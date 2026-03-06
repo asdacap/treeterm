@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import { ptyManager } from './pty'
+import { getGitInfo, createWorktree, removeWorktree, listWorktrees } from './git'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -59,6 +60,23 @@ ipcMain.handle('dialog:selectFolder', async () => {
     return null
   }
   return result.filePaths[0]
+})
+
+// Git IPC Handlers
+ipcMain.handle('git:getInfo', async (_event, dirPath: string) => {
+  return getGitInfo(dirPath)
+})
+
+ipcMain.handle('git:createWorktree', async (_event, repoPath: string, name: string, baseBranch?: string) => {
+  return createWorktree(repoPath, name, baseBranch)
+})
+
+ipcMain.handle('git:removeWorktree', async (_event, repoPath: string, worktreePath: string, deleteBranch: boolean) => {
+  return removeWorktree(repoPath, worktreePath, deleteBranch)
+})
+
+ipcMain.handle('git:listWorktrees', async (_event, repoPath: string) => {
+  return listWorktrees(repoPath)
 })
 
 // App lifecycle

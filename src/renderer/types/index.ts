@@ -5,6 +5,29 @@ export interface Workspace {
   parentId: string | null
   children: string[]
   status: 'active' | 'merged' | 'abandoned'
+  // Git-related fields
+  isGitRepo: boolean
+  gitBranch: string | null
+  gitRootPath: string | null
+  isWorktree: boolean
+}
+
+export interface GitInfo {
+  isRepo: boolean
+  branch: string | null
+  rootPath: string | null
+}
+
+export interface WorktreeResult {
+  success: boolean
+  path?: string
+  branch?: string
+  error?: string
+}
+
+export interface WorktreeInfo {
+  path: string
+  branch: string
 }
 
 export interface TerminalApi {
@@ -15,9 +38,17 @@ export interface TerminalApi {
   onData: (id: string, callback: (data: string) => void) => () => void
 }
 
+export interface GitApi {
+  getInfo: (dirPath: string) => Promise<GitInfo>
+  createWorktree: (repoPath: string, name: string, baseBranch?: string) => Promise<WorktreeResult>
+  removeWorktree: (repoPath: string, worktreePath: string, deleteBranch?: boolean) => Promise<{ success: boolean; error?: string }>
+  listWorktrees: (repoPath: string) => Promise<WorktreeInfo[]>
+}
+
 export interface ElectronApi {
   terminal: TerminalApi
   selectFolder: () => Promise<string | null>
+  git: GitApi
 }
 
 declare global {

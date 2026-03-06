@@ -49,5 +49,19 @@ contextBridge.exposeInMainWorld('electron', {
   },
   selectFolder: (): Promise<string | null> => {
     return ipcRenderer.invoke('dialog:selectFolder')
+  },
+  git: {
+    getInfo: (dirPath: string) => {
+      return ipcRenderer.invoke('git:getInfo', dirPath)
+    },
+    createWorktree: (repoPath: string, name: string, baseBranch?: string) => {
+      return ipcRenderer.invoke('git:createWorktree', repoPath, name, baseBranch)
+    },
+    removeWorktree: (repoPath: string, worktreePath: string, deleteBranch: boolean = true) => {
+      return ipcRenderer.invoke('git:removeWorktree', repoPath, worktreePath, deleteBranch)
+    },
+    listWorktrees: (repoPath: string) => {
+      return ipcRenderer.invoke('git:listWorktrees', repoPath)
+    }
   }
 })
