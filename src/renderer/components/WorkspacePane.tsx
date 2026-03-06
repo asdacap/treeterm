@@ -150,19 +150,28 @@ export default function WorkspacePane() {
         onNewTab={handleNewTab}
       />
       <div className="workspace-terminal">
-        {terminals.map((terminal) => (
-          <div
-            key={terminal.id}
-            className="terminal-wrapper"
-            style={{ display: terminal.id === activeTerminalId ? 'block' : 'none' }}
-          >
-            <Terminal
-              cwd={activeWorkspace.path}
-              workspaceId={activeWorkspace.id}
-              terminalId={terminal.id}
-            />
-          </div>
-        ))}
+        {/* Render terminals for ALL workspaces to keep PTYs alive when switching */}
+        {Object.values(workspaces).map((workspace) => {
+          const wsTerminals = workspace.terminals || [{ id: 'default', title: 'Terminal 1' }]
+          const wsActiveTerminalId = workspace.activeTerminalId || wsTerminals[0]?.id
+          const isActiveWorkspace = workspace.id === activeWorkspaceId
+
+          return wsTerminals.map((terminal) => (
+            <div
+              key={`${workspace.id}-${terminal.id}`}
+              className="terminal-wrapper"
+              style={{
+                display: isActiveWorkspace && terminal.id === wsActiveTerminalId ? 'block' : 'none'
+              }}
+            >
+              <Terminal
+                cwd={workspace.path}
+                workspaceId={workspace.id}
+                terminalId={terminal.id}
+              />
+            </div>
+          ))
+        })}
       </div>
     </div>
   )
