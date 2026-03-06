@@ -1,7 +1,26 @@
 import { useEffect, useCallback } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
+import { useSettingsStore } from '../store/settings'
 import TabBar from './TabBar'
 import Terminal from './Terminal'
+
+function matchesKeybinding(e: KeyboardEvent, keybinding: string): boolean {
+  const parts = keybinding.split('+')
+  const key = parts[parts.length - 1]
+  const hasCmd = parts.includes('CommandOrControl')
+  const hasShift = parts.includes('Shift')
+  const hasAlt = parts.includes('Alt')
+
+  const cmdMatch = hasCmd ? (e.metaKey || e.ctrlKey) : (!e.metaKey && !e.ctrlKey)
+  const shiftMatch = hasShift ? e.shiftKey : !e.shiftKey
+  const altMatch = hasAlt ? e.altKey : !e.altKey
+
+  const pressedKey = e.key.length === 1 ? e.key.toUpperCase() : e.key
+  const targetKey = key.length === 1 ? key.toUpperCase() : key
+  const keyMatch = pressedKey === targetKey || e.key === key
+
+  return cmdMatch && shiftMatch && altMatch && keyMatch
+}
 
 export default function WorkspacePane() {
   const {
@@ -11,6 +30,9 @@ export default function WorkspacePane() {
     removeTerminal,
     setActiveTerminal
   } = useWorkspaceStore()
+
+  const { settings } = useSettingsStore()
+  const keybindings = settings.keybindings
 
   const activeWorkspace = activeWorkspaceId ? workspaces[activeWorkspaceId] : null
 
@@ -43,15 +65,15 @@ export default function WorkspacePane() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!activeWorkspace) return
 
-      // Cmd+T: New tab
-      if (e.metaKey && e.key === 't') {
+      // New tab
+      if (matchesKeybinding(e, keybindings.newTab)) {
         e.preventDefault()
         handleNewTab()
         return
       }
 
-      // Cmd+W: Close tab
-      if (e.metaKey && e.key === 'w') {
+      // Close tab
+      if (matchesKeybinding(e, keybindings.closeTab)) {
         e.preventDefault()
         if (activeWorkspace.activeTerminalId && activeWorkspace.terminals.length > 1) {
           handleCloseTab(activeWorkspace.activeTerminalId)
@@ -59,8 +81,8 @@ export default function WorkspacePane() {
         return
       }
 
-      // Cmd+1-9: Switch to tab by number
-      if (e.metaKey && e.key >= '1' && e.key <= '9') {
+      // Cmd+1-9: Switch to tab by number (keep hardcoded as these are standard)
+      if ((e.metaKey || e.ctrlKey) && e.key >= '1' && e.key <= '9') {
         e.preventDefault()
         const index = parseInt(e.key) - 1
         if (index < activeWorkspace.terminals.length) {
@@ -69,26 +91,32 @@ export default function WorkspacePane() {
         return
       }
 
-      // Cmd+Shift+[ or ]: Previous/Next tab
-      if (e.metaKey && e.shiftKey) {
+      // Previous tab
+      if (matchesKeybinding(e, keybindings.prevTab)) {
+        e.preventDefault()
         const currentIndex = activeWorkspace.terminals.findIndex(
           (t) => t.id === activeWorkspace.activeTerminalId
         )
-        if (e.key === '[' || e.key === '{') {
-          e.preventDefault()
-          const newIndex = currentIndex > 0 ? currentIndex - 1 : activeWorkspace.terminals.length - 1
-          handleSelectTab(activeWorkspace.terminals[newIndex].id)
-        } else if (e.key === ']' || e.key === '}') {
-          e.preventDefault()
-          const newIndex = currentIndex < activeWorkspace.terminals.length - 1 ? currentIndex + 1 : 0
-          handleSelectTab(activeWorkspace.terminals[newIndex].id)
-        }
+        const newIndex = currentIndex > 0 ? currentIndex - 1 : activeWorkspace.terminals.length - 1
+        handleSelectTab(activeWorkspace.terminals[newIndex].id)
+        return
+      }
+
+      // Next tab
+      if (matchesKeybinding(e, keybindings.nextTab)) {
+        e.preventDefault()
+        const currentIndex = activeWorkspace.terminals.findIndex(
+          (t) => t.id === activeWorkspace.activeTerminalId
+        )
+        const newIndex = currentIndex < activeWorkspace.terminals.length - 1 ? currentIndex + 1 : 0
+        handleSelectTab(activeWorkspace.terminals[newIndex].id)
+        return
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activeWorkspace, handleNewTab, handleCloseTab, handleSelectTab])
+  }, [activeWorkspace, keybindings, handleNewTab, handleCloseTab, handleSelectTab])
 
   if (!activeWorkspace) {
     return (
