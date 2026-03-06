@@ -57,11 +57,15 @@ class PtyManager {
     })
 
     ptyProcess.onData((data) => {
-      window.webContents.send('pty:data', id, data)
+      if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+        window.webContents.send('pty:data', id, data)
+      }
     })
 
     ptyProcess.onExit(({ exitCode }) => {
-      window.webContents.send('pty:exit', id, exitCode)
+      if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+        window.webContents.send('pty:exit', id, exitCode)
+      }
       this.ptys.delete(id)
     })
 
