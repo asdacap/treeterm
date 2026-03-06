@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import MergeDialog from './MergeDialog'
+import CreateChildDialog from './CreateChildDialog'
 import type { Workspace } from '../types'
 
 interface ContextMenu {
@@ -21,11 +22,9 @@ export default function TreePane() {
     toggleSandbox
   } = useWorkspaceStore()
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
-  const [newChildName, setNewChildName] = useState('')
-  const [newChildSandboxed, setNewChildSandboxed] = useState(false)
-  const [showNewChildInput, setShowNewChildInput] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [mergeDialogWorkspaceId, setMergeDialogWorkspaceId] = useState<string | null>(null)
+  const [createChildDialogParentId, setCreateChildDialogParentId] = useState<string | null>(null)
 
   const handleAddWorkspace = async () => {
     const path = await window.electron.selectFolder()
@@ -46,26 +45,19 @@ export default function TreePane() {
 
   const handleCreateChild = (parentId: string) => {
     closeContextMenu()
-    setShowNewChildInput(parentId)
-    setNewChildName('')
-    setNewChildSandboxed(false)
-    // Expand the parent
-    setExpanded((prev) => new Set([...prev, parentId]))
+    setCreateChildDialogParentId(parentId)
   }
 
-  const handleSubmitNewChild = async (parentId: string) => {
-    if (!newChildName.trim()) {
-      setShowNewChildInput(null)
-      return
-    }
+  const handleCreateChildSubmit = async (name: string, sandboxed: boolean) => {
+    if (!createChildDialogParentId) return { success: false, error: 'No parent selected' }
 
-    const result = await addChildWorkspace(parentId, newChildName.trim(), newChildSandboxed)
-    if (!result.success) {
-      alert(result.error)
+    const result = await addChildWorkspace(createChildDialogParentId, name, sandboxed)
+    if (result.success) {
+      // Expand the parent to show the new child
+      setExpanded((prev) => new Set([...prev, createChildDialogParentId]))
+      setCreateChildDialogParentId(null)
     }
-    setShowNewChildInput(null)
-    setNewChildName('')
-    setNewChildSandboxed(false)
+    return result
   }
 
   const handleToggleSandbox = (id: string) => {
@@ -125,6 +117,11 @@ export default function TreePane() {
   const mergeDialogParent =
     mergeDialogWorkspace?.parentId ? workspaces[mergeDialogWorkspace.parentId] : null
 
+  // Get create child dialog parent
+  const createChildDialogParent = createChildDialogParentId
+    ? workspaces[createChildDialogParentId]
+    : null
+
   const renderWorkspace = (ws: Workspace, depth: number = 0) => {
     const hasChildren = ws.children.length > 0
     const isExpanded = expanded.has(ws.id)
@@ -159,31 +156,6 @@ export default function TreePane() {
             <span className="tree-item-branch">{ws.gitBranch}</span>
           )}
         </div>
-
-        {/* New child input */}
-        {showNewChildInput === ws.id && (
-          <div className="tree-new-child" style={{ paddingLeft: 32 + depth * 16 }}>
-            <input
-              type="text"
-              value={newChildName}
-              onChange={(e) => setNewChildName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSubmitNewChild(ws.id)
-                if (e.key === 'Escape') setShowNewChildInput(null)
-              }}
-              placeholder="Workspace name..."
-              autoFocus
-            />
-            <label className="tree-new-child-sandbox">
-              <input
-                type="checkbox"
-                checked={newChildSandboxed}
-                onChange={(e) => setNewChildSandboxed(e.target.checked)}
-              />
-              Sandbox
-            </label>
-          </div>
-        )}
 
         {/* Children */}
         {isExpanded && children.map((child) => renderWorkspace(child, depth + 1))}
@@ -236,6 +208,15 @@ export default function TreePane() {
           onMerge={handleMerge}
           onAbandon={handleAbandon}
           onCancel={() => setMergeDialogWorkspaceId(null)}
+        />
+      )}
+
+      {/* Create Child Dialog */}
+      {createChildDialogParent && (
+        <CreateChildDialog
+          parentWorkspace={createChildDialogParent}
+          onCreate={handleCreateChildSubmit}
+          onCancel={() => setCreateChildDialogParentId(null)}
         />
       )}
     </div>
