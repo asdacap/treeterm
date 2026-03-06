@@ -105,7 +105,7 @@ export default function Terminal({ cwd, workspaceId, terminalId }: TerminalProps
       }
       terminal.dispose()
     }
-  }, [cwd, terminalId, sandbox?.enabled])
+  }, [cwd, terminalId, sandbox?.enabled, workspaceId])
 
   return <div ref={containerRef} className="terminal-container" />
 }
