@@ -81,10 +81,40 @@ export interface GitApi {
   commitAll: (repoPath: string, message: string) => Promise<{ success: boolean; error?: string }>
 }
 
+export interface Settings {
+  terminal: {
+    fontSize: number
+    fontFamily: string
+    cursorStyle: 'block' | 'underline' | 'bar'
+    cursorBlink: boolean
+  }
+  sandbox: {
+    enabledByDefault: boolean
+    allowNetworkByDefault: boolean
+  }
+  appearance: {
+    theme: 'dark' | 'light' | 'system'
+  }
+  keybindings: {
+    newTab: string
+    closeTab: string
+    nextTab: string
+    prevTab: string
+    openSettings: string
+  }
+}
+
+export interface SettingsApi {
+  load: () => Promise<Settings>
+  save: (settings: Settings) => Promise<{ success: boolean }>
+  onOpen: (callback: () => void) => () => void
+}
+
 export interface ElectronApi {
   terminal: TerminalApi
   selectFolder: () => Promise<string | null>
   git: GitApi
+  settings: SettingsApi
 }
 
 declare global {

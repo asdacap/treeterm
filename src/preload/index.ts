@@ -15,6 +15,13 @@ ipcRenderer.on('pty:exit', (_event, id: string, _exitCode: number) => {
   dataListeners.delete(id)
 })
 
+type SettingsOpenCallback = () => void
+const settingsOpenListeners: SettingsOpenCallback[] = []
+
+ipcRenderer.on('settings:open', () => {
+  settingsOpenListeners.forEach((cb) => cb())
+})
+
 interface SandboxConfig {
   enabled: boolean
   allowNetwork: boolean
@@ -83,6 +90,23 @@ contextBridge.exposeInMainWorld('electron', {
     },
     commitAll: (repoPath: string, message: string) => {
       return ipcRenderer.invoke('git:commitAll', repoPath, message)
+    }
+  },
+  settings: {
+    load: () => {
+      return ipcRenderer.invoke('settings:load')
+    },
+    save: (settings: unknown) => {
+      return ipcRenderer.invoke('settings:save', settings)
+    },
+    onOpen: (callback: SettingsOpenCallback): (() => void) => {
+      settingsOpenListeners.push(callback)
+      return () => {
+        const index = settingsOpenListeners.indexOf(callback)
+        if (index > -1) {
+          settingsOpenListeners.splice(index, 1)
+        }
+      }
     }
   }
 })

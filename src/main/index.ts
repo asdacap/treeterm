@@ -12,6 +12,8 @@ import {
   hasUncommittedChanges,
   commitAll
 } from './git'
+import { loadSettings, saveSettings, Settings } from './settings'
+import { createApplicationMenu } from './menu'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -109,13 +111,25 @@ ipcMain.handle('git:commitAll', async (_event, repoPath: string, message: string
   return commitAll(repoPath, message)
 })
 
+// Settings IPC Handlers
+ipcMain.handle('settings:load', () => {
+  return loadSettings()
+})
+
+ipcMain.handle('settings:save', (_event, settings: Settings) => {
+  saveSettings(settings)
+  return { success: true }
+})
+
 // App lifecycle
 app.whenReady().then(() => {
   createWindow()
+  createApplicationMenu(mainWindow)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow()
+      createApplicationMenu(mainWindow)
     }
   })
 })

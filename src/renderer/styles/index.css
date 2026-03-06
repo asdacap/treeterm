@@ -745,3 +745,194 @@ body,
   white-space: pre;
   color: var(--text-primary);
 }
+
+/* Settings Dialog */
+.settings-dialog {
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  width: 90%;
+  max-width: 600px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.settings-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.settings-dialog-header h2 {
+  font-size: 16px;
+  font-weight: 500;
+  margin: 0;
+}
+
+.settings-dialog-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.settings-tabs {
+  display: flex;
+  flex-direction: column;
+  width: 140px;
+  border-right: 1px solid var(--border-color);
+  padding: 8px 0;
+  flex-shrink: 0;
+}
+
+.settings-tab {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 10px 16px;
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.settings-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.settings-tab.active {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.settings-panel {
+  flex: 1;
+  padding: 16px 20px;
+  overflow-y: auto;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-label {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.settings-input,
+.settings-select {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  padding: 8px 12px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.1s;
+}
+
+.settings-input:focus,
+.settings-select:focus {
+  border-color: var(--accent);
+}
+
+.settings-input[type="number"] {
+  width: 100px;
+}
+
+.settings-select {
+  cursor: pointer;
+}
+
+.settings-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.settings-checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.settings-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.settings-keybinding {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: monospace;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.1s, background 0.1s;
+}
+
+.settings-keybinding:hover {
+  background: var(--bg-hover);
+}
+
+.settings-keybinding.recording {
+  border-color: var(--accent);
+  background: rgba(0, 120, 212, 0.1);
+  color: var(--accent);
+}
+
+.settings-dialog-actions {
+  display: flex;
+  gap: 8px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-color);
+  justify-content: flex-end;
+}
+
+.settings-btn {
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  border: none;
+  transition: background 0.1s;
+}
+
+.settings-btn.cancel {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.settings-btn.cancel:hover {
+  background: var(--bg-hover);
+}
+
+.settings-btn.save {
+  background: var(--accent);
+  color: white;
+}
+
+.settings-btn.save:hover {
+  background: #006cbf;
+}
