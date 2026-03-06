@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { useWorkspaceStore } from '../store/workspace'
+import { useSettingsStore } from '../store/settings'
 import '@xterm/xterm/css/xterm.css'
 
 interface TerminalProps {
@@ -20,7 +21,9 @@ export default function Terminal({ cwd, workspaceId, terminalId }: TerminalProps
 
   const workspace = useWorkspaceStore((state) => state.workspaces[workspaceId])
   const sandbox = workspace?.sandbox
+  const isChildWorkspace = workspace?.parentId !== null
   const setPtyId = useWorkspaceStore((state) => state.setPtyId)
+  const settings = useSettingsStore((state) => state.settings)
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -66,8 +69,9 @@ export default function Terminal({ cwd, workspaceId, terminalId }: TerminalProps
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
 
-    // Create PTY with sandbox config
-    window.electron.terminal.create(cwd, sandbox).then((id) => {
+    // Create PTY with sandbox config and optional startup command for child workspaces
+    const startupCommand = isChildWorkspace ? settings.startup.childWorkspaceCommand : undefined
+    window.electron.terminal.create(cwd, sandbox, startupCommand).then((id) => {
       if (!id) return
 
       // Check if component is still mounted

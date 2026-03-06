@@ -7,11 +7,12 @@ interface SettingsDialogProps {
   onClose: () => void
 }
 
-type TabId = 'terminal' | 'sandbox' | 'appearance' | 'keybindings'
+type TabId = 'terminal' | 'sandbox' | 'appearance' | 'keybindings' | 'startup'
 
 const tabs: { id: TabId; label: string }[] = [
   { id: 'terminal', label: 'Terminal' },
   { id: 'sandbox', label: 'Sandbox' },
+  { id: 'startup', label: 'Startup' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'keybindings', label: 'Keybindings' }
 ]
@@ -203,6 +204,29 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
                   </label>
                   <p className="settings-hint">
                     Sandboxed terminals will have network access by default
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'startup' && (
+              <div className="settings-section">
+                <div className="settings-group">
+                  <label className="settings-label">Child Workspace Command</label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    value={localSettings.startup.childWorkspaceCommand}
+                    placeholder="e.g., claude"
+                    onChange={(e) =>
+                      setLocalSettings((prev) => ({
+                        ...prev,
+                        startup: { ...prev.startup, childWorkspaceCommand: e.target.value }
+                      }))
+                    }
+                  />
+                  <p className="settings-hint">
+                    Command to run automatically when a child workspace is opened
                   </p>
                 </div>
               </div>
