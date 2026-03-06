@@ -15,6 +15,7 @@ import {
 } from './git'
 import { loadSettings, saveSettings, Settings } from './settings'
 import { createApplicationMenu } from './menu'
+import { registerFilesystemHandlers } from './filesystem'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -128,6 +129,7 @@ ipcMain.handle('settings:save', (_event, settings: Settings) => {
 
 // App lifecycle
 app.whenReady().then(() => {
+  registerFilesystemHandlers()
   createWindow()
   createApplicationMenu(mainWindow)
 

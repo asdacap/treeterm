@@ -111,5 +111,13 @@ contextBridge.exposeInMainWorld('electron', {
         }
       }
     }
+  },
+  filesystem: {
+    readDirectory: (workspacePath: string, dirPath: string) => {
+      return ipcRenderer.invoke('fs:readDirectory', workspacePath, dirPath)
+    },
+    readFile: (workspacePath: string, filePath: string) => {
+      return ipcRenderer.invoke('fs:readFile', workspacePath, filePath)
+    }
   }
 })

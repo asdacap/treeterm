@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Workspace, GitInfo, TerminalTab, SandboxConfig } from '../types'
+import type { Workspace, GitInfo, TerminalTab, FilesystemTab, WorkspaceTab, SandboxConfig } from '../types'
 
 const defaultSandbox: SandboxConfig = {
   enabled: false,
@@ -21,12 +21,16 @@ interface WorkspaceState {
   updateWorkspaceStatus: (id: string, status: Workspace['status']) => void
   toggleSandbox: (id: string) => void
   updateSandboxConfig: (id: string, config: Partial<SandboxConfig>) => void
-  // Terminal tab management
+  // Tab management (terminals and filesystem browsers)
   addTerminal: (workspaceId: string) => string
-  removeTerminal: (workspaceId: string, terminalId: string) => void
-  setActiveTerminal: (workspaceId: string, terminalId: string) => void
+  addFilesystemTab: (workspaceId: string) => string
+  removeTab: (workspaceId: string, tabId: string) => void
+  setActiveTab: (workspaceId: string, tabId: string) => void
   updateTerminalTitle: (workspaceId: string, terminalId: string, title: string) => void
   setPtyId: (workspaceId: string, terminalId: string, ptyId: string) => void
+  // Filesystem browser state
+  setSelectedPath: (workspaceId: string, tabId: string, path: string | null) => void
+  toggleExpandedDir: (workspaceId: string, tabId: string, dirPath: string) => void
 }
 
 function generateId(): string {
@@ -65,8 +69,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           gitBranch: gitInfo.branch,
           gitRootPath: gitInfo.rootPath,
           isWorktree: false,
-          terminals: [{ id: terminalId, title: 'Terminal 1', ptyId: null }],
-          activeTerminalId: terminalId,
+          tabs: [{ type: 'terminal', id: terminalId, title: 'Terminal 1', ptyId: null }],
+          activeTabId: terminalId,
           sandbox: { ...defaultSandbox }
         }
 
@@ -115,8 +119,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           gitBranch: result.branch!,
           gitRootPath: parent.gitRootPath,
           isWorktree: true,
-          terminals: [{ id: terminalId, title: 'Terminal 1', ptyId: null }],
-          activeTerminalId: terminalId,
+          tabs: [{ type: 'terminal', id: terminalId, title: 'Terminal 1', ptyId: null }],
+          activeTabId: terminalId,
           sandbox: { ...defaultSandbox, enabled: sandboxed }
         }
 
@@ -146,10 +150,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           await get().removeWorkspace(childId)
         }
 
-        // Kill all PTYs for this workspace's terminals
-        for (const terminal of workspace.terminals) {
-          if (terminal.ptyId) {
-            window.electron.terminal.kill(terminal.ptyId)
+        // Kill all PTYs for this workspace's terminal tabs
+        for (const tab of workspace.tabs) {
+          if (tab.type === 'terminal' && tab.ptyId) {
+            window.electron.terminal.kill(tab.ptyId)
           }
         }
 
@@ -326,17 +330,18 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         return { success: true }
       },
 
-      // Terminal tab management
+      // Tab management (terminals and filesystem browsers)
       addTerminal: (workspaceId: string) => {
         const terminalId = generateTerminalId()
         set((state) => {
           const workspace = state.workspaces[workspaceId]
           if (!workspace) return state
 
-          const terminalNumber = workspace.terminals.length + 1
+          const terminalCount = workspace.tabs.filter((t) => t.type === 'terminal').length
           const newTerminal: TerminalTab = {
+            type: 'terminal',
             id: terminalId,
-            title: `Terminal ${terminalNumber}`,
+            title: `Terminal ${terminalCount + 1}`,
             ptyId: null
           }
 
@@ -345,8 +350,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
               ...state.workspaces,
               [workspaceId]: {
                 ...workspace,
-                terminals: [...workspace.terminals, newTerminal],
-                activeTerminalId: terminalId
+                tabs: [...workspace.tabs, newTerminal],
+                activeTabId: terminalId
               }
             }
           }
@@ -354,29 +359,58 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         return terminalId
       },
 
-      removeTerminal: (workspaceId: string, terminalId: string) => {
+      addFilesystemTab: (workspaceId: string) => {
+        const tabId = `fs-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+        set((state) => {
+          const workspace = state.workspaces[workspaceId]
+          if (!workspace) return state
+
+          const fsCount = workspace.tabs.filter((t) => t.type === 'filesystem').length
+          const newTab: FilesystemTab = {
+            type: 'filesystem',
+            id: tabId,
+            title: `Files ${fsCount + 1}`,
+            selectedPath: null,
+            expandedDirs: []
+          }
+
+          return {
+            workspaces: {
+              ...state.workspaces,
+              [workspaceId]: {
+                ...workspace,
+                tabs: [...workspace.tabs, newTab],
+                activeTabId: tabId
+              }
+            }
+          }
+        })
+        return tabId
+      },
+
+      removeTab: (workspaceId: string, tabId: string) => {
         const workspace = get().workspaces[workspaceId]
         if (!workspace) return
-        if (workspace.terminals.length <= 1) return // Keep at least one terminal
+        if (workspace.tabs.length <= 1) return // Keep at least one tab
 
-        // Kill the PTY before removing from state
-        const terminal = workspace.terminals.find((t) => t.id === terminalId)
-        if (terminal?.ptyId) {
-          window.electron.terminal.kill(terminal.ptyId)
+        // Kill the PTY if it's a terminal tab
+        const tab = workspace.tabs.find((t) => t.id === tabId)
+        if (tab?.type === 'terminal' && tab.ptyId) {
+          window.electron.terminal.kill(tab.ptyId)
         }
 
         set((state) => {
           const workspace = state.workspaces[workspaceId]
           if (!workspace) return state
 
-          const newTerminals = workspace.terminals.filter((t) => t.id !== terminalId)
-          let newActiveTerminalId = workspace.activeTerminalId
+          const newTabs = workspace.tabs.filter((t) => t.id !== tabId)
+          let newActiveTabId = workspace.activeTabId
 
-          // If we're removing the active terminal, switch to another
-          if (workspace.activeTerminalId === terminalId) {
-            const removedIndex = workspace.terminals.findIndex((t) => t.id === terminalId)
-            const newIndex = Math.min(removedIndex, newTerminals.length - 1)
-            newActiveTerminalId = newTerminals[newIndex]?.id || null
+          // If we're removing the active tab, switch to another
+          if (workspace.activeTabId === tabId) {
+            const removedIndex = workspace.tabs.findIndex((t) => t.id === tabId)
+            const newIndex = Math.min(removedIndex, newTabs.length - 1)
+            newActiveTabId = newTabs[newIndex]?.id || null
           }
 
           return {
@@ -384,15 +418,15 @@ export const useWorkspaceStore = create<WorkspaceState>()(
               ...state.workspaces,
               [workspaceId]: {
                 ...workspace,
-                terminals: newTerminals,
-                activeTerminalId: newActiveTerminalId
+                tabs: newTabs,
+                activeTabId: newActiveTabId
               }
             }
           }
         })
       },
 
-      setActiveTerminal: (workspaceId: string, terminalId: string) => {
+      setActiveTab: (workspaceId: string, tabId: string) => {
         set((state) => {
           const workspace = state.workspaces[workspaceId]
           if (!workspace) return state
@@ -402,7 +436,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
               ...state.workspaces,
               [workspaceId]: {
                 ...workspace,
-                activeTerminalId: terminalId
+                activeTabId: tabId
               }
             }
           }
@@ -419,8 +453,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
               ...state.workspaces,
               [workspaceId]: {
                 ...workspace,
-                terminals: workspace.terminals.map((t) =>
-                  t.id === terminalId ? { ...t, title } : t
+                tabs: workspace.tabs.map((t) =>
+                  t.id === terminalId && t.type === 'terminal' ? { ...t, title } : t
                 )
               }
             }
@@ -438,9 +472,57 @@ export const useWorkspaceStore = create<WorkspaceState>()(
               ...state.workspaces,
               [workspaceId]: {
                 ...workspace,
-                terminals: workspace.terminals.map((t) =>
-                  t.id === terminalId ? { ...t, ptyId } : t
+                tabs: workspace.tabs.map((t) =>
+                  t.id === terminalId && t.type === 'terminal' ? { ...t, ptyId } : t
                 )
+              }
+            }
+          }
+        })
+      },
+
+      // Filesystem browser state
+      setSelectedPath: (workspaceId: string, tabId: string, path: string | null) => {
+        set((state) => {
+          const workspace = state.workspaces[workspaceId]
+          if (!workspace) return state
+
+          return {
+            workspaces: {
+              ...state.workspaces,
+              [workspaceId]: {
+                ...workspace,
+                tabs: workspace.tabs.map((t) =>
+                  t.id === tabId && t.type === 'filesystem' ? { ...t, selectedPath: path } : t
+                )
+              }
+            }
+          }
+        })
+      },
+
+      toggleExpandedDir: (workspaceId: string, tabId: string, dirPath: string) => {
+        set((state) => {
+          const workspace = state.workspaces[workspaceId]
+          if (!workspace) return state
+
+          return {
+            workspaces: {
+              ...state.workspaces,
+              [workspaceId]: {
+                ...workspace,
+                tabs: workspace.tabs.map((t) => {
+                  if (t.id === tabId && t.type === 'filesystem') {
+                    const isExpanded = t.expandedDirs.includes(dirPath)
+                    return {
+                      ...t,
+                      expandedDirs: isExpanded
+                        ? t.expandedDirs.filter((d) => d !== dirPath)
+                        : [...t.expandedDirs, dirPath]
+                    }
+                  }
+                  return t
+                })
               }
             }
           }
@@ -448,7 +530,30 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       }
     }),
     {
-      name: 'treeterm-workspaces'
+      name: 'treeterm-workspaces',
+      version: 1,
+      migrate: (persistedState: unknown, version: number) => {
+        const state = persistedState as { workspaces?: Record<string, unknown> }
+        if (version === 0 && state.workspaces) {
+          // Migrate from old format (terminals/activeTerminalId) to new format (tabs/activeTabId)
+          for (const ws of Object.values(state.workspaces) as Array<{
+            terminals?: Array<{ id: string; title: string; ptyId: string | null }>
+            tabs?: WorkspaceTab[]
+            activeTerminalId?: string | null
+            activeTabId?: string | null
+          }>) {
+            if (ws.terminals && !ws.tabs) {
+              ws.tabs = ws.terminals.map((t) => ({ type: 'terminal' as const, ...t }))
+              delete ws.terminals
+            }
+            if (ws.activeTerminalId !== undefined && ws.activeTabId === undefined) {
+              ws.activeTabId = ws.activeTerminalId
+              delete ws.activeTerminalId
+            }
+          }
+        }
+        return state as WorkspaceState
+      }
     }
   )
 )
