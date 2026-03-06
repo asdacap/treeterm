@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "description": "Hierarchical terminal manager for AI agent workflows",
   "main": "./out/main/index.js",
+  "bin": {
+    "treeterm": "./bin/treeterm.js"
+  },
+  "files": [
+    "bin",
+    "out",
+    "package.json"
+  ],
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
@@ -16,7 +24,6 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
     "@vitest/coverage-v8": "^4.0.18",
-    "electron": "^33.0.0",
     "electron-builder": "^25.0.0",
     "electron-vite": "^2.3.0",
     "typescript": "^5.6.0",
@@ -24,6 +31,7 @@
     "vitest": "^3.2.4"
   },
   "dependencies": {
+    "electron": "^33.0.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "highlight.js": "^11.11.1",
