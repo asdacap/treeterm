@@ -15,10 +15,16 @@ ipcRenderer.on('pty:exit', (_event, id: string, _exitCode: number) => {
   dataListeners.delete(id)
 })
 
+interface SandboxConfig {
+  enabled: boolean
+  allowNetwork: boolean
+  allowedPaths: string[]
+}
+
 contextBridge.exposeInMainWorld('electron', {
   terminal: {
-    create: (cwd: string): Promise<string> => {
-      return ipcRenderer.invoke('pty:create', cwd)
+    create: (cwd: string, sandbox?: SandboxConfig): Promise<string> => {
+      return ipcRenderer.invoke('pty:create', cwd, sandbox)
     },
     write: (id: string, data: string): void => {
       ipcRenderer.send('pty:write', id, data)

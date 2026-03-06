@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { useWorkspaceStore } from '../store/workspace'
 import '@xterm/xterm/css/xterm.css'
 
 interface TerminalProps {
@@ -16,19 +17,24 @@ export default function Terminal({ cwd, workspaceId, terminalId }: TerminalProps
   const ptyIdRef = useRef<string | null>(null)
   const unsubscribeRef = useRef<(() => void) | null>(null)
 
+  const workspace = useWorkspaceStore((state) => state.workspaces[workspaceId])
+  const sandbox = workspace?.sandbox
+
   useEffect(() => {
     if (!containerRef.current) return
 
-    // Create terminal
+    const isSandboxed = sandbox?.enabled ?? false
+
+    // Create terminal with sandbox-aware theme
     const terminal = new XTerm({
       cursorBlink: true,
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       theme: {
-        background: '#1e1e1e',
+        background: isSandboxed ? '#1a1a2e' : '#1e1e1e', // Slightly different bg for sandboxed
         foreground: '#d4d4d4',
         cursor: '#d4d4d4',
-        cursorAccent: '#1e1e1e',
+        cursorAccent: isSandboxed ? '#1a1a2e' : '#1e1e1e',
         selectionBackground: '#264f78',
         black: '#000000',
         red: '#cd3131',
@@ -57,8 +63,8 @@ export default function Terminal({ cwd, workspaceId, terminalId }: TerminalProps
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
 
-    // Create PTY
-    window.electron.terminal.create(cwd).then((id) => {
+    // Create PTY with sandbox config
+    window.electron.terminal.create(cwd, sandbox).then((id) => {
       if (!id) return
       ptyIdRef.current = id
 
@@ -99,7 +105,7 @@ export default function Terminal({ cwd, workspaceId, terminalId }: TerminalProps
       }
       terminal.dispose()
     }
-  }, [cwd, terminalId])
+  }, [cwd, terminalId, sandbox?.enabled])
 
   return <div ref={containerRef} className="terminal-container" />
 }

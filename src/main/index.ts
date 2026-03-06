@@ -44,9 +44,9 @@ function createWindow(): void {
 }
 
 // IPC Handlers
-ipcMain.handle('pty:create', (_event, cwd: string) => {
+ipcMain.handle('pty:create', (_event, cwd: string, sandbox?: { enabled: boolean; allowNetwork: boolean; allowedPaths: string[] }) => {
   if (!mainWindow) return null
-  return ptyManager.create(cwd, mainWindow)
+  return ptyManager.create(cwd, mainWindow, sandbox)
 })
 
 ipcMain.on('pty:write', (_event, id: string, data: string) => {

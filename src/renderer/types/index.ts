@@ -3,6 +3,12 @@ export interface TerminalTab {
   title: string
 }
 
+export interface SandboxConfig {
+  enabled: boolean
+  allowNetwork: boolean
+  allowedPaths: string[] // Additional paths besides workspace
+}
+
 export interface Workspace {
   id: string
   name: string
@@ -18,6 +24,8 @@ export interface Workspace {
   // Terminal tabs
   terminals: TerminalTab[]
   activeTerminalId: string | null
+  // Sandbox configuration
+  sandbox: SandboxConfig
 }
 
 export interface GitInfo {
@@ -54,7 +62,7 @@ export interface DiffResult {
 }
 
 export interface TerminalApi {
-  create: (cwd: string) => Promise<string>
+  create: (cwd: string, sandbox?: SandboxConfig) => Promise<string>
   write: (id: string, data: string) => void
   resize: (id: string, cols: number, rows: number) => void
   kill: (id: string) => void

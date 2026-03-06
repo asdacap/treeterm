@@ -169,8 +169,28 @@ body,
   outline: none;
 }
 
-.tree-new-child input::placeholder {
+.tree-new-child input[type="text"]::placeholder {
   color: var(--text-secondary);
+}
+
+.tree-new-child-sandbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.tree-new-child-sandbox input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+
+.tree-item-sandbox {
+  font-size: 12px;
+  margin-left: 4px;
 }
 
 /* Context Menu */

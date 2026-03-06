@@ -17,10 +17,12 @@ export default function TreePane() {
     addChildWorkspace,
     removeWorkspace,
     mergeAndRemoveWorkspace,
-    setActiveWorkspace
+    setActiveWorkspace,
+    toggleSandbox
   } = useWorkspaceStore()
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
   const [newChildName, setNewChildName] = useState('')
+  const [newChildSandboxed, setNewChildSandboxed] = useState(false)
   const [showNewChildInput, setShowNewChildInput] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [mergeDialogWorkspaceId, setMergeDialogWorkspaceId] = useState<string | null>(null)
@@ -46,6 +48,7 @@ export default function TreePane() {
     closeContextMenu()
     setShowNewChildInput(parentId)
     setNewChildName('')
+    setNewChildSandboxed(false)
     // Expand the parent
     setExpanded((prev) => new Set([...prev, parentId]))
   }
@@ -56,12 +59,18 @@ export default function TreePane() {
       return
     }
 
-    const result = await addChildWorkspace(parentId, newChildName.trim())
+    const result = await addChildWorkspace(parentId, newChildName.trim(), newChildSandboxed)
     if (!result.success) {
       alert(result.error)
     }
     setShowNewChildInput(null)
     setNewChildName('')
+    setNewChildSandboxed(false)
+  }
+
+  const handleToggleSandbox = (id: string) => {
+    closeContextMenu()
+    toggleSandbox(id)
   }
 
   const handleRemove = async (id: string) => {
@@ -145,6 +154,7 @@ export default function TreePane() {
           )}
           <span className="tree-item-icon">{ws.isWorktree ? '🌿' : '📁'}</span>
           <span className="tree-item-name">{ws.name}</span>
+          {ws.sandbox?.enabled && <span className="tree-item-sandbox" title="Sandboxed">🔒</span>}
           {ws.isGitRepo && ws.gitBranch && (
             <span className="tree-item-branch">{ws.gitBranch}</span>
           )}
@@ -161,10 +171,17 @@ export default function TreePane() {
                 if (e.key === 'Enter') handleSubmitNewChild(ws.id)
                 if (e.key === 'Escape') setShowNewChildInput(null)
               }}
-              onBlur={() => handleSubmitNewChild(ws.id)}
               placeholder="Workspace name..."
               autoFocus
             />
+            <label className="tree-new-child-sandbox">
+              <input
+                type="checkbox"
+                checked={newChildSandboxed}
+                onChange={(e) => setNewChildSandboxed(e.target.checked)}
+              />
+              Sandbox
+            </label>
           </div>
         )}
 
@@ -202,6 +219,9 @@ export default function TreePane() {
               New Child Workspace
             </div>
           )}
+          <div className="context-menu-item" onClick={() => handleToggleSandbox(contextMenu.workspaceId)}>
+            {workspaces[contextMenu.workspaceId]?.sandbox?.enabled ? 'Disable Sandbox' : 'Enable Sandbox'}
+          </div>
           <div className="context-menu-item danger" onClick={() => handleRemove(contextMenu.workspaceId)}>
             {workspaces[contextMenu.workspaceId]?.isWorktree ? 'Close & Merge...' : 'Remove'}
           </div>

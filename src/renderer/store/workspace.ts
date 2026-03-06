@@ -1,18 +1,26 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Workspace, GitInfo, TerminalTab } from '../types'
+import type { Workspace, GitInfo, TerminalTab, SandboxConfig } from '../types'
+
+const defaultSandbox: SandboxConfig = {
+  enabled: false,
+  allowNetwork: true,
+  allowedPaths: []
+}
 
 interface WorkspaceState {
   workspaces: Record<string, Workspace>
   activeWorkspaceId: string | null
   addWorkspace: (path: string) => Promise<string>
-  addChildWorkspace: (parentId: string, name: string) => Promise<{ success: boolean; error?: string }>
+  addChildWorkspace: (parentId: string, name: string, sandboxed?: boolean) => Promise<{ success: boolean; error?: string }>
   removeWorkspace: (id: string) => Promise<void>
   mergeAndRemoveWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
   setActiveWorkspace: (id: string | null) => void
   updateGitInfo: (id: string, gitInfo: GitInfo) => void
   refreshGitInfo: (id: string) => Promise<void>
   updateWorkspaceStatus: (id: string, status: Workspace['status']) => void
+  toggleSandbox: (id: string) => void
+  updateSandboxConfig: (id: string, config: Partial<SandboxConfig>) => void
   // Terminal tab management
   addTerminal: (workspaceId: string) => string
   removeTerminal: (workspaceId: string, terminalId: string) => void
@@ -57,7 +65,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           gitRootPath: gitInfo.rootPath,
           isWorktree: false,
           terminals: [{ id: terminalId, title: 'Terminal 1' }],
-          activeTerminalId: terminalId
+          activeTerminalId: terminalId,
+          sandbox: { ...defaultSandbox }
         }
 
         set((state) => ({
@@ -68,7 +77,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         return id
       },
 
-      addChildWorkspace: async (parentId: string, name: string) => {
+      addChildWorkspace: async (parentId: string, name: string, sandboxed: boolean = false) => {
         const state = get()
         const parent = state.workspaces[parentId]
 
@@ -106,7 +115,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           gitRootPath: parent.gitRootPath,
           isWorktree: true,
           terminals: [{ id: terminalId, title: 'Terminal 1' }],
-          activeTerminalId: terminalId
+          activeTerminalId: terminalId,
+          sandbox: { ...defaultSandbox, enabled: sandboxed }
         }
 
         set((state) => ({
@@ -212,6 +222,41 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             workspaces: {
               ...state.workspaces,
               [id]: { ...workspace, status }
+            }
+          }
+        })
+      },
+
+      toggleSandbox: (id: string) => {
+        set((state) => {
+          const workspace = state.workspaces[id]
+          if (!workspace) return state
+          return {
+            workspaces: {
+              ...state.workspaces,
+              [id]: {
+                ...workspace,
+                sandbox: {
+                  ...workspace.sandbox,
+                  enabled: !workspace.sandbox?.enabled
+                }
+              }
+            }
+          }
+        })
+      },
+
+      updateSandboxConfig: (id: string, config: Partial<SandboxConfig>) => {
+        set((state) => {
+          const workspace = state.workspaces[id]
+          if (!workspace) return state
+          return {
+            workspaces: {
+              ...state.workspaces,
+              [id]: {
+                ...workspace,
+                sandbox: { ...workspace.sandbox, ...config }
+              }
             }
           }
         })
