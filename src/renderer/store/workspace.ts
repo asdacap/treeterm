@@ -54,6 +54,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       addWorkspace: async (path: string) => {
         const id = generateId()
         const terminalId = generateTerminalId()
+        const filesystemTabId = `fs-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 
         // Get git info for the path
         const gitInfo = await window.electron.git.getInfo(path)
@@ -69,7 +70,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           gitBranch: gitInfo.branch,
           gitRootPath: gitInfo.rootPath,
           isWorktree: false,
-          tabs: [{ type: 'terminal', id: terminalId, title: 'Terminal 1', ptyId: null }],
+          tabs: [
+            { type: 'filesystem', id: filesystemTabId, title: 'Files', selectedPath: null, expandedDirs: [] },
+            { type: 'terminal', id: terminalId, title: 'Terminal 1', ptyId: null }
+          ],
           activeTabId: terminalId,
           sandbox: { ...defaultSandbox }
         }
