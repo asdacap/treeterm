@@ -35,6 +35,21 @@ export async function getGitInfo(dirPath: string): Promise<GitInfo> {
   }
 }
 
+function isWorktreesDirInGitignore(rootPath: string): boolean {
+  const gitignorePath = path.join(rootPath, '.gitignore')
+  if (!fs.existsSync(gitignorePath)) {
+    return false
+  }
+
+  try {
+    const content = fs.readFileSync(gitignorePath, 'utf-8')
+    const lines = content.split('\n').map((line) => line.trim())
+    return lines.some((line) => line === '.worktrees' || line === '.worktrees/')
+  } catch {
+    return false
+  }
+}
+
 export async function createWorktree(
   repoPath: string,
   worktreeName: string,
@@ -45,11 +60,23 @@ export async function createWorktree(
 
     // Get the repo root
     const rootPath = (await git.revparse(['--show-toplevel'])).trim()
-    const parentDir = path.dirname(rootPath)
-    const repoName = path.basename(rootPath)
 
-    // Create worktree path adjacent to the main repo
-    const worktreePath = path.join(parentDir, `${repoName}-${worktreeName}`)
+    // Determine worktree path based on .gitignore
+    let worktreePath: string
+    if (isWorktreesDirInGitignore(rootPath)) {
+      // Use .worktrees directory inside the repo
+      const worktreesDir = path.join(rootPath, '.worktrees')
+      if (!fs.existsSync(worktreesDir)) {
+        fs.mkdirSync(worktreesDir, { recursive: true })
+      }
+      worktreePath = path.join(worktreesDir, worktreeName)
+    } else {
+      // Create worktree path adjacent to the main repo
+      const parentDir = path.dirname(rootPath)
+      const repoName = path.basename(rootPath)
+      worktreePath = path.join(parentDir, `${repoName}-${worktreeName}`)
+    }
+
     const branchName = `treeterm/${worktreeName}`
 
     // Check if path already exists
