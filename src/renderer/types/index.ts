@@ -79,6 +79,7 @@ export interface GitApi {
   merge: (mainRepoPath: string, worktreeBranch: string, targetBranch: string, squash?: boolean) => Promise<{ success: boolean; error?: string }>
   hasUncommittedChanges: (repoPath: string) => Promise<boolean>
   commitAll: (repoPath: string, message: string) => Promise<{ success: boolean; error?: string }>
+  deleteBranch: (repoPath: string, branchName: string) => Promise<{ success: boolean; error?: string }>
 }
 
 export interface Settings {

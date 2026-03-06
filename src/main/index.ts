@@ -10,7 +10,8 @@ import {
   getFileDiff,
   mergeWorktree,
   hasUncommittedChanges,
-  commitAll
+  commitAll,
+  deleteBranch
 } from './git'
 import { loadSettings, saveSettings, Settings } from './settings'
 import { createApplicationMenu } from './menu'
@@ -109,6 +110,10 @@ ipcMain.handle('git:hasUncommittedChanges', async (_event, repoPath: string) => 
 
 ipcMain.handle('git:commitAll', async (_event, repoPath: string, message: string) => {
   return commitAll(repoPath, message)
+})
+
+ipcMain.handle('git:deleteBranch', async (_event, repoPath: string, branchName: string) => {
+  return deleteBranch(repoPath, branchName)
 })
 
 // Settings IPC Handlers

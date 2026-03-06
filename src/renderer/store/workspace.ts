@@ -304,6 +304,11 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           return { success: false, error: `Merge failed: ${mergeResult.error}` }
         }
 
+        // Delete the merged branch
+        if (workspace.gitBranch) {
+          await window.electron.git.deleteBranch(parent.gitRootPath, workspace.gitBranch)
+        }
+
         // Update workspace status
         get().updateWorkspaceStatus(id, 'merged')
 

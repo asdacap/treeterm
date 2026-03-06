@@ -90,6 +90,9 @@ contextBridge.exposeInMainWorld('electron', {
     },
     commitAll: (repoPath: string, message: string) => {
       return ipcRenderer.invoke('git:commitAll', repoPath, message)
+    },
+    deleteBranch: (repoPath: string, branchName: string) => {
+      return ipcRenderer.invoke('git:deleteBranch', repoPath, branchName)
     }
   },
   settings: {

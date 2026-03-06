@@ -332,3 +332,19 @@ export async function commitAll(
     }
   }
 }
+
+export async function deleteBranch(
+  repoPath: string,
+  branchName: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(repoPath)
+    await git.raw(['branch', '-D', branchName])
+    return { success: true }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error deleting branch'
+    }
+  }
+}
