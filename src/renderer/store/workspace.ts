@@ -8,9 +8,11 @@ interface WorkspaceState {
   addWorkspace: (path: string) => Promise<string>
   addChildWorkspace: (parentId: string, name: string) => Promise<{ success: boolean; error?: string }>
   removeWorkspace: (id: string) => Promise<void>
+  mergeAndRemoveWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
   setActiveWorkspace: (id: string | null) => void
   updateGitInfo: (id: string, gitInfo: GitInfo) => void
   refreshGitInfo: (id: string) => Promise<void>
+  updateWorkspaceStatus: (id: string, status: Workspace['status']) => void
   // Terminal tab management
   addTerminal: (workspaceId: string) => string
   removeTerminal: (workspaceId: string, terminalId: string) => void
@@ -200,6 +202,70 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
         const gitInfo = await window.electron.git.getInfo(workspace.path)
         get().updateGitInfo(id, gitInfo)
+      },
+
+      updateWorkspaceStatus: (id: string, status: Workspace['status']) => {
+        set((state) => {
+          const workspace = state.workspaces[id]
+          if (!workspace) return state
+          return {
+            workspaces: {
+              ...state.workspaces,
+              [id]: { ...workspace, status }
+            }
+          }
+        })
+      },
+
+      mergeAndRemoveWorkspace: async (id: string, squash: boolean) => {
+        const state = get()
+        const workspace = state.workspaces[id]
+
+        if (!workspace) {
+          return { success: false, error: 'Workspace not found' }
+        }
+
+        if (!workspace.isWorktree || !workspace.parentId) {
+          return { success: false, error: 'Not a worktree workspace' }
+        }
+
+        const parent = state.workspaces[workspace.parentId]
+        if (!parent || !parent.gitRootPath || !parent.gitBranch) {
+          return { success: false, error: 'Parent workspace not found or not a git repo' }
+        }
+
+        // Check for uncommitted changes
+        const hasChanges = await window.electron.git.hasUncommittedChanges(workspace.path)
+        if (hasChanges) {
+          // Auto-commit changes before merge
+          const commitResult = await window.electron.git.commitAll(
+            workspace.path,
+            `WIP: Auto-commit before merge from ${workspace.name}`
+          )
+          if (!commitResult.success) {
+            return { success: false, error: `Failed to commit changes: ${commitResult.error}` }
+          }
+        }
+
+        // Perform merge
+        const mergeResult = await window.electron.git.merge(
+          parent.gitRootPath,
+          workspace.gitBranch!,
+          parent.gitBranch,
+          squash
+        )
+
+        if (!mergeResult.success) {
+          return { success: false, error: `Merge failed: ${mergeResult.error}` }
+        }
+
+        // Update workspace status
+        get().updateWorkspaceStatus(id, 'merged')
+
+        // Remove the workspace
+        await get().removeWorkspace(id)
+
+        return { success: true }
       },
 
       // Terminal tab management

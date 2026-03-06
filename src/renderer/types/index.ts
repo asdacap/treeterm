@@ -38,6 +38,21 @@ export interface WorktreeInfo {
   branch: string
 }
 
+export interface DiffFile {
+  path: string
+  status: 'added' | 'modified' | 'deleted' | 'renamed'
+  additions: number
+  deletions: number
+}
+
+export interface DiffResult {
+  files: DiffFile[]
+  totalAdditions: number
+  totalDeletions: number
+  baseBranch: string
+  headBranch: string
+}
+
 export interface TerminalApi {
   create: (cwd: string) => Promise<string>
   write: (id: string, data: string) => void
@@ -51,6 +66,11 @@ export interface GitApi {
   createWorktree: (repoPath: string, name: string, baseBranch?: string) => Promise<WorktreeResult>
   removeWorktree: (repoPath: string, worktreePath: string, deleteBranch?: boolean) => Promise<{ success: boolean; error?: string }>
   listWorktrees: (repoPath: string) => Promise<WorktreeInfo[]>
+  getDiff: (worktreePath: string, parentBranch: string) => Promise<{ success: boolean; diff?: DiffResult; error?: string }>
+  getFileDiff: (worktreePath: string, parentBranch: string, filePath: string) => Promise<{ success: boolean; diff?: string; error?: string }>
+  merge: (mainRepoPath: string, worktreeBranch: string, targetBranch: string, squash?: boolean) => Promise<{ success: boolean; error?: string }>
+  hasUncommittedChanges: (repoPath: string) => Promise<boolean>
+  commitAll: (repoPath: string, message: string) => Promise<{ success: boolean; error?: string }>
 }
 
 export interface ElectronApi {

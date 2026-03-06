@@ -1,7 +1,17 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import { ptyManager } from './pty'
-import { getGitInfo, createWorktree, removeWorktree, listWorktrees } from './git'
+import {
+  getGitInfo,
+  createWorktree,
+  removeWorktree,
+  listWorktrees,
+  getDiff,
+  getFileDiff,
+  mergeWorktree,
+  hasUncommittedChanges,
+  commitAll
+} from './git'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -77,6 +87,26 @@ ipcMain.handle('git:removeWorktree', async (_event, repoPath: string, worktreePa
 
 ipcMain.handle('git:listWorktrees', async (_event, repoPath: string) => {
   return listWorktrees(repoPath)
+})
+
+ipcMain.handle('git:getDiff', async (_event, worktreePath: string, parentBranch: string) => {
+  return getDiff(worktreePath, parentBranch)
+})
+
+ipcMain.handle('git:getFileDiff', async (_event, worktreePath: string, parentBranch: string, filePath: string) => {
+  return getFileDiff(worktreePath, parentBranch, filePath)
+})
+
+ipcMain.handle('git:merge', async (_event, mainRepoPath: string, worktreeBranch: string, targetBranch: string, squash: boolean) => {
+  return mergeWorktree(mainRepoPath, worktreeBranch, targetBranch, squash)
+})
+
+ipcMain.handle('git:hasUncommittedChanges', async (_event, repoPath: string) => {
+  return hasUncommittedChanges(repoPath)
+})
+
+ipcMain.handle('git:commitAll', async (_event, repoPath: string, message: string) => {
+  return commitAll(repoPath, message)
 })
 
 // App lifecycle

@@ -146,3 +146,162 @@ export async function listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
     return []
   }
 }
+
+export interface DiffFile {
+  path: string
+  status: 'added' | 'modified' | 'deleted' | 'renamed'
+  additions: number
+  deletions: number
+}
+
+export interface DiffResult {
+  files: DiffFile[]
+  totalAdditions: number
+  totalDeletions: number
+  baseBranch: string
+  headBranch: string
+}
+
+export async function getDiff(
+  worktreePath: string,
+  parentBranch: string
+): Promise<{ success: boolean; diff?: DiffResult; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(worktreePath)
+    const currentBranch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim()
+
+    // Get the merge base
+    const mergeBase = (await git.raw(['merge-base', parentBranch, currentBranch])).trim()
+
+    // Get diff stat
+    const diffStat = await git.raw(['diff', '--numstat', mergeBase, currentBranch])
+    const nameStatus = await git.raw(['diff', '--name-status', mergeBase, currentBranch])
+
+    const files: DiffFile[] = []
+    let totalAdditions = 0
+    let totalDeletions = 0
+
+    const statLines = diffStat.trim().split('\n').filter(Boolean)
+    const statusLines = nameStatus.trim().split('\n').filter(Boolean)
+
+    const statusMap: Record<string, 'added' | 'modified' | 'deleted' | 'renamed'> = {}
+    for (const line of statusLines) {
+      const [status, ...pathParts] = line.split('\t')
+      const filePath = pathParts[pathParts.length - 1] // Handle renames
+      if (status.startsWith('A')) statusMap[filePath] = 'added'
+      else if (status.startsWith('M')) statusMap[filePath] = 'modified'
+      else if (status.startsWith('D')) statusMap[filePath] = 'deleted'
+      else if (status.startsWith('R')) statusMap[filePath] = 'renamed'
+    }
+
+    for (const line of statLines) {
+      const [add, del, filePath] = line.split('\t')
+      const additions = add === '-' ? 0 : parseInt(add)
+      const deletions = del === '-' ? 0 : parseInt(del)
+
+      files.push({
+        path: filePath,
+        status: statusMap[filePath] || 'modified',
+        additions,
+        deletions
+      })
+
+      totalAdditions += additions
+      totalDeletions += deletions
+    }
+
+    return {
+      success: true,
+      diff: {
+        files,
+        totalAdditions,
+        totalDeletions,
+        baseBranch: parentBranch,
+        headBranch: currentBranch
+      }
+    }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error getting diff'
+    }
+  }
+}
+
+export async function getFileDiff(
+  worktreePath: string,
+  parentBranch: string,
+  filePath: string
+): Promise<{ success: boolean; diff?: string; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(worktreePath)
+    const currentBranch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim()
+    const mergeBase = (await git.raw(['merge-base', parentBranch, currentBranch])).trim()
+
+    const diff = await git.raw(['diff', '--color=never', mergeBase, currentBranch, '--', filePath])
+
+    return { success: true, diff }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error getting file diff'
+    }
+  }
+}
+
+export async function mergeWorktree(
+  mainRepoPath: string,
+  worktreeBranch: string,
+  targetBranch: string,
+  squash: boolean = false
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(mainRepoPath)
+
+    // Checkout target branch
+    await git.checkout(targetBranch)
+
+    if (squash) {
+      // Squash merge
+      await git.raw(['merge', '--squash', worktreeBranch])
+      await git.commit(`Squash merge ${worktreeBranch}`)
+    } else {
+      // Regular merge
+      await git.merge([worktreeBranch, '--no-ff', '-m', `Merge ${worktreeBranch}`])
+    }
+
+    return { success: true }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error merging'
+    }
+  }
+}
+
+export async function hasUncommittedChanges(repoPath: string): Promise<boolean> {
+  try {
+    const git: SimpleGit = simpleGit(repoPath)
+    const status = await git.status()
+    return !status.isClean()
+  } catch {
+    return false
+  }
+}
+
+export async function commitAll(
+  repoPath: string,
+  message: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(repoPath)
+    await git.add('.')
+    await git.commit(message)
+    return { success: true }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error committing'
+    }
+  }
+}

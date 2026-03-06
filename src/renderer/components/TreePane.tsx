@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
+import MergeDialog from './MergeDialog'
 import type { Workspace } from '../types'
 
 interface ContextMenu {
@@ -9,12 +10,20 @@ interface ContextMenu {
 }
 
 export default function TreePane() {
-  const { workspaces, activeWorkspaceId, addWorkspace, addChildWorkspace, removeWorkspace, setActiveWorkspace } =
-    useWorkspaceStore()
+  const {
+    workspaces,
+    activeWorkspaceId,
+    addWorkspace,
+    addChildWorkspace,
+    removeWorkspace,
+    mergeAndRemoveWorkspace,
+    setActiveWorkspace
+  } = useWorkspaceStore()
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
   const [newChildName, setNewChildName] = useState('')
   const [showNewChildInput, setShowNewChildInput] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [mergeDialogWorkspaceId, setMergeDialogWorkspaceId] = useState<string | null>(null)
 
   const handleAddWorkspace = async () => {
     const path = await window.electron.selectFolder()
@@ -58,13 +67,33 @@ export default function TreePane() {
   const handleRemove = async (id: string) => {
     closeContextMenu()
     const workspace = workspaces[id]
-    const message = workspace.isWorktree
-      ? `Remove workspace "${workspace.name}" and delete its git worktree?`
-      : `Remove workspace "${workspace.name}"?`
 
+    // For worktree workspaces with a parent, show the merge dialog
+    if (workspace.isWorktree && workspace.parentId) {
+      setMergeDialogWorkspaceId(id)
+      return
+    }
+
+    // For regular workspaces, just confirm and remove
+    const message = `Remove workspace "${workspace.name}"?`
     if (confirm(message)) {
       await removeWorkspace(id)
     }
+  }
+
+  const handleMerge = async (squash: boolean) => {
+    if (!mergeDialogWorkspaceId) return
+    const result = await mergeAndRemoveWorkspace(mergeDialogWorkspaceId, squash)
+    if (!result.success) {
+      throw new Error(result.error)
+    }
+    setMergeDialogWorkspaceId(null)
+  }
+
+  const handleAbandon = async () => {
+    if (!mergeDialogWorkspaceId) return
+    await removeWorkspace(mergeDialogWorkspaceId)
+    setMergeDialogWorkspaceId(null)
   }
 
   const toggleExpand = (id: string) => {
@@ -81,6 +110,11 @@ export default function TreePane() {
 
   // Get root workspaces (those without parents)
   const rootWorkspaces = Object.values(workspaces).filter((ws) => !ws.parentId)
+
+  // Get merge dialog workspace and parent
+  const mergeDialogWorkspace = mergeDialogWorkspaceId ? workspaces[mergeDialogWorkspaceId] : null
+  const mergeDialogParent =
+    mergeDialogWorkspace?.parentId ? workspaces[mergeDialogWorkspace.parentId] : null
 
   const renderWorkspace = (ws: Workspace, depth: number = 0) => {
     const hasChildren = ws.children.length > 0
@@ -169,9 +203,20 @@ export default function TreePane() {
             </div>
           )}
           <div className="context-menu-item danger" onClick={() => handleRemove(contextMenu.workspaceId)}>
-            Remove
+            {workspaces[contextMenu.workspaceId]?.isWorktree ? 'Close & Merge...' : 'Remove'}
           </div>
         </div>
+      )}
+
+      {/* Merge Dialog */}
+      {mergeDialogWorkspace && mergeDialogParent && (
+        <MergeDialog
+          workspace={mergeDialogWorkspace}
+          parentWorkspace={mergeDialogParent}
+          onMerge={handleMerge}
+          onAbandon={handleAbandon}
+          onCancel={() => setMergeDialogWorkspaceId(null)}
+        />
       )}
     </div>
   )

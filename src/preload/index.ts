@@ -62,6 +62,21 @@ contextBridge.exposeInMainWorld('electron', {
     },
     listWorktrees: (repoPath: string) => {
       return ipcRenderer.invoke('git:listWorktrees', repoPath)
+    },
+    getDiff: (worktreePath: string, parentBranch: string) => {
+      return ipcRenderer.invoke('git:getDiff', worktreePath, parentBranch)
+    },
+    getFileDiff: (worktreePath: string, parentBranch: string, filePath: string) => {
+      return ipcRenderer.invoke('git:getFileDiff', worktreePath, parentBranch, filePath)
+    },
+    merge: (mainRepoPath: string, worktreeBranch: string, targetBranch: string, squash: boolean = false) => {
+      return ipcRenderer.invoke('git:merge', mainRepoPath, worktreeBranch, targetBranch, squash)
+    },
+    hasUncommittedChanges: (repoPath: string) => {
+      return ipcRenderer.invoke('git:hasUncommittedChanges', repoPath)
+    },
+    commitAll: (repoPath: string, message: string) => {
+      return ipcRenderer.invoke('git:commitAll', repoPath, message)
     }
   }
 })
