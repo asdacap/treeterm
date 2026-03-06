@@ -23,6 +23,9 @@ export interface Settings {
     prevTab: string
     openSettings: string
   }
+  startup: {
+    childWorkspaceCommand: string
+  }
 }
 
 const defaultSettings: Settings = {
@@ -45,6 +48,9 @@ const defaultSettings: Settings = {
     nextTab: 'CommandOrControl+Shift+]',
     prevTab: 'CommandOrControl+Shift+[',
     openSettings: 'CommandOrControl+,'
+  },
+  startup: {
+    childWorkspaceCommand: ''
   }
 }
 
@@ -107,6 +113,10 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
     keybindings: {
       ...defaults.keybindings,
       ...loaded.keybindings
+    },
+    startup: {
+      ...defaults.startup,
+      ...loaded.startup
     }
   }
 }

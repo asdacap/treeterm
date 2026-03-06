@@ -21,6 +21,9 @@ const defaultSettings: Settings = {
     nextTab: 'CommandOrControl+Shift+]',
     prevTab: 'CommandOrControl+Shift+[',
     openSettings: 'CommandOrControl+,'
+  },
+  startup: {
+    childWorkspaceCommand: ''
   }
 }
 

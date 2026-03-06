@@ -19,7 +19,7 @@ class PtyManager {
   private ptys: Map<string, PtyInstance> = new Map()
   private counter = 0
 
-  create(cwd: string, window: BrowserWindow, sandbox?: SandboxConfig): string {
+  create(cwd: string, window: BrowserWindow, sandbox?: SandboxConfig, startupCommand?: string): string {
     const id = `pty-${++this.counter}`
     const isSandboxed = sandbox?.enabled ?? false
 
@@ -70,6 +70,15 @@ class PtyManager {
     })
 
     this.ptys.set(id, { pty: ptyProcess, id, sandboxed: isSandboxed })
+
+    // Execute startup command if provided
+    if (startupCommand && startupCommand.trim()) {
+      // Small delay to ensure shell is ready
+      setTimeout(() => {
+        ptyProcess.write(startupCommand.trim() + '\n')
+      }, 100)
+    }
+
     return id
   }
 

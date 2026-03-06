@@ -63,7 +63,7 @@ export interface DiffResult {
 }
 
 export interface TerminalApi {
-  create: (cwd: string, sandbox?: SandboxConfig) => Promise<string>
+  create: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
   write: (id: string, data: string) => void
   resize: (id: string, cols: number, rows: number) => void
   kill: (id: string) => void
@@ -103,6 +103,9 @@ export interface Settings {
     nextTab: string
     prevTab: string
     openSettings: string
+  }
+  startup: {
+    childWorkspaceCommand: string
   }
 }
 
