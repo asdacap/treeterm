@@ -1,6 +1,7 @@
 export interface TerminalTab {
   id: string
   title: string
+  ptyId: string | null
 }
 
 export interface SandboxConfig {
