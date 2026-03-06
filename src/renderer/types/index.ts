@@ -1,3 +1,8 @@
+export interface TerminalTab {
+  id: string
+  title: string
+}
+
 export interface Workspace {
   id: string
   name: string
@@ -10,6 +15,9 @@ export interface Workspace {
   gitBranch: string | null
   gitRootPath: string | null
   isWorktree: boolean
+  // Terminal tabs
+  terminals: TerminalTab[]
+  activeTerminalId: string | null
 }
 
 export interface GitInfo {

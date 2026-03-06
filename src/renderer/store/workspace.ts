@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Workspace, GitInfo } from '../types'
+import type { Workspace, GitInfo, TerminalTab } from '../types'
 
 interface WorkspaceState {
   workspaces: Record<string, Workspace>
@@ -11,10 +11,19 @@ interface WorkspaceState {
   setActiveWorkspace: (id: string | null) => void
   updateGitInfo: (id: string, gitInfo: GitInfo) => void
   refreshGitInfo: (id: string) => Promise<void>
+  // Terminal tab management
+  addTerminal: (workspaceId: string) => string
+  removeTerminal: (workspaceId: string, terminalId: string) => void
+  setActiveTerminal: (workspaceId: string, terminalId: string) => void
+  updateTerminalTitle: (workspaceId: string, terminalId: string, title: string) => void
 }
 
 function generateId(): string {
   return `ws-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+function generateTerminalId(): string {
+  return `term-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
 function getNameFromPath(path: string): string {
@@ -29,6 +38,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
       addWorkspace: async (path: string) => {
         const id = generateId()
+        const terminalId = generateTerminalId()
 
         // Get git info for the path
         const gitInfo = await window.electron.git.getInfo(path)
@@ -43,7 +53,9 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           isGitRepo: gitInfo.isRepo,
           gitBranch: gitInfo.branch,
           gitRootPath: gitInfo.rootPath,
-          isWorktree: false
+          isWorktree: false,
+          terminals: [{ id: terminalId, title: 'Terminal 1' }],
+          activeTerminalId: terminalId
         }
 
         set((state) => ({
@@ -79,6 +91,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
         // Create child workspace
         const id = generateId()
+        const terminalId = generateTerminalId()
         const childWorkspace: Workspace = {
           id,
           name,
@@ -89,7 +102,9 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           isGitRepo: true,
           gitBranch: result.branch!,
           gitRootPath: parent.gitRootPath,
-          isWorktree: true
+          isWorktree: true,
+          terminals: [{ id: terminalId, title: 'Terminal 1' }],
+          activeTerminalId: terminalId
         }
 
         set((state) => ({
@@ -185,6 +200,98 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
         const gitInfo = await window.electron.git.getInfo(workspace.path)
         get().updateGitInfo(id, gitInfo)
+      },
+
+      // Terminal tab management
+      addTerminal: (workspaceId: string) => {
+        const terminalId = generateTerminalId()
+        set((state) => {
+          const workspace = state.workspaces[workspaceId]
+          if (!workspace) return state
+
+          const terminalNumber = workspace.terminals.length + 1
+          const newTerminal: TerminalTab = {
+            id: terminalId,
+            title: `Terminal ${terminalNumber}`
+          }
+
+          return {
+            workspaces: {
+              ...state.workspaces,
+              [workspaceId]: {
+                ...workspace,
+                terminals: [...workspace.terminals, newTerminal],
+                activeTerminalId: terminalId
+              }
+            }
+          }
+        })
+        return terminalId
+      },
+
+      removeTerminal: (workspaceId: string, terminalId: string) => {
+        set((state) => {
+          const workspace = state.workspaces[workspaceId]
+          if (!workspace) return state
+          if (workspace.terminals.length <= 1) return state // Keep at least one terminal
+
+          const newTerminals = workspace.terminals.filter((t) => t.id !== terminalId)
+          let newActiveTerminalId = workspace.activeTerminalId
+
+          // If we're removing the active terminal, switch to another
+          if (workspace.activeTerminalId === terminalId) {
+            const removedIndex = workspace.terminals.findIndex((t) => t.id === terminalId)
+            const newIndex = Math.min(removedIndex, newTerminals.length - 1)
+            newActiveTerminalId = newTerminals[newIndex]?.id || null
+          }
+
+          return {
+            workspaces: {
+              ...state.workspaces,
+              [workspaceId]: {
+                ...workspace,
+                terminals: newTerminals,
+                activeTerminalId: newActiveTerminalId
+              }
+            }
+          }
+        })
+      },
+
+      setActiveTerminal: (workspaceId: string, terminalId: string) => {
+        set((state) => {
+          const workspace = state.workspaces[workspaceId]
+          if (!workspace) return state
+
+          return {
+            workspaces: {
+              ...state.workspaces,
+              [workspaceId]: {
+                ...workspace,
+                activeTerminalId: terminalId
+              }
+            }
+          }
+        })
+      },
+
+      updateTerminalTitle: (workspaceId: string, terminalId: string, title: string) => {
+        set((state) => {
+          const workspace = state.workspaces[workspaceId]
+          if (!workspace) return state
+
+          return {
+            workspaces: {
+              ...state.workspaces,
+              [workspaceId]: {
+                ...workspace,
+                terminals: workspace.terminals.map((t) =>
+                  t.id === terminalId ? { ...t, title } : t
+                )
+              }
+            }
+          }
+        })
       }
     }),
     {

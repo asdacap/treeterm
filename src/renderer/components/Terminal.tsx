@@ -6,9 +6,10 @@ import '@xterm/xterm/css/xterm.css'
 interface TerminalProps {
   cwd: string
   workspaceId: string
+  terminalId: string
 }
 
-export default function Terminal({ cwd, workspaceId }: TerminalProps) {
+export default function Terminal({ cwd, workspaceId, terminalId }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -98,7 +99,7 @@ export default function Terminal({ cwd, workspaceId }: TerminalProps) {
       }
       terminal.dispose()
     }
-  }, [cwd, workspaceId])
+  }, [cwd, terminalId])
 
   return <div ref={containerRef} className="terminal-container" />
 }
