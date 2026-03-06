@@ -16,13 +16,16 @@ export default function Terminal({ cwd, workspaceId, terminalId }: TerminalProps
   const fitAddonRef = useRef<FitAddon | null>(null)
   const ptyIdRef = useRef<string | null>(null)
   const unsubscribeRef = useRef<(() => void) | null>(null)
+  const isMountedRef = useRef(true)
 
   const workspace = useWorkspaceStore((state) => state.workspaces[workspaceId])
   const sandbox = workspace?.sandbox
+  const setPtyId = useWorkspaceStore((state) => state.setPtyId)
 
   useEffect(() => {
     if (!containerRef.current) return
 
+    isMountedRef.current = true
     const isSandboxed = sandbox?.enabled ?? false
 
     // Create terminal with sandbox-aware theme
@@ -66,7 +69,16 @@ export default function Terminal({ cwd, workspaceId, terminalId }: TerminalProps
     // Create PTY with sandbox config
     window.electron.terminal.create(cwd, sandbox).then((id) => {
       if (!id) return
+
+      // Check if component is still mounted
+      if (!isMountedRef.current) {
+        // Component unmounted during PTY creation - kill the orphaned PTY
+        window.electron.terminal.kill(id)
+        return
+      }
+
       ptyIdRef.current = id
+      setPtyId(workspaceId, terminalId, id)
 
       // Subscribe to PTY output
       unsubscribeRef.current = window.electron.terminal.onData(id, (data) => {
@@ -95,6 +107,7 @@ export default function Terminal({ cwd, workspaceId, terminalId }: TerminalProps
 
     // Cleanup
     return () => {
+      isMountedRef.current = false
       inputDisposable.dispose()
       resizeObserver.disconnect()
       if (unsubscribeRef.current) {

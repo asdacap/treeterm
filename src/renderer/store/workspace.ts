@@ -26,6 +26,7 @@ interface WorkspaceState {
   removeTerminal: (workspaceId: string, terminalId: string) => void
   setActiveTerminal: (workspaceId: string, terminalId: string) => void
   updateTerminalTitle: (workspaceId: string, terminalId: string, title: string) => void
+  setPtyId: (workspaceId: string, terminalId: string, ptyId: string) => void
 }
 
 function generateId(): string {
@@ -64,7 +65,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           gitBranch: gitInfo.branch,
           gitRootPath: gitInfo.rootPath,
           isWorktree: false,
-          terminals: [{ id: terminalId, title: 'Terminal 1' }],
+          terminals: [{ id: terminalId, title: 'Terminal 1', ptyId: null }],
           activeTerminalId: terminalId,
           sandbox: { ...defaultSandbox }
         }
@@ -114,7 +115,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           gitBranch: result.branch!,
           gitRootPath: parent.gitRootPath,
           isWorktree: true,
-          terminals: [{ id: terminalId, title: 'Terminal 1' }],
+          terminals: [{ id: terminalId, title: 'Terminal 1', ptyId: null }],
           activeTerminalId: terminalId,
           sandbox: { ...defaultSandbox, enabled: sandboxed }
         }
@@ -143,6 +144,13 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         // Recursively remove children first
         for (const childId of workspace.children) {
           await get().removeWorkspace(childId)
+        }
+
+        // Kill all PTYs for this workspace's terminals
+        for (const terminal of workspace.terminals) {
+          if (terminal.ptyId) {
+            window.electron.terminal.kill(terminal.ptyId)
+          }
         }
 
         // If this is a worktree, remove it from git
@@ -328,7 +336,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           const terminalNumber = workspace.terminals.length + 1
           const newTerminal: TerminalTab = {
             id: terminalId,
-            title: `Terminal ${terminalNumber}`
+            title: `Terminal ${terminalNumber}`,
+            ptyId: null
           }
 
           return {
@@ -346,10 +355,19 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       },
 
       removeTerminal: (workspaceId: string, terminalId: string) => {
+        const workspace = get().workspaces[workspaceId]
+        if (!workspace) return
+        if (workspace.terminals.length <= 1) return // Keep at least one terminal
+
+        // Kill the PTY before removing from state
+        const terminal = workspace.terminals.find((t) => t.id === terminalId)
+        if (terminal?.ptyId) {
+          window.electron.terminal.kill(terminal.ptyId)
+        }
+
         set((state) => {
           const workspace = state.workspaces[workspaceId]
           if (!workspace) return state
-          if (workspace.terminals.length <= 1) return state // Keep at least one terminal
 
           const newTerminals = workspace.terminals.filter((t) => t.id !== terminalId)
           let newActiveTerminalId = workspace.activeTerminalId
@@ -403,6 +421,25 @@ export const useWorkspaceStore = create<WorkspaceState>()(
                 ...workspace,
                 terminals: workspace.terminals.map((t) =>
                   t.id === terminalId ? { ...t, title } : t
+                )
+              }
+            }
+          }
+        })
+      },
+
+      setPtyId: (workspaceId: string, terminalId: string, ptyId: string) => {
+        set((state) => {
+          const workspace = state.workspaces[workspaceId]
+          if (!workspace) return state
+
+          return {
+            workspaces: {
+              ...state.workspaces,
+              [workspaceId]: {
+                ...workspace,
+                terminals: workspace.terminals.map((t) =>
+                  t.id === terminalId ? { ...t, ptyId } : t
                 )
               }
             }
