@@ -1,7 +1,52 @@
 export interface TerminalTab {
+  type: 'terminal'
   id: string
   title: string
   ptyId: string | null
+}
+
+export interface FilesystemTab {
+  type: 'filesystem'
+  id: string
+  title: string
+  selectedPath: string | null
+  expandedDirs: string[]
+}
+
+export type WorkspaceTab = TerminalTab | FilesystemTab
+
+export interface FileEntry {
+  name: string
+  path: string
+  relativePath: string
+  isDirectory: boolean
+  size?: number
+  modifiedTime?: number
+}
+
+export interface DirectoryContents {
+  path: string
+  entries: FileEntry[]
+}
+
+export interface FileContents {
+  path: string
+  content: string
+  size: number
+  language: string
+}
+
+export interface FilesystemApi {
+  readDirectory: (workspacePath: string, dirPath: string) => Promise<{
+    success: boolean
+    contents?: DirectoryContents
+    error?: string
+  }>
+  readFile: (workspacePath: string, filePath: string) => Promise<{
+    success: boolean
+    file?: FileContents
+    error?: string
+  }>
 }
 
 export interface SandboxConfig {
@@ -22,9 +67,9 @@ export interface Workspace {
   gitBranch: string | null
   gitRootPath: string | null
   isWorktree: boolean
-  // Terminal tabs
-  terminals: TerminalTab[]
-  activeTerminalId: string | null
+  // Tabs (terminals and filesystem browsers)
+  tabs: WorkspaceTab[]
+  activeTabId: string | null
   // Sandbox configuration
   sandbox: SandboxConfig
 }
@@ -120,6 +165,7 @@ export interface ElectronApi {
   selectFolder: () => Promise<string | null>
   git: GitApi
   settings: SettingsApi
+  filesystem: FilesystemApi
 }
 
 declare global {

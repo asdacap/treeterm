@@ -1,14 +1,25 @@
-import type { TerminalTab } from '../types'
+import { useState } from 'react'
+import type { WorkspaceTab } from '../types'
 
 interface TabBarProps {
-  tabs: TerminalTab[]
+  tabs: WorkspaceTab[]
   activeTabId: string | null
   onSelectTab: (id: string) => void
   onCloseTab: (id: string) => void
-  onNewTab: () => void
+  onNewTerminal: () => void
+  onNewFilesystemTab: () => void
 }
 
-export default function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onNewTab }: TabBarProps) {
+export default function TabBar({
+  tabs,
+  activeTabId,
+  onSelectTab,
+  onCloseTab,
+  onNewTerminal,
+  onNewFilesystemTab
+}: TabBarProps) {
+  const [showNewMenu, setShowNewMenu] = useState(false)
+
   return (
     <div className="tab-bar">
       <div className="tab-list">
@@ -18,6 +29,7 @@ export default function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onN
             className={`tab ${activeTabId === tab.id ? 'active' : ''}`}
             onClick={() => onSelectTab(tab.id)}
           >
+            <span className="tab-icon">{tab.type === 'terminal' ? '>' : '\uD83D\uDCC2'}</span>
             <span className="tab-title">{tab.title}</span>
             {tabs.length > 1 && (
               <button
@@ -34,9 +46,37 @@ export default function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onN
           </div>
         ))}
       </div>
-      <button className="tab-new" onClick={onNewTab} title="New terminal (Cmd+T)">
-        +
-      </button>
+      <div className="tab-new-container">
+        <button
+          className="tab-new"
+          onClick={() => setShowNewMenu(!showNewMenu)}
+          title="New tab"
+        >
+          +
+        </button>
+        {showNewMenu && (
+          <div className="tab-new-menu">
+            <button
+              className="tab-new-menu-item"
+              onClick={() => {
+                onNewTerminal()
+                setShowNewMenu(false)
+              }}
+            >
+              <span className="tab-icon">{'>'}</span> Terminal
+            </button>
+            <button
+              className="tab-new-menu-item"
+              onClick={() => {
+                onNewFilesystemTab()
+                setShowNewMenu(false)
+              }}
+            >
+              <span className="tab-icon">{'\uD83D\uDCC2'}</span> Files
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

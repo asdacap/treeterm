@@ -3,6 +3,8 @@ import { useWorkspaceStore } from '../store/workspace'
 import { useSettingsStore } from '../store/settings'
 import TabBar from './TabBar'
 import Terminal from './Terminal'
+import { FilesystemBrowser } from './FilesystemBrowser'
+import type { TerminalTab } from '../types'
 
 function matchesKeybinding(e: KeyboardEvent, keybinding: string): boolean {
   const parts = keybinding.split('+')
@@ -27,8 +29,9 @@ export default function WorkspacePane() {
     workspaces,
     activeWorkspaceId,
     addTerminal,
-    removeTerminal,
-    setActiveTerminal
+    addFilesystemTab,
+    removeTab,
+    setActiveTab
   } = useWorkspaceStore()
 
   const { settings } = useSettingsStore()
@@ -36,28 +39,34 @@ export default function WorkspacePane() {
 
   const activeWorkspace = activeWorkspaceId ? workspaces[activeWorkspaceId] : null
 
-  const handleNewTab = useCallback(() => {
+  const handleNewTerminal = useCallback(() => {
     if (activeWorkspaceId) {
       addTerminal(activeWorkspaceId)
     }
   }, [activeWorkspaceId, addTerminal])
 
+  const handleNewFilesystemTab = useCallback(() => {
+    if (activeWorkspaceId) {
+      addFilesystemTab(activeWorkspaceId)
+    }
+  }, [activeWorkspaceId, addFilesystemTab])
+
   const handleCloseTab = useCallback(
-    (terminalId: string) => {
+    (tabId: string) => {
       if (activeWorkspaceId) {
-        removeTerminal(activeWorkspaceId, terminalId)
+        removeTab(activeWorkspaceId, tabId)
       }
     },
-    [activeWorkspaceId, removeTerminal]
+    [activeWorkspaceId, removeTab]
   )
 
   const handleSelectTab = useCallback(
-    (terminalId: string) => {
+    (tabId: string) => {
       if (activeWorkspaceId) {
-        setActiveTerminal(activeWorkspaceId, terminalId)
+        setActiveTab(activeWorkspaceId, tabId)
       }
     },
-    [activeWorkspaceId, setActiveTerminal]
+    [activeWorkspaceId, setActiveTab]
   )
 
   // Keyboard shortcuts
@@ -65,18 +74,18 @@ export default function WorkspacePane() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!activeWorkspace) return
 
-      // New tab
+      // New terminal tab
       if (matchesKeybinding(e, keybindings.newTab)) {
         e.preventDefault()
-        handleNewTab()
+        handleNewTerminal()
         return
       }
 
       // Close tab
       if (matchesKeybinding(e, keybindings.closeTab)) {
         e.preventDefault()
-        if (activeWorkspace.activeTerminalId && activeWorkspace.terminals.length > 1) {
-          handleCloseTab(activeWorkspace.activeTerminalId)
+        if (activeWorkspace.activeTabId && activeWorkspace.tabs.length > 1) {
+          handleCloseTab(activeWorkspace.activeTabId)
         }
         return
       }
@@ -85,8 +94,8 @@ export default function WorkspacePane() {
       if ((e.metaKey || e.ctrlKey) && e.key >= '1' && e.key <= '9') {
         e.preventDefault()
         const index = parseInt(e.key) - 1
-        if (index < activeWorkspace.terminals.length) {
-          handleSelectTab(activeWorkspace.terminals[index].id)
+        if (index < activeWorkspace.tabs.length) {
+          handleSelectTab(activeWorkspace.tabs[index].id)
         }
         return
       }
@@ -94,29 +103,29 @@ export default function WorkspacePane() {
       // Previous tab
       if (matchesKeybinding(e, keybindings.prevTab)) {
         e.preventDefault()
-        const currentIndex = activeWorkspace.terminals.findIndex(
-          (t) => t.id === activeWorkspace.activeTerminalId
+        const currentIndex = activeWorkspace.tabs.findIndex(
+          (t) => t.id === activeWorkspace.activeTabId
         )
-        const newIndex = currentIndex > 0 ? currentIndex - 1 : activeWorkspace.terminals.length - 1
-        handleSelectTab(activeWorkspace.terminals[newIndex].id)
+        const newIndex = currentIndex > 0 ? currentIndex - 1 : activeWorkspace.tabs.length - 1
+        handleSelectTab(activeWorkspace.tabs[newIndex].id)
         return
       }
 
       // Next tab
       if (matchesKeybinding(e, keybindings.nextTab)) {
         e.preventDefault()
-        const currentIndex = activeWorkspace.terminals.findIndex(
-          (t) => t.id === activeWorkspace.activeTerminalId
+        const currentIndex = activeWorkspace.tabs.findIndex(
+          (t) => t.id === activeWorkspace.activeTabId
         )
-        const newIndex = currentIndex < activeWorkspace.terminals.length - 1 ? currentIndex + 1 : 0
-        handleSelectTab(activeWorkspace.terminals[newIndex].id)
+        const newIndex = currentIndex < activeWorkspace.tabs.length - 1 ? currentIndex + 1 : 0
+        handleSelectTab(activeWorkspace.tabs[newIndex].id)
         return
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activeWorkspace, keybindings, handleNewTab, handleCloseTab, handleSelectTab])
+  }, [activeWorkspace, keybindings, handleNewTerminal, handleCloseTab, handleSelectTab])
 
   if (!activeWorkspace) {
     return (
@@ -129,9 +138,9 @@ export default function WorkspacePane() {
     )
   }
 
-  // Handle legacy workspaces without terminals array
-  const terminals = activeWorkspace.terminals || [{ id: 'default', title: 'Terminal 1' }]
-  const activeTerminalId = activeWorkspace.activeTerminalId || terminals[0]?.id
+  // Handle legacy workspaces - migrate terminals to tabs format
+  const tabs = activeWorkspace.tabs || []
+  const activeTabId = activeWorkspace.activeTabId || tabs[0]?.id
 
   return (
     <div className="workspace-content">
@@ -143,34 +152,55 @@ export default function WorkspacePane() {
         )}
       </div>
       <TabBar
-        tabs={terminals}
-        activeTabId={activeTerminalId}
+        tabs={tabs}
+        activeTabId={activeTabId}
         onSelectTab={handleSelectTab}
         onCloseTab={handleCloseTab}
-        onNewTab={handleNewTab}
+        onNewTerminal={handleNewTerminal}
+        onNewFilesystemTab={handleNewFilesystemTab}
       />
       <div className="workspace-terminal">
-        {/* Render terminals for ALL workspaces to keep PTYs alive when switching */}
+        {/* Render tabs for ALL workspaces to keep PTYs alive when switching */}
         {Object.values(workspaces).map((workspace) => {
-          const wsTerminals = workspace.terminals || [{ id: 'default', title: 'Terminal 1' }]
-          const wsActiveTerminalId = workspace.activeTerminalId || wsTerminals[0]?.id
+          const wsTabs = workspace.tabs || []
+          const wsActiveTabId = workspace.activeTabId || wsTabs[0]?.id
           const isActiveWorkspace = workspace.id === activeWorkspaceId
 
-          return wsTerminals.map((terminal) => (
-            <div
-              key={`${workspace.id}-${terminal.id}`}
-              className="terminal-wrapper"
-              style={{
-                display: isActiveWorkspace && terminal.id === wsActiveTerminalId ? 'block' : 'none'
-              }}
-            >
-              <Terminal
-                cwd={workspace.path}
-                workspaceId={workspace.id}
-                terminalId={terminal.id}
-              />
-            </div>
-          ))
+          return wsTabs.map((tab) => {
+            const isVisible = isActiveWorkspace && tab.id === wsActiveTabId
+
+            if (tab.type === 'terminal') {
+              return (
+                <div
+                  key={`${workspace.id}-${tab.id}`}
+                  className="terminal-wrapper"
+                  style={{ display: isVisible ? 'block' : 'none' }}
+                >
+                  <Terminal
+                    cwd={workspace.path}
+                    workspaceId={workspace.id}
+                    terminalId={tab.id}
+                  />
+                </div>
+              )
+            } else {
+              // Filesystem browser - only render when active workspace (no need to keep alive)
+              if (!isActiveWorkspace) return null
+              return (
+                <div
+                  key={`${workspace.id}-${tab.id}`}
+                  className="filesystem-wrapper"
+                  style={{ display: isVisible ? 'flex' : 'none' }}
+                >
+                  <FilesystemBrowser
+                    workspacePath={workspace.path}
+                    workspaceId={workspace.id}
+                    tabId={tab.id}
+                  />
+                </div>
+              )
+            }
+          })
         })}
       </div>
     </div>
