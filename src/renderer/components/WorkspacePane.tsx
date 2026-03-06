@@ -29,7 +29,6 @@ export default function WorkspacePane() {
     workspaces,
     activeWorkspaceId,
     addTerminal,
-    addFilesystemTab,
     removeTab,
     setActiveTab
   } = useWorkspaceStore()
@@ -44,12 +43,6 @@ export default function WorkspacePane() {
       addTerminal(activeWorkspaceId)
     }
   }, [activeWorkspaceId, addTerminal])
-
-  const handleNewFilesystemTab = useCallback(() => {
-    if (activeWorkspaceId) {
-      addFilesystemTab(activeWorkspaceId)
-    }
-  }, [activeWorkspaceId, addFilesystemTab])
 
   const handleCloseTab = useCallback(
     (tabId: string) => {
@@ -157,7 +150,6 @@ export default function WorkspacePane() {
         onSelectTab={handleSelectTab}
         onCloseTab={handleCloseTab}
         onNewTerminal={handleNewTerminal}
-        onNewFilesystemTab={handleNewFilesystemTab}
       />
       <div className="workspace-terminal">
         {/* Render tabs for ALL workspaces to keep PTYs alive when switching */}

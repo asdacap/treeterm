@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import type { WorkspaceTab } from '../types'
 
 interface TabBarProps {
@@ -7,7 +6,6 @@ interface TabBarProps {
   onSelectTab: (id: string) => void
   onCloseTab: (id: string) => void
   onNewTerminal: () => void
-  onNewFilesystemTab: () => void
 }
 
 export default function TabBar({
@@ -15,10 +13,10 @@ export default function TabBar({
   activeTabId,
   onSelectTab,
   onCloseTab,
-  onNewTerminal,
-  onNewFilesystemTab
+  onNewTerminal
 }: TabBarProps) {
-  const [showNewMenu, setShowNewMenu] = useState(false)
+  const terminalTabs = tabs.filter((t) => t.type === 'terminal')
+  const canCloseTabs = terminalTabs.length > 1
 
   return (
     <div className="tab-bar">
@@ -31,7 +29,7 @@ export default function TabBar({
           >
             <span className="tab-icon">{tab.type === 'terminal' ? '>' : '\uD83D\uDCC2'}</span>
             <span className="tab-title">{tab.title}</span>
-            {tabs.length > 1 && (
+            {tab.type === 'terminal' && canCloseTabs && (
               <button
                 className="tab-close"
                 onClick={(e) => {
@@ -46,37 +44,13 @@ export default function TabBar({
           </div>
         ))}
       </div>
-      <div className="tab-new-container">
-        <button
-          className="tab-new"
-          onClick={() => setShowNewMenu(!showNewMenu)}
-          title="New tab"
-        >
-          +
-        </button>
-        {showNewMenu && (
-          <div className="tab-new-menu">
-            <button
-              className="tab-new-menu-item"
-              onClick={() => {
-                onNewTerminal()
-                setShowNewMenu(false)
-              }}
-            >
-              <span className="tab-icon">{'>'}</span> Terminal
-            </button>
-            <button
-              className="tab-new-menu-item"
-              onClick={() => {
-                onNewFilesystemTab()
-                setShowNewMenu(false)
-              }}
-            >
-              <span className="tab-icon">{'\uD83D\uDCC2'}</span> Files
-            </button>
-          </div>
-        )}
-      </div>
+      <button
+        className="tab-new"
+        onClick={onNewTerminal}
+        title="New terminal"
+      >
+        +
+      </button>
     </div>
   )
 }

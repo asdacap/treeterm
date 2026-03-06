@@ -54,9 +54,18 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       addWorkspace: async (path: string) => {
         const id = generateId()
         const terminalId = generateTerminalId()
+        const filesTabId = `files-${id}`
 
         // Get git info for the path
         const gitInfo = await window.electron.git.getInfo(path)
+
+        const filesTab: FilesystemTab = {
+          type: 'filesystem',
+          id: filesTabId,
+          title: 'Files',
+          selectedPath: null,
+          expandedDirs: []
+        }
 
         const workspace: Workspace = {
           id,
@@ -69,7 +78,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           gitBranch: gitInfo.branch,
           gitRootPath: gitInfo.rootPath,
           isWorktree: false,
-          tabs: [{ type: 'terminal', id: terminalId, title: 'Terminal 1', ptyId: null }],
+          tabs: [filesTab, { type: 'terminal', id: terminalId, title: 'Terminal 1', ptyId: null }],
           activeTabId: terminalId,
           sandbox: { ...defaultSandbox }
         }
@@ -108,6 +117,16 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         // Create child workspace
         const id = generateId()
         const terminalId = generateTerminalId()
+        const filesTabId = `files-${id}`
+
+        const filesTab: FilesystemTab = {
+          type: 'filesystem',
+          id: filesTabId,
+          title: 'Files',
+          selectedPath: null,
+          expandedDirs: []
+        }
+
         const childWorkspace: Workspace = {
           id,
           name,
@@ -119,7 +138,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           gitBranch: result.branch!,
           gitRootPath: parent.gitRootPath,
           isWorktree: true,
-          tabs: [{ type: 'terminal', id: terminalId, title: 'Terminal 1', ptyId: null }],
+          tabs: [filesTab, { type: 'terminal', id: terminalId, title: 'Terminal 1', ptyId: null }],
           activeTabId: terminalId,
           sandbox: { ...defaultSandbox, enabled: sandboxed }
         }
@@ -391,11 +410,20 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       removeTab: (workspaceId: string, tabId: string) => {
         const workspace = get().workspaces[workspaceId]
         if (!workspace) return
-        if (workspace.tabs.length <= 1) return // Keep at least one tab
+
+        // Find the tab to remove
+        const tab = workspace.tabs.find((t) => t.id === tabId)
+        if (!tab) return
+
+        // Prevent removing filesystem tabs (they are always available)
+        if (tab.type === 'filesystem') return
+
+        // Keep at least one terminal tab
+        const terminalTabs = workspace.tabs.filter((t) => t.type === 'terminal')
+        if (terminalTabs.length <= 1) return
 
         // Kill the PTY if it's a terminal tab
-        const tab = workspace.tabs.find((t) => t.id === tabId)
-        if (tab?.type === 'terminal' && tab.ptyId) {
+        if (tab.type === 'terminal' && tab.ptyId) {
           window.electron.terminal.kill(tab.ptyId)
         }
 

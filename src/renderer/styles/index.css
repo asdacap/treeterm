@@ -1087,42 +1087,6 @@ body,
   flex-shrink: 0;
 }
 
-/* Tab New Menu */
-.tab-new-container {
-  position: relative;
-}
-
-.tab-new-menu {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  margin-top: 4px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  padding: 4px 0;
-  min-width: 140px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  z-index: 1000;
-}
-
-.tab-new-menu-item {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  padding: 8px 12px;
-  font-size: 13px;
-  background: transparent;
-  border: none;
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: background 0.1s;
-}
-
-.tab-new-menu-item:hover {
-  background: var(--bg-hover);
-}
-
 /* Filesystem Browser */
 .filesystem-wrapper {
   height: 100%;
