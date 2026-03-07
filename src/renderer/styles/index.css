@@ -193,6 +193,28 @@ body,
   margin-left: 4px;
 }
 
+/* Activity State Indicator */
+.tree-item-activity {
+  font-size: 10px;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+
+.tree-item-activity-working {
+  color: #e5e510;
+  animation: spin 1s linear infinite;
+  display: inline-block;
+}
+
+.tree-item-activity-waiting_for_input {
+  color: #0dbc79;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* Context Menu */
 .context-menu {
   position: fixed;

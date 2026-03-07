@@ -4,7 +4,7 @@ import type { Settings, ApplicationInstance } from '../types'
 const defaultApplicationInstances: ApplicationInstance[] = [
   { id: 'files', applicationId: 'filesystem', name: 'Files', icon: '\uD83D\uDCC2', config: {}, isDefault: true, isBuiltIn: true },
   { id: 'default-terminal', applicationId: 'terminal', name: 'Terminal', icon: '>', config: {}, isDefault: true, isBuiltIn: true },
-  { id: 'claude', applicationId: 'terminal', name: 'Claude', icon: '\u2726', config: { command: 'claude' }, isDefault: false, isBuiltIn: true }
+  { id: 'claude', applicationId: 'claude', name: 'Claude', icon: '\u2726', config: {}, isDefault: false, isBuiltIn: true }
 ]
 
 const defaultSettings: Settings = {

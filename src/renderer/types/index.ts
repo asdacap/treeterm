@@ -1,5 +1,8 @@
 import type { ReactNode } from 'react'
 
+// Activity state for applications that can report their state
+export type ActivityState = 'idle' | 'working' | 'waiting_for_input'
+
 // Application - code-defined, registered at runtime
 export interface Application<TState = unknown> {
   id: string
@@ -15,6 +18,8 @@ export interface Application<TState = unknown> {
   keepAlive: boolean
   // CSS display style when visible: 'block' or 'flex'
   displayStyle: 'block' | 'flex'
+  // Optional: Applications can report their activity state
+  getActivityState?: (tab: Tab) => ActivityState
 }
 
 export interface ApplicationRenderProps {

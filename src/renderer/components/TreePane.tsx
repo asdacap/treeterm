@@ -1,13 +1,35 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
+import { useActivityStateStore } from '../store/activityState'
 import MergeDialog from './MergeDialog'
 import CreateChildDialog from './CreateChildDialog'
-import type { Workspace } from '../types'
+import type { Workspace, ActivityState } from '../types'
 
 interface ContextMenu {
   x: number
   y: number
   workspaceId: string
+}
+
+// Small component to subscribe to activity state changes for a workspace
+function WorkspaceActivityIndicator({ tabIds }: { tabIds: string[] }) {
+  const activityState = useActivityStateStore((state) => {
+    // Priority: working > waiting_for_input > idle
+    if (tabIds.some((id) => state.states[id] === 'working')) return 'working'
+    if (tabIds.some((id) => state.states[id] === 'waiting_for_input')) return 'waiting_for_input'
+    return 'idle'
+  })
+
+  if (activityState === 'idle') return null
+
+  return (
+    <span
+      className={`tree-item-activity tree-item-activity-${activityState}`}
+      title={activityState === 'working' ? 'Working...' : 'Waiting for input'}
+    >
+      {activityState === 'working' ? '⟳' : '●'}
+    </span>
+  )
 }
 
 export default function TreePane() {
@@ -126,6 +148,7 @@ export default function TreePane() {
     const hasChildren = ws.children.length > 0
     const isExpanded = expanded.has(ws.id)
     const children = ws.children.map((id) => workspaces[id]).filter(Boolean)
+    const tabIds = ws.tabs.map((t) => t.id)
 
     return (
       <div key={ws.id}>
@@ -151,6 +174,7 @@ export default function TreePane() {
           )}
           <span className="tree-item-icon">{ws.isWorktree ? '🌿' : '📁'}</span>
           <span className="tree-item-name">{ws.name}</span>
+          <WorkspaceActivityIndicator tabIds={tabIds} />
           {ws.sandbox?.enabled && <span className="tree-item-sandbox" title="Sandboxed">🔒</span>}
           {ws.isGitRepo && ws.gitBranch && (
             <span className="tree-item-branch">{ws.gitBranch}</span>
