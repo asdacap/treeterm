@@ -53,6 +53,12 @@ export default function WorkspacePane() {
     }
   }, [activeWorkspaceId, addTerminal])
 
+  const handleNewApplication = useCallback((applicationId: string) => {
+    if (activeWorkspaceId) {
+      addTerminal(activeWorkspaceId, applicationId)
+    }
+  }, [activeWorkspaceId, addTerminal])
+
   const handleCloseTab = useCallback(
     (tabId: string) => {
       if (activeWorkspaceId) {
@@ -205,7 +211,8 @@ export default function WorkspacePane() {
         activeTabId={activeTabId}
         onSelectTab={handleSelectTab}
         onCloseTab={handleCloseTab}
-        onNewTerminal={handleNewTerminal}
+        applications={settings.applications}
+        onNewApplication={handleNewApplication}
       />
       <div className="workspace-terminal">
         {/* Render tabs for ALL workspaces to keep PTYs alive when switching */}
