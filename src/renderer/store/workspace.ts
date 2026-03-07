@@ -1,28 +1,20 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Workspace, GitInfo, Tab, SandboxConfig } from '../types'
+import type { Workspace, GitInfo, Tab } from '../types'
 import { useSettingsStore } from './settings'
 import { applicationRegistry } from '../registry/applicationRegistry'
-
-const defaultSandbox: SandboxConfig = {
-  enabled: false,
-  allowNetwork: true,
-  allowedPaths: []
-}
 
 interface WorkspaceState {
   workspaces: Record<string, Workspace>
   activeWorkspaceId: string | null
   addWorkspace: (path: string) => Promise<string>
-  addChildWorkspace: (parentId: string, name: string, sandboxed?: boolean) => Promise<{ success: boolean; error?: string }>
+  addChildWorkspace: (parentId: string, name: string) => Promise<{ success: boolean; error?: string }>
   removeWorkspace: (id: string) => Promise<void>
   mergeAndRemoveWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
   setActiveWorkspace: (id: string | null) => void
   updateGitInfo: (id: string, gitInfo: GitInfo) => void
   refreshGitInfo: (id: string) => Promise<void>
   updateWorkspaceStatus: (id: string, status: Workspace['status']) => void
-  toggleSandbox: (id: string) => void
-  updateSandboxConfig: (id: string, config: Partial<SandboxConfig>) => void
   // Tab management (application-agnostic)
   addTab: (workspaceId: string, instanceId: string) => string
   removeTab: (workspaceId: string, tabId: string) => Promise<void>
@@ -94,8 +86,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           gitRootPath: gitInfo.rootPath,
           isWorktree: false,
           tabs,
-          activeTabId,
-          sandbox: { ...defaultSandbox }
+          activeTabId
         }
 
         set((state) => ({
@@ -106,7 +97,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         return id
       },
 
-      addChildWorkspace: async (parentId: string, name: string, sandboxed: boolean = false) => {
+      addChildWorkspace: async (parentId: string, name: string) => {
         const state = get()
         const parent = state.workspaces[parentId]
 
@@ -171,8 +162,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           gitRootPath: parent.gitRootPath,
           isWorktree: true,
           tabs,
-          activeTabId,
-          sandbox: { ...defaultSandbox, enabled: sandboxed }
+          activeTabId
         }
 
         set((state) => ({
@@ -286,41 +276,6 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             workspaces: {
               ...state.workspaces,
               [id]: { ...workspace, status }
-            }
-          }
-        })
-      },
-
-      toggleSandbox: (id: string) => {
-        set((state) => {
-          const workspace = state.workspaces[id]
-          if (!workspace) return state
-          return {
-            workspaces: {
-              ...state.workspaces,
-              [id]: {
-                ...workspace,
-                sandbox: {
-                  ...workspace.sandbox,
-                  enabled: !workspace.sandbox?.enabled
-                }
-              }
-            }
-          }
-        })
-      },
-
-      updateSandboxConfig: (id: string, config: Partial<SandboxConfig>) => {
-        set((state) => {
-          const workspace = state.workspaces[id]
-          if (!workspace) return state
-          return {
-            workspaces: {
-              ...state.workspaces,
-              [id]: {
-                ...workspace,
-                sandbox: { ...workspace.sandbox, ...config }
-              }
             }
           }
         })

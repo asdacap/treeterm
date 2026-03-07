@@ -26,7 +26,6 @@ export interface ApplicationRenderProps {
   tab: Tab
   workspaceId: string
   workspacePath: string
-  sandbox?: SandboxConfig
 }
 
 // Tab - unified tab type, references application by id
@@ -114,8 +113,6 @@ export interface Workspace {
   // Tabs
   tabs: Tab[]
   activeTabId: string | null
-  // Sandbox configuration
-  sandbox: SandboxConfig
 }
 
 export interface GitInfo {

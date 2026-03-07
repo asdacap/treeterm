@@ -3,7 +3,7 @@ import type { Workspace } from '../types'
 
 interface CreateChildDialogProps {
   parentWorkspace: Workspace
-  onCreate: (name: string, sandboxed: boolean) => Promise<{ success: boolean; error?: string }>
+  onCreate: (name: string) => Promise<{ success: boolean; error?: string }>
   onCancel: () => void
 }
 
@@ -13,7 +13,6 @@ export default function CreateChildDialog({
   onCancel
 }: CreateChildDialogProps) {
   const [name, setName] = useState('')
-  const [sandboxed, setSandboxed] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -26,7 +25,7 @@ export default function CreateChildDialog({
     setIsCreating(true)
     setError(null)
 
-    const result = await onCreate(name.trim(), sandboxed)
+    const result = await onCreate(name.trim())
     if (!result.success) {
       setError(result.error || 'Failed to create workspace')
       setIsCreating(false)
@@ -71,18 +70,6 @@ export default function CreateChildDialog({
               autoFocus
               disabled={isCreating}
             />
-          </div>
-
-          <div className="create-child-dialog-checkbox">
-            <label>
-              <input
-                type="checkbox"
-                checked={sandboxed}
-                onChange={(e) => setSandboxed(e.target.checked)}
-                disabled={isCreating}
-              />
-              Enable Sandbox
-            </label>
           </div>
 
           {error && <div className="create-child-error">{error}</div>}

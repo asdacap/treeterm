@@ -87,10 +87,10 @@ export default function WorkspacePane() {
   )
 
   // Fork handler
-  const handleCreateChildSubmit = async (name: string, sandboxed: boolean) => {
+  const handleCreateChildSubmit = async (name: string) => {
     if (!activeWorkspaceId) return { success: false, error: 'No workspace selected' }
 
-    const result = await addChildWorkspace(activeWorkspaceId, name, sandboxed)
+    const result = await addChildWorkspace(activeWorkspaceId, name)
     if (result.success) {
       setShowCreateChildDialog(false)
     }
@@ -248,8 +248,7 @@ export default function WorkspacePane() {
                 {app.render({
                   tab,
                   workspaceId: workspace.id,
-                  workspacePath: workspace.path,
-                  sandbox: workspace.sandbox
+                  workspacePath: workspace.path
                 })}
               </div>
             )
