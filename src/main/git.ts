@@ -348,3 +348,97 @@ export async function deleteBranch(
     }
   }
 }
+
+export interface ConflictInfo {
+  hasConflicts: boolean
+  conflictedFiles: string[]
+  messages: string[]
+}
+
+/**
+ * Check for merge conflicts without actually performing the merge.
+ * Uses git merge-tree --write-tree to simulate the merge.
+ */
+export async function checkMergeConflicts(
+  repoPath: string,
+  sourceBranch: string,
+  targetBranch: string
+): Promise<{ success: boolean; conflicts?: ConflictInfo; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(repoPath)
+
+    // Use git merge-tree --write-tree to simulate merge
+    // This performs a 3-way merge without touching the working tree
+    const result = await git.raw([
+      'merge-tree',
+      '--write-tree',
+      '--no-messages',
+      targetBranch,
+      sourceBranch
+    ])
+
+    // If we get here without error, merge-tree succeeded (clean merge)
+    // The output is just the tree OID
+    return {
+      success: true,
+      conflicts: {
+        hasConflicts: false,
+        conflictedFiles: [],
+        messages: []
+      }
+    }
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err)
+
+    // git merge-tree returns exit code 1 for conflicts
+    // Check if this is a conflict vs an actual error
+    if (errorMessage.includes('CONFLICT') || errorMessage.includes('Merge conflict')) {
+      // Parse conflicts from error message
+      const lines = errorMessage.split('\n')
+      const conflictedFiles: string[] = []
+      const messages: string[] = []
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (trimmed.startsWith('CONFLICT') || trimmed.startsWith('Auto-merging')) {
+          messages.push(trimmed)
+
+          // Extract file paths from CONFLICT messages
+          // Format: "CONFLICT (content): Merge conflict in <filepath>"
+          const mergeConflictMatch = trimmed.match(/Merge conflict in (.+)/)
+          if (mergeConflictMatch) {
+            const filePath = mergeConflictMatch[1].trim()
+            if (!conflictedFiles.includes(filePath)) {
+              conflictedFiles.push(filePath)
+            }
+          }
+
+          // Format: "CONFLICT (add/add): Merge conflict in <filepath>"
+          // Format: "CONFLICT (modify/delete): <filepath> deleted in ..."
+          const conflictPathMatch = trimmed.match(/CONFLICT \([^)]+\): (.+?) (?:deleted|renamed|modified)/)
+          if (conflictPathMatch) {
+            const filePath = conflictPathMatch[1].trim()
+            if (!conflictedFiles.includes(filePath)) {
+              conflictedFiles.push(filePath)
+            }
+          }
+        }
+      }
+
+      return {
+        success: true,
+        conflicts: {
+          hasConflicts: true,
+          conflictedFiles,
+          messages
+        }
+      }
+    }
+
+    // Actual error (not a conflict)
+    return {
+      success: false,
+      error: errorMessage
+    }
+  }
+}
