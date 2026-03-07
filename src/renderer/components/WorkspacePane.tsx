@@ -1,9 +1,11 @@
-import { useEffect, useCallback } from 'react'
+import { useEffect, useCallback, useState } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import { useSettingsStore } from '../store/settings'
 import TabBar from './TabBar'
 import Terminal from './Terminal'
 import { FilesystemBrowser } from './FilesystemBrowser'
+import MergeDialog from './MergeDialog'
+import CreateChildDialog from './CreateChildDialog'
 import type { TerminalTab } from '../types'
 
 function matchesKeybinding(e: KeyboardEvent, keybinding: string): boolean {
@@ -30,13 +32,20 @@ export default function WorkspacePane() {
     activeWorkspaceId,
     addTerminal,
     removeTab,
-    setActiveTab
+    setActiveTab,
+    addChildWorkspace,
+    removeWorkspace,
+    mergeAndRemoveWorkspace
   } = useWorkspaceStore()
 
   const { settings } = useSettingsStore()
   const keybindings = settings.keybindings
 
   const activeWorkspace = activeWorkspaceId ? workspaces[activeWorkspaceId] : null
+
+  // Dialog state
+  const [showCreateChildDialog, setShowCreateChildDialog] = useState(false)
+  const [showMergeDialog, setShowMergeDialog] = useState(false)
 
   const handleNewTerminal = useCallback(() => {
     if (activeWorkspaceId) {
@@ -61,6 +70,33 @@ export default function WorkspacePane() {
     },
     [activeWorkspaceId, setActiveTab]
   )
+
+  // Fork handler
+  const handleCreateChildSubmit = async (name: string, sandboxed: boolean) => {
+    if (!activeWorkspaceId) return { success: false, error: 'No workspace selected' }
+
+    const result = await addChildWorkspace(activeWorkspaceId, name, sandboxed)
+    if (result.success) {
+      setShowCreateChildDialog(false)
+    }
+    return result
+  }
+
+  // Merge handlers
+  const handleMerge = async (squash: boolean) => {
+    if (!activeWorkspaceId) return
+    const result = await mergeAndRemoveWorkspace(activeWorkspaceId, squash)
+    if (!result.success) {
+      throw new Error(result.error)
+    }
+    setShowMergeDialog(false)
+  }
+
+  const handleAbandon = async () => {
+    if (!activeWorkspaceId) return
+    await removeWorkspace(activeWorkspaceId)
+    setShowMergeDialog(false)
+  }
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -143,6 +179,26 @@ export default function WorkspacePane() {
         {activeWorkspace.gitBranch && (
           <span className="workspace-branch">{activeWorkspace.gitBranch}</span>
         )}
+        <div className="workspace-actions">
+          {activeWorkspace.isGitRepo && (
+            <button
+              className="workspace-action-btn"
+              onClick={() => setShowCreateChildDialog(true)}
+              title="Fork: Create new child workspace"
+            >
+              Fork
+            </button>
+          )}
+          {activeWorkspace.isWorktree && activeWorkspace.parentId && (
+            <button
+              className="workspace-action-btn workspace-action-btn-merge"
+              onClick={() => setShowMergeDialog(true)}
+              title="Merge: Close and merge this workspace"
+            >
+              Merge
+            </button>
+          )}
+        </div>
       </div>
       <TabBar
         tabs={tabs}
@@ -195,6 +251,26 @@ export default function WorkspacePane() {
           })
         })}
       </div>
+
+      {/* Create Child Dialog (Fork) */}
+      {showCreateChildDialog && activeWorkspace && (
+        <CreateChildDialog
+          parentWorkspace={activeWorkspace}
+          onCreate={handleCreateChildSubmit}
+          onCancel={() => setShowCreateChildDialog(false)}
+        />
+      )}
+
+      {/* Merge Dialog */}
+      {showMergeDialog && activeWorkspace && activeWorkspace.parentId && workspaces[activeWorkspace.parentId] && (
+        <MergeDialog
+          workspace={activeWorkspace}
+          parentWorkspace={workspaces[activeWorkspace.parentId]}
+          onMerge={handleMerge}
+          onAbandon={handleAbandon}
+          onCancel={() => setShowMergeDialog(false)}
+        />
+      )}
     </div>
   )
 }
