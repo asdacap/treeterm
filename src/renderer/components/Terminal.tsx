@@ -134,7 +134,14 @@ export default function Terminal({ cwd, workspaceId, tabId, config, sandbox }: T
     })
 
     // Handle resize
-    const resizeObserver = new ResizeObserver(() => {
+    const resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+
+      // Skip resize when container is hidden (0x0 dimensions)
+      const { width, height } = entry.contentRect
+      if (width === 0 || height === 0) return
+
       fitAddon.fit()
       if (ptyIdRef.current) {
         window.electron.terminal.resize(ptyIdRef.current, terminal.cols, terminal.rows)
