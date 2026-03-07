@@ -40,8 +40,7 @@ export default function TreePane() {
     addChildWorkspace,
     removeWorkspace,
     mergeAndRemoveWorkspace,
-    setActiveWorkspace,
-    toggleSandbox
+    setActiveWorkspace
   } = useWorkspaceStore()
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -70,21 +69,16 @@ export default function TreePane() {
     setCreateChildDialogParentId(parentId)
   }
 
-  const handleCreateChildSubmit = async (name: string, sandboxed: boolean) => {
+  const handleCreateChildSubmit = async (name: string) => {
     if (!createChildDialogParentId) return { success: false, error: 'No parent selected' }
 
-    const result = await addChildWorkspace(createChildDialogParentId, name, sandboxed)
+    const result = await addChildWorkspace(createChildDialogParentId, name)
     if (result.success) {
       // Expand the parent to show the new child
       setExpanded((prev) => new Set([...prev, createChildDialogParentId]))
       setCreateChildDialogParentId(null)
     }
     return result
-  }
-
-  const handleToggleSandbox = (id: string) => {
-    closeContextMenu()
-    toggleSandbox(id)
   }
 
   const handleRemove = async (id: string) => {
@@ -175,7 +169,6 @@ export default function TreePane() {
           <span className="tree-item-icon">{ws.isWorktree ? '🌿' : '📁'}</span>
           <span className="tree-item-name">{ws.name}</span>
           <WorkspaceActivityIndicator tabIds={tabIds} />
-          {ws.sandbox?.enabled && <span className="tree-item-sandbox" title="Sandboxed">🔒</span>}
           {ws.isGitRepo && ws.gitBranch && (
             <span className="tree-item-branch">{ws.gitBranch}</span>
           )}
@@ -215,9 +208,6 @@ export default function TreePane() {
               New Child Workspace
             </div>
           )}
-          <div className="context-menu-item" onClick={() => handleToggleSandbox(contextMenu.workspaceId)}>
-            {workspaces[contextMenu.workspaceId]?.sandbox?.enabled ? 'Disable Sandbox' : 'Enable Sandbox'}
-          </div>
           <div className="context-menu-item danger" onClick={() => handleRemove(contextMenu.workspaceId)}>
             {workspaces[contextMenu.workspaceId]?.isWorktree ? 'Close & Merge...' : 'Remove'}
           </div>

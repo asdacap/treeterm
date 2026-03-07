@@ -1,10 +1,12 @@
-import type { Application, Tab, Workspace, ActivityState } from '../types'
+import type { Application, Tab, Workspace, ActivityState, SandboxConfig } from '../types'
 import Claude from '../components/Claude'
 import { createElement } from 'react'
 import { useActivityStateStore } from '../store/activityState'
+import { useSettingsStore } from '../store/settings'
 
 export interface ClaudeState {
   ptyId: string | null
+  sandbox: SandboxConfig
 }
 
 export const claudeApplication: Application<ClaudeState> = {
@@ -12,9 +14,17 @@ export const claudeApplication: Application<ClaudeState> = {
   name: 'Claude',
   icon: '✦',
 
-  createInitialState: () => ({
-    ptyId: null
-  }),
+  createInitialState: () => {
+    const { settings } = useSettingsStore.getState()
+    return {
+      ptyId: null,
+      sandbox: {
+        enabled: settings.sandbox.enabledByDefault,
+        allowNetwork: settings.sandbox.allowNetworkByDefault,
+        allowedPaths: []
+      }
+    }
+  },
 
   cleanup: async (tab: Tab, _workspace: Workspace) => {
     const state = tab.state as ClaudeState
@@ -25,13 +35,14 @@ export const claudeApplication: Application<ClaudeState> = {
     useActivityStateStore.getState().removeTabState(tab.id)
   },
 
-  render: ({ tab, workspaceId, workspacePath, sandbox }) => {
+  render: ({ tab, workspaceId, workspacePath }) => {
+    const state = tab.state as ClaudeState
     return createElement(Claude, {
       key: tab.id,
       cwd: workspacePath,
       workspaceId,
       tabId: tab.id,
-      sandbox
+      sandbox: state.sandbox
     })
   },
 
