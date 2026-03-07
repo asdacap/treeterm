@@ -1,7 +1,7 @@
 import { useWorkspaceStore } from '../store/workspace'
 import { FileTree } from './FileTree'
 import { FileViewer } from './FileViewer'
-import type { FilesystemTab } from '../types'
+import type { FilesystemState } from '../types'
 
 interface FilesystemBrowserProps {
   workspacePath: string
@@ -14,24 +14,44 @@ export function FilesystemBrowser({
   workspaceId,
   tabId
 }: FilesystemBrowserProps): JSX.Element {
-  const { workspaces, setSelectedPath, toggleExpandedDir } = useWorkspaceStore()
+  const { workspaces, updateTabState } = useWorkspaceStore()
   const workspace = workspaces[workspaceId]
-  const tab = workspace?.tabs.find((t) => t.id === tabId) as FilesystemTab | undefined
+  const tab = workspace?.tabs.find((t) => t.id === tabId)
+  const state = tab?.state as FilesystemState | undefined
 
-  if (!tab || tab.type !== 'filesystem') {
+  if (!tab || !state) {
     return <div className="filesystem-browser-error">Invalid tab</div>
+  }
+
+  const setSelectedPath = (path: string | null) => {
+    updateTabState<FilesystemState>(workspaceId, tabId, (s) => ({
+      ...s,
+      selectedPath: path
+    }))
+  }
+
+  const toggleExpandedDir = (dirPath: string) => {
+    updateTabState<FilesystemState>(workspaceId, tabId, (s) => {
+      const isExpanded = s.expandedDirs.includes(dirPath)
+      return {
+        ...s,
+        expandedDirs: isExpanded
+          ? s.expandedDirs.filter((d) => d !== dirPath)
+          : [...s.expandedDirs, dirPath]
+      }
+    })
   }
 
   return (
     <div className="filesystem-browser">
       <FileTree
         workspacePath={workspacePath}
-        selectedPath={tab.selectedPath}
-        expandedDirs={tab.expandedDirs}
-        onSelectFile={(path) => setSelectedPath(workspaceId, tabId, path)}
-        onToggleDir={(path) => toggleExpandedDir(workspaceId, tabId, path)}
+        selectedPath={state.selectedPath}
+        expandedDirs={state.expandedDirs}
+        onSelectFile={setSelectedPath}
+        onToggleDir={toggleExpandedDir}
       />
-      <FileViewer workspacePath={workspacePath} filePath={tab.selectedPath} />
+      <FileViewer workspacePath={workspacePath} filePath={state.selectedPath} />
     </div>
   )
 }

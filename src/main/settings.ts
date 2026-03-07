@@ -2,11 +2,12 @@ import { app } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 
-export interface Application {
+export interface ApplicationInstance {
   id: string
+  applicationId: string
   name: string
-  command: string
   icon: string
+  config: Record<string, unknown>
   isDefault: boolean
   isBuiltIn: boolean
 }
@@ -32,15 +33,13 @@ export interface Settings {
     prevTab: string
     openSettings: string
   }
-  startup: {
-    childWorkspaceCommand: string
-  }
-  applications: Application[]
+  applications: ApplicationInstance[]
 }
 
-const defaultApplications: Application[] = [
-  { id: 'terminal', name: 'Terminal', command: '', icon: '>', isDefault: true, isBuiltIn: true },
-  { id: 'claude', name: 'Claude', command: 'claude', icon: '✦', isDefault: false, isBuiltIn: true }
+const defaultApplicationInstances: ApplicationInstance[] = [
+  { id: 'files', applicationId: 'filesystem', name: 'Files', icon: '\uD83D\uDCC2', config: {}, isDefault: true, isBuiltIn: true },
+  { id: 'default-terminal', applicationId: 'terminal', name: 'Terminal', icon: '>', config: {}, isDefault: true, isBuiltIn: true },
+  { id: 'claude', applicationId: 'terminal', name: 'Claude', icon: '\u2726', config: { command: 'claude' }, isDefault: false, isBuiltIn: true }
 ]
 
 const defaultSettings: Settings = {
@@ -64,10 +63,7 @@ const defaultSettings: Settings = {
     prevTab: 'CommandOrControl+Shift+[',
     openSettings: 'CommandOrControl+,'
   },
-  startup: {
-    childWorkspaceCommand: ''
-  },
-  applications: defaultApplications
+  applications: defaultApplicationInstances
 }
 
 function getSettingsDir(): string {
@@ -112,19 +108,22 @@ export function saveSettings(settings: Settings): void {
   }
 }
 
-function mergeApplications(defaults: Application[], loaded: Application[]): Application[] {
-  const result: Application[] = []
+function mergeApplicationInstances(
+  defaults: ApplicationInstance[],
+  loaded: ApplicationInstance[]
+): ApplicationInstance[] {
+  const result: ApplicationInstance[] = []
 
   // Start with defaults, override with loaded values
-  for (const defaultApp of defaults) {
-    const loadedApp = loaded.find((a) => a.id === defaultApp.id)
-    result.push(loadedApp ? { ...defaultApp, ...loadedApp, isBuiltIn: defaultApp.isBuiltIn } : defaultApp)
+  for (const defaultInst of defaults) {
+    const loadedInst = loaded.find((a) => a.id === defaultInst.id)
+    result.push(loadedInst ? { ...defaultInst, ...loadedInst, isBuiltIn: defaultInst.isBuiltIn } : defaultInst)
   }
 
-  // Add any user-created apps not in defaults
-  for (const loadedApp of loaded) {
-    if (!defaults.find((a) => a.id === loadedApp.id)) {
-      result.push({ ...loadedApp, isBuiltIn: false })
+  // Add any user-created instances not in defaults
+  for (const loadedInst of loaded) {
+    if (!defaults.find((a) => a.id === loadedInst.id)) {
+      result.push({ ...loadedInst, isBuiltIn: false })
     }
   }
 
@@ -132,6 +131,22 @@ function mergeApplications(defaults: Application[], loaded: Application[]): Appl
 }
 
 function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings {
+  // Migrate old application format if needed
+  let loadedApps = loaded.applications || []
+  if (loadedApps.length > 0 && !('applicationId' in loadedApps[0])) {
+    // Old format: { id, name, command, icon, isDefault, isBuiltIn }
+    // New format: { id, applicationId, name, icon, config, isDefault, isBuiltIn }
+    loadedApps = (loadedApps as Array<{ id: string; name: string; command?: string; icon: string; isDefault: boolean; isBuiltIn: boolean }>).map((old) => ({
+      id: old.id,
+      applicationId: 'terminal', // Old apps were all terminals
+      name: old.name,
+      icon: old.icon,
+      config: old.command ? { command: old.command } : {},
+      isDefault: old.isDefault,
+      isBuiltIn: old.isBuiltIn
+    }))
+  }
+
   return {
     terminal: {
       ...defaults.terminal,
@@ -149,11 +164,7 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
       ...defaults.keybindings,
       ...loaded.keybindings
     },
-    startup: {
-      ...defaults.startup,
-      ...loaded.startup
-    },
-    applications: mergeApplications(defaults.applications, loaded.applications || [])
+    applications: mergeApplicationInstances(defaults.applications, loadedApps as ApplicationInstance[])
   }
 }
 

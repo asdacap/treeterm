@@ -3,16 +3,18 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { useWorkspaceStore } from '../store/workspace'
 import { useSettingsStore } from '../store/settings'
+import type { TerminalState, SandboxConfig } from '../types'
 import '@xterm/xterm/css/xterm.css'
 
 interface TerminalProps {
   cwd: string
   workspaceId: string
-  terminalId: string
-  applicationId?: string
+  tabId: string
+  config?: Record<string, unknown>
+  sandbox?: SandboxConfig
 }
 
-export default function Terminal({ cwd, workspaceId, terminalId, applicationId }: TerminalProps) {
+export default function Terminal({ cwd, workspaceId, tabId, config, sandbox }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -21,18 +23,15 @@ export default function Terminal({ cwd, workspaceId, terminalId, applicationId }
   const isMountedRef = useRef(true)
 
   const workspace = useWorkspaceStore((state) => state.workspaces[workspaceId])
-  const sandbox = workspace?.sandbox
-  const isChildWorkspace = workspace?.parentId !== null
-  const setPtyId = useWorkspaceStore((state) => state.setPtyId)
+  const updateTabState = useWorkspaceStore((state) => state.updateTabState)
   const settings = useSettingsStore((state) => state.settings)
 
   // Get existing ptyId from store for reconnection
-  const existingPtyId = workspace?.tabs.find(
-    (t) => t.type === 'terminal' && t.id === terminalId
-  )?.ptyId
+  const tab = workspace?.tabs.find((t) => t.id === tabId)
+  const existingPtyId = (tab?.state as TerminalState | undefined)?.ptyId
 
   useEffect(() => {
-    console.log(`[Terminal ${terminalId}] useEffect running`, {
+    console.log(`[Terminal ${tabId}] useEffect running`, {
       cwd,
       sandboxEnabled: sandbox?.enabled,
       workspaceId
@@ -96,7 +95,7 @@ export default function Terminal({ cwd, workspaceId, terminalId, applicationId }
       if (existingPtyId) {
         const isAlive = await window.electron.terminal.isAlive(existingPtyId)
         if (isAlive) {
-          console.log(`[Terminal ${terminalId}] reconnecting to existing PTY:`, existingPtyId)
+          console.log(`[Terminal ${tabId}] reconnecting to existing PTY:`, existingPtyId)
           if (!isMountedRef.current) return
           connectToPty(existingPtyId)
           return
@@ -104,17 +103,8 @@ export default function Terminal({ cwd, workspaceId, terminalId, applicationId }
       }
 
       // No existing PTY or it's dead - create a new one
-      // Determine startup command based on application
-      let startupCommand: string | undefined
-      if (applicationId) {
-        const app = settings.applications.find((a) => a.id === applicationId)
-        if (app && app.command) {
-          startupCommand = app.command
-        }
-      } else if (isChildWorkspace) {
-        // Backward compatibility: use childWorkspaceCommand for tabs without applicationId
-        startupCommand = settings.startup.childWorkspaceCommand || undefined
-      }
+      // Determine startup command from config
+      const startupCommand = (config?.command as string) || undefined
 
       const id = await window.electron.terminal.create(cwd, sandbox, startupCommand)
       if (!id) return
@@ -126,9 +116,12 @@ export default function Terminal({ cwd, workspaceId, terminalId, applicationId }
         return
       }
 
-      console.log(`[Terminal ${terminalId}] created new PTY:`, id)
+      console.log(`[Terminal ${tabId}] created new PTY:`, id)
       connectToPty(id)
-      setPtyId(workspaceId, terminalId, id)
+      updateTabState<TerminalState>(workspaceId, tabId, (state) => ({
+        ...state,
+        ptyId: id
+      }))
     }
 
     initPty()
@@ -152,7 +145,7 @@ export default function Terminal({ cwd, workspaceId, terminalId, applicationId }
     // Cleanup - DON'T kill PTY here, just unsubscribe
     // PTY is explicitly killed in removeWorkspace/removeTab
     return () => {
-      console.log(`[Terminal ${terminalId}] cleanup running (PTY preserved):`, {
+      console.log(`[Terminal ${tabId}] cleanup running (PTY preserved):`, {
         ptyId: ptyIdRef.current,
         cwd,
         sandboxEnabled: sandbox?.enabled,
@@ -170,7 +163,7 @@ export default function Terminal({ cwd, workspaceId, terminalId, applicationId }
     }
   // Note: existingPtyId is intentionally NOT in deps - we only check it on mount/re-run
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cwd, terminalId, sandbox?.enabled, workspaceId, applicationId])
+  }, [cwd, tabId, sandbox?.enabled, workspaceId, config])
 
   return <div ref={containerRef} className="terminal-container" />
 }

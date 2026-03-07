@@ -1,29 +1,58 @@
-export interface Application {
+import type { ReactNode } from 'react'
+
+// Application - code-defined, registered at runtime
+export interface Application<TState = unknown> {
   id: string
   name: string
-  command: string
   icon: string
+  createInitialState: () => TState
+  cleanup?: (tab: Tab, workspace: Workspace) => void | Promise<void>
+  render: (props: ApplicationRenderProps) => ReactNode
+  canClose: boolean
+  canHaveMultiple: boolean
+  showInNewTabMenu: boolean
+  // Whether to keep tabs mounted when workspace is inactive (for PTY persistence)
+  keepAlive: boolean
+  // CSS display style when visible: 'block' or 'flex'
+  displayStyle: 'block' | 'flex'
+}
+
+export interface ApplicationRenderProps {
+  tab: Tab
+  workspaceId: string
+  workspacePath: string
+  sandbox?: SandboxConfig
+}
+
+// Tab - unified tab type, references application by id
+export interface Tab {
+  id: string
+  applicationId: string
+  title: string
+  state: unknown
+  config?: Record<string, unknown>
+}
+
+// ApplicationInstance - user configuration in settings
+export interface ApplicationInstance {
+  id: string
+  applicationId: string
+  name: string
+  icon: string
+  config: Record<string, unknown>
   isDefault: boolean
   isBuiltIn: boolean
 }
 
-export interface TerminalTab {
-  type: 'terminal'
-  id: string
-  title: string
+// Type-specific state interfaces (for internal use within applications)
+export interface TerminalState {
   ptyId: string | null
-  applicationId?: string
 }
 
-export interface FilesystemTab {
-  type: 'filesystem'
-  id: string
-  title: string
+export interface FilesystemState {
   selectedPath: string | null
   expandedDirs: string[]
 }
-
-export type WorkspaceTab = TerminalTab | FilesystemTab
 
 export interface FileEntry {
   name: string
@@ -77,8 +106,8 @@ export interface Workspace {
   gitBranch: string | null
   gitRootPath: string | null
   isWorktree: boolean
-  // Tabs (terminals and filesystem browsers)
-  tabs: WorkspaceTab[]
+  // Tabs
+  tabs: Tab[]
   activeTabId: string | null
   // Sandbox configuration
   sandbox: SandboxConfig
@@ -160,10 +189,7 @@ export interface Settings {
     prevTab: string
     openSettings: string
   }
-  startup: {
-    childWorkspaceCommand: string
-  }
-  applications: Application[]
+  applications: ApplicationInstance[]
 }
 
 export interface SettingsApi {
