@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { useWorkspaceStore } from '../store/workspace'
 import { useSettingsStore } from '../store/settings'
-import TerminalToolbar from './TerminalToolbar'
+import TerminalScrollWrapper from './TerminalScrollWrapper'
 import type { TerminalState, SandboxConfig } from '../types'
 import '@xterm/xterm/css/xterm.css'
 
@@ -173,16 +173,9 @@ export default function Terminal({ cwd, workspaceId, tabId, config, sandbox }: T
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd, tabId, sandbox?.enabled, workspaceId, config])
 
-  const handleScrollDown = useCallback(() => {
-    if (terminalRef.current) {
-      terminalRef.current.scrollToBottom()
-    }
-  }, [])
-
   return (
-    <div className="terminal-wrapper">
-      <TerminalToolbar onScrollDown={handleScrollDown} />
+    <TerminalScrollWrapper terminalRef={terminalRef}>
       <div ref={containerRef} className="terminal-container" />
-    </div>
+    </TerminalScrollWrapper>
   )
 }
