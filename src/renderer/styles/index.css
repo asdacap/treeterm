@@ -310,6 +310,39 @@ body,
   white-space: nowrap;
 }
 
+.workspace-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  -webkit-app-region: no-drag;
+}
+
+.workspace-action-btn {
+  background: var(--bg-hover);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.workspace-action-btn:hover {
+  background: var(--bg-primary);
+  border-color: var(--accent);
+}
+
+.workspace-action-btn-merge {
+  background: rgba(0, 120, 212, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.workspace-action-btn-merge:hover {
+  background: rgba(0, 120, 212, 0.25);
+}
+
 /* Tab Bar */
 .tab-bar {
   display: flex;
