@@ -2,6 +2,15 @@ import { app } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 
+export interface Application {
+  id: string
+  name: string
+  command: string
+  icon: string
+  isDefault: boolean
+  isBuiltIn: boolean
+}
+
 export interface Settings {
   terminal: {
     fontSize: number
@@ -26,7 +35,13 @@ export interface Settings {
   startup: {
     childWorkspaceCommand: string
   }
+  applications: Application[]
 }
+
+const defaultApplications: Application[] = [
+  { id: 'terminal', name: 'Terminal', command: '', icon: '>', isDefault: true, isBuiltIn: true },
+  { id: 'claude', name: 'Claude', command: 'claude', icon: '✦', isDefault: false, isBuiltIn: true }
+]
 
 const defaultSettings: Settings = {
   terminal: {
@@ -51,7 +66,8 @@ const defaultSettings: Settings = {
   },
   startup: {
     childWorkspaceCommand: ''
-  }
+  },
+  applications: defaultApplications
 }
 
 function getSettingsDir(): string {
@@ -96,6 +112,25 @@ export function saveSettings(settings: Settings): void {
   }
 }
 
+function mergeApplications(defaults: Application[], loaded: Application[]): Application[] {
+  const result: Application[] = []
+
+  // Start with defaults, override with loaded values
+  for (const defaultApp of defaults) {
+    const loadedApp = loaded.find((a) => a.id === defaultApp.id)
+    result.push(loadedApp ? { ...defaultApp, ...loadedApp, isBuiltIn: defaultApp.isBuiltIn } : defaultApp)
+  }
+
+  // Add any user-created apps not in defaults
+  for (const loadedApp of loaded) {
+    if (!defaults.find((a) => a.id === loadedApp.id)) {
+      result.push({ ...loadedApp, isBuiltIn: false })
+    }
+  }
+
+  return result
+}
+
 function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings {
   return {
     terminal: {
@@ -117,7 +152,8 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
     startup: {
       ...defaults.startup,
       ...loaded.startup
-    }
+    },
+    applications: mergeApplications(defaults.applications, loaded.applications || [])
   }
 }
 

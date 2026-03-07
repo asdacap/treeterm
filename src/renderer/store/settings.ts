@@ -1,5 +1,10 @@
 import { create } from 'zustand'
-import { Settings } from '../types'
+import type { Settings, Application } from '../types'
+
+const defaultApplications: Application[] = [
+  { id: 'terminal', name: 'Terminal', command: '', icon: '>', isDefault: true, isBuiltIn: true },
+  { id: 'claude', name: 'Claude', command: 'claude', icon: '✦', isDefault: false, isBuiltIn: true }
+]
 
 const defaultSettings: Settings = {
   terminal: {
@@ -24,7 +29,8 @@ const defaultSettings: Settings = {
   },
   startup: {
     childWorkspaceCommand: ''
-  }
+  },
+  applications: defaultApplications
 }
 
 interface SettingsState {

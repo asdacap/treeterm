@@ -228,6 +228,7 @@ export default function WorkspacePane() {
                     cwd={workspace.path}
                     workspaceId={workspace.id}
                     terminalId={tab.id}
+                    applicationId={tab.applicationId}
                   />
                 </div>
               )

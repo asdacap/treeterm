@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Workspace, GitInfo, TerminalTab, FilesystemTab, WorkspaceTab, SandboxConfig } from '../types'
+import { useSettingsStore } from './settings'
 
 const defaultSandbox: SandboxConfig = {
   enabled: false,
@@ -22,7 +23,7 @@ interface WorkspaceState {
   toggleSandbox: (id: string) => void
   updateSandboxConfig: (id: string, config: Partial<SandboxConfig>) => void
   // Tab management (terminals and filesystem browsers)
-  addTerminal: (workspaceId: string) => string
+  addTerminal: (workspaceId: string, applicationId?: string) => string
   addFilesystemTab: (workspaceId: string) => string
   removeTab: (workspaceId: string, tabId: string) => void
   setActiveTab: (workspaceId: string, tabId: string) => void
@@ -116,7 +117,6 @@ const filesystemTabId = `fs-${Date.now()}-${Math.random().toString(36).slice(2, 
 
         // Create child workspace
         const id = generateId()
-        const terminalId = generateTerminalId()
         const filesTabId = `files-${id}`
 
         const filesTab: FilesystemTab = {
@@ -125,6 +125,45 @@ const filesystemTabId = `fs-${Date.now()}-${Math.random().toString(36).slice(2, 
           title: 'Files',
           selectedPath: null,
           expandedDirs: []
+        }
+
+        // Get default applications from settings
+        const { settings } = useSettingsStore.getState()
+        const defaultApps = settings.applications.filter((app) => app.isDefault)
+
+        // Create tabs for each default application
+        const tabs: WorkspaceTab[] = [filesTab]
+        let activeTabId = filesTabId
+
+        if (defaultApps.length > 0) {
+          for (const app of defaultApps) {
+            const terminalId = generateTerminalId()
+            const appCount = tabs.filter(
+              (t) => t.type === 'terminal' && t.applicationId === app.id
+            ).length
+            const terminalTab: TerminalTab = {
+              type: 'terminal',
+              id: terminalId,
+              title: `${app.name} ${appCount + 1}`,
+              ptyId: null,
+              applicationId: app.id
+            }
+            tabs.push(terminalTab)
+            if (activeTabId === filesTabId) {
+              activeTabId = terminalId // Make first terminal active
+            }
+          }
+        } else {
+          // If no default apps, fall back to plain terminal
+          const terminalId = generateTerminalId()
+          tabs.push({
+            type: 'terminal',
+            id: terminalId,
+            title: 'Terminal 1',
+            ptyId: null,
+            applicationId: 'terminal'
+          })
+          activeTabId = terminalId
         }
 
         const childWorkspace: Workspace = {
@@ -138,8 +177,8 @@ const filesystemTabId = `fs-${Date.now()}-${Math.random().toString(36).slice(2, 
           gitBranch: result.branch!,
           gitRootPath: parent.gitRootPath,
           isWorktree: true,
-          tabs: [filesTab, { type: 'terminal', id: terminalId, title: 'Terminal 1', ptyId: null }],
-          activeTabId: terminalId,
+          tabs,
+          activeTabId,
           sandbox: { ...defaultSandbox, enabled: sandboxed }
         }
 
@@ -350,18 +389,26 @@ const filesystemTabId = `fs-${Date.now()}-${Math.random().toString(36).slice(2, 
       },
 
       // Tab management (terminals and filesystem browsers)
-      addTerminal: (workspaceId: string) => {
+      addTerminal: (workspaceId: string, applicationId?: string) => {
         const terminalId = generateTerminalId()
+        const { settings } = useSettingsStore.getState()
+        const app = applicationId
+          ? settings.applications.find((a) => a.id === applicationId)
+          : settings.applications.find((a) => a.id === 'terminal')
+
         set((state) => {
           const workspace = state.workspaces[workspaceId]
           if (!workspace) return state
 
-          const terminalCount = workspace.tabs.filter((t) => t.type === 'terminal').length
+          const appCount = workspace.tabs.filter(
+            (t) => t.type === 'terminal' && t.applicationId === app?.id
+          ).length
           const newTerminal: TerminalTab = {
             type: 'terminal',
             id: terminalId,
-            title: `Terminal ${terminalCount + 1}`,
-            ptyId: null
+            title: `${app?.name || 'Terminal'} ${appCount + 1}`,
+            ptyId: null,
+            applicationId: app?.id
           }
 
           return {

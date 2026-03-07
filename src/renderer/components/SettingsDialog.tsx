@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Settings } from '../types'
+import type { Settings, Application } from '../types'
 import { useSettingsStore } from '../store/settings'
 
 interface SettingsDialogProps {
@@ -7,14 +7,15 @@ interface SettingsDialogProps {
   onClose: () => void
 }
 
-type TabId = 'terminal' | 'sandbox' | 'appearance' | 'keybindings' | 'startup'
+type TabId = 'terminal' | 'sandbox' | 'appearance' | 'keybindings' | 'startup' | 'applications'
 
 const tabs: { id: TabId; label: string }[] = [
   { id: 'terminal', label: 'Terminal' },
   { id: 'sandbox', label: 'Sandbox' },
   { id: 'startup', label: 'Startup' },
   { id: 'appearance', label: 'Appearance' },
-  { id: 'keybindings', label: 'Keybindings' }
+  { id: 'keybindings', label: 'Keybindings' },
+  { id: 'applications', label: 'Applications' }
 ]
 
 export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
@@ -276,6 +277,116 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
                   </div>
                 ))}
                 <p className="settings-hint">Click a keybinding to record a new shortcut</p>
+              </div>
+            )}
+
+            {activeTab === 'applications' && (
+              <div className="settings-section">
+                <div className="applications-list">
+                  {localSettings.applications.map((app, index) => (
+                    <div key={app.id} className="application-item">
+                      <div className="application-icon">
+                        <input
+                          type="text"
+                          className="settings-input icon-input"
+                          value={app.icon}
+                          maxLength={2}
+                          onChange={(e) =>
+                            setLocalSettings((prev) => ({
+                              ...prev,
+                              applications: prev.applications.map((a, i) =>
+                                i === index ? { ...a, icon: e.target.value } : a
+                              )
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="application-fields">
+                        <input
+                          type="text"
+                          className="settings-input"
+                          value={app.name}
+                          placeholder="Name"
+                          onChange={(e) =>
+                            setLocalSettings((prev) => ({
+                              ...prev,
+                              applications: prev.applications.map((a, i) =>
+                                i === index ? { ...a, name: e.target.value } : a
+                              )
+                            }))
+                          }
+                        />
+                        <input
+                          type="text"
+                          className="settings-input"
+                          value={app.command}
+                          placeholder="Startup command (optional)"
+                          onChange={(e) =>
+                            setLocalSettings((prev) => ({
+                              ...prev,
+                              applications: prev.applications.map((a, i) =>
+                                i === index ? { ...a, command: e.target.value } : a
+                              )
+                            }))
+                          }
+                        />
+                      </div>
+                      <label className="settings-checkbox-label default-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={app.isDefault}
+                          onChange={(e) =>
+                            setLocalSettings((prev) => ({
+                              ...prev,
+                              applications: prev.applications.map((a, i) =>
+                                i === index ? { ...a, isDefault: e.target.checked } : a
+                              )
+                            }))
+                          }
+                        />
+                        Default
+                      </label>
+                      {!app.isBuiltIn && (
+                        <button
+                          className="application-delete"
+                          onClick={() =>
+                            setLocalSettings((prev) => ({
+                              ...prev,
+                              applications: prev.applications.filter((_, i) => i !== index)
+                            }))
+                          }
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <button
+                  className="settings-btn add-app"
+                  onClick={() => {
+                    const newId = `app-${Date.now()}`
+                    setLocalSettings((prev) => ({
+                      ...prev,
+                      applications: [
+                        ...prev.applications,
+                        {
+                          id: newId,
+                          name: 'New Application',
+                          command: '',
+                          icon: '*',
+                          isDefault: false,
+                          isBuiltIn: false
+                        }
+                      ]
+                    }))
+                  }}
+                >
+                  + Add Application
+                </button>
+                <p className="settings-hint">
+                  Default applications open automatically in new child workspaces
+                </p>
               </div>
             )}
           </div>
