@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { useWorkspaceStore } from '../store/workspace'
 import { useActivityStateStore } from '../store/activityState'
 import { createActivityStateDetector } from '../utils/activityStateDetector'
+import TerminalToolbar from './TerminalToolbar'
 import type { SandboxConfig } from '../types'
 import type { ClaudeState } from '../applications/claude'
 import '@xterm/xterm/css/xterm.css'
@@ -145,7 +146,14 @@ export default function Claude({ cwd, workspaceId, tabId, sandbox }: ClaudeProps
     })
 
     // Handle resize
-    const resizeObserver = new ResizeObserver(() => {
+    const resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+
+      // Skip resize when container is hidden (0x0 dimensions)
+      const { width, height } = entry.contentRect
+      if (width === 0 || height === 0) return
+
       fitAddon.fit()
       if (ptyIdRef.current) {
         window.electron.terminal.resize(ptyIdRef.current, terminal.cols, terminal.rows)
@@ -179,5 +187,16 @@ export default function Claude({ cwd, workspaceId, tabId, sandbox }: ClaudeProps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd, tabId, sandbox?.enabled, workspaceId])
 
-  return <div ref={containerRef} className="terminal-container" />
+  const handleScrollDown = useCallback(() => {
+    if (terminalRef.current) {
+      terminalRef.current.scrollToBottom()
+    }
+  }, [])
+
+  return (
+    <div className="terminal-wrapper">
+      <TerminalToolbar onScrollDown={handleScrollDown} />
+      <div ref={containerRef} className="terminal-container" />
+    </div>
+  )
 }
