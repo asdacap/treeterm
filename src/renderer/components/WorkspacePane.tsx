@@ -248,7 +248,8 @@ export default function WorkspacePane() {
                 {app.render({
                   tab,
                   workspaceId: workspace.id,
-                  workspacePath: workspace.path
+                  workspacePath: workspace.path,
+                  isVisible
                 })}
               </div>
             )

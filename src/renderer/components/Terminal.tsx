@@ -13,9 +13,10 @@ interface TerminalProps {
   tabId: string
   config?: Record<string, unknown>
   sandbox?: SandboxConfig
+  isVisible?: boolean
 }
 
-export default function Terminal({ cwd, workspaceId, tabId, config, sandbox }: TerminalProps) {
+export default function Terminal({ cwd, workspaceId, tabId, config, sandbox, isVisible }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -172,6 +173,15 @@ export default function Terminal({ cwd, workspaceId, tabId, config, sandbox }: T
   // Note: existingPtyId is intentionally NOT in deps - we only check it on mount/re-run
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd, tabId, sandbox?.enabled, workspaceId, config])
+
+  // Refresh terminal when tab becomes visible to fix blank screen issue
+  useEffect(() => {
+    if (isVisible && terminalRef.current && fitAddonRef.current) {
+      // Re-fit and refresh the terminal when becoming visible
+      fitAddonRef.current.fit()
+      terminalRef.current.refresh(0, terminalRef.current.rows)
+    }
+  }, [isVisible])
 
   return (
     <TerminalScrollWrapper terminalRef={terminalRef}>

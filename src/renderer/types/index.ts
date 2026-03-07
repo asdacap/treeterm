@@ -26,6 +26,7 @@ export interface ApplicationRenderProps {
   tab: Tab
   workspaceId: string
   workspacePath: string
+  isVisible: boolean
 }
 
 // Tab - unified tab type, references application by id

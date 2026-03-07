@@ -18,14 +18,14 @@ export const terminalApplication: Application<TerminalState> = {
     }
   },
 
-  render: ({ tab, workspaceId, workspacePath, sandbox }) => {
+  render: ({ tab, workspaceId, workspacePath, isVisible }) => {
     return createElement(Terminal, {
       key: tab.id,
       cwd: workspacePath,
       workspaceId,
       tabId: tab.id,
       config: tab.config,
-      sandbox
+      isVisible
     })
   },
 
