@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import { execSync } from 'child_process'
 import { join } from 'path'
 import { ptyManager } from './pty'
 import {
@@ -134,6 +135,22 @@ ipcMain.handle('settings:load', () => {
 ipcMain.handle('settings:save', (_event, settings: Settings) => {
   saveSettings(settings)
   return { success: true }
+})
+
+// Sandbox IPC Handlers
+ipcMain.handle('sandbox:isAvailable', () => {
+  if (process.platform === 'darwin') {
+    return true // macOS always has sandbox-exec
+  }
+  if (process.platform === 'linux') {
+    try {
+      execSync('which bwrap', { stdio: 'ignore' })
+      return true
+    } catch {
+      return false
+    }
+  }
+  return false // Windows: no sandbox support
 })
 
 // App lifecycle

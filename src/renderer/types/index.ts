@@ -214,12 +214,17 @@ export interface SettingsApi {
   onOpen: (callback: () => void) => () => void
 }
 
+export interface SandboxApi {
+  isAvailable: () => Promise<boolean>
+}
+
 export interface ElectronApi {
   terminal: TerminalApi
   selectFolder: () => Promise<string | null>
   git: GitApi
   settings: SettingsApi
   filesystem: FilesystemApi
+  sandbox: SandboxApi
 }
 
 declare global {
