@@ -1,9 +1,10 @@
 import { create } from 'zustand'
-import type { Settings, Application } from '../types'
+import type { Settings, ApplicationInstance } from '../types'
 
-const defaultApplications: Application[] = [
-  { id: 'terminal', name: 'Terminal', command: '', icon: '>', isDefault: true, isBuiltIn: true },
-  { id: 'claude', name: 'Claude', command: 'claude', icon: '✦', isDefault: false, isBuiltIn: true }
+const defaultApplicationInstances: ApplicationInstance[] = [
+  { id: 'files', applicationId: 'filesystem', name: 'Files', icon: '\uD83D\uDCC2', config: {}, isDefault: true, isBuiltIn: true },
+  { id: 'default-terminal', applicationId: 'terminal', name: 'Terminal', icon: '>', config: {}, isDefault: true, isBuiltIn: true },
+  { id: 'claude', applicationId: 'terminal', name: 'Claude', icon: '\u2726', config: { command: 'claude' }, isDefault: false, isBuiltIn: true }
 ]
 
 const defaultSettings: Settings = {
@@ -27,10 +28,7 @@ const defaultSettings: Settings = {
     prevTab: 'CommandOrControl+Shift+[',
     openSettings: 'CommandOrControl+,'
   },
-  startup: {
-    childWorkspaceCommand: ''
-  },
-  applications: defaultApplications
+  applications: defaultApplicationInstances
 }
 
 interface SettingsState {

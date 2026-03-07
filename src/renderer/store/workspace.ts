@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Workspace, GitInfo, TerminalTab, FilesystemTab, WorkspaceTab, SandboxConfig } from '../types'
+import type { Workspace, GitInfo, Tab, SandboxConfig } from '../types'
 import { useSettingsStore } from './settings'
+import { applicationRegistry } from '../registry/applicationRegistry'
 
 const defaultSandbox: SandboxConfig = {
   enabled: false,
@@ -22,24 +23,20 @@ interface WorkspaceState {
   updateWorkspaceStatus: (id: string, status: Workspace['status']) => void
   toggleSandbox: (id: string) => void
   updateSandboxConfig: (id: string, config: Partial<SandboxConfig>) => void
-  // Tab management (terminals and filesystem browsers)
-  addTerminal: (workspaceId: string, applicationId?: string) => string
-  addFilesystemTab: (workspaceId: string) => string
-  removeTab: (workspaceId: string, tabId: string) => void
+  // Tab management (application-agnostic)
+  addTab: (workspaceId: string, instanceId: string) => string
+  removeTab: (workspaceId: string, tabId: string) => Promise<void>
   setActiveTab: (workspaceId: string, tabId: string) => void
-  updateTerminalTitle: (workspaceId: string, terminalId: string, title: string) => void
-  setPtyId: (workspaceId: string, terminalId: string, ptyId: string) => void
-  // Filesystem browser state
-  setSelectedPath: (workspaceId: string, tabId: string, path: string | null) => void
-  toggleExpandedDir: (workspaceId: string, tabId: string, dirPath: string) => void
+  updateTabTitle: (workspaceId: string, tabId: string, title: string) => void
+  updateTabState: <T>(workspaceId: string, tabId: string, updater: (state: T) => T) => void
 }
 
 function generateId(): string {
   return `ws-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
-function generateTerminalId(): string {
-  return `term-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+function generateTabId(): string {
+  return `tab-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
 function getNameFromPath(path: string): string {
@@ -54,18 +51,35 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
       addWorkspace: async (path: string) => {
         const id = generateId()
-        const terminalId = generateTerminalId()
-const filesystemTabId = `fs-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+        const { settings } = useSettingsStore.getState()
 
         // Get git info for the path
         const gitInfo = await window.electron.git.getInfo(path)
 
-        const filesTab: FilesystemTab = {
-          type: 'filesystem',
-          id: filesystemTabId,
-          title: 'Files',
-          selectedPath: null,
-          expandedDirs: []
+        // Create tabs based on default application instances
+        const tabs: Tab[] = []
+        let activeTabId: string | null = null
+
+        const defaultInstances = settings.applications.filter((inst) => inst.isDefault)
+        for (const instance of defaultInstances) {
+          const app = applicationRegistry.get(instance.applicationId)
+          if (!app) continue
+
+          const tabId = generateTabId()
+          const existingCount = tabs.filter((t) => t.applicationId === instance.applicationId).length
+
+          tabs.push({
+            id: tabId,
+            applicationId: instance.applicationId,
+            title: `${instance.name} ${existingCount + 1}`,
+            state: app.createInitialState(),
+            config: instance.config
+          })
+
+          // Make first closable tab active, or first tab if none are closable
+          if (activeTabId === null || (app.canClose && !applicationRegistry.get(tabs.find((t) => t.id === activeTabId)?.applicationId ?? '')?.canClose)) {
+            activeTabId = tabId
+          }
         }
 
         const workspace: Workspace = {
@@ -79,8 +93,8 @@ const filesystemTabId = `fs-${Date.now()}-${Math.random().toString(36).slice(2, 
           gitBranch: gitInfo.branch,
           gitRootPath: gitInfo.rootPath,
           isWorktree: false,
-          tabs: [filesTab, { type: 'terminal', id: terminalId, title: 'Terminal 1', ptyId: null }],
-          activeTabId: terminalId,
+          tabs,
+          activeTabId,
           sandbox: { ...defaultSandbox }
         }
 
@@ -117,53 +131,32 @@ const filesystemTabId = `fs-${Date.now()}-${Math.random().toString(36).slice(2, 
 
         // Create child workspace
         const id = generateId()
-        const filesTabId = `files-${id}`
-
-        const filesTab: FilesystemTab = {
-          type: 'filesystem',
-          id: filesTabId,
-          title: 'Files',
-          selectedPath: null,
-          expandedDirs: []
-        }
-
-        // Get default applications from settings
         const { settings } = useSettingsStore.getState()
-        const defaultApps = settings.applications.filter((app) => app.isDefault)
 
-        // Create tabs for each default application
-        const tabs: WorkspaceTab[] = [filesTab]
-        let activeTabId = filesTabId
+        // Create tabs based on default application instances
+        const tabs: Tab[] = []
+        let activeTabId: string | null = null
 
-        if (defaultApps.length > 0) {
-          for (const app of defaultApps) {
-            const terminalId = generateTerminalId()
-            const appCount = tabs.filter(
-              (t) => t.type === 'terminal' && t.applicationId === app.id
-            ).length
-            const terminalTab: TerminalTab = {
-              type: 'terminal',
-              id: terminalId,
-              title: `${app.name} ${appCount + 1}`,
-              ptyId: null,
-              applicationId: app.id
-            }
-            tabs.push(terminalTab)
-            if (activeTabId === filesTabId) {
-              activeTabId = terminalId // Make first terminal active
-            }
-          }
-        } else {
-          // If no default apps, fall back to plain terminal
-          const terminalId = generateTerminalId()
+        const defaultInstances = settings.applications.filter((inst) => inst.isDefault)
+        for (const instance of defaultInstances) {
+          const app = applicationRegistry.get(instance.applicationId)
+          if (!app) continue
+
+          const tabId = generateTabId()
+          const existingCount = tabs.filter((t) => t.applicationId === instance.applicationId).length
+
           tabs.push({
-            type: 'terminal',
-            id: terminalId,
-            title: 'Terminal 1',
-            ptyId: null,
-            applicationId: 'terminal'
+            id: tabId,
+            applicationId: instance.applicationId,
+            title: `${instance.name} ${existingCount + 1}`,
+            state: app.createInitialState(),
+            config: instance.config
           })
-          activeTabId = terminalId
+
+          // Make first closable tab active, or first tab if none are closable
+          if (activeTabId === null || (app.canClose && !applicationRegistry.get(tabs.find((t) => t.id === activeTabId)?.applicationId ?? '')?.canClose)) {
+            activeTabId = tabId
+          }
         }
 
         const childWorkspace: Workspace = {
@@ -208,10 +201,11 @@ const filesystemTabId = `fs-${Date.now()}-${Math.random().toString(36).slice(2, 
           await get().removeWorkspace(childId)
         }
 
-        // Kill all PTYs for this workspace's terminal tabs
+        // Run cleanup for all tabs using the application registry
         for (const tab of workspace.tabs) {
-          if (tab.type === 'terminal' && tab.ptyId) {
-            window.electron.terminal.kill(tab.ptyId)
+          const app = applicationRegistry.get(tab.applicationId)
+          if (app?.cleanup) {
+            await app.cleanup(tab, workspace)
           }
         }
 
@@ -388,56 +382,37 @@ const filesystemTabId = `fs-${Date.now()}-${Math.random().toString(36).slice(2, 
         return { success: true }
       },
 
-      // Tab management (terminals and filesystem browsers)
-      addTerminal: (workspaceId: string, applicationId?: string) => {
-        const terminalId = generateTerminalId()
+      // Tab management (application-agnostic)
+      addTab: (workspaceId: string, instanceId: string) => {
+        const tabId = generateTabId()
         const { settings } = useSettingsStore.getState()
-        const app = applicationId
-          ? settings.applications.find((a) => a.id === applicationId)
-          : settings.applications.find((a) => a.id === 'terminal')
+        const instance = settings.applications.find((a) => a.id === instanceId)
+
+        if (!instance) return tabId
+
+        const app = applicationRegistry.get(instance.applicationId)
+        if (!app) return tabId
 
         set((state) => {
           const workspace = state.workspaces[workspaceId]
           if (!workspace) return state
 
-          const appCount = workspace.tabs.filter(
-            (t) => t.type === 'terminal' && t.applicationId === app?.id
+          // Check if app allows multiple instances
+          if (!app.canHaveMultiple) {
+            const existing = workspace.tabs.find((t) => t.applicationId === instance.applicationId)
+            if (existing) return state
+          }
+
+          const existingCount = workspace.tabs.filter(
+            (t) => t.applicationId === instance.applicationId
           ).length
-          const newTerminal: TerminalTab = {
-            type: 'terminal',
-            id: terminalId,
-            title: `${app?.name || 'Terminal'} ${appCount + 1}`,
-            ptyId: null,
-            applicationId: app?.id
-          }
 
-          return {
-            workspaces: {
-              ...state.workspaces,
-              [workspaceId]: {
-                ...workspace,
-                tabs: [...workspace.tabs, newTerminal],
-                activeTabId: terminalId
-              }
-            }
-          }
-        })
-        return terminalId
-      },
-
-      addFilesystemTab: (workspaceId: string) => {
-        const tabId = `fs-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-        set((state) => {
-          const workspace = state.workspaces[workspaceId]
-          if (!workspace) return state
-
-          const fsCount = workspace.tabs.filter((t) => t.type === 'filesystem').length
-          const newTab: FilesystemTab = {
-            type: 'filesystem',
+          const newTab: Tab = {
             id: tabId,
-            title: `Files ${fsCount + 1}`,
-            selectedPath: null,
-            expandedDirs: []
+            applicationId: instance.applicationId,
+            title: `${instance.name} ${existingCount + 1}`,
+            state: app.createInitialState(),
+            config: instance.config
           }
 
           return {
@@ -454,7 +429,7 @@ const filesystemTabId = `fs-${Date.now()}-${Math.random().toString(36).slice(2, 
         return tabId
       },
 
-      removeTab: (workspaceId: string, tabId: string) => {
+      removeTab: async (workspaceId: string, tabId: string) => {
         const workspace = get().workspaces[workspaceId]
         if (!workspace) return
 
@@ -462,16 +437,21 @@ const filesystemTabId = `fs-${Date.now()}-${Math.random().toString(36).slice(2, 
         const tab = workspace.tabs.find((t) => t.id === tabId)
         if (!tab) return
 
-        // Prevent removing filesystem tabs (they are always available)
-        if (tab.type === 'filesystem') return
+        const app = applicationRegistry.get(tab.applicationId)
+        if (!app) return
 
-        // Keep at least one terminal tab
-        const terminalTabs = workspace.tabs.filter((t) => t.type === 'terminal')
-        if (terminalTabs.length <= 1) return
+        // Check if app allows closing
+        if (!app.canClose) return
 
-        // Kill the PTY if it's a terminal tab
-        if (tab.type === 'terminal' && tab.ptyId) {
-          window.electron.terminal.kill(tab.ptyId)
+        // Keep at least one tab of this type if app doesn't allow multiple
+        if (!app.canHaveMultiple) {
+          const sameTabs = workspace.tabs.filter((t) => t.applicationId === tab.applicationId)
+          if (sameTabs.length <= 1) return
+        }
+
+        // Run cleanup
+        if (app.cleanup) {
+          await app.cleanup(tab, workspace)
         }
 
         set((state) => {
@@ -518,7 +498,24 @@ const filesystemTabId = `fs-${Date.now()}-${Math.random().toString(36).slice(2, 
         })
       },
 
-      updateTerminalTitle: (workspaceId: string, terminalId: string, title: string) => {
+      updateTabTitle: (workspaceId: string, tabId: string, title: string) => {
+        set((state) => {
+          const workspace = state.workspaces[workspaceId]
+          if (!workspace) return state
+
+          return {
+            workspaces: {
+              ...state.workspaces,
+              [workspaceId]: {
+                ...workspace,
+                tabs: workspace.tabs.map((t) => (t.id === tabId ? { ...t, title } : t))
+              }
+            }
+          }
+        })
+      },
+
+      updateTabState: <T>(workspaceId: string, tabId: string, updater: (state: T) => T) => {
         set((state) => {
           const workspace = state.workspaces[workspaceId]
           if (!workspace) return state
@@ -529,75 +526,8 @@ const filesystemTabId = `fs-${Date.now()}-${Math.random().toString(36).slice(2, 
               [workspaceId]: {
                 ...workspace,
                 tabs: workspace.tabs.map((t) =>
-                  t.id === terminalId && t.type === 'terminal' ? { ...t, title } : t
+                  t.id === tabId ? { ...t, state: updater(t.state as T) } : t
                 )
-              }
-            }
-          }
-        })
-      },
-
-      setPtyId: (workspaceId: string, terminalId: string, ptyId: string) => {
-        set((state) => {
-          const workspace = state.workspaces[workspaceId]
-          if (!workspace) return state
-
-          return {
-            workspaces: {
-              ...state.workspaces,
-              [workspaceId]: {
-                ...workspace,
-                tabs: workspace.tabs.map((t) =>
-                  t.id === terminalId && t.type === 'terminal' ? { ...t, ptyId } : t
-                )
-              }
-            }
-          }
-        })
-      },
-
-      // Filesystem browser state
-      setSelectedPath: (workspaceId: string, tabId: string, path: string | null) => {
-        set((state) => {
-          const workspace = state.workspaces[workspaceId]
-          if (!workspace) return state
-
-          return {
-            workspaces: {
-              ...state.workspaces,
-              [workspaceId]: {
-                ...workspace,
-                tabs: workspace.tabs.map((t) =>
-                  t.id === tabId && t.type === 'filesystem' ? { ...t, selectedPath: path } : t
-                )
-              }
-            }
-          }
-        })
-      },
-
-      toggleExpandedDir: (workspaceId: string, tabId: string, dirPath: string) => {
-        set((state) => {
-          const workspace = state.workspaces[workspaceId]
-          if (!workspace) return state
-
-          return {
-            workspaces: {
-              ...state.workspaces,
-              [workspaceId]: {
-                ...workspace,
-                tabs: workspace.tabs.map((t) => {
-                  if (t.id === tabId && t.type === 'filesystem') {
-                    const isExpanded = t.expandedDirs.includes(dirPath)
-                    return {
-                      ...t,
-                      expandedDirs: isExpanded
-                        ? t.expandedDirs.filter((d) => d !== dirPath)
-                        : [...t.expandedDirs, dirPath]
-                    }
-                  }
-                  return t
-                })
               }
             }
           }
@@ -606,19 +536,25 @@ const filesystemTabId = `fs-${Date.now()}-${Math.random().toString(36).slice(2, 
     }),
     {
       name: 'treeterm-workspaces',
-      version: 1,
+      version: 2,
       migrate: (persistedState: unknown, version: number) => {
         const state = persistedState as { workspaces?: Record<string, unknown> }
+
         if (version === 0 && state.workspaces) {
           // Migrate from old format (terminals/activeTerminalId) to new format (tabs/activeTabId)
           for (const ws of Object.values(state.workspaces) as Array<{
             terminals?: Array<{ id: string; title: string; ptyId: string | null }>
-            tabs?: WorkspaceTab[]
+            tabs?: Tab[]
             activeTerminalId?: string | null
             activeTabId?: string | null
           }>) {
             if (ws.terminals && !ws.tabs) {
-              ws.tabs = ws.terminals.map((t) => ({ type: 'terminal' as const, ...t }))
+              ws.tabs = ws.terminals.map((t) => ({
+                id: t.id,
+                applicationId: 'terminal',
+                title: t.title,
+                state: { ptyId: t.ptyId }
+              }))
               delete ws.terminals
             }
             if (ws.activeTerminalId !== undefined && ws.activeTabId === undefined) {
@@ -627,6 +563,48 @@ const filesystemTabId = `fs-${Date.now()}-${Math.random().toString(36).slice(2, 
             }
           }
         }
+
+        if (version <= 1 && state.workspaces) {
+          // Migrate from version 1 (type-based tabs) to version 2 (application-based tabs)
+          for (const ws of Object.values(state.workspaces) as Array<{
+            tabs?: Array<{
+              type?: string
+              id: string
+              title: string
+              ptyId?: string | null
+              applicationId?: string
+              selectedPath?: string | null
+              expandedDirs?: string[]
+              state?: unknown
+            }>
+          }>) {
+            if (ws.tabs) {
+              ws.tabs = ws.tabs.map((t) => {
+                // If already migrated (has state), skip
+                if (t.state !== undefined && !t.type) return t as Tab
+
+                if (t.type === 'terminal') {
+                  return {
+                    id: t.id,
+                    applicationId: 'terminal',
+                    title: t.title,
+                    state: { ptyId: t.ptyId || null },
+                    config: t.applicationId ? { instanceId: t.applicationId } : undefined
+                  }
+                } else if (t.type === 'filesystem') {
+                  return {
+                    id: t.id,
+                    applicationId: 'filesystem',
+                    title: t.title,
+                    state: { selectedPath: t.selectedPath || null, expandedDirs: t.expandedDirs || [] }
+                  }
+                }
+                return t as Tab
+              })
+            }
+          }
+        }
+
         return state as WorkspaceState
       }
     }

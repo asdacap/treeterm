@@ -1,12 +1,12 @@
 import { useEffect, useCallback, useState } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import { useSettingsStore } from '../store/settings'
+import { applicationRegistry } from '../registry/applicationRegistry'
 import TabBar from './TabBar'
-import Terminal from './Terminal'
-import { FilesystemBrowser } from './FilesystemBrowser'
 import MergeDialog from './MergeDialog'
 import CreateChildDialog from './CreateChildDialog'
-import type { TerminalTab } from '../types'
+// Import applications to ensure they are registered
+import '../applications'
 
 function matchesKeybinding(e: KeyboardEvent, keybinding: string): boolean {
   const parts = keybinding.split('+')
@@ -30,7 +30,7 @@ export default function WorkspacePane() {
   const {
     workspaces,
     activeWorkspaceId,
-    addTerminal,
+    addTab,
     removeTab,
     setActiveTab,
     addChildWorkspace,
@@ -47,17 +47,26 @@ export default function WorkspacePane() {
   const [showCreateChildDialog, setShowCreateChildDialog] = useState(false)
   const [showMergeDialog, setShowMergeDialog] = useState(false)
 
-  const handleNewTerminal = useCallback(() => {
-    if (activeWorkspaceId) {
-      addTerminal(activeWorkspaceId)
-    }
-  }, [activeWorkspaceId, addTerminal])
+  const handleNewTab = useCallback(
+    (instanceId: string) => {
+      if (activeWorkspaceId) {
+        addTab(activeWorkspaceId, instanceId)
+      }
+    },
+    [activeWorkspaceId, addTab]
+  )
 
-  const handleNewApplication = useCallback((applicationId: string) => {
-    if (activeWorkspaceId) {
-      addTerminal(activeWorkspaceId, applicationId)
+  // Create new tab using the first available application instance
+  const handleNewDefaultTab = useCallback(() => {
+    // Find the first instance where the app allows new tabs
+    const defaultInstance = settings.applications.find((inst) => {
+      const app = applicationRegistry.get(inst.applicationId)
+      return app?.showInNewTabMenu && app?.canHaveMultiple
+    })
+    if (activeWorkspaceId && defaultInstance) {
+      addTab(activeWorkspaceId, defaultInstance.id)
     }
-  }, [activeWorkspaceId, addTerminal])
+  }, [activeWorkspaceId, addTab, settings.applications])
 
   const handleCloseTab = useCallback(
     (tabId: string) => {
@@ -109,10 +118,10 @@ export default function WorkspacePane() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!activeWorkspace) return
 
-      // New terminal tab
+      // New tab
       if (matchesKeybinding(e, keybindings.newTab)) {
         e.preventDefault()
-        handleNewTerminal()
+        handleNewDefaultTab()
         return
       }
 
@@ -160,7 +169,7 @@ export default function WorkspacePane() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activeWorkspace, keybindings, handleNewTerminal, handleCloseTab, handleSelectTab])
+  }, [activeWorkspace, keybindings, handleNewDefaultTab, handleCloseTab, handleSelectTab])
 
   if (!activeWorkspace) {
     return (
@@ -211,8 +220,8 @@ export default function WorkspacePane() {
         activeTabId={activeTabId}
         onSelectTab={handleSelectTab}
         onCloseTab={handleCloseTab}
-        applications={settings.applications}
-        onNewApplication={handleNewApplication}
+        instances={settings.applications}
+        onNewTab={handleNewTab}
       />
       <div className="workspace-terminal">
         {/* Render tabs for ALL workspaces to keep PTYs alive when switching */}
@@ -223,39 +232,27 @@ export default function WorkspacePane() {
 
           return wsTabs.map((tab) => {
             const isVisible = isActiveWorkspace && tab.id === wsActiveTabId
+            const app = applicationRegistry.get(tab.applicationId)
 
-            if (tab.type === 'terminal') {
-              return (
-                <div
-                  key={`${workspace.id}-${tab.id}`}
-                  className="terminal-wrapper"
-                  style={{ display: isVisible ? 'block' : 'none' }}
-                >
-                  <Terminal
-                    cwd={workspace.path}
-                    workspaceId={workspace.id}
-                    terminalId={tab.id}
-                    applicationId={tab.applicationId}
-                  />
-                </div>
-              )
-            } else {
-              // Filesystem browser - only render when active workspace (no need to keep alive)
-              if (!isActiveWorkspace) return null
-              return (
-                <div
-                  key={`${workspace.id}-${tab.id}`}
-                  className="filesystem-wrapper"
-                  style={{ display: isVisible ? 'flex' : 'none' }}
-                >
-                  <FilesystemBrowser
-                    workspacePath={workspace.path}
-                    workspaceId={workspace.id}
-                    tabId={tab.id}
-                  />
-                </div>
-              )
-            }
+            if (!app) return null
+
+            // Skip rendering if app doesn't need to stay alive and workspace is inactive
+            if (!app.keepAlive && !isActiveWorkspace) return null
+
+            return (
+              <div
+                key={`${workspace.id}-${tab.id}`}
+                className={`${tab.applicationId}-wrapper`}
+                style={{ display: isVisible ? app.displayStyle : 'none' }}
+              >
+                {app.render({
+                  tab,
+                  workspaceId: workspace.id,
+                  workspacePath: workspace.path,
+                  sandbox: workspace.sandbox
+                })}
+              </div>
+            )
           })
         })}
       </div>
