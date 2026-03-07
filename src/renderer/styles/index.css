@@ -215,6 +215,23 @@ body,
   to { transform: rotate(360deg); }
 }
 
+/* Tab Activity Indicator */
+.tab-activity {
+  font-size: 10px;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+
+.tab-activity-working {
+  color: #e5e510;
+  animation: spin 1s linear infinite;
+  display: inline-block;
+}
+
+.tab-activity-waiting_for_input {
+  color: #0dbc79;
+}
+
 /* Context Menu */
 .context-menu {
   position: fixed;
