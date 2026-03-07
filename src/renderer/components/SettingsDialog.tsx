@@ -25,6 +25,11 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
   const [localSettings, setLocalSettings] = useState<Settings>(savedSettings)
   const [activeTab, setActiveTab] = useState<TabId>('terminal')
   const [recordingKey, setRecordingKey] = useState<keyof Settings['keybindings'] | null>(null)
+  const [sandboxAvailable, setSandboxAvailable] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    window.electron.sandbox.isAvailable().then(setSandboxAvailable)
+  }, [])
 
   useEffect(() => {
     if (isOpen) {
@@ -172,10 +177,18 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
 
             {activeTab === 'sandbox' && (
               <div className="settings-section">
+                {sandboxAvailable === false && (
+                  <div className="settings-warning">
+                    Sandbox not available on this system.
+                    {process.platform === 'linux' && ' Install bubblewrap (bwrap) to enable.'}
+                    {process.platform === 'win32' && ' Sandbox is not supported on Windows.'}
+                  </div>
+                )}
                 <div className="settings-group">
                   <label className="settings-checkbox-label">
                     <input
                       type="checkbox"
+                      disabled={!sandboxAvailable}
                       checked={localSettings.sandbox.enabledByDefault}
                       onChange={(e) =>
                         setLocalSettings((prev) => ({
@@ -195,6 +208,7 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
                   <label className="settings-checkbox-label">
                     <input
                       type="checkbox"
+                      disabled={!sandboxAvailable}
                       checked={localSettings.sandbox.allowNetworkByDefault}
                       onChange={(e) =>
                         setLocalSettings((prev) => ({

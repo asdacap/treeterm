@@ -122,5 +122,10 @@ contextBridge.exposeInMainWorld('electron', {
     readFile: (workspacePath: string, filePath: string) => {
       return ipcRenderer.invoke('fs:readFile', workspacePath, filePath)
     }
+  },
+  sandbox: {
+    isAvailable: (): Promise<boolean> => {
+      return ipcRenderer.invoke('sandbox:isAvailable')
+    }
   }
 })

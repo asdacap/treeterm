@@ -2,6 +2,8 @@ import * as pty from 'node-pty'
 import { BrowserWindow } from 'electron'
 import * as path from 'path'
 import * as os from 'os'
+import * as fs from 'fs'
+import { execSync } from 'child_process'
 
 export interface SandboxConfig {
   enabled: boolean
@@ -13,6 +15,84 @@ interface PtyInstance {
   pty: pty.IPty
   id: string
   sandboxed: boolean
+}
+
+function isBwrapAvailable(): boolean {
+  try {
+    execSync('which bwrap', { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+function getGitRoot(workspacePath: string): string | null {
+  const gitPath = path.join(workspacePath, '.git')
+  const stat = fs.statSync(gitPath, { throwIfNoEntry: false })
+  if (!stat) return null
+
+  if (stat.isFile()) {
+    // Worktree: parse "gitdir: <path>" to find main .git
+    const content = fs.readFileSync(gitPath, 'utf-8')
+    const match = content.match(/^gitdir:\s*(.+)$/m)
+    if (match) {
+      const worktreeGitDir = path.resolve(workspacePath, match[1].trim())
+      // Main .git is at ../../ from worktree gitdir
+      return path.resolve(worktreeGitDir, '../../')
+    }
+  }
+  return null // Regular repo, .git is inside workspace
+}
+
+function generateBwrapArgs(cwd: string, sandbox: SandboxConfig): string[] {
+  const args: string[] = ['--die-with-parent', '--unshare-pid', '--unshare-uts', '--unshare-ipc']
+
+  // Network
+  if (!sandbox.allowNetwork) {
+    args.push('--unshare-net')
+  }
+
+  // System directories (read-only)
+  const roBinds = ['/usr', '/bin', '/lib', '/lib64', '/etc', '/opt']
+  for (const p of roBinds) {
+    if (fs.existsSync(p)) {
+      args.push('--ro-bind', p, p)
+    }
+  }
+
+  // Required mounts
+  args.push('--proc', '/proc')
+  args.push('--dev', '/dev')
+  args.push('--tmpfs', '/tmp')
+
+  // Workspace (read-write)
+  args.push('--bind', cwd, cwd)
+  args.push('--chdir', cwd)
+
+  // Git worktree support: add parent .git as read-only
+  const gitRoot = getGitRoot(cwd)
+  if (gitRoot) {
+    args.push('--ro-bind', gitRoot, gitRoot)
+  }
+
+  // Home directory essentials (read-only)
+  const home = os.homedir()
+  const homeFiles = ['.bashrc', '.zshrc', '.profile', '.gitconfig']
+  for (const f of homeFiles) {
+    const p = path.join(home, f)
+    if (fs.existsSync(p)) {
+      args.push('--ro-bind', p, p)
+    }
+  }
+
+  // Additional allowed paths (read-only)
+  for (const p of sandbox.allowedPaths) {
+    if (fs.existsSync(p)) {
+      args.push('--ro-bind', p, p)
+    }
+  }
+
+  return args
 }
 
 class PtyManager {
@@ -36,14 +116,24 @@ class PtyManager {
       // Add sandbox indicator to prompt
       env.TREETERM_SANDBOXED = '1'
       env.PS1 = '[SANDBOX] ' + (env.PS1 || '\\$ ')
+    } else if (isSandboxed && process.platform === 'linux') {
+      if (isBwrapAvailable()) {
+        // Use bubblewrap for real sandboxing
+        const bwrapArgs = generateBwrapArgs(cwd, sandbox!)
+        shell = 'bwrap'
+        args = [...bwrapArgs, '--', process.env.SHELL || '/bin/bash']
+        env.TREETERM_SANDBOXED = '1'
+        env.PS1 = '[SANDBOX] ' + (env.PS1 || '\\$ ')
+      } else {
+        // No sandbox available - warn and run unsandboxed
+        console.warn('[sandbox] bwrap not found, sandbox not available on this system')
+        shell = process.env.SHELL || '/bin/bash'
+        // Do NOT set TREETERM_SANDBOXED - not actually sandboxed
+      }
     } else if (isSandboxed) {
-      // On other platforms, just set restricted env vars as a soft sandbox
+      // Windows or other platforms: no sandbox support, run unsandboxed
+      console.warn('[sandbox] sandbox not available on this platform')
       shell = process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/zsh'
-      env.TREETERM_SANDBOXED = '1'
-      env.PS1 = '[SANDBOX] ' + (env.PS1 || '\\$ ')
-      // Restrict HOME to workspace to limit access
-      env.HOME = cwd
-      env.TMPDIR = path.join(cwd, '.treeterm-tmp')
     } else {
       shell = process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/zsh'
     }
