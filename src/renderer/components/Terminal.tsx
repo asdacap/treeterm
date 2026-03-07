@@ -9,9 +9,10 @@ interface TerminalProps {
   cwd: string
   workspaceId: string
   terminalId: string
+  applicationId?: string
 }
 
-export default function Terminal({ cwd, workspaceId, terminalId }: TerminalProps) {
+export default function Terminal({ cwd, workspaceId, terminalId, applicationId }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -103,7 +104,18 @@ export default function Terminal({ cwd, workspaceId, terminalId }: TerminalProps
       }
 
       // No existing PTY or it's dead - create a new one
-      const startupCommand = isChildWorkspace ? settings.startup.childWorkspaceCommand : undefined
+      // Determine startup command based on application
+      let startupCommand: string | undefined
+      if (applicationId) {
+        const app = settings.applications.find((a) => a.id === applicationId)
+        if (app && app.command) {
+          startupCommand = app.command
+        }
+      } else if (isChildWorkspace) {
+        // Backward compatibility: use childWorkspaceCommand for tabs without applicationId
+        startupCommand = settings.startup.childWorkspaceCommand || undefined
+      }
+
       const id = await window.electron.terminal.create(cwd, sandbox, startupCommand)
       if (!id) return
 
@@ -158,7 +170,7 @@ export default function Terminal({ cwd, workspaceId, terminalId }: TerminalProps
     }
   // Note: existingPtyId is intentionally NOT in deps - we only check it on mount/re-run
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cwd, terminalId, sandbox?.enabled, workspaceId])
+  }, [cwd, terminalId, sandbox?.enabled, workspaceId, applicationId])
 
   return <div ref={containerRef} className="terminal-container" />
 }

@@ -1,8 +1,18 @@
+export interface Application {
+  id: string
+  name: string
+  command: string
+  icon: string
+  isDefault: boolean
+  isBuiltIn: boolean
+}
+
 export interface TerminalTab {
   type: 'terminal'
   id: string
   title: string
   ptyId: string | null
+  applicationId?: string
 }
 
 export interface FilesystemTab {
@@ -153,6 +163,7 @@ export interface Settings {
   startup: {
     childWorkspaceCommand: string
   }
+  applications: Application[]
 }
 
 export interface SettingsApi {

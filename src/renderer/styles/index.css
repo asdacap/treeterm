@@ -1078,6 +1078,71 @@ body,
   color: var(--accent);
 }
 
+/* Applications Settings */
+.applications-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.application-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+}
+
+.application-icon .icon-input {
+  width: 40px;
+  text-align: center;
+  font-size: 16px;
+}
+
+.application-fields {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.application-fields .settings-input {
+  width: 100%;
+}
+
+.default-checkbox {
+  white-space: nowrap;
+}
+
+.application-delete {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: #f14c4c;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.application-delete:hover {
+  background: rgba(241, 76, 76, 0.1);
+}
+
+.settings-btn.add-app {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px dashed var(--border-color);
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.settings-btn.add-app:hover {
+  background: var(--bg-hover);
+  border-style: solid;
+}
+
 .settings-dialog-actions {
   display: flex;
   gap: 8px;
