@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import { execSync } from 'child_process'
 import { join } from 'path'
 import { ptyManager } from './pty'
@@ -34,6 +34,24 @@ function createWindow(): void {
     },
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 15, y: 15 }
+  })
+
+  // Open external links in the default browser instead of within Electron
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const parsedUrl = new URL(url)
+    if (
+      parsedUrl.protocol === 'file:' ||
+      (process.env.ELECTRON_RENDERER_URL && url.startsWith(process.env.ELECTRON_RENDERER_URL))
+    ) {
+      return
+    }
+    event.preventDefault()
+    shell.openExternal(url)
+  })
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url)
+    return { action: 'deny' }
   })
 
   // Load the renderer
