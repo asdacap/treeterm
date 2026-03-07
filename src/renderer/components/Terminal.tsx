@@ -25,7 +25,18 @@ export default function Terminal({ cwd, workspaceId, terminalId }: TerminalProps
   const setPtyId = useWorkspaceStore((state) => state.setPtyId)
   const settings = useSettingsStore((state) => state.settings)
 
+  // Get existing ptyId from store for reconnection
+  const existingPtyId = workspace?.tabs.find(
+    (t) => t.type === 'terminal' && t.id === terminalId
+  )?.ptyId
+
   useEffect(() => {
+    console.log(`[Terminal ${terminalId}] useEffect running`, {
+      cwd,
+      sandboxEnabled: sandbox?.enabled,
+      workspaceId
+    })
+
     if (!containerRef.current) return
 
     isMountedRef.current = true
@@ -69,9 +80,31 @@ export default function Terminal({ cwd, workspaceId, terminalId }: TerminalProps
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
 
-    // Create PTY with sandbox config and optional startup command for child workspaces
-    const startupCommand = isChildWorkspace ? settings.startup.childWorkspaceCommand : undefined
-    window.electron.terminal.create(cwd, sandbox, startupCommand).then((id) => {
+    // Helper to subscribe to PTY and set up refs
+    const connectToPty = (id: string) => {
+      ptyIdRef.current = id
+      unsubscribeRef.current = window.electron.terminal.onData(id, (data) => {
+        terminal.write(data)
+      })
+      window.electron.terminal.resize(id, terminal.cols, terminal.rows)
+    }
+
+    // Try to reconnect to existing PTY, or create a new one
+    const initPty = async () => {
+      // Check if we have an existing PTY that's still alive
+      if (existingPtyId) {
+        const isAlive = await window.electron.terminal.isAlive(existingPtyId)
+        if (isAlive) {
+          console.log(`[Terminal ${terminalId}] reconnecting to existing PTY:`, existingPtyId)
+          if (!isMountedRef.current) return
+          connectToPty(existingPtyId)
+          return
+        }
+      }
+
+      // No existing PTY or it's dead - create a new one
+      const startupCommand = isChildWorkspace ? settings.startup.childWorkspaceCommand : undefined
+      const id = await window.electron.terminal.create(cwd, sandbox, startupCommand)
       if (!id) return
 
       // Check if component is still mounted
@@ -81,17 +114,12 @@ export default function Terminal({ cwd, workspaceId, terminalId }: TerminalProps
         return
       }
 
-      ptyIdRef.current = id
+      console.log(`[Terminal ${terminalId}] created new PTY:`, id)
+      connectToPty(id)
       setPtyId(workspaceId, terminalId, id)
+    }
 
-      // Subscribe to PTY output
-      unsubscribeRef.current = window.electron.terminal.onData(id, (data) => {
-        terminal.write(data)
-      })
-
-      // Send initial resize
-      window.electron.terminal.resize(id, terminal.cols, terminal.rows)
-    })
+    initPty()
 
     // Forward terminal input to PTY
     const inputDisposable = terminal.onData((data) => {
@@ -109,19 +137,27 @@ export default function Terminal({ cwd, workspaceId, terminalId }: TerminalProps
     })
     resizeObserver.observe(containerRef.current)
 
-    // Cleanup
+    // Cleanup - DON'T kill PTY here, just unsubscribe
+    // PTY is explicitly killed in removeWorkspace/removeTab
     return () => {
+      console.log(`[Terminal ${terminalId}] cleanup running (PTY preserved):`, {
+        ptyId: ptyIdRef.current,
+        cwd,
+        sandboxEnabled: sandbox?.enabled,
+        workspaceId
+      })
       isMountedRef.current = false
       inputDisposable.dispose()
       resizeObserver.disconnect()
       if (unsubscribeRef.current) {
         unsubscribeRef.current()
       }
-      if (ptyIdRef.current) {
-        window.electron.terminal.kill(ptyIdRef.current)
-      }
+      // Note: We intentionally don't kill the PTY here
+      // The PTY lifecycle is managed by removeWorkspace/removeTab in workspace.ts
       terminal.dispose()
     }
+  // Note: existingPtyId is intentionally NOT in deps - we only check it on mount/re-run
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd, terminalId, sandbox?.enabled, workspaceId])
 
   return <div ref={containerRef} className="terminal-container" />

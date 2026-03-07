@@ -178,6 +178,10 @@ ${networkRule}
     const instance = this.ptys.get(id)
     return instance?.sandboxed ?? false
   }
+
+  isAlive(id: string): boolean {
+    return this.ptys.has(id)
+  }
 }
 
 export const ptyManager = new PtyManager()

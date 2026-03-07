@@ -42,6 +42,9 @@ contextBridge.exposeInMainWorld('electron', {
     kill: (id: string): void => {
       ipcRenderer.send('pty:kill', id)
     },
+    isAlive: (id: string): Promise<boolean> => {
+      return ipcRenderer.invoke('pty:isAlive', id)
+    },
     onData: (id: string, callback: DataCallback): (() => void) => {
       if (!dataListeners.has(id)) {
         dataListeners.set(id, [])

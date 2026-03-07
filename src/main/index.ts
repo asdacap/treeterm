@@ -65,6 +65,10 @@ ipcMain.on('pty:kill', (_event, id: string) => {
   ptyManager.kill(id)
 })
 
+ipcMain.handle('pty:isAlive', (_event, id: string) => {
+  return ptyManager.isAlive(id)
+})
+
 ipcMain.handle('dialog:selectFolder', async () => {
   if (!mainWindow) return null
   const result = await dialog.showOpenDialog(mainWindow, {

@@ -112,6 +112,7 @@ export interface TerminalApi {
   write: (id: string, data: string) => void
   resize: (id: string, cols: number, rows: number) => void
   kill: (id: string) => void
+  isAlive: (id: string) => Promise<boolean>
   onData: (id: string, callback: (data: string) => void) => () => void
 }
 
