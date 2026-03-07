@@ -745,6 +745,109 @@ body,
   background: var(--bg-hover);
 }
 
+.merge-btn-warning {
+  background: #b36200 !important;
+}
+
+.merge-btn-warning:hover:not(:disabled) {
+  background: #cc7000 !important;
+}
+
+/* Conflict Status Section */
+.merge-conflict-status {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.merge-conflict-loading {
+  color: var(--text-secondary);
+  font-style: italic;
+  font-size: 13px;
+}
+
+.merge-conflict-warning {
+  background-color: rgba(255, 193, 7, 0.1);
+  border: 1px solid #b36200;
+  border-radius: 4px;
+  padding: 12px;
+}
+
+.merge-conflict-error {
+  background-color: rgba(241, 76, 76, 0.1);
+  border: 1px solid #f14c4c;
+  border-radius: 4px;
+  padding: 12px;
+  color: #f14c4c;
+  font-size: 13px;
+}
+
+.merge-conflict-clean {
+  background-color: rgba(35, 134, 54, 0.1);
+  border: 1px solid #238636;
+  border-radius: 4px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #3fb950;
+  font-size: 13px;
+}
+
+.merge-conflict-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.merge-conflict-icon {
+  font-size: 16px;
+}
+
+.merge-conflict-warning .merge-conflict-icon {
+  color: #f0a000;
+}
+
+.merge-conflict-clean .merge-conflict-icon {
+  color: #3fb950;
+}
+
+.merge-conflict-title {
+  font-weight: 600;
+  color: #f0a000;
+  font-size: 14px;
+}
+
+.merge-conflict-files {
+  margin: 8px 0;
+}
+
+.merge-conflict-files-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: block;
+  margin-bottom: 4px;
+}
+
+.merge-conflict-files-list {
+  margin: 0;
+  padding: 0 0 0 16px;
+  list-style: disc;
+}
+
+.merge-conflict-file {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 2px 0;
+  color: var(--text-primary);
+}
+
+.merge-conflict-help {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 /* Create Child Dialog */
 .create-child-dialog {
   background: var(--bg-secondary);

@@ -88,6 +88,9 @@ contextBridge.exposeInMainWorld('electron', {
     merge: (mainRepoPath: string, worktreeBranch: string, targetBranch: string, squash: boolean = false) => {
       return ipcRenderer.invoke('git:merge', mainRepoPath, worktreeBranch, targetBranch, squash)
     },
+    checkMergeConflicts: (repoPath: string, sourceBranch: string, targetBranch: string) => {
+      return ipcRenderer.invoke('git:checkMergeConflicts', repoPath, sourceBranch, targetBranch)
+    },
     hasUncommittedChanges: (repoPath: string) => {
       return ipcRenderer.invoke('git:hasUncommittedChanges', repoPath)
     },

@@ -149,6 +149,18 @@ export interface DiffResult {
   headBranch: string
 }
 
+export interface ConflictInfo {
+  hasConflicts: boolean
+  conflictedFiles: string[]
+  messages: string[]
+}
+
+export interface ConflictCheckResult {
+  success: boolean
+  conflicts?: ConflictInfo
+  error?: string
+}
+
 export interface TerminalApi {
   create: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
   write: (id: string, data: string) => void
@@ -165,6 +177,7 @@ export interface GitApi {
   listWorktrees: (repoPath: string) => Promise<WorktreeInfo[]>
   getDiff: (worktreePath: string, parentBranch: string) => Promise<{ success: boolean; diff?: DiffResult; error?: string }>
   getFileDiff: (worktreePath: string, parentBranch: string, filePath: string) => Promise<{ success: boolean; diff?: string; error?: string }>
+  checkMergeConflicts: (repoPath: string, sourceBranch: string, targetBranch: string) => Promise<ConflictCheckResult>
   merge: (mainRepoPath: string, worktreeBranch: string, targetBranch: string, squash?: boolean) => Promise<{ success: boolean; error?: string }>
   hasUncommittedChanges: (repoPath: string) => Promise<boolean>
   commitAll: (repoPath: string, message: string) => Promise<{ success: boolean; error?: string }>

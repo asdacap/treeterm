@@ -11,7 +11,8 @@ import {
   mergeWorktree,
   hasUncommittedChanges,
   commitAll,
-  deleteBranch
+  deleteBranch,
+  checkMergeConflicts
 } from './git'
 import { loadSettings, saveSettings, Settings } from './settings'
 import { createApplicationMenu } from './menu'
@@ -107,6 +108,10 @@ ipcMain.handle('git:getFileDiff', async (_event, worktreePath: string, parentBra
 
 ipcMain.handle('git:merge', async (_event, mainRepoPath: string, worktreeBranch: string, targetBranch: string, squash: boolean) => {
   return mergeWorktree(mainRepoPath, worktreeBranch, targetBranch, squash)
+})
+
+ipcMain.handle('git:checkMergeConflicts', async (_event, repoPath: string, sourceBranch: string, targetBranch: string) => {
+  return checkMergeConflicts(repoPath, sourceBranch, targetBranch)
 })
 
 ipcMain.handle('git:hasUncommittedChanges', async (_event, repoPath: string) => {
