@@ -509,6 +509,40 @@ body,
 
 .terminal-wrapper {
   height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Terminal Toolbar */
+.terminal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.terminal-toolbar-btn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.terminal-toolbar-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
 }
 
 .workspace-terminal {
@@ -518,7 +552,8 @@ body,
 }
 
 .terminal-container {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   width: 100%;
 }
 
