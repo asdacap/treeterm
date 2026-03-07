@@ -28,7 +28,10 @@ export default function TabBar({
             onClick={() => onSelectTab(tab.id)}
           >
             <span className="tab-icon">{tab.type === 'terminal' ? '>' : '\uD83D\uDCC2'}</span>
-            <span className="tab-title">{tab.title}</span>
+            <span className="tab-title">
+              {tab.title}
+              {tab.type === 'terminal' && tab.ptyId && ` [${tab.ptyId}]`}
+            </span>
             {tab.type === 'terminal' && canCloseTabs && (
               <button
                 className="tab-close"
