@@ -1,6 +1,23 @@
 import { useState, useRef, useEffect } from 'react'
 import type { Tab, ApplicationInstance } from '../types'
 import { applicationRegistry } from '../registry/applicationRegistry'
+import { useActivityStateStore } from '../store/activityState'
+
+// Small component to subscribe to activity state for a single tab
+function TabActivityIndicator({ tabId }: { tabId: string }) {
+  const activityState = useActivityStateStore((state) => state.states[tabId] || 'idle')
+
+  if (activityState === 'idle') return null
+
+  return (
+    <span
+      className={`tab-activity tab-activity-${activityState}`}
+      title={activityState === 'working' ? 'Working...' : 'Waiting for input'}
+    >
+      {activityState === 'working' ? '⟳' : '●'}
+    </span>
+  )
+}
 
 interface TabBarProps {
   tabs: Tab[]
@@ -82,6 +99,7 @@ export default function TabBar({
           >
             <span className="tab-icon">{getTabIcon(tab)}</span>
             <span className="tab-title">{tab.title}</span>
+            <TabActivityIndicator tabId={tab.id} />
             {canCloseTab(tab) && (
               <button
                 className="tab-close"
