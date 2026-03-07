@@ -35,14 +35,15 @@ export const claudeApplication: Application<ClaudeState> = {
     useActivityStateStore.getState().removeTabState(tab.id)
   },
 
-  render: ({ tab, workspaceId, workspacePath }) => {
+  render: ({ tab, workspaceId, workspacePath, isVisible }) => {
     const state = tab.state as ClaudeState
     return createElement(Claude, {
       key: tab.id,
       cwd: workspacePath,
       workspaceId,
       tabId: tab.id,
-      sandbox: state.sandbox
+      sandbox: state.sandbox,
+      isVisible
     })
   },
 
