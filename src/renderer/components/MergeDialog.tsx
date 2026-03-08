@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import DiffView from './DiffView'
-import type { Workspace, ConflictInfo } from '../types'
+import type { Workspace, ConflictInfo, UncommittedChanges } from '../types'
 
 interface MergeDialogProps {
   workspace: Workspace
@@ -22,6 +22,8 @@ export default function MergeDialog({
   const [conflictInfo, setConflictInfo] = useState<ConflictInfo | null>(null)
   const [conflictError, setConflictError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [uncommittedChanges, setUncommittedChanges] = useState<UncommittedChanges | null>(null)
+  const [isCheckingUncommitted, setIsCheckingUncommitted] = useState(true)
 
   // Check for conflicts when dialog opens
   useEffect(() => {
@@ -53,7 +55,26 @@ export default function MergeDialog({
     checkConflicts()
   }, [workspace, parentWorkspace])
 
+  // Check for uncommitted changes when dialog opens
+  useEffect(() => {
+    async function checkUncommitted() {
+      try {
+        const result = await window.electron.git.getUncommittedChanges(workspace.path)
+        if (result.success && result.changes) {
+          setUncommittedChanges(result.changes)
+        }
+      } catch {
+        // Ignore errors
+      } finally {
+        setIsCheckingUncommitted(false)
+      }
+    }
+
+    checkUncommitted()
+  }, [workspace.path])
+
   const hasConflicts = conflictInfo?.hasConflicts ?? false
+  const hasUncommitted = uncommittedChanges && uncommittedChanges.files.length > 0
 
   const handleMerge = async (squash: boolean) => {
     setIsProcessing(true)
@@ -134,6 +155,34 @@ export default function MergeDialog({
             </div>
           )}
         </div>
+
+        {/* Uncommitted Changes Warning */}
+        {!isCheckingUncommitted && hasUncommitted && (
+          <div className="merge-uncommitted-warning">
+            <div className="merge-conflict-header">
+              <span className="merge-conflict-icon">⚠</span>
+              <span className="merge-conflict-title">Uncommitted changes detected</span>
+            </div>
+            <div className="merge-conflict-files">
+              <span className="merge-conflict-files-label">
+                {uncommittedChanges.files.length} file{uncommittedChanges.files.length !== 1 ? 's' : ''} with uncommitted changes:
+              </span>
+              <ul className="merge-conflict-files-list">
+                {uncommittedChanges.files.slice(0, 5).map((file, idx) => (
+                  <li key={idx} className="merge-conflict-file">{file.path}</li>
+                ))}
+                {uncommittedChanges.files.length > 5 && (
+                  <li className="merge-conflict-file">...and {uncommittedChanges.files.length - 5} more</li>
+                )}
+              </ul>
+            </div>
+            <div className="merge-conflict-help">
+              <strong>Merge/Squash:</strong> Changes will be auto-committed with a "WIP" message before merging.
+              <br />
+              <strong>Abandon:</strong> All uncommitted changes will be permanently lost.
+            </div>
+          </div>
+        )}
 
         <div className="merge-dialog-diff">
           <DiffView

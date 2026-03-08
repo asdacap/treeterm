@@ -773,6 +773,22 @@ body,
   padding: 12px;
 }
 
+.merge-uncommitted-warning {
+  background-color: rgba(255, 193, 7, 0.1);
+  border: 1px solid #b36200;
+  border-radius: 4px;
+  padding: 12px;
+  margin-top: 12px;
+}
+
+.merge-uncommitted-warning .merge-conflict-icon {
+  color: #f0a000;
+}
+
+.merge-uncommitted-warning .merge-conflict-title {
+  color: #f0a000;
+}
+
 .merge-conflict-error {
   background-color: rgba(241, 76, 76, 0.1);
   border: 1px solid #f14c4c;
