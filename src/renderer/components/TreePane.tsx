@@ -39,6 +39,7 @@ export default function TreePane() {
     activeWorkspaceId,
     addWorkspace,
     addChildWorkspace,
+    adoptExistingWorktree,
     removeWorkspace,
     mergeAndRemoveWorkspace,
     setActiveWorkspace
@@ -47,6 +48,13 @@ export default function TreePane() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [mergeDialogWorkspaceId, setMergeDialogWorkspaceId] = useState<string | null>(null)
   const [createChildDialogParentId, setCreateChildDialogParentId] = useState<string | null>(null)
+
+  // Compute paths of already-open worktrees
+  const openWorktreePaths = useMemo(() => {
+    return Object.values(workspaces)
+      .filter(ws => ws.isWorktree)
+      .map(ws => ws.path)
+  }, [workspaces])
 
   const handleAddWorkspace = async () => {
     const path = await window.electron.selectFolder()
@@ -76,6 +84,26 @@ export default function TreePane() {
     const result = await addChildWorkspace(createChildDialogParentId, name)
     if (result.success) {
       // Expand the parent to show the new child
+      setExpanded((prev) => new Set([...prev, createChildDialogParentId]))
+      setCreateChildDialogParentId(null)
+    }
+    return result
+  }
+
+  const handleAdoptWorktreeSubmit = async (
+    worktreePath: string,
+    branch: string,
+    name: string
+  ) => {
+    if (!createChildDialogParentId) return { success: false, error: 'No parent selected' }
+
+    const result = await adoptExistingWorktree(
+      createChildDialogParentId,
+      worktreePath,
+      branch,
+      name
+    )
+    if (result.success) {
       setExpanded((prev) => new Set([...prev, createChildDialogParentId]))
       setCreateChildDialogParentId(null)
     }
@@ -228,7 +256,9 @@ export default function TreePane() {
         <CreateChildDialog
           parentWorkspace={createChildDialogParent}
           onCreate={handleCreateChildSubmit}
+          onAdopt={handleAdoptWorktreeSubmit}
           onCancel={() => setCreateChildDialogParentId(null)}
+          openWorktreePaths={openWorktreePaths}
         />
       )}
     </div>
