@@ -9,6 +9,11 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()]
   },
   renderer: {
-    plugins: [react()]
+    plugins: [react()],
+    resolve: {
+      alias: {
+        'monaco-editor': 'monaco-editor/esm/vs/editor/editor.api'
+      }
+    }
   }
 })
