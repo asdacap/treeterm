@@ -34,17 +34,24 @@ export function FileTree({
         [dirPath]: { entries: [], loading: true, error: null }
       }))
 
-      const result = await window.electron.filesystem.readDirectory(workspacePath, dirPath)
+      try {
+        const result = await window.electron.filesystem.readDirectory(workspacePath, dirPath)
 
-      if (result.success && result.contents) {
+        if (result.success && result.contents) {
+          setDirContents((prev) => ({
+            ...prev,
+            [dirPath]: { entries: result.contents!.entries, loading: false, error: null }
+          }))
+        } else {
+          setDirContents((prev) => ({
+            ...prev,
+            [dirPath]: { entries: [], loading: false, error: result.error || 'Failed to load' }
+          }))
+        }
+      } catch (err) {
         setDirContents((prev) => ({
           ...prev,
-          [dirPath]: { entries: result.contents!.entries, loading: false, error: null }
-        }))
-      } else {
-        setDirContents((prev) => ({
-          ...prev,
-          [dirPath]: { entries: [], loading: false, error: result.error || 'Failed to load' }
+          [dirPath]: { entries: [], loading: false, error: `Error: ${err}` }
         }))
       }
     },

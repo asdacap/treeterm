@@ -41,21 +41,30 @@ export function FileViewer({ workspacePath, filePath }: FileViewerProps): JSX.El
     const loadFile = async () => {
       setFileState((prev) => ({ ...prev, loading: true, error: null }))
 
-      const result = await window.electron.filesystem.readFile(workspacePath, filePath)
+      try {
+        const result = await window.electron.filesystem.readFile(workspacePath, filePath)
 
-      if (result.success && result.file) {
-        setFileState({
-          content: result.file.content,
-          language: mapLanguageToMonaco(result.file.language),
-          loading: false,
-          error: null
-        })
-      } else {
+        if (result.success && result.file) {
+          setFileState({
+            content: result.file.content,
+            language: mapLanguageToMonaco(result.file.language),
+            loading: false,
+            error: null
+          })
+        } else {
+          setFileState({
+            content: '',
+            language: 'plaintext',
+            loading: false,
+            error: result.error || 'Failed to load file'
+          })
+        }
+      } catch (err) {
         setFileState({
           content: '',
           language: 'plaintext',
           loading: false,
-          error: result.error || 'Failed to load file'
+          error: `Error loading file: ${err}`
         })
       }
     }
