@@ -170,9 +170,6 @@ export default function TreePane() {
           <span className="tree-item-icon">{ws.isWorktree ? '🌿' : '📁'}</span>
           <span className="tree-item-name">{ws.name}</span>
           <WorkspaceActivityIndicator tabIds={tabIds} />
-          {ws.isGitRepo && ws.gitBranch && (
-            <span className="tree-item-branch">{ws.gitBranch}</span>
-          )}
         </div>
 
         {/* Children */}
