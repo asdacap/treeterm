@@ -100,6 +100,27 @@ contextBridge.exposeInMainWorld('electron', {
     },
     deleteBranch: (repoPath: string, branchName: string) => {
       return ipcRenderer.invoke('git:deleteBranch', repoPath, branchName)
+    },
+    getUncommittedChanges: (repoPath: string) => {
+      return ipcRenderer.invoke('git:getUncommittedChanges', repoPath)
+    },
+    getUncommittedFileDiff: (repoPath: string, filePath: string, staged: boolean) => {
+      return ipcRenderer.invoke('git:getUncommittedFileDiff', repoPath, filePath, staged)
+    },
+    stageFile: (repoPath: string, filePath: string) => {
+      return ipcRenderer.invoke('git:stageFile', repoPath, filePath)
+    },
+    unstageFile: (repoPath: string, filePath: string) => {
+      return ipcRenderer.invoke('git:unstageFile', repoPath, filePath)
+    },
+    stageAll: (repoPath: string) => {
+      return ipcRenderer.invoke('git:stageAll', repoPath)
+    },
+    unstageAll: (repoPath: string) => {
+      return ipcRenderer.invoke('git:unstageAll', repoPath)
+    },
+    commitStaged: (repoPath: string, message: string) => {
+      return ipcRenderer.invoke('git:commitStaged', repoPath, message)
     }
   },
   settings: {

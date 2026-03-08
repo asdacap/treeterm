@@ -155,6 +155,20 @@ export interface ConflictInfo {
   messages: string[]
 }
 
+export interface UncommittedFile {
+  path: string
+  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked'
+  staged: boolean
+  additions: number
+  deletions: number
+}
+
+export interface UncommittedChanges {
+  files: UncommittedFile[]
+  totalAdditions: number
+  totalDeletions: number
+}
+
 export interface ConflictCheckResult {
   success: boolean
   conflicts?: ConflictInfo
@@ -182,6 +196,13 @@ export interface GitApi {
   hasUncommittedChanges: (repoPath: string) => Promise<boolean>
   commitAll: (repoPath: string, message: string) => Promise<{ success: boolean; error?: string }>
   deleteBranch: (repoPath: string, branchName: string) => Promise<{ success: boolean; error?: string }>
+  getUncommittedChanges: (repoPath: string) => Promise<{ success: boolean; changes?: UncommittedChanges; error?: string }>
+  getUncommittedFileDiff: (repoPath: string, filePath: string, staged: boolean) => Promise<{ success: boolean; diff?: string; error?: string }>
+  stageFile: (repoPath: string, filePath: string) => Promise<{ success: boolean; error?: string }>
+  unstageFile: (repoPath: string, filePath: string) => Promise<{ success: boolean; error?: string }>
+  stageAll: (repoPath: string) => Promise<{ success: boolean; error?: string }>
+  unstageAll: (repoPath: string) => Promise<{ success: boolean; error?: string }>
+  commitStaged: (repoPath: string, message: string) => Promise<{ success: boolean; error?: string }>
 }
 
 export interface Settings {
