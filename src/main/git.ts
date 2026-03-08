@@ -359,6 +359,230 @@ export interface ConflictInfo {
  * Check for merge conflicts without actually performing the merge.
  * Uses git merge-tree --write-tree to simulate the merge.
  */
+export interface UncommittedFile {
+  path: string
+  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked'
+  staged: boolean
+  additions: number
+  deletions: number
+}
+
+export interface UncommittedChanges {
+  files: UncommittedFile[]
+  totalAdditions: number
+  totalDeletions: number
+}
+
+export async function getUncommittedChanges(
+  repoPath: string
+): Promise<{ success: boolean; changes?: UncommittedChanges; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(repoPath)
+    const status = await git.status()
+
+    const files: UncommittedFile[] = []
+    let totalAdditions = 0
+    let totalDeletions = 0
+
+    // Helper to get numstat for a file
+    const getFileStats = async (
+      filePath: string,
+      staged: boolean
+    ): Promise<{ additions: number; deletions: number }> => {
+      try {
+        const diffArgs = staged ? ['diff', '--cached', '--numstat', '--', filePath] : ['diff', '--numstat', '--', filePath]
+        const numstat = await git.raw(diffArgs)
+        if (numstat.trim()) {
+          const [add, del] = numstat.trim().split('\t')
+          return {
+            additions: add === '-' ? 0 : parseInt(add) || 0,
+            deletions: del === '-' ? 0 : parseInt(del) || 0
+          }
+        }
+      } catch {
+        // Ignore errors
+      }
+      return { additions: 0, deletions: 0 }
+    }
+
+    // Process staged files
+    for (const file of status.staged) {
+      const statusChar = status.files.find((f) => f.path === file)?.index || 'M'
+      let fileStatus: UncommittedFile['status'] = 'modified'
+      if (statusChar === 'A') fileStatus = 'added'
+      else if (statusChar === 'D') fileStatus = 'deleted'
+      else if (statusChar === 'R') fileStatus = 'renamed'
+
+      const stats = await getFileStats(file, true)
+      files.push({
+        path: file,
+        status: fileStatus,
+        staged: true,
+        ...stats
+      })
+      totalAdditions += stats.additions
+      totalDeletions += stats.deletions
+    }
+
+    // Process modified (unstaged) files
+    for (const file of status.modified) {
+      // Skip if already in staged
+      if (files.some((f) => f.path === file)) continue
+
+      const stats = await getFileStats(file, false)
+      files.push({
+        path: file,
+        status: 'modified',
+        staged: false,
+        ...stats
+      })
+      totalAdditions += stats.additions
+      totalDeletions += stats.deletions
+    }
+
+    // Process deleted (unstaged) files
+    for (const file of status.deleted) {
+      if (files.some((f) => f.path === file)) continue
+
+      const stats = await getFileStats(file, false)
+      files.push({
+        path: file,
+        status: 'deleted',
+        staged: false,
+        ...stats
+      })
+      totalAdditions += stats.additions
+      totalDeletions += stats.deletions
+    }
+
+    // Process untracked (new) files
+    for (const file of status.not_added) {
+      files.push({
+        path: file,
+        status: 'untracked',
+        staged: false,
+        additions: 0,
+        deletions: 0
+      })
+    }
+
+    return {
+      success: true,
+      changes: {
+        files,
+        totalAdditions,
+        totalDeletions
+      }
+    }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error getting uncommitted changes'
+    }
+  }
+}
+
+export async function getUncommittedFileDiff(
+  repoPath: string,
+  filePath: string,
+  staged: boolean
+): Promise<{ success: boolean; diff?: string; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(repoPath)
+
+    const diffArgs = staged
+      ? ['diff', '--cached', '--color=never', '--', filePath]
+      : ['diff', '--color=never', '--', filePath]
+
+    const diff = await git.raw(diffArgs)
+
+    return { success: true, diff }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error getting file diff'
+    }
+  }
+}
+
+export async function stageFile(
+  repoPath: string,
+  filePath: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(repoPath)
+    await git.add(filePath)
+    return { success: true }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error staging file'
+    }
+  }
+}
+
+export async function unstageFile(
+  repoPath: string,
+  filePath: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(repoPath)
+    await git.raw(['reset', 'HEAD', '--', filePath])
+    return { success: true }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error unstaging file'
+    }
+  }
+}
+
+export async function stageAll(
+  repoPath: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(repoPath)
+    await git.add('.')
+    return { success: true }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error staging all files'
+    }
+  }
+}
+
+export async function unstageAll(
+  repoPath: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(repoPath)
+    await git.raw(['reset', 'HEAD'])
+    return { success: true }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error unstaging all files'
+    }
+  }
+}
+
+export async function commitStaged(
+  repoPath: string,
+  message: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(repoPath)
+    await git.commit(message)
+    return { success: true }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error committing'
+    }
+  }
+}
+
 export async function checkMergeConflicts(
   repoPath: string,
   sourceBranch: string,

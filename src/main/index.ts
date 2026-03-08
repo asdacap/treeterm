@@ -13,7 +13,14 @@ import {
   hasUncommittedChanges,
   commitAll,
   deleteBranch,
-  checkMergeConflicts
+  checkMergeConflicts,
+  getUncommittedChanges,
+  getUncommittedFileDiff,
+  stageFile,
+  unstageFile,
+  stageAll,
+  unstageAll,
+  commitStaged
 } from './git'
 import { loadSettings, saveSettings, Settings } from './settings'
 import { createApplicationMenu } from './menu'
@@ -143,6 +150,34 @@ ipcMain.handle('git:commitAll', async (_event, repoPath: string, message: string
 
 ipcMain.handle('git:deleteBranch', async (_event, repoPath: string, branchName: string) => {
   return deleteBranch(repoPath, branchName)
+})
+
+ipcMain.handle('git:getUncommittedChanges', async (_event, repoPath: string) => {
+  return getUncommittedChanges(repoPath)
+})
+
+ipcMain.handle('git:getUncommittedFileDiff', async (_event, repoPath: string, filePath: string, staged: boolean) => {
+  return getUncommittedFileDiff(repoPath, filePath, staged)
+})
+
+ipcMain.handle('git:stageFile', async (_event, repoPath: string, filePath: string) => {
+  return stageFile(repoPath, filePath)
+})
+
+ipcMain.handle('git:unstageFile', async (_event, repoPath: string, filePath: string) => {
+  return unstageFile(repoPath, filePath)
+})
+
+ipcMain.handle('git:stageAll', async (_event, repoPath: string) => {
+  return stageAll(repoPath)
+})
+
+ipcMain.handle('git:unstageAll', async (_event, repoPath: string) => {
+  return unstageAll(repoPath)
+})
+
+ipcMain.handle('git:commitStaged', async (_event, repoPath: string, message: string) => {
+  return commitStaged(repoPath, message)
 })
 
 // Settings IPC Handlers
