@@ -17,6 +17,7 @@ export default function WorkspacePane() {
     removeTab,
     setActiveTab,
     addChildWorkspace,
+    adoptExistingWorktree,
     removeWorkspace,
     mergeAndRemoveWorkspace
   } = useWorkspaceStore()
@@ -64,11 +65,29 @@ export default function WorkspacePane() {
     [activeWorkspaceId, setActiveTab]
   )
 
-  // Fork handler
+  // Compute paths of already-open worktrees
+  const openWorktreePaths = useMemo(() => {
+    return Object.values(workspaces)
+      .filter(ws => ws.isWorktree)
+      .map(ws => ws.path)
+  }, [workspaces])
+
+  // Fork handler - create new worktree
   const handleCreateChildSubmit = async (name: string) => {
     if (!activeWorkspaceId) return { success: false, error: 'No workspace selected' }
 
     const result = await addChildWorkspace(activeWorkspaceId, name)
+    if (result.success) {
+      setShowCreateChildDialog(false)
+    }
+    return result
+  }
+
+  // Adopt existing worktree handler
+  const handleAdoptWorktreeSubmit = async (worktreePath: string, branch: string, name: string) => {
+    if (!activeWorkspaceId) return { success: false, error: 'No workspace selected' }
+
+    const result = await adoptExistingWorktree(activeWorkspaceId, worktreePath, branch, name)
     if (result.success) {
       setShowCreateChildDialog(false)
     }
@@ -241,7 +260,9 @@ export default function WorkspacePane() {
         <CreateChildDialog
           parentWorkspace={activeWorkspace}
           onCreate={handleCreateChildSubmit}
+          onAdopt={handleAdoptWorktreeSubmit}
           onCancel={() => setShowCreateChildDialog(false)}
+          openWorktreePaths={openWorktreePaths}
         />
       )}
 

@@ -87,6 +87,9 @@ contextBridge.exposeInMainWorld('electron', {
     listWorktrees: (repoPath: string) => {
       return ipcRenderer.invoke('git:listWorktrees', repoPath)
     },
+    getChildWorktrees: (repoPath: string, parentBranch: string | null) => {
+      return ipcRenderer.invoke('git:getChildWorktrees', repoPath, parentBranch)
+    },
     getDiff: (worktreePath: string, parentBranch: string) => {
       return ipcRenderer.invoke('git:getDiff', worktreePath, parentBranch)
     },

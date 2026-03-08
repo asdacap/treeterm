@@ -10,6 +10,7 @@ interface WorkspaceState {
   activeWorkspaceId: string | null
   addWorkspace: (path: string) => Promise<string>
   addChildWorkspace: (parentId: string, name: string) => Promise<{ success: boolean; error?: string }>
+  adoptExistingWorktree: (parentId: string, worktreePath: string, branch: string, name: string) => Promise<{ success: boolean; error?: string }>
   removeWorkspace: (id: string) => Promise<void>
   mergeAndRemoveWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
   setActiveWorkspace: (id: string | null) => void
@@ -164,6 +165,84 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           status: 'active',
           isGitRepo: true,
           gitBranch: result.branch!,
+          gitRootPath: parent.gitRootPath,
+          isWorktree: true,
+          tabs,
+          activeTabId
+        }
+
+        set((state) => ({
+          workspaces: {
+            ...state.workspaces,
+            [id]: childWorkspace,
+            [parentId]: {
+              ...state.workspaces[parentId],
+              children: [...state.workspaces[parentId].children, id]
+            }
+          },
+          activeWorkspaceId: id
+        }))
+
+        return { success: true }
+      },
+
+      adoptExistingWorktree: async (parentId: string, worktreePath: string, branch: string, name: string) => {
+        const state = get()
+        const parent = state.workspaces[parentId]
+
+        if (!parent) {
+          return { success: false, error: 'Parent workspace not found' }
+        }
+
+        // Check if this worktree is already open in TreeTerm
+        const existingWorkspace = Object.values(state.workspaces).find(
+          ws => ws.path === worktreePath
+        )
+        if (existingWorkspace) {
+          return { success: false, error: 'This worktree is already open' }
+        }
+
+        // Create workspace for existing worktree
+        const id = generateId()
+
+        // Create tabs based on default applications from registry
+        const tabs: Tab[] = []
+        let activeTabId: string | null = null
+
+        const defaultApps = applicationRegistry.getDefaultApps()
+
+        // Check if Claude should be started by default
+        const { settings } = useSettingsStore.getState()
+        if (settings.claude.startByDefault && !defaultApps.some(app => app.id === 'claude')) {
+          defaultApps.push(claudeApplication)
+        }
+
+        for (const app of defaultApps) {
+          const tabId = generateTabId()
+          const existingCount = tabs.filter((t) => t.applicationId === app.id).length
+
+          tabs.push({
+            id: tabId,
+            applicationId: app.id,
+            title: `${app.name} ${existingCount + 1}`,
+            state: app.createInitialState()
+          })
+
+          // Make first closable tab active, or first tab if none are closable
+          if (activeTabId === null || (app.canClose && !applicationRegistry.get(tabs.find((t) => t.id === activeTabId)?.applicationId ?? '')?.canClose)) {
+            activeTabId = tabId
+          }
+        }
+
+        const childWorkspace: Workspace = {
+          id,
+          name,
+          path: worktreePath,
+          parentId,
+          children: [],
+          status: 'active',
+          isGitRepo: true,
+          gitBranch: branch,
           gitRootPath: parent.gitRootPath,
           isWorktree: true,
           tabs,
