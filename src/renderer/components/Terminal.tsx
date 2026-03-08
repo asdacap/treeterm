@@ -90,8 +90,8 @@ export default function Terminal({ cwd, workspaceId, tabId, config, sandbox, isV
       ptyIdRef.current = id
       unsubscribeRef.current = window.electron.terminal.onData(id, (data) => {
         terminal.write(data)
-        // Capture last 50 raw characters for debug display
-        rawCharsRef.current = (rawCharsRef.current + data).slice(-50)
+        // Capture last 1000 raw characters for debug display
+        rawCharsRef.current = (rawCharsRef.current + data).slice(-1000)
         if (settings.terminal.showRawChars) {
           setRawCharsDisplay(rawCharsRef.current)
         }

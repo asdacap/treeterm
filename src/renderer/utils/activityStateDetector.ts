@@ -40,22 +40,36 @@ export function createActivityStateDetector(
   let debounceTimerId: ReturnType<typeof setTimeout> | null = null
 
   const emitState = (state: ActivityState) => {
+    // Always clear pending debounce when trying to emit 'working'
+    // This prevents a race where data arrives during a debounced transition
+    // to 'waiting_for_input' or 'idle', which would incorrectly fire after the early return
+    if (state === 'working' && debounceTimerId) {
+      clearTimeout(debounceTimerId)
+      debounceTimerId = null
+    }
+
     if (state === currentState) return
 
-    // Clear any pending debounce
+    // Clear any pending debounce for other state transitions
     if (debounceTimerId) {
       clearTimeout(debounceTimerId)
       debounceTimerId = null
     }
 
-    // Debounce state changes to prevent flickering
-    debounceTimerId = setTimeout(() => {
-      if (state !== currentState) {
-        currentState = state
-        onStateChange(state)
-      }
-      debounceTimerId = null
-    }, debounceMs)
+    // Emit 'working' immediately - we want instant feedback when output starts
+    // Debounce other state changes to prevent flickering
+    if (state === 'working') {
+      currentState = state
+      onStateChange(state)
+    } else {
+      debounceTimerId = setTimeout(() => {
+        if (state !== currentState) {
+          currentState = state
+          onStateChange(state)
+        }
+        debounceTimerId = null
+      }, debounceMs)
+    }
   }
 
   const checkForPrompt = (): boolean => {

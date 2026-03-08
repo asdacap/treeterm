@@ -90,11 +90,11 @@ export default function Claude({ cwd, workspaceId, tabId, sandbox, isVisible }: 
     fitAddonRef.current = fitAddon
 
     // Create activity state detector with Claude-specific patterns
+    // Any data activity = working, prompt pattern detects waiting for input
     const detector = createActivityStateDetector(
       (state) => setTabState(tabId, state),
       {
-        promptPatterns: [/❯\s/], // Claude uses ❯ prompt (no $ anchor - UI draws out of order)
-        workingPatterns: [/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/] // Braille spinners
+        promptPatterns: [/❯\s/] // Claude uses ❯ prompt (no $ anchor - UI draws out of order)
       }
     )
     detectorRef.current = detector
