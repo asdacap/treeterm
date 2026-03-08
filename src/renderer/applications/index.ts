@@ -1,16 +1,22 @@
 import { applicationRegistry } from '../registry/applicationRegistry'
-import { terminalApplication, createTerminalVariant } from './terminal'
+import { terminalApplication, createTerminalApplication, createTerminalVariant } from './terminal'
 import { filesystemApplication } from './filesystem'
 import { claudeApplication } from './claude'
-import type { TerminalInstance } from '../types'
+import type { TerminalInstance, Settings } from '../types'
 
 // Register all built-in applications
 applicationRegistry.register(terminalApplication)
 applicationRegistry.register(filesystemApplication)
 applicationRegistry.register(claudeApplication)
 
-// Register dynamic terminal variants from settings
-export function registerTerminalVariants(instances: TerminalInstance[]): void {
+// Register dynamic terminal variants from settings and update base terminal
+export function registerTerminalVariants(instances: TerminalInstance[], terminalSettings?: Settings['terminal']): void {
+  // Re-register base terminal with updated startByDefault setting
+  if (terminalSettings !== undefined) {
+    const updatedTerminal = createTerminalApplication(terminalSettings.startByDefault)
+    applicationRegistry.register(updatedTerminal)
+  }
+
   // First, unregister any existing dynamic terminals
   const allApps = applicationRegistry.getAll()
   for (const app of allApps) {
