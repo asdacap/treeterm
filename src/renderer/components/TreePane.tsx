@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { Loader2 } from 'lucide-react'
 import { useWorkspaceStore } from '../store/workspace'
 import { useActivityStateStore } from '../store/activityState'
 import MergeDialog from './MergeDialog'
@@ -27,7 +28,7 @@ function WorkspaceActivityIndicator({ tabIds }: { tabIds: string[] }) {
       className={`tree-item-activity tree-item-activity-${activityState}`}
       title={activityState === 'working' ? 'Working...' : 'Waiting for input'}
     >
-      {activityState === 'working' ? '⟳' : '●'}
+      {activityState === 'working' ? <Loader2 size={10} /> : '●'}
     </span>
   )
 }
