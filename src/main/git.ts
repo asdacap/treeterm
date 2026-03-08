@@ -583,6 +583,46 @@ export async function commitStaged(
   }
 }
 
+// Helper function to parse conflict information from git merge-tree output
+function parseConflicts(output: string): ConflictInfo {
+  const lines = output.split('\n')
+  const conflictedFiles: string[] = []
+  const messages: string[] = []
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('CONFLICT') || trimmed.startsWith('Auto-merging')) {
+      messages.push(trimmed)
+
+      // Extract file paths from CONFLICT messages
+      // Format: "CONFLICT (content): Merge conflict in <filepath>"
+      const mergeConflictMatch = trimmed.match(/Merge conflict in (.+)/)
+      if (mergeConflictMatch) {
+        const filePath = mergeConflictMatch[1].trim()
+        if (!conflictedFiles.includes(filePath)) {
+          conflictedFiles.push(filePath)
+        }
+      }
+
+      // Format: "CONFLICT (add/add): Merge conflict in <filepath>"
+      // Format: "CONFLICT (modify/delete): <filepath> deleted in ..."
+      const conflictPathMatch = trimmed.match(/CONFLICT \([^)]+\): (.+?) (?:deleted|renamed|modified)/)
+      if (conflictPathMatch) {
+        const filePath = conflictPathMatch[1].trim()
+        if (!conflictedFiles.includes(filePath)) {
+          conflictedFiles.push(filePath)
+        }
+      }
+    }
+  }
+
+  return {
+    hasConflicts: conflictedFiles.length > 0,
+    conflictedFiles,
+    messages
+  }
+}
+
 export async function checkMergeConflicts(
   repoPath: string,
   sourceBranch: string,
@@ -602,8 +642,16 @@ export async function checkMergeConflicts(
       sourceBranch
     ])
 
-    // If we get here without error, merge-tree succeeded (clean merge)
-    // The output is just the tree OID
+    // simple-git may not throw an error even when git exits with code 1 for conflicts
+    // Check the result string for conflict indicators
+    if (result.includes('CONFLICT') || result.includes('Merge conflict')) {
+      return {
+        success: true,
+        conflicts: parseConflicts(result)
+      }
+    }
+
+    // Clean merge - the output is just the tree OID
     return {
       success: true,
       conflicts: {
@@ -618,45 +666,9 @@ export async function checkMergeConflicts(
     // git merge-tree returns exit code 1 for conflicts
     // Check if this is a conflict vs an actual error
     if (errorMessage.includes('CONFLICT') || errorMessage.includes('Merge conflict')) {
-      // Parse conflicts from error message
-      const lines = errorMessage.split('\n')
-      const conflictedFiles: string[] = []
-      const messages: string[] = []
-
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (trimmed.startsWith('CONFLICT') || trimmed.startsWith('Auto-merging')) {
-          messages.push(trimmed)
-
-          // Extract file paths from CONFLICT messages
-          // Format: "CONFLICT (content): Merge conflict in <filepath>"
-          const mergeConflictMatch = trimmed.match(/Merge conflict in (.+)/)
-          if (mergeConflictMatch) {
-            const filePath = mergeConflictMatch[1].trim()
-            if (!conflictedFiles.includes(filePath)) {
-              conflictedFiles.push(filePath)
-            }
-          }
-
-          // Format: "CONFLICT (add/add): Merge conflict in <filepath>"
-          // Format: "CONFLICT (modify/delete): <filepath> deleted in ..."
-          const conflictPathMatch = trimmed.match(/CONFLICT \([^)]+\): (.+?) (?:deleted|renamed|modified)/)
-          if (conflictPathMatch) {
-            const filePath = conflictPathMatch[1].trim()
-            if (!conflictedFiles.includes(filePath)) {
-              conflictedFiles.push(filePath)
-            }
-          }
-        }
-      }
-
       return {
         success: true,
-        conflicts: {
-          hasConflicts: true,
-          conflictedFiles,
-          messages
-        }
+        conflicts: parseConflicts(errorMessage)
       }
     }
 
