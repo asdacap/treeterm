@@ -524,6 +524,14 @@ body,
   flex: 1;
 }
 
+.app-wrapper {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
 .terminal-wrapper {
   height: 100%;
   display: flex;

@@ -240,7 +240,7 @@ export default function WorkspacePane() {
             return (
               <div
                 key={`${workspace.id}-${tab.id}`}
-                className={`${tab.applicationId}-wrapper`}
+                className={`app-wrapper ${tab.applicationId}-wrapper`}
                 style={{ display: isVisible ? app.displayStyle : 'none' }}
               >
                 {app.render({
