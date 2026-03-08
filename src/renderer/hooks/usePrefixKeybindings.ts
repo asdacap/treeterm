@@ -1,6 +1,8 @@
-import { useEffect, useCallback, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
+import { parseKeybinding } from 'tinykeys'
 import { useSettingsStore } from '../store/settings'
 import { usePrefixModeStore } from '../store/prefixMode'
+import { convertDirectKeybinding } from '../utils/keybindingConverter'
 import type { Settings } from '../types'
 
 export interface KeybindingHandlers {
@@ -9,24 +11,6 @@ export interface KeybindingHandlers {
   nextTab?: () => void
   prevTab?: () => void
   openSettings?: () => void
-}
-
-function matchesKeybinding(e: KeyboardEvent, keybinding: string): boolean {
-  const parts = keybinding.split('+')
-  const key = parts[parts.length - 1]
-  const hasCmd = parts.includes('CommandOrControl') || parts.includes('Control')
-  const hasShift = parts.includes('Shift')
-  const hasAlt = parts.includes('Alt')
-
-  const cmdMatch = hasCmd ? e.metaKey || e.ctrlKey : !e.metaKey && !e.ctrlKey
-  const shiftMatch = hasShift ? e.shiftKey : !e.shiftKey
-  const altMatch = hasAlt ? e.altKey : !e.altKey
-
-  const pressedKey = e.key.length === 1 ? e.key.toUpperCase() : e.key
-  const targetKey = key.length === 1 ? key.toUpperCase() : key
-  const keyMatch = pressedKey === targetKey || e.key === key
-
-  return cmdMatch && shiftMatch && altMatch && keyMatch
 }
 
 export function usePrefixKeybindings(handlers: KeybindingHandlers) {
@@ -62,33 +46,49 @@ export function usePrefixKeybindings(handlers: KeybindingHandlers) {
     (e: KeyboardEvent) => {
       const { prefixMode, keybindings } = settings
 
-      // Check for prefix key
-      if (prefixMode.enabled && matchesKeybinding(e, prefixMode.prefixKey)) {
-        e.preventDefault()
-        if (prefixState === 'idle') {
-          activate()
-        } else {
-          // Pressing prefix again cancels prefix mode
-          deactivate()
+      // Action map for all keybindings
+      const actionMap: Record<keyof Settings['keybindings'], keyof KeybindingHandlers> = {
+        newTab: 'newTab',
+        closeTab: 'closeTab',
+        nextTab: 'nextTab',
+        prevTab: 'prevTab',
+        openSettings: 'openSettings'
+      }
+
+      // Check for prefix key activation
+      const prefixKeybinding = convertDirectKeybinding(prefixMode.prefixKey)
+      const prefixParts = parseKeybinding(prefixKeybinding)
+
+      // parseKeybinding returns [[modifiers, key]], get first sequence
+      if (prefixParts.length > 0) {
+        const [modifiers, key] = prefixParts[0]
+        if (matchesKeybinding(e, modifiers, key)) {
+          e.preventDefault()
+          if (prefixState === 'idle') {
+            activate()
+          } else {
+            // Pressing prefix again cancels prefix mode
+            deactivate()
+          }
+          return
         }
-        return
       }
 
       // If in prefix mode, check for action keys
-      if (prefixMode.enabled && prefixState === 'active') {
+      if (prefixState === 'active') {
         const actionKey = e.key.toLowerCase()
 
-        const actionMap: Record<keyof Settings['keybindings'], keyof KeybindingHandlers> = {
-          newTab: 'newTab',
-          closeTab: 'closeTab',
-          nextTab: 'nextTab',
-          prevTab: 'prevTab',
-          openSettings: 'openSettings'
+        // Check for Escape to cancel
+        if (actionKey === 'escape') {
+          e.preventDefault()
+          deactivate()
+          return
         }
 
+        // Check for prefix mode bindings
         for (const [action, handlerKey] of Object.entries(actionMap)) {
           const binding = keybindings[action as keyof Settings['keybindings']]
-          if (binding.prefixMode?.toLowerCase() === actionKey) {
+          if (binding.toLowerCase() === actionKey) {
             e.preventDefault()
             deactivate()
             handlers[handlerKey]?.()
@@ -103,26 +103,6 @@ export function usePrefixKeybindings(handlers: KeybindingHandlers) {
         }
         return
       }
-
-      // Check direct keybindings (when prefix mode disabled or in idle state)
-      if (!prefixMode.enabled || prefixState === 'idle') {
-        const actionMap: Record<keyof Settings['keybindings'], keyof KeybindingHandlers> = {
-          newTab: 'newTab',
-          closeTab: 'closeTab',
-          nextTab: 'nextTab',
-          prevTab: 'prevTab',
-          openSettings: 'openSettings'
-        }
-
-        for (const [action, handlerKey] of Object.entries(actionMap)) {
-          const binding = keybindings[action as keyof Settings['keybindings']]
-          if (binding.direct && matchesKeybinding(e, binding.direct)) {
-            e.preventDefault()
-            handlers[handlerKey]?.()
-            return
-          }
-        }
-      }
     },
     [settings, prefixState, activate, deactivate, handlers]
   )
@@ -132,4 +112,24 @@ export function usePrefixKeybindings(handlers: KeybindingHandlers) {
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
   }, [handleKeyDown])
+}
+
+// Helper function to match a keybinding event
+// modifiers is an array of modifier keys like ["Meta", "Shift"]
+// key is the main key like "t"
+function matchesKeybinding(event: KeyboardEvent, modifiers: string[], key: string): boolean {
+  const hasControl = modifiers.includes('Control')
+  const hasShift = modifiers.includes('Shift')
+  const hasAlt = modifiers.includes('Alt')
+  const hasMeta = modifiers.includes('Meta')
+
+  const controlMatch = hasControl ? event.ctrlKey : !event.ctrlKey
+  const shiftMatch = hasShift ? event.shiftKey : !event.shiftKey
+  const altMatch = hasAlt ? event.altKey : !event.altKey
+  const metaMatch = hasMeta ? event.metaKey : !event.metaKey
+
+  const eventKey = event.key.toLowerCase()
+  const targetKey = key.toLowerCase()
+
+  return controlMatch && shiftMatch && altMatch && metaMatch && eventKey === targetKey
 }

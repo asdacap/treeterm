@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { Settings, KeybindingAction } from '../types'
+import type { Settings } from '../types'
 import { useSettingsStore } from '../store/settings'
 // Import applications to ensure they are registered
 import '../applications'
@@ -20,10 +20,9 @@ const tabs: { id: TabId; label: string }[] = [
   { id: 'keybindings', label: 'Keybindings' }
 ]
 
-// Recording state type - can be for direct keybinding or prefix key
+// Recording state type - can be for keybinding or prefix key
 type RecordingState =
-  | { type: 'direct'; action: keyof Settings['keybindings'] }
-  | { type: 'prefixMode'; action: keyof Settings['keybindings'] }
+  | { type: 'keybinding'; action: keyof Settings['keybindings'] }
   | { type: 'prefixKey' }
   | null
 
@@ -60,24 +59,21 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
       // Skip if only modifier keys are pressed
       if (['Meta', 'Control', 'Alt', 'Shift'].includes(key)) return
 
-      if (recording.type === 'prefixMode') {
-        // For prefix mode, we just capture the single key (no modifiers)
-        const prefixModeKey = key.length === 1 ? key.toLowerCase() : key
+      if (recording.type === 'keybinding') {
+        // For keybindings, we just capture the single key (no modifiers)
+        const actionKey = key.length === 1 ? key.toLowerCase() : key
         setLocalSettings((prev) => ({
           ...prev,
           keybindings: {
             ...prev.keybindings,
-            [recording.action]: {
-              ...prev.keybindings[recording.action],
-              prefixMode: prefixModeKey
-            }
+            [recording.action]: actionKey
           }
         }))
         setRecording(null)
         return
       }
 
-      // For direct keybindings and prefix key, capture with modifiers
+      // For prefix key, capture with modifiers
       const parts: string[] = []
       if (e.metaKey || e.ctrlKey) parts.push('CommandOrControl')
       if (e.altKey) parts.push('Alt')
@@ -93,20 +89,8 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
             prefixKey: keybinding
           }
         }))
-      } else {
-        // recording.type === 'direct'
-        setLocalSettings((prev) => ({
-          ...prev,
-          keybindings: {
-            ...prev.keybindings,
-            [recording.action]: {
-              ...prev.keybindings[recording.action],
-              direct: keybinding
-            }
-          }
-        }))
+        setRecording(null)
       }
-      setRecording(null)
     },
     [recording]
   )
@@ -392,129 +376,79 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
 
             {activeTab === 'keybindings' && (
               <div className="settings-section">
-                {/* Prefix Mode Toggle */}
+                {/* Prefix Key Configuration */}
                 <div className="settings-group">
-                  <label className="settings-checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={localSettings.prefixMode.enabled}
-                      onChange={(e) =>
-                        setLocalSettings((prev) => ({
-                          ...prev,
-                          prefixMode: { ...prev.prefixMode, enabled: e.target.checked }
-                        }))
-                      }
-                    />
-                    Enable Prefix Mode (tmux-style)
-                  </label>
+                  <label className="settings-label">Prefix Key</label>
+                  <button
+                    className={`settings-keybinding ${recording?.type === 'prefixKey' ? 'recording' : ''}`}
+                    onClick={() =>
+                      setRecording(
+                        recording?.type === 'prefixKey' ? null : { type: 'prefixKey' }
+                      )
+                    }
+                  >
+                    {recording?.type === 'prefixKey'
+                      ? 'Press keys...'
+                      : formatKeybinding(localSettings.prefixMode.prefixKey)}
+                  </button>
                   <p className="settings-hint">
                     Press a prefix key first, then the action key. Like tmux or screen.
                   </p>
                 </div>
 
-                {/* Prefix Key Configuration */}
-                {localSettings.prefixMode.enabled && (
-                  <>
-                    <div className="settings-group">
-                      <label className="settings-label">Prefix Key</label>
-                      <button
-                        className={`settings-keybinding ${recording?.type === 'prefixKey' ? 'recording' : ''}`}
-                        onClick={() =>
-                          setRecording(
-                            recording?.type === 'prefixKey' ? null : { type: 'prefixKey' }
-                          )
+                <div className="settings-group">
+                  <label className="settings-label">Timeout (ms)</label>
+                  <input
+                    type="number"
+                    className="settings-input"
+                    value={localSettings.prefixMode.timeout}
+                    min={500}
+                    max={5000}
+                    step={100}
+                    onChange={(e) =>
+                      setLocalSettings((prev) => ({
+                        ...prev,
+                        prefixMode: {
+                          ...prev.prefixMode,
+                          timeout: parseInt(e.target.value) || 1500
                         }
-                      >
-                        {recording?.type === 'prefixKey'
-                          ? 'Press keys...'
-                          : formatKeybinding(localSettings.prefixMode.prefixKey)}
-                      </button>
-                    </div>
+                      }))
+                    }
+                  />
+                  <p className="settings-hint">
+                    How long to wait for action key after pressing prefix (500-5000ms)
+                  </p>
+                </div>
 
-                    <div className="settings-group">
-                      <label className="settings-label">Timeout (ms)</label>
-                      <input
-                        type="number"
-                        className="settings-input"
-                        value={localSettings.prefixMode.timeout}
-                        min={500}
-                        max={5000}
-                        step={100}
-                        onChange={(e) =>
-                          setLocalSettings((prev) => ({
-                            ...prev,
-                            prefixMode: {
-                              ...prev.prefixMode,
-                              timeout: parseInt(e.target.value) || 1500
-                            }
-                          }))
-                        }
-                      />
-                      <p className="settings-hint">
-                        How long to wait for action key after pressing prefix (500-5000ms)
-                      </p>
-                    </div>
-
-                    <hr className="settings-divider" />
-                  </>
-                )}
+                <hr className="settings-divider" />
 
                 {/* Keybinding Actions */}
                 {(
                   Object.entries(localSettings.keybindings) as [
                     keyof Settings['keybindings'],
-                    KeybindingAction
+                    string
                   ][]
                 ).map(([key, binding]) => (
                   <div key={key} className="settings-group keybinding-row">
                     <label className="settings-label">{formatKeybindingLabel(key)}</label>
-                    <div className="keybinding-inputs">
-                      {/* Direct shortcut */}
-                      <div className="keybinding-input-group">
-                        <span className="keybinding-type-label">Direct:</span>
-                        <button
-                          className={`settings-keybinding ${recording?.type === 'direct' && recording.action === key ? 'recording' : ''}`}
-                          onClick={() =>
-                            setRecording(
-                              recording?.type === 'direct' && recording.action === key
-                                ? null
-                                : { type: 'direct', action: key }
-                            )
-                          }
-                        >
-                          {recording?.type === 'direct' && recording.action === key
-                            ? 'Press keys...'
-                            : formatKeybinding(binding.direct || '')}
-                        </button>
-                      </div>
-
-                      {/* Prefix mode key (shown when prefix mode enabled) */}
-                      {localSettings.prefixMode.enabled && (
-                        <div className="keybinding-input-group">
-                          <span className="keybinding-type-label">After prefix:</span>
-                          <button
-                            className={`settings-keybinding prefix-key-btn ${recording?.type === 'prefixMode' && recording.action === key ? 'recording' : ''}`}
-                            onClick={() =>
-                              setRecording(
-                                recording?.type === 'prefixMode' && recording.action === key
-                                  ? null
-                                  : { type: 'prefixMode', action: key }
-                              )
-                            }
-                          >
-                            {recording?.type === 'prefixMode' && recording.action === key
-                              ? 'Press key...'
-                              : binding.prefixMode || '(none)'}
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                    <button
+                      className={`settings-keybinding prefix-key-btn ${recording?.type === 'keybinding' && recording.action === key ? 'recording' : ''}`}
+                      onClick={() =>
+                        setRecording(
+                          recording?.type === 'keybinding' && recording.action === key
+                            ? null
+                            : { type: 'keybinding', action: key }
+                        )
+                      }
+                    >
+                      {recording?.type === 'keybinding' && recording.action === key
+                        ? 'Press key...'
+                        : binding.toUpperCase()}
+                    </button>
                   </div>
                 ))}
                 <p className="settings-hint">
-                  {localSettings.prefixMode.enabled
-                    ? 'Configure both direct shortcuts and keys to press after the prefix key.'
-                    : 'Click a keybinding to record a new shortcut. Enable prefix mode above for tmux-style keybindings.'}
+                  Click a keybinding to record a new key. Press the prefix key first, then the action key shown here.
                 </p>
               </div>
             )}

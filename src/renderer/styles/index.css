@@ -1954,6 +1954,114 @@ body,
   }
 }
 
+/* Keybinding Overlay */
+.keybinding-overlay {
+  position: fixed;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(30, 30, 30, 0.98);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 16px 20px;
+  min-width: 320px;
+  max-width: 450px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  z-index: 9999;
+  animation: overlay-appear 0.2s ease-out;
+  backdrop-filter: blur(10px);
+}
+
+.keybinding-overlay-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.keybinding-overlay-prefix {
+  font-family: monospace;
+  background: var(--accent);
+  color: white;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.keybinding-overlay-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 13px;
+  flex: 1;
+}
+
+.keybinding-overlay-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.keybinding-overlay-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 16px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.keybinding-overlay-item {
+  display: contents;
+}
+
+.keybinding-overlay-key {
+  font-family: monospace;
+  background: var(--bg-tertiary);
+  color: var(--accent);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 14px;
+  text-align: center;
+  min-width: 36px;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  display: inline-block;
+}
+
+.keybinding-overlay-action {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.keybinding-overlay-progress {
+  margin-top: 12px;
+  height: 3px;
+  background: var(--bg-tertiary);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.keybinding-overlay-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #00a6ff);
+  transition: width 0.016s linear;
+  border-radius: 2px;
+}
+
+@keyframes overlay-appear {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
 /* Settings Divider */
 .settings-divider {
   border: none;

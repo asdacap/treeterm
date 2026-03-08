@@ -25,16 +25,15 @@ const defaultSettings: Settings = {
     theme: 'dark'
   },
   prefixMode: {
-    enabled: false,
     prefixKey: 'Control+B',
     timeout: 1500
   },
   keybindings: {
-    newTab: { direct: 'CommandOrControl+T', prefixMode: 'c' },
-    closeTab: { direct: 'CommandOrControl+W', prefixMode: 'x' },
-    nextTab: { direct: 'CommandOrControl+Shift+]', prefixMode: 'n' },
-    prevTab: { direct: 'CommandOrControl+Shift+[', prefixMode: 'p' },
-    openSettings: { direct: 'CommandOrControl+,' }
+    newTab: 'c',
+    closeTab: 'x',
+    nextTab: 'n',
+    prevTab: 'p',
+    openSettings: ','
   }
 }
 

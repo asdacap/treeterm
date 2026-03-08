@@ -5,7 +5,7 @@ import { usePrefixKeybindings } from '../hooks/usePrefixKeybindings'
 import TabBar from './TabBar'
 import MergeDialog from './MergeDialog'
 import CreateChildDialog from './CreateChildDialog'
-import PrefixModeIndicator from './PrefixModeIndicator'
+import KeybindingOverlay from './KeybindingOverlay'
 // Import applications to ensure they are registered
 import '../applications'
 
@@ -277,8 +277,8 @@ export default function WorkspacePane() {
         />
       )}
 
-      {/* Prefix Mode Indicator */}
-      <PrefixModeIndicator />
+      {/* Keybinding Overlay */}
+      <KeybindingOverlay />
     </div>
   )
 }
