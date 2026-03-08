@@ -36,6 +36,7 @@ import { createApplicationMenu } from './menu'
 import { registerFilesystemHandlers } from './filesystem'
 
 let mainWindow: BrowserWindow | null = null
+let closeConfirmed = false
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -68,6 +69,14 @@ function createWindow(): void {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
+  })
+
+  // Intercept close event to check for unmerged workspaces
+  mainWindow.on('close', (event) => {
+    if (!closeConfirmed) {
+      event.preventDefault()
+      mainWindow?.webContents.send('app:confirm-close')
+    }
   })
 
   // Load the renderer
@@ -219,6 +228,16 @@ ipcMain.handle('app:getInitialWorkspace', () => {
   const path = initialWorkspacePath
   initialWorkspacePath = null // Clear after first read
   return path
+})
+
+// App close confirmation IPC handlers
+ipcMain.on('app:close-confirmed', () => {
+  closeConfirmed = true
+  mainWindow?.close()
+})
+
+ipcMain.on('app:close-cancelled', () => {
+  closeConfirmed = false
 })
 
 // App lifecycle

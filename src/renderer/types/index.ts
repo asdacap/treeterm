@@ -257,6 +257,12 @@ export interface SandboxApi {
   isAvailable: () => Promise<boolean>
 }
 
+export interface AppApi {
+  onCloseConfirm: (callback: () => void) => () => void
+  confirmClose: () => void
+  cancelClose: () => void
+}
+
 export interface ElectronApi {
   platform: NodeJS.Platform
   terminal: TerminalApi
@@ -266,6 +272,7 @@ export interface ElectronApi {
   filesystem: FilesystemApi
   sandbox: SandboxApi
   getInitialWorkspace: () => Promise<string | null>
+  app: AppApi
 }
 
 declare global {

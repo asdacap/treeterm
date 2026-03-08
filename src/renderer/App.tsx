@@ -1,22 +1,45 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import TreePane from './components/TreePane'
 import WorkspacePane from './components/WorkspacePane'
 import SettingsDialog from './components/SettingsDialog'
+import CloseConfirmDialog from './components/CloseConfirmDialog'
 import { useSettingsStore } from './store/settings'
-import { useWorkspaceStore } from './store/workspace'
+import { useWorkspaceStore, getUnmergedSubWorkspaces } from './store/workspace'
+import type { Workspace } from './types'
 
 export default function App() {
   const [treeWidth, setTreeWidth] = useState(250)
   const [isResizing, setIsResizing] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false)
+  const [unmergedWorkspaces, setUnmergedWorkspaces] = useState<Workspace[]>([])
   const { loadSettings } = useSettingsStore()
+  const { workspaces } = useWorkspaceStore()
+
+  // Use ref to access latest workspaces in the close confirm callback
+  const workspacesRef = useRef(workspaces)
+  workspacesRef.current = workspaces
 
   useEffect(() => {
     loadSettings()
-    const unsubscribe = window.electron.settings.onOpen(() => {
+    const unsubSettings = window.electron.settings.onOpen(() => {
       setIsSettingsOpen(true)
     })
-    return () => unsubscribe()
+
+    const unsubClose = window.electron.app.onCloseConfirm(() => {
+      const unmerged = getUnmergedSubWorkspaces(workspacesRef.current)
+      if (unmerged.length > 0) {
+        setUnmergedWorkspaces(unmerged)
+        setShowCloseConfirm(true)
+      } else {
+        window.electron.app.confirmClose()
+      }
+    })
+
+    return () => {
+      unsubSettings()
+      unsubClose()
+    }
   }, [loadSettings])
 
   // Handle initial workspace from CLI
@@ -41,6 +64,16 @@ export default function App() {
 
     handleInitialWorkspace()
   }, [])
+
+  const handleConfirmClose = () => {
+    setShowCloseConfirm(false)
+    window.electron.app.confirmClose()
+  }
+
+  const handleCancelClose = () => {
+    setShowCloseConfirm(false)
+    window.electron.app.cancelClose()
+  }
 
   const handleMouseDown = useCallback(() => {
     setIsResizing(true)
@@ -77,6 +110,13 @@ export default function App() {
         <WorkspacePane />
       </div>
       <SettingsDialog isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      {showCloseConfirm && (
+        <CloseConfirmDialog
+          unmergedWorkspaces={unmergedWorkspaces}
+          onConfirm={handleConfirmClose}
+          onCancel={handleCancelClose}
+        />
+      )}
     </div>
   )
 }
