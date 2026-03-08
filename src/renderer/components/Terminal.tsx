@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { useWorkspaceStore } from '../store/workspace'
 import { useSettingsStore } from '../store/settings'
 import TerminalScrollWrapper from './TerminalScrollWrapper'
+import DebugRawChars from './DebugRawChars'
 import type { TerminalState, SandboxConfig } from '../types'
 import '@xterm/xterm/css/xterm.css'
 
@@ -23,6 +24,8 @@ export default function Terminal({ cwd, workspaceId, tabId, config, sandbox, isV
   const ptyIdRef = useRef<string | null>(null)
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const isMountedRef = useRef(true)
+  const rawCharsRef = useRef<string>('')
+  const [rawCharsDisplay, setRawCharsDisplay] = useState<string>('')
 
   const workspace = useWorkspaceStore((state) => state.workspaces[workspaceId])
   const updateTabState = useWorkspaceStore((state) => state.updateTabState)
@@ -87,6 +90,11 @@ export default function Terminal({ cwd, workspaceId, tabId, config, sandbox, isV
       ptyIdRef.current = id
       unsubscribeRef.current = window.electron.terminal.onData(id, (data) => {
         terminal.write(data)
+        // Capture last 50 raw characters for debug display
+        rawCharsRef.current = (rawCharsRef.current + data).slice(-50)
+        if (settings.terminal.showRawChars) {
+          setRawCharsDisplay(rawCharsRef.current)
+        }
       })
       window.electron.terminal.resize(id, terminal.cols, terminal.rows)
     }
@@ -183,9 +191,19 @@ export default function Terminal({ cwd, workspaceId, tabId, config, sandbox, isV
     }
   }, [isVisible])
 
+  // Update raw chars display when setting changes
+  useEffect(() => {
+    if (settings.terminal.showRawChars) {
+      setRawCharsDisplay(rawCharsRef.current)
+    } else {
+      setRawCharsDisplay('')
+    }
+  }, [settings.terminal.showRawChars])
+
   return (
     <TerminalScrollWrapper terminalRef={terminalRef}>
       <div ref={containerRef} className="terminal-container" />
+      {settings.terminal.showRawChars && <DebugRawChars rawChars={rawCharsDisplay} />}
     </TerminalScrollWrapper>
   )
 }

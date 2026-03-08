@@ -1,10 +1,12 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { useWorkspaceStore } from '../store/workspace'
+import { useSettingsStore } from '../store/settings'
 import { useActivityStateStore } from '../store/activityState'
 import { createActivityStateDetector } from '../utils/activityStateDetector'
 import TerminalScrollWrapper from './TerminalScrollWrapper'
+import DebugRawChars from './DebugRawChars'
 import type { SandboxConfig } from '../types'
 import type { ClaudeState } from '../applications/claude'
 import '@xterm/xterm/css/xterm.css'
@@ -25,10 +27,13 @@ export default function Claude({ cwd, workspaceId, tabId, sandbox, isVisible }: 
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const detectorRef = useRef<ReturnType<typeof createActivityStateDetector> | null>(null)
   const isMountedRef = useRef(true)
+  const rawCharsRef = useRef<string>('')
+  const [rawCharsDisplay, setRawCharsDisplay] = useState<string>('')
 
   const workspace = useWorkspaceStore((state) => state.workspaces[workspaceId])
   const updateTabState = useWorkspaceStore((state) => state.updateTabState)
   const setTabState = useActivityStateStore((state) => state.setTabState)
+  const settings = useSettingsStore((state) => state.settings)
 
   // Get existing ptyId from store for reconnection
   const tab = workspace?.tabs.find((t) => t.id === tabId)
@@ -101,6 +106,11 @@ export default function Claude({ cwd, workspaceId, tabId, sandbox, isVisible }: 
         terminal.write(data)
         // Process data for activity state detection
         detector.processData(data)
+        // Capture last 50 raw characters for debug display
+        rawCharsRef.current = (rawCharsRef.current + data).slice(-50)
+        if (settings.terminal.showRawChars) {
+          setRawCharsDisplay(rawCharsRef.current)
+        }
       })
       window.electron.terminal.resize(id, terminal.cols, terminal.rows)
     }
@@ -197,9 +207,19 @@ export default function Claude({ cwd, workspaceId, tabId, sandbox, isVisible }: 
     }
   }, [isVisible])
 
+  // Update raw chars display when setting changes
+  useEffect(() => {
+    if (settings.terminal.showRawChars) {
+      setRawCharsDisplay(rawCharsRef.current)
+    } else {
+      setRawCharsDisplay('')
+    }
+  }, [settings.terminal.showRawChars])
+
   return (
     <TerminalScrollWrapper terminalRef={terminalRef}>
       <div ref={containerRef} className="terminal-container" />
+      {settings.terminal.showRawChars && <DebugRawChars rawChars={rawCharsDisplay} />}
     </TerminalScrollWrapper>
   )
 }

@@ -18,6 +18,7 @@ export interface Settings {
     fontFamily: string
     cursorStyle: 'block' | 'underline' | 'bar'
     cursorBlink: boolean
+    showRawChars: boolean
   }
   sandbox: {
     enabledByDefault: boolean
@@ -47,7 +48,8 @@ const defaultSettings: Settings = {
     fontSize: 14,
     fontFamily: 'Menlo, Monaco, Consolas, monospace',
     cursorStyle: 'block',
-    cursorBlink: true
+    cursorBlink: true,
+    showRawChars: false
   },
   sandbox: {
     enabledByDefault: false,
