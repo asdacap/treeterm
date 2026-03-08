@@ -593,10 +593,11 @@ export async function checkMergeConflicts(
 
     // Use git merge-tree --write-tree to simulate merge
     // This performs a 3-way merge without touching the working tree
+    // Note: We intentionally don't use --no-messages because we need the
+    // conflict messages to detect and report conflicts to the user
     const result = await git.raw([
       'merge-tree',
       '--write-tree',
-      '--no-messages',
       targetBranch,
       sourceBranch
     ])
