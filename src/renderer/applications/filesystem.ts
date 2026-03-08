@@ -25,5 +25,6 @@ export const filesystemApplication: Application<FilesystemState> = {
   canHaveMultiple: false,
   showInNewTabMenu: false,
   keepAlive: false,
-  displayStyle: 'flex'
+  displayStyle: 'flex',
+  isDefault: true
 }

@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { Settings, ApplicationInstance } from '../types'
+import type { Settings } from '../types'
 import { useSettingsStore } from '../store/settings'
-import { applicationRegistry } from '../registry/applicationRegistry'
 // Import applications to ensure they are registered
 import '../applications'
 
@@ -10,14 +9,14 @@ interface SettingsDialogProps {
   onClose: () => void
 }
 
-type TabId = 'terminal' | 'sandbox' | 'appearance' | 'keybindings' | 'applications'
+type TabId = 'terminal' | 'sandbox' | 'appearance' | 'keybindings' | 'terminal-profiles'
 
 const tabs: { id: TabId; label: string }[] = [
   { id: 'terminal', label: 'Terminal' },
+  { id: 'terminal-profiles', label: 'Terminal Profiles' },
   { id: 'sandbox', label: 'Sandbox' },
   { id: 'appearance', label: 'Appearance' },
-  { id: 'keybindings', label: 'Keybindings' },
-  { id: 'applications', label: 'Applications' }
+  { id: 'keybindings', label: 'Keybindings' }
 ]
 
 export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
@@ -292,123 +291,131 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
               </div>
             )}
 
-            {activeTab === 'applications' && (
+            {activeTab === 'terminal-profiles' && (
               <div className="settings-section">
+                <p className="settings-hint">
+                  Create custom terminal profiles with startup commands.
+                  These appear as separate options in the new tab menu.
+                </p>
                 <div className="applications-list">
-                  {localSettings.applications.map((inst, index) => {
-                    const app = applicationRegistry.get(inst.applicationId)
-                    const isTerminal = inst.applicationId === 'terminal'
-
-                    return (
-                      <div key={inst.id} className="application-item">
-                        <div className="application-icon">
-                          <input
-                            type="text"
-                            className="settings-input icon-input"
-                            value={inst.icon}
-                            maxLength={2}
-                            onChange={(e) =>
-                              setLocalSettings((prev) => ({
-                                ...prev,
-                                applications: prev.applications.map((a, i) =>
+                  {localSettings.terminal.instances.map((inst, index) => (
+                    <div key={inst.id} className="application-item">
+                      <div className="application-icon">
+                        <input
+                          type="text"
+                          className="settings-input icon-input"
+                          value={inst.icon}
+                          maxLength={2}
+                          onChange={(e) =>
+                            setLocalSettings((prev) => ({
+                              ...prev,
+                              terminal: {
+                                ...prev.terminal,
+                                instances: prev.terminal.instances.map((a, i) =>
                                   i === index ? { ...a, icon: e.target.value } : a
                                 )
-                              }))
-                            }
-                          />
-                        </div>
-                        <div className="application-fields">
-                          <input
-                            type="text"
-                            className="settings-input"
-                            value={inst.name}
-                            placeholder="Name"
-                            onChange={(e) =>
-                              setLocalSettings((prev) => ({
-                                ...prev,
-                                applications: prev.applications.map((a, i) =>
+                              }
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="application-fields">
+                        <input
+                          type="text"
+                          className="settings-input"
+                          value={inst.name}
+                          placeholder="Name"
+                          onChange={(e) =>
+                            setLocalSettings((prev) => ({
+                              ...prev,
+                              terminal: {
+                                ...prev.terminal,
+                                instances: prev.terminal.instances.map((a, i) =>
                                   i === index ? { ...a, name: e.target.value } : a
                                 )
-                              }))
-                            }
-                          />
-                          {isTerminal && (
-                            <input
-                              type="text"
-                              className="settings-input"
-                              value={(inst.config.command as string) || ''}
-                              placeholder="Startup command (optional)"
-                              onChange={(e) =>
-                                setLocalSettings((prev) => ({
-                                  ...prev,
-                                  applications: prev.applications.map((a, i) =>
-                                    i === index
-                                      ? { ...a, config: { ...a.config, command: e.target.value } }
-                                      : a
-                                  )
-                                }))
                               }
-                            />
-                          )}
-                          <span className="application-type">{app?.name || inst.applicationId}</span>
-                        </div>
-                        <label className="settings-checkbox-label default-checkbox">
-                          <input
-                            type="checkbox"
-                            checked={inst.isDefault}
-                            onChange={(e) =>
-                              setLocalSettings((prev) => ({
-                                ...prev,
-                                applications: prev.applications.map((a, i) =>
+                            }))
+                          }
+                        />
+                        <input
+                          type="text"
+                          className="settings-input"
+                          value={inst.startupCommand}
+                          placeholder="Startup command"
+                          onChange={(e) =>
+                            setLocalSettings((prev) => ({
+                              ...prev,
+                              terminal: {
+                                ...prev.terminal,
+                                instances: prev.terminal.instances.map((a, i) =>
+                                  i === index ? { ...a, startupCommand: e.target.value } : a
+                                )
+                              }
+                            }))
+                          }
+                        />
+                      </div>
+                      <label className="settings-checkbox-label default-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={inst.isDefault}
+                          onChange={(e) =>
+                            setLocalSettings((prev) => ({
+                              ...prev,
+                              terminal: {
+                                ...prev.terminal,
+                                instances: prev.terminal.instances.map((a, i) =>
                                   i === index ? { ...a, isDefault: e.target.checked } : a
                                 )
-                              }))
+                              }
+                            }))
+                          }
+                        />
+                        Default
+                      </label>
+                      <button
+                        className="application-delete"
+                        onClick={() =>
+                          setLocalSettings((prev) => ({
+                            ...prev,
+                            terminal: {
+                              ...prev.terminal,
+                              instances: prev.terminal.instances.filter((_, i) => i !== index)
                             }
-                          />
-                          Default
-                        </label>
-                        {!inst.isBuiltIn && (
-                          <button
-                            className="application-delete"
-                            onClick={() =>
-                              setLocalSettings((prev) => ({
-                                ...prev,
-                                applications: prev.applications.filter((_, i) => i !== index)
-                              }))
-                            }
-                          >
-                            Delete
-                          </button>
-                        )}
-                      </div>
-                    )
-                  })}
+                          }))
+                        }
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ))}
                 </div>
                 <button
                   className="settings-btn add-app"
                   onClick={() => {
-                    const newId = `app-${Date.now()}`
+                    const newId = `term-${Date.now()}`
                     setLocalSettings((prev) => ({
                       ...prev,
-                      applications: [
-                        ...prev.applications,
-                        {
-                          id: newId,
-                          applicationId: 'terminal',
-                          name: 'New Terminal',
-                          icon: '>',
-                          config: {},
-                          isDefault: false,
-                          isBuiltIn: false
-                        }
-                      ]
+                      terminal: {
+                        ...prev.terminal,
+                        instances: [
+                          ...prev.terminal.instances,
+                          {
+                            id: newId,
+                            name: 'New Terminal',
+                            icon: '>',
+                            startupCommand: '',
+                            isDefault: false
+                          }
+                        ]
+                      }
                     }))
                   }}
                 >
-                  + Add Terminal
+                  + Add Terminal Profile
                 </button>
                 <p className="settings-hint">
-                  Default applications open automatically in new workspaces
+                  Default profiles open automatically in new workspaces.
                 </p>
               </div>
             )}

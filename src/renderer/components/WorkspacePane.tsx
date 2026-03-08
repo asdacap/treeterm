@@ -48,25 +48,23 @@ export default function WorkspacePane() {
   const [showMergeDialog, setShowMergeDialog] = useState(false)
 
   const handleNewTab = useCallback(
-    (instanceId: string) => {
+    (applicationId: string) => {
       if (activeWorkspaceId) {
-        addTab(activeWorkspaceId, instanceId)
+        addTab(activeWorkspaceId, applicationId)
       }
     },
     [activeWorkspaceId, addTab]
   )
 
-  // Create new tab using the first available application instance
+  // Create new tab using the first available application
   const handleNewDefaultTab = useCallback(() => {
-    // Find the first instance where the app allows new tabs
-    const defaultInstance = settings.applications.find((inst) => {
-      const app = applicationRegistry.get(inst.applicationId)
-      return app?.showInNewTabMenu && app?.canHaveMultiple
-    })
-    if (activeWorkspaceId && defaultInstance) {
-      addTab(activeWorkspaceId, defaultInstance.id)
+    // Find the first app that allows new tabs
+    const menuApps = applicationRegistry.getMenuItems()
+    const defaultApp = menuApps.find((app) => app.canHaveMultiple)
+    if (activeWorkspaceId && defaultApp) {
+      addTab(activeWorkspaceId, defaultApp.id)
     }
-  }, [activeWorkspaceId, addTab, settings.applications])
+  }, [activeWorkspaceId, addTab])
 
   const handleCloseTab = useCallback(
     (tabId: string) => {
@@ -220,7 +218,6 @@ export default function WorkspacePane() {
         activeTabId={activeTabId}
         onSelectTab={handleSelectTab}
         onCloseTab={handleCloseTab}
-        instances={settings.applications}
         onNewTab={handleNewTab}
       />
       <div className="workspace-terminal">

@@ -1,18 +1,15 @@
 import { create } from 'zustand'
-import type { Settings, ApplicationInstance } from '../types'
-
-const defaultApplicationInstances: ApplicationInstance[] = [
-  { id: 'files', applicationId: 'filesystem', name: 'Files', icon: '\uD83D\uDCC2', config: {}, isDefault: true, isBuiltIn: true },
-  { id: 'default-terminal', applicationId: 'terminal', name: 'Terminal', icon: '>', config: {}, isDefault: true, isBuiltIn: true },
-  { id: 'claude', applicationId: 'claude', name: 'Claude', icon: '\u2726', config: {}, isDefault: false, isBuiltIn: true }
-]
+import type { Settings } from '../types'
+import { registerTerminalVariants } from '../applications'
 
 const defaultSettings: Settings = {
   terminal: {
     fontSize: 14,
     fontFamily: 'Menlo, Monaco, Consolas, monospace',
     cursorStyle: 'block',
-    cursorBlink: true
+    cursorBlink: true,
+    showRawChars: false,
+    instances: []
   },
   sandbox: {
     enabledByDefault: false,
@@ -27,8 +24,7 @@ const defaultSettings: Settings = {
     nextTab: 'CommandOrControl+Shift+]',
     prevTab: 'CommandOrControl+Shift+[',
     openSettings: 'CommandOrControl+,'
-  },
-  applications: defaultApplicationInstances
+  }
 }
 
 interface SettingsState {
@@ -51,6 +47,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       const settings = await window.electron.settings.load()
       set({ settings, isLoaded: true })
+      // Register dynamic terminal variants
+      registerTerminalVariants(settings.terminal.instances)
     } catch (error) {
       console.error('Failed to load settings:', error)
       set({ isLoaded: true })
@@ -61,6 +59,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       await window.electron.settings.save(settings)
       set({ settings })
+      // Re-register terminal variants when settings change
+      registerTerminalVariants(settings.terminal.instances)
     } catch (error) {
       console.error('Failed to save settings:', error)
       throw error
