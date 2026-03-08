@@ -107,7 +107,7 @@ export default function Claude({ cwd, workspaceId, tabId, sandbox, isVisible }: 
         // Process data for activity state detection
         detector.processData(data)
         // Capture last 1000 raw characters for debug display
-        rawCharsRef.current = (rawCharsRef.current + data).slice(-1000)
+        rawCharsRef.current = (rawCharsRef.current + data).slice(-50)
         if (settings.terminal.showRawChars) {
           setRawCharsDisplay(rawCharsRef.current)
         }
