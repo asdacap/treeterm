@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { Loader2 } from 'lucide-react'
 import type { Tab, ApplicationInstance } from '../types'
 import { applicationRegistry } from '../registry/applicationRegistry'
 import { useActivityStateStore } from '../store/activityState'
@@ -7,9 +8,9 @@ import { useActivityStateStore } from '../store/activityState'
 function TabActivityIndicator({ tabId }: { tabId: string }) {
   const activityState = useActivityStateStore((state) => state.states[tabId] || 'idle')
 
-  const indicators: Record<string, { icon: string; title: string }> = {
+  const indicators: Record<string, { icon: React.ReactNode; title: string }> = {
     idle: { icon: '○', title: 'Idle' },
-    working: { icon: '⟳', title: 'Working...' },
+    working: { icon: <Loader2 size={10} />, title: 'Working...' },
     waiting_for_input: { icon: '●', title: 'Waiting for input' }
   }
 
