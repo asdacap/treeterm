@@ -93,7 +93,7 @@ export default function Claude({ cwd, workspaceId, tabId, sandbox, isVisible }: 
     const detector = createActivityStateDetector(
       (state) => setTabState(tabId, state),
       {
-        promptPatterns: [/>\s*$/], // Claude uses > prompt
+        promptPatterns: [/❯\s/], // Claude uses ❯ prompt (no $ anchor - UI draws out of order)
         workingPatterns: [/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/] // Braille spinners
       }
     )
@@ -106,8 +106,8 @@ export default function Claude({ cwd, workspaceId, tabId, sandbox, isVisible }: 
         terminal.write(data)
         // Process data for activity state detection
         detector.processData(data)
-        // Capture last 300 raw characters for debug display
-        rawCharsRef.current = (rawCharsRef.current + data).slice(-300)
+        // Capture last 1000 raw characters for debug display
+        rawCharsRef.current = (rawCharsRef.current + data).slice(-1000)
         if (settings.terminal.showRawChars) {
           setRawCharsDisplay(rawCharsRef.current)
         }
