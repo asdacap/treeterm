@@ -16,6 +16,7 @@ import {
   createWorktree,
   removeWorktree,
   listWorktrees,
+  getChildWorktrees,
   getDiff,
   getFileDiff,
   mergeWorktree,
@@ -140,6 +141,10 @@ ipcMain.handle('git:removeWorktree', async (_event, repoPath: string, worktreePa
 
 ipcMain.handle('git:listWorktrees', async (_event, repoPath: string) => {
   return listWorktrees(repoPath)
+})
+
+ipcMain.handle('git:getChildWorktrees', async (_event, repoPath: string, parentBranch: string | null) => {
+  return getChildWorktrees(repoPath, parentBranch)
 })
 
 ipcMain.handle('git:getDiff', async (_event, worktreePath: string, parentBranch: string) => {

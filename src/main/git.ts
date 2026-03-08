@@ -77,7 +77,13 @@ export async function createWorktree(
       worktreePath = path.join(parentDir, `${repoName}-${worktreeName}`)
     }
 
-    const branchName = `treeterm/${worktreeName}`
+    // Hierarchical branch naming: if base branch is treeterm/*, append child name
+    let branchName: string
+    if (baseBranch && baseBranch.startsWith('treeterm/')) {
+      branchName = `${baseBranch}/${worktreeName}`
+    } else {
+      branchName = `treeterm/${worktreeName}`
+    }
 
     // Check if path already exists
     if (fs.existsSync(worktreePath)) {
@@ -172,6 +178,35 @@ export async function listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
   } catch {
     return []
   }
+}
+
+export interface ChildWorktreeInfo extends WorktreeInfo {
+  displayName: string
+}
+
+export async function getChildWorktrees(
+  repoPath: string,
+  parentBranch: string | null
+): Promise<ChildWorktreeInfo[]> {
+  const allWorktrees = await listWorktrees(repoPath)
+
+  // Determine the expected prefix for child branches
+  const branchPrefix = (parentBranch && parentBranch.startsWith('treeterm/'))
+    ? `${parentBranch}/`
+    : 'treeterm/'
+
+  return allWorktrees
+    .filter(wt => {
+      // Branch must start with the prefix
+      if (!wt.branch.startsWith(branchPrefix)) return false
+      // Must be a direct child (no further slashes after prefix)
+      const remainder = wt.branch.slice(branchPrefix.length)
+      return remainder.length > 0 && !remainder.includes('/')
+    })
+    .map(wt => ({
+      ...wt,
+      displayName: wt.branch.slice(branchPrefix.length)
+    }))
 }
 
 export interface DiffFile {

@@ -133,6 +133,10 @@ export interface WorktreeInfo {
   branch: string
 }
 
+export interface ChildWorktreeInfo extends WorktreeInfo {
+  displayName: string
+}
+
 export interface DiffFile {
   path: string
   status: 'added' | 'modified' | 'deleted' | 'renamed'
@@ -188,6 +192,7 @@ export interface GitApi {
   createWorktree: (repoPath: string, name: string, baseBranch?: string) => Promise<WorktreeResult>
   removeWorktree: (repoPath: string, worktreePath: string, deleteBranch?: boolean) => Promise<{ success: boolean; error?: string }>
   listWorktrees: (repoPath: string) => Promise<WorktreeInfo[]>
+  getChildWorktrees: (repoPath: string, parentBranch: string | null) => Promise<ChildWorktreeInfo[]>
   getDiff: (worktreePath: string, parentBranch: string) => Promise<{ success: boolean; diff?: DiffResult; error?: string }>
   getFileDiff: (worktreePath: string, parentBranch: string, filePath: string) => Promise<{ success: boolean; diff?: string; error?: string }>
   checkMergeConflicts: (repoPath: string, sourceBranch: string, targetBranch: string) => Promise<ConflictCheckResult>
