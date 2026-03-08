@@ -6,9 +6,30 @@ import { useSettingsStore } from '../store/settings'
 import { useActivityStateStore } from '../store/activityState'
 import { createActivityStateDetector } from '../utils/activityStateDetector'
 import TerminalScrollWrapper from './TerminalScrollWrapper'
-import DebugRawChars from './DebugRawChars'
 import type { SandboxConfig, TerminalState } from '../types'
 import '@xterm/xterm/css/xterm.css'
+
+// Utility to format raw chars for console debugging
+function formatRawChars(str: string): string {
+  let result = ''
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i)
+    if (code === 0x1b) {
+      result += '\\x1b'
+    } else if (code === 0x0d) {
+      result += '\\r'
+    } else if (code === 0x0a) {
+      result += '\\n'
+    } else if (code === 0x09) {
+      result += '\\t'
+    } else if (code < 0x20) {
+      result += `\\x${code.toString(16).padStart(2, '0')}`
+    } else {
+      result += str[i]
+    }
+  }
+  return result
+}
 
 // Base state interface that all terminal-based states should extend
 export interface BaseTerminalState extends TerminalState {
@@ -56,7 +77,6 @@ export default function BaseTerminal({
   const detectorRef = useRef<ReturnType<typeof createActivityStateDetector> | null>(null)
   const isMountedRef = useRef(true)
   const rawCharsRef = useRef<string>('')
-  const [rawCharsDisplay, setRawCharsDisplay] = useState<string>('')
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
 
   const workspace = useWorkspaceStore((state) => state.workspaces[workspaceId])
@@ -132,10 +152,10 @@ export default function BaseTerminal({
         terminal.write(data)
         // Process data for activity state detection
         detector.processData(data)
-        // Capture last 50 raw characters for debug display
-        rawCharsRef.current = (rawCharsRef.current + data).slice(-50)
+        // Log raw characters to console for debugging
         if (settings.terminal.showRawChars) {
-          setRawCharsDisplay(rawCharsRef.current)
+          rawCharsRef.current = (rawCharsRef.current + data).slice(-50)
+          console.log('[RAW]', formatRawChars(rawCharsRef.current))
         }
       })
       window.electron.terminal.resize(id, terminal.cols, terminal.rows)
@@ -233,15 +253,6 @@ export default function BaseTerminal({
     }
   }, [isVisible])
 
-  // Update raw chars display when setting changes
-  useEffect(() => {
-    if (settings.terminal.showRawChars) {
-      setRawCharsDisplay(rawCharsRef.current)
-    } else {
-      setRawCharsDisplay('')
-    }
-  }, [settings.terminal.showRawChars])
-
   // Close context menu when clicking outside
   useEffect(() => {
     if (!contextMenu) return
@@ -274,7 +285,6 @@ export default function BaseTerminal({
   return (
     <TerminalScrollWrapper terminalRef={terminalRef}>
       <div ref={containerRef} className="terminal-container" onContextMenu={handleContextMenu} />
-      {settings.terminal.showRawChars && <DebugRawChars rawChars={rawCharsDisplay} />}
       {contextMenu && (
         <div
           className="context-menu"

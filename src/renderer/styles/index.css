@@ -1541,32 +1541,3 @@ body,
   font-size: 14px;
 }
 
-/* Debug Raw Characters Overlay */
-.debug-raw-chars {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: rgba(0, 0, 0, 0.5);
-  color: #0f0;
-  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-  font-size: 11px;
-  padding: 4px 8px;
-  overflow-x: auto;
-  white-space: nowrap;
-  z-index: 10;
-  border-top: 1px solid #333;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.debug-raw-chars-label {
-  color: #888;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.debug-raw-chars-content {
-  color: #0f0;
-}
