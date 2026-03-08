@@ -382,6 +382,16 @@ body,
   background: rgba(0, 120, 212, 0.25);
 }
 
+.workspace-action-btn-abandon {
+  background: rgba(182, 35, 36, 0.15);
+  border-color: #b62324;
+  color: #cf3536;
+}
+
+.workspace-action-btn-abandon:hover {
+  background: rgba(182, 35, 36, 0.25);
+}
+
 /* Tab Bar */
 .tab-bar {
   display: flex;
