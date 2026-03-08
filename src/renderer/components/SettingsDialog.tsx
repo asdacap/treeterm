@@ -9,11 +9,12 @@ interface SettingsDialogProps {
   onClose: () => void
 }
 
-type TabId = 'terminal' | 'sandbox' | 'appearance' | 'keybindings' | 'terminal-profiles'
+type TabId = 'terminal' | 'sandbox' | 'claude' | 'appearance' | 'keybindings' | 'terminal-profiles'
 
 const tabs: { id: TabId; label: string }[] = [
   { id: 'terminal', label: 'Terminal' },
   { id: 'terminal-profiles', label: 'Terminal Profiles' },
+  { id: 'claude', label: 'Claude' },
   { id: 'sandbox', label: 'Sandbox' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'keybindings', label: 'Keybindings' }
@@ -239,6 +240,68 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
                   </label>
                   <p className="settings-hint">
                     Sandboxed terminals will have network access by default
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'claude' && (
+              <div className="settings-section">
+                <div className="settings-group">
+                  <label className="settings-label">Claude Command</label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    value={localSettings.claude.command}
+                    placeholder={window.electron.platform === 'darwin' ? 'claude' : 'npx @anthropic-ai/claude-code'}
+                    onChange={(e) =>
+                      setLocalSettings((prev) => ({
+                        ...prev,
+                        claude: { ...prev.claude, command: e.target.value }
+                      }))
+                    }
+                  />
+                  <p className="settings-hint">
+                    Command to launch Claude Code (e.g., &quot;claude&quot; on macOS, &quot;npx @anthropic-ai/claude-code&quot; on Linux)
+                  </p>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={localSettings.claude.startByDefault}
+                      onChange={(e) =>
+                        setLocalSettings((prev) => ({
+                          ...prev,
+                          claude: { ...prev.claude, startByDefault: e.target.checked }
+                        }))
+                      }
+                    />
+                    Start by Default
+                  </label>
+                  <p className="settings-hint">
+                    Automatically open a Claude tab when creating new workspaces
+                  </p>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-checkbox-label">
+                    <input
+                      type="checkbox"
+                      disabled={!sandboxAvailable}
+                      checked={localSettings.claude.enableSandbox}
+                      onChange={(e) =>
+                        setLocalSettings((prev) => ({
+                          ...prev,
+                          claude: { ...prev.claude, enableSandbox: e.target.checked }
+                        }))
+                      }
+                    />
+                    Enable Sandbox
+                  </label>
+                  <p className="settings-hint">
+                    Run Claude in a sandboxed terminal with restricted file and network access
                   </p>
                 </div>
               </div>

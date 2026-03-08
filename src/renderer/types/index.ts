@@ -217,6 +217,11 @@ export interface Settings {
     enabledByDefault: boolean
     allowNetworkByDefault: boolean
   }
+  claude: {
+    command: string
+    startByDefault: boolean
+    enableSandbox: boolean
+  }
   appearance: {
     theme: 'dark' | 'light' | 'system'
   }

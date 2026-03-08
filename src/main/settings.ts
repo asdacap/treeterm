@@ -2,6 +2,10 @@ import { app } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 
+function getDefaultClaudeCommand(): string {
+  return process.platform === 'darwin' ? 'claude' : 'npx @anthropic-ai/claude-code'
+}
+
 export interface TerminalInstance {
   id: string
   name: string
@@ -22,6 +26,11 @@ export interface Settings {
   sandbox: {
     enabledByDefault: boolean
     allowNetworkByDefault: boolean
+  }
+  claude: {
+    command: string
+    startByDefault: boolean
+    enableSandbox: boolean
   }
   appearance: {
     theme: 'dark' | 'light' | 'system'
@@ -47,6 +56,11 @@ const defaultSettings: Settings = {
   sandbox: {
     enabledByDefault: false,
     allowNetworkByDefault: true
+  },
+  claude: {
+    command: getDefaultClaudeCommand(),
+    startByDefault: false,
+    enableSandbox: false
   },
   appearance: {
     theme: 'dark'
@@ -145,6 +159,10 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
     sandbox: {
       ...defaults.sandbox,
       ...loaded.sandbox
+    },
+    claude: {
+      ...defaults.claude,
+      ...loaded.claude
     },
     appearance: {
       ...defaults.appearance,
