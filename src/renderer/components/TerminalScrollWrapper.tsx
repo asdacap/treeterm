@@ -1,6 +1,5 @@
 import { useCallback } from 'react'
 import type { Terminal as XTerm } from '@xterm/xterm'
-import TerminalToolbar from './TerminalToolbar'
 
 interface TerminalScrollWrapperProps {
   terminalRef: React.RefObject<XTerm | null>
@@ -16,8 +15,14 @@ export default function TerminalScrollWrapper({ terminalRef, children }: Termina
 
   return (
     <div className="terminal-wrapper">
-      <TerminalToolbar onScrollDown={handleScrollDown} />
       {children}
+      <button
+        className="scroll-down-btn"
+        onClick={handleScrollDown}
+        title="Scroll to bottom"
+      >
+        ↓
+      </button>
     </div>
   )
 }
