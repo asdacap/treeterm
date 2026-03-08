@@ -1,11 +1,10 @@
-import type { Application, Tab, Workspace, ActivityState, SandboxConfig } from '../types'
+import type { Application, Tab, Workspace, ActivityState, SandboxConfig, TerminalState } from '../types'
 import Claude from '../components/Claude'
 import { createElement } from 'react'
 import { useActivityStateStore } from '../store/activityState'
 import { useSettingsStore } from '../store/settings'
 
-export interface ClaudeState {
-  ptyId: string | null
+export interface ClaudeState extends TerminalState {
   sandbox: SandboxConfig
 }
 
