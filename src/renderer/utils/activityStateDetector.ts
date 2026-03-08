@@ -3,7 +3,7 @@ import type { ActivityState } from '../types'
 interface DetectorConfig {
   promptPatterns?: RegExp[] // Patterns indicating "waiting for input"
   workingPatterns?: RegExp[] // Patterns indicating "working" (e.g., spinners)
-  idleTimeout?: number // ms of no activity before confirming state (default: 300)
+  idleTimeout?: number // ms of no activity before confirming state (default: 1000)
   debounceMs?: number // ms to debounce state changes (default: 100)
 }
 
@@ -28,7 +28,7 @@ export function createActivityStateDetector(
 } {
   const promptPatterns = config?.promptPatterns ?? DEFAULT_PROMPT_PATTERNS
   const workingPatterns = config?.workingPatterns ?? DEFAULT_WORKING_PATTERNS
-  const idleTimeout = config?.idleTimeout ?? 300
+  const idleTimeout = config?.idleTimeout ?? 1000
   const debounceMs = config?.debounceMs ?? 100
 
   let buffer = ''
@@ -85,9 +85,11 @@ export function createActivityStateDetector(
     }
 
     idleTimerId = setTimeout(() => {
-      // After idle timeout, check if we're at a prompt
+      // After 1 second of no activity, determine final state
       if (checkForPrompt()) {
         emitState('waiting_for_input')
+      } else {
+        emitState('idle')
       }
       idleTimerId = null
     }, idleTimeout)
@@ -102,22 +104,9 @@ export function createActivityStateDetector(
       buffer = buffer.slice(-MAX_BUFFER_SIZE)
     }
 
-    // Check for working indicators (spinners)
-    if (checkForWorking(data)) {
-      emitState('working')
-      scheduleIdleCheck()
-      return
-    }
-
-    // Check for prompt at end of buffer
-    if (checkForPrompt()) {
-      // Schedule idle check - if no more output, we're waiting for input
-      scheduleIdleCheck()
-    } else {
-      // Activity but no prompt - likely working
-      emitState('working')
-      scheduleIdleCheck()
-    }
+    // Any stream activity = working
+    emitState('working')
+    scheduleIdleCheck()
   }
 
   const destroy = () => {
