@@ -15,14 +15,8 @@ export interface TerminalInstance {
 }
 
 export interface PrefixModeConfig {
-  enabled: boolean
   prefixKey: string // e.g., 'Control+B'
   timeout: number // ms (default: 1500)
-}
-
-export interface KeybindingAction {
-  direct?: string // e.g., 'CommandOrControl+T'
-  prefixMode?: string // e.g., 'c' (key after prefix)
 }
 
 export interface Settings {
@@ -49,11 +43,11 @@ export interface Settings {
   }
   prefixMode: PrefixModeConfig
   keybindings: {
-    newTab: KeybindingAction
-    closeTab: KeybindingAction
-    nextTab: KeybindingAction
-    prevTab: KeybindingAction
-    openSettings: KeybindingAction
+    newTab: string // Key after prefix (e.g., 'c')
+    closeTab: string
+    nextTab: string
+    prevTab: string
+    openSettings: string
   }
 }
 
@@ -80,16 +74,15 @@ const defaultSettings: Settings = {
     theme: 'dark'
   },
   prefixMode: {
-    enabled: false,
     prefixKey: 'Control+B',
     timeout: 1500
   },
   keybindings: {
-    newTab: { direct: 'CommandOrControl+T', prefixMode: 'c' },
-    closeTab: { direct: 'CommandOrControl+W', prefixMode: 'x' },
-    nextTab: { direct: 'CommandOrControl+Shift+]', prefixMode: 'n' },
-    prevTab: { direct: 'CommandOrControl+Shift+[', prefixMode: 'p' },
-    openSettings: { direct: 'CommandOrControl+,' }
+    newTab: 'c',
+    closeTab: 'x',
+    nextTab: 'n',
+    prevTab: 'p',
+    openSettings: ','
   }
 }
 
@@ -137,7 +130,7 @@ export function saveSettings(settings: Settings): void {
 
 function migrateKeybindings(
   defaults: Settings['keybindings'],
-  loaded: Record<string, string | KeybindingAction> | undefined
+  loaded: Record<string, string | { direct?: string; prefixMode?: string }> | undefined
 ): Settings['keybindings'] {
   if (!loaded) return defaults
 
@@ -148,17 +141,11 @@ function migrateKeybindings(
     const value = loaded[key]
     if (value) {
       if (typeof value === 'string') {
-        // Migrate from old string format
-        result[key] = {
-          direct: value,
-          prefixMode: defaults[key]?.prefixMode
-        }
-      } else {
-        // Already in new format
-        result[key] = {
-          ...defaults[key],
-          ...value
-        }
+        // Already a string, keep it
+        result[key] = value
+      } else if (value.prefixMode) {
+        // Migrate from old object format - use prefixMode field
+        result[key] = value.prefixMode
       }
     }
   }
@@ -224,7 +211,7 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
     },
     keybindings: migrateKeybindings(
       defaults.keybindings,
-      loaded.keybindings as Record<string, string | KeybindingAction> | undefined
+      loaded.keybindings as Record<string, string | { direct?: string; prefixMode?: string }> | undefined
     )
   }
 }

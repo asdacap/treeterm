@@ -210,14 +210,8 @@ export interface GitApi {
 }
 
 export interface PrefixModeConfig {
-  enabled: boolean
   prefixKey: string // e.g., 'Control+B'
   timeout: number // ms (default: 1500)
-}
-
-export interface KeybindingAction {
-  direct?: string // e.g., 'CommandOrControl+T'
-  prefixMode?: string // e.g., 'c' (key after prefix)
 }
 
 export interface Settings {
@@ -244,11 +238,11 @@ export interface Settings {
   }
   prefixMode: PrefixModeConfig
   keybindings: {
-    newTab: KeybindingAction
-    closeTab: KeybindingAction
-    nextTab: KeybindingAction
-    prevTab: KeybindingAction
-    openSettings: KeybindingAction
+    newTab: string // Key after prefix (e.g., 'c')
+    closeTab: string
+    nextTab: string
+    prevTab: string
+    openSettings: string
   }
 }
 
