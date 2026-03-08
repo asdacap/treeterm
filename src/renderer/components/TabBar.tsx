@@ -80,7 +80,10 @@ export default function TabBar({
     const app = applicationRegistry.get(tab.applicationId)
     if (!app?.canClose) return false
 
-    // Check if there's more than one tab of this type
+    // Apps that can have multiple instances can always be closed
+    if (app.canHaveMultiple) return true
+
+    // For single-instance apps, require more than one tab of this type
     const sameTypeTabs = tabs.filter((t) => t.applicationId === tab.applicationId)
     return sameTypeTabs.length > 1
   }
