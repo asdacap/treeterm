@@ -172,6 +172,25 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
                     Cursor Blink
                   </label>
                 </div>
+
+                <div className="settings-group">
+                  <label className="settings-checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={localSettings.terminal.showRawChars}
+                      onChange={(e) =>
+                        setLocalSettings((prev) => ({
+                          ...prev,
+                          terminal: { ...prev.terminal, showRawChars: e.target.checked }
+                        }))
+                      }
+                    />
+                    Show Raw Characters (Debug)
+                  </label>
+                  <p className="settings-hint">
+                    Display the last 50 raw terminal characters at the bottom of the terminal
+                  </p>
+                </div>
               </div>
             )}
 

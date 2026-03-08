@@ -190,6 +190,7 @@ export interface Settings {
     fontFamily: string
     cursorStyle: 'block' | 'underline' | 'bar'
     cursorBlink: boolean
+    showRawChars: boolean
   }
   sandbox: {
     enabledByDefault: boolean
