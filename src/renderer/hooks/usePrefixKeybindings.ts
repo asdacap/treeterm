@@ -128,7 +128,8 @@ export function usePrefixKeybindings(handlers: KeybindingHandlers) {
   )
 
   useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    // Use capture phase so the event is caught before xterm.js can stop propagation
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
   }, [handleKeyDown])
 }
