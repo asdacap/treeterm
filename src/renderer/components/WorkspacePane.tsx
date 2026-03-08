@@ -169,58 +169,59 @@ export default function WorkspacePane() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [activeWorkspace, keybindings, handleNewDefaultTab, handleCloseTab, handleSelectTab])
 
-  if (!activeWorkspace) {
-    return (
-      <div className="workspace-empty">
-        <div className="workspace-empty-content">
-          <h2>No workspace selected</h2>
-          <p>Select a workspace from the sidebar or add a new one to get started.</p>
-        </div>
-      </div>
-    )
-  }
-
   // Handle legacy workspaces - migrate terminals to tabs format
-  const tabs = activeWorkspace.tabs || []
-  const activeTabId = activeWorkspace.activeTabId || tabs[0]?.id
+  const tabs = activeWorkspace?.tabs || []
+  const activeTabId = activeWorkspace?.activeTabId || tabs[0]?.id
 
   return (
     <div className="workspace-content">
-      <div className="workspace-header">
-        <span className="workspace-title">{activeWorkspace.name}</span>
-        <span className="workspace-path">{activeWorkspace.path}</span>
-        {activeWorkspace.gitBranch && (
-          <span className="workspace-branch">{activeWorkspace.gitBranch}</span>
-        )}
-        <div className="workspace-actions">
-          {activeWorkspace.isGitRepo && (
-            <button
-              className="workspace-action-btn"
-              onClick={() => setShowCreateChildDialog(true)}
-              title="Fork: Create new child workspace"
-            >
-              Fork
-            </button>
-          )}
-          {activeWorkspace.isWorktree && activeWorkspace.parentId && (
-            <button
-              className="workspace-action-btn workspace-action-btn-merge"
-              onClick={() => setShowMergeDialog(true)}
-              title="Merge: Close and merge this workspace"
-            >
-              Merge
-            </button>
-          )}
+      {/* Show empty state when no workspace is active, but keep terminals mounted below */}
+      {!activeWorkspace ? (
+        <div className="workspace-empty">
+          <div className="workspace-empty-content">
+            <h2>No workspace selected</h2>
+            <p>Select a workspace from the sidebar or add a new one to get started.</p>
+          </div>
         </div>
-      </div>
-      <TabBar
-        tabs={tabs}
-        activeTabId={activeTabId}
-        onSelectTab={handleSelectTab}
-        onCloseTab={handleCloseTab}
-        onNewTab={handleNewTab}
-      />
-      <div className="workspace-terminal">
+      ) : (
+        <>
+          <div className="workspace-header">
+            <span className="workspace-title">{activeWorkspace.name}</span>
+            <span className="workspace-path">{activeWorkspace.path}</span>
+            {activeWorkspace.gitBranch && (
+              <span className="workspace-branch">{activeWorkspace.gitBranch}</span>
+            )}
+            <div className="workspace-actions">
+              {activeWorkspace.isGitRepo && (
+                <button
+                  className="workspace-action-btn"
+                  onClick={() => setShowCreateChildDialog(true)}
+                  title="Fork: Create new child workspace"
+                >
+                  Fork
+                </button>
+              )}
+              {activeWorkspace.isWorktree && activeWorkspace.parentId && (
+                <button
+                  className="workspace-action-btn workspace-action-btn-merge"
+                  onClick={() => setShowMergeDialog(true)}
+                  title="Merge: Close and merge this workspace"
+                >
+                  Merge
+                </button>
+              )}
+            </div>
+          </div>
+          <TabBar
+            tabs={tabs}
+            activeTabId={activeTabId}
+            onSelectTab={handleSelectTab}
+            onCloseTab={handleCloseTab}
+            onNewTab={handleNewTab}
+          />
+        </>
+      )}
+      <div className="workspace-terminal" style={{ display: activeWorkspace ? 'flex' : 'none' }}>
         {/* Render tabs for ALL workspaces to keep PTYs alive when switching */}
         {Object.values(workspaces).map((workspace) => {
           const wsTabs = workspace.tabs || []
