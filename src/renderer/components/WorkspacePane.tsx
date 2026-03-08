@@ -1,30 +1,13 @@
-import { useEffect, useCallback, useState } from 'react'
+import { useEffect, useCallback, useState, useMemo } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
-import { useSettingsStore } from '../store/settings'
 import { applicationRegistry } from '../registry/applicationRegistry'
+import { usePrefixKeybindings } from '../hooks/usePrefixKeybindings'
 import TabBar from './TabBar'
 import MergeDialog from './MergeDialog'
 import CreateChildDialog from './CreateChildDialog'
+import PrefixModeIndicator from './PrefixModeIndicator'
 // Import applications to ensure they are registered
 import '../applications'
-
-function matchesKeybinding(e: KeyboardEvent, keybinding: string): boolean {
-  const parts = keybinding.split('+')
-  const key = parts[parts.length - 1]
-  const hasCmd = parts.includes('CommandOrControl')
-  const hasShift = parts.includes('Shift')
-  const hasAlt = parts.includes('Alt')
-
-  const cmdMatch = hasCmd ? (e.metaKey || e.ctrlKey) : (!e.metaKey && !e.ctrlKey)
-  const shiftMatch = hasShift ? e.shiftKey : !e.shiftKey
-  const altMatch = hasAlt ? e.altKey : !e.altKey
-
-  const pressedKey = e.key.length === 1 ? e.key.toUpperCase() : e.key
-  const targetKey = key.length === 1 ? key.toUpperCase() : key
-  const keyMatch = pressedKey === targetKey || e.key === key
-
-  return cmdMatch && shiftMatch && altMatch && keyMatch
-}
 
 export default function WorkspacePane() {
   const {
@@ -37,9 +20,6 @@ export default function WorkspacePane() {
     removeWorkspace,
     mergeAndRemoveWorkspace
   } = useWorkspaceStore()
-
-  const { settings } = useSettingsStore()
-  const keybindings = settings.keybindings
 
   const activeWorkspace = activeWorkspaceId ? workspaces[activeWorkspaceId] : null
 
@@ -111,63 +91,55 @@ export default function WorkspacePane() {
     setShowMergeDialog(false)
   }
 
-  // Keyboard shortcuts
+  // Keybinding handlers for prefix mode hook
+  const keybindingHandlers = useMemo(
+    () => ({
+      newTab: handleNewDefaultTab,
+      closeTab: () => {
+        if (activeWorkspace?.activeTabId && activeWorkspace.tabs.length > 1) {
+          handleCloseTab(activeWorkspace.activeTabId)
+        }
+      },
+      nextTab: () => {
+        if (!activeWorkspace) return
+        const currentIndex = activeWorkspace.tabs.findIndex(
+          (t) => t.id === activeWorkspace.activeTabId
+        )
+        const newIndex = currentIndex < activeWorkspace.tabs.length - 1 ? currentIndex + 1 : 0
+        handleSelectTab(activeWorkspace.tabs[newIndex].id)
+      },
+      prevTab: () => {
+        if (!activeWorkspace) return
+        const currentIndex = activeWorkspace.tabs.findIndex(
+          (t) => t.id === activeWorkspace.activeTabId
+        )
+        const newIndex = currentIndex > 0 ? currentIndex - 1 : activeWorkspace.tabs.length - 1
+        handleSelectTab(activeWorkspace.tabs[newIndex].id)
+      }
+    }),
+    [activeWorkspace, handleNewDefaultTab, handleCloseTab, handleSelectTab]
+  )
+
+  // Use the prefix keybindings hook
+  usePrefixKeybindings(keybindingHandlers)
+
+  // Cmd+1-9: Switch to tab by number (keep hardcoded as these are standard)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!activeWorkspace) return
 
-      // New tab
-      if (matchesKeybinding(e, keybindings.newTab)) {
-        e.preventDefault()
-        handleNewDefaultTab()
-        return
-      }
-
-      // Close tab
-      if (matchesKeybinding(e, keybindings.closeTab)) {
-        e.preventDefault()
-        if (activeWorkspace.activeTabId && activeWorkspace.tabs.length > 1) {
-          handleCloseTab(activeWorkspace.activeTabId)
-        }
-        return
-      }
-
-      // Cmd+1-9: Switch to tab by number (keep hardcoded as these are standard)
       if ((e.metaKey || e.ctrlKey) && e.key >= '1' && e.key <= '9') {
         e.preventDefault()
         const index = parseInt(e.key) - 1
         if (index < activeWorkspace.tabs.length) {
           handleSelectTab(activeWorkspace.tabs[index].id)
         }
-        return
-      }
-
-      // Previous tab
-      if (matchesKeybinding(e, keybindings.prevTab)) {
-        e.preventDefault()
-        const currentIndex = activeWorkspace.tabs.findIndex(
-          (t) => t.id === activeWorkspace.activeTabId
-        )
-        const newIndex = currentIndex > 0 ? currentIndex - 1 : activeWorkspace.tabs.length - 1
-        handleSelectTab(activeWorkspace.tabs[newIndex].id)
-        return
-      }
-
-      // Next tab
-      if (matchesKeybinding(e, keybindings.nextTab)) {
-        e.preventDefault()
-        const currentIndex = activeWorkspace.tabs.findIndex(
-          (t) => t.id === activeWorkspace.activeTabId
-        )
-        const newIndex = currentIndex < activeWorkspace.tabs.length - 1 ? currentIndex + 1 : 0
-        handleSelectTab(activeWorkspace.tabs[newIndex].id)
-        return
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activeWorkspace, keybindings, handleNewDefaultTab, handleCloseTab, handleSelectTab])
+  }, [activeWorkspace, handleSelectTab])
 
   // Handle legacy workspaces - migrate terminals to tabs format
   const tabs = activeWorkspace?.tabs || []
@@ -283,6 +255,9 @@ export default function WorkspacePane() {
           onCancel={() => setShowMergeDialog(false)}
         />
       )}
+
+      {/* Prefix Mode Indicator */}
+      <PrefixModeIndicator />
     </div>
   )
 }

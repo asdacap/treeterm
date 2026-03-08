@@ -24,12 +24,17 @@ const defaultSettings: Settings = {
   appearance: {
     theme: 'dark'
   },
+  prefixMode: {
+    enabled: false,
+    prefixKey: 'Control+B',
+    timeout: 1500
+  },
   keybindings: {
-    newTab: 'CommandOrControl+T',
-    closeTab: 'CommandOrControl+W',
-    nextTab: 'CommandOrControl+Shift+]',
-    prevTab: 'CommandOrControl+Shift+[',
-    openSettings: 'CommandOrControl+,'
+    newTab: { direct: 'CommandOrControl+T', prefixMode: 'c' },
+    closeTab: { direct: 'CommandOrControl+W', prefixMode: 'x' },
+    nextTab: { direct: 'CommandOrControl+Shift+]', prefixMode: 'n' },
+    prevTab: { direct: 'CommandOrControl+Shift+[', prefixMode: 'p' },
+    openSettings: { direct: 'CommandOrControl+,' }
   }
 }
 
