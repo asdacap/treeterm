@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { useWorkspaceStore } from '../store/workspace'
@@ -56,6 +56,11 @@ export interface BaseTerminalProps {
   config: BaseTerminalConfig
 }
 
+interface ContextMenu {
+  x: number
+  y: number
+}
+
 export default function BaseTerminal({
   cwd,
   workspaceId,
@@ -72,6 +77,7 @@ export default function BaseTerminal({
   const detectorRef = useRef<ReturnType<typeof createActivityStateDetector> | null>(null)
   const isMountedRef = useRef(true)
   const rawCharsRef = useRef<string>('')
+  const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
 
   const workspace = useWorkspaceStore((state) => state.workspaces[workspaceId])
   const updateTabState = useWorkspaceStore((state) => state.updateTabState)
@@ -247,9 +253,51 @@ export default function BaseTerminal({
     }
   }, [isVisible])
 
+  // Close context menu when clicking outside
+  useEffect(() => {
+    if (!contextMenu) return
+    const handleClick = () => setContextMenu(null)
+    document.addEventListener('click', handleClick)
+    return () => document.removeEventListener('click', handleClick)
+  }, [contextMenu])
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    setContextMenu({ x: e.clientX, y: e.clientY })
+  }
+
+  const handleCopy = async () => {
+    const selection = terminalRef.current?.getSelection()
+    if (selection) {
+      await navigator.clipboard.writeText(selection)
+    }
+    setContextMenu(null)
+  }
+
+  const handlePaste = async () => {
+    const text = await navigator.clipboard.readText()
+    if (text && ptyIdRef.current) {
+      window.electron.terminal.write(ptyIdRef.current, text)
+    }
+    setContextMenu(null)
+  }
+
   return (
     <TerminalScrollWrapper terminalRef={terminalRef}>
-      <div ref={containerRef} className="terminal-container" />
+      <div ref={containerRef} className="terminal-container" onContextMenu={handleContextMenu} />
+      {contextMenu && (
+        <div
+          className="context-menu"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+        >
+          <div className="context-menu-item" onClick={handleCopy}>
+            Copy
+          </div>
+          <div className="context-menu-item" onClick={handlePaste}>
+            Paste
+          </div>
+        </div>
+      )}
     </TerminalScrollWrapper>
   )
 }
