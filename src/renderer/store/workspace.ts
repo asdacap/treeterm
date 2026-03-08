@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Workspace, GitInfo, Tab } from '../types'
 import { applicationRegistry } from '../registry/applicationRegistry'
+import { useSettingsStore } from '../store/settings'
+import { claudeApplication } from '../applications/claude'
 
 interface WorkspaceState {
   workspaces: Record<string, Workspace>
@@ -51,6 +53,13 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         let activeTabId: string | null = null
 
         const defaultApps = applicationRegistry.getDefaultApps()
+
+        // Check if Claude should be started by default
+        const { settings } = useSettingsStore.getState()
+        if (settings.claude.startByDefault && !defaultApps.some(app => app.id === 'claude')) {
+          defaultApps.push(claudeApplication)
+        }
+
         for (const app of defaultApps) {
           const tabId = generateTabId()
           const existingCount = tabs.filter((t) => t.applicationId === app.id).length
@@ -122,6 +131,13 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         let activeTabId: string | null = null
 
         const defaultApps = applicationRegistry.getDefaultApps()
+
+        // Check if Claude should be started by default
+        const { settings } = useSettingsStore.getState()
+        if (settings.claude.startByDefault && !defaultApps.some(app => app.id === 'claude')) {
+          defaultApps.push(claudeApplication)
+        }
+
         for (const app of defaultApps) {
           const tabId = generateTabId()
           const existingCount = tabs.filter((t) => t.applicationId === app.id).length
