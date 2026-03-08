@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Loader2 } from 'lucide-react'
-import type { Tab, ApplicationInstance } from '../types'
+import type { Tab } from '../types'
 import { applicationRegistry } from '../registry/applicationRegistry'
 import { useActivityStateStore } from '../store/activityState'
 
@@ -31,8 +31,7 @@ interface TabBarProps {
   activeTabId: string | null
   onSelectTab: (id: string) => void
   onCloseTab: (id: string) => void
-  instances: ApplicationInstance[]
-  onNewTab: (instanceId: string) => void
+  onNewTab: (applicationId: string) => void
 }
 
 export default function TabBar({
@@ -40,18 +39,14 @@ export default function TabBar({
   activeTabId,
   onSelectTab,
   onCloseTab,
-  instances,
   onNewTab
 }: TabBarProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
 
-  // Filter instances to only show those with showInNewTabMenu
-  const menuInstances = instances.filter((inst) => {
-    const app = applicationRegistry.get(inst.applicationId)
-    return app?.showInNewTabMenu
-  })
+  // Get menu items directly from registry
+  const menuApps = applicationRegistry.getMenuItems()
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -71,17 +66,12 @@ export default function TabBar({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [menuOpen])
 
-  const handleSelectInstance = (instanceId: string) => {
-    onNewTab(instanceId)
+  const handleSelectApp = (applicationId: string) => {
+    onNewTab(applicationId)
     setMenuOpen(false)
   }
 
   const getTabIcon = (tab: Tab): string => {
-    // First check if the tab's config has an icon override
-    const instance = instances.find((inst) => inst.id === (tab.config as Record<string, unknown>)?.instanceId)
-    if (instance) return instance.icon
-
-    // Fall back to application's default icon
     const app = applicationRegistry.get(tab.applicationId)
     return app?.icon || '?'
   }
@@ -133,14 +123,14 @@ export default function TabBar({
         </button>
         {menuOpen && (
           <div className="app-menu" ref={menuRef}>
-            {menuInstances.map((inst) => (
+            {menuApps.map((app) => (
               <div
-                key={inst.id}
+                key={app.id}
                 className="app-menu-item"
-                onClick={() => handleSelectInstance(inst.id)}
+                onClick={() => handleSelectApp(app.id)}
               >
-                <span className="app-menu-icon">{inst.icon}</span>
-                <span className="app-menu-name">{inst.name}</span>
+                <span className="app-menu-icon">{app.icon}</span>
+                <span className="app-menu-name">{app.name}</span>
               </div>
             ))}
           </div>

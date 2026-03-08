@@ -18,6 +18,8 @@ export interface Application<TState = unknown> {
   keepAlive: boolean
   // CSS display style when visible: 'block' or 'flex'
   displayStyle: 'block' | 'flex'
+  // Whether this app creates tabs automatically in new workspaces
+  isDefault: boolean
   // Optional: Applications can report their activity state
   getActivityState?: (tab: Tab) => ActivityState
 }
@@ -35,18 +37,15 @@ export interface Tab {
   applicationId: string
   title: string
   state: unknown
-  config?: Record<string, unknown>
 }
 
-// ApplicationInstance - user configuration in settings
-export interface ApplicationInstance {
+// TerminalInstance - user configuration for custom terminal variants
+export interface TerminalInstance {
   id: string
-  applicationId: string
   name: string
   icon: string
-  config: Record<string, unknown>
+  startupCommand: string
   isDefault: boolean
-  isBuiltIn: boolean
 }
 
 // Type-specific state interfaces (for internal use within applications)
@@ -212,6 +211,7 @@ export interface Settings {
     cursorStyle: 'block' | 'underline' | 'bar'
     cursorBlink: boolean
     showRawChars: boolean
+    instances: TerminalInstance[]
   }
   sandbox: {
     enabledByDefault: boolean
@@ -227,7 +227,6 @@ export interface Settings {
     prevTab: string
     openSettings: string
   }
-  applications: ApplicationInstance[]
 }
 
 export interface SettingsApi {

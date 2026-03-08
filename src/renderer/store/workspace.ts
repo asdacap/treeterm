@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Workspace, GitInfo, Tab } from '../types'
-import { useSettingsStore } from './settings'
 import { applicationRegistry } from '../registry/applicationRegistry'
 
 interface WorkspaceState {
@@ -16,7 +15,7 @@ interface WorkspaceState {
   refreshGitInfo: (id: string) => Promise<void>
   updateWorkspaceStatus: (id: string, status: Workspace['status']) => void
   // Tab management (application-agnostic)
-  addTab: (workspaceId: string, instanceId: string) => string
+  addTab: (workspaceId: string, applicationId: string) => string
   removeTab: (workspaceId: string, tabId: string) => Promise<void>
   setActiveTab: (workspaceId: string, tabId: string) => void
   updateTabTitle: (workspaceId: string, tabId: string, title: string) => void
@@ -43,29 +42,24 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
       addWorkspace: async (path: string) => {
         const id = generateId()
-        const { settings } = useSettingsStore.getState()
 
         // Get git info for the path
         const gitInfo = await window.electron.git.getInfo(path)
 
-        // Create tabs based on default application instances
+        // Create tabs based on default applications from registry
         const tabs: Tab[] = []
         let activeTabId: string | null = null
 
-        const defaultInstances = settings.applications.filter((inst) => inst.isDefault)
-        for (const instance of defaultInstances) {
-          const app = applicationRegistry.get(instance.applicationId)
-          if (!app) continue
-
+        const defaultApps = applicationRegistry.getDefaultApps()
+        for (const app of defaultApps) {
           const tabId = generateTabId()
-          const existingCount = tabs.filter((t) => t.applicationId === instance.applicationId).length
+          const existingCount = tabs.filter((t) => t.applicationId === app.id).length
 
           tabs.push({
             id: tabId,
-            applicationId: instance.applicationId,
-            title: `${instance.name} ${existingCount + 1}`,
-            state: app.createInitialState(),
-            config: instance.config
+            applicationId: app.id,
+            title: `${app.name} ${existingCount + 1}`,
+            state: app.createInitialState()
           })
 
           // Make first closable tab active, or first tab if none are closable
@@ -122,26 +116,21 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
         // Create child workspace
         const id = generateId()
-        const { settings } = useSettingsStore.getState()
 
-        // Create tabs based on default application instances
+        // Create tabs based on default applications from registry
         const tabs: Tab[] = []
         let activeTabId: string | null = null
 
-        const defaultInstances = settings.applications.filter((inst) => inst.isDefault)
-        for (const instance of defaultInstances) {
-          const app = applicationRegistry.get(instance.applicationId)
-          if (!app) continue
-
+        const defaultApps = applicationRegistry.getDefaultApps()
+        for (const app of defaultApps) {
           const tabId = generateTabId()
-          const existingCount = tabs.filter((t) => t.applicationId === instance.applicationId).length
+          const existingCount = tabs.filter((t) => t.applicationId === app.id).length
 
           tabs.push({
             id: tabId,
-            applicationId: instance.applicationId,
-            title: `${instance.name} ${existingCount + 1}`,
-            state: app.createInitialState(),
-            config: instance.config
+            applicationId: app.id,
+            title: `${app.name} ${existingCount + 1}`,
+            state: app.createInitialState()
           })
 
           // Make first closable tab active, or first tab if none are closable
@@ -338,14 +327,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       },
 
       // Tab management (application-agnostic)
-      addTab: (workspaceId: string, instanceId: string) => {
+      addTab: (workspaceId: string, applicationId: string) => {
         const tabId = generateTabId()
-        const { settings } = useSettingsStore.getState()
-        const instance = settings.applications.find((a) => a.id === instanceId)
+        const app = applicationRegistry.get(applicationId)
 
-        if (!instance) return tabId
-
-        const app = applicationRegistry.get(instance.applicationId)
         if (!app) return tabId
 
         set((state) => {
@@ -354,20 +339,19 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
           // Check if app allows multiple instances
           if (!app.canHaveMultiple) {
-            const existing = workspace.tabs.find((t) => t.applicationId === instance.applicationId)
+            const existing = workspace.tabs.find((t) => t.applicationId === applicationId)
             if (existing) return state
           }
 
           const existingCount = workspace.tabs.filter(
-            (t) => t.applicationId === instance.applicationId
+            (t) => t.applicationId === applicationId
           ).length
 
           const newTab: Tab = {
             id: tabId,
-            applicationId: instance.applicationId,
-            title: `${instance.name} ${existingCount + 1}`,
-            state: app.createInitialState(),
-            config: instance.config
+            applicationId,
+            title: `${app.name} ${existingCount + 1}`,
+            state: app.createInitialState()
           }
 
           return {
@@ -491,7 +475,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
     }),
     {
       name: 'treeterm-workspaces',
-      version: 2,
+      version: 3,
       migrate: (persistedState: unknown, version: number) => {
         const state = persistedState as { workspaces?: Record<string, unknown> }
 
@@ -543,8 +527,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
                     id: t.id,
                     applicationId: 'terminal',
                     title: t.title,
-                    state: { ptyId: t.ptyId || null },
-                    config: t.applicationId ? { instanceId: t.applicationId } : undefined
+                    state: { ptyId: t.ptyId || null }
                   }
                 } else if (t.type === 'filesystem') {
                   return {
@@ -555,6 +538,20 @@ export const useWorkspaceStore = create<WorkspaceState>()(
                   }
                 }
                 return t as Tab
+              })
+            }
+          }
+        }
+
+        if (version <= 2 && state.workspaces) {
+          // Migrate from version 2 to 3: remove config field from tabs
+          for (const ws of Object.values(state.workspaces) as Array<{
+            tabs?: Array<Tab & { config?: unknown }>
+          }>) {
+            if (ws.tabs) {
+              ws.tabs = ws.tabs.map((t) => {
+                const { config, ...rest } = t
+                return rest
               })
             }
           }

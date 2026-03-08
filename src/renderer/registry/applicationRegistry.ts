@@ -7,6 +7,10 @@ class ApplicationRegistry {
     this.applications.set(application.id, application)
   }
 
+  unregister(id: string): void {
+    this.applications.delete(id)
+  }
+
   get(id: string): Application | undefined {
     return this.applications.get(id)
   }
@@ -17,6 +21,10 @@ class ApplicationRegistry {
 
   getMenuItems(): Application[] {
     return this.getAll().filter((app) => app.showInNewTabMenu)
+  }
+
+  getDefaultApps(): Application[] {
+    return this.getAll().filter((app) => app.isDefault)
   }
 }
 
