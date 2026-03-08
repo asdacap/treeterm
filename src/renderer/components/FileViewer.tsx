@@ -1,60 +1,6 @@
-import { useState, useEffect, useMemo } from 'react'
-import hljs from 'highlight.js/lib/core'
-import typescript from 'highlight.js/lib/languages/typescript'
-import javascript from 'highlight.js/lib/languages/javascript'
-import json from 'highlight.js/lib/languages/json'
-import markdown from 'highlight.js/lib/languages/markdown'
-import css from 'highlight.js/lib/languages/css'
-import xml from 'highlight.js/lib/languages/xml'
-import python from 'highlight.js/lib/languages/python'
-import rust from 'highlight.js/lib/languages/rust'
-import go from 'highlight.js/lib/languages/go'
-import java from 'highlight.js/lib/languages/java'
-import c from 'highlight.js/lib/languages/c'
-import cpp from 'highlight.js/lib/languages/cpp'
-import yaml from 'highlight.js/lib/languages/yaml'
-import bash from 'highlight.js/lib/languages/bash'
-import sql from 'highlight.js/lib/languages/sql'
-import ruby from 'highlight.js/lib/languages/ruby'
-import php from 'highlight.js/lib/languages/php'
-import swift from 'highlight.js/lib/languages/swift'
-import kotlin from 'highlight.js/lib/languages/kotlin'
-import scala from 'highlight.js/lib/languages/scala'
-import lua from 'highlight.js/lib/languages/lua'
-import dockerfile from 'highlight.js/lib/languages/dockerfile'
-import graphql from 'highlight.js/lib/languages/graphql'
-import scss from 'highlight.js/lib/languages/scss'
-import less from 'highlight.js/lib/languages/less'
-import plaintext from 'highlight.js/lib/languages/plaintext'
-
-// Register languages
-hljs.registerLanguage('typescript', typescript)
-hljs.registerLanguage('javascript', javascript)
-hljs.registerLanguage('json', json)
-hljs.registerLanguage('markdown', markdown)
-hljs.registerLanguage('css', css)
-hljs.registerLanguage('html', xml)
-hljs.registerLanguage('xml', xml)
-hljs.registerLanguage('python', python)
-hljs.registerLanguage('rust', rust)
-hljs.registerLanguage('go', go)
-hljs.registerLanguage('java', java)
-hljs.registerLanguage('c', c)
-hljs.registerLanguage('cpp', cpp)
-hljs.registerLanguage('yaml', yaml)
-hljs.registerLanguage('bash', bash)
-hljs.registerLanguage('sql', sql)
-hljs.registerLanguage('ruby', ruby)
-hljs.registerLanguage('php', php)
-hljs.registerLanguage('swift', swift)
-hljs.registerLanguage('kotlin', kotlin)
-hljs.registerLanguage('scala', scala)
-hljs.registerLanguage('lua', lua)
-hljs.registerLanguage('dockerfile', dockerfile)
-hljs.registerLanguage('graphql', graphql)
-hljs.registerLanguage('scss', scss)
-hljs.registerLanguage('less', less)
-hljs.registerLanguage('plaintext', plaintext)
+import { useState, useEffect, useRef, useCallback } from 'react'
+import Editor, { OnMount } from '@monaco-editor/react'
+import type { editor } from 'monaco-editor'
 
 interface FileViewerProps {
   workspacePath: string
@@ -68,6 +14,15 @@ interface FileState {
   error: string | null
 }
 
+// Map backend language IDs to Monaco language IDs
+function mapLanguageToMonaco(language: string): string {
+  const languageMap: Record<string, string> = {
+    bash: 'shell',
+    // Most others are directly compatible
+  }
+  return languageMap[language] || language
+}
+
 export function FileViewer({ workspacePath, filePath }: FileViewerProps): JSX.Element {
   const [fileState, setFileState] = useState<FileState>({
     content: '',
@@ -75,6 +30,7 @@ export function FileViewer({ workspacePath, filePath }: FileViewerProps): JSX.El
     loading: false,
     error: null
   })
+  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
 
   useEffect(() => {
     if (!filePath) {
@@ -90,7 +46,7 @@ export function FileViewer({ workspacePath, filePath }: FileViewerProps): JSX.El
       if (result.success && result.file) {
         setFileState({
           content: result.file.content,
-          language: result.file.language,
+          language: mapLanguageToMonaco(result.file.language),
           loading: false,
           error: null
         })
@@ -107,20 +63,9 @@ export function FileViewer({ workspacePath, filePath }: FileViewerProps): JSX.El
     loadFile()
   }, [workspacePath, filePath])
 
-  const highlightedContent = useMemo(() => {
-    if (!fileState.content) return []
-
-    try {
-      const highlighted = hljs.highlight(fileState.content, {
-        language: fileState.language,
-        ignoreIllegals: true
-      })
-      return highlighted.value.split('\n')
-    } catch {
-      // Fallback to plaintext if highlighting fails
-      return fileState.content.split('\n')
-    }
-  }, [fileState.content, fileState.language])
+  const handleEditorMount: OnMount = useCallback((editor) => {
+    editorRef.current = editor
+  }, [])
 
   if (!filePath) {
     return (
@@ -155,19 +100,28 @@ export function FileViewer({ workspacePath, filePath }: FileViewerProps): JSX.El
         <span className="file-viewer-language">{fileState.language}</span>
       </div>
       <div className="file-viewer-content">
-        <table className="file-viewer-table">
-          <tbody>
-            {highlightedContent.map((line, index) => (
-              <tr key={index} className="file-viewer-line">
-                <td className="file-viewer-line-number">{index + 1}</td>
-                <td
-                  className="file-viewer-line-content"
-                  dangerouslySetInnerHTML={{ __html: line || '&nbsp;' }}
-                />
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <Editor
+          height="100%"
+          language={fileState.language}
+          value={fileState.content}
+          theme="vs-dark"
+          onMount={handleEditorMount}
+          options={{
+            readOnly: true,
+            minimap: { enabled: false },
+            lineNumbers: 'on',
+            scrollBeyondLastLine: false,
+            wordWrap: 'on',
+            fontSize: 14,
+            folding: true,
+            renderLineHighlight: 'line',
+            scrollbar: {
+              vertical: 'auto',
+              horizontal: 'auto'
+            },
+            padding: { top: 8 }
+          }}
+        />
       </div>
     </div>
   )
