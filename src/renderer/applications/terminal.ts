@@ -35,7 +35,7 @@ export const terminalApplication: Application<TerminalState> = {
   canHaveMultiple: true,
   showInNewTabMenu: true,
   keepAlive: true,
-  displayStyle: 'block',
+  displayStyle: 'flex',
   isDefault: true
 }
 
@@ -73,7 +73,7 @@ export function createTerminalVariant(instance: TerminalInstance): Application<T
     canHaveMultiple: true,
     showInNewTabMenu: true,
     keepAlive: true,
-    displayStyle: 'block',
+    displayStyle: 'flex',
     isDefault: instance.isDefault
   }
 }
