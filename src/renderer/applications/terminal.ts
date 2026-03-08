@@ -1,6 +1,7 @@
 import type { Application, TerminalState, Tab, Workspace } from '../types'
 import Terminal from '../components/Terminal'
 import { createElement } from 'react'
+import { useActivityStateStore } from '../store/activityState'
 
 export const terminalApplication: Application<TerminalState> = {
   id: 'terminal',
@@ -16,6 +17,8 @@ export const terminalApplication: Application<TerminalState> = {
     if (state.ptyId) {
       window.electron.terminal.kill(state.ptyId)
     }
+    // Remove activity state for this tab
+    useActivityStateStore.getState().removeTabState(tab.id)
   },
 
   render: ({ tab, workspaceId, workspacePath, isVisible }) => {

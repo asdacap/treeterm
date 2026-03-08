@@ -3,6 +3,8 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { useWorkspaceStore } from '../store/workspace'
 import { useSettingsStore } from '../store/settings'
+import { useActivityStateStore } from '../store/activityState'
+import { createActivityStateDetector } from '../utils/activityStateDetector'
 import TerminalScrollWrapper from './TerminalScrollWrapper'
 import DebugRawChars from './DebugRawChars'
 import type { TerminalState, SandboxConfig } from '../types'
@@ -23,12 +25,14 @@ export default function Terminal({ cwd, workspaceId, tabId, config, sandbox, isV
   const fitAddonRef = useRef<FitAddon | null>(null)
   const ptyIdRef = useRef<string | null>(null)
   const unsubscribeRef = useRef<(() => void) | null>(null)
+  const detectorRef = useRef<ReturnType<typeof createActivityStateDetector> | null>(null)
   const isMountedRef = useRef(true)
   const rawCharsRef = useRef<string>('')
   const [rawCharsDisplay, setRawCharsDisplay] = useState<string>('')
 
   const workspace = useWorkspaceStore((state) => state.workspaces[workspaceId])
   const updateTabState = useWorkspaceStore((state) => state.updateTabState)
+  const setTabState = useActivityStateStore((state) => state.setTabState)
   const settings = useSettingsStore((state) => state.settings)
 
   // Get existing ptyId from store for reconnection
@@ -85,11 +89,20 @@ export default function Terminal({ cwd, workspaceId, tabId, config, sandbox, isV
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
 
+    // Create activity state detector
+    // Any data activity = working, prompt pattern detects waiting for input
+    const detector = createActivityStateDetector(
+      (state) => setTabState(tabId, state)
+    )
+    detectorRef.current = detector
+
     // Helper to subscribe to PTY and set up refs
     const connectToPty = (id: string) => {
       ptyIdRef.current = id
       unsubscribeRef.current = window.electron.terminal.onData(id, (data) => {
         terminal.write(data)
+        // Process data for activity state detection
+        detector.processData(data)
         // Capture last 1000 raw characters for debug display
         rawCharsRef.current = (rawCharsRef.current + data).slice(-1000)
         if (settings.terminal.showRawChars) {
@@ -173,6 +186,9 @@ export default function Terminal({ cwd, workspaceId, tabId, config, sandbox, isV
       resizeObserver.disconnect()
       if (unsubscribeRef.current) {
         unsubscribeRef.current()
+      }
+      if (detectorRef.current) {
+        detectorRef.current.destroy()
       }
       // Note: We intentionally don't kill the PTY here
       // The PTY lifecycle is managed by removeWorkspace/removeTab in workspace.ts

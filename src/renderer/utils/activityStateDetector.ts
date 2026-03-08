@@ -34,6 +34,8 @@ export function createActivityStateDetector(
   let buffer = ''
   const MAX_BUFFER_SIZE = 500
 
+  console.log('[ActivityDetector] Created with config:', { idleTimeout, debounceMs, promptPatterns })
+
   let currentState: ActivityState = 'idle'
   let lastActivityTime = Date.now()
   let idleTimerId: ReturnType<typeof setTimeout> | null = null
@@ -44,11 +46,17 @@ export function createActivityStateDetector(
     // This prevents a race where data arrives during a debounced transition
     // to 'waiting_for_input' or 'idle', which would incorrectly fire after the early return
     if (state === 'working' && debounceTimerId) {
+      console.log('[ActivityDetector] Clearing pending debounce for working state')
       clearTimeout(debounceTimerId)
       debounceTimerId = null
     }
 
-    if (state === currentState) return
+    if (state === currentState) {
+      console.log('[ActivityDetector] State unchanged, skipping:', state)
+      return
+    }
+
+    console.log('[ActivityDetector] State changing:', currentState, '->', state)
 
     // Clear any pending debounce for other state transitions
     if (debounceTimerId) {
@@ -60,10 +68,13 @@ export function createActivityStateDetector(
     // Debounce other state changes to prevent flickering
     if (state === 'working') {
       currentState = state
+      console.log('[ActivityDetector] Emitting working immediately')
       onStateChange(state)
     } else {
+      console.log('[ActivityDetector] Debouncing state change to:', state)
       debounceTimerId = setTimeout(() => {
         if (state !== currentState) {
+          console.log('[ActivityDetector] Debounce fired, changing to:', state)
           currentState = state
           onStateChange(state)
         }
@@ -100,7 +111,9 @@ export function createActivityStateDetector(
 
     idleTimerId = setTimeout(() => {
       // After 1 second of no activity, determine final state
-      if (checkForPrompt()) {
+      const hasPrompt = checkForPrompt()
+      console.log('[ActivityDetector] Idle check fired, hasPrompt:', hasPrompt, 'buffer tail:', buffer.slice(-50))
+      if (hasPrompt) {
         emitState('waiting_for_input')
       } else {
         emitState('idle')
@@ -119,6 +132,7 @@ export function createActivityStateDetector(
     }
 
     // Any stream activity = working
+    console.log('[ActivityDetector] processData called, current state:', currentState, 'data length:', data.length)
     emitState('working')
     scheduleIdleCheck()
   }
