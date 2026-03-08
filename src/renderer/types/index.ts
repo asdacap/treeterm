@@ -204,6 +204,17 @@ export interface GitApi {
   commitStaged: (repoPath: string, message: string) => Promise<{ success: boolean; error?: string }>
 }
 
+export interface PrefixModeConfig {
+  enabled: boolean
+  prefixKey: string // e.g., 'Control+B'
+  timeout: number // ms (default: 1500)
+}
+
+export interface KeybindingAction {
+  direct?: string // e.g., 'CommandOrControl+T'
+  prefixMode?: string // e.g., 'c' (key after prefix)
+}
+
 export interface Settings {
   terminal: {
     fontSize: number
@@ -226,12 +237,13 @@ export interface Settings {
   appearance: {
     theme: 'dark' | 'light' | 'system'
   }
+  prefixMode: PrefixModeConfig
   keybindings: {
-    newTab: string
-    closeTab: string
-    nextTab: string
-    prevTab: string
-    openSettings: string
+    newTab: KeybindingAction
+    closeTab: KeybindingAction
+    nextTab: KeybindingAction
+    prevTab: KeybindingAction
+    openSettings: KeybindingAction
   }
 }
 
