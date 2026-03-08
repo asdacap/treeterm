@@ -188,7 +188,7 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
                     Show Raw Characters (Debug)
                   </label>
                   <p className="settings-hint">
-                    Display the last 50 raw terminal characters at the bottom of the terminal
+                    Log the last 50 raw terminal characters to the console (DevTools)
                   </p>
                 </div>
               </div>
