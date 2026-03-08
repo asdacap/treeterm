@@ -54,6 +54,6 @@ export const claudeApplication: Application<ClaudeState> = {
   canHaveMultiple: true,
   showInNewTabMenu: true,
   keepAlive: true,
-  displayStyle: 'block',
+  displayStyle: 'flex',
   isDefault: false
 }
