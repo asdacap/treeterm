@@ -29,6 +29,7 @@ interface SandboxConfig {
 }
 
 contextBridge.exposeInMainWorld('electron', {
+  platform: process.platform,
   terminal: {
     create: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string): Promise<string> => {
       return ipcRenderer.invoke('pty:create', cwd, sandbox, startupCommand)
