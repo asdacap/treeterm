@@ -7,14 +7,20 @@ import { useActivityStateStore } from '../store/activityState'
 function TabActivityIndicator({ tabId }: { tabId: string }) {
   const activityState = useActivityStateStore((state) => state.states[tabId] || 'idle')
 
-  if (activityState === 'idle') return null
+  const indicators: Record<string, { icon: string; title: string }> = {
+    idle: { icon: '○', title: 'Idle' },
+    working: { icon: '⟳', title: 'Working...' },
+    waiting_for_input: { icon: '●', title: 'Waiting for input' }
+  }
+
+  const { icon, title } = indicators[activityState]
 
   return (
     <span
       className={`tab-activity tab-activity-${activityState}`}
-      title={activityState === 'working' ? 'Working...' : 'Waiting for input'}
+      title={title}
     >
-      {activityState === 'working' ? '⟳' : '●'}
+      {icon}
     </span>
   )
 }
