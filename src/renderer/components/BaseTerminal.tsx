@@ -256,9 +256,15 @@ export default function BaseTerminal({
   // Close context menu when clicking outside
   useEffect(() => {
     if (!contextMenu) return
-    const handleClick = () => setContextMenu(null)
-    document.addEventListener('click', handleClick)
-    return () => document.removeEventListener('click', handleClick)
+    const handleClick = (e: MouseEvent) => {
+      // Don't close if clicking on the context menu itself
+      const target = e.target as HTMLElement
+      if (target.closest('.context-menu')) return
+      setContextMenu(null)
+    }
+    // Use capture phase so the event is caught before xterm.js can stop propagation
+    document.addEventListener('click', handleClick, true)
+    return () => document.removeEventListener('click', handleClick, true)
   }, [contextMenu])
 
   const handleContextMenu = (e: React.MouseEvent) => {
