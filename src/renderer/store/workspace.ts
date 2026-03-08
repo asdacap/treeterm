@@ -578,3 +578,12 @@ export const useWorkspaceStore = create<WorkspaceState>()(
     }
   )
 )
+
+/**
+ * Helper function to find unmerged sub-workspaces (worktrees with status 'active')
+ */
+export function getUnmergedSubWorkspaces(workspaces: Record<string, Workspace>): Workspace[] {
+  return Object.values(workspaces).filter(
+    (ws) => ws.isWorktree && ws.status === 'active'
+  )
+}

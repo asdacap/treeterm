@@ -1021,6 +1021,96 @@ body,
   background: #006cbf;
 }
 
+/* Close Confirm Dialog */
+.close-confirm-dialog {
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  width: 450px;
+  max-width: 90%;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.close-confirm-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.close-confirm-dialog-header h2 {
+  font-size: 16px;
+  font-weight: 500;
+  margin: 0;
+  color: #f0a000;
+}
+
+.close-confirm-dialog-content {
+  padding: 20px;
+}
+
+.close-confirm-warning {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0 0 12px 0;
+}
+
+.close-confirm-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  padding: 8px 12px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.close-confirm-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+}
+
+.close-confirm-name {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.close-confirm-branch {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.close-confirm-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 12px 0 0 0;
+  font-style: italic;
+}
+
+.close-confirm-dialog-actions {
+  display: flex;
+  gap: 8px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-color);
+  justify-content: flex-end;
+}
+
+.dialog-btn.close-anyway {
+  background: #b36200;
+  color: white;
+}
+
+.dialog-btn.close-anyway:hover:not(:disabled) {
+  background: #cc7000;
+}
+
 /* Diff View */
 .diff-view {
   display: flex;

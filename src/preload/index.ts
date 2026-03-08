@@ -22,6 +22,13 @@ ipcRenderer.on('settings:open', () => {
   settingsOpenListeners.forEach((cb) => cb())
 })
 
+type CloseConfirmCallback = () => void
+const closeConfirmListeners: CloseConfirmCallback[] = []
+
+ipcRenderer.on('app:confirm-close', () => {
+  closeConfirmListeners.forEach((cb) => cb())
+})
+
 interface SandboxConfig {
   enabled: boolean
   allowNetwork: boolean
@@ -155,5 +162,22 @@ contextBridge.exposeInMainWorld('electron', {
   },
   getInitialWorkspace: (): Promise<string | null> => {
     return ipcRenderer.invoke('app:getInitialWorkspace')
+  },
+  app: {
+    onCloseConfirm: (callback: CloseConfirmCallback): (() => void) => {
+      closeConfirmListeners.push(callback)
+      return () => {
+        const index = closeConfirmListeners.indexOf(callback)
+        if (index > -1) {
+          closeConfirmListeners.splice(index, 1)
+        }
+      }
+    },
+    confirmClose: (): void => {
+      ipcRenderer.send('app:close-confirmed')
+    },
+    cancelClose: (): void => {
+      ipcRenderer.send('app:close-cancelled')
+    }
   }
 })
