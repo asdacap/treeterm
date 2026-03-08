@@ -3,6 +3,7 @@ import TreePane from './components/TreePane'
 import WorkspacePane from './components/WorkspacePane'
 import SettingsDialog from './components/SettingsDialog'
 import { useSettingsStore } from './store/settings'
+import { useWorkspaceStore } from './store/workspace'
 
 export default function App() {
   const [treeWidth, setTreeWidth] = useState(250)
@@ -17,6 +18,29 @@ export default function App() {
     })
     return () => unsubscribe()
   }, [loadSettings])
+
+  // Handle initial workspace from CLI
+  useEffect(() => {
+    const handleInitialWorkspace = async () => {
+      const initialPath = await window.electron.getInitialWorkspace()
+      if (!initialPath) return
+
+      const { workspaces, addWorkspace, setActiveWorkspace } = useWorkspaceStore.getState()
+
+      // Check if workspace already exists for this path
+      const existingWorkspace = Object.values(workspaces).find(
+        (ws) => ws.path === initialPath
+      )
+
+      if (existingWorkspace) {
+        setActiveWorkspace(existingWorkspace.id)
+      } else {
+        await addWorkspace(initialPath)
+      }
+    }
+
+    handleInitialWorkspace()
+  }, [])
 
   const handleMouseDown = useCallback(() => {
     setIsResizing(true)

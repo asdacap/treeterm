@@ -2,6 +2,15 @@ import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import { execSync } from 'child_process'
 import { join } from 'path'
 import { ptyManager } from './pty'
+
+// Parse initial workspace from command line
+let initialWorkspacePath: string | null = null
+for (const arg of process.argv) {
+  if (arg.startsWith('--workspace=')) {
+    initialWorkspacePath = arg.substring('--workspace='.length)
+    break
+  }
+}
 import {
   getGitInfo,
   createWorktree,
@@ -204,6 +213,12 @@ ipcMain.handle('sandbox:isAvailable', () => {
     }
   }
   return false // Windows: no sandbox support
+})
+
+ipcMain.handle('app:getInitialWorkspace', () => {
+  const path = initialWorkspacePath
+  initialWorkspacePath = null // Clear after first read
+  return path
 })
 
 // App lifecycle
