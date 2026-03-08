@@ -265,6 +265,7 @@ export interface ElectronApi {
   settings: SettingsApi
   filesystem: FilesystemApi
   sandbox: SandboxApi
+  getInitialWorkspace: () => Promise<string | null>
 }
 
 declare global {

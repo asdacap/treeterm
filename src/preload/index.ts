@@ -152,5 +152,8 @@ contextBridge.exposeInMainWorld('electron', {
     isAvailable: (): Promise<boolean> => {
       return ipcRenderer.invoke('sandbox:isAvailable')
     }
+  },
+  getInitialWorkspace: (): Promise<string | null> => {
+    return ipcRenderer.invoke('app:getInitialWorkspace')
   }
 })
