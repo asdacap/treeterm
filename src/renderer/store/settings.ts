@@ -9,11 +9,17 @@ const defaultSettings: Settings = {
     cursorStyle: 'block',
     cursorBlink: true,
     showRawChars: false,
+    startByDefault: true,
     instances: []
   },
   sandbox: {
     enabledByDefault: false,
     allowNetworkByDefault: true
+  },
+  claude: {
+    command: 'claude',
+    startByDefault: false,
+    enableSandbox: false
   },
   appearance: {
     theme: 'dark'
@@ -47,8 +53,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       const settings = await window.electron.settings.load()
       set({ settings, isLoaded: true })
-      // Register dynamic terminal variants
-      registerTerminalVariants(settings.terminal.instances)
+      // Register dynamic terminal variants and update base terminal
+      registerTerminalVariants(settings.terminal.instances, settings.terminal)
     } catch (error) {
       console.error('Failed to load settings:', error)
       set({ isLoaded: true })
@@ -59,8 +65,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       await window.electron.settings.save(settings)
       set({ settings })
-      // Re-register terminal variants when settings change
-      registerTerminalVariants(settings.terminal.instances)
+      // Re-register terminal variants and update base terminal when settings change
+      registerTerminalVariants(settings.terminal.instances, settings.terminal)
     } catch (error) {
       console.error('Failed to save settings:', error)
       throw error

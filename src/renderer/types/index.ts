@@ -211,6 +211,7 @@ export interface Settings {
     cursorStyle: 'block' | 'underline' | 'bar'
     cursorBlink: boolean
     showRawChars: boolean
+    startByDefault: boolean
     instances: TerminalInstance[]
   }
   sandbox: {

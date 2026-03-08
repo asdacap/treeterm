@@ -21,6 +21,7 @@ export interface Settings {
     cursorStyle: 'block' | 'underline' | 'bar'
     cursorBlink: boolean
     showRawChars: boolean
+    startByDefault: boolean
     instances: TerminalInstance[]
   }
   sandbox: {
@@ -51,6 +52,7 @@ const defaultSettings: Settings = {
     cursorStyle: 'block',
     cursorBlink: true,
     showRawChars: false,
+    startByDefault: true,
     instances: []
   },
   sandbox: {
