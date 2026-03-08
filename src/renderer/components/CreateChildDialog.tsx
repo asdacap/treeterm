@@ -31,18 +31,31 @@ export default function CreateChildDialog({
   // Load existing worktrees when "existing" tab is selected
   useEffect(() => {
     if (mode === 'existing' && parentWorkspace.gitRootPath) {
+      console.log('[CreateChildDialog] Loading worktrees for:', {
+        gitRootPath: parentWorkspace.gitRootPath,
+        gitBranch: parentWorkspace.gitBranch,
+        openWorktreePaths
+      })
       setIsLoadingWorktrees(true)
       window.electron.git.getChildWorktrees(
         parentWorkspace.gitRootPath,
         parentWorkspace.gitBranch
       ).then(worktrees => {
+        console.log('[CreateChildDialog] Received worktrees:', worktrees)
         // Filter out worktrees that are already open
         const available = worktrees.filter(wt => !openWorktreePaths.includes(wt.path))
+        console.log('[CreateChildDialog] Available worktrees after filtering:', available)
         setExistingWorktrees(available)
         setIsLoadingWorktrees(false)
-      }).catch(() => {
+      }).catch((error) => {
+        console.error('[CreateChildDialog] Error loading worktrees:', error)
         setExistingWorktrees([])
         setIsLoadingWorktrees(false)
+      })
+    } else {
+      console.log('[CreateChildDialog] Skipping worktree load:', {
+        mode,
+        hasGitRootPath: !!parentWorkspace.gitRootPath
       })
     }
   }, [mode, parentWorkspace.gitRootPath, parentWorkspace.gitBranch, openWorktreePaths])

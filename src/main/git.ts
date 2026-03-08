@@ -188,14 +188,18 @@ export async function getChildWorktrees(
   repoPath: string,
   parentBranch: string | null
 ): Promise<ChildWorktreeInfo[]> {
+  console.log('[getChildWorktrees] called with:', { repoPath, parentBranch })
+
   const allWorktrees = await listWorktrees(repoPath)
+  console.log('[getChildWorktrees] allWorktrees:', allWorktrees)
 
   // Determine the expected prefix for child branches
   const branchPrefix = (parentBranch && parentBranch.startsWith('treeterm/'))
     ? `${parentBranch}/`
     : 'treeterm/'
+  console.log('[getChildWorktrees] branchPrefix:', branchPrefix)
 
-  return allWorktrees
+  const filtered = allWorktrees
     .filter(wt => {
       // Branch must start with the prefix
       if (!wt.branch.startsWith(branchPrefix)) return false
@@ -203,10 +207,16 @@ export async function getChildWorktrees(
       const remainder = wt.branch.slice(branchPrefix.length)
       return remainder.length > 0 && !remainder.includes('/')
     })
-    .map(wt => ({
-      ...wt,
-      displayName: wt.branch.slice(branchPrefix.length)
-    }))
+
+  console.log('[getChildWorktrees] filtered worktrees:', filtered)
+
+  const result = filtered.map(wt => ({
+    ...wt,
+    displayName: wt.branch.slice(branchPrefix.length)
+  }))
+
+  console.log('[getChildWorktrees] returning:', result)
+  return result
 }
 
 export interface DiffFile {
