@@ -199,8 +199,8 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
                 {sandboxAvailable === false && (
                   <div className="settings-warning">
                     Sandbox not available on this system.
-                    {process.platform === 'linux' && ' Install bubblewrap (bwrap) to enable.'}
-                    {process.platform === 'win32' && ' Sandbox is not supported on Windows.'}
+                    {window.electron.platform === 'linux' && ' Install bubblewrap (bwrap) to enable.'}
+                    {window.electron.platform === 'win32' && ' Sandbox is not supported on Windows.'}
                   </div>
                 )}
                 <div className="settings-group">
@@ -441,6 +441,6 @@ function formatKeybindingLabel(key: string): string {
 
 function formatKeybinding(keybinding: string): string {
   return keybinding
-    .replace('CommandOrControl', process.platform === 'darwin' ? 'Cmd' : 'Ctrl')
+    .replace('CommandOrControl', window.electron.platform === 'darwin' ? 'Cmd' : 'Ctrl')
     .replace(/\+/g, ' + ')
 }

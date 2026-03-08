@@ -220,6 +220,7 @@ export interface SandboxApi {
 }
 
 export interface ElectronApi {
+  platform: NodeJS.Platform
   terminal: TerminalApi
   selectFolder: () => Promise<string | null>
   git: GitApi
