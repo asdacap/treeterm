@@ -424,7 +424,7 @@ export async function mergeWorktree(
       await git.commit(`Squash merge ${worktreeBranch}`)
     } else {
       // Regular merge
-      await git.merge([worktreeBranch, '--no-ff', '-m', `Merge ${worktreeBranch}`])
+      await git.merge([worktreeBranch])
     }
 
     return { success: true }
