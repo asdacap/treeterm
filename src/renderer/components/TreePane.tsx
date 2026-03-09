@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useWorkspaceStore } from '../store/workspace'
 import { useActivityStateStore } from '../store/activityState'
+import { usePrefixModeStore } from '../store/prefixMode'
 import MergeDialog from './MergeDialog'
 import CreateChildDialog from './CreateChildDialog'
 import type { Workspace, ActivityState } from '../types'
@@ -44,6 +45,11 @@ export default function TreePane() {
     mergeAndRemoveWorkspace,
     setActiveWorkspace
   } = useWorkspaceStore()
+  const {
+    state: prefixState,
+    focusedWorkspaceIndex,
+    workspaceIds: focusedWorkspaceIds
+  } = usePrefixModeStore()
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [mergeDialogWorkspaceId, setMergeDialogWorkspaceId] = useState<string | null>(null)
@@ -173,10 +179,15 @@ export default function TreePane() {
     const children = ws.children.map((id) => workspaces[id]).filter(Boolean)
     const tabIds = ws.tabs.map((t) => t.id)
 
+    // Check if this workspace is focused in workspace_focus mode
+    const isFocused =
+      prefixState === 'workspace_focus' &&
+      focusedWorkspaceIds[focusedWorkspaceIndex] === ws.id
+
     return (
       <div key={ws.id}>
         <div
-          className={`tree-item ${activeWorkspaceId === ws.id ? 'active' : ''}`}
+          className={`tree-item ${activeWorkspaceId === ws.id ? 'active' : ''} ${isFocused ? 'focused' : ''}`}
           style={{ paddingLeft: 16 + depth * 16 }}
           onClick={() => setActiveWorkspace(ws.id)}
           onContextMenu={(e) => handleContextMenu(e, ws.id)}

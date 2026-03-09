@@ -82,7 +82,8 @@ const defaultSettings: Settings = {
     closeTab: 'x',
     nextTab: 'n',
     prevTab: 'p',
-    openSettings: ','
+    openSettings: ',',
+    workspaceFocus: 'w'
   }
 }
 

@@ -250,6 +250,8 @@ export default function BaseTerminal({
       // Re-fit and refresh the terminal when becoming visible
       fitAddonRef.current.fit()
       terminalRef.current.refresh(0, terminalRef.current.rows)
+      // Focus the terminal so keyboard input works immediately
+      terminalRef.current.focus()
     }
   }, [isVisible])
 

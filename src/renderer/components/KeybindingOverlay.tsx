@@ -22,7 +22,8 @@ function getAvailableKeybindings(settings: Settings): KeybindingItem[] {
     closeTab: 'Close Tab',
     nextTab: 'Next Tab',
     prevTab: 'Previous Tab',
-    openSettings: 'Open Settings'
+    openSettings: 'Open Settings',
+    workspaceFocus: 'Workspace Focus'
   }
 
   return Object.entries(settings.keybindings)
@@ -66,13 +67,43 @@ function TimeoutProgress({ timeout, activatedAt }: { timeout: number; activatedA
 }
 
 export default function KeybindingOverlay() {
-  const { state, activatedAt } = usePrefixModeStore()
+  const { state, activatedAt, focusedWorkspaceIndex, workspaceIds } = usePrefixModeStore()
   const { settings } = useSettingsStore()
 
-  if (state !== 'active') {
+  if (state === 'idle') {
     return null
   }
 
+  // Workspace focus mode
+  if (state === 'workspace_focus') {
+    return (
+      <div className="keybinding-overlay">
+        <div className="keybinding-overlay-header">
+          <span className="keybinding-overlay-title">Workspace Focus</span>
+          <span className="keybinding-overlay-hint">
+            Navigate: ↑/↓ • Select: Enter • Cancel: Esc
+          </span>
+        </div>
+        <div className="keybinding-overlay-list">
+          <div className="keybinding-overlay-item">
+            <kbd className="keybinding-overlay-key">↑ / ↓</kbd>
+            <span className="keybinding-overlay-action">Navigate Workspaces</span>
+          </div>
+          <div className="keybinding-overlay-item">
+            <kbd className="keybinding-overlay-key">Enter</kbd>
+            <span className="keybinding-overlay-action">Select Workspace</span>
+          </div>
+          <div className="keybinding-overlay-item">
+            <kbd className="keybinding-overlay-key">Esc</kbd>
+            <span className="keybinding-overlay-action">Cancel</span>
+          </div>
+        </div>
+        <TimeoutProgress timeout={settings.prefixMode.timeout} activatedAt={activatedAt} />
+      </div>
+    )
+  }
+
+  // Regular prefix mode
   const keybindings = getAvailableKeybindings(settings)
 
   return (
