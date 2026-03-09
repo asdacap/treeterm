@@ -7,8 +7,6 @@ import TabBar from './TabBar'
 import CreateChildDialog from './CreateChildDialog'
 import KeybindingOverlay from './KeybindingOverlay'
 import type { ReviewState } from '../types'
-// Import applications to ensure they are registered
-import '../applications'
 
 export default function WorkspacePane() {
   const {

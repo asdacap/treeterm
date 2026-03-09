@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware'
 import type { Workspace, GitInfo, Tab } from '../types'
 import { applicationRegistry } from '../registry/applicationRegistry'
 import { useSettingsStore } from '../store/settings'
-import { claudeApplication } from '../applications/claude'
+import { claudeApplication } from '../../applications/claude/renderer'
 
 interface WorkspaceState {
   workspaces: Record<string, Workspace>

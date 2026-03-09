@@ -1,15 +1,22 @@
-import { applicationRegistry } from '../registry/applicationRegistry'
-import { terminalApplication, createTerminalApplication, createTerminalVariant } from './terminal'
-import { filesystemApplication } from './filesystem'
-import { claudeApplication } from './claude'
-import { reviewApplication } from './review'
-import type { TerminalInstance, Settings } from '../types'
+import { applicationRegistry } from '../renderer/registry/applicationRegistry'
+import { terminalApplication, createTerminalApplication, createTerminalVariant } from './terminal/renderer'
+import { filesystemApplication } from './filesystem/renderer'
+import { claudeApplication } from './claude/renderer'
+import { reviewApplication } from './review/renderer'
+import type { TerminalInstance, Settings } from '../renderer/types'
 
-// Register all built-in applications
-applicationRegistry.register(terminalApplication)
-applicationRegistry.register(filesystemApplication)
-applicationRegistry.register(claudeApplication)
-applicationRegistry.register(reviewApplication)
+let initialized = false
+
+export function initializeApplications(): void {
+  if (initialized) return
+
+  applicationRegistry.register(terminalApplication)
+  applicationRegistry.register(filesystemApplication)
+  applicationRegistry.register(claudeApplication)
+  applicationRegistry.register(reviewApplication)
+
+  initialized = true
+}
 
 // Register dynamic terminal variants from settings and update base terminal
 export function registerTerminalVariants(instances: TerminalInstance[], terminalSettings?: Settings['terminal']): void {

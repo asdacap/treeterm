@@ -1,5 +1,5 @@
-import type { Application, FilesystemState } from '../types'
-import { FilesystemBrowser } from '../components/FilesystemBrowser'
+import type { Application, FilesystemState } from '../../renderer/types'
+import { FilesystemBrowser } from '../../renderer/components/FilesystemBrowser'
 import { createElement } from 'react'
 
 export const filesystemApplication: Application<FilesystemState> = {

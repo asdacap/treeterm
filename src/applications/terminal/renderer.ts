@@ -1,7 +1,7 @@
-import type { Application, TerminalState, TerminalInstance, Tab, Workspace } from '../types'
-import Terminal from '../components/Terminal'
+import type { Application, TerminalState, TerminalInstance, Tab, Workspace } from '../../renderer/types'
+import Terminal from '../../renderer/components/Terminal'
 import { createElement } from 'react'
-import { useActivityStateStore } from '../store/activityState'
+import { useActivityStateStore } from '../../renderer/store/activityState'
 
 // Factory function to create the base terminal application with configurable isDefault
 export function createTerminalApplication(startByDefault: boolean): Application<TerminalState> {
