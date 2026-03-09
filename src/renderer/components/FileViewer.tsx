@@ -3,6 +3,7 @@ import Editor, { OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
 import { useWorkspaceStore } from '../store/workspace'
 import type { EditorState } from '../types'
+import { MarkdownPreview } from './MarkdownPreview'
 
 interface FileViewerProps {
   workspacePath: string
@@ -120,6 +121,7 @@ export function FileViewer({ workspacePath, workspaceId, filePath }: FileViewerP
   }
 
   const fileName = filePath.split('/').pop() || filePath
+  const isMarkdown = fileState.language === 'markdown'
 
   return (
     <div className="file-viewer">
@@ -137,28 +139,32 @@ export function FileViewer({ workspacePath, workspaceId, filePath }: FileViewerP
         </div>
       </div>
       <div className="file-viewer-content">
-        <Editor
-          height="100%"
-          language={fileState.language}
-          value={fileState.content}
-          theme="vs-dark"
-          onMount={handleEditorMount}
-          options={{
-            readOnly: true,
-            minimap: { enabled: false },
-            lineNumbers: 'on',
-            scrollBeyondLastLine: false,
-            wordWrap: 'on',
-            fontSize: 14,
-            folding: true,
-            renderLineHighlight: 'line',
-            scrollbar: {
-              vertical: 'auto',
-              horizontal: 'auto'
-            },
-            padding: { top: 8 }
-          }}
-        />
+        {isMarkdown ? (
+          <MarkdownPreview content={fileState.content} />
+        ) : (
+          <Editor
+            height="100%"
+            language={fileState.language}
+            value={fileState.content}
+            theme="vs-dark"
+            onMount={handleEditorMount}
+            options={{
+              readOnly: true,
+              minimap: { enabled: false },
+              lineNumbers: 'on',
+              scrollBeyondLastLine: false,
+              wordWrap: 'on',
+              fontSize: 14,
+              folding: true,
+              renderLineHighlight: 'line',
+              scrollbar: {
+                vertical: 'auto',
+                horizontal: 'auto'
+              },
+              padding: { top: 8 }
+            }}
+          />
+        )}
       </div>
     </div>
   )
