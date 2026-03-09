@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges } from '../types'
+import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, FileDiffContents } from '../types'
+import { MonacoDiffViewer } from './MonacoDiffViewer'
 
 interface DiffViewProps {
   worktreePath: string
@@ -13,7 +14,7 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
-  const [fileDiff, setFileDiff] = useState<string | null>(null)
+  const [fileDiffContents, setFileDiffContents] = useState<FileDiffContents | null>(null)
   const [loadingFileDiff, setLoadingFileDiff] = useState(false)
 
   // Uncommitted changes state
@@ -65,15 +66,16 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
     setSelectedFile(filePath)
     setSelectedUncommittedFile(null)
     setLoadingFileDiff(true)
+    setFileDiffContents(null)
     try {
-      const result = await window.electron.git.getFileDiff(worktreePath, parentBranch, filePath)
-      if (result.success) {
-        setFileDiff(result.diff || '')
+      const result = await window.electron.git.getFileContentsForDiff(worktreePath, parentBranch, filePath)
+      if (result.success && result.contents) {
+        setFileDiffContents(result.contents)
       } else {
-        setFileDiff(`Error: ${result.error}`)
+        setFileDiffContents(null)
       }
     } catch {
-      setFileDiff('Failed to load file diff')
+      setFileDiffContents(null)
     }
     setLoadingFileDiff(false)
   }
@@ -82,15 +84,16 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
     setSelectedUncommittedFile(file)
     setSelectedFile(null)
     setLoadingFileDiff(true)
+    setFileDiffContents(null)
     try {
-      const result = await window.electron.git.getUncommittedFileDiff(worktreePath, file.path, file.staged)
-      if (result.success) {
-        setFileDiff(result.diff || '')
+      const result = await window.electron.git.getUncommittedFileContentsForDiff(worktreePath, file.path, file.staged)
+      if (result.success && result.contents) {
+        setFileDiffContents(result.contents)
       } else {
-        setFileDiff(`Error: ${result.error}`)
+        setFileDiffContents(null)
       }
     } catch {
-      setFileDiff('Failed to load file diff')
+      setFileDiffContents(null)
     }
     setLoadingFileDiff(false)
   }
@@ -239,8 +242,16 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
                   {selectedFile ? (
                     loadingFileDiff ? (
                       <div className="diff-loading">Loading...</div>
+                    ) : fileDiffContents ? (
+                      <MonacoDiffViewer
+                        originalContent={fileDiffContents.originalContent}
+                        modifiedContent={fileDiffContents.modifiedContent}
+                        language={fileDiffContents.language}
+                        originalLabel={diff?.baseBranch || 'Original'}
+                        modifiedLabel={diff?.headBranch || 'Modified'}
+                      />
                     ) : (
-                      <pre className="diff-code">{fileDiff}</pre>
+                      <div className="diff-placeholder">Failed to load diff contents</div>
                     )
                   ) : (
                     <div className="diff-placeholder">Select a file to view changes</div>
@@ -360,8 +371,16 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
                   {selectedUncommittedFile ? (
                     loadingFileDiff ? (
                       <div className="diff-loading">Loading...</div>
+                    ) : fileDiffContents ? (
+                      <MonacoDiffViewer
+                        originalContent={fileDiffContents.originalContent}
+                        modifiedContent={fileDiffContents.modifiedContent}
+                        language={fileDiffContents.language}
+                        originalLabel={selectedUncommittedFile.staged ? 'HEAD' : 'Index/HEAD'}
+                        modifiedLabel={selectedUncommittedFile.staged ? 'Staged' : 'Working Tree'}
+                      />
                     ) : (
-                      <pre className="diff-code">{fileDiff}</pre>
+                      <div className="diff-placeholder">Failed to load diff contents</div>
                     )
                   ) : (
                     <div className="diff-placeholder">Select a file to view changes</div>

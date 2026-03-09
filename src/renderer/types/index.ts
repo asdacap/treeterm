@@ -191,6 +191,12 @@ export interface UncommittedChanges {
   totalDeletions: number
 }
 
+export interface FileDiffContents {
+  originalContent: string
+  modifiedContent: string
+  language: string
+}
+
 export interface ConflictCheckResult {
   success: boolean
   conflicts?: ConflictInfo
@@ -228,6 +234,9 @@ export interface GitApi {
   stageAll: (repoPath: string) => Promise<{ success: boolean; error?: string }>
   unstageAll: (repoPath: string) => Promise<{ success: boolean; error?: string }>
   commitStaged: (repoPath: string, message: string) => Promise<{ success: boolean; error?: string }>
+  getFileContentsForDiff: (worktreePath: string, parentBranch: string, filePath: string) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
+  getFileContentsForDiffAgainstHead: (worktreePath: string, parentBranch: string, filePath: string) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
+  getUncommittedFileContentsForDiff: (repoPath: string, filePath: string, staged: boolean) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
 }
 
 export interface PrefixModeConfig {
