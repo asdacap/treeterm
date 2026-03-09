@@ -1962,16 +1962,16 @@ body,
 /* Keybinding Overlay */
 .keybinding-overlay {
   position: fixed;
-  bottom: 60px;
+  bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(30, 30, 30, 0.98);
+  background: rgba(30, 30, 30, 0.95);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 16px 20px;
-  min-width: 320px;
-  max-width: 450px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  border-radius: 8px;
+  padding: 10px 14px;
+  min-width: 500px;
+  max-width: 650px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
   z-index: 9999;
   animation: overlay-appear 0.2s ease-out;
   backdrop-filter: blur(10px);
@@ -1980,9 +1980,9 @@ body,
 .keybinding-overlay-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
-  padding-bottom: 12px;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
   border-bottom: 1px solid var(--border-color);
 }
 
@@ -1990,31 +1990,31 @@ body,
   font-family: monospace;
   background: var(--accent);
   color: white;
-  padding: 4px 10px;
-  border-radius: 6px;
+  padding: 3px 8px;
+  border-radius: 4px;
   font-weight: 600;
-  font-size: 13px;
+  font-size: 11px;
 }
 
 .keybinding-overlay-title {
   font-weight: 600;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 11px;
   flex: 1;
 }
 
 .keybinding-overlay-hint {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-secondary);
   font-style: italic;
 }
 
 .keybinding-overlay-list {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 10px 16px;
+  grid-template-columns: repeat(2, auto 1fr);
+  gap: 6px 12px;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .keybinding-overlay-item {
@@ -2025,27 +2025,27 @@ body,
   font-family: monospace;
   background: var(--bg-tertiary);
   color: var(--accent);
-  padding: 6px 12px;
-  border-radius: 6px;
+  padding: 3px 8px;
+  border-radius: 4px;
   font-weight: 700;
-  font-size: 14px;
+  font-size: 11px;
   text-align: center;
-  min-width: 36px;
+  min-width: 28px;
   border: 1px solid var(--border-color);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   display: inline-block;
 }
 
 .keybinding-overlay-action {
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 11px;
 }
 
 .keybinding-overlay-progress {
-  margin-top: 12px;
-  height: 3px;
+  margin-top: 6px;
+  height: 2px;
   background: var(--bg-tertiary);
-  border-radius: 2px;
+  border-radius: 1px;
   overflow: hidden;
 }
 
