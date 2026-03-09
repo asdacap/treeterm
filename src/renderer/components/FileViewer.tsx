@@ -1,9 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Editor, { OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
+import { useWorkspaceStore } from '../store/workspace'
+import type { EditorState } from '../types'
 
 interface FileViewerProps {
   workspacePath: string
+  workspaceId: string
   filePath: string | null
 }
 
@@ -23,7 +26,8 @@ function mapLanguageToMonaco(language: string): string {
   return languageMap[language] || language
 }
 
-export function FileViewer({ workspacePath, filePath }: FileViewerProps): JSX.Element {
+export function FileViewer({ workspacePath, workspaceId, filePath }: FileViewerProps): JSX.Element {
+  const { addTabWithState } = useWorkspaceStore()
   const [fileState, setFileState] = useState<FileState>({
     content: '',
     language: 'plaintext',
@@ -76,6 +80,21 @@ export function FileViewer({ workspacePath, filePath }: FileViewerProps): JSX.El
     editorRef.current = editor
   }, [])
 
+  const handleOpenInTab = useCallback(() => {
+    if (!filePath) return
+
+    addTabWithState<EditorState>(workspaceId, 'editor', {
+      filePath: filePath,
+      originalContent: fileState.content,
+      currentContent: fileState.content,
+      language: fileState.language,
+      isDirty: false,
+      viewMode: fileState.language === 'markdown' ? 'preview' : 'editor',
+      isLoading: false,
+      error: null
+    })
+  }, [filePath, fileState, workspaceId, addTabWithState])
+
   if (!filePath) {
     return (
       <div className="file-viewer">
@@ -106,7 +125,16 @@ export function FileViewer({ workspacePath, filePath }: FileViewerProps): JSX.El
     <div className="file-viewer">
       <div className="file-viewer-header">
         <span className="file-viewer-filename">{fileName}</span>
-        <span className="file-viewer-language">{fileState.language}</span>
+        <div className="file-viewer-header-actions">
+          <button
+            className="file-viewer-open-btn"
+            onClick={handleOpenInTab}
+            title="Open in new tab for editing"
+          >
+            \u21D7 Open in Tab
+          </button>
+          <span className="file-viewer-language">{fileState.language}</span>
+        </div>
       </div>
       <div className="file-viewer-content">
         <Editor

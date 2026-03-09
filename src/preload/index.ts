@@ -171,6 +171,9 @@ contextBridge.exposeInMainWorld('electron', {
     },
     readFile: (workspacePath: string, filePath: string) => {
       return ipcRenderer.invoke('fs:readFile', workspacePath, filePath)
+    },
+    writeFile: (workspacePath: string, filePath: string, content: string) => {
+      return ipcRenderer.invoke('fs:writeFile', workspacePath, filePath, content)
     }
   },
   sandbox: {

@@ -51,7 +51,7 @@ export function FilesystemBrowser({
         onSelectFile={setSelectedPath}
         onToggleDir={toggleExpandedDir}
       />
-      <FileViewer workspacePath={workspacePath} filePath={state.selectedPath} />
+      <FileViewer workspacePath={workspacePath} workspaceId={workspaceId} filePath={state.selectedPath} />
     </div>
   )
 }
