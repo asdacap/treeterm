@@ -32,7 +32,10 @@ import {
   unstageFile,
   stageAll,
   unstageAll,
-  commitStaged
+  commitStaged,
+  getFileContentsForDiff,
+  getFileContentsForDiffAgainstHead,
+  getUncommittedFileContentsForDiff
 } from './git'
 import { loadSettings, saveSettings, Settings } from './settings'
 import { createApplicationMenu } from './menu'
@@ -216,6 +219,18 @@ ipcMain.handle('git:unstageAll', async (_event, repoPath: string) => {
 
 ipcMain.handle('git:commitStaged', async (_event, repoPath: string, message: string) => {
   return commitStaged(repoPath, message)
+})
+
+ipcMain.handle('git:getFileContentsForDiff', async (_event, worktreePath: string, parentBranch: string, filePath: string) => {
+  return getFileContentsForDiff(worktreePath, parentBranch, filePath)
+})
+
+ipcMain.handle('git:getFileContentsForDiffAgainstHead', async (_event, worktreePath: string, parentBranch: string, filePath: string) => {
+  return getFileContentsForDiffAgainstHead(worktreePath, parentBranch, filePath)
+})
+
+ipcMain.handle('git:getUncommittedFileContentsForDiff', async (_event, repoPath: string, filePath: string, staged: boolean) => {
+  return getUncommittedFileContentsForDiff(repoPath, filePath, staged)
 })
 
 // Settings IPC Handlers

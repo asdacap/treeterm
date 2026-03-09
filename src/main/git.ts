@@ -809,3 +809,225 @@ export async function checkMergeConflicts(
     }
   }
 }
+
+// Helper function to detect language from file extension
+function detectLanguageFromPath(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase()
+  const languageMap: Record<string, string> = {
+    '.ts': 'typescript',
+    '.tsx': 'typescript',
+    '.js': 'javascript',
+    '.jsx': 'javascript',
+    '.json': 'json',
+    '.md': 'markdown',
+    '.css': 'css',
+    '.scss': 'scss',
+    '.less': 'less',
+    '.html': 'html',
+    '.htm': 'html',
+    '.xml': 'xml',
+    '.py': 'python',
+    '.rs': 'rust',
+    '.go': 'go',
+    '.java': 'java',
+    '.c': 'c',
+    '.cpp': 'cpp',
+    '.h': 'c',
+    '.hpp': 'cpp',
+    '.yaml': 'yaml',
+    '.yml': 'yaml',
+    '.toml': 'toml',
+    '.sh': 'bash',
+    '.bash': 'bash',
+    '.zsh': 'bash',
+    '.sql': 'sql',
+    '.graphql': 'graphql',
+    '.gql': 'graphql',
+    '.vue': 'html',
+    '.svelte': 'html',
+    '.rb': 'ruby',
+    '.php': 'php',
+    '.swift': 'swift',
+    '.kt': 'kotlin',
+    '.kts': 'kotlin',
+    '.scala': 'scala',
+    '.r': 'r',
+    '.R': 'r',
+    '.lua': 'lua',
+    '.dockerfile': 'dockerfile',
+    '.gitignore': 'plaintext',
+    '.env': 'plaintext'
+  }
+  return languageMap[ext] || 'plaintext'
+}
+
+export interface FileDiffContents {
+  originalContent: string
+  modifiedContent: string
+  language: string
+}
+
+/**
+ * Get file contents for diff comparison (merge-base comparison)
+ * Returns both original (at merge base) and modified (current branch) versions
+ */
+export async function getFileContentsForDiff(
+  worktreePath: string,
+  parentBranch: string,
+  filePath: string
+): Promise<{ success: boolean; contents?: FileDiffContents; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(worktreePath)
+    const currentBranch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim()
+    const mergeBase = (await git.raw(['merge-base', parentBranch, currentBranch])).trim()
+
+    // Get original content (at merge base)
+    let originalContent = ''
+    try {
+      originalContent = await git.raw(['show', `${mergeBase}:${filePath}`])
+    } catch {
+      // File didn't exist at merge base (new file)
+      originalContent = ''
+    }
+
+    // Get modified content (current branch)
+    let modifiedContent = ''
+    try {
+      modifiedContent = await git.raw(['show', `${currentBranch}:${filePath}`])
+    } catch {
+      // File was deleted
+      modifiedContent = ''
+    }
+
+    const language = detectLanguageFromPath(filePath)
+
+    return {
+      success: true,
+      contents: {
+        originalContent,
+        modifiedContent,
+        language
+      }
+    }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error getting file contents for diff'
+    }
+  }
+}
+
+/**
+ * Get file contents for diff comparison (against parent HEAD)
+ * Returns both original (parent branch HEAD) and modified (current branch) versions
+ */
+export async function getFileContentsForDiffAgainstHead(
+  worktreePath: string,
+  parentBranch: string,
+  filePath: string
+): Promise<{ success: boolean; contents?: FileDiffContents; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(worktreePath)
+    const currentBranch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim()
+
+    // Get original content (parent branch HEAD)
+    let originalContent = ''
+    try {
+      originalContent = await git.raw(['show', `${parentBranch}:${filePath}`])
+    } catch {
+      // File doesn't exist on parent branch
+      originalContent = ''
+    }
+
+    // Get modified content (current branch)
+    let modifiedContent = ''
+    try {
+      modifiedContent = await git.raw(['show', `${currentBranch}:${filePath}`])
+    } catch {
+      // File was deleted
+      modifiedContent = ''
+    }
+
+    const language = detectLanguageFromPath(filePath)
+
+    return {
+      success: true,
+      contents: {
+        originalContent,
+        modifiedContent,
+        language
+      }
+    }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error getting file contents for diff against HEAD'
+    }
+  }
+}
+
+/**
+ * Get file contents for uncommitted changes diff
+ * Returns both original (HEAD or index) and modified (working tree or index) versions
+ */
+export async function getUncommittedFileContentsForDiff(
+  repoPath: string,
+  filePath: string,
+  staged: boolean
+): Promise<{ success: boolean; contents?: FileDiffContents; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(repoPath)
+    const fullPath = path.join(repoPath, filePath)
+
+    let originalContent = ''
+    let modifiedContent = ''
+
+    if (staged) {
+      // Staged: compare HEAD to index
+      try {
+        originalContent = await git.raw(['show', `HEAD:${filePath}`])
+      } catch {
+        originalContent = '' // New file
+      }
+      try {
+        modifiedContent = await git.raw(['show', `:${filePath}`]) // Index version
+      } catch {
+        modifiedContent = '' // File deleted in index
+      }
+    } else {
+      // Unstaged: compare index (or HEAD) to working tree
+      try {
+        // Try to get from index first, fall back to HEAD
+        originalContent = await git.raw(['show', `:${filePath}`])
+      } catch {
+        try {
+          originalContent = await git.raw(['show', `HEAD:${filePath}`])
+        } catch {
+          originalContent = '' // New file
+        }
+      }
+      // Read working tree version
+      try {
+        modifiedContent = fs.readFileSync(fullPath, 'utf-8')
+      } catch {
+        modifiedContent = '' // File deleted
+      }
+    }
+
+    const language = detectLanguageFromPath(filePath)
+
+    return {
+      success: true,
+      contents: {
+        originalContent,
+        modifiedContent,
+        language
+      }
+    }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error getting uncommitted file contents for diff'
+    }
+  }
+}

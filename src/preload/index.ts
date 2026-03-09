@@ -146,6 +146,15 @@ contextBridge.exposeInMainWorld('electron', {
     },
     commitStaged: (repoPath: string, message: string) => {
       return ipcRenderer.invoke('git:commitStaged', repoPath, message)
+    },
+    getFileContentsForDiff: (worktreePath: string, parentBranch: string, filePath: string) => {
+      return ipcRenderer.invoke('git:getFileContentsForDiff', worktreePath, parentBranch, filePath)
+    },
+    getFileContentsForDiffAgainstHead: (worktreePath: string, parentBranch: string, filePath: string) => {
+      return ipcRenderer.invoke('git:getFileContentsForDiffAgainstHead', worktreePath, parentBranch, filePath)
+    },
+    getUncommittedFileContentsForDiff: (repoPath: string, filePath: string, staged: boolean) => {
+      return ipcRenderer.invoke('git:getUncommittedFileContentsForDiff', repoPath, filePath, staged)
     }
   },
   settings: {
