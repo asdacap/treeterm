@@ -96,6 +96,12 @@ contextBridge.exposeInMainWorld('electron', {
     getFileDiff: (worktreePath: string, parentBranch: string, filePath: string) => {
       return ipcRenderer.invoke('git:getFileDiff', worktreePath, parentBranch, filePath)
     },
+    getDiffAgainstHead: (worktreePath: string, parentBranch: string) => {
+      return ipcRenderer.invoke('git:getDiffAgainstHead', worktreePath, parentBranch)
+    },
+    getFileDiffAgainstHead: (worktreePath: string, parentBranch: string, filePath: string) => {
+      return ipcRenderer.invoke('git:getFileDiffAgainstHead', worktreePath, parentBranch, filePath)
+    },
     merge: (mainRepoPath: string, worktreeBranch: string, targetBranch: string, squash: boolean = false) => {
       return ipcRenderer.invoke('git:merge', mainRepoPath, worktreeBranch, targetBranch, squash)
     },

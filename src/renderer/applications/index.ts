@@ -2,12 +2,14 @@ import { applicationRegistry } from '../registry/applicationRegistry'
 import { terminalApplication, createTerminalApplication, createTerminalVariant } from './terminal'
 import { filesystemApplication } from './filesystem'
 import { claudeApplication } from './claude'
+import { reviewApplication } from './review'
 import type { TerminalInstance, Settings } from '../types'
 
 // Register all built-in applications
 applicationRegistry.register(terminalApplication)
 applicationRegistry.register(filesystemApplication)
 applicationRegistry.register(claudeApplication)
+applicationRegistry.register(reviewApplication)
 
 // Register dynamic terminal variants from settings and update base terminal
 export function registerTerminalVariants(instances: TerminalInstance[], terminalSettings?: Settings['terminal']): void {
@@ -32,4 +34,4 @@ export function registerTerminalVariants(instances: TerminalInstance[], terminal
   }
 }
 
-export { terminalApplication, filesystemApplication, claudeApplication }
+export { terminalApplication, filesystemApplication, claudeApplication, reviewApplication }

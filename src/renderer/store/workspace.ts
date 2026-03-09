@@ -19,6 +19,7 @@ interface WorkspaceState {
   updateWorkspaceStatus: (id: string, status: Workspace['status']) => void
   // Tab management (application-agnostic)
   addTab: (workspaceId: string, applicationId: string) => string
+  addTabWithState: <T>(workspaceId: string, applicationId: string, initialState: Partial<T>) => string
   removeTab: (workspaceId: string, tabId: string) => Promise<void>
   setActiveTab: (workspaceId: string, tabId: string) => void
   updateTabTitle: (workspaceId: string, tabId: string, title: string) => void
@@ -447,6 +448,62 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             applicationId,
             title: `${app.name} ${existingCount + 1}`,
             state: app.createInitialState()
+          }
+
+          return {
+            workspaces: {
+              ...state.workspaces,
+              [workspaceId]: {
+                ...workspace,
+                tabs: [...workspace.tabs, newTab],
+                activeTabId: tabId
+              }
+            }
+          }
+        })
+        return tabId
+      },
+
+      addTabWithState: <T>(workspaceId: string, applicationId: string, initialState: Partial<T>) => {
+        const tabId = generateTabId()
+        const app = applicationRegistry.get(applicationId)
+
+        if (!app) return tabId
+
+        set((state) => {
+          const workspace = state.workspaces[workspaceId]
+          if (!workspace) return state
+
+          // Check if app allows multiple instances
+          if (!app.canHaveMultiple) {
+            const existing = workspace.tabs.find((t) => t.applicationId === applicationId)
+            if (existing) {
+              // If tab exists, update its state and activate it
+              const updatedTabs = workspace.tabs.map((t) =>
+                t.id === existing.id ? { ...t, state: { ...t.state, ...initialState } } : t
+              )
+              return {
+                workspaces: {
+                  ...state.workspaces,
+                  [workspaceId]: {
+                    ...workspace,
+                    tabs: updatedTabs,
+                    activeTabId: existing.id
+                  }
+                }
+              }
+            }
+          }
+
+          const existingCount = workspace.tabs.filter(
+            (t) => t.applicationId === applicationId
+          ).length
+
+          const newTab: Tab = {
+            id: tabId,
+            applicationId,
+            title: `${app.name} ${existingCount + 1}`,
+            state: { ...app.createInitialState(), ...initialState }
           }
 
           return {

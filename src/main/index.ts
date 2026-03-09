@@ -19,6 +19,8 @@ import {
   getChildWorktrees,
   getDiff,
   getFileDiff,
+  getDiffAgainstHead,
+  getFileDiffAgainstHead,
   mergeWorktree,
   hasUncommittedChanges,
   commitAll,
@@ -153,6 +155,14 @@ ipcMain.handle('git:getDiff', async (_event, worktreePath: string, parentBranch:
 
 ipcMain.handle('git:getFileDiff', async (_event, worktreePath: string, parentBranch: string, filePath: string) => {
   return getFileDiff(worktreePath, parentBranch, filePath)
+})
+
+ipcMain.handle('git:getDiffAgainstHead', async (_event, worktreePath: string, parentBranch: string) => {
+  return getDiffAgainstHead(worktreePath, parentBranch)
+})
+
+ipcMain.handle('git:getFileDiffAgainstHead', async (_event, worktreePath: string, parentBranch: string, filePath: string) => {
+  return getFileDiffAgainstHead(worktreePath, parentBranch, filePath)
 })
 
 ipcMain.handle('git:merge', async (_event, mainRepoPath: string, worktreeBranch: string, targetBranch: string, squash: boolean) => {

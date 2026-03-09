@@ -4,9 +4,9 @@ import { usePrefixModeStore } from '../store/prefixMode'
 import { applicationRegistry } from '../registry/applicationRegistry'
 import { usePrefixKeybindings } from '../hooks/usePrefixKeybindings'
 import TabBar from './TabBar'
-import MergeDialog from './MergeDialog'
 import CreateChildDialog from './CreateChildDialog'
 import KeybindingOverlay from './KeybindingOverlay'
+import type { ReviewState } from '../types'
 // Import applications to ensure they are registered
 import '../applications'
 
@@ -15,6 +15,7 @@ export default function WorkspacePane() {
     workspaces,
     activeWorkspaceId,
     addTab,
+    addTabWithState,
     removeTab,
     setActiveTab,
     addChildWorkspace,
@@ -28,7 +29,6 @@ export default function WorkspacePane() {
 
   // Dialog state
   const [showCreateChildDialog, setShowCreateChildDialog] = useState(false)
-  const [showMergeDialog, setShowMergeDialog] = useState(false)
 
   const handleNewTab = useCallback(
     (applicationId: string) => {
@@ -96,20 +96,21 @@ export default function WorkspacePane() {
     return result
   }
 
-  // Merge handlers
-  const handleMerge = async (squash: boolean) => {
-    if (!activeWorkspaceId) return
-    const result = await mergeAndRemoveWorkspace(activeWorkspaceId, squash)
-    if (!result.success) {
-      throw new Error(result.error)
-    }
-    setShowMergeDialog(false)
+  // Review handler
+  const handleOpenReview = () => {
+    if (!activeWorkspaceId || !activeWorkspace?.parentId) return
+    addTabWithState<ReviewState>(activeWorkspaceId, 'review', {
+      parentWorkspaceId: activeWorkspace.parentId
+    })
   }
 
+  // Abandon handler (direct)
   const handleAbandon = async () => {
     if (!activeWorkspaceId) return
+    if (!confirm('Are you sure you want to abandon this workspace? All changes will be discarded.')) {
+      return
+    }
     await removeWorkspace(activeWorkspaceId)
-    setShowMergeDialog(false)
   }
 
   // Compute flattened workspace list for navigation
@@ -229,10 +230,10 @@ export default function WorkspacePane() {
                 <>
                   <button
                     className="workspace-action-btn workspace-action-btn-merge"
-                    onClick={() => setShowMergeDialog(true)}
-                    title="Merge: Close and merge this workspace"
+                    onClick={handleOpenReview}
+                    title="Review & Merge: Review changes and merge this workspace"
                   >
-                    Merge
+                    Review & Merge
                   </button>
                   <button
                     className="workspace-action-btn workspace-action-btn-abandon"
@@ -296,17 +297,6 @@ export default function WorkspacePane() {
           onAdopt={handleAdoptWorktreeSubmit}
           onCancel={() => setShowCreateChildDialog(false)}
           openWorktreePaths={openWorktreePaths}
-        />
-      )}
-
-      {/* Merge Dialog */}
-      {showMergeDialog && activeWorkspace && activeWorkspace.parentId && workspaces[activeWorkspace.parentId] && (
-        <MergeDialog
-          workspace={activeWorkspace}
-          parentWorkspace={workspaces[activeWorkspace.parentId]}
-          onMerge={handleMerge}
-          onAbandon={handleAbandon}
-          onCancel={() => setShowMergeDialog(false)}
         />
       )}
 

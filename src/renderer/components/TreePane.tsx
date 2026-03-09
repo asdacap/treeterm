@@ -3,9 +3,8 @@ import { Loader2 } from 'lucide-react'
 import { useWorkspaceStore } from '../store/workspace'
 import { useActivityStateStore } from '../store/activityState'
 import { usePrefixModeStore } from '../store/prefixMode'
-import MergeDialog from './MergeDialog'
 import CreateChildDialog from './CreateChildDialog'
-import type { Workspace, ActivityState } from '../types'
+import type { Workspace, ActivityState, ReviewState } from '../types'
 
 interface ContextMenu {
   x: number
@@ -40,6 +39,7 @@ export default function TreePane() {
     activeWorkspaceId,
     addWorkspace,
     addChildWorkspace,
+    addTabWithState,
     adoptExistingWorktree,
     removeWorkspace,
     mergeAndRemoveWorkspace,
@@ -52,7 +52,6 @@ export default function TreePane() {
   } = usePrefixModeStore()
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [mergeDialogWorkspaceId, setMergeDialogWorkspaceId] = useState<string | null>(null)
   const [createChildDialogParentId, setCreateChildDialogParentId] = useState<string | null>(null)
 
   // Compute paths of already-open worktrees
@@ -120,9 +119,12 @@ export default function TreePane() {
     closeContextMenu()
     const workspace = workspaces[id]
 
-    // For worktree workspaces with a parent, show the merge dialog
+    // For worktree workspaces with a parent, open the Review tab
     if (workspace.isWorktree && workspace.parentId) {
-      setMergeDialogWorkspaceId(id)
+      setActiveWorkspace(id)
+      addTabWithState<ReviewState>(id, 'review', {
+        parentWorkspaceId: workspace.parentId
+      })
       return
     }
 
@@ -131,21 +133,6 @@ export default function TreePane() {
     if (confirm(message)) {
       await removeWorkspace(id)
     }
-  }
-
-  const handleMerge = async (squash: boolean) => {
-    if (!mergeDialogWorkspaceId) return
-    const result = await mergeAndRemoveWorkspace(mergeDialogWorkspaceId, squash)
-    if (!result.success) {
-      throw new Error(result.error)
-    }
-    setMergeDialogWorkspaceId(null)
-  }
-
-  const handleAbandon = async () => {
-    if (!mergeDialogWorkspaceId) return
-    await removeWorkspace(mergeDialogWorkspaceId)
-    setMergeDialogWorkspaceId(null)
   }
 
   const toggleExpand = (id: string) => {
@@ -162,11 +149,6 @@ export default function TreePane() {
 
   // Get root workspaces (those without parents)
   const rootWorkspaces = Object.values(workspaces).filter((ws) => !ws.parentId)
-
-  // Get merge dialog workspace and parent
-  const mergeDialogWorkspace = mergeDialogWorkspaceId ? workspaces[mergeDialogWorkspaceId] : null
-  const mergeDialogParent =
-    mergeDialogWorkspace?.parentId ? workspaces[mergeDialogWorkspace.parentId] : null
 
   // Get create child dialog parent
   const createChildDialogParent = createChildDialogParentId
@@ -249,17 +231,6 @@ export default function TreePane() {
             {workspaces[contextMenu.workspaceId]?.isWorktree ? 'Close & Merge...' : 'Remove'}
           </div>
         </div>
-      )}
-
-      {/* Merge Dialog */}
-      {mergeDialogWorkspace && mergeDialogParent && (
-        <MergeDialog
-          workspace={mergeDialogWorkspace}
-          parentWorkspace={mergeDialogParent}
-          onMerge={handleMerge}
-          onAbandon={handleAbandon}
-          onCancel={() => setMergeDialogWorkspaceId(null)}
-        />
       )}
 
       {/* Create Child Dialog */}
