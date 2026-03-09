@@ -243,6 +243,7 @@ export interface Settings {
     nextTab: string
     prevTab: string
     openSettings: string
+    workspaceFocus: string
   }
 }
 

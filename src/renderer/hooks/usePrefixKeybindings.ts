@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import { parseKeybinding } from 'tinykeys'
 import { useSettingsStore } from '../store/settings'
 import { usePrefixModeStore } from '../store/prefixMode'
+import { useWorkspaceStore } from '../store/workspace'
 import { convertDirectKeybinding } from '../utils/keybindingConverter'
 import type { Settings } from '../types'
 
@@ -11,11 +12,19 @@ export interface KeybindingHandlers {
   nextTab?: () => void
   prevTab?: () => void
   openSettings?: () => void
+  workspaceFocus?: () => void
 }
 
 export function usePrefixKeybindings(handlers: KeybindingHandlers) {
   const { settings } = useSettingsStore()
-  const { state: prefixState, activate, deactivate } = usePrefixModeStore()
+  const {
+    state: prefixState,
+    activate,
+    deactivate,
+    navigateWorkspace,
+    selectFocusedWorkspace
+  } = usePrefixModeStore()
+  const { setActiveWorkspace } = useWorkspaceStore()
   const timeoutRef = useRef<number | null>(null)
 
   // Clear timeout on unmount
@@ -52,7 +61,8 @@ export function usePrefixKeybindings(handlers: KeybindingHandlers) {
         closeTab: 'closeTab',
         nextTab: 'nextTab',
         prevTab: 'prevTab',
-        openSettings: 'openSettings'
+        openSettings: 'openSettings',
+        workspaceFocus: 'workspaceFocus'
       }
 
       // Check for prefix key activation
@@ -64,6 +74,7 @@ export function usePrefixKeybindings(handlers: KeybindingHandlers) {
         const [modifiers, key] = prefixParts[0]
         if (matchesKeybinding(e, modifiers, key)) {
           e.preventDefault()
+          e.stopPropagation()
           if (prefixState === 'idle') {
             activate()
           } else {
@@ -81,6 +92,7 @@ export function usePrefixKeybindings(handlers: KeybindingHandlers) {
         // Check for Escape to cancel
         if (actionKey === 'escape') {
           e.preventDefault()
+          e.stopPropagation()
           deactivate()
           return
         }
@@ -90,6 +102,7 @@ export function usePrefixKeybindings(handlers: KeybindingHandlers) {
           const binding = keybindings[action as keyof Settings['keybindings']]
           if (binding.toLowerCase() === actionKey) {
             e.preventDefault()
+            e.stopPropagation()
             deactivate()
             handlers[handlerKey]?.()
             return
@@ -103,8 +116,59 @@ export function usePrefixKeybindings(handlers: KeybindingHandlers) {
         }
         return
       }
+
+      // If in workspace focus mode, handle navigation
+      if (prefixState === 'workspace_focus') {
+        const actionKey = e.key.toLowerCase()
+
+        // Check for Escape to cancel
+        if (actionKey === 'escape') {
+          e.preventDefault()
+          e.stopPropagation()
+          deactivate()
+          return
+        }
+
+        // Check for Enter to select
+        if (actionKey === 'enter') {
+          e.preventDefault()
+          e.stopPropagation()
+          const selectedWorkspaceId = selectFocusedWorkspace()
+          if (selectedWorkspaceId) {
+            setActiveWorkspace(selectedWorkspaceId)
+          }
+          deactivate()
+          return
+        }
+
+        // Check for Arrow Up/Down to navigate
+        if (actionKey === 'arrowup') {
+          e.preventDefault()
+          e.stopPropagation()
+          navigateWorkspace('up')
+          return
+        }
+
+        if (actionKey === 'arrowdown') {
+          e.preventDefault()
+          e.stopPropagation()
+          navigateWorkspace('down')
+          return
+        }
+
+        return
+      }
     },
-    [settings, prefixState, activate, deactivate, handlers]
+    [
+      settings,
+      prefixState,
+      activate,
+      deactivate,
+      navigateWorkspace,
+      selectFocusedWorkspace,
+      setActiveWorkspace,
+      handlers
+    ]
   )
 
   useEffect(() => {

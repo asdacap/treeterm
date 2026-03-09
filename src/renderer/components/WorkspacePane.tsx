@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useState, useMemo } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
+import { usePrefixModeStore } from '../store/prefixMode'
 import { applicationRegistry } from '../registry/applicationRegistry'
 import { usePrefixKeybindings } from '../hooks/usePrefixKeybindings'
 import TabBar from './TabBar'
@@ -21,6 +22,7 @@ export default function WorkspacePane() {
     removeWorkspace,
     mergeAndRemoveWorkspace
   } = useWorkspaceStore()
+  const { enterWorkspaceFocus } = usePrefixModeStore()
 
   const activeWorkspace = activeWorkspaceId ? workspaces[activeWorkspaceId] : null
 
@@ -110,6 +112,23 @@ export default function WorkspacePane() {
     setShowMergeDialog(false)
   }
 
+  // Compute flattened workspace list for navigation
+  const flattenedWorkspaceIds = useMemo(() => {
+    const result: string[] = []
+    const traverse = (wsId: string) => {
+      result.push(wsId)
+      const ws = workspaces[wsId]
+      if (ws) {
+        ws.children.forEach(traverse)
+      }
+    }
+    // Get root workspaces (those without parents)
+    Object.values(workspaces)
+      .filter((ws) => !ws.parentId)
+      .forEach((ws) => traverse(ws.id))
+    return result
+  }, [workspaces])
+
   // Keybinding handlers for prefix mode hook
   const keybindingHandlers = useMemo(
     () => ({
@@ -134,9 +153,23 @@ export default function WorkspacePane() {
         )
         const newIndex = currentIndex > 0 ? currentIndex - 1 : activeWorkspace.tabs.length - 1
         handleSelectTab(activeWorkspace.tabs[newIndex].id)
+      },
+      workspaceFocus: () => {
+        const currentIndex = activeWorkspaceId
+          ? flattenedWorkspaceIds.indexOf(activeWorkspaceId)
+          : 0
+        enterWorkspaceFocus(flattenedWorkspaceIds, currentIndex >= 0 ? currentIndex : 0)
       }
     }),
-    [activeWorkspace, handleNewDefaultTab, handleCloseTab, handleSelectTab]
+    [
+      activeWorkspace,
+      activeWorkspaceId,
+      flattenedWorkspaceIds,
+      handleNewDefaultTab,
+      handleCloseTab,
+      handleSelectTab,
+      enterWorkspaceFocus
+    ]
   )
 
   // Use the prefix keybindings hook
