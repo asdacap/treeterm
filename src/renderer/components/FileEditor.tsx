@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import Editor, { OnMount, OnChange } from '@monaco-editor/react'
-import type { editor } from 'monaco-editor'
+import { editor, KeyMod, KeyCode } from 'monaco-editor'
 import { useWorkspaceStore } from '../store/workspace'
 import type { EditorState } from '../types'
 import { MarkdownPreview } from './MarkdownPreview'
@@ -121,11 +121,7 @@ export function FileEditor({ workspaceId, workspacePath, tabId }: FileEditorProp
       editorRef.current = editor
 
       // Add Cmd/Ctrl+S keybinding for save
-      editor.addCommand(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (window as any).monaco.KeyMod.CtrlCmd | (window as any).monaco.KeyCode.KeyS,
-        () => handleSave()
-      )
+      editor.addCommand(KeyMod.CtrlCmd | KeyCode.KeyS, () => handleSave())
     },
     [handleSave]
   )
