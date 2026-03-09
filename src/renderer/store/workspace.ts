@@ -113,15 +113,24 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           return { success: false, error: 'Parent workspace is not a git repository' }
         }
 
+        // Get current branch from git (in case it changed via terminal)
+        const currentGitInfo = await window.electron.git.getInfo(parent.path)
+        const currentBranch = currentGitInfo.branch
+
         // Create worktree
         const result = await window.electron.git.createWorktree(
           parent.gitRootPath,
           name,
-          parent.gitBranch || undefined
+          currentBranch || undefined
         )
 
         if (!result.success) {
           return { success: false, error: result.error }
+        }
+
+        // Update parent's stored branch if it changed
+        if (currentBranch && currentBranch !== parent.gitBranch) {
+          get().updateGitInfo(parentId, currentGitInfo)
         }
 
         // Create child workspace
