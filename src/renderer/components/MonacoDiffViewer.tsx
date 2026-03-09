@@ -1,5 +1,5 @@
 import { DiffEditor, DiffOnMount } from '@monaco-editor/react'
-import { useRef } from 'react'
+import { useRef, useEffect } from 'react'
 import type { editor } from 'monaco-editor'
 
 interface MonacoDiffViewerProps {
@@ -22,6 +22,15 @@ export function MonacoDiffViewer({
   const handleEditorMount: DiffOnMount = (editor) => {
     diffEditorRef.current = editor
   }
+
+  useEffect(() => {
+    return () => {
+      if (diffEditorRef.current) {
+        diffEditorRef.current.dispose()
+        diffEditorRef.current = null
+      }
+    }
+  }, [])
 
   return (
     <div className="monaco-diff-viewer">
