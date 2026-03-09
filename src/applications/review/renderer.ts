@@ -1,5 +1,5 @@
-import type { Application, ReviewState } from '../types'
-import ReviewBrowser from '../components/ReviewBrowser'
+import type { Application, ReviewState } from '../../renderer/types'
+import ReviewBrowser from '../../renderer/components/ReviewBrowser'
 import { createElement } from 'react'
 
 export const reviewApplication: Application<ReviewState> = {

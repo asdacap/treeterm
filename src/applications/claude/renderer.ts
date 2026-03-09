@@ -1,8 +1,8 @@
-import type { Application, Tab, Workspace, ActivityState, SandboxConfig, TerminalState } from '../types'
-import Claude from '../components/Claude'
+import type { Application, Tab, Workspace, ActivityState, SandboxConfig, TerminalState } from '../../renderer/types'
+import Claude from '../../renderer/components/Claude'
 import { createElement } from 'react'
-import { useActivityStateStore } from '../store/activityState'
-import { useSettingsStore } from '../store/settings'
+import { useActivityStateStore } from '../../renderer/store/activityState'
+import { useSettingsStore } from '../../renderer/store/settings'
 
 export interface ClaudeState extends TerminalState {
   sandbox: SandboxConfig

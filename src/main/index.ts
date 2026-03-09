@@ -89,6 +89,11 @@ function createWindow(): void {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
+  // Signal renderer when ready to initialize
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow?.webContents.send('app:ready')
+  })
+
   mainWindow.on('closed', () => {
     mainWindow = null
     ptyManager.killAll()

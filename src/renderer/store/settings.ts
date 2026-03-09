@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { Settings } from '../types'
-import { registerTerminalVariants } from '../applications'
+import { registerTerminalVariants } from '../../applications'
 
 const defaultSettings: Settings = {
   terminal: {

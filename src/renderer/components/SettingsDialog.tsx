@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { Settings } from '../types'
 import { useSettingsStore } from '../store/settings'
-// Import applications to ensure they are registered
-import '../applications'
 
 interface SettingsDialogProps {
   isOpen: boolean
