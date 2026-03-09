@@ -2104,3 +2104,271 @@ body,
   text-align: center;
 }
 
+
+/* Review Application */
+.review-browser {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.review-browser-error {
+  padding: 20px;
+  text-align: center;
+  color: #f14c4c;
+}
+
+.review-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.review-header-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.review-workspace-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.review-branch-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.review-branch {
+  font-family: monospace;
+  color: var(--accent);
+  padding: 2px 8px;
+  background: rgba(0, 120, 212, 0.15);
+  border-radius: 4px;
+}
+
+.review-arrow {
+  color: var(--text-secondary);
+}
+
+.review-checking {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.review-conflict-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 20px;
+  background: rgba(240, 160, 0, 0.1);
+  border-bottom: 1px solid rgba(240, 160, 0, 0.3);
+}
+
+.review-conflict-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.review-conflict-text {
+  flex: 1;
+  font-size: 13px;
+}
+
+.review-conflict-text strong {
+  color: #f0a000;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.review-conflict-files {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: monospace;
+}
+
+.review-loading,
+.review-error {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.review-error {
+  color: #f14c4c;
+}
+
+.review-commit-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.review-commit-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.review-commit-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.review-commit-input::placeholder {
+  color: var(--text-secondary);
+}
+
+.review-commit-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  background: #238636;
+  color: white;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.review-commit-btn:hover:not(:disabled) {
+  background: #2ea043;
+}
+
+.review-commit-btn:disabled {
+  background: var(--bg-active);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+}
+
+.review-commit-error {
+  color: #f85149;
+  font-size: 12px;
+}
+
+.review-actions {
+  display: flex;
+  gap: 8px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  justify-content: flex-end;
+}
+
+.review-action-btn {
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  border: none;
+  transition: background 0.1s;
+  white-space: nowrap;
+}
+
+.review-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.review-merge-btn {
+  background: var(--accent);
+  color: white;
+}
+
+.review-merge-btn:hover:not(:disabled) {
+  background: #006cbf;
+}
+
+.review-squash-btn {
+  background: #238636;
+  color: white;
+}
+
+.review-squash-btn:hover:not(:disabled) {
+  background: #2ea043;
+}
+
+.review-abandon-btn {
+  background: #b62324;
+  color: white;
+}
+
+.review-abandon-btn:hover:not(:disabled) {
+  background: #cc2626;
+}
+
+.review-cancel-btn {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.review-cancel-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+/* File section labels */
+.diff-file-section {
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* File action buttons (Stage/Unstage) */
+.diff-file-action {
+  padding: 2px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 10px;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.diff-file-action:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Diff actions row */
+.diff-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.diff-action-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.diff-action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}

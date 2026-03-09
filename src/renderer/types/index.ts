@@ -58,6 +58,10 @@ export interface FilesystemState {
   expandedDirs: string[]
 }
 
+export interface ReviewState {
+  parentWorkspaceId: string
+}
+
 export interface FileEntry {
   name: string
   path: string
@@ -195,6 +199,8 @@ export interface GitApi {
   getChildWorktrees: (repoPath: string, parentBranch: string | null) => Promise<ChildWorktreeInfo[]>
   getDiff: (worktreePath: string, parentBranch: string) => Promise<{ success: boolean; diff?: DiffResult; error?: string }>
   getFileDiff: (worktreePath: string, parentBranch: string, filePath: string) => Promise<{ success: boolean; diff?: string; error?: string }>
+  getDiffAgainstHead: (worktreePath: string, parentBranch: string) => Promise<{ success: boolean; diff?: DiffResult; error?: string }>
+  getFileDiffAgainstHead: (worktreePath: string, parentBranch: string, filePath: string) => Promise<{ success: boolean; diff?: string; error?: string }>
   checkMergeConflicts: (repoPath: string, sourceBranch: string, targetBranch: string) => Promise<ConflictCheckResult>
   merge: (mainRepoPath: string, worktreeBranch: string, targetBranch: string, squash?: boolean) => Promise<{ success: boolean; error?: string }>
   hasUncommittedChanges: (repoPath: string) => Promise<boolean>

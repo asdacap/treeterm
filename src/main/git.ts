@@ -321,6 +321,91 @@ export async function getFileDiff(
   }
 }
 
+export async function getDiffAgainstHead(
+  worktreePath: string,
+  parentBranch: string
+): Promise<{ success: boolean; diff?: DiffResult; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(worktreePath)
+    const currentBranch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim()
+
+    // Use two-dot notation to compare against parent's current HEAD
+    // This shows what changes exist on currentBranch relative to parentBranch's HEAD
+    const diffStat = await git.raw(['diff', '--numstat', `${parentBranch}..${currentBranch}`])
+    const nameStatus = await git.raw(['diff', '--name-status', `${parentBranch}..${currentBranch}`])
+
+    const files: DiffFile[] = []
+    let totalAdditions = 0
+    let totalDeletions = 0
+
+    const statLines = diffStat.trim().split('\n').filter(Boolean)
+    const statusLines = nameStatus.trim().split('\n').filter(Boolean)
+
+    const statusMap: Record<string, 'added' | 'modified' | 'deleted' | 'renamed'> = {}
+    for (const line of statusLines) {
+      const [status, ...pathParts] = line.split('\t')
+      const filePath = pathParts[pathParts.length - 1] // Handle renames
+      if (status.startsWith('A')) statusMap[filePath] = 'added'
+      else if (status.startsWith('M')) statusMap[filePath] = 'modified'
+      else if (status.startsWith('D')) statusMap[filePath] = 'deleted'
+      else if (status.startsWith('R')) statusMap[filePath] = 'renamed'
+    }
+
+    for (const line of statLines) {
+      const [add, del, filePath] = line.split('\t')
+      const additions = add === '-' ? 0 : parseInt(add)
+      const deletions = del === '-' ? 0 : parseInt(del)
+
+      files.push({
+        path: filePath,
+        status: statusMap[filePath] || 'modified',
+        additions,
+        deletions
+      })
+
+      totalAdditions += additions
+      totalDeletions += deletions
+    }
+
+    return {
+      success: true,
+      diff: {
+        files,
+        totalAdditions,
+        totalDeletions,
+        baseBranch: parentBranch,
+        headBranch: currentBranch
+      }
+    }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error getting diff against HEAD'
+    }
+  }
+}
+
+export async function getFileDiffAgainstHead(
+  worktreePath: string,
+  parentBranch: string,
+  filePath: string
+): Promise<{ success: boolean; diff?: string; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(worktreePath)
+    const currentBranch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim()
+
+    // Use two-dot notation to compare against parent's current HEAD
+    const diff = await git.raw(['diff', '--color=never', `${parentBranch}..${currentBranch}`, '--', filePath])
+
+    return { success: true, diff }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error getting file diff against HEAD'
+    }
+  }
+}
+
 export async function mergeWorktree(
   mainRepoPath: string,
   worktreeBranch: string,
