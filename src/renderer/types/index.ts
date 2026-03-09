@@ -62,6 +62,17 @@ export interface ReviewState {
   parentWorkspaceId: string
 }
 
+export interface EditorState {
+  filePath: string
+  originalContent: string
+  currentContent: string
+  language: string
+  isDirty: boolean
+  viewMode: 'editor' | 'preview'
+  isLoading: boolean
+  error: string | null
+}
+
 export interface FileEntry {
   name: string
   path: string
@@ -92,6 +103,10 @@ export interface FilesystemApi {
   readFile: (workspacePath: string, filePath: string) => Promise<{
     success: boolean
     file?: FileContents
+    error?: string
+  }>
+  writeFile: (workspacePath: string, filePath: string, content: string) => Promise<{
+    success: boolean
     error?: string
   }>
 }

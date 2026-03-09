@@ -3,6 +3,7 @@ import { terminalApplication, createTerminalApplication, createTerminalVariant }
 import { filesystemApplication } from './filesystem/renderer'
 import { claudeApplication } from './claude/renderer'
 import { reviewApplication } from './review/renderer'
+import { editorApplication } from './editor/renderer'
 import type { TerminalInstance, Settings } from '../renderer/types'
 
 let initialized = false
@@ -14,6 +15,7 @@ export function initializeApplications(): void {
   applicationRegistry.register(filesystemApplication)
   applicationRegistry.register(claudeApplication)
   applicationRegistry.register(reviewApplication)
+  applicationRegistry.register(editorApplication)
 
   initialized = true
 }

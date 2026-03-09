@@ -149,4 +149,23 @@ export function registerFilesystemHandlers(): void {
       }
     }
   )
+
+  ipcMain.handle(
+    'fs:writeFile',
+    async (_event, workspacePath: string, filePath: string, content: string) => {
+      try {
+        // Security check
+        if (!isPathWithinWorkspace(workspacePath, filePath)) {
+          return { success: false, error: 'Access denied: Path outside workspace' }
+        }
+
+        // Write file
+        await fs.writeFile(filePath, content, 'utf-8')
+
+        return { success: true }
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    }
+  )
 }
