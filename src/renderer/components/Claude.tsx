@@ -15,7 +15,8 @@ const CLAUDE_CONFIG: BaseTerminalConfig = {
   themeBackground: '#1a1a24', // Slight purple tint for Claude
   promptPatterns: [/❯\s/], // Claude uses ❯ prompt (no $ anchor - UI draws out of order)
   startupCommand: 'claude',
-  logPrefix: 'Claude'
+  logPrefix: 'Claude',
+  showPushToTalk: true
 }
 
 export default function Claude({ cwd, workspaceId, tabId, sandbox, isVisible }: ClaudeProps) {

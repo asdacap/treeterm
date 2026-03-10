@@ -581,6 +581,138 @@ body,
   opacity: 1;
 }
 
+/* Push to Talk Button */
+.push-to-talk-btn {
+  position: absolute;
+  bottom: 56px; /* 16px + 32px scroll btn + 8px gap */
+  right: 16px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.1s, border-color 0.1s, opacity 0.2s, transform 0.1s;
+  opacity: 0.7;
+  z-index: 10;
+}
+
+.push-to-talk-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  opacity: 1;
+}
+
+.push-to-talk-btn.recording {
+  background: #dc3545;
+  border-color: #dc3545;
+  opacity: 1;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.push-to-talk-btn.processing {
+  background: var(--accent);
+  border-color: var(--accent);
+  opacity: 1;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.4);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 0 0 8px rgba(220, 53, 69, 0);
+  }
+}
+
+/* Interim text display */
+.push-to-talk-interim {
+  position: absolute;
+  bottom: 96px; /* Above buttons */
+  right: 16px;
+  max-width: 300px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  z-index: 10;
+  opacity: 0.9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* Error notification */
+.push-to-talk-error {
+  position: absolute;
+  bottom: 96px;
+  right: 16px;
+  max-width: 350px;
+  background: #dc3545;
+  border: 1px solid #bd2130;
+  color: white;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  animation: slideIn 0.2s ease-out;
+}
+
+.push-to-talk-error strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+
+.push-to-talk-error p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.push-to-talk-error button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: white;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  opacity: 0.7;
+  transition: opacity 0.1s;
+}
+
+.push-to-talk-error button:hover {
+  opacity: 1;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 .workspace-terminal {
   flex: 1;
   min-height: 0;

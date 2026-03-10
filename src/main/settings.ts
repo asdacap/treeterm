@@ -19,6 +19,8 @@ export interface PrefixModeConfig {
   timeout: number // ms (default: 1500)
 }
 
+export type STTProvider = 'openaiWhisper' | 'localWhisper'
+
 export interface Settings {
   terminal: {
     fontSize: number
@@ -48,6 +50,13 @@ export interface Settings {
     nextTab: string
     prevTab: string
     openSettings: string
+  }
+  stt: {
+    enabled: boolean
+    provider: STTProvider
+    openaiApiKey: string
+    localWhisperModelPath: string
+    pushToTalkKey: string
   }
 }
 
@@ -84,6 +93,13 @@ const defaultSettings: Settings = {
     prevTab: 'p',
     openSettings: ',',
     workspaceFocus: 'w'
+  },
+  stt: {
+    enabled: true,
+    provider: 'openaiWhisper',
+    openaiApiKey: '',
+    localWhisperModelPath: '',
+    pushToTalkKey: 'Shift+Space'
   }
 }
 
@@ -213,7 +229,11 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
     keybindings: migrateKeybindings(
       defaults.keybindings,
       loaded.keybindings as Record<string, string | { direct?: string; prefixMode?: string }> | undefined
-    )
+    ),
+    stt: {
+      ...defaults.stt,
+      ...loaded.stt
+    }
   }
 }
 

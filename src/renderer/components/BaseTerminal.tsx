@@ -45,6 +45,8 @@ export interface BaseTerminalConfig {
   startupCommand?: string
   // Log prefix for console messages
   logPrefix: string
+  // Whether to show push-to-talk button
+  showPushToTalk?: boolean
 }
 
 export interface BaseTerminalProps {
@@ -299,8 +301,25 @@ export default function BaseTerminal({
     setContextMenu(null)
   }
 
+  const handlePushToTalkTranscript = (text: string) => {
+    if (ptyIdRef.current) {
+      window.electron.terminal.write(ptyIdRef.current, text)
+    }
+  }
+
+  const handlePushToTalkSubmit = () => {
+    if (ptyIdRef.current) {
+      window.electron.terminal.write(ptyIdRef.current, '\r')
+    }
+  }
+
   return (
-    <TerminalScrollWrapper terminalRef={terminalRef}>
+    <TerminalScrollWrapper
+      terminalRef={terminalRef}
+      showPushToTalk={config.showPushToTalk}
+      onPushToTalkTranscript={handlePushToTalkTranscript}
+      onPushToTalkSubmit={handlePushToTalkSubmit}
+    >
       <div ref={containerRef} className="terminal-container" onContextMenu={handleContextMenu} />
       {contextMenu && (
         <div
