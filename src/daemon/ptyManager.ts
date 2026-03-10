@@ -33,7 +33,8 @@ function isBwrapAvailable(): boolean {
   try {
     execSync('which bwrap', { stdio: 'ignore' })
     return true
-  } catch {
+  } catch (error) {
+    console.log('[daemon] bwrap check failed:', error)
     return false
   }
 }
@@ -282,6 +283,7 @@ export class DaemonPtyManager {
   detach(sessionId: string, clientId: string): void {
     const session = this.sessions.get(sessionId)
     if (!session) {
+      console.warn(`[daemon] detach: session ${sessionId} not found`)
       return
     }
 
@@ -316,6 +318,7 @@ export class DaemonPtyManager {
   kill(sessionId: string): void {
     const session = this.sessions.get(sessionId)
     if (!session) {
+      console.warn(`[daemon] kill: session ${sessionId} not found`)
       return
     }
 

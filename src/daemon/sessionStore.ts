@@ -140,7 +140,10 @@ export class SessionStore {
    */
   detachClient(clientId: string): void {
     const sessionIds = this.clientAttachments.get(clientId)
-    if (!sessionIds) return
+    if (!sessionIds) {
+      console.log(`[sessionStore] detachClient: client ${clientId} has no attachments`)
+      return
+    }
 
     for (const sessionId of sessionIds) {
       const session = this.sessions.get(sessionId)
