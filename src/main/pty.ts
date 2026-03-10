@@ -21,7 +21,8 @@ function isBwrapAvailable(): boolean {
   try {
     execSync('which bwrap', { stdio: 'ignore' })
     return true
-  } catch {
+  } catch (error) {
+    console.log('[pty] bwrap check failed:', error)
     return false
   }
 }
@@ -240,6 +241,8 @@ ${networkRule}
     const instance = this.ptys.get(id)
     if (instance) {
       instance.pty.write(data)
+    } else {
+      console.warn(`[pty] write: PTY ${id} not found`)
     }
   }
 
@@ -247,6 +250,8 @@ ${networkRule}
     const instance = this.ptys.get(id)
     if (instance) {
       instance.pty.resize(cols, rows)
+    } else {
+      console.warn(`[pty] resize: PTY ${id} not found`)
     }
   }
 
@@ -255,6 +260,8 @@ ${networkRule}
     if (instance) {
       instance.pty.kill()
       this.ptys.delete(id)
+    } else {
+      console.warn(`[pty] kill: PTY ${id} not found`)
     }
   }
 
