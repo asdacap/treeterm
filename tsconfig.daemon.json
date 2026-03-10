@@ -18,7 +18,8 @@
   },
   "include": [
     "src/daemon/**/*.ts",
-    "src/main/pty.ts"
+    "src/main/pty.ts",
+    "src/shared/**/*.ts"
   ],
   "exclude": [
     "**/*.test.ts",
