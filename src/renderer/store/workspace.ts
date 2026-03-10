@@ -397,19 +397,23 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       },
 
       createWorktreeFromBranch: async (parentId: string, branch: string, isDetached: boolean) => {
+        console.log('[workspace] createWorktreeFromBranch called:', { parentId, branch, isDetached })
         const state = get()
         const parent = state.workspaces[parentId]
 
         if (!parent) {
+          console.error('[workspace] Parent workspace not found:', parentId)
           return { success: false, error: 'Parent workspace not found' }
         }
 
         if (!parent.isGitRepo || !parent.gitRootPath) {
+          console.error('[workspace] Parent workspace is not a git repository')
           return { success: false, error: 'Parent workspace is not a git repository' }
         }
 
         // Extract simple name from branch for worktree naming
         const worktreeName = branch.split('/').pop() || branch
+        console.log('[workspace] Creating worktree with name:', worktreeName)
 
         // Create worktree from existing branch
         const result = await window.electron.git.createWorktreeFromBranch(
@@ -417,6 +421,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           branch,
           worktreeName
         )
+        console.log('[workspace] createWorktreeFromBranch result:', result)
 
         if (!result.success) {
           return { success: false, error: result.error }
@@ -490,19 +495,23 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       },
 
       createWorktreeFromRemote: async (parentId: string, remoteBranch: string, isDetached: boolean) => {
+        console.log('[workspace] createWorktreeFromRemote called:', { parentId, remoteBranch, isDetached })
         const state = get()
         const parent = state.workspaces[parentId]
 
         if (!parent) {
+          console.error('[workspace] Parent workspace not found:', parentId)
           return { success: false, error: 'Parent workspace not found' }
         }
 
         if (!parent.isGitRepo || !parent.gitRootPath) {
+          console.error('[workspace] Parent workspace is not a git repository')
           return { success: false, error: 'Parent workspace is not a git repository' }
         }
 
         // Extract simple name from remote branch for worktree naming
         const worktreeName = remoteBranch.split('/').pop() || remoteBranch
+        console.log('[workspace] Creating worktree from remote with name:', worktreeName)
 
         // Create worktree from remote branch
         const result = await window.electron.git.createWorktreeFromRemote(
@@ -510,6 +519,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           remoteBranch,
           worktreeName
         )
+        console.log('[workspace] createWorktreeFromRemote result:', result)
 
         if (!result.success) {
           return { success: false, error: result.error }

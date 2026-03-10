@@ -99,9 +99,11 @@ export default function WorkspacePane() {
 
   // Create worktree from existing branch handler
   const handleCreateFromBranchSubmit = async (branch: string, isDetached: boolean) => {
+    console.log('[WorkspacePane] handleCreateFromBranchSubmit called:', { branch, isDetached, activeWorkspaceId })
     if (!activeWorkspaceId) return { success: false, error: 'No workspace selected' }
 
     const result = await createWorktreeFromBranch(activeWorkspaceId, branch, isDetached)
+    console.log('[WorkspacePane] handleCreateFromBranchSubmit result:', result)
     if (result.success) {
       setShowCreateChildDialog(false)
     }
@@ -110,9 +112,11 @@ export default function WorkspacePane() {
 
   // Create worktree from remote branch handler
   const handleCreateFromRemoteSubmit = async (remoteBranch: string, isDetached: boolean) => {
+    console.log('[WorkspacePane] handleCreateFromRemoteSubmit called:', { remoteBranch, isDetached, activeWorkspaceId })
     if (!activeWorkspaceId) return { success: false, error: 'No workspace selected' }
 
     const result = await createWorktreeFromRemote(activeWorkspaceId, remoteBranch, isDetached)
+    console.log('[WorkspacePane] handleCreateFromRemoteSubmit result:', result)
     if (result.success) {
       setShowCreateChildDialog(false)
     }
