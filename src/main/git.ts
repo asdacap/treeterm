@@ -329,10 +329,12 @@ export async function getDiffAgainstHead(
     const git: SimpleGit = simpleGit(worktreePath)
     const currentBranch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim()
 
-    // Use two-dot notation to compare against parent's current HEAD
-    // This shows what changes exist on currentBranch relative to parentBranch's HEAD
-    const diffStat = await git.raw(['diff', '--numstat', `${parentBranch}..${currentBranch}`])
-    const nameStatus = await git.raw(['diff', '--name-status', `${parentBranch}..${currentBranch}`])
+    // Get the merge base to compare against the common ancestor
+    // This shows only changes introduced on the current branch
+    const mergeBase = (await git.raw(['merge-base', parentBranch, currentBranch])).trim()
+
+    const diffStat = await git.raw(['diff', '--numstat', mergeBase, currentBranch])
+    const nameStatus = await git.raw(['diff', '--name-status', mergeBase, currentBranch])
 
     const files: DiffFile[] = []
     let totalAdditions = 0
@@ -394,8 +396,10 @@ export async function getFileDiffAgainstHead(
     const git: SimpleGit = simpleGit(worktreePath)
     const currentBranch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim()
 
-    // Use two-dot notation to compare against parent's current HEAD
-    const diff = await git.raw(['diff', '--color=never', `${parentBranch}..${currentBranch}`, '--', filePath])
+    // Get the merge base to compare against the common ancestor
+    const mergeBase = (await git.raw(['merge-base', parentBranch, currentBranch])).trim()
+
+    const diff = await git.raw(['diff', '--color=never', mergeBase, currentBranch, '--', filePath])
 
     return { success: true, diff }
   } catch (err) {
@@ -930,10 +934,13 @@ export async function getFileContentsForDiffAgainstHead(
     const git: SimpleGit = simpleGit(worktreePath)
     const currentBranch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim()
 
-    // Get original content (parent branch HEAD)
+    // Get the merge base to compare against the common ancestor
+    const mergeBase = (await git.raw(['merge-base', parentBranch, currentBranch])).trim()
+
+    // Get original content (at merge base)
     let originalContent = ''
     try {
-      originalContent = await git.raw(['show', `${parentBranch}:${filePath}`])
+      originalContent = await git.raw(['show', `${mergeBase}:${filePath}`])
     } catch {
       // File doesn't exist on parent branch
       originalContent = ''
