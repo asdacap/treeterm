@@ -3,6 +3,8 @@
 const { spawn } = require('child_process')
 const path = require('path')
 const fs = require('fs')
+const net = require('net')
+const os = require('os')
 
 // Get the path to the electron executable
 const electronPath = require('electron')
@@ -10,18 +12,236 @@ const electronPath = require('electron')
 // Get the path to the app's main entry point
 const appPath = path.join(__dirname, '..')
 
+// Daemon paths
+const DAEMON_PID_FILE = path.join(os.homedir(), '.treeterm', 'daemon.pid')
+
+function getDefaultSocketPath() {
+  const uid = process.getuid ? process.getuid() : os.userInfo().uid
+  return path.join(os.tmpdir(), `treeterm-${uid}`, 'daemon.sock')
+}
+
+// Lightweight daemon client for CLI
+class CliDaemonClient {
+  constructor(socketPath) {
+    this.socketPath = socketPath
+    this.socket = null
+    this.buffer = ''
+    this.requestCounter = 0
+  }
+
+  async connect(timeout = 5000) {
+    return new Promise((resolve, reject) => {
+      this.socket = net.createConnection(this.socketPath)
+
+      const timeoutId = setTimeout(() => {
+        this.socket.destroy()
+        reject(new Error('Connection timeout'))
+      }, timeout)
+
+      this.socket.on('connect', () => {
+        clearTimeout(timeoutId)
+        resolve()
+      })
+
+      this.socket.on('error', (error) => {
+        clearTimeout(timeoutId)
+        reject(error)
+      })
+    })
+  }
+
+  disconnect() {
+    if (this.socket) {
+      this.socket.destroy()
+      this.socket = null
+    }
+  }
+
+  async sendMessage(message) {
+    return new Promise((resolve, reject) => {
+      const requestId = `req-${++this.requestCounter}`
+      message.requestId = requestId
+
+      const timeout = setTimeout(() => {
+        reject(new Error('Request timeout'))
+      }, 10000)
+
+      let responseHandled = false
+
+      this.socket.on('data', (data) => {
+        this.buffer += data.toString()
+
+        // Process complete messages (newline-delimited)
+        while (true) {
+          const newlineIndex = this.buffer.indexOf('\n')
+          if (newlineIndex === -1) break
+
+          const line = this.buffer.slice(0, newlineIndex)
+          this.buffer = this.buffer.slice(newlineIndex + 1)
+
+          if (line.trim()) {
+            try {
+              const response = JSON.parse(line)
+              if (response.requestId === requestId && !responseHandled) {
+                clearTimeout(timeout)
+                responseHandled = true
+                if (response.type === 'error') {
+                  reject(new Error(response.error))
+                } else {
+                  resolve(response)
+                }
+              }
+            } catch (error) {
+              // Ignore parse errors for non-matching responses
+            }
+          }
+        }
+      })
+
+      const data = JSON.stringify(message) + '\n'
+      this.socket.write(data)
+    })
+  }
+
+  async listSessions() {
+    const response = await this.sendMessage({ type: 'listSessions' })
+    return response.payload || []
+  }
+
+  async shutdownDaemon() {
+    await this.sendMessage({ type: 'shutdown' })
+  }
+}
+
 // Parse arguments - find first non-flag argument
 const args = process.argv.slice(2)
+const command = args[0]
+
+if (command === '--help' || command === '-h') {
+  console.log('Usage: treeterm [command] [options]')
+  console.log('')
+  console.log('Commands:')
+  console.log('  (no command)          Open TreeTerm GUI')
+  console.log('  [directory]           Open TreeTerm GUI with workspace directory')
+  console.log('  list-sessions         List all active daemon sessions')
+  console.log('  shutdown-daemon       Shutdown the daemon process')
+  console.log('  status                Show daemon status')
+  console.log('')
+  console.log('Options:')
+  console.log('  -h, --help            Show this help message')
+  process.exit(0)
+}
+
+// Handle daemon management commands
+if (command === 'list-sessions') {
+  ;(async () => {
+    const client = new CliDaemonClient(getDefaultSocketPath())
+    try {
+      await client.connect()
+      const sessions = await client.listSessions()
+
+      if (sessions.length === 0) {
+        console.log('No active sessions')
+      } else {
+        console.log(`Active Sessions (${sessions.length}):`)
+        console.log('')
+        for (const session of sessions) {
+          console.log(`Session ID: ${session.id}`)
+          console.log(`  Workspaces: ${session.workspaces.length}`)
+          for (const workspace of session.workspaces) {
+            console.log(`    - ${workspace.path}`)
+            if (workspace.gitBranch) {
+              console.log(`      Branch: ${workspace.gitBranch}`)
+            }
+            console.log(`      Tabs: ${workspace.tabs.length}`)
+          }
+          console.log(`  Attached Clients: ${session.attachedClients}`)
+          console.log(`  Last Activity: ${new Date(session.lastActivity).toLocaleString()}`)
+          console.log('')
+        }
+      }
+
+      client.disconnect()
+      process.exit(0)
+    } catch (error) {
+      console.error('Error: Daemon is not running')
+      client.disconnect()
+      process.exit(1)
+    }
+  })()
+  return
+}
+
+if (command === 'shutdown-daemon') {
+  ;(async () => {
+    const client = new CliDaemonClient(getDefaultSocketPath())
+    try {
+      await client.connect()
+      await client.shutdownDaemon()
+      console.log('Daemon shutdown successfully')
+      client.disconnect()
+      process.exit(0)
+    } catch (error) {
+      console.error('Error: Daemon is not running')
+      client.disconnect()
+      process.exit(1)
+    }
+  })()
+  return
+}
+
+if (command === 'status') {
+  ;(async () => {
+    const socketPath = getDefaultSocketPath()
+
+    // Check PID file
+    let pid = null
+    let processRunning = false
+
+    if (fs.existsSync(DAEMON_PID_FILE)) {
+      try {
+        pid = parseInt(fs.readFileSync(DAEMON_PID_FILE, 'utf-8'), 10)
+        // Check if process is still alive
+        process.kill(pid, 0)
+        processRunning = true
+      } catch {
+        // Process not running
+        processRunning = false
+      }
+    }
+
+    // Try connecting to daemon
+    const client = new CliDaemonClient(socketPath)
+    try {
+      await client.connect(2000)
+      const sessions = await client.listSessions()
+
+      console.log('Daemon Status: running')
+      if (pid) {
+        console.log(`PID: ${pid}`)
+      }
+      console.log(`Socket: ${socketPath}`)
+      console.log(`Sessions: ${sessions.length}`)
+
+      client.disconnect()
+      process.exit(0)
+    } catch (error) {
+      console.log('Daemon Status: not running')
+      if (pid && processRunning) {
+        console.log(`Note: PID file exists (${pid}) but daemon is not responding`)
+      }
+      client.disconnect()
+      process.exit(0)
+    }
+  })()
+  return
+}
+
+// Handle workspace argument for GUI mode
 let workspacePath = null
 const electronArgs = [appPath]
 
 for (const arg of args) {
-  if (arg === '--help' || arg === '-h') {
-    console.log('Usage: treeterm [directory]')
-    console.log('')
-    console.log('Open TreeTerm with an optional workspace directory.')
-    process.exit(0)
-  }
   if (!arg.startsWith('-') && !workspacePath) {
     workspacePath = arg
   }
