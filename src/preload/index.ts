@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { SandboxConfig, DaemonSession, WorkspaceInput } from '../shared/types'
 
 type DataCallback = (data: string) => void
 const dataListeners = new Map<string, DataCallback[]>()
@@ -45,7 +46,7 @@ ipcRenderer.on('app:ready', () => {
   readyListeners.forEach((cb) => cb())
 })
 
-type DaemonSessionsCallback = (sessions: any[]) => void
+type DaemonSessionsCallback = (sessions: DaemonSession[]) => void
 const daemonSessionsListeners: DaemonSessionsCallback[] = []
 
 ipcRenderer.on('daemon:sessions', (_event, sessions) => {
@@ -71,12 +72,6 @@ const sessionShowSessionsListeners: SessionMenuCallback[] = []
 ipcRenderer.on('session:show-sessions', () => {
   sessionShowSessionsListeners.forEach((cb) => cb())
 })
-
-interface SandboxConfig {
-  enabled: boolean
-  allowNetwork: boolean
-  allowedPaths: string[]
-}
 
 contextBridge.exposeInMainWorld('electron', {
   platform: process.platform,
@@ -335,16 +330,16 @@ contextBridge.exposeInMainWorld('electron', {
     }
   },
   session: {
-    create: (workspaces: any[]): Promise<{ success: boolean; session?: any; error?: string }> => {
+    create: (workspaces: WorkspaceInput[]): Promise<{ success: boolean; session?: DaemonSession; error?: string }> => {
       return ipcRenderer.invoke('session:create', workspaces)
     },
-    update: (sessionId: string, workspaces: any[]): Promise<{ success: boolean; session?: any; error?: string }> => {
+    update: (sessionId: string, workspaces: WorkspaceInput[]): Promise<{ success: boolean; session?: DaemonSession; error?: string }> => {
       return ipcRenderer.invoke('session:update', sessionId, workspaces)
     },
-    list: (): Promise<{ success: boolean; sessions?: any[]; error?: string }> => {
+    list: (): Promise<{ success: boolean; sessions?: DaemonSession[]; error?: string }> => {
       return ipcRenderer.invoke('session:list')
     },
-    get: (sessionId: string): Promise<{ success: boolean; session?: any; error?: string }> => {
+    get: (sessionId: string): Promise<{ success: boolean; session?: DaemonSession; error?: string }> => {
       return ipcRenderer.invoke('session:get', sessionId)
     },
     delete: (sessionId: string): Promise<{ success: boolean; error?: string }> => {

@@ -1,5 +1,32 @@
 import type { ReactNode } from 'react'
 
+// Import and re-export shared types
+import type {
+  SandboxConfig,
+  DaemonTab,
+  DaemonWorkspace,
+  DaemonSession,
+  DaemonSessionInfo,
+  WorkspaceInput,
+  TerminalInstance,
+  PrefixModeConfig,
+  STTProvider,
+  Settings
+} from '../../shared/types'
+
+export type {
+  SandboxConfig,
+  DaemonTab,
+  DaemonWorkspace,
+  DaemonSession,
+  DaemonSessionInfo,
+  WorkspaceInput,
+  TerminalInstance,
+  PrefixModeConfig,
+  STTProvider,
+  Settings
+}
+
 // Activity state for applications that can report their state
 export type ActivityState = 'idle' | 'working' | 'waiting_for_input'
 
@@ -37,15 +64,6 @@ export interface Tab {
   applicationId: string
   title: string
   state: unknown
-}
-
-// TerminalInstance - user configuration for custom terminal variants
-export interface TerminalInstance {
-  id: string
-  name: string
-  icon: string
-  startupCommand: string
-  isDefault: boolean
 }
 
 // Type-specific state interfaces (for internal use within applications)
@@ -109,54 +127,6 @@ export interface FilesystemApi {
     success: boolean
     error?: string
   }>
-}
-
-export interface SandboxConfig {
-  enabled: boolean
-  allowNetwork: boolean
-  allowedPaths: string[] // Additional paths besides workspace
-}
-
-export interface DaemonSessionInfo {
-  id: string
-  cwd: string
-  cols: number
-  rows: number
-  createdAt: number
-  lastActivity: number
-  attachedClients: number
-}
-
-export interface DaemonTab {
-  id: string
-  applicationId: string
-  title: string
-  state: unknown
-}
-
-export interface DaemonWorkspace {
-  path: string
-  name: string
-  parentPath: string | null
-  status: 'active' | 'merged' | 'abandoned'
-  isGitRepo: boolean
-  gitBranch: string | null
-  gitRootPath: string | null
-  isWorktree: boolean
-  isDetached?: boolean
-  tabs: DaemonTab[]
-  activeTabId: string | null
-  createdAt: number
-  lastActivity: number
-  attachedClients: number
-}
-
-export interface DaemonSession {
-  id: string
-  workspaces: DaemonWorkspace[]
-  createdAt: number
-  lastActivity: number
-  attachedClients: number
 }
 
 export interface Workspace {
@@ -298,60 +268,6 @@ export interface GitApi {
   getUncommittedFileContentsForDiff: (repoPath: string, filePath: string, staged: boolean) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
 }
 
-export interface PrefixModeConfig {
-  prefixKey: string // e.g., 'Control+B'
-  timeout: number // ms (default: 1500)
-}
-
-export type STTProvider = 'openaiWhisper' | 'localWhisper'
-
-export interface Settings {
-  terminal: {
-    fontSize: number
-    fontFamily: string
-    cursorStyle: 'block' | 'underline' | 'bar'
-    cursorBlink: boolean
-    showRawChars: boolean
-    startByDefault: boolean
-    instances: TerminalInstance[]
-  }
-  sandbox: {
-    enabledByDefault: boolean
-    allowNetworkByDefault: boolean
-  }
-  claude: {
-    command: string
-    startByDefault: boolean
-    enableSandbox: boolean
-  }
-  appearance: {
-    theme: 'dark' | 'light' | 'system'
-  }
-  prefixMode: PrefixModeConfig
-  keybindings: {
-    newTab: string // Key after prefix (e.g., 'c')
-    closeTab: string
-    nextTab: string
-    prevTab: string
-    openSettings: string
-    workspaceFocus: string
-  }
-  stt: {
-    enabled: boolean
-    provider: STTProvider
-    openaiApiKey: string
-    localWhisperModelPath: string
-    pushToTalkKey: string
-    language: string // ISO-639-1 code (e.g., 'en', 'ms', 'zh')
-  }
-  daemon: {
-    enabled: boolean
-    orphanTimeout: number
-    scrollbackLimit: number
-    killOnQuit: boolean
-  }
-}
-
 export interface SettingsApi {
   load: () => Promise<Settings>
   save: (settings: Settings) => Promise<{ success: boolean }>
@@ -381,9 +297,9 @@ export interface DaemonApi {
 }
 
 export interface SessionApi {
-  create: (workspaces: Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]) =>
+  create: (workspaces: WorkspaceInput[]) =>
     Promise<{ success: boolean; session?: DaemonSession; error?: string }>
-  update: (sessionId: string, workspaces: Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]) =>
+  update: (sessionId: string, workspaces: WorkspaceInput[]) =>
     Promise<{ success: boolean; session?: DaemonSession; error?: string }>
   list: () => Promise<{ success: boolean; sessions?: DaemonSession[]; error?: string }>
   get: (sessionId: string) => Promise<{ success: boolean; session?: DaemonSession; error?: string }>

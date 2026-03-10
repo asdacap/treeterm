@@ -4,12 +4,10 @@ import * as path from 'path'
 import * as os from 'os'
 import * as fs from 'fs'
 import { execSync } from 'child_process'
+import type { SandboxConfig } from '../shared/types'
 
-export interface SandboxConfig {
-  enabled: boolean
-  allowNetwork: boolean
-  allowedPaths: string[]
-}
+// Re-export for backward compatibility
+export type { SandboxConfig }
 
 interface PtyInstance {
   pty: pty.IPty

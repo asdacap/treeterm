@@ -2,7 +2,24 @@
  * Protocol for communication between Electron app and daemon via Unix domain socket
  */
 
-import type { SandboxConfig } from '../main/pty'
+// Import shared types
+import type {
+  SandboxConfig,
+  DaemonTab,
+  DaemonWorkspace,
+  DaemonSession,
+  DaemonSessionInfo,
+  WorkspaceInput
+} from '../shared/types'
+
+// Re-export for backward compatibility
+export type {
+  SandboxConfig,
+  DaemonTab,
+  DaemonWorkspace,
+  DaemonSession,
+  WorkspaceInput
+}
 
 export type MessageType =
   | 'create'
@@ -37,38 +54,6 @@ export interface SessionInfo {
   cwd: string
   cols: number
   rows: number
-  createdAt: number
-  lastActivity: number
-  attachedClients: number
-}
-
-export interface DaemonTab {
-  id: string
-  applicationId: string
-  title: string
-  state: unknown
-}
-
-export interface DaemonWorkspace {
-  path: string              // Primary key - same folder = same workspace session
-  name: string
-  parentPath: string | null // For tree reconstruction
-  status: 'active' | 'merged' | 'abandoned'
-  isGitRepo: boolean
-  gitBranch: string | null
-  gitRootPath: string | null
-  isWorktree: boolean
-  isDetached?: boolean
-  tabs: DaemonTab[]
-  activeTabId: string | null
-  createdAt: number
-  lastActivity: number
-  attachedClients: number
-}
-
-export interface DaemonSession {
-  id: string
-  workspaces: DaemonWorkspace[]
   createdAt: number
   lastActivity: number
   attachedClients: number
@@ -165,14 +150,14 @@ export interface ExitResponse extends DaemonResponse {
 // Session message interfaces (workspace sessions)
 export interface CreateSessionMessage extends DaemonMessage {
   type: 'createSession'
-  payload: { workspaces: Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[] }
+  payload: { workspaces: WorkspaceInput[] }
 }
 
 export interface UpdateSessionMessage extends DaemonMessage {
   type: 'updateSession'
   payload: {
     sessionId: string
-    workspaces: Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]
+    workspaces: WorkspaceInput[]
   }
 }
 
