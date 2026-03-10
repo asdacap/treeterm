@@ -1319,7 +1319,6 @@ body,
 }
 
 .diff-file-list {
-  width: 250px;
   border-right: 1px solid var(--border-color);
   overflow-y: auto;
   flex-shrink: 0;
@@ -1850,12 +1849,11 @@ body,
 
 /* File Tree */
 .file-tree {
-  width: 250px;
-  min-width: 200px;
   border-right: 1px solid var(--border-color);
   overflow-y: auto;
   background: var(--bg-secondary);
   flex-shrink: 0;
+  height: 100%;
 }
 
 .file-tree-item {

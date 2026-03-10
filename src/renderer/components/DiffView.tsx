@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, FileDiffContents } from '../types'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
 
@@ -27,6 +27,10 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
   const [commitMessage, setCommitMessage] = useState('')
   const [committing, setCommitting] = useState(false)
   const [commitError, setCommitError] = useState<string | null>(null)
+
+  // Resize state
+  const [fileListWidth, setFileListWidth] = useState(250)
+  const [isResizing, setIsResizing] = useState(false)
 
   useEffect(() => {
     loadDiff()
@@ -205,6 +209,26 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
     }
   }
 
+  // Resize handlers
+  const handleMouseDown = useCallback(() => {
+    setIsResizing(true)
+  }, [])
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isResizing) return
+      const container = e.currentTarget as HTMLElement
+      const rect = container.getBoundingClientRect()
+      const newWidth = Math.max(150, Math.min(500, e.clientX - rect.left))
+      setFileListWidth(newWidth)
+    },
+    [isResizing]
+  )
+
+  const handleMouseUp = useCallback(() => {
+    setIsResizing(false)
+  }, [])
+
   if (loading) {
     return <div className="diff-loading">Loading diff...</div>
   }
@@ -255,8 +279,8 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
                 </span>
               </div>
 
-              <div className="diff-content">
-                <div className="diff-file-list">
+              <div className="diff-content" onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
+                <div className="diff-file-list" style={{ width: fileListWidth }}>
                   {diff.files.map((file) => (
                     <div
                       key={file.path}
@@ -272,6 +296,8 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
                     </div>
                   ))}
                 </div>
+
+                <div className={`divider ${isResizing ? 'active' : ''}`} onMouseDown={handleMouseDown} />
 
                 <div className="diff-file-content">
                   {selectedFile ? (
@@ -335,8 +361,8 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
                 {commitError && <div className="commit-error">{commitError}</div>}
               </div>
 
-              <div className="diff-content">
-                <div className="diff-file-list">
+              <div className="diff-content" onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
+                <div className="diff-file-list" style={{ width: fileListWidth }}>
                   {/* Staged files */}
                   {stagedFiles.length > 0 && (
                     <div className="diff-file-group">
@@ -405,6 +431,8 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
                     </div>
                   )}
                 </div>
+
+                <div className={`divider ${isResizing ? 'active' : ''}`} onMouseDown={handleMouseDown} />
 
                 <div className="diff-file-content">
                   {selectedUncommittedFile ? (

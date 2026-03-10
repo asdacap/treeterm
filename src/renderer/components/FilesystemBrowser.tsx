@@ -1,3 +1,4 @@
+import { useState, useCallback } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import { FileTree } from './FileTree'
 import { FileViewer } from './FileViewer'
@@ -18,6 +19,10 @@ export function FilesystemBrowser({
   const workspace = workspaces[workspaceId]
   const tab = workspace?.tabs.find((t) => t.id === tabId)
   const state = tab?.state as FilesystemState | undefined
+
+  // Resize state
+  const [treeWidth, setTreeWidth] = useState(250)
+  const [isResizing, setIsResizing] = useState(false)
 
   if (!tab || !state) {
     return <div className="filesystem-browser-error">Invalid tab</div>
@@ -42,15 +47,38 @@ export function FilesystemBrowser({
     })
   }
 
+  // Resize handlers
+  const handleMouseDown = useCallback(() => {
+    setIsResizing(true)
+  }, [])
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isResizing) return
+      const container = e.currentTarget as HTMLElement
+      const rect = container.getBoundingClientRect()
+      const newWidth = Math.max(150, Math.min(500, e.clientX - rect.left))
+      setTreeWidth(newWidth)
+    },
+    [isResizing]
+  )
+
+  const handleMouseUp = useCallback(() => {
+    setIsResizing(false)
+  }, [])
+
   return (
-    <div className="filesystem-browser">
-      <FileTree
-        workspacePath={workspacePath}
-        selectedPath={state.selectedPath}
-        expandedDirs={state.expandedDirs}
-        onSelectFile={setSelectedPath}
-        onToggleDir={toggleExpandedDir}
-      />
+    <div className="filesystem-browser" onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
+      <div style={{ width: treeWidth }}>
+        <FileTree
+          workspacePath={workspacePath}
+          selectedPath={state.selectedPath}
+          expandedDirs={state.expandedDirs}
+          onSelectFile={setSelectedPath}
+          onToggleDir={toggleExpandedDir}
+        />
+      </div>
+      <div className={`divider ${isResizing ? 'active' : ''}`} onMouseDown={handleMouseDown} />
       <FileViewer workspacePath={workspacePath} workspaceId={workspaceId} filePath={state.selectedPath} />
     </div>
   )
