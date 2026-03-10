@@ -83,6 +83,7 @@ export default function BaseTerminal({
 
   const workspace = useWorkspaceStore((state) => state.workspaces[workspaceId])
   const updateTabState = useWorkspaceStore((state) => state.updateTabState)
+  const removeTab = useWorkspaceStore((state) => state.removeTab)
   const setTabState = useActivityStateStore((state) => state.setTabState)
   const settings = useSettingsStore((state) => state.settings)
 
@@ -159,7 +160,7 @@ export default function BaseTerminal({
     // Helper to subscribe to PTY and set up refs
     const connectToPty = (id: string) => {
       ptyIdRef.current = id
-      unsubscribeRef.current = window.electron.terminal.onData(id, (data) => {
+      const unsubscribeData = window.electron.terminal.onData(id, (data) => {
         terminal.write(data)
         // Process data for activity state detection
         detector.processData(data)
@@ -169,6 +170,19 @@ export default function BaseTerminal({
           console.log('[RAW]', formatRawChars(rawCharsRef.current))
         }
       })
+
+      const unsubscribeExit = window.electron.terminal.onExit(id, (exitCode) => {
+        console.log(`[${config.logPrefix} ${tabId}] PTY exited with code:`, exitCode)
+        if (isMountedRef.current) {
+          removeTab(workspaceId, tabId)
+        }
+      })
+
+      unsubscribeRef.current = () => {
+        unsubscribeData()
+        unsubscribeExit()
+      }
+
       window.electron.terminal.resize(id, terminal.cols, terminal.rows)
     }
 

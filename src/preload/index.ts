@@ -4,6 +4,9 @@ import type { SandboxConfig, DaemonSession, WorkspaceInput } from '../shared/typ
 type DataCallback = (data: string) => void
 const dataListeners = new Map<string, DataCallback[]>()
 
+type ExitCallback = (exitCode: number) => void
+const exitListeners = new Map<string, ExitCallback[]>()
+
 // Listen for pty data from main process
 ipcRenderer.on('pty:data', (_event, id: string, data: string) => {
   const listeners = dataListeners.get(id)
@@ -12,8 +15,13 @@ ipcRenderer.on('pty:data', (_event, id: string, data: string) => {
   }
 })
 
-ipcRenderer.on('pty:exit', (_event, id: string, _exitCode: number) => {
+ipcRenderer.on('pty:exit', (_event, id: string, exitCode: number) => {
+  const listeners = exitListeners.get(id)
+  if (listeners) {
+    listeners.forEach((cb) => cb(exitCode))
+  }
   dataListeners.delete(id)
+  exitListeners.delete(id)
 })
 
 type SettingsOpenCallback = () => void
@@ -109,6 +117,23 @@ contextBridge.exposeInMainWorld('electron', {
       // Return unsubscribe function
       return () => {
         const listeners = dataListeners.get(id)
+        if (listeners) {
+          const index = listeners.indexOf(callback)
+          if (index > -1) {
+            listeners.splice(index, 1)
+          }
+        }
+      }
+    },
+    onExit: (id: string, callback: ExitCallback): (() => void) => {
+      if (!exitListeners.has(id)) {
+        exitListeners.set(id, [])
+      }
+      exitListeners.get(id)!.push(callback)
+
+      // Return unsubscribe function
+      return () => {
+        const listeners = exitListeners.get(id)
         if (listeners) {
           const index = listeners.indexOf(callback)
           if (index > -1) {
