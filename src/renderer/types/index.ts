@@ -256,6 +256,8 @@ export interface PrefixModeConfig {
   timeout: number // ms (default: 1500)
 }
 
+export type STTProvider = 'openaiWhisper' | 'localWhisper'
+
 export interface Settings {
   terminal: {
     fontSize: number
@@ -287,6 +289,13 @@ export interface Settings {
     openSettings: string
     workspaceFocus: string
   }
+  stt: {
+    enabled: boolean
+    provider: STTProvider
+    openaiApiKey: string
+    localWhisperModelPath: string
+    pushToTalkKey: string
+  }
 }
 
 export interface SettingsApi {
@@ -299,10 +308,17 @@ export interface SandboxApi {
   isAvailable: () => Promise<boolean>
 }
 
+export interface STTApi {
+  transcribeOpenAI: (audioBuffer: ArrayBuffer, apiKey: string) => Promise<{ text: string }>
+  transcribeLocal: (audioBuffer: ArrayBuffer, modelPath: string) => Promise<{ text: string }>
+  checkMicPermission: () => Promise<boolean>
+}
+
 export interface AppApi {
   onCloseConfirm: (callback: () => void) => () => void
   confirmClose: () => void
   cancelClose: () => void
+  onCapsLockEvent: (callback: (event: { type: string; key: string; code: string }) => void) => () => void
 }
 
 export interface ElectronApi {
@@ -313,6 +329,7 @@ export interface ElectronApi {
   settings: SettingsApi
   filesystem: FilesystemApi
   sandbox: SandboxApi
+  stt: STTApi
   getInitialWorkspace: () => Promise<string | null>
   app: AppApi
 }

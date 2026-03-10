@@ -35,6 +35,13 @@ const defaultSettings: Settings = {
     prevTab: 'p',
     openSettings: ',',
     workspaceFocus: 'w'
+  },
+  stt: {
+    enabled: true,
+    provider: 'openaiWhisper',
+    openaiApiKey: '',
+    localWhisperModelPath: '',
+    pushToTalkKey: 'Shift+Space'
   }
 }
 

@@ -29,6 +29,13 @@ ipcRenderer.on('app:confirm-close', () => {
   closeConfirmListeners.forEach((cb) => cb())
 })
 
+type CapsLockCallback = (event: { type: string; key: string; code: string }) => void
+const capsLockListeners: CapsLockCallback[] = []
+
+ipcRenderer.on('capslock-event', (_event, data) => {
+  capsLockListeners.forEach((cb) => cb(data))
+})
+
 type ReadyCallback = () => void
 const readyListeners: ReadyCallback[] = []
 let isReady = false
@@ -205,6 +212,20 @@ contextBridge.exposeInMainWorld('electron', {
       return ipcRenderer.invoke('sandbox:isAvailable')
     }
   },
+  stt: {
+    transcribeOpenAI: (audioBuffer: ArrayBuffer, apiKey: string): Promise<{ text: string }> => {
+      return ipcRenderer.invoke('stt:transcribe-openai', audioBuffer, apiKey)
+    },
+    transcribeLocal: (
+      audioBuffer: ArrayBuffer,
+      modelPath: string
+    ): Promise<{ text: string }> => {
+      return ipcRenderer.invoke('stt:transcribe-local', audioBuffer, modelPath)
+    },
+    checkMicPermission: (): Promise<boolean> => {
+      return ipcRenderer.invoke('stt:check-mic-permission')
+    }
+  },
   getInitialWorkspace: (): Promise<string | null> => {
     return ipcRenderer.invoke('app:getInitialWorkspace')
   },
@@ -237,6 +258,15 @@ contextBridge.exposeInMainWorld('electron', {
     },
     cancelClose: (): void => {
       ipcRenderer.send('app:close-cancelled')
+    },
+    onCapsLockEvent: (callback: CapsLockCallback): (() => void) => {
+      capsLockListeners.push(callback)
+      return () => {
+        const index = capsLockListeners.indexOf(callback)
+        if (index > -1) {
+          capsLockListeners.splice(index, 1)
+        }
+      }
     }
   }
 })

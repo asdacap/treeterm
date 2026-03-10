@@ -45,6 +45,7 @@ import {
 import { loadSettings, saveSettings, Settings } from './settings'
 import { createApplicationMenu } from './menu'
 import { registerFilesystemHandlers } from './filesystem'
+import { registerSTTHandlers } from './stt'
 
 let mainWindow: BrowserWindow | null = null
 let closeConfirmed = false
@@ -62,6 +63,28 @@ function createWindow(): void {
     },
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 15, y: 15 }
+  })
+
+  // Handle media permissions for speech recognition and microphone
+  mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+    if (permission === 'media' || permission === 'microphone') {
+      // Always allow microphone access for push-to-talk
+      callback(true)
+    } else {
+      callback(false)
+    }
+  })
+
+  // Forward all keyboard events including Caps Lock to renderer
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    // Forward Caps Lock events to renderer via IPC
+    if (input.code === 'CapsLock' || input.key === 'CapsLock') {
+      mainWindow?.webContents.send('capslock-event', {
+        type: input.type, // 'keyDown' or 'keyUp'
+        key: input.key,
+        code: input.code
+      })
+    }
   })
 
   // Open external links in the default browser instead of within Electron
@@ -303,6 +326,7 @@ ipcMain.on('app:close-cancelled', () => {
 // App lifecycle
 app.whenReady().then(() => {
   registerFilesystemHandlers()
+  registerSTTHandlers()
   createWindow()
   createApplicationMenu(mainWindow)
 
