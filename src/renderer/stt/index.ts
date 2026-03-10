@@ -8,14 +8,15 @@ export * from './types'
 export function createSTTProvider(
   provider: STTProviderType,
   apiKey?: string,
-  modelPath?: string
+  modelPath?: string,
+  language?: string
 ): STTProvider {
   switch (provider) {
     case 'openaiWhisper':
-      return new OpenAIWhisperProvider(apiKey || '')
+      return new OpenAIWhisperProvider(apiKey || '', language)
     case 'localWhisper':
       return new LocalWhisperProvider(modelPath || '')
     default:
-      return new OpenAIWhisperProvider(apiKey || '')
+      return new OpenAIWhisperProvider(apiKey || '', language)
   }
 }

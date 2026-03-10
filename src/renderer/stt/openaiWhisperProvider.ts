@@ -6,9 +6,11 @@ export class OpenAIWhisperProvider implements STTProvider {
   private audioChunks: Blob[] = []
   private stream: MediaStream | null = null
   private apiKey: string
+  private language?: string
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, language?: string) {
     this.apiKey = apiKey
+    this.language = language
   }
 
   async isAvailable(): Promise<boolean> {
@@ -58,7 +60,8 @@ export class OpenAIWhisperProvider implements STTProvider {
           // Send to main process for transcription
           const result = await window.electron.stt.transcribeOpenAI(
             arrayBuffer,
-            this.apiKey
+            this.apiKey,
+            this.language
           )
 
           resolve({ text: result.text })

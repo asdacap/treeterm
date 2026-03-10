@@ -41,7 +41,8 @@ const defaultSettings: Settings = {
     provider: 'openaiWhisper',
     openaiApiKey: '',
     localWhisperModelPath: '',
-    pushToTalkKey: 'Shift+Space'
+    pushToTalkKey: 'Shift+Space',
+    language: 'en'
   }
 }
 

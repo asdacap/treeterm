@@ -213,14 +213,15 @@ contextBridge.exposeInMainWorld('electron', {
     }
   },
   stt: {
-    transcribeOpenAI: (audioBuffer: ArrayBuffer, apiKey: string): Promise<{ text: string }> => {
-      return ipcRenderer.invoke('stt:transcribe-openai', audioBuffer, apiKey)
+    transcribeOpenAI: (audioBuffer: ArrayBuffer, apiKey: string, language?: string): Promise<{ text: string }> => {
+      return ipcRenderer.invoke('stt:transcribe-openai', audioBuffer, apiKey, language)
     },
     transcribeLocal: (
       audioBuffer: ArrayBuffer,
-      modelPath: string
+      modelPath: string,
+      language?: string
     ): Promise<{ text: string }> => {
-      return ipcRenderer.invoke('stt:transcribe-local', audioBuffer, modelPath)
+      return ipcRenderer.invoke('stt:transcribe-local', audioBuffer, modelPath, language)
     },
     checkMicPermission: (): Promise<boolean> => {
       return ipcRenderer.invoke('stt:check-mic-permission')

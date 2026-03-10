@@ -295,6 +295,7 @@ export interface Settings {
     openaiApiKey: string
     localWhisperModelPath: string
     pushToTalkKey: string
+    language: string // ISO-639-1 code (e.g., 'en', 'ms', 'zh')
   }
 }
 
@@ -309,8 +310,8 @@ export interface SandboxApi {
 }
 
 export interface STTApi {
-  transcribeOpenAI: (audioBuffer: ArrayBuffer, apiKey: string) => Promise<{ text: string }>
-  transcribeLocal: (audioBuffer: ArrayBuffer, modelPath: string) => Promise<{ text: string }>
+  transcribeOpenAI: (audioBuffer: ArrayBuffer, apiKey: string, language?: string) => Promise<{ text: string }>
+  transcribeLocal: (audioBuffer: ArrayBuffer, modelPath: string, language?: string) => Promise<{ text: string }>
   checkMicPermission: () => Promise<boolean>
 }
 

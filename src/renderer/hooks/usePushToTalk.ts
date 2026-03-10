@@ -32,7 +32,8 @@ export function usePushToTalk({
       providerRef.current = createSTTProvider(
         settings.stt.provider,
         settings.stt.openaiApiKey,
-        settings.stt.localWhisperModelPath
+        settings.stt.localWhisperModelPath,
+        settings.stt.language
       )
     }
   }, [settings.stt])

@@ -4,7 +4,7 @@ export function registerSTTHandlers(): void {
   // OpenAI Whisper transcription
   ipcMain.handle(
     'stt:transcribe-openai',
-    async (_event, audioBuffer: ArrayBuffer, apiKey: string) => {
+    async (_event, audioBuffer: ArrayBuffer, apiKey: string, language?: string) => {
       try {
         // Try to import OpenAI SDK dynamically
         let OpenAI: any
@@ -25,7 +25,8 @@ export function registerSTTHandlers(): void {
         // Transcribe using Whisper API
         const transcription = await openai.audio.transcriptions.create({
           file: file as any, // Type workaround for File object
-          model: 'whisper-1'
+          model: 'whisper-1',
+          ...(language && { language }) // Include language if provided
         })
 
         return { text: transcription.text }

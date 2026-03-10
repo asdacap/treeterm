@@ -667,6 +667,43 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
                   </p>
                 </div>
 
+                <div className="settings-group">
+                  <label className="settings-label">Language</label>
+                  <select
+                    className="settings-select"
+                    value={localSettings.stt.language}
+                    onChange={(e) =>
+                      setLocalSettings((prev) => ({
+                        ...prev,
+                        stt: { ...prev.stt, language: e.target.value }
+                      }))
+                    }
+                  >
+                    <option value="en">English</option>
+                    <option value="ms">Malay</option>
+                    <option value="zh">Chinese</option>
+                    <option value="es">Spanish</option>
+                    <option value="fr">French</option>
+                    <option value="de">German</option>
+                    <option value="ja">Japanese</option>
+                    <option value="ko">Korean</option>
+                    <option value="pt">Portuguese</option>
+                    <option value="ru">Russian</option>
+                    <option value="ar">Arabic</option>
+                    <option value="hi">Hindi</option>
+                    <option value="it">Italian</option>
+                    <option value="nl">Dutch</option>
+                    <option value="pl">Polish</option>
+                    <option value="tr">Turkish</option>
+                    <option value="vi">Vietnamese</option>
+                    <option value="th">Thai</option>
+                    <option value="id">Indonesian</option>
+                  </select>
+                  <p className="settings-hint">
+                    Language of your speech. This helps Whisper transcribe more accurately.
+                  </p>
+                </div>
+
                 {localSettings.stt.provider === 'localWhisper' && (
                   <div className="settings-group">
                     <label className="settings-label">Whisper Model Path</label>
