@@ -78,7 +78,7 @@ export class WebSpeechProvider implements STTProvider {
       }
     }
 
-    this.recognition.onerror = (event: any) => {
+    this.recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       const errorType = event.error
       const errorMessage = event.message || ''
 

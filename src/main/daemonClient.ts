@@ -102,12 +102,14 @@ export class DaemonClient {
       throw new Error(response.error)
     }
 
-    const sessionId = (response.payload as any)?.sessionId
-    if (!sessionId) {
-      throw new Error('Failed to create session: no sessionId returned')
+    if (response.type === 'success' && response.payload && typeof response.payload === 'object' && 'sessionId' in response.payload) {
+      const sessionId = (response.payload as { sessionId: string }).sessionId
+      if (sessionId) {
+        return sessionId
+      }
     }
 
-    return sessionId
+    throw new Error('Failed to create session: no sessionId returned')
   }
 
   async attachPtySession(sessionId: string): Promise<{ scrollback: string[] }> {
@@ -120,8 +122,8 @@ export class DaemonClient {
       throw new Error(response.error)
     }
 
-    if (response.type === 'scrollback') {
-      return { scrollback: response.payload as string[] }
+    if (response.type === 'scrollback' && Array.isArray(response.payload)) {
+      return { scrollback: response.payload }
     }
 
     throw new Error('Unexpected response type for attach')
@@ -174,7 +176,11 @@ export class DaemonClient {
       throw new Error(response.error)
     }
 
-    return (response.payload as SessionInfo[]) || []
+    if (response.type === 'success' && Array.isArray(response.payload)) {
+      return response.payload as SessionInfo[]
+    }
+
+    return []
   }
 
   async shutdownDaemon(): Promise<void> {
@@ -204,7 +210,11 @@ export class DaemonClient {
       throw new Error(response.error)
     }
 
-    return response.payload as DaemonSession
+    if (response.type === 'success' && response.payload && typeof response.payload === 'object' && 'id' in response.payload) {
+      return response.payload as DaemonSession
+    }
+
+    throw new Error('Failed to create session: invalid response')
   }
 
   async updateSession(sessionId: string, workspaces: Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]): Promise<DaemonSession> {
@@ -217,7 +227,11 @@ export class DaemonClient {
       throw new Error(response.error)
     }
 
-    return response.payload as DaemonSession
+    if (response.type === 'success' && response.payload && typeof response.payload === 'object' && 'id' in response.payload) {
+      return response.payload as DaemonSession
+    }
+
+    throw new Error('Failed to update session: invalid response')
   }
 
   async listSessions(): Promise<DaemonSession[]> {
@@ -229,7 +243,11 @@ export class DaemonClient {
       throw new Error(response.error)
     }
 
-    return (response.payload as DaemonSession[]) || []
+    if (response.type === 'success' && Array.isArray(response.payload)) {
+      return response.payload as DaemonSession[]
+    }
+
+    return []
   }
 
   async getSession(sessionId: string): Promise<DaemonSession | null> {
@@ -242,7 +260,13 @@ export class DaemonClient {
       throw new Error(response.error)
     }
 
-    return (response.payload as DaemonSession) || null
+    if (response.type === 'success' && response.payload) {
+      if (typeof response.payload === 'object' && 'id' in response.payload) {
+        return response.payload as DaemonSession
+      }
+    }
+
+    return null
   }
 
   async deleteSession(sessionId: string): Promise<void> {
@@ -353,15 +377,15 @@ export class DaemonClient {
       // Handle broadcast messages (data, exit)
       if (response.type === 'data' && response.sessionId) {
         const listeners = this.dataListeners.get(response.sessionId)
-        if (listeners) {
+        if (listeners && typeof response.payload === 'string') {
           for (const listener of listeners) {
-            listener(response.payload as string)
+            listener(response.payload)
           }
         }
       } else if (response.type === 'exit' && response.sessionId) {
-        const payload = response.payload as { exitCode: number; signal?: number }
         const listeners = this.exitListeners.get(response.sessionId)
-        if (listeners) {
+        if (listeners && response.payload && typeof response.payload === 'object') {
+          const payload = response.payload as { exitCode: number; signal?: number }
           for (const listener of listeners) {
             listener(payload.exitCode, payload.signal)
           }

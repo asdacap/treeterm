@@ -3,6 +3,11 @@ interface SpeechRecognitionEvent extends Event {
   results: SpeechRecognitionResultList
 }
 
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string
+  message?: string
+}
+
 interface SpeechRecognitionResultList {
   length: number
   item(index: number): SpeechRecognitionResult
@@ -25,8 +30,10 @@ interface SpeechRecognition extends EventTarget {
   continuous: boolean
   interimResults: boolean
   lang: string
+  maxAlternatives: number
   onresult: ((event: SpeechRecognitionEvent) => void) | null
-  onerror: ((event: Event) => void) | null
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null
+  onstart: (() => void) | null
   onend: (() => void) | null
   start(): void
   stop(): void

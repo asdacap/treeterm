@@ -71,6 +71,10 @@ export interface TerminalState {
   ptyId: string | null
 }
 
+export interface ClaudeState extends TerminalState {
+  sandbox: SandboxConfig
+}
+
 export interface FilesystemState {
   selectedPath: string | null
   expandedDirs: string[]
@@ -327,4 +331,57 @@ declare global {
   interface Window {
     electron: ElectronApi
   }
+}
+
+// Type guard functions for application states
+export function isTerminalState(state: unknown): state is TerminalState {
+  return (
+    state !== null &&
+    typeof state === 'object' &&
+    'ptyId' in state &&
+    (typeof (state as TerminalState).ptyId === 'string' || (state as TerminalState).ptyId === null)
+  )
+}
+
+export function isClaudeState(state: unknown): state is ClaudeState {
+  return (
+    isTerminalState(state) &&
+    'sandbox' in state &&
+    typeof (state as ClaudeState).sandbox === 'object' &&
+    (state as ClaudeState).sandbox !== null
+  )
+}
+
+export function isFilesystemState(state: unknown): state is FilesystemState {
+  return (
+    state !== null &&
+    typeof state === 'object' &&
+    'selectedPath' in state &&
+    'expandedDirs' in state &&
+    Array.isArray((state as FilesystemState).expandedDirs)
+  )
+}
+
+export function isReviewState(state: unknown): state is ReviewState {
+  return (
+    state !== null &&
+    typeof state === 'object' &&
+    'parentWorkspaceId' in state &&
+    typeof (state as ReviewState).parentWorkspaceId === 'string'
+  )
+}
+
+export function isEditorState(state: unknown): state is EditorState {
+  return (
+    state !== null &&
+    typeof state === 'object' &&
+    'filePath' in state &&
+    'originalContent' in state &&
+    'currentContent' in state &&
+    'language' in state &&
+    'isDirty' in state &&
+    'viewMode' in state &&
+    'isLoading' in state &&
+    typeof (state as EditorState).filePath === 'string'
+  )
 }

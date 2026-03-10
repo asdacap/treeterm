@@ -137,8 +137,12 @@ export function useCapsLockHold({
           bubbles: true,
           cancelable: true
         })
-        // @ts-ignore - add keyCode
-        syntheticEvent.keyCode = 20
+        // Add deprecated keyCode property using defineProperty for compatibility
+        Object.defineProperty(syntheticEvent, 'keyCode', {
+          value: 20,
+          writable: false,
+          configurable: true
+        })
         handleKeyDown(syntheticEvent)
       } else if (event.type === 'keyUp') {
         console.log('📤 Creating synthetic keyup event for Caps Lock')
@@ -148,8 +152,12 @@ export function useCapsLockHold({
           bubbles: true,
           cancelable: true
         })
-        // @ts-ignore - add keyCode
-        syntheticEvent.keyCode = 20
+        // Add deprecated keyCode property using defineProperty for compatibility
+        Object.defineProperty(syntheticEvent, 'keyCode', {
+          value: 20,
+          writable: false,
+          configurable: true
+        })
         handleKeyUp(syntheticEvent)
       }
     })

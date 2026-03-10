@@ -6,7 +6,12 @@ import CloseConfirmDialog from './components/CloseConfirmDialog'
 import WorkspacePickerDialog from './components/WorkspacePickerDialog'
 import { useSettingsStore } from './store/settings'
 import { useWorkspaceStore, getUnmergedSubWorkspaces } from './store/workspace'
-import type { Workspace, DaemonWorkspace, DaemonSession, TerminalState } from './types'
+import type { Workspace, DaemonWorkspace, DaemonSession, TerminalState, Tab, DaemonSessionInfo } from './types'
+
+// Helper types for session restoration
+type SessionMap = Map<string, DaemonSessionInfo>
+type AddTabWithStateFn = <T>(workspaceId: string, applicationId: string, initialState: Partial<T>) => string
+type SetActiveTabFn = (workspaceId: string, tabId: string) => void
 
 export default function App() {
   console.log('[App] Component rendering')
@@ -204,9 +209,9 @@ export default function App() {
   const restoreWorkspaceTabs = async (
     workspaceId: string,
     daemonWorkspace: DaemonWorkspace,
-    sessionMap: Map<string, any>,
-    addTabWithState: any,
-    setActiveTab: any
+    sessionMap: SessionMap,
+    addTabWithState: AddTabWithStateFn,
+    setActiveTab: SetActiveTabFn
   ) => {
     for (const daemonTab of daemonWorkspace.tabs) {
       if (daemonTab.applicationId === 'terminal') {
@@ -232,9 +237,9 @@ export default function App() {
   const reconstructChildWorkspace = async (
     daemonWorkspace: DaemonWorkspace,
     parentId: string,
-    addTabWithState: any,
-    setActiveTab: any,
-    sessionMap: Map<string, any>
+    addTabWithState: AddTabWithStateFn,
+    setActiveTab: SetActiveTabFn,
+    sessionMap: SessionMap
   ): Promise<string | null> => {
     const { workspaces } = useWorkspaceStore.getState()
     const parent = workspaces[parentId]
@@ -248,7 +253,7 @@ export default function App() {
     const id = `ws-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 
     // Create tabs
-    const tabs: any[] = []
+    const tabs: Tab[] = []
     for (const daemonTab of daemonWorkspace.tabs) {
       const tabId = `tab-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 

@@ -111,6 +111,15 @@ export interface ShutdownMessage extends DaemonMessage {
   type: 'shutdown'
 }
 
+// Response payload type map for better type safety
+export interface ResponsePayloadMap {
+  success: { sessionId?: string } | DaemonSession | DaemonSession[] | SessionInfo[] | null
+  error: never
+  data: string
+  scrollback: string[]
+  exit: { exitCode: number; signal?: number }
+}
+
 export interface DaemonResponse {
   type: ResponseType
   sessionId?: string
@@ -121,7 +130,7 @@ export interface DaemonResponse {
 
 export interface SuccessResponse extends DaemonResponse {
   type: 'success'
-  payload?: unknown
+  payload?: ResponsePayloadMap['success']
 }
 
 export interface ErrorResponse extends DaemonResponse {
@@ -132,19 +141,33 @@ export interface ErrorResponse extends DaemonResponse {
 export interface DataResponse extends DaemonResponse {
   type: 'data'
   sessionId: string
-  payload: string
+  payload: ResponsePayloadMap['data']
 }
 
 export interface ScrollbackResponse extends DaemonResponse {
   type: 'scrollback'
   sessionId: string
-  payload: string[]
+  payload: ResponsePayloadMap['scrollback']
 }
 
 export interface ExitResponse extends DaemonResponse {
   type: 'exit'
   sessionId: string
-  payload: { exitCode: number; signal?: number }
+  payload: ResponsePayloadMap['exit']
+}
+
+// Type-safe discriminated union for responses
+export type TypedDaemonResponse = SuccessResponse | ErrorResponse | DataResponse | ScrollbackResponse | ExitResponse
+
+// Type guard for typed responses
+export function isTypedResponse(response: DaemonResponse): response is TypedDaemonResponse {
+  return (
+    response.type === 'success' ||
+    response.type === 'error' ||
+    response.type === 'data' ||
+    response.type === 'scrollback' ||
+    response.type === 'exit'
+  )
 }
 
 // Session message interfaces (workspace sessions)

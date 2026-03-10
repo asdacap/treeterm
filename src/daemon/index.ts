@@ -40,15 +40,25 @@ function setupLogging(logFile: string): void {
   const logStream = fs.createWriteStream(logFile, { flags: 'a' })
 
   // Redirect stdout/stderr to log file
-  process.stdout.write = (chunk: any) => {
+  process.stdout.write = (
+    chunk: string | Uint8Array,
+    _encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
+    _cb?: (err?: Error | null) => void
+  ): boolean => {
     const timestamp = new Date().toISOString()
-    logStream.write(`[${timestamp}] ${chunk}`)
+    const text = typeof chunk === 'string' ? chunk : chunk.toString()
+    logStream.write(`[${timestamp}] ${text}`)
     return true
   }
 
-  process.stderr.write = (chunk: any) => {
+  process.stderr.write = (
+    chunk: string | Uint8Array,
+    _encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
+    _cb?: (err?: Error | null) => void
+  ): boolean => {
     const timestamp = new Date().toISOString()
-    logStream.write(`[${timestamp}] ERROR: ${chunk}`)
+    const text = typeof chunk === 'string' ? chunk : chunk.toString()
+    logStream.write(`[${timestamp}] ERROR: ${text}`)
     return true
   }
 

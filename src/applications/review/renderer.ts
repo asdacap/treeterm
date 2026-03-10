@@ -1,4 +1,5 @@
 import type { Application, ReviewState } from '../../renderer/types'
+import { isReviewState } from '../../renderer/types'
 import ReviewBrowser from '../../renderer/components/ReviewBrowser'
 import { createElement } from 'react'
 
@@ -12,13 +13,15 @@ export const reviewApplication: Application<ReviewState> = {
   }),
 
   render: ({ tab, workspaceId, workspacePath }) => {
-    const state = tab.state as ReviewState
+    if (!isReviewState(tab.state)) {
+      return null
+    }
     return createElement(ReviewBrowser, {
       key: tab.id,
       workspaceId,
       workspacePath,
       tabId: tab.id,
-      parentWorkspaceId: state.parentWorkspaceId
+      parentWorkspaceId: tab.state.parentWorkspaceId
     })
   },
 

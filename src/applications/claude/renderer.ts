@@ -1,12 +1,9 @@
-import type { Application, Tab, Workspace, ActivityState, SandboxConfig, TerminalState } from '../../renderer/types'
+import type { Application, Tab, Workspace, ActivityState, SandboxConfig, ClaudeState } from '../../renderer/types'
+import { isClaudeState } from '../../renderer/types'
 import Claude from '../../renderer/components/Claude'
 import { createElement } from 'react'
 import { useActivityStateStore } from '../../renderer/store/activityState'
 import { useSettingsStore } from '../../renderer/store/settings'
-
-export interface ClaudeState extends TerminalState {
-  sandbox: SandboxConfig
-}
 
 export const claudeApplication: Application<ClaudeState> = {
   id: 'claude',
@@ -26,22 +23,23 @@ export const claudeApplication: Application<ClaudeState> = {
   },
 
   cleanup: async (tab: Tab, _workspace: Workspace) => {
-    const state = tab.state as ClaudeState
-    if (state.ptyId) {
-      window.electron.terminal.kill(state.ptyId)
+    if (isClaudeState(tab.state) && tab.state.ptyId) {
+      window.electron.terminal.kill(tab.state.ptyId)
     }
     // Remove activity state for this tab
     useActivityStateStore.getState().removeTabState(tab.id)
   },
 
   render: ({ tab, workspaceId, workspacePath, isVisible }) => {
-    const state = tab.state as ClaudeState
+    if (!isClaudeState(tab.state)) {
+      return null
+    }
     return createElement(Claude, {
       key: tab.id,
       cwd: workspacePath,
       workspaceId,
       tabId: tab.id,
-      sandbox: state.sandbox,
+      sandbox: tab.state.sandbox,
       isVisible
     })
   },

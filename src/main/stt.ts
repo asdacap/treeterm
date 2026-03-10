@@ -7,7 +7,7 @@ export function registerSTTHandlers(): void {
     async (_event, audioBuffer: ArrayBuffer, apiKey: string, language?: string) => {
       try {
         // Try to import OpenAI SDK dynamically
-        let OpenAI: any
+        let OpenAI: typeof import('openai').default
         try {
           OpenAI = await import('openai').then((m) => m.default)
         } catch (importError) {
@@ -19,12 +19,13 @@ export function registerSTTHandlers(): void {
         const openai = new OpenAI({ apiKey })
 
         // Convert ArrayBuffer to File
+        // The OpenAI SDK expects a specific File-like interface
         const audioBlob = new Blob([audioBuffer], { type: 'audio/webm' })
         const file = new File([audioBlob], 'audio.webm', { type: 'audio/webm' })
 
         // Transcribe using Whisper API
         const transcription = await openai.audio.transcriptions.create({
-          file: file as any, // Type workaround for File object
+          file,
           model: 'whisper-1',
           ...(language && { language }) // Include language if provided
         })

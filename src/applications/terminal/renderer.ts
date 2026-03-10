@@ -1,4 +1,5 @@
 import type { Application, TerminalState, TerminalInstance, Tab, Workspace } from '../../renderer/types'
+import { isTerminalState } from '../../renderer/types'
 import Terminal from '../../renderer/components/Terminal'
 import { createElement } from 'react'
 import { useActivityStateStore } from '../../renderer/store/activityState'
@@ -15,9 +16,8 @@ export function createTerminalApplication(startByDefault: boolean): Application<
     }),
 
     cleanup: async (tab: Tab, _workspace: Workspace) => {
-      const state = tab.state as TerminalState
-      if (state.ptyId) {
-        window.electron.terminal.kill(state.ptyId)
+      if (isTerminalState(tab.state) && tab.state.ptyId) {
+        window.electron.terminal.kill(tab.state.ptyId)
       }
       // Remove activity state for this tab
       useActivityStateStore.getState().removeTabState(tab.id)
@@ -57,9 +57,8 @@ export function createTerminalVariant(instance: TerminalInstance): Application<T
     }),
 
     cleanup: async (tab: Tab, _workspace: Workspace) => {
-      const state = tab.state as TerminalState
-      if (state.ptyId) {
-        window.electron.terminal.kill(state.ptyId)
+      if (isTerminalState(tab.state) && tab.state.ptyId) {
+        window.electron.terminal.kill(tab.state.ptyId)
       }
       useActivityStateStore.getState().removeTabState(tab.id)
     },
