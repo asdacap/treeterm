@@ -10,3 +10,6 @@ dist/
 result
 result-*
 .direnv/
+
+# Test artifacts
+test-results/
