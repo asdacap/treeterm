@@ -8,10 +8,17 @@ A hierarchical terminal manager and IDE built for AI agent workflows. TreeTerm i
 - **Multi-Tab Interface** - Each workspace supports multiple tabs for different applications
 - **Git Integration** - Full Git support including worktree management, merging with optional squashing, conflict detection, and diff viewing
 - **Built-in Applications**:
-  - **Terminal** - Full PTY support with xterm
+  - **Terminal** - Full PTY support with xterm, customizable terminal instances
   - **Files** - File browser and viewer
+  - **Editor** - Monaco-based code editor with vim mode support
   - **Claude** - Integration with Claude AI for agent workflows
+  - **Review** - Review and merge changes from parent workspaces
+- **Speech-to-Text** - Push-to-talk functionality with multiple STT providers:
+  - Web Speech API (browser-based)
+  - OpenAI Whisper API
+  - Local Whisper (planned)
 - **Process Sandboxing** - Optional sandboxing with macOS sandbox-exec and Linux Bubblewrap
+- **Prefix Mode Keybindings** - tmux-style prefix key system for workspace and tab navigation
 - **Activity State Tracking** - Real-time indicators showing if applications are idle, working, or waiting for input
 - **Persistent State** - Workspaces and tabs persist across sessions
 
@@ -58,7 +65,7 @@ npm run test:run  # Run tests once
 
 ```bash
 npm install -g
-treeterm
+treeterm [directory]  # Open with optional workspace directory
 ```
 
 ## Project Structure
@@ -70,14 +77,23 @@ src/
 │   ├── git.ts               # Git operations
 │   ├── pty.ts               # PTY management
 │   ├── filesystem.ts        # Filesystem handlers
-│   └── settings.ts          # Settings persistence
+│   ├── settings.ts          # Settings persistence
+│   ├── stt.ts               # Speech-to-text handlers
+│   └── menu.ts              # Application menu
 ├── preload/
 │   └── index.ts             # Context bridge for secure IPC
+├── applications/            # Application definitions
+│   ├── terminal/            # Terminal application
+│   ├── filesystem/          # File browser
+│   ├── editor/              # Monaco editor
+│   ├── claude/              # Claude AI integration
+│   └── review/              # Review/merge interface
 └── renderer/                # React frontend
     ├── App.tsx              # Main app component
-    ├── applications/        # Application definitions
     ├── components/          # React components
     ├── store/               # Zustand state management
+    ├── hooks/               # React hooks (PTT, keybindings)
+    ├── stt/                 # STT providers
     └── types/               # TypeScript definitions
 ```
 
@@ -97,19 +113,51 @@ Settings are stored in the Electron userData directory:
 | Terminal | fontFamily | Menlo, Monaco, Consolas, monospace |
 | Terminal | cursorStyle | block |
 | Terminal | cursorBlink | true |
+| Terminal | showRawChars | false |
+| Terminal | startByDefault | true |
 | Sandbox | enabledByDefault | false |
 | Sandbox | allowNetworkByDefault | true |
+| Claude | command | claude |
+| Claude | startByDefault | false |
+| Claude | enableSandbox | false |
 | Appearance | theme | dark |
+| Prefix Mode | prefixKey | Control+B |
+| Prefix Mode | timeout | 1500 |
+| Keybindings | newTab | c |
+| Keybindings | closeTab | x |
+| Keybindings | nextTab | n |
+| Keybindings | prevTab | p |
+| Keybindings | openSettings | , |
+| Keybindings | workspaceFocus | w |
+| STT | enabled | true |
+| STT | provider | openaiWhisper |
+| STT | openaiApiKey | (empty) |
+| STT | localWhisperModelPath | (empty) |
+| STT | pushToTalkKey | Shift+Space |
+| STT | language | en |
 
 ### Keybindings
 
+#### Prefix Mode (Default: `Ctrl+B`)
+
+Prefix mode provides tmux-style keybindings. Press the prefix key followed by an action key:
+
+| Action | Default Key (after prefix) |
+|--------|----------|
+| New Tab | `c` |
+| Close Tab | `x` |
+| Next Tab | `n` |
+| Previous Tab | `p` |
+| Settings | `,` |
+| Workspace Focus | `w` (then use arrows + Enter) |
+
+All keybindings are customizable in settings.
+
+#### Other Shortcuts
+
 | Action | Shortcut |
 |--------|----------|
-| New Tab | `Cmd/Ctrl+T` |
-| Close Tab | `Cmd/Ctrl+W` |
-| Next Tab | `Cmd/Ctrl+Shift+]` |
-| Previous Tab | `Cmd/Ctrl+Shift+[` |
-| Settings | `Cmd/Ctrl+,` |
+| Push-to-Talk (STT) | `Shift+Space` |
 
 ## Tech Stack
 
@@ -120,6 +168,10 @@ Settings are stored in the Electron userData directory:
 - **xterm.js** - Terminal emulation
 - **node-pty** - Pseudo-terminal creation
 - **simple-git** - Git operations
+- **Monaco Editor** - Code editor with vim mode support (monaco-vim)
+- **OpenAI SDK** - Speech-to-text via Whisper API
+- **tinykeys** - Keybinding management
+- **react-markdown** - Markdown rendering
 - **electron-vite** - Build tooling
 
 ## License
