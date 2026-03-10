@@ -196,6 +196,18 @@ export default function ReviewBrowser({
   }
 
   const handleMerge = async (squash: boolean) => {
+    // Check for uncommitted changes and warn user
+    if (hasUncommitted) {
+      const fileCount = uncommitted!.files.length
+      const confirmed = confirm(
+        `You have ${fileCount} uncommitted file${fileCount !== 1 ? 's' : ''}. ` +
+        `These changes will be auto-committed before merging. Continue?`
+      )
+      if (!confirmed) {
+        return
+      }
+    }
+
     setIsProcessing(true)
     setProcessingAction(squash ? 'squash' : 'merge')
 
