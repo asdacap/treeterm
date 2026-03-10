@@ -105,6 +105,7 @@ export default function BaseTerminal({
       cursorBlink: true,
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      scrollback: 50000, // Increase scrollback buffer to handle long outputs
       theme: {
         background: isSandboxed ? '#1a1a2e' : config.themeBackground,
         foreground: '#d4d4d4',
@@ -134,6 +135,14 @@ export default function BaseTerminal({
     terminal.loadAddon(fitAddon)
     terminal.open(containerRef.current)
     fitAddon.fit()
+
+    // Delayed fit to ensure proper dimensions after layout stabilizes
+    // This helps fix scrollbar viewport calculation issues
+    setTimeout(() => {
+      if (isMountedRef.current && fitAddonRef.current) {
+        fitAddonRef.current.fit()
+      }
+    }, 100)
 
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
