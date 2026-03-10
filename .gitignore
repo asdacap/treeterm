@@ -5,3 +5,8 @@ dist/
 *.swo
 .DS_Store
 .worktrees
+
+# Nix
+result
+result-*
+.direnv/

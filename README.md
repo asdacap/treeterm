@@ -24,9 +24,28 @@ A hierarchical terminal manager and IDE built for AI agent workflows. TreeTerm i
 
 ## Installation
 
+### Using npm
+
 ```bash
 npm install
 ```
+
+### Using Nix (Recommended for reproducible environments)
+
+With [Nix flakes](https://nixos.wiki/wiki/Flakes) enabled:
+
+```bash
+# Enter development shell with all dependencies
+nix develop
+
+# Or build the application
+nix build
+
+# Or run directly
+nix run
+```
+
+See [NIX_SETUP.md](NIX_SETUP.md) for detailed Nix setup instructions.
 
 ## Usage
 
