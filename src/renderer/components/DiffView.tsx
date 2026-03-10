@@ -170,6 +170,41 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
   const unstagedFiles = uncommitted?.files.filter((f) => !f.staged) || []
   const hasUncommitted = uncommitted && uncommitted.files.length > 0
 
+  // File navigation helpers
+  const fileList = viewMode === 'committed'
+    ? diff?.files.map(f => f.path) || []
+    : [...stagedFiles, ...unstagedFiles].map(f => f.path)
+
+  const currentFileIndex = selectedFile
+    ? fileList.indexOf(selectedFile)
+    : selectedUncommittedFile
+      ? fileList.indexOf(selectedUncommittedFile.path)
+      : -1
+
+  const handlePreviousFile = () => {
+    if (currentFileIndex > 0) {
+      const prevFilePath = fileList[currentFileIndex - 1]
+      if (viewMode === 'committed') {
+        loadFileDiff(prevFilePath)
+      } else {
+        const prevFile = [...stagedFiles, ...unstagedFiles].find(f => f.path === prevFilePath)
+        if (prevFile) loadUncommittedFileDiff(prevFile)
+      }
+    }
+  }
+
+  const handleNextFile = () => {
+    if (currentFileIndex < fileList.length - 1) {
+      const nextFilePath = fileList[currentFileIndex + 1]
+      if (viewMode === 'committed') {
+        loadFileDiff(nextFilePath)
+      } else {
+        const nextFile = [...stagedFiles, ...unstagedFiles].find(f => f.path === nextFilePath)
+        if (nextFile) loadUncommittedFileDiff(nextFile)
+      }
+    }
+  }
+
   if (loading) {
     return <div className="diff-loading">Loading diff...</div>
   }
@@ -249,6 +284,10 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
                         language={fileDiffContents.language}
                         originalLabel={diff?.baseBranch || 'Original'}
                         modifiedLabel={diff?.headBranch || 'Modified'}
+                        onPreviousFile={handlePreviousFile}
+                        onNextFile={handleNextFile}
+                        hasPreviousFile={currentFileIndex > 0}
+                        hasNextFile={currentFileIndex < fileList.length - 1}
                       />
                     ) : (
                       <div className="diff-placeholder">Failed to load diff contents</div>
@@ -378,6 +417,10 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
                         language={fileDiffContents.language}
                         originalLabel={selectedUncommittedFile.staged ? 'HEAD' : 'Index/HEAD'}
                         modifiedLabel={selectedUncommittedFile.staged ? 'Staged' : 'Working Tree'}
+                        onPreviousFile={handlePreviousFile}
+                        onNextFile={handleNextFile}
+                        hasPreviousFile={currentFileIndex > 0}
+                        hasNextFile={currentFileIndex < fileList.length - 1}
                       />
                     ) : (
                       <div className="diff-placeholder">Failed to load diff contents</div>
