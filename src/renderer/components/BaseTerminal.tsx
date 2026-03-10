@@ -80,6 +80,16 @@ export default function BaseTerminal({
   const isMountedRef = useRef(true)
   const rawCharsRef = useRef<string>('')
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
+  const [scrollDebug, setScrollDebug] = useState({
+    viewportY: 0,
+    baseY: 0,
+    bufferLength: 0,
+    rows: 0,
+    scrollTop: 0,
+    scrollHeight: 0,
+    clientHeight: 0,
+    expectedScrollbarHeight: 0
+  })
 
   const workspace = useWorkspaceStore((state) => state.workspaces[workspaceId])
   const updateTabState = useWorkspaceStore((state) => state.updateTabState)
@@ -302,6 +312,60 @@ export default function BaseTerminal({
     }
   }, [isVisible])
 
+  // Debug scroll state - monitor xterm scroll properties
+  useEffect(() => {
+    const updateScrollDebug = () => {
+      if (!terminalRef.current || !containerRef.current) return
+
+      const terminal = terminalRef.current
+      const xtermViewport = containerRef.current.querySelector('.xterm-viewport') as HTMLElement
+
+      if (!xtermViewport) return
+
+      const viewportY = terminal.buffer.active.viewportY
+      const baseY = terminal.buffer.active.baseY
+      const bufferLength = terminal.buffer.active.length
+      const rows = terminal.rows
+
+      const scrollTop = xtermViewport.scrollTop
+      const scrollHeight = xtermViewport.scrollHeight
+      const clientHeight = xtermViewport.clientHeight
+
+      // Calculate expected scrollbar height based on viewport ratio
+      const expectedScrollbarHeight = (clientHeight / scrollHeight) * clientHeight
+
+      setScrollDebug({
+        viewportY,
+        baseY,
+        bufferLength,
+        rows,
+        scrollTop,
+        scrollHeight,
+        clientHeight,
+        expectedScrollbarHeight
+      })
+    }
+
+    // Update on scroll events
+    const xtermViewport = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement
+    if (xtermViewport) {
+      xtermViewport.addEventListener('scroll', updateScrollDebug)
+    }
+
+    // Also update periodically in case of programmatic changes
+    const interval = setInterval(updateScrollDebug, 100)
+
+    // Initial update
+    updateScrollDebug()
+
+    return () => {
+      clearInterval(interval)
+      if (xtermViewport) {
+        xtermViewport.removeEventListener('scroll', updateScrollDebug)
+      }
+    }
+  }, [])
+
   // Close context menu when clicking outside
   useEffect(() => {
     if (!contextMenu) return
@@ -357,6 +421,30 @@ export default function BaseTerminal({
       onPushToTalkSubmit={handlePushToTalkSubmit}
     >
       <div ref={containerRef} className="terminal-container" onContextMenu={handleContextMenu} />
+
+      {/* Debug overlay for scroll state */}
+      <div className="scroll-debug-overlay">
+        <div className="scroll-debug-title">Scroll Debug</div>
+        <div className="scroll-debug-section">
+          <div className="scroll-debug-label">XTerm Buffer:</div>
+          <div>viewportY: {scrollDebug.viewportY}</div>
+          <div>baseY: {scrollDebug.baseY}</div>
+          <div>bufferLength: {scrollDebug.bufferLength}</div>
+          <div>rows: {scrollDebug.rows}</div>
+        </div>
+        <div className="scroll-debug-section">
+          <div className="scroll-debug-label">Viewport Scroll:</div>
+          <div>scrollTop: {scrollDebug.scrollTop.toFixed(0)}px</div>
+          <div>scrollHeight: {scrollDebug.scrollHeight.toFixed(0)}px</div>
+          <div>clientHeight: {scrollDebug.clientHeight.toFixed(0)}px</div>
+        </div>
+        <div className="scroll-debug-section">
+          <div className="scroll-debug-label">Scrollbar:</div>
+          <div>Expected height: {scrollDebug.expectedScrollbarHeight.toFixed(0)}px</div>
+          <div>Ratio: {((scrollDebug.clientHeight / scrollDebug.scrollHeight) * 100).toFixed(1)}%</div>
+        </div>
+      </div>
+
       {contextMenu && (
         <div
           className="context-menu"
