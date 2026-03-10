@@ -581,49 +581,6 @@ body,
   opacity: 1;
 }
 
-/* Scroll Debug Overlay */
-.scroll-debug-overlay {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  background: rgba(0, 0, 0, 0.85);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  padding: 12px;
-  color: var(--text-primary);
-  font-family: 'Menlo, Monaco, "Courier New", monospace';
-  font-size: 11px;
-  line-height: 1.4;
-  z-index: 10;
-  min-width: 200px;
-  backdrop-filter: blur(4px);
-}
-
-.scroll-debug-title {
-  font-weight: bold;
-  margin-bottom: 8px;
-  color: var(--accent);
-  font-size: 12px;
-}
-
-.scroll-debug-section {
-  margin-bottom: 8px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.scroll-debug-section:last-child {
-  margin-bottom: 0;
-  padding-bottom: 0;
-  border-bottom: none;
-}
-
-.scroll-debug-label {
-  font-weight: bold;
-  color: #4ec9b0;
-  margin-bottom: 2px;
-}
-
 /* Push to Talk Button */
 .push-to-talk-btn {
   position: absolute;
