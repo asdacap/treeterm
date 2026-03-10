@@ -902,12 +902,6 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         // Check if app allows closing
         if (!app.canClose) return
 
-        // Keep at least one tab of this type if app doesn't allow multiple
-        if (!app.canHaveMultiple) {
-          const sameTabs = workspace.tabs.filter((t) => t.applicationId === tab.applicationId)
-          if (sameTabs.length <= 1) return
-        }
-
         // Run cleanup
         if (app.cleanup) {
           await app.cleanup(tab, workspace)
