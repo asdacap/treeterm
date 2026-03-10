@@ -2,6 +2,14 @@ import { simpleGit, SimpleGit } from 'simple-git'
 import * as path from 'path'
 import * as fs from 'fs'
 
+// Git timeout configuration for large repositories
+const GIT_TIMEOUT = 300000 // 5 minutes for blocking operations
+const gitOptions = {
+  timeout: {
+    block: GIT_TIMEOUT
+  }
+}
+
 export interface GitInfo {
   isRepo: boolean
   branch: string | null
@@ -15,7 +23,7 @@ export interface WorktreeInfo {
 
 export async function getGitInfo(dirPath: string): Promise<GitInfo> {
   try {
-    const git: SimpleGit = simpleGit(dirPath)
+    const git: SimpleGit = simpleGit(dirPath, gitOptions)
     const isRepo = await git.checkIsRepo()
 
     if (!isRepo) {
@@ -56,7 +64,8 @@ export async function createWorktree(
   baseBranch?: string
 ): Promise<{ success: boolean; path?: string; branch?: string; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(repoPath)
+    console.log('[git] createWorktree started:', { repoPath, worktreeName, baseBranch })
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
 
     // Get the repo root
     const rootPath = (await git.revparse(['--show-toplevel'])).trim()
@@ -92,11 +101,13 @@ export async function createWorktree(
 
     // Create new branch and worktree
     // If baseBranch provided, branch from there; otherwise from current HEAD
+    console.log('[git] Creating worktree at:', worktreePath, 'with branch:', branchName)
     if (baseBranch) {
       await git.raw(['worktree', 'add', '-b', branchName, worktreePath, baseBranch])
     } else {
       await git.raw(['worktree', 'add', '-b', branchName, worktreePath])
     }
+    console.log('[git] Worktree created successfully')
 
     return {
       success: true,
@@ -117,7 +128,7 @@ export async function removeWorktree(
   deleteBranch: boolean = false
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(repoPath)
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
 
     // Get branch name before removing worktree
     let branchName: string | null = null
@@ -153,7 +164,7 @@ export async function removeWorktree(
 
 export async function listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
   try {
-    const git: SimpleGit = simpleGit(repoPath)
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
     const result = await git.raw(['worktree', 'list', '--porcelain'])
 
     const worktrees: WorktreeInfo[] = []
@@ -239,7 +250,7 @@ export async function getDiff(
   parentBranch: string
 ): Promise<{ success: boolean; diff?: DiffResult; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(worktreePath)
+    const git: SimpleGit = simpleGit(worktreePath, gitOptions)
     const currentBranch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim()
 
     // Get the merge base
@@ -306,7 +317,7 @@ export async function getFileDiff(
   filePath: string
 ): Promise<{ success: boolean; diff?: string; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(worktreePath)
+    const git: SimpleGit = simpleGit(worktreePath, gitOptions)
     const currentBranch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim()
     const mergeBase = (await git.raw(['merge-base', parentBranch, currentBranch])).trim()
 
@@ -326,7 +337,7 @@ export async function getDiffAgainstHead(
   parentBranch: string
 ): Promise<{ success: boolean; diff?: DiffResult; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(worktreePath)
+    const git: SimpleGit = simpleGit(worktreePath, gitOptions)
     const currentBranch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim()
 
     // Get the merge base to compare against the common ancestor
@@ -393,7 +404,7 @@ export async function getFileDiffAgainstHead(
   filePath: string
 ): Promise<{ success: boolean; diff?: string; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(worktreePath)
+    const git: SimpleGit = simpleGit(worktreePath, gitOptions)
     const currentBranch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim()
 
     // Get the merge base to compare against the common ancestor
@@ -417,7 +428,7 @@ export async function mergeWorktree(
   squash: boolean = false
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(mainRepoPath)
+    const git: SimpleGit = simpleGit(mainRepoPath, gitOptions)
 
     // Checkout target branch
     await git.checkout(targetBranch)
@@ -442,7 +453,7 @@ export async function mergeWorktree(
 
 export async function hasUncommittedChanges(repoPath: string): Promise<boolean> {
   try {
-    const git: SimpleGit = simpleGit(repoPath)
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
     const status = await git.status()
     return !status.isClean()
   } catch {
@@ -455,7 +466,7 @@ export async function commitAll(
   message: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(repoPath)
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
     await git.add('.')
     await git.commit(message)
     return { success: true }
@@ -472,7 +483,7 @@ export async function deleteBranch(
   branchName: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(repoPath)
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
     await git.raw(['branch', '-D', branchName])
     return { success: true }
   } catch (err) {
@@ -511,7 +522,7 @@ export async function getUncommittedChanges(
   repoPath: string
 ): Promise<{ success: boolean; changes?: UncommittedChanges; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(repoPath)
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
     const status = await git.status()
 
     const files: UncommittedFile[] = []
@@ -622,7 +633,7 @@ export async function getUncommittedFileDiff(
   staged: boolean
 ): Promise<{ success: boolean; diff?: string; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(repoPath)
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
 
     const diffArgs = staged
       ? ['diff', '--cached', '--color=never', '--', filePath]
@@ -644,7 +655,7 @@ export async function stageFile(
   filePath: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(repoPath)
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
     await git.add(filePath)
     return { success: true }
   } catch (err) {
@@ -660,7 +671,7 @@ export async function unstageFile(
   filePath: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(repoPath)
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
     await git.raw(['reset', 'HEAD', '--', filePath])
     return { success: true }
   } catch (err) {
@@ -675,7 +686,7 @@ export async function stageAll(
   repoPath: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(repoPath)
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
     await git.add('.')
     return { success: true }
   } catch (err) {
@@ -690,7 +701,7 @@ export async function unstageAll(
   repoPath: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(repoPath)
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
     await git.raw(['reset', 'HEAD'])
     return { success: true }
   } catch (err) {
@@ -706,7 +717,7 @@ export async function commitStaged(
   message: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(repoPath)
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
     await git.commit(message)
     return { success: true }
   } catch (err) {
@@ -763,7 +774,7 @@ export async function checkMergeConflicts(
   targetBranch: string
 ): Promise<{ success: boolean; conflicts?: ConflictInfo; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(repoPath)
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
 
     // Use git merge-tree --write-tree to simulate merge
     // This performs a 3-way merge without touching the working tree
@@ -881,7 +892,7 @@ export async function getFileContentsForDiff(
   filePath: string
 ): Promise<{ success: boolean; contents?: FileDiffContents; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(worktreePath)
+    const git: SimpleGit = simpleGit(worktreePath, gitOptions)
     const currentBranch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim()
     const mergeBase = (await git.raw(['merge-base', parentBranch, currentBranch])).trim()
 
@@ -931,7 +942,7 @@ export async function getFileContentsForDiffAgainstHead(
   filePath: string
 ): Promise<{ success: boolean; contents?: FileDiffContents; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(worktreePath)
+    const git: SimpleGit = simpleGit(worktreePath, gitOptions)
     const currentBranch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim()
 
     // Get the merge base to compare against the common ancestor
@@ -983,7 +994,7 @@ export async function getUncommittedFileContentsForDiff(
   staged: boolean
 ): Promise<{ success: boolean; contents?: FileDiffContents; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(repoPath)
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
     const fullPath = path.join(repoPath, filePath)
 
     let originalContent = ''
@@ -1044,7 +1055,7 @@ export async function getUncommittedFileContentsForDiff(
  */
 export async function listLocalBranches(repoPath: string): Promise<string[]> {
   try {
-    const git: SimpleGit = simpleGit(repoPath)
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
     const result = await git.raw(['branch', '--list', '--format=%(refname:short)'])
     return result
       .split('\n')
@@ -1060,7 +1071,7 @@ export async function listLocalBranches(repoPath: string): Promise<string[]> {
  */
 export async function listRemoteBranches(repoPath: string): Promise<string[]> {
   try {
-    const git: SimpleGit = simpleGit(repoPath)
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
     const result = await git.raw(['branch', '-r', '--format=%(refname:short)'])
     return result
       .split('\n')
@@ -1088,7 +1099,8 @@ export async function createWorktreeFromBranch(
   worktreeName: string
 ): Promise<{ success: boolean; path?: string; branch?: string; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(repoPath)
+    console.log('[git] createWorktreeFromBranch started:', { repoPath, branch, worktreeName })
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
 
     // Get the repo root
     const rootPath = (await git.revparse(['--show-toplevel'])).trim()
@@ -1113,7 +1125,9 @@ export async function createWorktreeFromBranch(
     }
 
     // Create worktree from existing branch (no -b flag)
+    console.log('[git] Creating worktree at:', worktreePath, 'from branch:', branch)
     await git.raw(['worktree', 'add', worktreePath, branch])
+    console.log('[git] Worktree created successfully')
 
     return {
       success: true,
@@ -1137,7 +1151,8 @@ export async function createWorktreeFromRemote(
   worktreeName: string
 ): Promise<{ success: boolean; path?: string; branch?: string; error?: string }> {
   try {
-    const git: SimpleGit = simpleGit(repoPath)
+    console.log('[git] createWorktreeFromRemote started:', { repoPath, remoteBranch, worktreeName })
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
 
     // Get the repo root
     const rootPath = (await git.revparse(['--show-toplevel'])).trim()
@@ -1165,7 +1180,9 @@ export async function createWorktreeFromRemote(
     const localBranchName = remoteBranch.split('/').slice(1).join('/')
 
     // Create worktree with tracking branch
+    console.log('[git] Creating worktree at:', worktreePath, 'from remote:', remoteBranch, 'as local branch:', localBranchName)
     await git.raw(['worktree', 'add', '-b', localBranchName, worktreePath, remoteBranch])
+    console.log('[git] Worktree created successfully from remote branch')
 
     return {
       success: true,

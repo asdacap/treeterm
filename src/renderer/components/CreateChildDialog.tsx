@@ -25,6 +25,7 @@ export default function CreateChildDialog({
   const [mode, setMode] = useState<TabMode>('create')
   const [name, setName] = useState('')
   const [isProcessing, setIsProcessing] = useState(false)
+  const [processingMessage, setProcessingMessage] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
   const [isDetached, setIsDetached] = useState(false)
 
@@ -163,12 +164,18 @@ export default function CreateChildDialog({
     }
 
     setIsProcessing(true)
+    setProcessingMessage('Creating worktree... This may take a while for large repositories.')
     setError(null)
 
+    console.log('[CreateChildDialog] Creating new worktree:', name.trim())
     const result = await onCreate(name.trim(), isDetached)
     if (!result.success) {
+      console.error('[CreateChildDialog] Failed to create worktree:', result.error)
       setError(result.error || 'Failed to create workspace')
       setIsProcessing(false)
+      setProcessingMessage('')
+    } else {
+      console.log('[CreateChildDialog] Successfully created worktree')
     }
   }
 
@@ -179,16 +186,22 @@ export default function CreateChildDialog({
     }
 
     setIsProcessing(true)
+    setProcessingMessage('Opening existing worktree...')
     setError(null)
 
+    console.log('[CreateChildDialog] Adopting existing worktree:', selectedWorktree.path)
     const result = await onAdopt(
       selectedWorktree.path,
       selectedWorktree.branch,
       selectedWorktree.displayName
     )
     if (!result.success) {
+      console.error('[CreateChildDialog] Failed to adopt worktree:', result.error)
       setError(result.error || 'Failed to open worktree')
       setIsProcessing(false)
+      setProcessingMessage('')
+    } else {
+      console.log('[CreateChildDialog] Successfully adopted worktree')
     }
   }
 
@@ -199,12 +212,18 @@ export default function CreateChildDialog({
     }
 
     setIsProcessing(true)
+    setProcessingMessage('Creating worktree from branch... This may take a while for large repositories.')
     setError(null)
 
+    console.log('[CreateChildDialog] Creating worktree from branch:', selectedBranch.name)
     const result = await onCreateFromBranch(selectedBranch.name, isDetached)
     if (!result.success) {
+      console.error('[CreateChildDialog] Failed to create worktree from branch:', result.error)
       setError(result.error || 'Failed to create worktree from branch')
       setIsProcessing(false)
+      setProcessingMessage('')
+    } else {
+      console.log('[CreateChildDialog] Successfully created worktree from branch')
     }
   }
 
@@ -214,13 +233,26 @@ export default function CreateChildDialog({
       return
     }
 
+    // Defensive check for function availability
+    if (typeof onCreateFromRemote !== 'function') {
+      console.error('[CreateChildDialog] onCreateFromRemote is not a function:', onCreateFromRemote)
+      setError('Internal error: handler not available. Please reload the application.')
+      return
+    }
+
     setIsProcessing(true)
+    setProcessingMessage('Creating worktree from remote branch... This may take a while for large repositories.')
     setError(null)
 
+    console.log('[CreateChildDialog] Creating worktree from remote branch:', selectedRemoteBranch.name)
     const result = await onCreateFromRemote(selectedRemoteBranch.name, isDetached)
     if (!result.success) {
+      console.error('[CreateChildDialog] Failed to create worktree:', result.error)
       setError(result.error || 'Failed to create worktree from remote branch')
       setIsProcessing(false)
+      setProcessingMessage('')
+    } else {
+      console.log('[CreateChildDialog] Successfully created worktree from remote branch')
     }
   }
 
@@ -430,6 +462,9 @@ export default function CreateChildDialog({
           )}
 
           {error && <div className="create-child-error">{error}</div>}
+          {isProcessing && processingMessage && (
+            <div className="create-child-processing">{processingMessage}</div>
+          )}
         </div>
 
         <div className="create-child-dialog-actions">
@@ -442,7 +477,7 @@ export default function CreateChildDialog({
               onClick={handleCreateSubmit}
               disabled={isProcessing || !!nameValidationError}
             >
-              {isProcessing ? 'Creating...' : 'Create'}
+              {isProcessing ? 'Creating... Please wait' : 'Create'}
             </button>
           ) : mode === 'existing' ? (
             <button
@@ -450,7 +485,7 @@ export default function CreateChildDialog({
               onClick={handleAdoptSubmit}
               disabled={isProcessing || !selectedWorktree}
             >
-              {isProcessing ? 'Opening...' : 'Open'}
+              {isProcessing ? 'Opening... Please wait' : 'Open'}
             </button>
           ) : mode === 'branch' ? (
             <button
@@ -458,7 +493,7 @@ export default function CreateChildDialog({
               onClick={handleBranchSubmit}
               disabled={isProcessing || !selectedBranch}
             >
-              {isProcessing ? 'Opening...' : 'Open'}
+              {isProcessing ? 'Opening... Please wait' : 'Open'}
             </button>
           ) : (
             <button
@@ -466,7 +501,7 @@ export default function CreateChildDialog({
               onClick={handleRemoteSubmit}
               disabled={isProcessing || !selectedRemoteBranch}
             >
-              {isProcessing ? 'Opening...' : 'Open'}
+              {isProcessing ? 'Opening... Please wait' : 'Open'}
             </button>
           )}
         </div>
