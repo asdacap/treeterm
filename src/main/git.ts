@@ -1038,3 +1038,144 @@ export async function getUncommittedFileContentsForDiff(
     }
   }
 }
+
+/**
+ * List all local branches
+ */
+export async function listLocalBranches(repoPath: string): Promise<string[]> {
+  try {
+    const git: SimpleGit = simpleGit(repoPath)
+    const result = await git.raw(['branch', '--list', '--format=%(refname:short)'])
+    return result
+      .split('\n')
+      .map(b => b.trim())
+      .filter(b => b.length > 0)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * List all remote branches
+ */
+export async function listRemoteBranches(repoPath: string): Promise<string[]> {
+  try {
+    const git: SimpleGit = simpleGit(repoPath)
+    const result = await git.raw(['branch', '-r', '--format=%(refname:short)'])
+    return result
+      .split('\n')
+      .map(b => b.trim())
+      .filter(b => b.length > 0 && !b.includes('HEAD'))
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Get which branches are currently in worktrees
+ */
+export async function getBranchesInWorktrees(repoPath: string): Promise<string[]> {
+  const worktrees = await listWorktrees(repoPath)
+  return worktrees.map(wt => wt.branch)
+}
+
+/**
+ * Create worktree from existing local branch (no -b flag)
+ */
+export async function createWorktreeFromBranch(
+  repoPath: string,
+  branch: string,
+  worktreeName: string
+): Promise<{ success: boolean; path?: string; branch?: string; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(repoPath)
+
+    // Get the repo root
+    const rootPath = (await git.revparse(['--show-toplevel'])).trim()
+
+    // Determine worktree path based on .gitignore
+    let worktreePath: string
+    if (isWorktreesDirInGitignore(rootPath)) {
+      const worktreesDir = path.join(rootPath, '.worktrees')
+      if (!fs.existsSync(worktreesDir)) {
+        fs.mkdirSync(worktreesDir, { recursive: true })
+      }
+      worktreePath = path.join(worktreesDir, worktreeName)
+    } else {
+      const parentDir = path.dirname(rootPath)
+      const repoName = path.basename(rootPath)
+      worktreePath = path.join(parentDir, `${repoName}-${worktreeName}`)
+    }
+
+    // Check if path already exists
+    if (fs.existsSync(worktreePath)) {
+      return { success: false, error: `Path already exists: ${worktreePath}` }
+    }
+
+    // Create worktree from existing branch (no -b flag)
+    await git.raw(['worktree', 'add', worktreePath, branch])
+
+    return {
+      success: true,
+      path: worktreePath,
+      branch: branch
+    }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error creating worktree from branch'
+    }
+  }
+}
+
+/**
+ * Create worktree from remote branch (track remote)
+ */
+export async function createWorktreeFromRemote(
+  repoPath: string,
+  remoteBranch: string,
+  worktreeName: string
+): Promise<{ success: boolean; path?: string; branch?: string; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(repoPath)
+
+    // Get the repo root
+    const rootPath = (await git.revparse(['--show-toplevel'])).trim()
+
+    // Determine worktree path based on .gitignore
+    let worktreePath: string
+    if (isWorktreesDirInGitignore(rootPath)) {
+      const worktreesDir = path.join(rootPath, '.worktrees')
+      if (!fs.existsSync(worktreesDir)) {
+        fs.mkdirSync(worktreesDir, { recursive: true })
+      }
+      worktreePath = path.join(worktreesDir, worktreeName)
+    } else {
+      const parentDir = path.dirname(rootPath)
+      const repoName = path.basename(rootPath)
+      worktreePath = path.join(parentDir, `${repoName}-${worktreeName}`)
+    }
+
+    // Check if path already exists
+    if (fs.existsSync(worktreePath)) {
+      return { success: false, error: `Path already exists: ${worktreePath}` }
+    }
+
+    // Extract local branch name from remote branch (e.g., origin/feature -> feature)
+    const localBranchName = remoteBranch.split('/').slice(1).join('/')
+
+    // Create worktree with tracking branch
+    await git.raw(['worktree', 'add', '-b', localBranchName, worktreePath, remoteBranch])
+
+    return {
+      success: true,
+      path: worktreePath,
+      branch: localBranchName
+    }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error creating worktree from remote branch'
+    }
+  }
+}

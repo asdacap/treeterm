@@ -9,10 +9,13 @@ interface WorkspaceState {
   workspaces: Record<string, Workspace>
   activeWorkspaceId: string | null
   addWorkspace: (path: string) => Promise<string>
-  addChildWorkspace: (parentId: string, name: string) => Promise<{ success: boolean; error?: string }>
+  addChildWorkspace: (parentId: string, name: string, isDetached?: boolean) => Promise<{ success: boolean; error?: string }>
   adoptExistingWorktree: (parentId: string, worktreePath: string, branch: string, name: string) => Promise<{ success: boolean; error?: string }>
+  createWorktreeFromBranch: (parentId: string, branch: string, isDetached: boolean) => Promise<{ success: boolean; error?: string }>
+  createWorktreeFromRemote: (parentId: string, remoteBranch: string, isDetached: boolean) => Promise<{ success: boolean; error?: string }>
   removeWorkspace: (id: string) => Promise<void>
   mergeAndRemoveWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
+  closeAndCleanWorkspace: (id: string) => Promise<{ success: boolean; error?: string }>
   setActiveWorkspace: (id: string | null) => void
   updateGitInfo: (id: string, gitInfo: GitInfo) => void
   refreshGitInfo: (id: string) => Promise<void>
@@ -102,7 +105,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         return id
       },
 
-      addChildWorkspace: async (parentId: string, name: string) => {
+      addChildWorkspace: async (parentId: string, name: string, isDetached: boolean = false) => {
         const state = get()
         const parent = state.workspaces[parentId]
 
@@ -177,6 +180,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           gitBranch: result.branch!,
           gitRootPath: parent.gitRootPath,
           isWorktree: true,
+          isDetached,
           tabs,
           activeTabId
         }
@@ -274,6 +278,180 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         return { success: true }
       },
 
+      createWorktreeFromBranch: async (parentId: string, branch: string, isDetached: boolean) => {
+        const state = get()
+        const parent = state.workspaces[parentId]
+
+        if (!parent) {
+          return { success: false, error: 'Parent workspace not found' }
+        }
+
+        if (!parent.isGitRepo || !parent.gitRootPath) {
+          return { success: false, error: 'Parent workspace is not a git repository' }
+        }
+
+        // Extract simple name from branch for worktree naming
+        const worktreeName = branch.split('/').pop() || branch
+
+        // Create worktree from existing branch
+        const result = await window.electron.git.createWorktreeFromBranch(
+          parent.gitRootPath,
+          branch,
+          worktreeName
+        )
+
+        if (!result.success) {
+          return { success: false, error: result.error }
+        }
+
+        // Create child workspace
+        const id = generateId()
+
+        // Create tabs based on default applications from registry
+        const tabs: Tab[] = []
+        let activeTabId: string | null = null
+
+        const defaultApps = applicationRegistry.getDefaultApps()
+
+        const { settings } = useSettingsStore.getState()
+        if (settings.claude.startByDefault && !defaultApps.some(app => app.id === 'claude')) {
+          defaultApps.push(claudeApplication)
+        }
+
+        for (const app of defaultApps) {
+          const tabId = generateTabId()
+          const existingCount = tabs.filter((t) => t.applicationId === app.id).length
+
+          tabs.push({
+            id: tabId,
+            applicationId: app.id,
+            title: `${app.name} ${existingCount + 1}`,
+            state: app.createInitialState()
+          })
+
+          if (activeTabId === null || (app.canClose && !applicationRegistry.get(tabs.find((t) => t.id === activeTabId)?.applicationId ?? '')?.canClose)) {
+            activeTabId = tabId
+          }
+        }
+
+        const childWorkspace: Workspace = {
+          id,
+          name: worktreeName,
+          path: result.path!,
+          parentId,
+          children: [],
+          status: 'active',
+          isGitRepo: true,
+          gitBranch: result.branch!,
+          gitRootPath: parent.gitRootPath,
+          isWorktree: true,
+          isDetached,
+          tabs,
+          activeTabId
+        }
+
+        set((state) => ({
+          workspaces: {
+            ...state.workspaces,
+            [id]: childWorkspace,
+            [parentId]: {
+              ...state.workspaces[parentId],
+              children: [...state.workspaces[parentId].children, id]
+            }
+          },
+          activeWorkspaceId: id
+        }))
+
+        return { success: true }
+      },
+
+      createWorktreeFromRemote: async (parentId: string, remoteBranch: string, isDetached: boolean) => {
+        const state = get()
+        const parent = state.workspaces[parentId]
+
+        if (!parent) {
+          return { success: false, error: 'Parent workspace not found' }
+        }
+
+        if (!parent.isGitRepo || !parent.gitRootPath) {
+          return { success: false, error: 'Parent workspace is not a git repository' }
+        }
+
+        // Extract simple name from remote branch for worktree naming
+        const worktreeName = remoteBranch.split('/').pop() || remoteBranch
+
+        // Create worktree from remote branch
+        const result = await window.electron.git.createWorktreeFromRemote(
+          parent.gitRootPath,
+          remoteBranch,
+          worktreeName
+        )
+
+        if (!result.success) {
+          return { success: false, error: result.error }
+        }
+
+        // Create child workspace
+        const id = generateId()
+
+        // Create tabs based on default applications from registry
+        const tabs: Tab[] = []
+        let activeTabId: string | null = null
+
+        const defaultApps = applicationRegistry.getDefaultApps()
+
+        const { settings } = useSettingsStore.getState()
+        if (settings.claude.startByDefault && !defaultApps.some(app => app.id === 'claude')) {
+          defaultApps.push(claudeApplication)
+        }
+
+        for (const app of defaultApps) {
+          const tabId = generateTabId()
+          const existingCount = tabs.filter((t) => t.applicationId === app.id).length
+
+          tabs.push({
+            id: tabId,
+            applicationId: app.id,
+            title: `${app.name} ${existingCount + 1}`,
+            state: app.createInitialState()
+          })
+
+          if (activeTabId === null || (app.canClose && !applicationRegistry.get(tabs.find((t) => t.id === activeTabId)?.applicationId ?? '')?.canClose)) {
+            activeTabId = tabId
+          }
+        }
+
+        const childWorkspace: Workspace = {
+          id,
+          name: worktreeName,
+          path: result.path!,
+          parentId,
+          children: [],
+          status: 'active',
+          isGitRepo: true,
+          gitBranch: result.branch!,
+          gitRootPath: parent.gitRootPath,
+          isWorktree: true,
+          isDetached,
+          tabs,
+          activeTabId
+        }
+
+        set((state) => ({
+          workspaces: {
+            ...state.workspaces,
+            [id]: childWorkspace,
+            [parentId]: {
+              ...state.workspaces[parentId],
+              children: [...state.workspaces[parentId].children, id]
+            }
+          },
+          activeWorkspaceId: id
+        }))
+
+        return { success: true }
+      },
+
       removeWorkspace: async (id: string) => {
         const state = get()
         const workspace = state.workspaces[id]
@@ -295,10 +473,12 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
         // If this is a worktree, remove it from git
         if (workspace.isWorktree && workspace.gitRootPath) {
+          // For detached worktrees, keep the branch. For normal worktrees, delete it.
+          const deleteBranch = !workspace.isDetached
           await window.electron.git.removeWorktree(
             workspace.gitRootPath,
             workspace.path,
-            true // delete branch
+            deleteBranch
           )
         }
 
@@ -426,6 +606,29 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         get().updateWorkspaceStatus(id, 'merged')
 
         // Remove the workspace
+        await get().removeWorkspace(id)
+
+        return { success: true }
+      },
+
+      closeAndCleanWorkspace: async (id: string) => {
+        const state = get()
+        const workspace = state.workspaces[id]
+
+        if (!workspace) {
+          return { success: false, error: 'Workspace not found' }
+        }
+
+        if (!workspace.isWorktree || !workspace.parentId) {
+          return { success: false, error: 'Not a worktree workspace' }
+        }
+
+        const parent = state.workspaces[workspace.parentId]
+        if (!parent || !parent.gitRootPath) {
+          return { success: false, error: 'Parent workspace not found or not a git repo' }
+        }
+
+        // Remove the workspace (this will also remove the worktree but keep the branch)
         await get().removeWorkspace(id)
 
         return { success: true }

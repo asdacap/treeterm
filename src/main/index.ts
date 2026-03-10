@@ -17,6 +17,11 @@ import {
   removeWorktree,
   listWorktrees,
   getChildWorktrees,
+  listLocalBranches,
+  listRemoteBranches,
+  getBranchesInWorktrees,
+  createWorktreeFromBranch,
+  createWorktreeFromRemote,
   getDiff,
   getFileDiff,
   getDiffAgainstHead,
@@ -155,6 +160,26 @@ ipcMain.handle('git:listWorktrees', async (_event, repoPath: string) => {
 
 ipcMain.handle('git:getChildWorktrees', async (_event, repoPath: string, parentBranch: string | null) => {
   return getChildWorktrees(repoPath, parentBranch)
+})
+
+ipcMain.handle('git:listLocalBranches', async (_event, repoPath: string) => {
+  return listLocalBranches(repoPath)
+})
+
+ipcMain.handle('git:listRemoteBranches', async (_event, repoPath: string) => {
+  return listRemoteBranches(repoPath)
+})
+
+ipcMain.handle('git:getBranchesInWorktrees', async (_event, repoPath: string) => {
+  return getBranchesInWorktrees(repoPath)
+})
+
+ipcMain.handle('git:createWorktreeFromBranch', async (_event, repoPath: string, branch: string, worktreeName: string) => {
+  return createWorktreeFromBranch(repoPath, branch, worktreeName)
+})
+
+ipcMain.handle('git:createWorktreeFromRemote', async (_event, repoPath: string, remoteBranch: string, worktreeName: string) => {
+  return createWorktreeFromRemote(repoPath, remoteBranch, worktreeName)
 })
 
 ipcMain.handle('git:getDiff', async (_event, worktreePath: string, parentBranch: string) => {

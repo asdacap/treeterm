@@ -99,6 +99,21 @@ contextBridge.exposeInMainWorld('electron', {
     getChildWorktrees: (repoPath: string, parentBranch: string | null) => {
       return ipcRenderer.invoke('git:getChildWorktrees', repoPath, parentBranch)
     },
+    listLocalBranches: (repoPath: string) => {
+      return ipcRenderer.invoke('git:listLocalBranches', repoPath)
+    },
+    listRemoteBranches: (repoPath: string) => {
+      return ipcRenderer.invoke('git:listRemoteBranches', repoPath)
+    },
+    getBranchesInWorktrees: (repoPath: string) => {
+      return ipcRenderer.invoke('git:getBranchesInWorktrees', repoPath)
+    },
+    createWorktreeFromBranch: (repoPath: string, branch: string, worktreeName: string) => {
+      return ipcRenderer.invoke('git:createWorktreeFromBranch', repoPath, branch, worktreeName)
+    },
+    createWorktreeFromRemote: (repoPath: string, remoteBranch: string, worktreeName: string) => {
+      return ipcRenderer.invoke('git:createWorktreeFromRemote', repoPath, remoteBranch, worktreeName)
+    },
     getDiff: (worktreePath: string, parentBranch: string) => {
       return ipcRenderer.invoke('git:getDiff', worktreePath, parentBranch)
     },

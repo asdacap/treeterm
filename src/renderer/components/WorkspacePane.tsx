@@ -18,8 +18,11 @@ export default function WorkspacePane() {
     setActiveTab,
     addChildWorkspace,
     adoptExistingWorktree,
+    createWorktreeFromBranch,
+    createWorktreeFromRemote,
     removeWorkspace,
-    mergeAndRemoveWorkspace
+    mergeAndRemoveWorkspace,
+    closeAndCleanWorkspace
   } = useWorkspaceStore()
   const { enterWorkspaceFocus } = usePrefixModeStore()
 
@@ -73,10 +76,10 @@ export default function WorkspacePane() {
   }, [workspaces])
 
   // Fork handler - create new worktree
-  const handleCreateChildSubmit = async (name: string) => {
+  const handleCreateChildSubmit = async (name: string, isDetached: boolean) => {
     if (!activeWorkspaceId) return { success: false, error: 'No workspace selected' }
 
-    const result = await addChildWorkspace(activeWorkspaceId, name)
+    const result = await addChildWorkspace(activeWorkspaceId, name, isDetached)
     if (result.success) {
       setShowCreateChildDialog(false)
     }
@@ -88,6 +91,28 @@ export default function WorkspacePane() {
     if (!activeWorkspaceId) return { success: false, error: 'No workspace selected' }
 
     const result = await adoptExistingWorktree(activeWorkspaceId, worktreePath, branch, name)
+    if (result.success) {
+      setShowCreateChildDialog(false)
+    }
+    return result
+  }
+
+  // Create worktree from existing branch handler
+  const handleCreateFromBranchSubmit = async (branch: string, isDetached: boolean) => {
+    if (!activeWorkspaceId) return { success: false, error: 'No workspace selected' }
+
+    const result = await createWorktreeFromBranch(activeWorkspaceId, branch, isDetached)
+    if (result.success) {
+      setShowCreateChildDialog(false)
+    }
+    return result
+  }
+
+  // Create worktree from remote branch handler
+  const handleCreateFromRemoteSubmit = async (remoteBranch: string, isDetached: boolean) => {
+    if (!activeWorkspaceId) return { success: false, error: 'No workspace selected' }
+
+    const result = await createWorktreeFromRemote(activeWorkspaceId, remoteBranch, isDetached)
     if (result.success) {
       setShowCreateChildDialog(false)
     }
@@ -293,6 +318,8 @@ export default function WorkspacePane() {
           parentWorkspace={activeWorkspace}
           onCreate={handleCreateChildSubmit}
           onAdopt={handleAdoptWorktreeSubmit}
+          onCreateFromBranch={handleCreateFromBranchSubmit}
+          onCreateFromRemote={handleCreateFromRemoteSubmit}
           onCancel={() => setShowCreateChildDialog(false)}
           openWorktreePaths={openWorktreePaths}
         />

@@ -7,6 +7,7 @@ interface MergeDialogProps {
   parentWorkspace: Workspace
   onMerge: (squash: boolean) => Promise<void>
   onAbandon: () => Promise<void>
+  onCloseAndClean: () => Promise<void>
   onCancel: () => void
 }
 
@@ -15,6 +16,7 @@ export default function MergeDialog({
   parentWorkspace,
   onMerge,
   onAbandon,
+  onCloseAndClean,
   onCancel
 }: MergeDialogProps) {
   const [isProcessing, setIsProcessing] = useState(false)
@@ -98,11 +100,24 @@ export default function MergeDialog({
     }
   }
 
+  const handleCloseAndClean = async () => {
+    setIsProcessing(true)
+    setError(null)
+    try {
+      await onCloseAndClean()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to close and clean')
+      setIsProcessing(false)
+    }
+  }
+
+  const isDetached = workspace.isDetached ?? false
+
   return (
     <div className="dialog-overlay" onClick={onCancel}>
       <div className="merge-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="merge-dialog-header">
-          <h2>Close Workspace: {workspace.name}</h2>
+          <h2>Close Workspace: {workspace.name}{isDetached && ' (Detached)'}</h2>
           <button className="dialog-close" onClick={onCancel}>
             x
           </button>
@@ -194,32 +209,56 @@ export default function MergeDialog({
         {error && <div className="merge-error">{error}</div>}
 
         <div className="merge-dialog-actions">
-          <button
-            className={`merge-btn merge ${hasConflicts ? 'merge-btn-warning' : ''}`}
-            onClick={() => handleMerge(false)}
-            disabled={isProcessing || isCheckingConflicts}
-            title={hasConflicts ? 'Warning: This merge has conflicts' : undefined}
-          >
-            {isProcessing ? 'Processing...' : hasConflicts ? 'Merge (has conflicts)' : 'Merge'}
-          </button>
-          <button
-            className={`merge-btn squash ${hasConflicts ? 'merge-btn-warning' : ''}`}
-            onClick={() => handleMerge(true)}
-            disabled={isProcessing || isCheckingConflicts}
-            title={hasConflicts ? 'Warning: This merge has conflicts' : undefined}
-          >
-            {hasConflicts ? 'Squash (has conflicts)' : 'Squash Merge'}
-          </button>
-          <button
-            className="merge-btn abandon"
-            onClick={handleAbandon}
-            disabled={isProcessing}
-          >
-            Abandon
-          </button>
-          <button className="merge-btn cancel" onClick={onCancel} disabled={isProcessing}>
-            Cancel
-          </button>
+          {isDetached ? (
+            <>
+              <button
+                className="merge-btn close-and-clean"
+                onClick={handleCloseAndClean}
+                disabled={isProcessing}
+              >
+                {isProcessing ? 'Processing...' : 'Close and Clean'}
+              </button>
+              <button
+                className="merge-btn abandon"
+                onClick={handleAbandon}
+                disabled={isProcessing}
+              >
+                Abandon
+              </button>
+              <button className="merge-btn cancel" onClick={onCancel} disabled={isProcessing}>
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className={`merge-btn merge ${hasConflicts ? 'merge-btn-warning' : ''}`}
+                onClick={() => handleMerge(false)}
+                disabled={isProcessing || isCheckingConflicts}
+                title={hasConflicts ? 'Warning: This merge has conflicts' : undefined}
+              >
+                {isProcessing ? 'Processing...' : hasConflicts ? 'Merge (has conflicts)' : 'Merge'}
+              </button>
+              <button
+                className={`merge-btn squash ${hasConflicts ? 'merge-btn-warning' : ''}`}
+                onClick={() => handleMerge(true)}
+                disabled={isProcessing || isCheckingConflicts}
+                title={hasConflicts ? 'Warning: This merge has conflicts' : undefined}
+              >
+                {hasConflicts ? 'Squash (has conflicts)' : 'Squash Merge'}
+              </button>
+              <button
+                className="merge-btn abandon"
+                onClick={handleAbandon}
+                disabled={isProcessing}
+              >
+                Abandon
+              </button>
+              <button className="merge-btn cancel" onClick={onCancel} disabled={isProcessing}>
+                Cancel
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

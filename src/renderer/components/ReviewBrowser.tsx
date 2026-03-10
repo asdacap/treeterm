@@ -18,7 +18,7 @@ export default function ReviewBrowser({
   tabId,
   parentWorkspaceId
 }: ReviewBrowserProps) {
-  const { workspaces, mergeAndRemoveWorkspace, removeWorkspace, removeTab } = useWorkspaceStore()
+  const { workspaces, mergeAndRemoveWorkspace, removeWorkspace, closeAndCleanWorkspace, removeTab } = useWorkspaceStore()
   const workspace = workspaces[workspaceId]
   const parentWorkspace = workspaces[parentWorkspaceId]
 
@@ -230,6 +230,27 @@ export default function ReviewBrowser({
       alert(`Abandon failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
       setIsProcessing(false)
       setProcessingAction(null)
+    }
+  }
+
+  const handleCloseAndClean = async () => {
+    if (!confirm('Close this workspace? The worktree will be removed but the branch will be kept.')) {
+      return
+    }
+
+    setIsProcessing(true)
+
+    try {
+      const result = await closeAndCleanWorkspace(workspaceId)
+      if (!result.success) {
+        alert(`Close failed: ${result.error}`)
+        setIsProcessing(false)
+        return
+      }
+      // Tab will close automatically when workspace is removed
+    } catch (err) {
+      alert(`Close failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      setIsProcessing(false)
     }
   }
 
@@ -556,39 +577,69 @@ export default function ReviewBrowser({
 
       {/* Action Bar */}
       <div className="review-actions">
-        <button
-          className="review-action-btn review-merge-btn"
-          onClick={() => handleMerge(false)}
-          disabled={isProcessing}
-          title={hasConflicts ? 'Merge (conflicts will need to be resolved)' : 'Merge changes into parent branch'}
-        >
-          {processingAction === 'merge' ? 'Merging...' : 'Merge'}
-          {hasConflicts && ' (has conflicts)'}
-        </button>
-        <button
-          className="review-action-btn review-squash-btn"
-          onClick={() => handleMerge(true)}
-          disabled={isProcessing}
-          title={hasConflicts ? 'Squash merge (conflicts will need to be resolved)' : 'Squash all commits into one'}
-        >
-          {processingAction === 'squash' ? 'Squashing...' : 'Squash Merge'}
-          {hasConflicts && ' (has conflicts)'}
-        </button>
-        <button
-          className="review-action-btn review-abandon-btn"
-          onClick={handleAbandon}
-          disabled={isProcessing}
-          title="Discard all changes and remove this workspace"
-        >
-          {processingAction === 'abandon' ? 'Abandoning...' : 'Abandon'}
-        </button>
-        <button
-          className="review-action-btn review-cancel-btn"
-          onClick={handleCancel}
-          disabled={isProcessing}
-        >
-          Cancel
-        </button>
+        {workspace?.isDetached ? (
+          <>
+            <button
+              className="review-action-btn review-close-and-clean-btn"
+              onClick={handleCloseAndClean}
+              disabled={isProcessing}
+              title="Remove worktree but keep the branch"
+            >
+              {isProcessing ? 'Closing...' : 'Close and Clean'}
+            </button>
+            <button
+              className="review-action-btn review-abandon-btn"
+              onClick={handleAbandon}
+              disabled={isProcessing}
+              title="Discard all changes and remove this workspace"
+            >
+              {processingAction === 'abandon' ? 'Abandoning...' : 'Abandon'}
+            </button>
+            <button
+              className="review-action-btn review-cancel-btn"
+              onClick={handleCancel}
+              disabled={isProcessing}
+            >
+              Cancel
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              className="review-action-btn review-merge-btn"
+              onClick={() => handleMerge(false)}
+              disabled={isProcessing}
+              title={hasConflicts ? 'Merge (conflicts will need to be resolved)' : 'Merge changes into parent branch'}
+            >
+              {processingAction === 'merge' ? 'Merging...' : 'Merge'}
+              {hasConflicts && ' (has conflicts)'}
+            </button>
+            <button
+              className="review-action-btn review-squash-btn"
+              onClick={() => handleMerge(true)}
+              disabled={isProcessing}
+              title={hasConflicts ? 'Squash merge (conflicts will need to be resolved)' : 'Squash all commits into one'}
+            >
+              {processingAction === 'squash' ? 'Squashing...' : 'Squash Merge'}
+              {hasConflicts && ' (has conflicts)'}
+            </button>
+            <button
+              className="review-action-btn review-abandon-btn"
+              onClick={handleAbandon}
+              disabled={isProcessing}
+              title="Discard all changes and remove this workspace"
+            >
+              {processingAction === 'abandon' ? 'Abandoning...' : 'Abandon'}
+            </button>
+            <button
+              className="review-action-btn review-cancel-btn"
+              onClick={handleCancel}
+              disabled={isProcessing}
+            >
+              Cancel
+            </button>
+          </>
+        )}
       </div>
     </div>
   )

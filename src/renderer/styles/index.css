@@ -765,6 +765,15 @@ body,
   background: var(--bg-hover);
 }
 
+.merge-btn.close-and-clean {
+  background: #0066cc;
+  color: white;
+}
+
+.merge-btn.close-and-clean:hover:not(:disabled) {
+  background: #0077ee;
+}
+
 .merge-btn-warning {
   background: #b36200 !important;
 }
@@ -1061,6 +1070,26 @@ body,
   margin-top: 4px;
 }
 
+/* Search field for branches */
+.create-child-search-field {
+  padding: 0 20px 12px 20px;
+}
+
+.create-child-search-field input[type="text"] {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.create-child-search-field input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 /* Existing worktrees list */
 .create-child-existing-list {
   max-height: 200px;
@@ -1112,6 +1141,24 @@ body,
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.create-child-worktree-item.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.create-child-worktree-item.disabled:hover {
+  background: transparent;
+}
+
+.create-child-worktree-item .worktree-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border-radius: 3px;
+  margin-left: 8px;
 }
 
 /* Close Confirm Dialog */
@@ -2321,6 +2368,15 @@ body,
 
 .review-cancel-btn:hover:not(:disabled) {
   background: var(--bg-hover);
+}
+
+.review-close-and-clean-btn {
+  background: #0066cc;
+  color: white;
+}
+
+.review-close-and-clean-btn:hover:not(:disabled) {
+  background: #0077ee;
 }
 
 /* File section labels */

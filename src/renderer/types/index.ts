@@ -129,6 +129,7 @@ export interface Workspace {
   gitBranch: string | null
   gitRootPath: string | null
   isWorktree: boolean
+  isDetached?: boolean  // If true, no merge - just "Close and Clean"
   // Tabs
   tabs: Tab[]
   activeTabId: string | null
@@ -154,6 +155,12 @@ export interface WorktreeInfo {
 
 export interface ChildWorktreeInfo extends WorktreeInfo {
   displayName: string
+}
+
+export interface BranchInfo {
+  name: string
+  isInWorktree: boolean
+  worktreePath?: string  // Path if branch is in a worktree
 }
 
 export interface DiffFile {
@@ -218,6 +225,11 @@ export interface GitApi {
   removeWorktree: (repoPath: string, worktreePath: string, deleteBranch?: boolean) => Promise<{ success: boolean; error?: string }>
   listWorktrees: (repoPath: string) => Promise<WorktreeInfo[]>
   getChildWorktrees: (repoPath: string, parentBranch: string | null) => Promise<ChildWorktreeInfo[]>
+  listLocalBranches: (repoPath: string) => Promise<string[]>
+  listRemoteBranches: (repoPath: string) => Promise<string[]>
+  getBranchesInWorktrees: (repoPath: string) => Promise<string[]>
+  createWorktreeFromBranch: (repoPath: string, branch: string, worktreeName: string) => Promise<WorktreeResult>
+  createWorktreeFromRemote: (repoPath: string, remoteBranch: string, worktreeName: string) => Promise<WorktreeResult>
   getDiff: (worktreePath: string, parentBranch: string) => Promise<{ success: boolean; diff?: DiffResult; error?: string }>
   getFileDiff: (worktreePath: string, parentBranch: string, filePath: string) => Promise<{ success: boolean; diff?: string; error?: string }>
   getDiffAgainstHead: (worktreePath: string, parentBranch: string) => Promise<{ success: boolean; diff?: DiffResult; error?: string }>
