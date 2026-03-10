@@ -58,6 +58,12 @@ export interface Settings {
     localWhisperModelPath: string
     pushToTalkKey: string
   }
+  daemon: {
+    enabled: boolean
+    orphanTimeout: number
+    scrollbackLimit: number
+    killOnQuit: boolean
+  }
 }
 
 const defaultSettings: Settings = {
@@ -100,6 +106,12 @@ const defaultSettings: Settings = {
     openaiApiKey: '',
     localWhisperModelPath: '',
     pushToTalkKey: 'Shift+Space'
+  },
+  daemon: {
+    enabled: true,
+    orphanTimeout: 0,
+    scrollbackLimit: 50000,
+    killOnQuit: false
   }
 }
 
@@ -233,6 +245,10 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
     stt: {
       ...defaults.stt,
       ...loaded.stt
+    },
+    daemon: {
+      ...defaults.daemon,
+      ...loaded.daemon
     }
   }
 }

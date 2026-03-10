@@ -57,6 +57,15 @@ contextBridge.exposeInMainWorld('electron', {
     create: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string): Promise<string> => {
       return ipcRenderer.invoke('pty:create', cwd, sandbox, startupCommand)
     },
+    attach: (sessionId: string): Promise<{ success: boolean; scrollback?: string[]; error?: string }> => {
+      return ipcRenderer.invoke('pty:attach', sessionId)
+    },
+    detach: (sessionId: string): Promise<void> => {
+      return ipcRenderer.invoke('pty:detach', sessionId)
+    },
+    list: (): Promise<Array<{ id: string; cwd: string; createdAt: number; attachedClients: number }>> => {
+      return ipcRenderer.invoke('pty:list')
+    },
     write: (id: string, data: string): void => {
       ipcRenderer.send('pty:write', id, data)
     },

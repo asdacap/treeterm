@@ -174,8 +174,30 @@ export default function BaseTerminal({
 
     // Try to reconnect to existing PTY, or create a new one
     const initPty = async () => {
-      // Check if we have an existing PTY that's still alive
+      // Try to attach to existing session (daemon mode)
       if (existingPtyId) {
+        try {
+          const result = await window.electron.terminal.attach(existingPtyId)
+          if (result.success) {
+            console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, existingPtyId)
+            if (!isMountedRef.current) return
+
+            // Restore scrollback buffer
+            if (result.scrollback && result.scrollback.length > 0) {
+              console.log(`[${config.logPrefix} ${tabId}] restoring ${result.scrollback.length} scrollback chunks`)
+              for (const chunk of result.scrollback) {
+                terminal.write(chunk)
+              }
+            }
+
+            connectToPty(existingPtyId)
+            return
+          }
+        } catch (error) {
+          console.log(`[${config.logPrefix} ${tabId}] failed to attach, trying isAlive:`, error)
+        }
+
+        // Fallback: check if PTY is alive (legacy mode or attach failed)
         const isAlive = await window.electron.terminal.isAlive(existingPtyId)
         if (isAlive) {
           console.log(`[${config.logPrefix} ${tabId}] reconnecting to existing PTY:`, existingPtyId)

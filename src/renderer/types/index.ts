@@ -297,6 +297,12 @@ export interface Settings {
     pushToTalkKey: string
     language: string // ISO-639-1 code (e.g., 'en', 'ms', 'zh')
   }
+  daemon: {
+    enabled: boolean
+    orphanTimeout: number
+    scrollbackLimit: number
+    killOnQuit: boolean
+  }
 }
 
 export interface SettingsApi {

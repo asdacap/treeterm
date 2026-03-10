@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import { execSync } from 'child_process'
 import { join } from 'path'
 import { ptyManager } from './pty'
+import { DaemonClient } from './daemonClient'
 
 // Parse initial workspace from command line
 let initialWorkspacePath: string | null = null
@@ -49,6 +50,9 @@ import { registerSTTHandlers } from './stt'
 
 let mainWindow: BrowserWindow | null = null
 let closeConfirmed = false
+let daemonClient: DaemonClient | null = null
+let useDaemon = false
+let attachedSessions: Set<string> = new Set()
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -126,31 +130,140 @@ function createWindow(): void {
   })
 
   mainWindow.on('closed', () => {
+    // Detach from sessions if using daemon
+    if (daemonClient && useDaemon) {
+      for (const sessionId of attachedSessions) {
+        daemonClient.detachSession(sessionId).catch(console.error)
+      }
+      attachedSessions.clear()
+      daemonClient.disconnect()
+    } else {
+      // Legacy mode: kill all PTYs
+      ptyManager.killAll()
+    }
     mainWindow = null
-    ptyManager.killAll()
   })
 }
 
 // IPC Handlers
-ipcMain.handle('pty:create', (_event, cwd: string, sandbox?: { enabled: boolean; allowNetwork: boolean; allowedPaths: string[] }, startupCommand?: string) => {
+ipcMain.handle('pty:create', async (_event, cwd: string, sandbox?: { enabled: boolean; allowNetwork: boolean; allowedPaths: string[] }, startupCommand?: string) => {
   if (!mainWindow) return null
-  return ptyManager.create(cwd, mainWindow, sandbox, startupCommand)
+
+  if (useDaemon && daemonClient) {
+    try {
+      await daemonClient.ensureDaemonRunning()
+      const sessionId = await daemonClient.createSession({ cwd, sandbox, startupCommand })
+
+      // Set up data forwarding
+      daemonClient.onSessionData(sessionId, (data) => {
+        mainWindow?.webContents.send('pty:data', sessionId, data)
+      })
+
+      daemonClient.onSessionExit(sessionId, (exitCode, signal) => {
+        mainWindow?.webContents.send('pty:exit', sessionId, exitCode)
+        attachedSessions.delete(sessionId)
+      })
+
+      attachedSessions.add(sessionId)
+      return sessionId
+    } catch (error) {
+      console.error('[main] failed to create session via daemon:', error)
+      return null
+    }
+  } else {
+    // Legacy mode: direct PTY
+    return ptyManager.create(cwd, mainWindow, sandbox, startupCommand)
+  }
+})
+
+ipcMain.handle('pty:attach', async (_event, sessionId: string) => {
+  if (!useDaemon || !daemonClient) {
+    return { success: false, error: 'Daemon not enabled' }
+  }
+
+  try {
+    await daemonClient.ensureDaemonRunning()
+    const result = await daemonClient.attachSession(sessionId)
+
+    // Set up data forwarding if not already attached
+    if (!attachedSessions.has(sessionId)) {
+      daemonClient.onSessionData(sessionId, (data) => {
+        mainWindow?.webContents.send('pty:data', sessionId, data)
+      })
+
+      daemonClient.onSessionExit(sessionId, (exitCode, signal) => {
+        mainWindow?.webContents.send('pty:exit', sessionId, exitCode)
+        attachedSessions.delete(sessionId)
+      })
+
+      attachedSessions.add(sessionId)
+    }
+
+    return { success: true, scrollback: result.scrollback }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[main] failed to attach to session:', errorMessage)
+    return { success: false, error: errorMessage }
+  }
+})
+
+ipcMain.handle('pty:detach', async (_event, sessionId: string) => {
+  if (useDaemon && daemonClient) {
+    await daemonClient.detachSession(sessionId)
+    attachedSessions.delete(sessionId)
+  }
+})
+
+ipcMain.handle('pty:list', async () => {
+  if (!useDaemon || !daemonClient) {
+    return []
+  }
+
+  try {
+    await daemonClient.ensureDaemonRunning()
+    return await daemonClient.listSessions()
+  } catch (error) {
+    console.error('[main] failed to list sessions:', error)
+    return []
+  }
 })
 
 ipcMain.on('pty:write', (_event, id: string, data: string) => {
-  ptyManager.write(id, data)
+  if (useDaemon && daemonClient) {
+    daemonClient.writeToSession(id, data)
+  } else {
+    ptyManager.write(id, data)
+  }
 })
 
 ipcMain.on('pty:resize', (_event, id: string, cols: number, rows: number) => {
-  ptyManager.resize(id, cols, rows)
+  if (useDaemon && daemonClient) {
+    daemonClient.resizeSession(id, cols, rows)
+  } else {
+    ptyManager.resize(id, cols, rows)
+  }
 })
 
-ipcMain.on('pty:kill', (_event, id: string) => {
-  ptyManager.kill(id)
+ipcMain.on('pty:kill', async (_event, id: string) => {
+  if (useDaemon && daemonClient) {
+    await daemonClient.killSession(id)
+    attachedSessions.delete(id)
+  } else {
+    ptyManager.kill(id)
+  }
 })
 
-ipcMain.handle('pty:isAlive', (_event, id: string) => {
-  return ptyManager.isAlive(id)
+ipcMain.handle('pty:isAlive', async (_event, id: string) => {
+  if (useDaemon && daemonClient) {
+    try {
+      const sessions = await daemonClient.listSessions()
+      return sessions.some(s => s.id === id)
+    } catch {
+      return false
+    }
+  } else {
+    return ptyManager.isAlive(id)
+  }
 })
 
 ipcMain.handle('dialog:selectFolder', async () => {
@@ -325,6 +438,17 @@ ipcMain.on('app:close-cancelled', () => {
 
 // App lifecycle
 app.whenReady().then(() => {
+  // Load settings to check daemon mode
+  const settings = loadSettings()
+  useDaemon = settings.daemon.enabled
+
+  if (useDaemon) {
+    console.log('[main] daemon mode enabled')
+    daemonClient = new DaemonClient()
+  } else {
+    console.log('[main] legacy mode enabled (direct PTY)')
+  }
+
   registerFilesystemHandlers()
   registerSTTHandlers()
   createWindow()
@@ -342,6 +466,23 @@ app.on('window-all-closed', () => {
   app.quit()
 })
 
-app.on('before-quit', () => {
-  ptyManager.killAll()
+app.on('before-quit', async () => {
+  if (useDaemon && daemonClient) {
+    const settings = loadSettings()
+    if (settings.daemon.killOnQuit) {
+      console.log('[main] killing all sessions before quit')
+      for (const sessionId of attachedSessions) {
+        await daemonClient.killSession(sessionId)
+      }
+    } else {
+      console.log('[main] detaching from sessions before quit')
+      for (const sessionId of attachedSessions) {
+        await daemonClient.detachSession(sessionId)
+      }
+    }
+    attachedSessions.clear()
+    daemonClient.disconnect()
+  } else {
+    ptyManager.killAll()
+  }
 })
