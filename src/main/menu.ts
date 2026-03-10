@@ -72,6 +72,27 @@ export function createApplicationMenu(mainWindow: BrowserWindow | null): void {
       ]
     },
 
+    // Workspace menu
+    {
+      label: 'Workspace',
+      submenu: [
+        {
+          label: 'New Terminal',
+          accelerator: isMac ? 'Cmd+T' : 'Ctrl+T',
+          click: () => {
+            mainWindow?.webContents.send('terminal:new')
+          }
+        },
+        { type: 'separator' as const },
+        {
+          label: 'Browse Sessions...',
+          click: () => {
+            mainWindow?.webContents.send('session:show-sessions')
+          }
+        }
+      ]
+    },
+
     // View menu
     {
       label: 'View',

@@ -45,6 +45,33 @@ ipcRenderer.on('app:ready', () => {
   readyListeners.forEach((cb) => cb())
 })
 
+type DaemonSessionsCallback = (sessions: any[]) => void
+const daemonSessionsListeners: DaemonSessionsCallback[] = []
+
+ipcRenderer.on('daemon:sessions', (_event, sessions) => {
+  daemonSessionsListeners.forEach((cb) => cb(sessions))
+})
+
+
+type TerminalMenuCallback = () => void
+const terminalNewListeners: TerminalMenuCallback[] = []
+const terminalShowSessionsListeners: TerminalMenuCallback[] = []
+
+ipcRenderer.on('terminal:new', () => {
+  terminalNewListeners.forEach((cb) => cb())
+})
+
+ipcRenderer.on('terminal:show-sessions', () => {
+  terminalShowSessionsListeners.forEach((cb) => cb())
+})
+
+type SessionMenuCallback = () => void
+const sessionShowSessionsListeners: SessionMenuCallback[] = []
+
+ipcRenderer.on('session:show-sessions', () => {
+  sessionShowSessionsListeners.forEach((cb) => cb())
+})
+
 interface SandboxConfig {
   enabled: boolean
   allowNetwork: boolean
@@ -93,6 +120,20 @@ contextBridge.exposeInMainWorld('electron', {
             listeners.splice(index, 1)
           }
         }
+      }
+    },
+    onNewTerminal: (callback: TerminalMenuCallback): (() => void) => {
+      terminalNewListeners.push(callback)
+      return () => {
+        const index = terminalNewListeners.indexOf(callback)
+        if (index > -1) terminalNewListeners.splice(index, 1)
+      }
+    },
+    onShowSessions: (callback: TerminalMenuCallback): (() => void) => {
+      terminalShowSessionsListeners.push(callback)
+      return () => {
+        const index = terminalShowSessionsListeners.indexOf(callback)
+        if (index > -1) terminalShowSessionsListeners.splice(index, 1)
       }
     }
   },
@@ -276,6 +317,44 @@ contextBridge.exposeInMainWorld('electron', {
         if (index > -1) {
           capsLockListeners.splice(index, 1)
         }
+      }
+    }
+  },
+  daemon: {
+    shutdown: (): Promise<{ success: boolean; error?: string }> => {
+      return ipcRenderer.invoke('daemon:shutdown')
+    },
+    onSessions: (callback: DaemonSessionsCallback): (() => void) => {
+      daemonSessionsListeners.push(callback)
+      return () => {
+        const index = daemonSessionsListeners.indexOf(callback)
+        if (index > -1) {
+          daemonSessionsListeners.splice(index, 1)
+        }
+      }
+    }
+  },
+  session: {
+    create: (workspaces: any[]): Promise<{ success: boolean; session?: any; error?: string }> => {
+      return ipcRenderer.invoke('session:create', workspaces)
+    },
+    update: (sessionId: string, workspaces: any[]): Promise<{ success: boolean; session?: any; error?: string }> => {
+      return ipcRenderer.invoke('session:update', sessionId, workspaces)
+    },
+    list: (): Promise<{ success: boolean; sessions?: any[]; error?: string }> => {
+      return ipcRenderer.invoke('session:list')
+    },
+    get: (sessionId: string): Promise<{ success: boolean; session?: any; error?: string }> => {
+      return ipcRenderer.invoke('session:get', sessionId)
+    },
+    delete: (sessionId: string): Promise<{ success: boolean; error?: string }> => {
+      return ipcRenderer.invoke('session:delete', sessionId)
+    },
+    onShowSessions: (callback: SessionMenuCallback): (() => void) => {
+      sessionShowSessionsListeners.push(callback)
+      return () => {
+        const index = sessionShowSessionsListeners.indexOf(callback)
+        if (index > -1) sessionShowSessionsListeners.splice(index, 1)
       }
     }
   }

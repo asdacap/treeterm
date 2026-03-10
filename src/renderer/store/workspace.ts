@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Workspace, GitInfo, Tab } from '../types'
+import type { Workspace, GitInfo, Tab, DaemonWorkspace } from '../types'
 import { applicationRegistry } from '../registry/applicationRegistry'
 import { useSettingsStore } from '../store/settings'
 import { claudeApplication } from '../../applications/claude/renderer'
@@ -8,7 +8,9 @@ import { claudeApplication } from '../../applications/claude/renderer'
 interface WorkspaceState {
   workspaces: Record<string, Workspace>
   activeWorkspaceId: string | null
-  addWorkspace: (path: string) => Promise<string>
+  sessionId: string | null  // Daemon session ID for syncing
+  isRestoring: boolean  // Flag to prevent syncing during restoration
+  addWorkspace: (path: string, options?: { skipDefaultTabs?: boolean }) => Promise<string>
   addChildWorkspace: (parentId: string, name: string, isDetached?: boolean) => Promise<{ success: boolean; error?: string }>
   adoptExistingWorktree: (parentId: string, worktreePath: string, branch: string, name: string) => Promise<{ success: boolean; error?: string }>
   createWorktreeFromBranch: (parentId: string, branch: string, isDetached: boolean) => Promise<{ success: boolean; error?: string }>
@@ -27,6 +29,7 @@ interface WorkspaceState {
   setActiveTab: (workspaceId: string, tabId: string) => void
   updateTabTitle: (workspaceId: string, tabId: string, title: string) => void
   updateTabState: <T>(workspaceId: string, tabId: string, updater: (state: T) => T) => void
+  syncToDaemon: () => Promise<void>
 }
 
 function generateId(): string {
@@ -41,13 +44,104 @@ function getNameFromPath(path: string): string {
   return path.split('/').pop() || path
 }
 
+// Helper to convert Workspace to DaemonWorkspace format
+function workspaceToDaemonWorkspace(
+  workspace: Workspace,
+  workspaces: Record<string, Workspace>
+): Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'> {
+  return {
+    path: workspace.path,
+    name: workspace.name,
+    parentPath: workspace.parentId ? workspaces[workspace.parentId]?.path || null : null,
+    status: workspace.status,
+    isGitRepo: workspace.isGitRepo,
+    gitBranch: workspace.gitBranch,
+    gitRootPath: workspace.gitRootPath,
+    isWorktree: workspace.isWorktree,
+    isDetached: workspace.isDetached,
+    tabs: workspace.tabs.map(tab => ({
+      id: tab.id,
+      applicationId: tab.applicationId,
+      title: tab.title,
+      state: tab.state
+    })),
+    activeTabId: workspace.activeTabId
+  }
+}
+
+// Helper to sync entire workspace tree to daemon as a session (if daemon is enabled)
+async function syncSessionToDaemon(
+  sessionId: string | null,
+  workspaces: Record<string, Workspace>,
+  setSessionId: (id: string) => void,
+  isRestoring: boolean = false
+) {
+  try {
+    const { settings } = useSettingsStore.getState()
+    console.log('[workspace] syncSessionToDaemon called - daemon enabled:', settings.daemon.enabled, 'workspaces:', Object.keys(workspaces).length, 'isRestoring:', isRestoring)
+
+    if (isRestoring) {
+      console.log('[workspace] currently restoring, skipping sync')
+      return
+    }
+
+    if (!settings.daemon.enabled) {
+      console.log('[workspace] daemon not enabled, skipping sync')
+      return
+    }
+
+    // Convert all workspaces to daemon format
+    const daemonWorkspaces = Object.values(workspaces).map(ws =>
+      workspaceToDaemonWorkspace(ws, workspaces)
+    )
+
+    console.log('[workspace] converted to daemon format:', daemonWorkspaces.length, 'workspaces')
+
+    if (daemonWorkspaces.length === 0) {
+      // No workspaces - delete session if it exists
+      if (sessionId) {
+        console.log('[workspace] deleting session:', sessionId)
+        await window.electron.session.delete(sessionId)
+        setSessionId(null)
+      }
+      return
+    }
+
+    if (sessionId) {
+      // Update existing session
+      console.log('[workspace] updating session:', sessionId)
+      const result = await window.electron.session.update(sessionId, daemonWorkspaces)
+      if (!result.success) {
+        console.error('[workspace] failed to update session:', result.error)
+      } else {
+        console.log('[workspace] session updated successfully')
+      }
+    } else {
+      // Create new session
+      console.log('[workspace] creating new session with', daemonWorkspaces.length, 'workspaces')
+      const result = await window.electron.session.create(daemonWorkspaces)
+      if (result.success && result.session) {
+        console.log('[workspace] session created:', result.session.id)
+        setSessionId(result.session.id)
+      } else {
+        console.error('[workspace] failed to create session:', result.error)
+      }
+    }
+  } catch (error) {
+    console.error('[workspace] failed to sync session to daemon:', error)
+  }
+}
+
 export const useWorkspaceStore = create<WorkspaceState>()(
   persist(
     (set, get) => ({
       workspaces: {},
       activeWorkspaceId: null,
+      sessionId: null,
+      isRestoring: false,
 
-      addWorkspace: async (path: string) => {
+      addWorkspace: async (path: string, options?: { skipDefaultTabs?: boolean }) => {
+        console.log('[workspace] addWorkspace called for path:', path)
         const id = generateId()
 
         // Get git info for the path
@@ -57,28 +151,31 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         const tabs: Tab[] = []
         let activeTabId: string | null = null
 
-        const defaultApps = applicationRegistry.getDefaultApps()
+        // Only create default tabs if not skipped (e.g., when restoring from daemon)
+        if (!options?.skipDefaultTabs) {
+          const defaultApps = applicationRegistry.getDefaultApps()
 
-        // Check if Claude should be started by default
-        const { settings } = useSettingsStore.getState()
-        if (settings.claude.startByDefault && !defaultApps.some(app => app.id === 'claude')) {
-          defaultApps.push(claudeApplication)
-        }
+          // Check if Claude should be started by default
+          const { settings } = useSettingsStore.getState()
+          if (settings.claude.startByDefault && !defaultApps.some(app => app.id === 'claude')) {
+            defaultApps.push(claudeApplication)
+          }
 
-        for (const app of defaultApps) {
-          const tabId = generateTabId()
-          const existingCount = tabs.filter((t) => t.applicationId === app.id).length
+          for (const app of defaultApps) {
+            const tabId = generateTabId()
+            const existingCount = tabs.filter((t) => t.applicationId === app.id).length
 
-          tabs.push({
-            id: tabId,
-            applicationId: app.id,
-            title: `${app.name} ${existingCount + 1}`,
-            state: app.createInitialState()
-          })
+            tabs.push({
+              id: tabId,
+              applicationId: app.id,
+              title: `${app.name} ${existingCount + 1}`,
+              state: app.createInitialState()
+            })
 
-          // Make first closable tab active, or first tab if none are closable
-          if (activeTabId === null || (app.canClose && !applicationRegistry.get(tabs.find((t) => t.id === activeTabId)?.applicationId ?? '')?.canClose)) {
-            activeTabId = tabId
+            // Make first closable tab active, or first tab if none are closable
+            if (activeTabId === null || (app.canClose && !applicationRegistry.get(tabs.find((t) => t.id === activeTabId)?.applicationId ?? '')?.canClose)) {
+              activeTabId = tabId
+            }
           }
         }
 
@@ -101,6 +198,15 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           workspaces: { ...state.workspaces, [id]: workspace },
           activeWorkspaceId: id
         }))
+
+        // Sync to daemon
+        console.log('[workspace] about to sync to daemon')
+        const state = get()
+        console.log('[workspace] current sessionId:', state.sessionId, 'workspaces count:', Object.keys(state.workspaces).length)
+        await syncSessionToDaemon(state.sessionId, state.workspaces, (sid) =>
+          set({ sessionId: sid }), state.isRestoring
+        )
+        console.log('[workspace] sync complete')
 
         return id
       },
@@ -197,6 +303,12 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           activeWorkspaceId: id
         }))
 
+        // Sync to daemon
+        const currentState = get()
+        await syncSessionToDaemon(currentState.sessionId, currentState.workspaces, (sid) =>
+          set({ sessionId: sid }), currentState.isRestoring
+        )
+
         return { success: true }
       },
 
@@ -274,6 +386,12 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           },
           activeWorkspaceId: id
         }))
+
+        // Sync to daemon
+        const currentState = get()
+        await syncSessionToDaemon(currentState.sessionId, currentState.workspaces, (sid) =>
+          set({ sessionId: sid }), currentState.isRestoring
+        )
 
         return { success: true }
       },
@@ -362,6 +480,12 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           activeWorkspaceId: id
         }))
 
+        // Sync to daemon
+        const currentState = get()
+        await syncSessionToDaemon(currentState.sessionId, currentState.workspaces, (sid) =>
+          set({ sessionId: sid }), currentState.isRestoring
+        )
+
         return { success: true }
       },
 
@@ -449,6 +573,12 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           activeWorkspaceId: id
         }))
 
+        // Sync to daemon
+        const currentState = get()
+        await syncSessionToDaemon(currentState.sessionId, currentState.workspaces, (sid) =>
+          set({ sessionId: sid }), currentState.isRestoring
+        )
+
         return { success: true }
       },
 
@@ -509,6 +639,12 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             activeWorkspaceId: state.activeWorkspaceId === id ? null : state.activeWorkspaceId
           }
         })
+
+        // Sync to daemon (after removing workspace)
+        const currentState = get()
+        await syncSessionToDaemon(currentState.sessionId, currentState.workspaces, (sid) =>
+          set({ sessionId: sid }), currentState.isRestoring
+        )
       },
 
       setActiveWorkspace: (id: string | null) => {
@@ -553,6 +689,12 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             }
           }
         })
+
+        // Sync to daemon
+        const state = get()
+        syncSessionToDaemon(state.sessionId, state.workspaces, (sid) =>
+          set({ sessionId: sid }), state.isRestoring
+        ).catch(console.error)
       },
 
       mergeAndRemoveWorkspace: async (id: string, squash: boolean) => {
@@ -673,6 +815,13 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             }
           }
         })
+
+        // Sync to daemon
+        const state = get()
+        syncSessionToDaemon(state.sessionId, state.workspaces, (sid) =>
+          set({ sessionId: sid }), state.isRestoring
+        ).catch(console.error)
+
         return tabId
       },
 
@@ -729,6 +878,13 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             }
           }
         })
+
+        // Sync to daemon
+        const state = get()
+        syncSessionToDaemon(state.sessionId, state.workspaces, (sid) =>
+          set({ sessionId: sid }), state.isRestoring
+        ).catch(console.error)
+
         return tabId
       },
 
@@ -782,6 +938,12 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             }
           }
         })
+
+        // Sync to daemon
+        const state = get()
+        syncSessionToDaemon(state.sessionId, state.workspaces, (sid) =>
+          set({ sessionId: sid }), state.isRestoring
+        ).catch(console.error)
       },
 
       setActiveTab: (workspaceId: string, tabId: string) => {
@@ -799,6 +961,12 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             }
           }
         })
+
+        // Sync to daemon
+        const state = get()
+        syncSessionToDaemon(state.sessionId, state.workspaces, (sid) =>
+          set({ sessionId: sid }), state.isRestoring
+        ).catch(console.error)
       },
 
       updateTabTitle: (workspaceId: string, tabId: string, title: string) => {
@@ -835,13 +1003,20 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             }
           }
         })
+      },
+
+      syncToDaemon: async () => {
+        const state = get()
+        await syncSessionToDaemon(state.sessionId, state.workspaces, (sid) =>
+          set({ sessionId: sid }), state.isRestoring
+        )
       }
     }),
     {
       name: 'treeterm-workspaces',
-      version: 3,
+      version: 4,
       migrate: (persistedState: unknown, version: number) => {
-        const state = persistedState as { workspaces?: Record<string, unknown> }
+        const state = persistedState as { workspaces?: Record<string, unknown>; sessionId?: string | null }
 
         if (version === 0 && state.workspaces) {
           // Migrate from old format (terminals/activeTerminalId) to new format (tabs/activeTabId)
@@ -918,6 +1093,16 @@ export const useWorkspaceStore = create<WorkspaceState>()(
                 return rest
               })
             }
+          }
+        }
+
+        if (version <= 3) {
+          // Migrate from version 3 to 4: add sessionId and isRestoring fields
+          if (!('sessionId' in state)) {
+            state.sessionId = null
+          }
+          if (!('isRestoring' in state)) {
+            (state as any).isRestoring = false
           }
         }
 

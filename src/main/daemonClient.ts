@@ -12,7 +12,10 @@ import type {
   DaemonMessage,
   DaemonResponse,
   CreateSessionConfig,
-  SessionInfo
+  SessionInfo,
+  DaemonWorkspace,
+  DaemonSession,
+  DaemonTab
 } from '../daemon/protocol'
 import { serializeMessage, parseResponse } from '../daemon/protocol'
 import { getDefaultSocketPath } from '../daemon/socketServer'
@@ -89,7 +92,7 @@ export class DaemonClient {
     }
   }
 
-  async createSession(config: CreateSessionConfig): Promise<string> {
+  async createPtySession(config: CreateSessionConfig): Promise<string> {
     const response = await this.sendMessage({
       type: 'create',
       payload: config
@@ -107,7 +110,7 @@ export class DaemonClient {
     return sessionId
   }
 
-  async attachSession(sessionId: string): Promise<{ scrollback: string[] }> {
+  async attachPtySession(sessionId: string): Promise<{ scrollback: string[] }> {
     const response = await this.sendMessage({
       type: 'attach',
       sessionId
@@ -124,14 +127,14 @@ export class DaemonClient {
     throw new Error('Unexpected response type for attach')
   }
 
-  async detachSession(sessionId: string): Promise<void> {
+  async detachPtySession(sessionId: string): Promise<void> {
     await this.sendMessage({
       type: 'detach',
       sessionId
     })
   }
 
-  writeToSession(sessionId: string, data: string): void {
+  writeToPtySession(sessionId: string, data: string): void {
     this.sendMessage({
       type: 'write',
       sessionId,
@@ -141,7 +144,7 @@ export class DaemonClient {
     })
   }
 
-  resizeSession(sessionId: string, cols: number, rows: number): void {
+  resizePtySession(sessionId: string, cols: number, rows: number): void {
     this.sendMessage({
       type: 'resize',
       sessionId,
@@ -151,7 +154,7 @@ export class DaemonClient {
     })
   }
 
-  async killSession(sessionId: string): Promise<void> {
+  async killPtySession(sessionId: string): Promise<void> {
     await this.sendMessage({
       type: 'kill',
       sessionId
@@ -162,7 +165,7 @@ export class DaemonClient {
     this.exitListeners.delete(sessionId)
   }
 
-  async listSessions(): Promise<SessionInfo[]> {
+  async listPtySessions(): Promise<SessionInfo[]> {
     const response = await this.sendMessage({
       type: 'list'
     })
@@ -174,7 +177,86 @@ export class DaemonClient {
     return (response.payload as SessionInfo[]) || []
   }
 
-  onSessionData(sessionId: string, callback: DataListener): () => void {
+  async shutdownDaemon(): Promise<void> {
+    if (!this.connected || !this.socket) {
+      throw new Error('Not connected to daemon')
+    }
+
+    const response = await this.sendMessage({
+      type: 'shutdown'
+    })
+
+    if (response.type === 'error') {
+      throw new Error(response.error)
+    }
+
+    // Disconnect after shutdown request
+    this.disconnect()
+  }
+
+  async createSession(workspaces: Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]): Promise<DaemonSession> {
+    const response = await this.sendMessage({
+      type: 'createSession',
+      payload: { workspaces }
+    })
+
+    if (response.type === 'error') {
+      throw new Error(response.error)
+    }
+
+    return response.payload as DaemonSession
+  }
+
+  async updateSession(sessionId: string, workspaces: Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]): Promise<DaemonSession> {
+    const response = await this.sendMessage({
+      type: 'updateSession',
+      payload: { sessionId, workspaces }
+    })
+
+    if (response.type === 'error') {
+      throw new Error(response.error)
+    }
+
+    return response.payload as DaemonSession
+  }
+
+  async listSessions(): Promise<DaemonSession[]> {
+    const response = await this.sendMessage({
+      type: 'listSessions'
+    })
+
+    if (response.type === 'error') {
+      throw new Error(response.error)
+    }
+
+    return (response.payload as DaemonSession[]) || []
+  }
+
+  async getSession(sessionId: string): Promise<DaemonSession | null> {
+    const response = await this.sendMessage({
+      type: 'getSession',
+      payload: { sessionId }
+    })
+
+    if (response.type === 'error') {
+      throw new Error(response.error)
+    }
+
+    return (response.payload as DaemonSession) || null
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    const response = await this.sendMessage({
+      type: 'deleteSession',
+      payload: { sessionId }
+    })
+
+    if (response.type === 'error') {
+      throw new Error(response.error)
+    }
+  }
+
+  onPtySessionData(sessionId: string, callback: DataListener): () => void {
     if (!this.dataListeners.has(sessionId)) {
       this.dataListeners.set(sessionId, new Set())
     }
@@ -191,7 +273,7 @@ export class DaemonClient {
     }
   }
 
-  onSessionExit(sessionId: string, callback: ExitListener): () => void {
+  onPtySessionExit(sessionId: string, callback: ExitListener): () => void {
     if (!this.exitListeners.has(sessionId)) {
       this.exitListeners.set(sessionId, new Set())
     }
@@ -287,6 +369,8 @@ export class DaemonClient {
       }
     } catch (error) {
       console.error('[daemonClient] failed to parse response:', error)
+      console.error('[daemonClient] invalid data (first 200 chars):', data.slice(0, 200))
+      console.error('[daemonClient] invalid data length:', data.length)
     }
   }
 

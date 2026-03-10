@@ -117,6 +117,48 @@ export interface SandboxConfig {
   allowedPaths: string[] // Additional paths besides workspace
 }
 
+export interface DaemonSessionInfo {
+  id: string
+  cwd: string
+  cols: number
+  rows: number
+  createdAt: number
+  lastActivity: number
+  attachedClients: number
+}
+
+export interface DaemonTab {
+  id: string
+  applicationId: string
+  title: string
+  state: unknown
+}
+
+export interface DaemonWorkspace {
+  path: string
+  name: string
+  parentPath: string | null
+  status: 'active' | 'merged' | 'abandoned'
+  isGitRepo: boolean
+  gitBranch: string | null
+  gitRootPath: string | null
+  isWorktree: boolean
+  isDetached?: boolean
+  tabs: DaemonTab[]
+  activeTabId: string | null
+  createdAt: number
+  lastActivity: number
+  attachedClients: number
+}
+
+export interface DaemonSession {
+  id: string
+  workspaces: DaemonWorkspace[]
+  createdAt: number
+  lastActivity: number
+  attachedClients: number
+}
+
 export interface Workspace {
   id: string
   name: string
@@ -212,11 +254,16 @@ export interface ConflictCheckResult {
 
 export interface TerminalApi {
   create: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
+  attach: (sessionId: string) => Promise<{ success: boolean; scrollback?: string[]; error?: string }>
+  detach: (sessionId: string) => Promise<void>
+  list: () => Promise<DaemonSessionInfo[]>
   write: (id: string, data: string) => void
   resize: (id: string, cols: number, rows: number) => void
   kill: (id: string) => void
   isAlive: (id: string) => Promise<boolean>
   onData: (id: string, callback: (data: string) => void) => () => void
+  onNewTerminal: (callback: () => void) => () => void
+  onShowSessions: (callback: () => void) => () => void
 }
 
 export interface GitApi {
@@ -328,6 +375,22 @@ export interface AppApi {
   onCapsLockEvent: (callback: (event: { type: string; key: string; code: string }) => void) => () => void
 }
 
+export interface DaemonApi {
+  shutdown: () => Promise<{ success: boolean; error?: string }>
+  onSessions: (callback: (sessions: DaemonSessionInfo[]) => void) => () => void
+}
+
+export interface SessionApi {
+  create: (workspaces: Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]) =>
+    Promise<{ success: boolean; session?: DaemonSession; error?: string }>
+  update: (sessionId: string, workspaces: Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]) =>
+    Promise<{ success: boolean; session?: DaemonSession; error?: string }>
+  list: () => Promise<{ success: boolean; sessions?: DaemonSession[]; error?: string }>
+  get: (sessionId: string) => Promise<{ success: boolean; session?: DaemonSession; error?: string }>
+  delete: (sessionId: string) => Promise<{ success: boolean; error?: string }>
+  onShowSessions: (callback: () => void) => () => void
+}
+
 export interface ElectronApi {
   platform: NodeJS.Platform
   terminal: TerminalApi
@@ -339,6 +402,8 @@ export interface ElectronApi {
   stt: STTApi
   getInitialWorkspace: () => Promise<string | null>
   app: AppApi
+  daemon: DaemonApi
+  session: SessionApi
 }
 
 declare global {

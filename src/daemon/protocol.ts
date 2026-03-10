@@ -13,6 +13,13 @@ export type MessageType =
   | 'kill'
   | 'list'
   | 'getScrollback'
+  | 'shutdown'
+  // Session message types (workspace sessions, not PTY sessions)
+  | 'createSession'
+  | 'updateSession'
+  | 'listSessions'
+  | 'getSession'
+  | 'deleteSession'
 
 export type ResponseType = 'success' | 'error' | 'data' | 'scrollback' | 'exit'
 
@@ -30,6 +37,38 @@ export interface SessionInfo {
   cwd: string
   cols: number
   rows: number
+  createdAt: number
+  lastActivity: number
+  attachedClients: number
+}
+
+export interface DaemonTab {
+  id: string
+  applicationId: string
+  title: string
+  state: unknown
+}
+
+export interface DaemonWorkspace {
+  path: string              // Primary key - same folder = same workspace session
+  name: string
+  parentPath: string | null // For tree reconstruction
+  status: 'active' | 'merged' | 'abandoned'
+  isGitRepo: boolean
+  gitBranch: string | null
+  gitRootPath: string | null
+  isWorktree: boolean
+  isDetached?: boolean
+  tabs: DaemonTab[]
+  activeTabId: string | null
+  createdAt: number
+  lastActivity: number
+  attachedClients: number
+}
+
+export interface DaemonSession {
+  id: string
+  workspaces: DaemonWorkspace[]
   createdAt: number
   lastActivity: number
   attachedClients: number
@@ -83,6 +122,10 @@ export interface GetScrollbackMessage extends DaemonMessage {
   sessionId: string
 }
 
+export interface ShutdownMessage extends DaemonMessage {
+  type: 'shutdown'
+}
+
 export interface DaemonResponse {
   type: ResponseType
   sessionId?: string
@@ -117,6 +160,34 @@ export interface ExitResponse extends DaemonResponse {
   type: 'exit'
   sessionId: string
   payload: { exitCode: number; signal?: number }
+}
+
+// Session message interfaces (workspace sessions)
+export interface CreateSessionMessage extends DaemonMessage {
+  type: 'createSession'
+  payload: { workspaces: Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[] }
+}
+
+export interface UpdateSessionMessage extends DaemonMessage {
+  type: 'updateSession'
+  payload: {
+    sessionId: string
+    workspaces: Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]
+  }
+}
+
+export interface ListSessionsMessage extends DaemonMessage {
+  type: 'listSessions'
+}
+
+export interface GetSessionMessage extends DaemonMessage {
+  type: 'getSession'
+  payload: { sessionId: string }
+}
+
+export interface DeleteSessionMessage extends DaemonMessage {
+  type: 'deleteSession'
+  payload: { sessionId: string }
 }
 
 export function serializeMessage(msg: DaemonMessage): string {

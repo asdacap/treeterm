@@ -48,7 +48,7 @@ function getGitRoot(workspacePath: string): string | null {
     const match = content.match(/^gitdir:\s*(.+)$/m)
     if (match) {
       const worktreeGitDir = path.resolve(workspacePath, match[1].trim())
-      return path.resolve(worktreeGitDir, '../../')
+      return path.resolve(worktreeGitDir, '../../../')
     }
   }
   return null
@@ -241,8 +241,9 @@ export class DaemonPtyManager {
 
     ptyProcess.onExit(({ exitCode, signal }) => {
       this.broadcastExit(id, exitCode, signal)
+      console.log(`[daemon] session ${id} exited with code ${exitCode} (worktree: ${cwd})`)
+      console.log(`[daemon] worktree removed: ${cwd} <- session ${id}`)
       this.sessions.delete(id)
-      console.log(`[daemon] session ${id} exited with code ${exitCode}`)
     })
 
     this.sessions.set(id, session)
@@ -255,6 +256,7 @@ export class DaemonPtyManager {
     }
 
     console.log(`[daemon] created session ${id} (cwd: ${cwd}, sandbox: ${isSandboxed})`)
+    console.log(`[daemon] worktree added: ${cwd} -> session ${id}`)
     return id
   }
 
@@ -317,13 +319,19 @@ export class DaemonPtyManager {
       return
     }
 
-    console.log(`[daemon] killing session ${sessionId}`)
+    console.log(`[daemon] killing session ${sessionId} (worktree: ${session.cwd})`)
+    console.log(`[daemon] worktree removed: ${session.cwd} <- session ${sessionId}`)
     session.pty.kill()
     this.sessions.delete(sessionId)
   }
 
   listSessions(): SessionInfo[] {
-    return Array.from(this.sessions.values()).map((session) => this.getSessionInfo(session))
+    const sessions = Array.from(this.sessions.values()).map((session) => this.getSessionInfo(session))
+    console.log(`[daemon] listSessions called - returning ${sessions.length} sessions`)
+    sessions.forEach((session) => {
+      console.log(`  - ${session.id}: worktree=${session.cwd}`)
+    })
+    return sessions
   }
 
   getScrollback(sessionId: string): string[] {

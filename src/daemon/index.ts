@@ -73,6 +73,9 @@ function removePidFile(): void {
 async function main(): Promise<void> {
   const config = getConfig()
 
+  // Setup logging first to ensure all output goes to log file
+  setupLogging(config.logFile)
+
   console.log('========================================')
   console.log('TreeTerm Daemon Starting')
   console.log('========================================')
@@ -82,19 +85,17 @@ async function main(): Promise<void> {
   console.log('Log file:', config.logFile)
   console.log('========================================')
 
-  // Setup logging
-  setupLogging(config.logFile)
-
   // Write PID file
   writePidFile()
 
   // Initialize components
   const ptyManager = new DaemonPtyManager(config.orphanTimeout, config.scrollbackLimit)
-  const socketServer = new SocketServer(config.socketPath, ptyManager)
   const sessionStore = new SessionStore()
+  const socketServer = new SocketServer(config.socketPath, ptyManager, sessionStore)
 
   // Load persisted sessions (future enhancement)
   // For now, we start fresh each time the daemon starts
+  // Note: SessionStore is memory-only (not persisted to disk)
 
   // Start socket server
   try {
@@ -142,11 +143,10 @@ if (fs.existsSync(DAEMON_PID_FILE)) {
   try {
     // Check if process is still alive
     process.kill(pid, 0)
-    console.log(`[daemon] daemon already running with PID ${pid}`)
+    // Daemon already running, exit silently
     process.exit(0)
   } catch {
     // Process not running, remove stale PID file
-    console.log(`[daemon] removing stale PID file for ${pid}`)
     fs.unlinkSync(DAEMON_PID_FILE)
   }
 }

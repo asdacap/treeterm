@@ -7,6 +7,7 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import type { DaemonPtyManager } from './ptyManager'
+import type { SessionStore } from './sessionStore'
 import type {
   DaemonMessage,
   DaemonResponse,
@@ -16,7 +17,13 @@ import type {
   WriteMessage,
   ResizeMessage,
   KillMessage,
-  GetScrollbackMessage
+  GetScrollbackMessage,
+  ShutdownMessage,
+  CreateSessionMessage,
+  UpdateSessionMessage,
+  ListSessionsMessage,
+  GetSessionMessage,
+  DeleteSessionMessage
 } from './protocol'
 import { parseMessage, serializeResponse } from './protocol'
 
@@ -30,11 +37,17 @@ export class SocketServer {
   private server: net.Server | null = null
   private clients: Map<string, Client> = new Map()
   private clientCounter = 0
+  private sessionStore: SessionStore
 
   constructor(
     private socketPath: string,
-    private ptyManager: DaemonPtyManager
-  ) {}
+    private ptyManager: DaemonPtyManager,
+    sessionStore?: SessionStore
+  ) {
+    // Import SessionStore dynamically to avoid circular dependency
+    const { SessionStore: SS } = require('./sessionStore')
+    this.sessionStore = sessionStore || new SS()
+  }
 
   start(): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -126,11 +139,13 @@ export class SocketServer {
 
     socket.on('close', () => {
       console.log(`[socketServer] client ${clientId} disconnected`)
-      // Detach client from all sessions
+      // Detach client from all PTY sessions
       const sessions = this.ptyManager.listSessions()
       for (const session of sessions) {
         this.ptyManager.detach(session.id, clientId)
       }
+      // Detach client from all sessions
+      this.sessionStore.detachClient(clientId)
       this.clients.delete(clientId)
     })
   }
@@ -157,6 +172,8 @@ export class SocketServer {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       console.error(`[socketServer] error processing message:`, errorMessage)
+      console.error(`[socketServer] invalid message data (first 200 chars):`, data.slice(0, 200))
+      console.error(`[socketServer] invalid message length:`, data.length)
       this.sendResponse(client, {
         type: 'error',
         error: errorMessage
@@ -227,6 +244,10 @@ export class SocketServer {
 
       case 'list': {
         const sessions = this.ptyManager.listSessions()
+        console.log(`[socketServer] list request - found ${sessions.length} sessions:`)
+        sessions.forEach((session) => {
+          console.log(`  - ${session.id}: worktree=${session.cwd}, clients=${session.attachedClients}`)
+        })
         return {
           type: 'success',
           payload: sessions,
@@ -241,6 +262,77 @@ export class SocketServer {
           type: 'scrollback',
           sessionId: msg.sessionId,
           payload: scrollback,
+          requestId: message.requestId
+        }
+      }
+
+      case 'shutdown': {
+        console.log('[socketServer] shutdown requested')
+        // Schedule shutdown after sending response
+        setTimeout(() => {
+          console.log('[socketServer] initiating shutdown')
+          this.stop()
+          this.ptyManager.shutdown()
+          process.exit(0)
+        }, 100)
+        return {
+          type: 'success',
+          requestId: message.requestId
+        }
+      }
+
+      case 'createSession': {
+        const msg = message as CreateSessionMessage
+        const session = this.sessionStore.createSession(clientId, msg.payload.workspaces)
+        return {
+          type: 'success',
+          payload: session,
+          requestId: message.requestId
+        }
+      }
+
+      case 'updateSession': {
+        const msg = message as UpdateSessionMessage
+        const session = this.sessionStore.updateSession(clientId, msg.payload.sessionId, msg.payload.workspaces)
+        if (!session) {
+          return {
+            type: 'error',
+            error: `Session not found: ${msg.payload.sessionId}`,
+            requestId: message.requestId
+          }
+        }
+        return {
+          type: 'success',
+          payload: session,
+          requestId: message.requestId
+        }
+      }
+
+      case 'listSessions': {
+        const sessions = this.sessionStore.listSessions()
+        console.log(`[socketServer] listSessions - found ${sessions.length} session(s)`)
+        return {
+          type: 'success',
+          payload: sessions,
+          requestId: message.requestId
+        }
+      }
+
+      case 'getSession': {
+        const msg = message as GetSessionMessage
+        const session = this.sessionStore.getSession(msg.payload.sessionId)
+        return {
+          type: 'success',
+          payload: session,
+          requestId: message.requestId
+        }
+      }
+
+      case 'deleteSession': {
+        const msg = message as DeleteSessionMessage
+        this.sessionStore.deleteSession(msg.payload.sessionId)
+        return {
+          type: 'success',
           requestId: message.requestId
         }
       }

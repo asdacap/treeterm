@@ -125,15 +125,16 @@ function createWindow(): void {
   }
 
   // Signal renderer when ready to initialize
-  mainWindow.webContents.on('did-finish-load', () => {
+  mainWindow.webContents.on('did-finish-load', async () => {
     mainWindow?.webContents.send('app:ready')
+    // Renderer will request workspaces when ready via workspace:list
   })
 
   mainWindow.on('closed', () => {
     // Detach from sessions if using daemon
     if (daemonClient && useDaemon) {
       for (const sessionId of attachedSessions) {
-        daemonClient.detachSession(sessionId).catch(console.error)
+        daemonClient.detachPtySession(sessionId).catch(console.error)
       }
       attachedSessions.clear()
       daemonClient.disconnect()
@@ -152,14 +153,14 @@ ipcMain.handle('pty:create', async (_event, cwd: string, sandbox?: { enabled: bo
   if (useDaemon && daemonClient) {
     try {
       await daemonClient.ensureDaemonRunning()
-      const sessionId = await daemonClient.createSession({ cwd, sandbox, startupCommand })
+      const sessionId = await daemonClient.createPtySession({ cwd, sandbox, startupCommand })
 
       // Set up data forwarding
-      daemonClient.onSessionData(sessionId, (data) => {
+      daemonClient.onPtySessionData(sessionId, (data) => {
         mainWindow?.webContents.send('pty:data', sessionId, data)
       })
 
-      daemonClient.onSessionExit(sessionId, (exitCode, signal) => {
+      daemonClient.onPtySessionExit(sessionId, (exitCode, signal) => {
         mainWindow?.webContents.send('pty:exit', sessionId, exitCode)
         attachedSessions.delete(sessionId)
       })
@@ -183,15 +184,15 @@ ipcMain.handle('pty:attach', async (_event, sessionId: string) => {
 
   try {
     await daemonClient.ensureDaemonRunning()
-    const result = await daemonClient.attachSession(sessionId)
+    const result = await daemonClient.attachPtySession(sessionId)
 
     // Set up data forwarding if not already attached
     if (!attachedSessions.has(sessionId)) {
-      daemonClient.onSessionData(sessionId, (data) => {
+      daemonClient.onPtySessionData(sessionId, (data) => {
         mainWindow?.webContents.send('pty:data', sessionId, data)
       })
 
-      daemonClient.onSessionExit(sessionId, (exitCode, signal) => {
+      daemonClient.onPtySessionExit(sessionId, (exitCode, signal) => {
         mainWindow?.webContents.send('pty:exit', sessionId, exitCode)
         attachedSessions.delete(sessionId)
       })
@@ -209,7 +210,7 @@ ipcMain.handle('pty:attach', async (_event, sessionId: string) => {
 
 ipcMain.handle('pty:detach', async (_event, sessionId: string) => {
   if (useDaemon && daemonClient) {
-    await daemonClient.detachSession(sessionId)
+    await daemonClient.detachPtySession(sessionId)
     attachedSessions.delete(sessionId)
   }
 })
@@ -221,7 +222,7 @@ ipcMain.handle('pty:list', async () => {
 
   try {
     await daemonClient.ensureDaemonRunning()
-    return await daemonClient.listSessions()
+    return await daemonClient.listPtySessions()
   } catch (error) {
     console.error('[main] failed to list sessions:', error)
     return []
@@ -230,7 +231,7 @@ ipcMain.handle('pty:list', async () => {
 
 ipcMain.on('pty:write', (_event, id: string, data: string) => {
   if (useDaemon && daemonClient) {
-    daemonClient.writeToSession(id, data)
+    daemonClient.writeToPtySession(id, data)
   } else {
     ptyManager.write(id, data)
   }
@@ -238,7 +239,7 @@ ipcMain.on('pty:write', (_event, id: string, data: string) => {
 
 ipcMain.on('pty:resize', (_event, id: string, cols: number, rows: number) => {
   if (useDaemon && daemonClient) {
-    daemonClient.resizeSession(id, cols, rows)
+    daemonClient.resizePtySession(id, cols, rows)
   } else {
     ptyManager.resize(id, cols, rows)
   }
@@ -246,7 +247,7 @@ ipcMain.on('pty:resize', (_event, id: string, cols: number, rows: number) => {
 
 ipcMain.on('pty:kill', async (_event, id: string) => {
   if (useDaemon && daemonClient) {
-    await daemonClient.killSession(id)
+    await daemonClient.killPtySession(id)
     attachedSessions.delete(id)
   } else {
     ptyManager.kill(id)
@@ -256,13 +257,109 @@ ipcMain.on('pty:kill', async (_event, id: string) => {
 ipcMain.handle('pty:isAlive', async (_event, id: string) => {
   if (useDaemon && daemonClient) {
     try {
-      const sessions = await daemonClient.listSessions()
+      const sessions = await daemonClient.listPtySessions()
       return sessions.some(s => s.id === id)
     } catch {
       return false
     }
   } else {
     return ptyManager.isAlive(id)
+  }
+})
+
+ipcMain.handle('daemon:shutdown', async () => {
+  if (!useDaemon || !daemonClient) {
+    return { success: false, error: 'Daemon not enabled' }
+  }
+
+  try {
+    await daemonClient.shutdownDaemon()
+    return { success: true }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[main] failed to shutdown daemon:', errorMessage)
+    return { success: false, error: errorMessage }
+  }
+})
+
+// Session IPC Handlers (workspace sessions)
+ipcMain.handle('session:create', async (_event, workspaces) => {
+  if (!useDaemon || !daemonClient) {
+    return { success: false, error: 'Daemon not enabled' }
+  }
+
+  try {
+    await daemonClient.ensureDaemonRunning()
+    const result = await daemonClient.createSession(workspaces)
+    console.log('[main] session created:', result?.id)
+    return { success: true, session: result }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[main] failed to create session:', errorMessage)
+    return { success: false, error: errorMessage }
+  }
+})
+
+ipcMain.handle('session:update', async (_event, sessionId: string, workspaces) => {
+  if (!useDaemon || !daemonClient) {
+    return { success: false, error: 'Daemon not enabled' }
+  }
+
+  try {
+    await daemonClient.ensureDaemonRunning()
+    const result = await daemonClient.updateSession(sessionId, workspaces)
+    return { success: true, session: result }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[main] failed to update session:', errorMessage)
+    return { success: false, error: errorMessage }
+  }
+})
+
+ipcMain.handle('session:list', async () => {
+  if (!useDaemon || !daemonClient) {
+    return { success: true, sessions: [] }
+  }
+
+  try {
+    await daemonClient.ensureDaemonRunning()
+    const sessions = await daemonClient.listSessions()
+    return { success: true, sessions }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[main] failed to list sessions:', errorMessage)
+    return { success: false, error: errorMessage }
+  }
+})
+
+ipcMain.handle('session:get', async (_event, sessionId: string) => {
+  if (!useDaemon || !daemonClient) {
+    return { success: false, error: 'Daemon not enabled' }
+  }
+
+  try {
+    await daemonClient.ensureDaemonRunning()
+    const session = await daemonClient.getSession(sessionId)
+    return { success: true, session: session || undefined }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[main] failed to get session:', errorMessage)
+    return { success: false, error: errorMessage }
+  }
+})
+
+ipcMain.handle('session:delete', async (_event, sessionId: string) => {
+  if (!useDaemon || !daemonClient) {
+    return { success: false, error: 'Daemon not enabled' }
+  }
+
+  try {
+    await daemonClient.deleteSession(sessionId)
+    return { success: true }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[main] failed to delete session:', errorMessage)
+    return { success: false, error: errorMessage }
   }
 })
 
@@ -437,7 +534,7 @@ ipcMain.on('app:close-cancelled', () => {
 })
 
 // App lifecycle
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Load settings to check daemon mode
   const settings = loadSettings()
   useDaemon = settings.daemon.enabled
@@ -472,12 +569,12 @@ app.on('before-quit', async () => {
     if (settings.daemon.killOnQuit) {
       console.log('[main] killing all sessions before quit')
       for (const sessionId of attachedSessions) {
-        await daemonClient.killSession(sessionId)
+        await daemonClient.killPtySession(sessionId)
       }
     } else {
       console.log('[main] detaching from sessions before quit')
       for (const sessionId of attachedSessions) {
-        await daemonClient.detachSession(sessionId)
+        await daemonClient.detachPtySession(sessionId)
       }
     }
     attachedSessions.clear()
