@@ -19,6 +19,7 @@ import { registerSTTHandlers } from './stt'
 let mainWindow: BrowserWindow | null = null
 let closeConfirmed = false
 let daemonClient: GrpcDaemonClient | null = null
+let useDaemon = true // Always use daemon mode
 let attachedSessions: Set<string> = new Set()
 
 // Initialize IPC server

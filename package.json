@@ -13,7 +13,7 @@
   ],
   "scripts": {
     "dev": "electron-vite dev",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "typecheck:web": "tsc -p tsconfig.web.json --noEmit",
     "typecheck:node": "tsc -p tsconfig.node.json --noEmit",
     "proto:gen": "mkdir -p src/generated && ./node_modules/.bin/grpc_tools_node_protoc --plugin=protoc-gen-ts_proto=./node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=./src/generated --ts_proto_opt=outputServices=grpc-js,env=node,esModuleInterop=true,useOptionals=messages,useDate=false -I=./src/proto treeterm.proto",
