@@ -1,6 +1,6 @@
-import { ipcMain } from 'electron'
 import * as fs from 'fs/promises'
 import * as path from 'path'
+import type { IpcServer } from './ipc/ipc-server'
 
 // Security: Ensure path is within workspace
 function isPathWithinWorkspace(workspacePath: string, targetPath: string): boolean {
@@ -62,110 +62,101 @@ function detectLanguage(filePath: string): string {
   return languageMap[ext] || 'plaintext'
 }
 
-export function registerFilesystemHandlers(): void {
-  ipcMain.handle(
-    'fs:readDirectory',
-    async (_event, workspacePath: string, dirPath: string) => {
-      try {
-        // Security check
-        if (!isPathWithinWorkspace(workspacePath, dirPath)) {
-          return { success: false, error: 'Access denied: Path outside workspace' }
-        }
-
-        const entries = await fs.readdir(dirPath, { withFileTypes: true })
-        const fileEntries = await Promise.all(
-          entries
-            .filter((entry) => !entry.name.startsWith('.')) // Hide hidden files by default
-            .map(async (entry) => {
-              const fullPath = path.join(dirPath, entry.name)
-              const relativePath = path.relative(workspacePath, fullPath)
-              let stats = null
-              try {
-                stats = await fs.stat(fullPath)
-              } catch {
-                // Ignore stat errors
-              }
-
-              return {
-                name: entry.name,
-                path: fullPath,
-                relativePath,
-                isDirectory: entry.isDirectory(),
-                size: stats?.size,
-                modifiedTime: stats?.mtimeMs
-              }
-            })
-        )
-
-        // Sort: directories first, then alphabetically
-        fileEntries.sort((a, b) => {
-          if (a.isDirectory !== b.isDirectory) {
-            return a.isDirectory ? -1 : 1
-          }
-          return a.name.localeCompare(b.name)
-        })
-
-        return {
-          success: true,
-          contents: { path: dirPath, entries: fileEntries }
-        }
-      } catch (error) {
-        return { success: false, error: String(error) }
+export function registerFilesystemHandlers(server: IpcServer): void {
+  server.onFsReadDirectory(async (workspacePath, dirPath) => {
+    try {
+      // Security check
+      if (!isPathWithinWorkspace(workspacePath, dirPath)) {
+        return { success: false, error: 'Access denied: Path outside workspace' }
       }
-    }
-  )
 
-  ipcMain.handle(
-    'fs:readFile',
-    async (_event, workspacePath: string, filePath: string) => {
-      try {
-        // Security check
-        if (!isPathWithinWorkspace(workspacePath, filePath)) {
-          return { success: false, error: 'Access denied: Path outside workspace' }
+      const entries = await fs.readdir(dirPath, { withFileTypes: true })
+      const fileEntries = await Promise.all(
+        entries
+          .filter((entry) => !entry.name.startsWith('.')) // Hide hidden files by default
+          .map(async (entry) => {
+            const fullPath = path.join(dirPath, entry.name)
+            const relativePath = path.relative(workspacePath, fullPath)
+            let stats = null
+            try {
+              stats = await fs.stat(fullPath)
+            } catch {
+              // Ignore stat errors
+            }
+
+            return {
+              name: entry.name,
+              path: fullPath,
+              relativePath,
+              isDirectory: entry.isDirectory(),
+              size: stats?.size,
+              modifiedTime: stats?.mtimeMs
+            }
+          })
+      )
+
+      // Sort: directories first, then alphabetically
+      fileEntries.sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) {
+          return a.isDirectory ? -1 : 1
         }
+        return a.name.localeCompare(b.name)
+      })
 
-        const stats = await fs.stat(filePath)
-
-        // Limit file size (1MB)
-        const MAX_SIZE = 1024 * 1024
-        if (stats.size > MAX_SIZE) {
-          return { success: false, error: 'File too large to preview (max 1MB)' }
-        }
-
-        const content = await fs.readFile(filePath, 'utf-8')
-        const language = detectLanguage(filePath)
-
-        return {
-          success: true,
-          file: {
-            path: filePath,
-            content,
-            size: stats.size,
-            language
-          }
-        }
-      } catch (error) {
-        return { success: false, error: String(error) }
+      return {
+        success: true,
+        contents: { path: dirPath, entries: fileEntries }
       }
+    } catch (error) {
+      return { success: false, error: String(error) }
     }
-  )
+  })
 
-  ipcMain.handle(
-    'fs:writeFile',
-    async (_event, workspacePath: string, filePath: string, content: string) => {
-      try {
-        // Security check
-        if (!isPathWithinWorkspace(workspacePath, filePath)) {
-          return { success: false, error: 'Access denied: Path outside workspace' }
-        }
-
-        // Write file
-        await fs.writeFile(filePath, content, 'utf-8')
-
-        return { success: true }
-      } catch (error) {
-        return { success: false, error: String(error) }
+  server.onFsReadFile(async (workspacePath, filePath) => {
+    try {
+      // Security check
+      if (!isPathWithinWorkspace(workspacePath, filePath)) {
+        return { success: false, error: 'Access denied: Path outside workspace' }
       }
+
+      const stats = await fs.stat(filePath)
+
+      // Limit file size (1MB)
+      const MAX_SIZE = 1024 * 1024
+      if (stats.size > MAX_SIZE) {
+        return { success: false, error: 'File too large to preview (max 1MB)' }
+      }
+
+      const content = await fs.readFile(filePath, 'utf-8')
+      const language = detectLanguage(filePath)
+
+      return {
+        success: true,
+        file: {
+          path: filePath,
+          content,
+          size: stats.size,
+          language
+        }
+      }
+    } catch (error) {
+      return { success: false, error: String(error) }
     }
-  )
+  })
+
+  server.onFsWriteFile(async (workspacePath, filePath, content) => {
+    try {
+      // Security check
+      if (!isPathWithinWorkspace(workspacePath, filePath)) {
+        return { success: false, error: 'Access denied: Path outside workspace' }
+      }
+
+      // Write file
+      await fs.writeFile(filePath, content, 'utf-8')
+
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
 }

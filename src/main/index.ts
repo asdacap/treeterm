@@ -1,8 +1,9 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
+import { app, BrowserWindow, dialog, shell } from 'electron'
 import { execSync } from 'child_process'
 import { join } from 'path'
 import { ptyManager } from './pty'
 import { GrpcDaemonClient } from './grpcClient'
+import { IpcServer } from './ipc/ipc-server'
 
 // Parse initial workspace from command line
 let initialWorkspacePath: string | null = null
@@ -54,6 +55,9 @@ let daemonClient: GrpcDaemonClient | null = null
 let useDaemon = false
 let attachedSessions: Set<string> = new Set()
 
+// Initialize IPC server
+const server = new IpcServer()
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -79,11 +83,14 @@ function createWindow(): void {
     }
   })
 
+  // Set the window on the IPC server
+  server.setWindow(mainWindow)
+
   // Forward all keyboard events including Caps Lock to renderer
   mainWindow.webContents.on('before-input-event', (event, input) => {
     // Forward Caps Lock events to renderer via IPC
     if (input.code === 'CapsLock' || input.key === 'CapsLock') {
-      mainWindow?.webContents.send('capslock-event', {
+      server.capsLockEvent({
         type: input.type, // 'keyDown' or 'keyUp'
         key: input.key,
         code: input.code
@@ -126,7 +133,7 @@ function createWindow(): void {
 
   // Signal renderer when ready to initialize
   mainWindow.webContents.on('did-finish-load', async () => {
-    mainWindow?.webContents.send('app:ready')
+    server.appReady()
     // Renderer will request workspaces when ready via workspace:list
   })
 
@@ -147,7 +154,7 @@ function createWindow(): void {
 }
 
 // IPC Handlers
-ipcMain.handle('pty:create', async (_event, cwd: string, sandbox?: { enabled: boolean; allowNetwork: boolean; allowedPaths: string[] }, startupCommand?: string) => {
+server.onPtyCreate(async (cwd, sandbox, startupCommand) => {
   if (!mainWindow) return null
 
   if (useDaemon && daemonClient) {
@@ -157,11 +164,11 @@ ipcMain.handle('pty:create', async (_event, cwd: string, sandbox?: { enabled: bo
 
       // Set up data forwarding
       daemonClient.onPtySessionData(sessionId, (data) => {
-        mainWindow?.webContents.send('pty:data', sessionId, data)
+        server.ptyData(sessionId, data)
       })
 
       daemonClient.onPtySessionExit(sessionId, (exitCode, signal) => {
-        mainWindow?.webContents.send('pty:exit', sessionId, exitCode)
+        server.ptyExit(sessionId, exitCode)
         attachedSessions.delete(sessionId)
       })
 
@@ -177,7 +184,7 @@ ipcMain.handle('pty:create', async (_event, cwd: string, sandbox?: { enabled: bo
   }
 })
 
-ipcMain.handle('pty:attach', async (_event, sessionId: string) => {
+server.onPtyAttach(async (sessionId) => {
   if (!useDaemon || !daemonClient) {
     return { success: false, error: 'Daemon not enabled' }
   }
@@ -189,11 +196,11 @@ ipcMain.handle('pty:attach', async (_event, sessionId: string) => {
     // Set up data forwarding if not already attached
     if (!attachedSessions.has(sessionId)) {
       daemonClient.onPtySessionData(sessionId, (data) => {
-        mainWindow?.webContents.send('pty:data', sessionId, data)
+        server.ptyData(sessionId, data)
       })
 
       daemonClient.onPtySessionExit(sessionId, (exitCode, signal) => {
-        mainWindow?.webContents.send('pty:exit', sessionId, exitCode)
+        server.ptyExit(sessionId, exitCode)
         attachedSessions.delete(sessionId)
       })
 
@@ -208,14 +215,14 @@ ipcMain.handle('pty:attach', async (_event, sessionId: string) => {
   }
 })
 
-ipcMain.handle('pty:detach', async (_event, sessionId: string) => {
+server.onPtyDetach(async (sessionId) => {
   if (useDaemon && daemonClient) {
     await daemonClient.detachPtySession(sessionId)
     attachedSessions.delete(sessionId)
   }
 })
 
-ipcMain.handle('pty:list', async () => {
+server.onPtyList(async () => {
   if (!useDaemon || !daemonClient) {
     return []
   }
@@ -229,7 +236,7 @@ ipcMain.handle('pty:list', async () => {
   }
 })
 
-ipcMain.on('pty:write', (_event, id: string, data: string) => {
+server.onPtyWrite((id, data) => {
   if (useDaemon && daemonClient) {
     daemonClient.writeToPtySession(id, data)
   } else {
@@ -237,7 +244,7 @@ ipcMain.on('pty:write', (_event, id: string, data: string) => {
   }
 })
 
-ipcMain.on('pty:resize', (_event, id: string, cols: number, rows: number) => {
+server.onPtyResize((id, cols, rows) => {
   if (useDaemon && daemonClient) {
     daemonClient.resizePtySession(id, cols, rows)
   } else {
@@ -245,7 +252,7 @@ ipcMain.on('pty:resize', (_event, id: string, cols: number, rows: number) => {
   }
 })
 
-ipcMain.on('pty:kill', async (_event, id: string) => {
+server.onPtyKill(async (id) => {
   if (useDaemon && daemonClient) {
     await daemonClient.killPtySession(id)
     attachedSessions.delete(id)
@@ -254,7 +261,7 @@ ipcMain.on('pty:kill', async (_event, id: string) => {
   }
 })
 
-ipcMain.handle('pty:isAlive', async (_event, id: string) => {
+server.onPtyIsAlive(async (id) => {
   if (useDaemon && daemonClient) {
     try {
       const sessions = await daemonClient.listPtySessions()
@@ -267,7 +274,7 @@ ipcMain.handle('pty:isAlive', async (_event, id: string) => {
   }
 })
 
-ipcMain.handle('daemon:shutdown', async () => {
+server.onDaemonShutdown(async () => {
   if (!useDaemon || !daemonClient) {
     return { success: false, error: 'Daemon not enabled' }
   }
@@ -283,7 +290,7 @@ ipcMain.handle('daemon:shutdown', async () => {
 })
 
 // Session IPC Handlers (workspace sessions)
-ipcMain.handle('session:create', async (_event, workspaces) => {
+server.onSessionCreate(async (workspaces) => {
   if (!useDaemon || !daemonClient) {
     return { success: false, error: 'Daemon not enabled' }
   }
@@ -300,7 +307,7 @@ ipcMain.handle('session:create', async (_event, workspaces) => {
   }
 })
 
-ipcMain.handle('session:update', async (_event, sessionId: string, workspaces) => {
+server.onSessionUpdate(async (sessionId, workspaces) => {
   if (!useDaemon || !daemonClient) {
     return { success: false, error: 'Daemon not enabled' }
   }
@@ -316,7 +323,7 @@ ipcMain.handle('session:update', async (_event, sessionId: string, workspaces) =
   }
 })
 
-ipcMain.handle('session:list', async () => {
+server.onSessionList(async () => {
   if (!useDaemon || !daemonClient) {
     return { success: true, sessions: [] }
   }
@@ -332,7 +339,7 @@ ipcMain.handle('session:list', async () => {
   }
 })
 
-ipcMain.handle('session:get', async (_event, sessionId: string) => {
+server.onSessionGet(async (sessionId) => {
   if (!useDaemon || !daemonClient) {
     return { success: false, error: 'Daemon not enabled' }
   }
@@ -348,7 +355,7 @@ ipcMain.handle('session:get', async (_event, sessionId: string) => {
   }
 })
 
-ipcMain.handle('session:delete', async (_event, sessionId: string) => {
+server.onSessionDelete(async (sessionId) => {
   if (!useDaemon || !daemonClient) {
     return { success: false, error: 'Daemon not enabled' }
   }
@@ -363,7 +370,7 @@ ipcMain.handle('session:delete', async (_event, sessionId: string) => {
   }
 })
 
-ipcMain.handle('dialog:selectFolder', async () => {
+server.onDialogSelectFolder(async () => {
   if (!mainWindow) return null
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory']
@@ -375,134 +382,134 @@ ipcMain.handle('dialog:selectFolder', async () => {
 })
 
 // Git IPC Handlers
-ipcMain.handle('git:getInfo', async (_event, dirPath: string) => {
+server.onGitGetInfo(async (dirPath) => {
   return getGitInfo(dirPath)
 })
 
-ipcMain.handle('git:createWorktree', async (_event, repoPath: string, name: string, baseBranch?: string) => {
+server.onGitCreateWorktree(async (repoPath, name, baseBranch) => {
   return createWorktree(repoPath, name, baseBranch)
 })
 
-ipcMain.handle('git:removeWorktree', async (_event, repoPath: string, worktreePath: string, deleteBranch: boolean) => {
+server.onGitRemoveWorktree(async (repoPath, worktreePath, deleteBranch) => {
   return removeWorktree(repoPath, worktreePath, deleteBranch)
 })
 
-ipcMain.handle('git:listWorktrees', async (_event, repoPath: string) => {
+server.onGitListWorktrees(async (repoPath) => {
   return listWorktrees(repoPath)
 })
 
-ipcMain.handle('git:getChildWorktrees', async (_event, repoPath: string, parentBranch: string | null) => {
+server.onGitGetChildWorktrees(async (repoPath, parentBranch) => {
   return getChildWorktrees(repoPath, parentBranch)
 })
 
-ipcMain.handle('git:listLocalBranches', async (_event, repoPath: string) => {
+server.onGitListLocalBranches(async (repoPath) => {
   return listLocalBranches(repoPath)
 })
 
-ipcMain.handle('git:listRemoteBranches', async (_event, repoPath: string) => {
+server.onGitListRemoteBranches(async (repoPath) => {
   return listRemoteBranches(repoPath)
 })
 
-ipcMain.handle('git:getBranchesInWorktrees', async (_event, repoPath: string) => {
+server.onGitGetBranchesInWorktrees(async (repoPath) => {
   return getBranchesInWorktrees(repoPath)
 })
 
-ipcMain.handle('git:createWorktreeFromBranch', async (_event, repoPath: string, branch: string, worktreeName: string) => {
+server.onGitCreateWorktreeFromBranch(async (repoPath, branch, worktreeName) => {
   return createWorktreeFromBranch(repoPath, branch, worktreeName)
 })
 
-ipcMain.handle('git:createWorktreeFromRemote', async (_event, repoPath: string, remoteBranch: string, worktreeName: string) => {
+server.onGitCreateWorktreeFromRemote(async (repoPath, remoteBranch, worktreeName) => {
   return createWorktreeFromRemote(repoPath, remoteBranch, worktreeName)
 })
 
-ipcMain.handle('git:getDiff', async (_event, worktreePath: string, parentBranch: string) => {
+server.onGitGetDiff(async (worktreePath, parentBranch) => {
   return getDiff(worktreePath, parentBranch)
 })
 
-ipcMain.handle('git:getFileDiff', async (_event, worktreePath: string, parentBranch: string, filePath: string) => {
+server.onGitGetFileDiff(async (worktreePath, parentBranch, filePath) => {
   return getFileDiff(worktreePath, parentBranch, filePath)
 })
 
-ipcMain.handle('git:getDiffAgainstHead', async (_event, worktreePath: string, parentBranch: string) => {
+server.onGitGetDiffAgainstHead(async (worktreePath, parentBranch) => {
   return getDiffAgainstHead(worktreePath, parentBranch)
 })
 
-ipcMain.handle('git:getFileDiffAgainstHead', async (_event, worktreePath: string, parentBranch: string, filePath: string) => {
+server.onGitGetFileDiffAgainstHead(async (worktreePath, parentBranch, filePath) => {
   return getFileDiffAgainstHead(worktreePath, parentBranch, filePath)
 })
 
-ipcMain.handle('git:merge', async (_event, mainRepoPath: string, worktreeBranch: string, targetBranch: string, squash: boolean) => {
+server.onGitMerge(async (mainRepoPath, worktreeBranch, targetBranch, squash) => {
   return mergeWorktree(mainRepoPath, worktreeBranch, targetBranch, squash)
 })
 
-ipcMain.handle('git:checkMergeConflicts', async (_event, repoPath: string, sourceBranch: string, targetBranch: string) => {
+server.onGitCheckMergeConflicts(async (repoPath, sourceBranch, targetBranch) => {
   return checkMergeConflicts(repoPath, sourceBranch, targetBranch)
 })
 
-ipcMain.handle('git:hasUncommittedChanges', async (_event, repoPath: string) => {
+server.onGitHasUncommittedChanges(async (repoPath) => {
   return hasUncommittedChanges(repoPath)
 })
 
-ipcMain.handle('git:commitAll', async (_event, repoPath: string, message: string) => {
+server.onGitCommitAll(async (repoPath, message) => {
   return commitAll(repoPath, message)
 })
 
-ipcMain.handle('git:deleteBranch', async (_event, repoPath: string, branchName: string) => {
+server.onGitDeleteBranch(async (repoPath, branchName) => {
   return deleteBranch(repoPath, branchName)
 })
 
-ipcMain.handle('git:getUncommittedChanges', async (_event, repoPath: string) => {
+server.onGitGetUncommittedChanges(async (repoPath) => {
   return getUncommittedChanges(repoPath)
 })
 
-ipcMain.handle('git:getUncommittedFileDiff', async (_event, repoPath: string, filePath: string, staged: boolean) => {
+server.onGitGetUncommittedFileDiff(async (repoPath, filePath, staged) => {
   return getUncommittedFileDiff(repoPath, filePath, staged)
 })
 
-ipcMain.handle('git:stageFile', async (_event, repoPath: string, filePath: string) => {
+server.onGitStageFile(async (repoPath, filePath) => {
   return stageFile(repoPath, filePath)
 })
 
-ipcMain.handle('git:unstageFile', async (_event, repoPath: string, filePath: string) => {
+server.onGitUnstageFile(async (repoPath, filePath) => {
   return unstageFile(repoPath, filePath)
 })
 
-ipcMain.handle('git:stageAll', async (_event, repoPath: string) => {
+server.onGitStageAll(async (repoPath) => {
   return stageAll(repoPath)
 })
 
-ipcMain.handle('git:unstageAll', async (_event, repoPath: string) => {
+server.onGitUnstageAll(async (repoPath) => {
   return unstageAll(repoPath)
 })
 
-ipcMain.handle('git:commitStaged', async (_event, repoPath: string, message: string) => {
+server.onGitCommitStaged(async (repoPath, message) => {
   return commitStaged(repoPath, message)
 })
 
-ipcMain.handle('git:getFileContentsForDiff', async (_event, worktreePath: string, parentBranch: string, filePath: string) => {
+server.onGitGetFileContentsForDiff(async (worktreePath, parentBranch, filePath) => {
   return getFileContentsForDiff(worktreePath, parentBranch, filePath)
 })
 
-ipcMain.handle('git:getFileContentsForDiffAgainstHead', async (_event, worktreePath: string, parentBranch: string, filePath: string) => {
+server.onGitGetFileContentsForDiffAgainstHead(async (worktreePath, parentBranch, filePath) => {
   return getFileContentsForDiffAgainstHead(worktreePath, parentBranch, filePath)
 })
 
-ipcMain.handle('git:getUncommittedFileContentsForDiff', async (_event, repoPath: string, filePath: string, staged: boolean) => {
+server.onGitGetUncommittedFileContentsForDiff(async (repoPath, filePath, staged) => {
   return getUncommittedFileContentsForDiff(repoPath, filePath, staged)
 })
 
 // Settings IPC Handlers
-ipcMain.handle('settings:load', () => {
+server.onSettingsLoad(() => {
   return loadSettings()
 })
 
-ipcMain.handle('settings:save', (_event, settings: Settings) => {
+server.onSettingsSave((settings) => {
   saveSettings(settings)
   return { success: true }
 })
 
 // Sandbox IPC Handlers
-ipcMain.handle('sandbox:isAvailable', () => {
+server.onSandboxIsAvailable(() => {
   if (process.platform === 'darwin') {
     return true // macOS always has sandbox-exec
   }
@@ -517,19 +524,19 @@ ipcMain.handle('sandbox:isAvailable', () => {
   return false // Windows: no sandbox support
 })
 
-ipcMain.handle('app:getInitialWorkspace', () => {
+server.onAppGetInitialWorkspace(() => {
   const path = initialWorkspacePath
   initialWorkspacePath = null // Clear after first read
   return path
 })
 
 // App close confirmation IPC handlers
-ipcMain.on('app:close-confirmed', () => {
+server.onAppCloseConfirmed(() => {
   closeConfirmed = true
   mainWindow?.close()
 })
 
-ipcMain.on('app:close-cancelled', () => {
+server.onAppCloseCancelled(() => {
   closeConfirmed = false
 })
 
@@ -546,15 +553,15 @@ app.whenReady().then(async () => {
     console.log('[main] legacy mode enabled (direct PTY)')
   }
 
-  registerFilesystemHandlers()
-  registerSTTHandlers()
+  registerFilesystemHandlers(server)
+  registerSTTHandlers(server)
   createWindow()
-  createApplicationMenu(mainWindow)
+  createApplicationMenu(mainWindow, server)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow()
-      createApplicationMenu(mainWindow)
+      createApplicationMenu(mainWindow, server)
     }
   })
 })

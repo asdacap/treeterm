@@ -1,6 +1,7 @@
 import { Menu, app, BrowserWindow } from 'electron'
+import type { IpcServer } from './ipc/ipc-server'
 
-export function createApplicationMenu(mainWindow: BrowserWindow | null): void {
+export function createApplicationMenu(mainWindow: BrowserWindow | null, server: IpcServer): void {
   const isMac = process.platform === 'darwin'
 
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -16,7 +17,7 @@ export function createApplicationMenu(mainWindow: BrowserWindow | null): void {
                 label: 'Preferences...',
                 accelerator: 'Cmd+,',
                 click: () => {
-                  mainWindow?.webContents.send('settings:open')
+                  server.settingsOpen()
                 }
               },
               { type: 'separator' as const },
@@ -43,7 +44,7 @@ export function createApplicationMenu(mainWindow: BrowserWindow | null): void {
                 label: 'Settings',
                 accelerator: 'Ctrl+,',
                 click: () => {
-                  mainWindow?.webContents.send('settings:open')
+                  server.settingsOpen()
                 }
               },
               { type: 'separator' as const }
@@ -80,14 +81,14 @@ export function createApplicationMenu(mainWindow: BrowserWindow | null): void {
           label: 'New Terminal',
           accelerator: isMac ? 'Cmd+T' : 'Ctrl+T',
           click: () => {
-            mainWindow?.webContents.send('terminal:new')
+            server.terminalNew()
           }
         },
         { type: 'separator' as const },
         {
           label: 'Browse Sessions...',
           click: () => {
-            mainWindow?.webContents.send('session:show-sessions')
+            server.sessionShowSessions()
           }
         }
       ]

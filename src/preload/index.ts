@@ -1,5 +1,6 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge } from 'electron'
 import type { SandboxConfig, DaemonSession, WorkspaceInput } from '../shared/types'
+import { IpcClient } from './ipc-client'
 
 type DataCallback = (data: string) => void
 const dataListeners = new Map<string, DataCallback[]>()
@@ -7,15 +8,18 @@ const dataListeners = new Map<string, DataCallback[]>()
 type ExitCallback = (exitCode: number) => void
 const exitListeners = new Map<string, ExitCallback[]>()
 
+// Initialize IPC client
+const client = new IpcClient()
+
 // Listen for pty data from main process
-ipcRenderer.on('pty:data', (_event, id: string, data: string) => {
+client.onPtyData((id, data) => {
   const listeners = dataListeners.get(id)
   if (listeners) {
     listeners.forEach((cb) => cb(data))
   }
 })
 
-ipcRenderer.on('pty:exit', (_event, id: string, exitCode: number) => {
+client.onPtyExit((id, exitCode) => {
   const listeners = exitListeners.get(id)
   if (listeners) {
     listeners.forEach((cb) => cb(exitCode))
@@ -27,29 +31,29 @@ ipcRenderer.on('pty:exit', (_event, id: string, exitCode: number) => {
 type SettingsOpenCallback = () => void
 const settingsOpenListeners: SettingsOpenCallback[] = []
 
-ipcRenderer.on('settings:open', () => {
+client.onSettingsOpen(() => {
   settingsOpenListeners.forEach((cb) => cb())
 })
 
 type CloseConfirmCallback = () => void
 const closeConfirmListeners: CloseConfirmCallback[] = []
 
-ipcRenderer.on('app:confirm-close', () => {
+client.onAppConfirmClose(() => {
   closeConfirmListeners.forEach((cb) => cb())
 })
 
 type CapsLockCallback = (event: { type: string; key: string; code: string }) => void
 const capsLockListeners: CapsLockCallback[] = []
 
-ipcRenderer.on('capslock-event', (_event, data) => {
-  capsLockListeners.forEach((cb) => cb(data))
+client.onCapsLockEvent((event) => {
+  capsLockListeners.forEach((cb) => cb(event))
 })
 
 type ReadyCallback = () => void
 const readyListeners: ReadyCallback[] = []
 let isReady = false
 
-ipcRenderer.on('app:ready', () => {
+client.onAppReady(() => {
   isReady = true
   readyListeners.forEach((cb) => cb())
 })
@@ -57,7 +61,7 @@ ipcRenderer.on('app:ready', () => {
 type DaemonSessionsCallback = (sessions: DaemonSession[]) => void
 const daemonSessionsListeners: DaemonSessionsCallback[] = []
 
-ipcRenderer.on('daemon:sessions', (_event, sessions) => {
+client.onDaemonSessions((sessions) => {
   daemonSessionsListeners.forEach((cb) => cb(sessions))
 })
 
@@ -66,18 +70,18 @@ type TerminalMenuCallback = () => void
 const terminalNewListeners: TerminalMenuCallback[] = []
 const terminalShowSessionsListeners: TerminalMenuCallback[] = []
 
-ipcRenderer.on('terminal:new', () => {
+client.onTerminalNew(() => {
   terminalNewListeners.forEach((cb) => cb())
 })
 
-ipcRenderer.on('terminal:show-sessions', () => {
+client.onTerminalShowSessions(() => {
   terminalShowSessionsListeners.forEach((cb) => cb())
 })
 
 type SessionMenuCallback = () => void
 const sessionShowSessionsListeners: SessionMenuCallback[] = []
 
-ipcRenderer.on('session:show-sessions', () => {
+client.onSessionShowSessions(() => {
   sessionShowSessionsListeners.forEach((cb) => cb())
 })
 
@@ -85,28 +89,28 @@ contextBridge.exposeInMainWorld('electron', {
   platform: process.platform,
   terminal: {
     create: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string): Promise<string> => {
-      return ipcRenderer.invoke('pty:create', cwd, sandbox, startupCommand)
+      return client.ptyCreate(cwd, sandbox, startupCommand)
     },
     attach: (sessionId: string): Promise<{ success: boolean; scrollback?: string[]; error?: string }> => {
-      return ipcRenderer.invoke('pty:attach', sessionId)
+      return client.ptyAttach(sessionId)
     },
     detach: (sessionId: string): Promise<void> => {
-      return ipcRenderer.invoke('pty:detach', sessionId)
+      return client.ptyDetach(sessionId)
     },
     list: (): Promise<Array<{ id: string; cwd: string; createdAt: number; attachedClients: number }>> => {
-      return ipcRenderer.invoke('pty:list')
+      return client.ptyList()
     },
     write: (id: string, data: string): void => {
-      ipcRenderer.send('pty:write', id, data)
+      client.ptyWrite(id, data)
     },
     resize: (id: string, cols: number, rows: number): void => {
-      ipcRenderer.send('pty:resize', id, cols, rows)
+      client.ptyResize(id, cols, rows)
     },
     kill: (id: string): void => {
-      ipcRenderer.send('pty:kill', id)
+      client.ptyKill(id)
     },
     isAlive: (id: string): Promise<boolean> => {
-      return ipcRenderer.invoke('pty:isAlive', id)
+      return client.ptyIsAlive(id)
     },
     onData: (id: string, callback: DataCallback): (() => void) => {
       if (!dataListeners.has(id)) {
@@ -158,103 +162,103 @@ contextBridge.exposeInMainWorld('electron', {
     }
   },
   selectFolder: (): Promise<string | null> => {
-    return ipcRenderer.invoke('dialog:selectFolder')
+    return client.dialogSelectFolder()
   },
   git: {
     getInfo: (dirPath: string) => {
-      return ipcRenderer.invoke('git:getInfo', dirPath)
+      return client.gitGetInfo(dirPath)
     },
     createWorktree: (repoPath: string, name: string, baseBranch?: string) => {
-      return ipcRenderer.invoke('git:createWorktree', repoPath, name, baseBranch)
+      return client.gitCreateWorktree(repoPath, name, baseBranch)
     },
     removeWorktree: (repoPath: string, worktreePath: string, deleteBranch: boolean = true) => {
-      return ipcRenderer.invoke('git:removeWorktree', repoPath, worktreePath, deleteBranch)
+      return client.gitRemoveWorktree(repoPath, worktreePath, deleteBranch)
     },
     listWorktrees: (repoPath: string) => {
-      return ipcRenderer.invoke('git:listWorktrees', repoPath)
+      return client.gitListWorktrees(repoPath)
     },
     getChildWorktrees: (repoPath: string, parentBranch: string | null) => {
-      return ipcRenderer.invoke('git:getChildWorktrees', repoPath, parentBranch)
+      return client.gitGetChildWorktrees(repoPath, parentBranch)
     },
     listLocalBranches: (repoPath: string) => {
-      return ipcRenderer.invoke('git:listLocalBranches', repoPath)
+      return client.gitListLocalBranches(repoPath)
     },
     listRemoteBranches: (repoPath: string) => {
-      return ipcRenderer.invoke('git:listRemoteBranches', repoPath)
+      return client.gitListRemoteBranches(repoPath)
     },
     getBranchesInWorktrees: (repoPath: string) => {
-      return ipcRenderer.invoke('git:getBranchesInWorktrees', repoPath)
+      return client.gitGetBranchesInWorktrees(repoPath)
     },
     createWorktreeFromBranch: (repoPath: string, branch: string, worktreeName: string) => {
-      return ipcRenderer.invoke('git:createWorktreeFromBranch', repoPath, branch, worktreeName)
+      return client.gitCreateWorktreeFromBranch(repoPath, branch, worktreeName)
     },
     createWorktreeFromRemote: (repoPath: string, remoteBranch: string, worktreeName: string) => {
-      return ipcRenderer.invoke('git:createWorktreeFromRemote', repoPath, remoteBranch, worktreeName)
+      return client.gitCreateWorktreeFromRemote(repoPath, remoteBranch, worktreeName)
     },
     getDiff: (worktreePath: string, parentBranch: string) => {
-      return ipcRenderer.invoke('git:getDiff', worktreePath, parentBranch)
+      return client.gitGetDiff(worktreePath, parentBranch)
     },
     getFileDiff: (worktreePath: string, parentBranch: string, filePath: string) => {
-      return ipcRenderer.invoke('git:getFileDiff', worktreePath, parentBranch, filePath)
+      return client.gitGetFileDiff(worktreePath, parentBranch, filePath)
     },
     getDiffAgainstHead: (worktreePath: string, parentBranch: string) => {
-      return ipcRenderer.invoke('git:getDiffAgainstHead', worktreePath, parentBranch)
+      return client.gitGetDiffAgainstHead(worktreePath, parentBranch)
     },
     getFileDiffAgainstHead: (worktreePath: string, parentBranch: string, filePath: string) => {
-      return ipcRenderer.invoke('git:getFileDiffAgainstHead', worktreePath, parentBranch, filePath)
+      return client.gitGetFileDiffAgainstHead(worktreePath, parentBranch, filePath)
     },
     merge: (mainRepoPath: string, worktreeBranch: string, targetBranch: string, squash: boolean = false) => {
-      return ipcRenderer.invoke('git:merge', mainRepoPath, worktreeBranch, targetBranch, squash)
+      return client.gitMerge(mainRepoPath, worktreeBranch, targetBranch, squash)
     },
     checkMergeConflicts: (repoPath: string, sourceBranch: string, targetBranch: string) => {
-      return ipcRenderer.invoke('git:checkMergeConflicts', repoPath, sourceBranch, targetBranch)
+      return client.gitCheckMergeConflicts(repoPath, sourceBranch, targetBranch)
     },
     hasUncommittedChanges: (repoPath: string) => {
-      return ipcRenderer.invoke('git:hasUncommittedChanges', repoPath)
+      return client.gitHasUncommittedChanges(repoPath)
     },
     commitAll: (repoPath: string, message: string) => {
-      return ipcRenderer.invoke('git:commitAll', repoPath, message)
+      return client.gitCommitAll(repoPath, message)
     },
     deleteBranch: (repoPath: string, branchName: string) => {
-      return ipcRenderer.invoke('git:deleteBranch', repoPath, branchName)
+      return client.gitDeleteBranch(repoPath, branchName)
     },
     getUncommittedChanges: (repoPath: string) => {
-      return ipcRenderer.invoke('git:getUncommittedChanges', repoPath)
+      return client.gitGetUncommittedChanges(repoPath)
     },
     getUncommittedFileDiff: (repoPath: string, filePath: string, staged: boolean) => {
-      return ipcRenderer.invoke('git:getUncommittedFileDiff', repoPath, filePath, staged)
+      return client.gitGetUncommittedFileDiff(repoPath, filePath, staged)
     },
     stageFile: (repoPath: string, filePath: string) => {
-      return ipcRenderer.invoke('git:stageFile', repoPath, filePath)
+      return client.gitStageFile(repoPath, filePath)
     },
     unstageFile: (repoPath: string, filePath: string) => {
-      return ipcRenderer.invoke('git:unstageFile', repoPath, filePath)
+      return client.gitUnstageFile(repoPath, filePath)
     },
     stageAll: (repoPath: string) => {
-      return ipcRenderer.invoke('git:stageAll', repoPath)
+      return client.gitStageAll(repoPath)
     },
     unstageAll: (repoPath: string) => {
-      return ipcRenderer.invoke('git:unstageAll', repoPath)
+      return client.gitUnstageAll(repoPath)
     },
     commitStaged: (repoPath: string, message: string) => {
-      return ipcRenderer.invoke('git:commitStaged', repoPath, message)
+      return client.gitCommitStaged(repoPath, message)
     },
     getFileContentsForDiff: (worktreePath: string, parentBranch: string, filePath: string) => {
-      return ipcRenderer.invoke('git:getFileContentsForDiff', worktreePath, parentBranch, filePath)
+      return client.gitGetFileContentsForDiff(worktreePath, parentBranch, filePath)
     },
     getFileContentsForDiffAgainstHead: (worktreePath: string, parentBranch: string, filePath: string) => {
-      return ipcRenderer.invoke('git:getFileContentsForDiffAgainstHead', worktreePath, parentBranch, filePath)
+      return client.gitGetFileContentsForDiffAgainstHead(worktreePath, parentBranch, filePath)
     },
     getUncommittedFileContentsForDiff: (repoPath: string, filePath: string, staged: boolean) => {
-      return ipcRenderer.invoke('git:getUncommittedFileContentsForDiff', repoPath, filePath, staged)
+      return client.gitGetUncommittedFileContentsForDiff(repoPath, filePath, staged)
     }
   },
   settings: {
     load: () => {
-      return ipcRenderer.invoke('settings:load')
+      return client.settingsLoad()
     },
     save: (settings: unknown) => {
-      return ipcRenderer.invoke('settings:save', settings)
+      return client.settingsSave(settings as any)
     },
     onOpen: (callback: SettingsOpenCallback): (() => void) => {
       settingsOpenListeners.push(callback)
@@ -268,37 +272,37 @@ contextBridge.exposeInMainWorld('electron', {
   },
   filesystem: {
     readDirectory: (workspacePath: string, dirPath: string) => {
-      return ipcRenderer.invoke('fs:readDirectory', workspacePath, dirPath)
+      return client.fsReadDirectory(workspacePath, dirPath)
     },
     readFile: (workspacePath: string, filePath: string) => {
-      return ipcRenderer.invoke('fs:readFile', workspacePath, filePath)
+      return client.fsReadFile(workspacePath, filePath)
     },
     writeFile: (workspacePath: string, filePath: string, content: string) => {
-      return ipcRenderer.invoke('fs:writeFile', workspacePath, filePath, content)
+      return client.fsWriteFile(workspacePath, filePath, content)
     }
   },
   sandbox: {
     isAvailable: (): Promise<boolean> => {
-      return ipcRenderer.invoke('sandbox:isAvailable')
+      return client.sandboxIsAvailable()
     }
   },
   stt: {
     transcribeOpenAI: (audioBuffer: ArrayBuffer, apiKey: string, language?: string): Promise<{ text: string }> => {
-      return ipcRenderer.invoke('stt:transcribe-openai', audioBuffer, apiKey, language)
+      return client.sttTranscribeOpenai(audioBuffer, apiKey, language)
     },
     transcribeLocal: (
       audioBuffer: ArrayBuffer,
       modelPath: string,
       language?: string
     ): Promise<{ text: string }> => {
-      return ipcRenderer.invoke('stt:transcribe-local', audioBuffer, modelPath, language)
+      return client.sttTranscribeLocal(audioBuffer, modelPath, language)
     },
     checkMicPermission: (): Promise<boolean> => {
-      return ipcRenderer.invoke('stt:check-mic-permission')
+      return client.sttCheckMicPermission()
     }
   },
   getInitialWorkspace: (): Promise<string | null> => {
-    return ipcRenderer.invoke('app:getInitialWorkspace')
+    return client.appGetInitialWorkspace()
   },
   app: {
     onReady: (callback: ReadyCallback): (() => void) => {
@@ -325,10 +329,10 @@ contextBridge.exposeInMainWorld('electron', {
       }
     },
     confirmClose: (): void => {
-      ipcRenderer.send('app:close-confirmed')
+      client.appCloseConfirmed()
     },
     cancelClose: (): void => {
-      ipcRenderer.send('app:close-cancelled')
+      client.appCloseCancelled()
     },
     onCapsLockEvent: (callback: CapsLockCallback): (() => void) => {
       capsLockListeners.push(callback)
@@ -342,7 +346,7 @@ contextBridge.exposeInMainWorld('electron', {
   },
   daemon: {
     shutdown: (): Promise<{ success: boolean; error?: string }> => {
-      return ipcRenderer.invoke('daemon:shutdown')
+      return client.daemonShutdown()
     },
     onSessions: (callback: DaemonSessionsCallback): (() => void) => {
       daemonSessionsListeners.push(callback)
@@ -356,19 +360,19 @@ contextBridge.exposeInMainWorld('electron', {
   },
   session: {
     create: (workspaces: WorkspaceInput[]): Promise<{ success: boolean; session?: DaemonSession; error?: string }> => {
-      return ipcRenderer.invoke('session:create', workspaces)
+      return client.sessionCreate(workspaces)
     },
     update: (sessionId: string, workspaces: WorkspaceInput[]): Promise<{ success: boolean; session?: DaemonSession; error?: string }> => {
-      return ipcRenderer.invoke('session:update', sessionId, workspaces)
+      return client.sessionUpdate(sessionId, workspaces)
     },
     list: (): Promise<{ success: boolean; sessions?: DaemonSession[]; error?: string }> => {
-      return ipcRenderer.invoke('session:list')
+      return client.sessionList()
     },
     get: (sessionId: string): Promise<{ success: boolean; session?: DaemonSession; error?: string }> => {
-      return ipcRenderer.invoke('session:get', sessionId)
+      return client.sessionGet(sessionId)
     },
     delete: (sessionId: string): Promise<{ success: boolean; error?: string }> => {
-      return ipcRenderer.invoke('session:delete', sessionId)
+      return client.sessionDelete(sessionId)
     },
     onShowSessions: (callback: SessionMenuCallback): (() => void) => {
       sessionShowSessionsListeners.push(callback)
