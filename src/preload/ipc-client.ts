@@ -43,6 +43,12 @@ const CHANNELS = {
   gitGetFileContentsForDiff: 'git:getFileContentsForDiff',
   gitGetFileContentsForDiffAgainstHead: 'git:getFileContentsForDiffAgainstHead',
   gitGetUncommittedFileContentsForDiff: 'git:getUncommittedFileContentsForDiff',
+  gitGetHeadCommitHash: 'git:getHeadCommitHash',
+  reviewsLoad: 'reviews:load',
+  reviewsSave: 'reviews:save',
+  reviewsAddComment: 'reviews:addComment',
+  reviewsDeleteComment: 'reviews:deleteComment',
+  reviewsUpdateOutdated: 'reviews:updateOutdated',
   settingsLoad: 'settings:load',
   settingsSave: 'settings:save',
   fsReadDirectory: 'fs:readDirectory',
@@ -264,6 +270,39 @@ export class IpcClient {
     ...args: IpcRequests['gitGetUncommittedFileContentsForDiff']['params']
   ): Promise<IpcRequests['gitGetUncommittedFileContentsForDiff']['result']> {
     return ipcRenderer.invoke(CHANNELS.gitGetUncommittedFileContentsForDiff, ...args)
+  }
+
+  gitGetHeadCommitHash(
+    ...args: IpcRequests['gitGetHeadCommitHash']['params']
+  ): Promise<IpcRequests['gitGetHeadCommitHash']['result']> {
+    return ipcRenderer.invoke(CHANNELS.gitGetHeadCommitHash, ...args)
+  }
+
+  // Reviews requests
+  reviewsLoad(...args: IpcRequests['reviewsLoad']['params']): Promise<IpcRequests['reviewsLoad']['result']> {
+    return ipcRenderer.invoke(CHANNELS.reviewsLoad, ...args)
+  }
+
+  reviewsSave(...args: IpcRequests['reviewsSave']['params']): Promise<IpcRequests['reviewsSave']['result']> {
+    return ipcRenderer.invoke(CHANNELS.reviewsSave, ...args)
+  }
+
+  reviewsAddComment(
+    ...args: IpcRequests['reviewsAddComment']['params']
+  ): Promise<IpcRequests['reviewsAddComment']['result']> {
+    return ipcRenderer.invoke(CHANNELS.reviewsAddComment, ...args)
+  }
+
+  reviewsDeleteComment(
+    ...args: IpcRequests['reviewsDeleteComment']['params']
+  ): Promise<IpcRequests['reviewsDeleteComment']['result']> {
+    return ipcRenderer.invoke(CHANNELS.reviewsDeleteComment, ...args)
+  }
+
+  reviewsUpdateOutdated(
+    ...args: IpcRequests['reviewsUpdateOutdated']['params']
+  ): Promise<IpcRequests['reviewsUpdateOutdated']['result']> {
+    return ipcRenderer.invoke(CHANNELS.reviewsUpdateOutdated, ...args)
   }
 
   // Settings requests

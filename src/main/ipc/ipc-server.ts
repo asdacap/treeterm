@@ -43,6 +43,12 @@ const CHANNELS = {
   gitGetFileContentsForDiff: 'git:getFileContentsForDiff',
   gitGetFileContentsForDiffAgainstHead: 'git:getFileContentsForDiffAgainstHead',
   gitGetUncommittedFileContentsForDiff: 'git:getUncommittedFileContentsForDiff',
+  gitGetHeadCommitHash: 'git:getHeadCommitHash',
+  reviewsLoad: 'reviews:load',
+  reviewsSave: 'reviews:save',
+  reviewsAddComment: 'reviews:addComment',
+  reviewsDeleteComment: 'reviews:deleteComment',
+  reviewsUpdateOutdated: 'reviews:updateOutdated',
   settingsLoad: 'settings:load',
   settingsSave: 'settings:save',
   fsReadDirectory: 'fs:readDirectory',
@@ -432,6 +438,67 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.gitGetUncommittedFileContentsForDiff, (_event: IpcMainInvokeEvent, ...args: any[]) =>
       handler(...(args as IpcRequests['gitGetUncommittedFileContentsForDiff']['params']))
+    )
+  }
+
+  onGitGetHeadCommitHash(
+    handler: (
+      ...args: IpcRequests['gitGetHeadCommitHash']['params']
+    ) => IpcRequests['gitGetHeadCommitHash']['result'] | Promise<IpcRequests['gitGetHeadCommitHash']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.gitGetHeadCommitHash, (_event: IpcMainInvokeEvent, ...args: any[]) =>
+      handler(...(args as IpcRequests['gitGetHeadCommitHash']['params']))
+    )
+  }
+
+  // Reviews request handlers
+  onReviewsLoad(
+    handler: (
+      ...args: IpcRequests['reviewsLoad']['params']
+    ) => IpcRequests['reviewsLoad']['result'] | Promise<IpcRequests['reviewsLoad']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.reviewsLoad, (_event: IpcMainInvokeEvent, ...args: any[]) =>
+      handler(...(args as IpcRequests['reviewsLoad']['params']))
+    )
+  }
+
+  onReviewsSave(
+    handler: (
+      ...args: IpcRequests['reviewsSave']['params']
+    ) => IpcRequests['reviewsSave']['result'] | Promise<IpcRequests['reviewsSave']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.reviewsSave, (_event: IpcMainInvokeEvent, ...args: any[]) =>
+      handler(...(args as IpcRequests['reviewsSave']['params']))
+    )
+  }
+
+  onReviewsAddComment(
+    handler: (
+      ...args: IpcRequests['reviewsAddComment']['params']
+    ) => IpcRequests['reviewsAddComment']['result'] | Promise<IpcRequests['reviewsAddComment']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.reviewsAddComment, (_event: IpcMainInvokeEvent, ...args: any[]) =>
+      handler(...(args as IpcRequests['reviewsAddComment']['params']))
+    )
+  }
+
+  onReviewsDeleteComment(
+    handler: (
+      ...args: IpcRequests['reviewsDeleteComment']['params']
+    ) => IpcRequests['reviewsDeleteComment']['result'] | Promise<IpcRequests['reviewsDeleteComment']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.reviewsDeleteComment, (_event: IpcMainInvokeEvent, ...args: any[]) =>
+      handler(...(args as IpcRequests['reviewsDeleteComment']['params']))
+    )
+  }
+
+  onReviewsUpdateOutdated(
+    handler: (
+      ...args: IpcRequests['reviewsUpdateOutdated']['params']
+    ) => IpcRequests['reviewsUpdateOutdated']['result'] | Promise<IpcRequests['reviewsUpdateOutdated']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.reviewsUpdateOutdated, (_event: IpcMainInvokeEvent, ...args: any[]) =>
+      handler(...(args as IpcRequests['reviewsUpdateOutdated']['params']))
     )
   }
 

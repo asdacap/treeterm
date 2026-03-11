@@ -220,6 +220,22 @@ export interface FileDiffContents {
   language: string
 }
 
+export interface ReviewComment {
+  id: string
+  filePath: string
+  lineNumber: number
+  text: string
+  commitHash: string
+  createdAt: number
+  isOutdated: boolean
+  side: 'original' | 'modified'
+}
+
+export interface ReviewsData {
+  version: 1
+  comments: ReviewComment[]
+}
+
 export interface ConflictCheckResult {
   success: boolean
   conflicts?: ConflictInfo
@@ -271,12 +287,21 @@ export interface GitApi {
   getFileContentsForDiff: (worktreePath: string, parentBranch: string, filePath: string) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
   getFileContentsForDiffAgainstHead: (worktreePath: string, parentBranch: string, filePath: string) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
   getUncommittedFileContentsForDiff: (repoPath: string, filePath: string, staged: boolean) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
+  getHeadCommitHash: (repoPath: string) => Promise<{ success: boolean; hash?: string; error?: string }>
 }
 
 export interface SettingsApi {
   load: () => Promise<Settings>
   save: (settings: Settings) => Promise<{ success: boolean }>
   onOpen: (callback: () => void) => () => void
+}
+
+export interface ReviewsApi {
+  load: (worktreePath: string) => Promise<{ success: boolean; reviews?: ReviewsData; error?: string }>
+  save: (worktreePath: string, reviews: ReviewsData) => Promise<{ success: boolean; error?: string }>
+  addComment: (worktreePath: string, comment: Omit<ReviewComment, 'id' | 'createdAt'>) => Promise<{ success: boolean; comment?: ReviewComment; error?: string }>
+  deleteComment: (worktreePath: string, commentId: string) => Promise<{ success: boolean; error?: string }>
+  updateOutdated: (worktreePath: string, currentCommitHash: string) => Promise<{ success: boolean; reviews?: ReviewsData; error?: string }>
 }
 
 export interface SandboxApi {
@@ -322,6 +347,7 @@ export interface ElectronApi {
   filesystem: FilesystemApi
   sandbox: SandboxApi
   stt: STTApi
+  reviews: ReviewsApi
   getInitialWorkspace: () => Promise<string | null>
   app: AppApi
   daemon: DaemonApi

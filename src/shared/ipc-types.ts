@@ -21,7 +21,9 @@ import type {
   UncommittedChanges,
   FileDiffContents,
   DirectoryContents,
-  FileContents
+  FileContents,
+  ReviewsData,
+  ReviewComment
 } from '../renderer/types'
 
 // === Request Types (renderer calls, server handles) ===
@@ -165,6 +167,32 @@ export interface IpcRequests {
   gitGetUncommittedFileContentsForDiff: {
     params: [repoPath: string, filePath: string, staged: boolean]
     result: { success: boolean; contents?: FileDiffContents; error?: string }
+  }
+  gitGetHeadCommitHash: {
+    params: [repoPath: string]
+    result: { success: boolean; hash?: string; error?: string }
+  }
+
+  // Reviews operations
+  reviewsLoad: {
+    params: [worktreePath: string]
+    result: { success: boolean; reviews?: ReviewsData; error?: string }
+  }
+  reviewsSave: {
+    params: [worktreePath: string, reviews: ReviewsData]
+    result: { success: boolean; error?: string }
+  }
+  reviewsAddComment: {
+    params: [worktreePath: string, comment: Omit<ReviewComment, 'id' | 'createdAt'>]
+    result: { success: boolean; comment?: ReviewComment; error?: string }
+  }
+  reviewsDeleteComment: {
+    params: [worktreePath: string, commentId: string]
+    result: { success: boolean; error?: string }
+  }
+  reviewsUpdateOutdated: {
+    params: [worktreePath: string, currentCommitHash: string]
+    result: { success: boolean; reviews?: ReviewsData; error?: string }
   }
 
   // Settings operations

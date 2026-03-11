@@ -1196,3 +1196,18 @@ export async function createWorktreeFromRemote(
     }
   }
 }
+
+export async function getHeadCommitHash(
+  repoPath: string
+): Promise<{ success: boolean; hash?: string; error?: string }> {
+  try {
+    const git: SimpleGit = simpleGit(repoPath, gitOptions)
+    const hash = (await git.revparse(['HEAD'])).trim()
+    return { success: true, hash }
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Unknown error getting HEAD commit hash'
+    }
+  }
+}

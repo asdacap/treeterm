@@ -251,6 +251,26 @@ contextBridge.exposeInMainWorld('electron', {
     },
     getUncommittedFileContentsForDiff: (repoPath: string, filePath: string, staged: boolean) => {
       return client.gitGetUncommittedFileContentsForDiff(repoPath, filePath, staged)
+    },
+    getHeadCommitHash: (repoPath: string) => {
+      return client.gitGetHeadCommitHash(repoPath)
+    }
+  },
+  reviews: {
+    load: (worktreePath: string) => {
+      return client.reviewsLoad(worktreePath)
+    },
+    save: (worktreePath: string, reviews: unknown) => {
+      return client.reviewsSave(worktreePath, reviews as any)
+    },
+    addComment: (worktreePath: string, comment: unknown) => {
+      return client.reviewsAddComment(worktreePath, comment as any)
+    },
+    deleteComment: (worktreePath: string, commentId: string) => {
+      return client.reviewsDeleteComment(worktreePath, commentId)
+    },
+    updateOutdated: (worktreePath: string, commitHash: string) => {
+      return client.reviewsUpdateOutdated(worktreePath, commitHash)
     }
   },
   settings: {

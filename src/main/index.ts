@@ -472,6 +472,37 @@ server.onGitGetUncommittedFileContentsForDiff(async (repoPath, filePath, staged)
   return daemonClient.getUncommittedFileContentsForDiff(repoPath, filePath, staged)
 })
 
+server.onGitGetHeadCommitHash(async (repoPath) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.getHeadCommitHash(repoPath)
+})
+
+// Reviews IPC Handlers
+server.onReviewsLoad(async (worktreePath) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.loadReviews(worktreePath)
+})
+
+server.onReviewsSave(async (worktreePath, reviews) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.saveReviews(worktreePath, reviews)
+})
+
+server.onReviewsAddComment(async (worktreePath, comment) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.addReviewComment(worktreePath, comment)
+})
+
+server.onReviewsDeleteComment(async (worktreePath, commentId) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.deleteReviewComment(worktreePath, commentId)
+})
+
+server.onReviewsUpdateOutdated(async (worktreePath, currentCommitHash) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.updateOutdatedReviews(worktreePath, currentCommitHash)
+})
+
 // Settings IPC Handlers
 server.onSettingsLoad(() => {
   return loadSettings()
