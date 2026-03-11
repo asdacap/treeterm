@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, ReviewsData, ReviewComment } from '../types'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
@@ -58,6 +58,10 @@ export default function ReviewBrowser({
     side: 'original' | 'modified'
   } | null>(null)
   const [currentCommitHash, setCurrentCommitHash] = useState<string | null>(null)
+
+  // Resize state
+  const [fileListWidth, setFileListWidth] = useState(250)
+  const [isResizing, setIsResizing] = useState(false)
 
   useEffect(() => {
     if (workspace && parentWorkspace) {
@@ -423,6 +427,26 @@ export default function ReviewBrowser({
     }
   }
 
+  // Resize handlers
+  const handleResizeMouseDown = useCallback(() => {
+    setIsResizing(true)
+  }, [])
+
+  const handleResizeMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isResizing) return
+      const container = e.currentTarget as HTMLElement
+      const rect = container.getBoundingClientRect()
+      const newWidth = Math.max(150, Math.min(500, e.clientX - rect.left))
+      setFileListWidth(newWidth)
+    },
+    [isResizing]
+  )
+
+  const handleResizeMouseUp = useCallback(() => {
+    setIsResizing(false)
+  }, [])
+
   // Filter comments for current file
   const fileComments = selectedFile && reviews
     ? reviews.comments.filter(c => c.filePath === selectedFile)
@@ -504,8 +528,13 @@ export default function ReviewBrowser({
                   </span>
                 </div>
 
-                <div className="diff-content">
-                  <div className="diff-file-list">
+                <div
+                  className="diff-content"
+                  onMouseMove={handleResizeMouseMove}
+                  onMouseUp={handleResizeMouseUp}
+                  onMouseLeave={handleResizeMouseUp}
+                >
+                  <div className="diff-file-list" style={{ width: fileListWidth }}>
                     {diff.files.map((file) => (
                       <div
                         key={file.path}
@@ -521,6 +550,11 @@ export default function ReviewBrowser({
                       </div>
                     ))}
                   </div>
+
+                  <div
+                    className={`divider ${isResizing ? 'active' : ''}`}
+                    onMouseDown={handleResizeMouseDown}
+                  />
 
                   <div className="diff-file-content">
                     {selectedFile ? (
@@ -540,17 +574,10 @@ export default function ReviewBrowser({
                             hasNextFile={currentFileIndex < fileList.length - 1}
                             comments={fileComments}
                             onLineClick={handleLineClick}
+                            inlineCommentInput={commentInput}
+                            onCommentSubmit={handleCommentSubmit}
+                            onCommentCancel={() => setCommentInput(null)}
                           />
-                          {commentInput && (
-                            <div className="comment-input-overlay">
-                              <CommentInput
-                                lineNumber={commentInput.lineNumber}
-                                side={commentInput.side}
-                                onSubmit={handleCommentSubmit}
-                                onCancel={() => setCommentInput(null)}
-                              />
-                            </div>
-                          )}
                         </>
                       ) : (
                         <div className="diff-placeholder">Failed to load diff contents</div>
@@ -597,8 +624,13 @@ export default function ReviewBrowser({
                   </div>
                 </div>
 
-                <div className="diff-content">
-                  <div className="diff-file-list">
+                <div
+                  className="diff-content"
+                  onMouseMove={handleResizeMouseMove}
+                  onMouseUp={handleResizeMouseUp}
+                  onMouseLeave={handleResizeMouseUp}
+                >
+                  <div className="diff-file-list" style={{ width: fileListWidth }}>
                     {stagedFiles.length > 0 && (
                       <>
                         <div className="diff-file-section">Staged</div>
@@ -656,6 +688,11 @@ export default function ReviewBrowser({
                       </>
                     )}
                   </div>
+
+                  <div
+                    className={`divider ${isResizing ? 'active' : ''}`}
+                    onMouseDown={handleResizeMouseDown}
+                  />
 
                   <div className="diff-file-content">
                     {selectedUncommittedFile ? (

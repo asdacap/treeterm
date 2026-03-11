@@ -1,7 +1,9 @@
 import { DiffEditor, DiffOnMount } from '@monaco-editor/react'
 import { useRef, useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import type { editor } from 'monaco-editor'
 import type { ReviewComment } from '../types'
+import { CommentInput } from './CommentInput'
 
 interface MonacoDiffViewerProps {
   originalContent: string
@@ -17,6 +19,13 @@ interface MonacoDiffViewerProps {
   // Comments props
   comments?: ReviewComment[]
   onLineClick?: (lineNumber: number, side: 'original' | 'modified') => void
+  // Inline comment input
+  inlineCommentInput?: {
+    lineNumber: number
+    side: 'original' | 'modified'
+  } | null
+  onCommentSubmit?: (text: string) => void
+  onCommentCancel?: () => void
 }
 
 export function MonacoDiffViewer({
@@ -30,12 +39,17 @@ export function MonacoDiffViewer({
   hasPreviousFile = false,
   hasNextFile = false,
   comments = [],
-  onLineClick
+  onLineClick,
+  inlineCommentInput,
+  onCommentSubmit,
+  onCommentCancel
 }: MonacoDiffViewerProps): JSX.Element {
   const diffEditorRef = useRef<editor.IStandaloneDiffEditor | null>(null)
   const [lineChanges, setLineChanges] = useState<editor.ILineChange[] | null>(null)
   const [currentChangeIndex, setCurrentChangeIndex] = useState<number>(-1)
   const decorationsRef = useRef<{ original: string[]; modified: string[] }>({ original: [], modified: [] })
+  const viewZoneIdRef = useRef<string | null>(null)
+  const commentContainerRef = useRef<HTMLDivElement | null>(null)
 
   // Reset when content changes
   useEffect(() => {
@@ -221,6 +235,71 @@ export function MonacoDiffViewer({
     )
   }, [comments])
 
+  // Manage inline comment view zone
+  useEffect(() => {
+    if (!diffEditorRef.current) return
+
+    // Clear existing view zone if no inline comment input
+    if (!inlineCommentInput) {
+      if (viewZoneIdRef.current) {
+        const modifiedEditor = diffEditorRef.current.getModifiedEditor()
+        const originalEditor = diffEditorRef.current.getOriginalEditor()
+
+        modifiedEditor.changeViewZones((accessor) => {
+          if (viewZoneIdRef.current) {
+            accessor.removeZone(viewZoneIdRef.current)
+          }
+        })
+        originalEditor.changeViewZones((accessor) => {
+          if (viewZoneIdRef.current) {
+            accessor.removeZone(viewZoneIdRef.current)
+          }
+        })
+
+        viewZoneIdRef.current = null
+        commentContainerRef.current = null
+      }
+      return
+    }
+
+    const { lineNumber, side } = inlineCommentInput
+    const editor = side === 'modified'
+      ? diffEditorRef.current.getModifiedEditor()
+      : diffEditorRef.current.getOriginalEditor()
+
+    // Create DOM container for inline comment
+    const container = document.createElement('div')
+    container.className = 'inline-comment-zone'
+    commentContainerRef.current = container
+
+    editor.changeViewZones((accessor) => {
+      // Remove previous zone if exists
+      if (viewZoneIdRef.current) {
+        accessor.removeZone(viewZoneIdRef.current)
+      }
+
+      // Add new zone
+      viewZoneIdRef.current = accessor.addZone({
+        afterLineNumber: lineNumber,
+        heightInPx: 140,
+        domNode: container,
+        suppressMouseDown: true
+      })
+    })
+
+    return () => {
+      // Cleanup view zone on unmount or change
+      if (viewZoneIdRef.current && diffEditorRef.current) {
+        editor.changeViewZones((accessor) => {
+          if (viewZoneIdRef.current) {
+            accessor.removeZone(viewZoneIdRef.current)
+          }
+        })
+        viewZoneIdRef.current = null
+      }
+    }
+  }, [inlineCommentInput])
+
   useEffect(() => {
     return () => {
       if (diffEditorRef.current) {
@@ -284,6 +363,15 @@ export function MonacoDiffViewer({
           }}
         />
       </div>
+      {commentContainerRef.current && inlineCommentInput && onCommentSubmit && onCommentCancel && createPortal(
+        <CommentInput
+          lineNumber={inlineCommentInput.lineNumber}
+          side={inlineCommentInput.side}
+          onSubmit={onCommentSubmit}
+          onCancel={onCommentCancel}
+        />,
+        commentContainerRef.current
+      )}
     </div>
   )
 }

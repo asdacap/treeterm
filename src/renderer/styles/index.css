@@ -3066,6 +3066,16 @@ body,
   max-width: 600px;
 }
 
+/* Inline Comment Zone (Monaco View Zone) */
+.inline-comment-zone {
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  margin: 4px 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  padding: 12px;
+}
+
 .comment-input-container {
   padding: 16px;
 }
