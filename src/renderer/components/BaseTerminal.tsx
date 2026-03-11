@@ -149,10 +149,11 @@ export default function BaseTerminal({
       if (isMountedRef.current && fitAddonRef.current && terminalRef.current) {
         const term = terminalRef.current
 
-        // Save scroll position before fit to prevent scroll jumping
+        // Save scroll position as ratio before fit to prevent scroll jumping
         const prevViewportY = term.buffer.active.viewportY
         const prevBaseY = term.buffer.active.baseY
         const wasAtBottom = prevViewportY === prevBaseY
+        const scrollRatio = prevBaseY > 0 ? prevViewportY / prevBaseY : 0
 
         fitAddonRef.current.fit()
 
@@ -160,7 +161,9 @@ export default function BaseTerminal({
         if (wasAtBottom) {
           term.scrollToBottom()
         } else {
-          term.scrollToLine(prevViewportY)
+          // Use ratio to calculate new scroll position after buffer reflow
+          const newScrollLine = Math.round(term.buffer.active.baseY * scrollRatio)
+          term.scrollToLine(newScrollLine)
         }
 
         console.log(`[${config.logPrefix} ${tabId}] delayed fit terminal size:`, {
@@ -286,10 +289,11 @@ export default function BaseTerminal({
       const { width, height } = entry.contentRect
       if (width === 0 || height === 0) return
 
-      // Save scroll position before fit to prevent scroll jumping
+      // Save scroll position as ratio before fit to prevent scroll jumping
       const prevViewportY = terminal.buffer.active.viewportY
       const prevBaseY = terminal.buffer.active.baseY
       const wasAtBottom = prevViewportY === prevBaseY
+      const scrollRatio = prevBaseY > 0 ? prevViewportY / prevBaseY : 0
 
       fitAddon.fit()
 
@@ -297,14 +301,15 @@ export default function BaseTerminal({
       if (wasAtBottom) {
         terminal.scrollToBottom()
       } else {
-        // Restore to previous viewport position
-        terminal.scrollToLine(prevViewportY)
+        // Use ratio to calculate new scroll position after buffer reflow
+        const newScrollLine = Math.round(terminal.buffer.active.baseY * scrollRatio)
+        terminal.scrollToLine(newScrollLine)
       }
 
       console.log(`[${config.logPrefix} ${tabId}] resize detected:`, {
         containerSize: { width, height },
         terminalSize: { cols: terminal.cols, rows: terminal.rows },
-        scrollPreserved: { prevViewportY, wasAtBottom }
+        scrollPreserved: { prevViewportY, wasAtBottom, scrollRatio, newScrollLine: Math.round(terminal.buffer.active.baseY * scrollRatio) }
       })
       if (ptyIdRef.current) {
         window.electron.terminal.resize(ptyIdRef.current, terminal.cols, terminal.rows)
@@ -343,10 +348,11 @@ export default function BaseTerminal({
     if (isVisible && terminalRef.current && fitAddonRef.current) {
       const terminal = terminalRef.current
 
-      // Save scroll position before fit to prevent scroll jumping
+      // Save scroll position as ratio before fit to prevent scroll jumping
       const prevViewportY = terminal.buffer.active.viewportY
       const prevBaseY = terminal.buffer.active.baseY
       const wasAtBottom = prevViewportY === prevBaseY
+      const scrollRatio = prevBaseY > 0 ? prevViewportY / prevBaseY : 0
 
       // Re-fit and refresh the terminal when becoming visible
       fitAddonRef.current.fit()
@@ -356,7 +362,9 @@ export default function BaseTerminal({
       if (wasAtBottom) {
         terminal.scrollToBottom()
       } else {
-        terminal.scrollToLine(prevViewportY)
+        // Use ratio to calculate new scroll position after buffer reflow
+        const newScrollLine = Math.round(terminal.buffer.active.baseY * scrollRatio)
+        terminal.scrollToLine(newScrollLine)
       }
 
       // Focus the terminal so keyboard input works immediately
