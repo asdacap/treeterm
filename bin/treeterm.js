@@ -3,8 +3,8 @@
 const { spawn } = require('child_process')
 const path = require('path')
 const fs = require('fs')
-const net = require('net')
 const os = require('os')
+const grpc = require('@grpc/grpc-js')
 
 // Get the path to the electron executable
 const electronPath = require('electron')
@@ -20,96 +20,63 @@ function getDefaultSocketPath() {
   return path.join(os.tmpdir(), `treeterm-${uid}`, 'daemon.sock')
 }
 
-// Lightweight daemon client for CLI
+// Lightweight gRPC daemon client for CLI
 class CliDaemonClient {
   constructor(socketPath) {
     this.socketPath = socketPath
-    this.socket = null
-    this.buffer = ''
-    this.requestCounter = 0
+    this.client = null
+
+    // Load generated proto client
+    const { TreeTermDaemonClient } = require('../out/generated/treeterm')
+    this.TreeTermDaemonClient = TreeTermDaemonClient
   }
 
   async connect(timeout = 5000) {
     return new Promise((resolve, reject) => {
-      this.socket = net.createConnection(this.socketPath)
+      const socketUri = `unix://${this.socketPath}`
+      const credentials = grpc.credentials.createInsecure()
 
-      const timeoutId = setTimeout(() => {
-        this.socket.destroy()
-        reject(new Error('Connection timeout'))
-      }, timeout)
+      this.client = new this.TreeTermDaemonClient(socketUri, credentials)
 
-      this.socket.on('connect', () => {
-        clearTimeout(timeoutId)
-        resolve()
-      })
-
-      this.socket.on('error', (error) => {
-        clearTimeout(timeoutId)
-        reject(error)
+      this.client.waitForReady(Date.now() + timeout, (error) => {
+        if (error) {
+          reject(error)
+        } else {
+          resolve()
+        }
       })
     })
   }
 
   disconnect() {
-    if (this.socket) {
-      this.socket.destroy()
-      this.socket = null
+    if (this.client) {
+      this.client.close()
+      this.client = null
     }
   }
 
-  async sendMessage(message) {
+  async listSessions() {
     return new Promise((resolve, reject) => {
-      const requestId = `req-${++this.requestCounter}`
-      message.requestId = requestId
-
-      const timeout = setTimeout(() => {
-        reject(new Error('Request timeout'))
-      }, 10000)
-
-      let responseHandled = false
-
-      this.socket.on('data', (data) => {
-        this.buffer += data.toString()
-
-        // Process complete messages (newline-delimited)
-        while (true) {
-          const newlineIndex = this.buffer.indexOf('\n')
-          if (newlineIndex === -1) break
-
-          const line = this.buffer.slice(0, newlineIndex)
-          this.buffer = this.buffer.slice(newlineIndex + 1)
-
-          if (line.trim()) {
-            try {
-              const response = JSON.parse(line)
-              if (response.requestId === requestId && !responseHandled) {
-                clearTimeout(timeout)
-                responseHandled = true
-                if (response.type === 'error') {
-                  reject(new Error(response.error))
-                } else {
-                  resolve(response)
-                }
-              }
-            } catch (error) {
-              // Ignore parse errors for non-matching responses
-            }
-          }
+      this.client.listSessions({}, (error, response) => {
+        if (error) {
+          reject(error)
+        } else {
+          resolve(response.sessions || [])
         }
       })
-
-      const data = JSON.stringify(message) + '\n'
-      this.socket.write(data)
     })
   }
 
-  async listSessions() {
-    const response = await this.sendMessage({ type: 'listSessions' })
-    return response.payload || []
-  }
-
   async shutdownDaemon() {
-    await this.sendMessage({ type: 'shutdown' })
+    return new Promise((resolve, reject) => {
+      this.client.shutdown({}, (error) => {
+        if (error) {
+          reject(error)
+        } else {
+          resolve()
+        }
+      })
+    })
   }
 }
 

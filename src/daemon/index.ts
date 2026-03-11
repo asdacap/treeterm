@@ -77,24 +77,24 @@ async function main(): Promise<void> {
 
   // Dynamic imports after logger is initialized
   const { DaemonPtyManager } = await import('./ptyManager')
-  const { SocketServer } = await import('./socketServer')
+  const { GrpcServer } = await import('./grpcServer')
   const { SessionStore } = await import('./sessionStore')
 
   // Initialize components
   const ptyManager = new DaemonPtyManager(config.orphanTimeout, config.scrollbackLimit)
   const sessionStore = new SessionStore()
-  const socketServer = new SocketServer(config.socketPath, ptyManager, sessionStore)
+  const grpcServer = new GrpcServer(config.socketPath, ptyManager, sessionStore)
 
   // Load persisted sessions (future enhancement)
   // For now, we start fresh each time the daemon starts
   // Note: SessionStore is memory-only (not persisted to disk)
 
-  // Start socket server
+  // Start gRPC server
   try {
-    await socketServer.start()
+    await grpcServer.start()
     log.info('daemon is ready')
   } catch (error) {
-    log.fatal({ err: error }, 'failed to start socket server')
+    log.fatal({ err: error }, 'failed to start gRPC server')
     process.exit(1)
   }
 
@@ -107,7 +107,7 @@ async function main(): Promise<void> {
     log.info({ sessionCount: sessions.length }, 'active sessions')
 
     // Cleanup
-    socketServer.stop()
+    grpcServer.stop()
     ptyManager.shutdown()
     removePidFile()
 

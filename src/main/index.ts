@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import { execSync } from 'child_process'
 import { join } from 'path'
 import { ptyManager } from './pty'
-import { DaemonClient } from './daemonClient'
+import { GrpcDaemonClient } from './grpcClient'
 
 // Parse initial workspace from command line
 let initialWorkspacePath: string | null = null
@@ -50,7 +50,7 @@ import { registerSTTHandlers } from './stt'
 
 let mainWindow: BrowserWindow | null = null
 let closeConfirmed = false
-let daemonClient: DaemonClient | null = null
+let daemonClient: GrpcDaemonClient | null = null
 let useDaemon = false
 let attachedSessions: Set<string> = new Set()
 
@@ -541,7 +541,7 @@ app.whenReady().then(async () => {
 
   if (useDaemon) {
     console.log('[main] daemon mode enabled')
-    daemonClient = new DaemonClient()
+    daemonClient = new GrpcDaemonClient()
   } else {
     console.log('[main] legacy mode enabled (direct PTY)')
   }

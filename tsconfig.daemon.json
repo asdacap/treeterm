@@ -19,7 +19,8 @@
   "include": [
     "src/daemon/**/*.ts",
     "src/main/pty.ts",
-    "src/shared/**/*.ts"
+    "src/shared/**/*.ts",
+    "src/generated/**/*.ts"
   ],
   "exclude": [
     "**/*.test.ts",

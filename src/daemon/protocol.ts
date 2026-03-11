@@ -198,26 +198,5 @@ export interface DeleteSessionMessage extends DaemonMessage {
   payload: { sessionId: string }
 }
 
-export function serializeMessage(msg: DaemonMessage): string {
-  return JSON.stringify(msg) + '\n'
-}
-
-export function parseMessage(data: string): DaemonMessage {
-  const msg = JSON.parse(data) as DaemonMessage
-  if (!msg.type) {
-    throw new Error('Invalid message: missing type field')
-  }
-  return msg
-}
-
-export function serializeResponse(res: DaemonResponse): string {
-  return JSON.stringify(res) + '\n'
-}
-
-export function parseResponse(data: string): DaemonResponse {
-  const res = JSON.parse(data) as DaemonResponse
-  if (!res.type) {
-    throw new Error('Invalid response: missing type field')
-  }
-  return res
-}
+// NDJSON serialization functions removed - now using gRPC
+// Protocol types kept for backward compatibility with internal APIs

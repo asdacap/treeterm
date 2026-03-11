@@ -1,0 +1,221 @@
+syntax = "proto3";
+
+package treeterm;
+
+// ============================================
+// Common Types
+// ============================================
+
+message Empty {}
+
+message SandboxConfig {
+  bool enabled = 1;
+  bool allow_network = 2;
+  repeated string allowed_paths = 3;
+}
+
+message DaemonTab {
+  string id = 1;
+  string application_id = 2;
+  string title = 3;
+  bytes state = 4;  // JSON-encoded arbitrary state
+}
+
+message DaemonWorkspace {
+  string path = 1;
+  string name = 2;
+  optional string parent_path = 3;
+  string status = 4;  // 'active' | 'merged' | 'abandoned'
+  bool is_git_repo = 5;
+  optional string git_branch = 6;
+  optional string git_root_path = 7;
+  bool is_worktree = 8;
+  optional bool is_detached = 9;
+  repeated DaemonTab tabs = 10;
+  optional string active_tab_id = 11;
+  int64 created_at = 12;
+  int64 last_activity = 13;
+  int32 attached_clients = 14;
+}
+
+message DaemonSession {
+  string id = 1;
+  repeated DaemonWorkspace workspaces = 2;
+  int64 created_at = 3;
+  int64 last_activity = 4;
+  int32 attached_clients = 5;
+}
+
+message WorkspaceInput {
+  string path = 1;
+  string name = 2;
+  optional string parent_path = 3;
+  string status = 4;
+  bool is_git_repo = 5;
+  optional string git_branch = 6;
+  optional string git_root_path = 7;
+  bool is_worktree = 8;
+  optional bool is_detached = 9;
+  repeated DaemonTab tabs = 10;
+  optional string active_tab_id = 11;
+}
+
+message PtySessionInfo {
+  string id = 1;
+  string cwd = 2;
+  int32 cols = 3;
+  int32 rows = 4;
+  int64 created_at = 5;
+  int64 last_activity = 6;
+  int32 attached_clients = 7;
+}
+
+// ============================================
+// PTY Session Messages
+// ============================================
+
+message CreatePtyRequest {
+  string cwd = 1;
+  map<string, string> env = 2;
+  optional int32 cols = 3;
+  optional int32 rows = 4;
+  optional SandboxConfig sandbox = 5;
+  optional string startup_command = 6;
+}
+
+message CreatePtyResponse {
+  string session_id = 1;
+}
+
+message AttachPtyRequest {
+  string session_id = 1;
+}
+
+message AttachPtyResponse {
+  repeated string scrollback = 1;
+}
+
+message DetachPtyRequest {
+  string session_id = 1;
+}
+
+message ResizePtyRequest {
+  string session_id = 1;
+  int32 cols = 2;
+  int32 rows = 3;
+}
+
+message KillPtyRequest {
+  string session_id = 1;
+}
+
+message GetScrollbackRequest {
+  string session_id = 1;
+}
+
+message GetScrollbackResponse {
+  repeated string scrollback = 1;
+}
+
+message ListPtySessionsResponse {
+  repeated PtySessionInfo sessions = 1;
+}
+
+// ============================================
+// PTY Streaming Messages (Bidirectional)
+// ============================================
+
+message PtyInput {
+  oneof input {
+    PtyWriteData write = 1;
+    PtyResizeData resize = 2;
+    PtyDetachData detach = 3;
+  }
+}
+
+message PtyWriteData {
+  string session_id = 1;
+  bytes data = 2;  // Use bytes for terminal data (may contain non-UTF8)
+}
+
+message PtyResizeData {
+  string session_id = 1;
+  int32 cols = 2;
+  int32 rows = 3;
+}
+
+message PtyDetachData {
+  string session_id = 1;
+}
+
+message PtyOutput {
+  oneof output {
+    PtyData data = 1;
+    PtyExit exit = 2;
+  }
+}
+
+message PtyData {
+  string session_id = 1;
+  bytes data = 2;  // Terminal output data
+}
+
+message PtyExit {
+  string session_id = 1;
+  int32 exit_code = 2;
+  optional int32 signal = 3;
+}
+
+// ============================================
+// Workspace Session Messages
+// ============================================
+
+message CreateSessionRequest {
+  repeated WorkspaceInput workspaces = 1;
+}
+
+message UpdateSessionRequest {
+  string session_id = 1;
+  repeated WorkspaceInput workspaces = 2;
+}
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message DeleteSessionRequest {
+  string session_id = 1;
+}
+
+message ListSessionsResponse {
+  repeated DaemonSession sessions = 1;
+}
+
+// ============================================
+// Service Definition
+// ============================================
+
+service TreeTermDaemon {
+  // PTY Session Management (Unary RPCs)
+  rpc CreatePty(CreatePtyRequest) returns (CreatePtyResponse);
+  rpc AttachPty(AttachPtyRequest) returns (AttachPtyResponse);
+  rpc DetachPty(DetachPtyRequest) returns (Empty);
+  rpc ResizePty(ResizePtyRequest) returns (Empty);
+  rpc KillPty(KillPtyRequest) returns (Empty);
+  rpc ListPtySessions(Empty) returns (ListPtySessionsResponse);
+  rpc GetScrollback(GetScrollbackRequest) returns (GetScrollbackResponse);
+
+  // PTY Data Streaming (Bidirectional)
+  // Client sends input (write/resize), server sends output (data/exit)
+  rpc PtyStream(stream PtyInput) returns (stream PtyOutput);
+
+  // Workspace Session Management
+  rpc CreateSession(CreateSessionRequest) returns (DaemonSession);
+  rpc UpdateSession(UpdateSessionRequest) returns (DaemonSession);
+  rpc GetSession(GetSessionRequest) returns (DaemonSession);
+  rpc DeleteSession(DeleteSessionRequest) returns (Empty);
+  rpc ListSessions(Empty) returns (ListSessionsResponse);
+
+  // Daemon Control
+  rpc Shutdown(Empty) returns (Empty);
+}
