@@ -4,13 +4,15 @@
 
 import * as net from 'net'
 import * as fs from 'fs'
-import * as os from 'os'
 import * as path from 'path'
 import type { DaemonPtyManager } from './ptyManager'
 import type { SessionStore } from './sessionStore'
 import { createModuleLogger } from './logger'
+import { getDefaultSocketPath } from './socketPath'
 
 const log = createModuleLogger('socketServer')
+
+export { getDefaultSocketPath }
 import type {
   DaemonMessage,
   DaemonResponse,
@@ -365,9 +367,4 @@ export class SocketServer {
       this.sendResponse(client, response)
     }
   }
-}
-
-export function getDefaultSocketPath(): string {
-  const uid = process.getuid ? process.getuid() : os.userInfo().uid
-  return path.join(os.tmpdir(), `treeterm-${uid}`, 'daemon.sock')
 }

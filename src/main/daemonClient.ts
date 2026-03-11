@@ -18,7 +18,7 @@ import type {
   DaemonTab
 } from '../daemon/protocol'
 import { serializeMessage, parseResponse } from '../daemon/protocol'
-import { getDefaultSocketPath } from '../daemon/socketServer'
+import { getDefaultSocketPath } from '../daemon/socketPath'
 
 type ResponseHandler = (response: DaemonResponse) => void
 type DataListener = (data: string) => void

@@ -8,9 +8,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
-import { DaemonPtyManager } from './ptyManager'
-import { SocketServer, getDefaultSocketPath } from './socketServer'
-import { SessionStore } from './sessionStore'
+import { getDefaultSocketPath } from './socketPath'
 import { initLogger, createModuleLogger } from './logger'
 
 const DAEMON_PID_FILE = path.join(os.homedir(), '.treeterm', 'daemon.pid')
@@ -76,6 +74,11 @@ async function main(): Promise<void> {
 
   // Write PID file
   writePidFile(log)
+
+  // Dynamic imports after logger is initialized
+  const { DaemonPtyManager } = await import('./ptyManager')
+  const { SocketServer } = await import('./socketServer')
+  const { SessionStore } = await import('./sessionStore')
 
   // Initialize components
   const ptyManager = new DaemonPtyManager(config.orphanTimeout, config.scrollbackLimit)
