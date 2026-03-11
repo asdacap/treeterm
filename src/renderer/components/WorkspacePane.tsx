@@ -262,13 +262,6 @@ export default function WorkspacePane() {
                   >
                     Review & Merge
                   </button>
-                  <button
-                    className="workspace-action-btn workspace-action-btn-abandon"
-                    onClick={handleAbandon}
-                    title="Abandon: Discard changes and remove this workspace"
-                  >
-                    Abandon
-                  </button>
                 </>
               )}
             </div>

@@ -18,7 +18,7 @@ export default function ReviewBrowser({
   tabId,
   parentWorkspaceId
 }: ReviewBrowserProps) {
-  const { workspaces, mergeAndRemoveWorkspace, removeWorkspace, closeAndCleanWorkspace, removeTab } = useWorkspaceStore()
+  const { workspaces, mergeAndRemoveWorkspace, removeWorkspace, removeWorkspaceKeepBranch, closeAndCleanWorkspace, removeTab } = useWorkspaceStore()
   const workspace = workspaces[workspaceId]
   const parentWorkspace = workspaces[parentWorkspaceId]
 
@@ -240,6 +240,24 @@ export default function ReviewBrowser({
       // Tab will close automatically when workspace is removed
     } catch (err) {
       alert(`Abandon failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      setIsProcessing(false)
+      setProcessingAction(null)
+    }
+  }
+
+  const handleAbandonKeepBranch = async () => {
+    if (!confirm('Abandon this workspace but keep the branch? The worktree will be removed but the branch will be kept.')) {
+      return
+    }
+
+    setIsProcessing(true)
+    setProcessingAction('abandon')
+
+    try {
+      await removeWorkspaceKeepBranch(workspaceId)
+      // Tab will close automatically when workspace is removed
+    } catch (err) {
+      alert(`Abandon (Keep Branch) failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
       setIsProcessing(false)
       setProcessingAction(null)
     }
@@ -608,6 +626,14 @@ export default function ReviewBrowser({
               {processingAction === 'abandon' ? 'Abandoning...' : 'Abandon'}
             </button>
             <button
+              className="review-action-btn review-abandon-keep-branch-btn"
+              onClick={handleAbandonKeepBranch}
+              disabled={isProcessing}
+              title="Remove worktree but keep the branch"
+            >
+              {processingAction === 'abandon' ? 'Abandoning...' : 'Abandon (Keep Branch)'}
+            </button>
+            <button
               className="review-action-btn review-cancel-btn"
               onClick={handleCancel}
               disabled={isProcessing}
@@ -642,6 +668,14 @@ export default function ReviewBrowser({
               title="Discard all changes and remove this workspace"
             >
               {processingAction === 'abandon' ? 'Abandoning...' : 'Abandon'}
+            </button>
+            <button
+              className="review-action-btn review-abandon-keep-branch-btn"
+              onClick={handleAbandonKeepBranch}
+              disabled={isProcessing}
+              title="Remove worktree but keep the branch"
+            >
+              {processingAction === 'abandon' ? 'Abandoning...' : 'Abandon (Keep Branch)'}
             </button>
             <button
               className="review-action-btn review-cancel-btn"
