@@ -8,6 +8,9 @@ import * as os from 'os'
 import * as path from 'path'
 import type { DaemonPtyManager } from './ptyManager'
 import type { SessionStore } from './sessionStore'
+import { createModuleLogger } from './logger'
+
+const log = createModuleLogger('socketServer')
 import type {
   DaemonMessage,
   DaemonResponse,
@@ -53,7 +56,7 @@ export class SocketServer {
     return new Promise((resolve, reject) => {
       // Remove stale socket file if exists
       if (fs.existsSync(this.socketPath)) {
-        console.log(`[socketServer] removing stale socket at ${this.socketPath}`)
+        log.info({ socketPath: this.socketPath }, 'removing stale socket')
         fs.unlinkSync(this.socketPath)
       }
 
@@ -66,12 +69,12 @@ export class SocketServer {
       this.server = net.createServer((socket) => this.handleConnection(socket))
 
       this.server.on('error', (error) => {
-        console.error('[socketServer] server error:', error)
+        log.error({ err: error }, 'server error')
         reject(error)
       })
 
       this.server.listen(this.socketPath, () => {
-        console.log(`[socketServer] listening on ${this.socketPath}`)
+        log.info({ socketPath: this.socketPath }, 'server listening')
         // Set socket permissions (user-only)
         fs.chmodSync(this.socketPath, 0o600)
         resolve()
@@ -97,7 +100,7 @@ export class SocketServer {
   }
 
   stop(): void {
-    console.log('[socketServer] stopping server')
+    log.info('stopping server')
 
     // Close all client connections
     for (const [clientId, client] of this.clients) {
@@ -126,7 +129,7 @@ export class SocketServer {
     }
 
     this.clients.set(clientId, client)
-    console.log(`[socketServer] client ${clientId} connected`)
+    log.info({ clientId }, 'client connected')
 
     socket.on('data', (data) => {
       client.buffer += data.toString()
@@ -134,11 +137,11 @@ export class SocketServer {
     })
 
     socket.on('error', (error) => {
-      console.error(`[socketServer] client ${clientId} error:`, error)
+      log.error({ clientId, err: error }, 'client socket error')
     })
 
     socket.on('close', () => {
-      console.log(`[socketServer] client ${clientId} disconnected`)
+      log.info({ clientId }, 'client disconnected')
       // Detach client from all PTY sessions
       const sessions = this.ptyManager.listSessions()
       for (const session of sessions) {
@@ -171,9 +174,10 @@ export class SocketServer {
       this.sendResponse(client, response)
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-      console.error(`[socketServer] error processing message:`, errorMessage)
-      console.error(`[socketServer] invalid message data (first 200 chars):`, data.slice(0, 200))
-      console.error(`[socketServer] invalid message length:`, data.length)
+      log.error(
+        { err: error, dataLength: data.length, dataPreview: data.slice(0, 200) },
+        'error processing message'
+      )
       this.sendResponse(client, {
         type: 'error',
         error: errorMessage
@@ -244,10 +248,7 @@ export class SocketServer {
 
       case 'list': {
         const sessions = this.ptyManager.listSessions()
-        console.log(`[socketServer] list request - found ${sessions.length} sessions:`)
-        sessions.forEach((session) => {
-          console.log(`  - ${session.id}: worktree=${session.cwd}, clients=${session.attachedClients}`)
-        })
+        log.debug({ sessionCount: sessions.length }, 'list request processed')
         return {
           type: 'success',
           payload: sessions,
@@ -267,10 +268,10 @@ export class SocketServer {
       }
 
       case 'shutdown': {
-        console.log('[socketServer] shutdown requested')
+        log.info('shutdown requested via socket')
         // Schedule shutdown after sending response
         setTimeout(() => {
-          console.log('[socketServer] initiating shutdown')
+          log.info('initiating shutdown')
           this.stop()
           this.ptyManager.shutdown()
           process.exit(0)
@@ -310,7 +311,7 @@ export class SocketServer {
 
       case 'listSessions': {
         const sessions = this.sessionStore.listSessions()
-        console.log(`[socketServer] listSessions - found ${sessions.length} session(s)`)
+        log.debug({ count: sessions.length }, 'listSessions processed')
         return {
           type: 'success',
           payload: sessions,
@@ -347,7 +348,7 @@ export class SocketServer {
       const data = serializeResponse(response)
       client.socket.write(data)
     } catch (error) {
-      console.error('[socketServer] failed to send response:', error)
+      log.error({ err: error, clientId: client.id }, 'failed to send response')
     }
   }
 

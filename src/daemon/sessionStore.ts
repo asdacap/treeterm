@@ -4,6 +4,9 @@
  */
 
 import type { DaemonSession, DaemonWorkspace } from './protocol'
+import { createModuleLogger } from './logger'
+
+const log = createModuleLogger('sessionStore')
 
 function generateSessionId(): string {
   return `session-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -46,7 +49,7 @@ export class SessionStore {
     this.sessions.set(sessionId, session)
     this.attachClient(clientId, sessionId)
 
-    console.log(`[sessionStore] created session: ${sessionId} with ${workspaces.length} workspace(s)`)
+    log.info({ sessionId, workspaceCount: workspaces.length }, 'session created')
     return session
   }
 
@@ -88,7 +91,7 @@ export class SessionStore {
     this.sessions.set(sessionId, updated)
     this.attachClient(clientId, sessionId)
 
-    console.log(`[sessionStore] updated session: ${sessionId} with ${workspaces.length} workspace(s)`)
+    log.info({ sessionId, workspaceCount: workspaces.length }, 'session updated')
     return updated
   }
 
@@ -112,7 +115,7 @@ export class SessionStore {
   deleteSession(sessionId: string): boolean {
     const existed = this.sessions.delete(sessionId)
     if (existed) {
-      console.log(`[sessionStore] deleted session: ${sessionId}`)
+      log.info({ sessionId }, 'session deleted')
     }
     return existed
   }
@@ -141,7 +144,7 @@ export class SessionStore {
   detachClient(clientId: string): void {
     const sessionIds = this.clientAttachments.get(clientId)
     if (!sessionIds) {
-      console.log(`[sessionStore] detachClient: client ${clientId} has no attachments`)
+      log.debug({ clientId }, 'detachClient: no attachments')
       return
     }
 
@@ -150,11 +153,14 @@ export class SessionStore {
       if (session && session.attachedClients > 0) {
         session.attachedClients--
         session.lastActivity = Date.now()
-        console.log(`[sessionStore] detached client from ${sessionId}, clients remaining: ${session.attachedClients}`)
+        log.debug(
+          { sessionId, clientsRemaining: session.attachedClients },
+          'client detached from session'
+        )
       }
     }
 
     this.clientAttachments.delete(clientId)
-    console.log(`[sessionStore] client ${clientId} detached from ${sessionIds.size} session(s)`)
+    log.info({ clientId, sessionCount: sessionIds.size }, 'client detached from all sessions')
   }
 }

@@ -11,6 +11,7 @@ import * as os from 'os'
 import { DaemonPtyManager } from './ptyManager'
 import { SocketServer, getDefaultSocketPath } from './socketServer'
 import { SessionStore } from './sessionStore'
+import { initLogger, createModuleLogger } from './logger'
 
 const DAEMON_PID_FILE = path.join(os.homedir(), '.treeterm', 'daemon.pid')
 const DAEMON_LOG_FILE = path.join(os.homedir(), '.treeterm', 'daemon.log')
@@ -20,6 +21,8 @@ interface DaemonConfig {
   orphanTimeout: number // minutes
   scrollbackLimit: number
   logFile: string
+  logLevel: string
+  logPretty: boolean
 }
 
 function getConfig(): DaemonConfig {
@@ -27,51 +30,20 @@ function getConfig(): DaemonConfig {
     socketPath: process.env.TREETERM_SOCKET_PATH || getDefaultSocketPath(),
     orphanTimeout: parseInt(process.env.TREETERM_ORPHAN_TIMEOUT || '0', 10),
     scrollbackLimit: parseInt(process.env.TREETERM_SCROLLBACK_LIMIT || '50000', 10),
-    logFile: process.env.TREETERM_LOG_FILE || DAEMON_LOG_FILE
+    logFile: process.env.TREETERM_LOG_FILE || DAEMON_LOG_FILE,
+    logLevel: process.env.TREETERM_LOG_LEVEL || 'info',
+    logPretty: process.env.TREETERM_LOG_PRETTY === '1'
   }
 }
 
-function setupLogging(logFile: string): void {
-  const logDir = path.dirname(logFile)
-  if (!fs.existsSync(logDir)) {
-    fs.mkdirSync(logDir, { recursive: true })
-  }
 
-  const logStream = fs.createWriteStream(logFile, { flags: 'a' })
-
-  // Redirect stdout/stderr to log file
-  process.stdout.write = (
-    chunk: string | Uint8Array,
-    _encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
-    _cb?: (err?: Error | null) => void
-  ): boolean => {
-    const timestamp = new Date().toISOString()
-    const text = typeof chunk === 'string' ? chunk : chunk.toString()
-    logStream.write(`[${timestamp}] ${text}`)
-    return true
-  }
-
-  process.stderr.write = (
-    chunk: string | Uint8Array,
-    _encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
-    _cb?: (err?: Error | null) => void
-  ): boolean => {
-    const timestamp = new Date().toISOString()
-    const text = typeof chunk === 'string' ? chunk : chunk.toString()
-    logStream.write(`[${timestamp}] ERROR: ${text}`)
-    return true
-  }
-
-  console.log('[daemon] logging to', logFile)
-}
-
-function writePidFile(): void {
+function writePidFile(log: ReturnType<typeof createModuleLogger>): void {
   const pidDir = path.dirname(DAEMON_PID_FILE)
   if (!fs.existsSync(pidDir)) {
     fs.mkdirSync(pidDir, { recursive: true })
   }
   fs.writeFileSync(DAEMON_PID_FILE, process.pid.toString(), 'utf-8')
-  console.log('[daemon] PID', process.pid, 'written to', DAEMON_PID_FILE)
+  log.info({ pid: process.pid, pidFile: DAEMON_PID_FILE }, 'PID file written')
 }
 
 function removePidFile(): void {
@@ -83,20 +55,27 @@ function removePidFile(): void {
 async function main(): Promise<void> {
   const config = getConfig()
 
-  // Setup logging first to ensure all output goes to log file
-  setupLogging(config.logFile)
+  // Initialize logging first
+  initLogger({
+    logFile: config.logFile,
+    level: config.logLevel,
+    pretty: config.logPretty
+  })
 
-  console.log('========================================')
-  console.log('TreeTerm Daemon Starting')
-  console.log('========================================')
-  console.log('Socket path:', config.socketPath)
-  console.log('Orphan timeout:', config.orphanTimeout, 'minutes')
-  console.log('Scrollback limit:', config.scrollbackLimit, 'lines')
-  console.log('Log file:', config.logFile)
-  console.log('========================================')
+  const log = createModuleLogger('daemon')
+
+  log.info('========================================')
+  log.info('TreeTerm Daemon Starting')
+  log.info('========================================')
+  log.info({ socketPath: config.socketPath }, 'socket path')
+  log.info({ orphanTimeout: config.orphanTimeout }, 'orphan timeout (minutes)')
+  log.info({ scrollbackLimit: config.scrollbackLimit }, 'scrollback limit (lines)')
+  log.info({ logFile: config.logFile }, 'log file')
+  log.info({ logLevel: config.logLevel }, 'log level')
+  log.info('========================================')
 
   // Write PID file
-  writePidFile()
+  writePidFile(log)
 
   // Initialize components
   const ptyManager = new DaemonPtyManager(config.orphanTimeout, config.scrollbackLimit)
@@ -110,26 +89,26 @@ async function main(): Promise<void> {
   // Start socket server
   try {
     await socketServer.start()
-    console.log('[daemon] daemon is ready')
+    log.info('daemon is ready')
   } catch (error) {
-    console.error('[daemon] failed to start socket server:', error)
+    log.fatal({ err: error }, 'failed to start socket server')
     process.exit(1)
   }
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
-    console.log(`[daemon] received ${signal}, shutting down...`)
+    log.info({ signal }, 'shutdown signal received')
 
     // Save sessions before shutdown (future enhancement)
     const sessions = ptyManager.listSessions()
-    console.log(`[daemon] ${sessions.length} active sessions`)
+    log.info({ sessionCount: sessions.length }, 'active sessions')
 
     // Cleanup
     socketServer.stop()
     ptyManager.shutdown()
     removePidFile()
 
-    console.log('[daemon] shutdown complete')
+    log.info('shutdown complete')
     process.exit(0)
   }
 
@@ -138,12 +117,12 @@ async function main(): Promise<void> {
 
   // Keep alive
   process.on('uncaughtException', (error) => {
-    console.error('[daemon] uncaught exception:', error)
-    shutdown('uncaughtException').catch(console.error)
+    log.fatal({ err: error }, 'uncaught exception')
+    shutdown('uncaughtException').catch((err) => log.error({ err }, 'error during shutdown'))
   })
 
   process.on('unhandledRejection', (reason) => {
-    console.error('[daemon] unhandled rejection:', reason)
+    log.error({ reason }, 'unhandled rejection')
   })
 }
 
@@ -163,7 +142,14 @@ if (fs.existsSync(DAEMON_PID_FILE)) {
 
 // Start daemon
 main().catch((error) => {
-  console.error('[daemon] fatal error:', error)
+  // Logger might not be initialized yet, so use console.error as fallback
+  try {
+    const log = createModuleLogger('daemon')
+    log.fatal({ err: error }, 'fatal error during startup')
+  } catch {
+    // Logger not initialized, use console.error
+    console.error('[daemon] fatal error:', error)
+  }
   removePidFile()
   process.exit(1)
 })

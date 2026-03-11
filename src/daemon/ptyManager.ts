@@ -10,6 +10,9 @@ import * as fs from 'fs'
 import { execSync } from 'child_process'
 import type { CreateSessionConfig, SessionInfo } from './protocol'
 import type { SandboxConfig } from '../main/pty'
+import { createModuleLogger } from './logger'
+
+const log = createModuleLogger('ptyManager')
 
 export interface PtySession {
   id: string
@@ -34,7 +37,7 @@ function isBwrapAvailable(): boolean {
     execSync('which bwrap', { stdio: 'ignore' })
     return true
   } catch (error) {
-    console.log('[daemon] bwrap check failed:', error)
+    log.debug({ err: error }, 'bwrap check failed')
     return false
   }
 }
@@ -201,11 +204,11 @@ export class DaemonPtyManager {
         env.TREETERM_SANDBOXED = '1'
         env.PS1 = '[SANDBOX] ' + (env.PS1 || '\\$ ')
       } else {
-        console.warn('[daemon] bwrap not found, sandbox not available')
+        log.warn('bwrap not found, sandbox not available')
         shell = process.env.SHELL || '/bin/bash'
       }
     } else if (isSandboxed) {
-      console.warn('[daemon] sandbox not available on this platform')
+      log.warn({ platform: process.platform }, 'sandbox not available on this platform')
       shell = process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/zsh'
     } else {
       shell = process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/zsh'
@@ -242,8 +245,7 @@ export class DaemonPtyManager {
 
     ptyProcess.onExit(({ exitCode, signal }) => {
       this.broadcastExit(id, exitCode, signal)
-      console.log(`[daemon] session ${id} exited with code ${exitCode} (worktree: ${cwd})`)
-      console.log(`[daemon] worktree removed: ${cwd} <- session ${id}`)
+      log.info({ sessionId: id, exitCode, signal, cwd }, 'session exited')
       this.sessions.delete(id)
     })
 
@@ -256,8 +258,7 @@ export class DaemonPtyManager {
       }, 100)
     }
 
-    console.log(`[daemon] created session ${id} (cwd: ${cwd}, sandbox: ${isSandboxed})`)
-    console.log(`[daemon] worktree added: ${cwd} -> session ${id}`)
+    log.info({ sessionId: id, cwd, sandbox: isSandboxed }, 'session created')
     return id
   }
 
@@ -270,8 +271,9 @@ export class DaemonPtyManager {
     session.attachedClients.add(clientId)
     session.lastActivity = Date.now()
 
-    console.log(
-      `[daemon] client ${clientId} attached to session ${sessionId} (${session.attachedClients.size} clients)`
+    log.info(
+      { clientId, sessionId, clientCount: session.attachedClients.size },
+      'client attached to session'
     )
 
     return {
@@ -283,13 +285,14 @@ export class DaemonPtyManager {
   detach(sessionId: string, clientId: string): void {
     const session = this.sessions.get(sessionId)
     if (!session) {
-      console.warn(`[daemon] detach: session ${sessionId} not found`)
+      log.warn({ sessionId }, 'detach: session not found')
       return
     }
 
     session.attachedClients.delete(clientId)
-    console.log(
-      `[daemon] client ${clientId} detached from session ${sessionId} (${session.attachedClients.size} clients remaining)`
+    log.info(
+      { clientId, sessionId, clientsRemaining: session.attachedClients.size },
+      'client detached from session'
     )
   }
 
@@ -318,22 +321,18 @@ export class DaemonPtyManager {
   kill(sessionId: string): void {
     const session = this.sessions.get(sessionId)
     if (!session) {
-      console.warn(`[daemon] kill: session ${sessionId} not found`)
+      log.warn({ sessionId }, 'kill: session not found')
       return
     }
 
-    console.log(`[daemon] killing session ${sessionId} (worktree: ${session.cwd})`)
-    console.log(`[daemon] worktree removed: ${session.cwd} <- session ${sessionId}`)
+    log.info({ sessionId, cwd: session.cwd }, 'killing session')
     session.pty.kill()
     this.sessions.delete(sessionId)
   }
 
   listSessions(): SessionInfo[] {
     const sessions = Array.from(this.sessions.values()).map((session) => this.getSessionInfo(session))
-    console.log(`[daemon] listSessions called - returning ${sessions.length} sessions`)
-    sessions.forEach((session) => {
-      console.log(`  - ${session.id}: worktree=${session.cwd}`)
-    })
+    log.debug({ count: sessions.length }, 'listSessions called')
     return sessions
   }
 
@@ -408,8 +407,9 @@ export class DaemonPtyManager {
       const idleTime = now - session.lastActivity
 
       if (isOrphan && idleTime > timeoutMs) {
-        console.log(
-          `[daemon] cleaning up orphaned session ${id} (idle for ${Math.round(idleTime / 1000)}s)`
+        log.info(
+          { sessionId: id, idleSeconds: Math.round(idleTime / 1000) },
+          'cleaning up orphaned session'
         )
         this.kill(id)
       }
@@ -417,7 +417,7 @@ export class DaemonPtyManager {
   }
 
   shutdown(): void {
-    console.log('[daemon] shutting down PTY manager')
+    log.info('shutting down PTY manager')
     if (this.orphanCleanupInterval) {
       clearInterval(this.orphanCleanupInterval)
     }
