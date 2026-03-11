@@ -2,7 +2,6 @@ import { create } from 'zustand'
 import type { Workspace, GitInfo, Tab, DaemonWorkspace } from '../types'
 import { applicationRegistry } from '../registry/applicationRegistry'
 import { useSettingsStore } from '../store/settings'
-import { claudeApplication } from '../../applications/claude/renderer'
 
 interface WorkspaceState {
   workspaces: Record<string, Workspace>
@@ -171,11 +170,6 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         if (!options?.skipDefaultTabs) {
           const defaultApps = applicationRegistry.getDefaultApps()
 
-          // Check if Claude should be started by default
-          const { settings } = useSettingsStore.getState()
-          if (settings.claude.startByDefault && !defaultApps.some(app => app.id === 'claude')) {
-            defaultApps.push(claudeApplication)
-          }
 
           for (const app of defaultApps) {
             const tabId = generateTabId()
@@ -268,11 +262,6 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
         const defaultApps = applicationRegistry.getDefaultApps()
 
-        // Check if Claude should be started by default
-        const { settings } = useSettingsStore.getState()
-        if (settings.claude.startByDefault && !defaultApps.some(app => app.id === 'claude')) {
-          defaultApps.push(claudeApplication)
-        }
 
         for (const app of defaultApps) {
           const tabId = generateTabId()
@@ -353,11 +342,6 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
         const defaultApps = applicationRegistry.getDefaultApps()
 
-        // Check if Claude should be started by default
-        const { settings } = useSettingsStore.getState()
-        if (settings.claude.startByDefault && !defaultApps.some(app => app.id === 'claude')) {
-          defaultApps.push(claudeApplication)
-        }
 
         for (const app of defaultApps) {
           const tabId = generateTabId()
@@ -452,10 +436,6 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
         const defaultApps = applicationRegistry.getDefaultApps()
 
-        const { settings } = useSettingsStore.getState()
-        if (settings.claude.startByDefault && !defaultApps.some(app => app.id === 'claude')) {
-          defaultApps.push(claudeApplication)
-        }
 
         for (const app of defaultApps) {
           const tabId = generateTabId()
@@ -550,10 +530,6 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
         const defaultApps = applicationRegistry.getDefaultApps()
 
-        const { settings } = useSettingsStore.getState()
-        if (settings.claude.startByDefault && !defaultApps.some(app => app.id === 'claude')) {
-          defaultApps.push(claudeApplication)
-        }
 
         for (const app of defaultApps) {
           const tabId = generateTabId()

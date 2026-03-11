@@ -1,14 +1,10 @@
 import { app } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
-import type { Settings, TerminalInstance, PrefixModeConfig, STTProvider } from '../shared/types'
+import type { Settings, TerminalInstance, AiHarnessInstance, PrefixModeConfig, STTProvider } from '../shared/types'
 
 // Re-export for backward compatibility
-export type { Settings, TerminalInstance, PrefixModeConfig, STTProvider }
-
-function getDefaultClaudeCommand(): string {
-  return process.platform === 'darwin' ? 'claude' : 'npx @anthropic-ai/claude-code'
-}
+export type { Settings, TerminalInstance, AiHarnessInstance, PrefixModeConfig, STTProvider }
 
 const defaultSettings: Settings = {
   terminal: {
@@ -24,10 +20,17 @@ const defaultSettings: Settings = {
     enabledByDefault: false,
     allowNetworkByDefault: true
   },
-  claude: {
-    command: getDefaultClaudeCommand(),
-    startByDefault: false,
-    enableSandbox: false
+  aiHarness: {
+    instances: [{
+      id: 'claude',
+      name: 'Claude',
+      icon: '✦',
+      command: process.platform === 'darwin' ? 'claude' : 'npx @anthropic-ai/claude-code',
+      isDefault: false,
+      enableSandbox: false,
+      allowNetwork: true,
+      backgroundColor: '#1a1a24'
+    }]
   },
   appearance: {
     theme: 'dark'
@@ -162,6 +165,22 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
       }))
   }
 
+  // Migrate AI Harness instances from old claude settings
+  let aiHarnessInstances: AiHarnessInstance[] = loaded.aiHarness?.instances || []
+  const oldClaude = (loaded as { claude?: { command?: string; startByDefault?: boolean; enableSandbox?: boolean } }).claude
+  if (oldClaude && aiHarnessInstances.length === 0) {
+    aiHarnessInstances = [{
+      id: 'claude',
+      name: 'Claude',
+      icon: '✦',
+      command: oldClaude.command || (process.platform === 'darwin' ? 'claude' : 'npx @anthropic-ai/claude-code'),
+      isDefault: oldClaude.startByDefault || false,
+      enableSandbox: oldClaude.enableSandbox || false,
+      allowNetwork: true,
+      backgroundColor: '#1a1a24'
+    }]
+  }
+
   return {
     terminal: {
       ...defaults.terminal,
@@ -172,9 +191,8 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
       ...defaults.sandbox,
       ...loaded.sandbox
     },
-    claude: {
-      ...defaults.claude,
-      ...loaded.claude
+    aiHarness: {
+      instances: aiHarnessInstances
     },
     appearance: {
       ...defaults.appearance,

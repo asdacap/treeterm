@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { Settings } from '../types'
-import { registerTerminalVariants } from '../../applications'
+import { registerTerminalVariants, registerAiHarnessVariants } from '../../applications'
 
 const defaultSettings: Settings = {
   terminal: {
@@ -16,10 +16,17 @@ const defaultSettings: Settings = {
     enabledByDefault: false,
     allowNetworkByDefault: true
   },
-  claude: {
-    command: 'claude',
-    startByDefault: false,
-    enableSandbox: false
+  aiHarness: {
+    instances: [{
+      id: 'claude',
+      name: 'Claude',
+      icon: '✦',
+      command: 'claude',
+      isDefault: false,
+      enableSandbox: false,
+      allowNetwork: true,
+      backgroundColor: '#1a1a24'
+    }]
   },
   appearance: {
     theme: 'dark'
@@ -75,6 +82,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set({ settings, isLoaded: true })
       // Register dynamic terminal variants and update base terminal
       registerTerminalVariants(settings.terminal.instances, settings.terminal)
+      // Register dynamic AI Harness variants
+      registerAiHarnessVariants(settings.aiHarness.instances)
     } catch (error) {
       console.error('Failed to load settings:', error)
       set({ isLoaded: true })
@@ -87,6 +96,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set({ settings })
       // Re-register terminal variants and update base terminal when settings change
       registerTerminalVariants(settings.terminal.instances, settings.terminal)
+      // Re-register AI Harness variants when settings change
+      registerAiHarnessVariants(settings.aiHarness.instances)
     } catch (error) {
       console.error('Failed to save settings:', error)
       throw error
