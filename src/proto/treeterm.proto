@@ -192,6 +192,340 @@ message ListSessionsResponse {
 }
 
 // ============================================
+// Git Messages
+// ============================================
+
+message GitInfoRequest {
+  string dir_path = 1;
+}
+
+message GitInfoResponse {
+  bool is_repo = 1;
+  optional string branch = 2;
+  optional string root_path = 3;
+}
+
+message CreateWorktreeRequest {
+  string repo_path = 1;
+  string worktree_name = 2;
+  optional string base_branch = 3;
+}
+
+message CreateWorktreeResponse {
+  bool success = 1;
+  optional string path = 2;
+  optional string branch = 3;
+  optional string error = 4;
+}
+
+message RemoveWorktreeRequest {
+  string repo_path = 1;
+  string worktree_path = 2;
+  bool delete_branch = 3;
+}
+
+message WorktreeInfo {
+  string path = 1;
+  string branch = 2;
+}
+
+message ListWorktreesRequest {
+  string repo_path = 1;
+}
+
+message ListWorktreesResponse {
+  repeated WorktreeInfo worktrees = 1;
+}
+
+message GetChildWorktreesRequest {
+  string repo_path = 1;
+  optional string parent_branch = 2;
+}
+
+message ChildWorktreeInfo {
+  string path = 1;
+  string branch = 2;
+  string display_name = 3;
+}
+
+message GetChildWorktreesResponse {
+  repeated ChildWorktreeInfo worktrees = 1;
+}
+
+message DiffFile {
+  string path = 1;
+  string status = 2;  // 'added' | 'modified' | 'deleted' | 'renamed'
+  int32 additions = 3;
+  int32 deletions = 4;
+}
+
+message DiffResult {
+  repeated DiffFile files = 1;
+  int32 total_additions = 2;
+  int32 total_deletions = 3;
+  string base_branch = 4;
+  string head_branch = 5;
+}
+
+message GetDiffRequest {
+  string worktree_path = 1;
+  string parent_branch = 2;
+}
+
+message GetDiffResponse {
+  bool success = 1;
+  optional DiffResult diff = 2;
+  optional string error = 3;
+}
+
+message GetFileDiffRequest {
+  string worktree_path = 1;
+  string parent_branch = 2;
+  string file_path = 3;
+}
+
+message GetFileDiffResponse {
+  bool success = 1;
+  optional string diff = 2;
+  optional string error = 3;
+}
+
+message MergeWorktreeRequest {
+  string main_repo_path = 1;
+  string worktree_branch = 2;
+  string target_branch = 3;
+  bool squash = 4;
+}
+
+message MergeWorktreeResponse {
+  bool success = 1;
+  optional string error = 2;
+}
+
+message HasUncommittedChangesRequest {
+  string repo_path = 1;
+}
+
+message HasUncommittedChangesResponse {
+  bool has_changes = 1;
+}
+
+message CommitAllRequest {
+  string repo_path = 1;
+  string message = 2;
+}
+
+message CommitAllResponse {
+  bool success = 1;
+  optional string error = 2;
+}
+
+message DeleteBranchRequest {
+  string repo_path = 1;
+  string branch_name = 2;
+}
+
+message DeleteBranchResponse {
+  bool success = 1;
+  optional string error = 2;
+}
+
+message UncommittedFile {
+  string path = 1;
+  string status = 2;  // 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked'
+  bool staged = 3;
+  int32 additions = 4;
+  int32 deletions = 5;
+}
+
+message UncommittedChanges {
+  repeated UncommittedFile files = 1;
+  int32 total_additions = 2;
+  int32 total_deletions = 3;
+}
+
+message GetUncommittedChangesRequest {
+  string repo_path = 1;
+}
+
+message GetUncommittedChangesResponse {
+  bool success = 1;
+  optional UncommittedChanges changes = 2;
+  optional string error = 3;
+}
+
+message GetUncommittedFileDiffRequest {
+  string repo_path = 1;
+  string file_path = 2;
+  bool staged = 3;
+}
+
+message StageFileRequest {
+  string repo_path = 1;
+  string file_path = 2;
+}
+
+message StageFileResponse {
+  bool success = 1;
+  optional string error = 2;
+}
+
+message StageAllRequest {
+  string repo_path = 1;
+}
+
+message StageAllResponse {
+  bool success = 1;
+  optional string error = 2;
+}
+
+message CommitStagedRequest {
+  string repo_path = 1;
+  string message = 2;
+}
+
+message CommitStagedResponse {
+  bool success = 1;
+  optional string error = 2;
+}
+
+message ConflictInfo {
+  bool has_conflicts = 1;
+  repeated string conflicted_files = 2;
+  repeated string messages = 3;
+}
+
+message CheckMergeConflictsRequest {
+  string repo_path = 1;
+  string source_branch = 2;
+  string target_branch = 3;
+}
+
+message CheckMergeConflictsResponse {
+  bool success = 1;
+  optional ConflictInfo conflicts = 2;
+  optional string error = 3;
+}
+
+message FileDiffContents {
+  string original_content = 1;
+  string modified_content = 2;
+  string language = 3;
+}
+
+message GetFileContentsForDiffRequest {
+  string worktree_path = 1;
+  string parent_branch = 2;
+  string file_path = 3;
+}
+
+message GetFileContentsForDiffResponse {
+  bool success = 1;
+  optional FileDiffContents contents = 2;
+  optional string error = 3;
+}
+
+message GetUncommittedFileContentsForDiffRequest {
+  string repo_path = 1;
+  string file_path = 2;
+  bool staged = 3;
+}
+
+message ListLocalBranchesRequest {
+  string repo_path = 1;
+}
+
+message ListLocalBranchesResponse {
+  repeated string branches = 1;
+}
+
+message ListRemoteBranchesRequest {
+  string repo_path = 1;
+}
+
+message ListRemoteBranchesResponse {
+  repeated string branches = 1;
+}
+
+message GetBranchesInWorktreesRequest {
+  string repo_path = 1;
+}
+
+message GetBranchesInWorktreesResponse {
+  repeated string branches = 1;
+}
+
+message CreateWorktreeFromBranchRequest {
+  string repo_path = 1;
+  string branch = 2;
+  string worktree_name = 3;
+}
+
+message CreateWorktreeFromRemoteRequest {
+  string repo_path = 1;
+  string remote_branch = 2;
+  string worktree_name = 3;
+}
+
+// ============================================
+// Filesystem Messages
+// ============================================
+
+message FileEntry {
+  string name = 1;
+  string path = 2;
+  string relative_path = 3;
+  bool is_directory = 4;
+  optional int64 size = 5;
+  optional double modified_time = 6;
+}
+
+message DirectoryContents {
+  string path = 1;
+  repeated FileEntry entries = 2;
+}
+
+message ReadDirectoryRequest {
+  string workspace_path = 1;
+  string dir_path = 2;
+}
+
+message ReadDirectoryResponse {
+  bool success = 1;
+  optional DirectoryContents contents = 2;
+  optional string error = 3;
+}
+
+message FileContents {
+  string path = 1;
+  string content = 2;
+  int64 size = 3;
+  string language = 4;
+}
+
+message ReadFileRequest {
+  string workspace_path = 1;
+  string file_path = 2;
+}
+
+message ReadFileResponse {
+  bool success = 1;
+  optional FileContents file = 2;
+  optional string error = 3;
+}
+
+message WriteFileRequest {
+  string workspace_path = 1;
+  string file_path = 2;
+  string content = 3;
+}
+
+message WriteFileResponse {
+  bool success = 1;
+  optional string error = 2;
+}
+
+// ============================================
 // Service Definition
 // ============================================
 
@@ -218,4 +552,40 @@ service TreeTermDaemon {
 
   // Daemon Control
   rpc Shutdown(Empty) returns (Empty);
+
+  // Git Operations
+  rpc GetGitInfo(GitInfoRequest) returns (GitInfoResponse);
+  rpc CreateWorktree(CreateWorktreeRequest) returns (CreateWorktreeResponse);
+  rpc RemoveWorktree(RemoveWorktreeRequest) returns (MergeWorktreeResponse);
+  rpc ListWorktrees(ListWorktreesRequest) returns (ListWorktreesResponse);
+  rpc GetChildWorktrees(GetChildWorktreesRequest) returns (GetChildWorktreesResponse);
+  rpc GetDiff(GetDiffRequest) returns (GetDiffResponse);
+  rpc GetFileDiff(GetFileDiffRequest) returns (GetFileDiffResponse);
+  rpc GetDiffAgainstHead(GetDiffRequest) returns (GetDiffResponse);
+  rpc GetFileDiffAgainstHead(GetFileDiffRequest) returns (GetFileDiffResponse);
+  rpc MergeWorktree(MergeWorktreeRequest) returns (MergeWorktreeResponse);
+  rpc HasUncommittedChanges(HasUncommittedChangesRequest) returns (HasUncommittedChangesResponse);
+  rpc CommitAll(CommitAllRequest) returns (CommitAllResponse);
+  rpc DeleteBranch(DeleteBranchRequest) returns (DeleteBranchResponse);
+  rpc GetUncommittedChanges(GetUncommittedChangesRequest) returns (GetUncommittedChangesResponse);
+  rpc GetUncommittedFileDiff(GetUncommittedFileDiffRequest) returns (GetFileDiffResponse);
+  rpc StageFile(StageFileRequest) returns (StageFileResponse);
+  rpc UnstageFile(StageFileRequest) returns (StageFileResponse);
+  rpc StageAll(StageAllRequest) returns (StageAllResponse);
+  rpc UnstageAll(StageAllRequest) returns (StageAllResponse);
+  rpc CommitStaged(CommitStagedRequest) returns (CommitStagedResponse);
+  rpc CheckMergeConflicts(CheckMergeConflictsRequest) returns (CheckMergeConflictsResponse);
+  rpc GetFileContentsForDiff(GetFileContentsForDiffRequest) returns (GetFileContentsForDiffResponse);
+  rpc GetFileContentsForDiffAgainstHead(GetFileContentsForDiffRequest) returns (GetFileContentsForDiffResponse);
+  rpc GetUncommittedFileContentsForDiff(GetUncommittedFileContentsForDiffRequest) returns (GetFileContentsForDiffResponse);
+  rpc ListLocalBranches(ListLocalBranchesRequest) returns (ListLocalBranchesResponse);
+  rpc ListRemoteBranches(ListRemoteBranchesRequest) returns (ListRemoteBranchesResponse);
+  rpc GetBranchesInWorktrees(GetBranchesInWorktreesRequest) returns (GetBranchesInWorktreesResponse);
+  rpc CreateWorktreeFromBranch(CreateWorktreeFromBranchRequest) returns (CreateWorktreeResponse);
+  rpc CreateWorktreeFromRemote(CreateWorktreeFromRemoteRequest) returns (CreateWorktreeResponse);
+
+  // Filesystem Operations
+  rpc ReadDirectory(ReadDirectoryRequest) returns (ReadDirectoryResponse);
+  rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
+  rpc WriteFile(WriteFileRequest) returns (WriteFileResponse);
 }

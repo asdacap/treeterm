@@ -204,6 +204,334 @@ export interface ListSessionsResponse {
   sessions: DaemonSession[];
 }
 
+export interface GitInfoRequest {
+  dirPath: string;
+}
+
+export interface GitInfoResponse {
+  isRepo: boolean;
+  branch?: string | undefined;
+  rootPath?: string | undefined;
+}
+
+export interface CreateWorktreeRequest {
+  repoPath: string;
+  worktreeName: string;
+  baseBranch?: string | undefined;
+}
+
+export interface CreateWorktreeResponse {
+  success: boolean;
+  path?: string | undefined;
+  branch?: string | undefined;
+  error?: string | undefined;
+}
+
+export interface RemoveWorktreeRequest {
+  repoPath: string;
+  worktreePath: string;
+  deleteBranch: boolean;
+}
+
+export interface WorktreeInfo {
+  path: string;
+  branch: string;
+}
+
+export interface ListWorktreesRequest {
+  repoPath: string;
+}
+
+export interface ListWorktreesResponse {
+  worktrees: WorktreeInfo[];
+}
+
+export interface GetChildWorktreesRequest {
+  repoPath: string;
+  parentBranch?: string | undefined;
+}
+
+export interface ChildWorktreeInfo {
+  path: string;
+  branch: string;
+  displayName: string;
+}
+
+export interface GetChildWorktreesResponse {
+  worktrees: ChildWorktreeInfo[];
+}
+
+export interface DiffFile {
+  path: string;
+  /** 'added' | 'modified' | 'deleted' | 'renamed' */
+  status: string;
+  additions: number;
+  deletions: number;
+}
+
+export interface DiffResult {
+  files: DiffFile[];
+  totalAdditions: number;
+  totalDeletions: number;
+  baseBranch: string;
+  headBranch: string;
+}
+
+export interface GetDiffRequest {
+  worktreePath: string;
+  parentBranch: string;
+}
+
+export interface GetDiffResponse {
+  success: boolean;
+  diff?: DiffResult | undefined;
+  error?: string | undefined;
+}
+
+export interface GetFileDiffRequest {
+  worktreePath: string;
+  parentBranch: string;
+  filePath: string;
+}
+
+export interface GetFileDiffResponse {
+  success: boolean;
+  diff?: string | undefined;
+  error?: string | undefined;
+}
+
+export interface MergeWorktreeRequest {
+  mainRepoPath: string;
+  worktreeBranch: string;
+  targetBranch: string;
+  squash: boolean;
+}
+
+export interface MergeWorktreeResponse {
+  success: boolean;
+  error?: string | undefined;
+}
+
+export interface HasUncommittedChangesRequest {
+  repoPath: string;
+}
+
+export interface HasUncommittedChangesResponse {
+  hasChanges: boolean;
+}
+
+export interface CommitAllRequest {
+  repoPath: string;
+  message: string;
+}
+
+export interface CommitAllResponse {
+  success: boolean;
+  error?: string | undefined;
+}
+
+export interface DeleteBranchRequest {
+  repoPath: string;
+  branchName: string;
+}
+
+export interface DeleteBranchResponse {
+  success: boolean;
+  error?: string | undefined;
+}
+
+export interface UncommittedFile {
+  path: string;
+  /** 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked' */
+  status: string;
+  staged: boolean;
+  additions: number;
+  deletions: number;
+}
+
+export interface UncommittedChanges {
+  files: UncommittedFile[];
+  totalAdditions: number;
+  totalDeletions: number;
+}
+
+export interface GetUncommittedChangesRequest {
+  repoPath: string;
+}
+
+export interface GetUncommittedChangesResponse {
+  success: boolean;
+  changes?: UncommittedChanges | undefined;
+  error?: string | undefined;
+}
+
+export interface GetUncommittedFileDiffRequest {
+  repoPath: string;
+  filePath: string;
+  staged: boolean;
+}
+
+export interface StageFileRequest {
+  repoPath: string;
+  filePath: string;
+}
+
+export interface StageFileResponse {
+  success: boolean;
+  error?: string | undefined;
+}
+
+export interface StageAllRequest {
+  repoPath: string;
+}
+
+export interface StageAllResponse {
+  success: boolean;
+  error?: string | undefined;
+}
+
+export interface CommitStagedRequest {
+  repoPath: string;
+  message: string;
+}
+
+export interface CommitStagedResponse {
+  success: boolean;
+  error?: string | undefined;
+}
+
+export interface ConflictInfo {
+  hasConflicts: boolean;
+  conflictedFiles: string[];
+  messages: string[];
+}
+
+export interface CheckMergeConflictsRequest {
+  repoPath: string;
+  sourceBranch: string;
+  targetBranch: string;
+}
+
+export interface CheckMergeConflictsResponse {
+  success: boolean;
+  conflicts?: ConflictInfo | undefined;
+  error?: string | undefined;
+}
+
+export interface FileDiffContents {
+  originalContent: string;
+  modifiedContent: string;
+  language: string;
+}
+
+export interface GetFileContentsForDiffRequest {
+  worktreePath: string;
+  parentBranch: string;
+  filePath: string;
+}
+
+export interface GetFileContentsForDiffResponse {
+  success: boolean;
+  contents?: FileDiffContents | undefined;
+  error?: string | undefined;
+}
+
+export interface GetUncommittedFileContentsForDiffRequest {
+  repoPath: string;
+  filePath: string;
+  staged: boolean;
+}
+
+export interface ListLocalBranchesRequest {
+  repoPath: string;
+}
+
+export interface ListLocalBranchesResponse {
+  branches: string[];
+}
+
+export interface ListRemoteBranchesRequest {
+  repoPath: string;
+}
+
+export interface ListRemoteBranchesResponse {
+  branches: string[];
+}
+
+export interface GetBranchesInWorktreesRequest {
+  repoPath: string;
+}
+
+export interface GetBranchesInWorktreesResponse {
+  branches: string[];
+}
+
+export interface CreateWorktreeFromBranchRequest {
+  repoPath: string;
+  branch: string;
+  worktreeName: string;
+}
+
+export interface CreateWorktreeFromRemoteRequest {
+  repoPath: string;
+  remoteBranch: string;
+  worktreeName: string;
+}
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  relativePath: string;
+  isDirectory: boolean;
+  size?: number | undefined;
+  modifiedTime?: number | undefined;
+}
+
+export interface DirectoryContents {
+  path: string;
+  entries: FileEntry[];
+}
+
+export interface ReadDirectoryRequest {
+  workspacePath: string;
+  dirPath: string;
+}
+
+export interface ReadDirectoryResponse {
+  success: boolean;
+  contents?: DirectoryContents | undefined;
+  error?: string | undefined;
+}
+
+export interface FileContents {
+  path: string;
+  content: string;
+  size: number;
+  language: string;
+}
+
+export interface ReadFileRequest {
+  workspacePath: string;
+  filePath: string;
+}
+
+export interface ReadFileResponse {
+  success: boolean;
+  file?: FileContents | undefined;
+  error?: string | undefined;
+}
+
+export interface WriteFileRequest {
+  workspacePath: string;
+  filePath: string;
+  content: string;
+}
+
+export interface WriteFileResponse {
+  success: boolean;
+  error?: string | undefined;
+}
+
 function createBaseEmpty(): Empty {
   return {};
 }
@@ -3129,6 +3457,5292 @@ export const ListSessionsResponse: MessageFns<ListSessionsResponse> = {
   },
 };
 
+function createBaseGitInfoRequest(): GitInfoRequest {
+  return { dirPath: "" };
+}
+
+export const GitInfoRequest: MessageFns<GitInfoRequest> = {
+  encode(message: GitInfoRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.dirPath !== "") {
+      writer.uint32(10).string(message.dirPath);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GitInfoRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGitInfoRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.dirPath = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GitInfoRequest {
+    return {
+      dirPath: isSet(object.dirPath)
+        ? globalThis.String(object.dirPath)
+        : isSet(object.dir_path)
+        ? globalThis.String(object.dir_path)
+        : "",
+    };
+  },
+
+  toJSON(message: GitInfoRequest): unknown {
+    const obj: any = {};
+    if (message.dirPath !== "") {
+      obj.dirPath = message.dirPath;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GitInfoRequest>, I>>(base?: I): GitInfoRequest {
+    return GitInfoRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GitInfoRequest>, I>>(object: I): GitInfoRequest {
+    const message = createBaseGitInfoRequest();
+    message.dirPath = object.dirPath ?? "";
+    return message;
+  },
+};
+
+function createBaseGitInfoResponse(): GitInfoResponse {
+  return { isRepo: false, branch: undefined, rootPath: undefined };
+}
+
+export const GitInfoResponse: MessageFns<GitInfoResponse> = {
+  encode(message: GitInfoResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.isRepo !== false) {
+      writer.uint32(8).bool(message.isRepo);
+    }
+    if (message.branch !== undefined) {
+      writer.uint32(18).string(message.branch);
+    }
+    if (message.rootPath !== undefined) {
+      writer.uint32(26).string(message.rootPath);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GitInfoResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGitInfoResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.isRepo = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.branch = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.rootPath = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GitInfoResponse {
+    return {
+      isRepo: isSet(object.isRepo)
+        ? globalThis.Boolean(object.isRepo)
+        : isSet(object.is_repo)
+        ? globalThis.Boolean(object.is_repo)
+        : false,
+      branch: isSet(object.branch) ? globalThis.String(object.branch) : undefined,
+      rootPath: isSet(object.rootPath)
+        ? globalThis.String(object.rootPath)
+        : isSet(object.root_path)
+        ? globalThis.String(object.root_path)
+        : undefined,
+    };
+  },
+
+  toJSON(message: GitInfoResponse): unknown {
+    const obj: any = {};
+    if (message.isRepo !== false) {
+      obj.isRepo = message.isRepo;
+    }
+    if (message.branch !== undefined) {
+      obj.branch = message.branch;
+    }
+    if (message.rootPath !== undefined) {
+      obj.rootPath = message.rootPath;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GitInfoResponse>, I>>(base?: I): GitInfoResponse {
+    return GitInfoResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GitInfoResponse>, I>>(object: I): GitInfoResponse {
+    const message = createBaseGitInfoResponse();
+    message.isRepo = object.isRepo ?? false;
+    message.branch = object.branch ?? undefined;
+    message.rootPath = object.rootPath ?? undefined;
+    return message;
+  },
+};
+
+function createBaseCreateWorktreeRequest(): CreateWorktreeRequest {
+  return { repoPath: "", worktreeName: "", baseBranch: undefined };
+}
+
+export const CreateWorktreeRequest: MessageFns<CreateWorktreeRequest> = {
+  encode(message: CreateWorktreeRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.repoPath !== "") {
+      writer.uint32(10).string(message.repoPath);
+    }
+    if (message.worktreeName !== "") {
+      writer.uint32(18).string(message.worktreeName);
+    }
+    if (message.baseBranch !== undefined) {
+      writer.uint32(26).string(message.baseBranch);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CreateWorktreeRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCreateWorktreeRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.repoPath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.worktreeName = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.baseBranch = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CreateWorktreeRequest {
+    return {
+      repoPath: isSet(object.repoPath)
+        ? globalThis.String(object.repoPath)
+        : isSet(object.repo_path)
+        ? globalThis.String(object.repo_path)
+        : "",
+      worktreeName: isSet(object.worktreeName)
+        ? globalThis.String(object.worktreeName)
+        : isSet(object.worktree_name)
+        ? globalThis.String(object.worktree_name)
+        : "",
+      baseBranch: isSet(object.baseBranch)
+        ? globalThis.String(object.baseBranch)
+        : isSet(object.base_branch)
+        ? globalThis.String(object.base_branch)
+        : undefined,
+    };
+  },
+
+  toJSON(message: CreateWorktreeRequest): unknown {
+    const obj: any = {};
+    if (message.repoPath !== "") {
+      obj.repoPath = message.repoPath;
+    }
+    if (message.worktreeName !== "") {
+      obj.worktreeName = message.worktreeName;
+    }
+    if (message.baseBranch !== undefined) {
+      obj.baseBranch = message.baseBranch;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CreateWorktreeRequest>, I>>(base?: I): CreateWorktreeRequest {
+    return CreateWorktreeRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CreateWorktreeRequest>, I>>(object: I): CreateWorktreeRequest {
+    const message = createBaseCreateWorktreeRequest();
+    message.repoPath = object.repoPath ?? "";
+    message.worktreeName = object.worktreeName ?? "";
+    message.baseBranch = object.baseBranch ?? undefined;
+    return message;
+  },
+};
+
+function createBaseCreateWorktreeResponse(): CreateWorktreeResponse {
+  return { success: false, path: undefined, branch: undefined, error: undefined };
+}
+
+export const CreateWorktreeResponse: MessageFns<CreateWorktreeResponse> = {
+  encode(message: CreateWorktreeResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    if (message.path !== undefined) {
+      writer.uint32(18).string(message.path);
+    }
+    if (message.branch !== undefined) {
+      writer.uint32(26).string(message.branch);
+    }
+    if (message.error !== undefined) {
+      writer.uint32(34).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CreateWorktreeResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCreateWorktreeResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.path = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.branch = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CreateWorktreeResponse {
+    return {
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      path: isSet(object.path) ? globalThis.String(object.path) : undefined,
+      branch: isSet(object.branch) ? globalThis.String(object.branch) : undefined,
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: CreateWorktreeResponse): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.path !== undefined) {
+      obj.path = message.path;
+    }
+    if (message.branch !== undefined) {
+      obj.branch = message.branch;
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CreateWorktreeResponse>, I>>(base?: I): CreateWorktreeResponse {
+    return CreateWorktreeResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CreateWorktreeResponse>, I>>(object: I): CreateWorktreeResponse {
+    const message = createBaseCreateWorktreeResponse();
+    message.success = object.success ?? false;
+    message.path = object.path ?? undefined;
+    message.branch = object.branch ?? undefined;
+    message.error = object.error ?? undefined;
+    return message;
+  },
+};
+
+function createBaseRemoveWorktreeRequest(): RemoveWorktreeRequest {
+  return { repoPath: "", worktreePath: "", deleteBranch: false };
+}
+
+export const RemoveWorktreeRequest: MessageFns<RemoveWorktreeRequest> = {
+  encode(message: RemoveWorktreeRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.repoPath !== "") {
+      writer.uint32(10).string(message.repoPath);
+    }
+    if (message.worktreePath !== "") {
+      writer.uint32(18).string(message.worktreePath);
+    }
+    if (message.deleteBranch !== false) {
+      writer.uint32(24).bool(message.deleteBranch);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): RemoveWorktreeRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseRemoveWorktreeRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.repoPath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.worktreePath = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.deleteBranch = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): RemoveWorktreeRequest {
+    return {
+      repoPath: isSet(object.repoPath)
+        ? globalThis.String(object.repoPath)
+        : isSet(object.repo_path)
+        ? globalThis.String(object.repo_path)
+        : "",
+      worktreePath: isSet(object.worktreePath)
+        ? globalThis.String(object.worktreePath)
+        : isSet(object.worktree_path)
+        ? globalThis.String(object.worktree_path)
+        : "",
+      deleteBranch: isSet(object.deleteBranch)
+        ? globalThis.Boolean(object.deleteBranch)
+        : isSet(object.delete_branch)
+        ? globalThis.Boolean(object.delete_branch)
+        : false,
+    };
+  },
+
+  toJSON(message: RemoveWorktreeRequest): unknown {
+    const obj: any = {};
+    if (message.repoPath !== "") {
+      obj.repoPath = message.repoPath;
+    }
+    if (message.worktreePath !== "") {
+      obj.worktreePath = message.worktreePath;
+    }
+    if (message.deleteBranch !== false) {
+      obj.deleteBranch = message.deleteBranch;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<RemoveWorktreeRequest>, I>>(base?: I): RemoveWorktreeRequest {
+    return RemoveWorktreeRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<RemoveWorktreeRequest>, I>>(object: I): RemoveWorktreeRequest {
+    const message = createBaseRemoveWorktreeRequest();
+    message.repoPath = object.repoPath ?? "";
+    message.worktreePath = object.worktreePath ?? "";
+    message.deleteBranch = object.deleteBranch ?? false;
+    return message;
+  },
+};
+
+function createBaseWorktreeInfo(): WorktreeInfo {
+  return { path: "", branch: "" };
+}
+
+export const WorktreeInfo: MessageFns<WorktreeInfo> = {
+  encode(message: WorktreeInfo, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.path !== "") {
+      writer.uint32(10).string(message.path);
+    }
+    if (message.branch !== "") {
+      writer.uint32(18).string(message.branch);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): WorktreeInfo {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseWorktreeInfo();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.path = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.branch = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): WorktreeInfo {
+    return {
+      path: isSet(object.path) ? globalThis.String(object.path) : "",
+      branch: isSet(object.branch) ? globalThis.String(object.branch) : "",
+    };
+  },
+
+  toJSON(message: WorktreeInfo): unknown {
+    const obj: any = {};
+    if (message.path !== "") {
+      obj.path = message.path;
+    }
+    if (message.branch !== "") {
+      obj.branch = message.branch;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<WorktreeInfo>, I>>(base?: I): WorktreeInfo {
+    return WorktreeInfo.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<WorktreeInfo>, I>>(object: I): WorktreeInfo {
+    const message = createBaseWorktreeInfo();
+    message.path = object.path ?? "";
+    message.branch = object.branch ?? "";
+    return message;
+  },
+};
+
+function createBaseListWorktreesRequest(): ListWorktreesRequest {
+  return { repoPath: "" };
+}
+
+export const ListWorktreesRequest: MessageFns<ListWorktreesRequest> = {
+  encode(message: ListWorktreesRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.repoPath !== "") {
+      writer.uint32(10).string(message.repoPath);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListWorktreesRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListWorktreesRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.repoPath = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListWorktreesRequest {
+    return {
+      repoPath: isSet(object.repoPath)
+        ? globalThis.String(object.repoPath)
+        : isSet(object.repo_path)
+        ? globalThis.String(object.repo_path)
+        : "",
+    };
+  },
+
+  toJSON(message: ListWorktreesRequest): unknown {
+    const obj: any = {};
+    if (message.repoPath !== "") {
+      obj.repoPath = message.repoPath;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListWorktreesRequest>, I>>(base?: I): ListWorktreesRequest {
+    return ListWorktreesRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListWorktreesRequest>, I>>(object: I): ListWorktreesRequest {
+    const message = createBaseListWorktreesRequest();
+    message.repoPath = object.repoPath ?? "";
+    return message;
+  },
+};
+
+function createBaseListWorktreesResponse(): ListWorktreesResponse {
+  return { worktrees: [] };
+}
+
+export const ListWorktreesResponse: MessageFns<ListWorktreesResponse> = {
+  encode(message: ListWorktreesResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.worktrees) {
+      WorktreeInfo.encode(v!, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListWorktreesResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListWorktreesResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.worktrees.push(WorktreeInfo.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListWorktreesResponse {
+    return {
+      worktrees: globalThis.Array.isArray(object?.worktrees)
+        ? object.worktrees.map((e: any) => WorktreeInfo.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: ListWorktreesResponse): unknown {
+    const obj: any = {};
+    if (message.worktrees?.length) {
+      obj.worktrees = message.worktrees.map((e) => WorktreeInfo.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListWorktreesResponse>, I>>(base?: I): ListWorktreesResponse {
+    return ListWorktreesResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListWorktreesResponse>, I>>(object: I): ListWorktreesResponse {
+    const message = createBaseListWorktreesResponse();
+    message.worktrees = object.worktrees?.map((e) => WorktreeInfo.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseGetChildWorktreesRequest(): GetChildWorktreesRequest {
+  return { repoPath: "", parentBranch: undefined };
+}
+
+export const GetChildWorktreesRequest: MessageFns<GetChildWorktreesRequest> = {
+  encode(message: GetChildWorktreesRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.repoPath !== "") {
+      writer.uint32(10).string(message.repoPath);
+    }
+    if (message.parentBranch !== undefined) {
+      writer.uint32(18).string(message.parentBranch);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GetChildWorktreesRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetChildWorktreesRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.repoPath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.parentBranch = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetChildWorktreesRequest {
+    return {
+      repoPath: isSet(object.repoPath)
+        ? globalThis.String(object.repoPath)
+        : isSet(object.repo_path)
+        ? globalThis.String(object.repo_path)
+        : "",
+      parentBranch: isSet(object.parentBranch)
+        ? globalThis.String(object.parentBranch)
+        : isSet(object.parent_branch)
+        ? globalThis.String(object.parent_branch)
+        : undefined,
+    };
+  },
+
+  toJSON(message: GetChildWorktreesRequest): unknown {
+    const obj: any = {};
+    if (message.repoPath !== "") {
+      obj.repoPath = message.repoPath;
+    }
+    if (message.parentBranch !== undefined) {
+      obj.parentBranch = message.parentBranch;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetChildWorktreesRequest>, I>>(base?: I): GetChildWorktreesRequest {
+    return GetChildWorktreesRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GetChildWorktreesRequest>, I>>(object: I): GetChildWorktreesRequest {
+    const message = createBaseGetChildWorktreesRequest();
+    message.repoPath = object.repoPath ?? "";
+    message.parentBranch = object.parentBranch ?? undefined;
+    return message;
+  },
+};
+
+function createBaseChildWorktreeInfo(): ChildWorktreeInfo {
+  return { path: "", branch: "", displayName: "" };
+}
+
+export const ChildWorktreeInfo: MessageFns<ChildWorktreeInfo> = {
+  encode(message: ChildWorktreeInfo, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.path !== "") {
+      writer.uint32(10).string(message.path);
+    }
+    if (message.branch !== "") {
+      writer.uint32(18).string(message.branch);
+    }
+    if (message.displayName !== "") {
+      writer.uint32(26).string(message.displayName);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ChildWorktreeInfo {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseChildWorktreeInfo();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.path = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.branch = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.displayName = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ChildWorktreeInfo {
+    return {
+      path: isSet(object.path) ? globalThis.String(object.path) : "",
+      branch: isSet(object.branch) ? globalThis.String(object.branch) : "",
+      displayName: isSet(object.displayName)
+        ? globalThis.String(object.displayName)
+        : isSet(object.display_name)
+        ? globalThis.String(object.display_name)
+        : "",
+    };
+  },
+
+  toJSON(message: ChildWorktreeInfo): unknown {
+    const obj: any = {};
+    if (message.path !== "") {
+      obj.path = message.path;
+    }
+    if (message.branch !== "") {
+      obj.branch = message.branch;
+    }
+    if (message.displayName !== "") {
+      obj.displayName = message.displayName;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ChildWorktreeInfo>, I>>(base?: I): ChildWorktreeInfo {
+    return ChildWorktreeInfo.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ChildWorktreeInfo>, I>>(object: I): ChildWorktreeInfo {
+    const message = createBaseChildWorktreeInfo();
+    message.path = object.path ?? "";
+    message.branch = object.branch ?? "";
+    message.displayName = object.displayName ?? "";
+    return message;
+  },
+};
+
+function createBaseGetChildWorktreesResponse(): GetChildWorktreesResponse {
+  return { worktrees: [] };
+}
+
+export const GetChildWorktreesResponse: MessageFns<GetChildWorktreesResponse> = {
+  encode(message: GetChildWorktreesResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.worktrees) {
+      ChildWorktreeInfo.encode(v!, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GetChildWorktreesResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetChildWorktreesResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.worktrees.push(ChildWorktreeInfo.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetChildWorktreesResponse {
+    return {
+      worktrees: globalThis.Array.isArray(object?.worktrees)
+        ? object.worktrees.map((e: any) => ChildWorktreeInfo.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: GetChildWorktreesResponse): unknown {
+    const obj: any = {};
+    if (message.worktrees?.length) {
+      obj.worktrees = message.worktrees.map((e) => ChildWorktreeInfo.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetChildWorktreesResponse>, I>>(base?: I): GetChildWorktreesResponse {
+    return GetChildWorktreesResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GetChildWorktreesResponse>, I>>(object: I): GetChildWorktreesResponse {
+    const message = createBaseGetChildWorktreesResponse();
+    message.worktrees = object.worktrees?.map((e) => ChildWorktreeInfo.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseDiffFile(): DiffFile {
+  return { path: "", status: "", additions: 0, deletions: 0 };
+}
+
+export const DiffFile: MessageFns<DiffFile> = {
+  encode(message: DiffFile, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.path !== "") {
+      writer.uint32(10).string(message.path);
+    }
+    if (message.status !== "") {
+      writer.uint32(18).string(message.status);
+    }
+    if (message.additions !== 0) {
+      writer.uint32(24).int32(message.additions);
+    }
+    if (message.deletions !== 0) {
+      writer.uint32(32).int32(message.deletions);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): DiffFile {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDiffFile();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.path = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.status = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.additions = reader.int32();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.deletions = reader.int32();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DiffFile {
+    return {
+      path: isSet(object.path) ? globalThis.String(object.path) : "",
+      status: isSet(object.status) ? globalThis.String(object.status) : "",
+      additions: isSet(object.additions) ? globalThis.Number(object.additions) : 0,
+      deletions: isSet(object.deletions) ? globalThis.Number(object.deletions) : 0,
+    };
+  },
+
+  toJSON(message: DiffFile): unknown {
+    const obj: any = {};
+    if (message.path !== "") {
+      obj.path = message.path;
+    }
+    if (message.status !== "") {
+      obj.status = message.status;
+    }
+    if (message.additions !== 0) {
+      obj.additions = Math.round(message.additions);
+    }
+    if (message.deletions !== 0) {
+      obj.deletions = Math.round(message.deletions);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DiffFile>, I>>(base?: I): DiffFile {
+    return DiffFile.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<DiffFile>, I>>(object: I): DiffFile {
+    const message = createBaseDiffFile();
+    message.path = object.path ?? "";
+    message.status = object.status ?? "";
+    message.additions = object.additions ?? 0;
+    message.deletions = object.deletions ?? 0;
+    return message;
+  },
+};
+
+function createBaseDiffResult(): DiffResult {
+  return { files: [], totalAdditions: 0, totalDeletions: 0, baseBranch: "", headBranch: "" };
+}
+
+export const DiffResult: MessageFns<DiffResult> = {
+  encode(message: DiffResult, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.files) {
+      DiffFile.encode(v!, writer.uint32(10).fork()).join();
+    }
+    if (message.totalAdditions !== 0) {
+      writer.uint32(16).int32(message.totalAdditions);
+    }
+    if (message.totalDeletions !== 0) {
+      writer.uint32(24).int32(message.totalDeletions);
+    }
+    if (message.baseBranch !== "") {
+      writer.uint32(34).string(message.baseBranch);
+    }
+    if (message.headBranch !== "") {
+      writer.uint32(42).string(message.headBranch);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): DiffResult {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDiffResult();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.files.push(DiffFile.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.totalAdditions = reader.int32();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.totalDeletions = reader.int32();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.baseBranch = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.headBranch = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DiffResult {
+    return {
+      files: globalThis.Array.isArray(object?.files) ? object.files.map((e: any) => DiffFile.fromJSON(e)) : [],
+      totalAdditions: isSet(object.totalAdditions)
+        ? globalThis.Number(object.totalAdditions)
+        : isSet(object.total_additions)
+        ? globalThis.Number(object.total_additions)
+        : 0,
+      totalDeletions: isSet(object.totalDeletions)
+        ? globalThis.Number(object.totalDeletions)
+        : isSet(object.total_deletions)
+        ? globalThis.Number(object.total_deletions)
+        : 0,
+      baseBranch: isSet(object.baseBranch)
+        ? globalThis.String(object.baseBranch)
+        : isSet(object.base_branch)
+        ? globalThis.String(object.base_branch)
+        : "",
+      headBranch: isSet(object.headBranch)
+        ? globalThis.String(object.headBranch)
+        : isSet(object.head_branch)
+        ? globalThis.String(object.head_branch)
+        : "",
+    };
+  },
+
+  toJSON(message: DiffResult): unknown {
+    const obj: any = {};
+    if (message.files?.length) {
+      obj.files = message.files.map((e) => DiffFile.toJSON(e));
+    }
+    if (message.totalAdditions !== 0) {
+      obj.totalAdditions = Math.round(message.totalAdditions);
+    }
+    if (message.totalDeletions !== 0) {
+      obj.totalDeletions = Math.round(message.totalDeletions);
+    }
+    if (message.baseBranch !== "") {
+      obj.baseBranch = message.baseBranch;
+    }
+    if (message.headBranch !== "") {
+      obj.headBranch = message.headBranch;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DiffResult>, I>>(base?: I): DiffResult {
+    return DiffResult.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<DiffResult>, I>>(object: I): DiffResult {
+    const message = createBaseDiffResult();
+    message.files = object.files?.map((e) => DiffFile.fromPartial(e)) || [];
+    message.totalAdditions = object.totalAdditions ?? 0;
+    message.totalDeletions = object.totalDeletions ?? 0;
+    message.baseBranch = object.baseBranch ?? "";
+    message.headBranch = object.headBranch ?? "";
+    return message;
+  },
+};
+
+function createBaseGetDiffRequest(): GetDiffRequest {
+  return { worktreePath: "", parentBranch: "" };
+}
+
+export const GetDiffRequest: MessageFns<GetDiffRequest> = {
+  encode(message: GetDiffRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.worktreePath !== "") {
+      writer.uint32(10).string(message.worktreePath);
+    }
+    if (message.parentBranch !== "") {
+      writer.uint32(18).string(message.parentBranch);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GetDiffRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetDiffRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.worktreePath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.parentBranch = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetDiffRequest {
+    return {
+      worktreePath: isSet(object.worktreePath)
+        ? globalThis.String(object.worktreePath)
+        : isSet(object.worktree_path)
+        ? globalThis.String(object.worktree_path)
+        : "",
+      parentBranch: isSet(object.parentBranch)
+        ? globalThis.String(object.parentBranch)
+        : isSet(object.parent_branch)
+        ? globalThis.String(object.parent_branch)
+        : "",
+    };
+  },
+
+  toJSON(message: GetDiffRequest): unknown {
+    const obj: any = {};
+    if (message.worktreePath !== "") {
+      obj.worktreePath = message.worktreePath;
+    }
+    if (message.parentBranch !== "") {
+      obj.parentBranch = message.parentBranch;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetDiffRequest>, I>>(base?: I): GetDiffRequest {
+    return GetDiffRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GetDiffRequest>, I>>(object: I): GetDiffRequest {
+    const message = createBaseGetDiffRequest();
+    message.worktreePath = object.worktreePath ?? "";
+    message.parentBranch = object.parentBranch ?? "";
+    return message;
+  },
+};
+
+function createBaseGetDiffResponse(): GetDiffResponse {
+  return { success: false, diff: undefined, error: undefined };
+}
+
+export const GetDiffResponse: MessageFns<GetDiffResponse> = {
+  encode(message: GetDiffResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    if (message.diff !== undefined) {
+      DiffResult.encode(message.diff, writer.uint32(18).fork()).join();
+    }
+    if (message.error !== undefined) {
+      writer.uint32(26).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GetDiffResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetDiffResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.diff = DiffResult.decode(reader, reader.uint32());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetDiffResponse {
+    return {
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      diff: isSet(object.diff) ? DiffResult.fromJSON(object.diff) : undefined,
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: GetDiffResponse): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.diff !== undefined) {
+      obj.diff = DiffResult.toJSON(message.diff);
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetDiffResponse>, I>>(base?: I): GetDiffResponse {
+    return GetDiffResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GetDiffResponse>, I>>(object: I): GetDiffResponse {
+    const message = createBaseGetDiffResponse();
+    message.success = object.success ?? false;
+    message.diff = (object.diff !== undefined && object.diff !== null)
+      ? DiffResult.fromPartial(object.diff)
+      : undefined;
+    message.error = object.error ?? undefined;
+    return message;
+  },
+};
+
+function createBaseGetFileDiffRequest(): GetFileDiffRequest {
+  return { worktreePath: "", parentBranch: "", filePath: "" };
+}
+
+export const GetFileDiffRequest: MessageFns<GetFileDiffRequest> = {
+  encode(message: GetFileDiffRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.worktreePath !== "") {
+      writer.uint32(10).string(message.worktreePath);
+    }
+    if (message.parentBranch !== "") {
+      writer.uint32(18).string(message.parentBranch);
+    }
+    if (message.filePath !== "") {
+      writer.uint32(26).string(message.filePath);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GetFileDiffRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetFileDiffRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.worktreePath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.parentBranch = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.filePath = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetFileDiffRequest {
+    return {
+      worktreePath: isSet(object.worktreePath)
+        ? globalThis.String(object.worktreePath)
+        : isSet(object.worktree_path)
+        ? globalThis.String(object.worktree_path)
+        : "",
+      parentBranch: isSet(object.parentBranch)
+        ? globalThis.String(object.parentBranch)
+        : isSet(object.parent_branch)
+        ? globalThis.String(object.parent_branch)
+        : "",
+      filePath: isSet(object.filePath)
+        ? globalThis.String(object.filePath)
+        : isSet(object.file_path)
+        ? globalThis.String(object.file_path)
+        : "",
+    };
+  },
+
+  toJSON(message: GetFileDiffRequest): unknown {
+    const obj: any = {};
+    if (message.worktreePath !== "") {
+      obj.worktreePath = message.worktreePath;
+    }
+    if (message.parentBranch !== "") {
+      obj.parentBranch = message.parentBranch;
+    }
+    if (message.filePath !== "") {
+      obj.filePath = message.filePath;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetFileDiffRequest>, I>>(base?: I): GetFileDiffRequest {
+    return GetFileDiffRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GetFileDiffRequest>, I>>(object: I): GetFileDiffRequest {
+    const message = createBaseGetFileDiffRequest();
+    message.worktreePath = object.worktreePath ?? "";
+    message.parentBranch = object.parentBranch ?? "";
+    message.filePath = object.filePath ?? "";
+    return message;
+  },
+};
+
+function createBaseGetFileDiffResponse(): GetFileDiffResponse {
+  return { success: false, diff: undefined, error: undefined };
+}
+
+export const GetFileDiffResponse: MessageFns<GetFileDiffResponse> = {
+  encode(message: GetFileDiffResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    if (message.diff !== undefined) {
+      writer.uint32(18).string(message.diff);
+    }
+    if (message.error !== undefined) {
+      writer.uint32(26).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GetFileDiffResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetFileDiffResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.diff = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetFileDiffResponse {
+    return {
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      diff: isSet(object.diff) ? globalThis.String(object.diff) : undefined,
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: GetFileDiffResponse): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.diff !== undefined) {
+      obj.diff = message.diff;
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetFileDiffResponse>, I>>(base?: I): GetFileDiffResponse {
+    return GetFileDiffResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GetFileDiffResponse>, I>>(object: I): GetFileDiffResponse {
+    const message = createBaseGetFileDiffResponse();
+    message.success = object.success ?? false;
+    message.diff = object.diff ?? undefined;
+    message.error = object.error ?? undefined;
+    return message;
+  },
+};
+
+function createBaseMergeWorktreeRequest(): MergeWorktreeRequest {
+  return { mainRepoPath: "", worktreeBranch: "", targetBranch: "", squash: false };
+}
+
+export const MergeWorktreeRequest: MessageFns<MergeWorktreeRequest> = {
+  encode(message: MergeWorktreeRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.mainRepoPath !== "") {
+      writer.uint32(10).string(message.mainRepoPath);
+    }
+    if (message.worktreeBranch !== "") {
+      writer.uint32(18).string(message.worktreeBranch);
+    }
+    if (message.targetBranch !== "") {
+      writer.uint32(26).string(message.targetBranch);
+    }
+    if (message.squash !== false) {
+      writer.uint32(32).bool(message.squash);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): MergeWorktreeRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseMergeWorktreeRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.mainRepoPath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.worktreeBranch = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.targetBranch = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.squash = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): MergeWorktreeRequest {
+    return {
+      mainRepoPath: isSet(object.mainRepoPath)
+        ? globalThis.String(object.mainRepoPath)
+        : isSet(object.main_repo_path)
+        ? globalThis.String(object.main_repo_path)
+        : "",
+      worktreeBranch: isSet(object.worktreeBranch)
+        ? globalThis.String(object.worktreeBranch)
+        : isSet(object.worktree_branch)
+        ? globalThis.String(object.worktree_branch)
+        : "",
+      targetBranch: isSet(object.targetBranch)
+        ? globalThis.String(object.targetBranch)
+        : isSet(object.target_branch)
+        ? globalThis.String(object.target_branch)
+        : "",
+      squash: isSet(object.squash) ? globalThis.Boolean(object.squash) : false,
+    };
+  },
+
+  toJSON(message: MergeWorktreeRequest): unknown {
+    const obj: any = {};
+    if (message.mainRepoPath !== "") {
+      obj.mainRepoPath = message.mainRepoPath;
+    }
+    if (message.worktreeBranch !== "") {
+      obj.worktreeBranch = message.worktreeBranch;
+    }
+    if (message.targetBranch !== "") {
+      obj.targetBranch = message.targetBranch;
+    }
+    if (message.squash !== false) {
+      obj.squash = message.squash;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<MergeWorktreeRequest>, I>>(base?: I): MergeWorktreeRequest {
+    return MergeWorktreeRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<MergeWorktreeRequest>, I>>(object: I): MergeWorktreeRequest {
+    const message = createBaseMergeWorktreeRequest();
+    message.mainRepoPath = object.mainRepoPath ?? "";
+    message.worktreeBranch = object.worktreeBranch ?? "";
+    message.targetBranch = object.targetBranch ?? "";
+    message.squash = object.squash ?? false;
+    return message;
+  },
+};
+
+function createBaseMergeWorktreeResponse(): MergeWorktreeResponse {
+  return { success: false, error: undefined };
+}
+
+export const MergeWorktreeResponse: MessageFns<MergeWorktreeResponse> = {
+  encode(message: MergeWorktreeResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    if (message.error !== undefined) {
+      writer.uint32(18).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): MergeWorktreeResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseMergeWorktreeResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): MergeWorktreeResponse {
+    return {
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: MergeWorktreeResponse): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<MergeWorktreeResponse>, I>>(base?: I): MergeWorktreeResponse {
+    return MergeWorktreeResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<MergeWorktreeResponse>, I>>(object: I): MergeWorktreeResponse {
+    const message = createBaseMergeWorktreeResponse();
+    message.success = object.success ?? false;
+    message.error = object.error ?? undefined;
+    return message;
+  },
+};
+
+function createBaseHasUncommittedChangesRequest(): HasUncommittedChangesRequest {
+  return { repoPath: "" };
+}
+
+export const HasUncommittedChangesRequest: MessageFns<HasUncommittedChangesRequest> = {
+  encode(message: HasUncommittedChangesRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.repoPath !== "") {
+      writer.uint32(10).string(message.repoPath);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): HasUncommittedChangesRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseHasUncommittedChangesRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.repoPath = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): HasUncommittedChangesRequest {
+    return {
+      repoPath: isSet(object.repoPath)
+        ? globalThis.String(object.repoPath)
+        : isSet(object.repo_path)
+        ? globalThis.String(object.repo_path)
+        : "",
+    };
+  },
+
+  toJSON(message: HasUncommittedChangesRequest): unknown {
+    const obj: any = {};
+    if (message.repoPath !== "") {
+      obj.repoPath = message.repoPath;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<HasUncommittedChangesRequest>, I>>(base?: I): HasUncommittedChangesRequest {
+    return HasUncommittedChangesRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<HasUncommittedChangesRequest>, I>>(object: I): HasUncommittedChangesRequest {
+    const message = createBaseHasUncommittedChangesRequest();
+    message.repoPath = object.repoPath ?? "";
+    return message;
+  },
+};
+
+function createBaseHasUncommittedChangesResponse(): HasUncommittedChangesResponse {
+  return { hasChanges: false };
+}
+
+export const HasUncommittedChangesResponse: MessageFns<HasUncommittedChangesResponse> = {
+  encode(message: HasUncommittedChangesResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.hasChanges !== false) {
+      writer.uint32(8).bool(message.hasChanges);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): HasUncommittedChangesResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseHasUncommittedChangesResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.hasChanges = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): HasUncommittedChangesResponse {
+    return {
+      hasChanges: isSet(object.hasChanges)
+        ? globalThis.Boolean(object.hasChanges)
+        : isSet(object.has_changes)
+        ? globalThis.Boolean(object.has_changes)
+        : false,
+    };
+  },
+
+  toJSON(message: HasUncommittedChangesResponse): unknown {
+    const obj: any = {};
+    if (message.hasChanges !== false) {
+      obj.hasChanges = message.hasChanges;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<HasUncommittedChangesResponse>, I>>(base?: I): HasUncommittedChangesResponse {
+    return HasUncommittedChangesResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<HasUncommittedChangesResponse>, I>>(
+    object: I,
+  ): HasUncommittedChangesResponse {
+    const message = createBaseHasUncommittedChangesResponse();
+    message.hasChanges = object.hasChanges ?? false;
+    return message;
+  },
+};
+
+function createBaseCommitAllRequest(): CommitAllRequest {
+  return { repoPath: "", message: "" };
+}
+
+export const CommitAllRequest: MessageFns<CommitAllRequest> = {
+  encode(message: CommitAllRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.repoPath !== "") {
+      writer.uint32(10).string(message.repoPath);
+    }
+    if (message.message !== "") {
+      writer.uint32(18).string(message.message);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CommitAllRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCommitAllRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.repoPath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.message = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CommitAllRequest {
+    return {
+      repoPath: isSet(object.repoPath)
+        ? globalThis.String(object.repoPath)
+        : isSet(object.repo_path)
+        ? globalThis.String(object.repo_path)
+        : "",
+      message: isSet(object.message) ? globalThis.String(object.message) : "",
+    };
+  },
+
+  toJSON(message: CommitAllRequest): unknown {
+    const obj: any = {};
+    if (message.repoPath !== "") {
+      obj.repoPath = message.repoPath;
+    }
+    if (message.message !== "") {
+      obj.message = message.message;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CommitAllRequest>, I>>(base?: I): CommitAllRequest {
+    return CommitAllRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CommitAllRequest>, I>>(object: I): CommitAllRequest {
+    const message = createBaseCommitAllRequest();
+    message.repoPath = object.repoPath ?? "";
+    message.message = object.message ?? "";
+    return message;
+  },
+};
+
+function createBaseCommitAllResponse(): CommitAllResponse {
+  return { success: false, error: undefined };
+}
+
+export const CommitAllResponse: MessageFns<CommitAllResponse> = {
+  encode(message: CommitAllResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    if (message.error !== undefined) {
+      writer.uint32(18).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CommitAllResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCommitAllResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CommitAllResponse {
+    return {
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: CommitAllResponse): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CommitAllResponse>, I>>(base?: I): CommitAllResponse {
+    return CommitAllResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CommitAllResponse>, I>>(object: I): CommitAllResponse {
+    const message = createBaseCommitAllResponse();
+    message.success = object.success ?? false;
+    message.error = object.error ?? undefined;
+    return message;
+  },
+};
+
+function createBaseDeleteBranchRequest(): DeleteBranchRequest {
+  return { repoPath: "", branchName: "" };
+}
+
+export const DeleteBranchRequest: MessageFns<DeleteBranchRequest> = {
+  encode(message: DeleteBranchRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.repoPath !== "") {
+      writer.uint32(10).string(message.repoPath);
+    }
+    if (message.branchName !== "") {
+      writer.uint32(18).string(message.branchName);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): DeleteBranchRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDeleteBranchRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.repoPath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.branchName = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DeleteBranchRequest {
+    return {
+      repoPath: isSet(object.repoPath)
+        ? globalThis.String(object.repoPath)
+        : isSet(object.repo_path)
+        ? globalThis.String(object.repo_path)
+        : "",
+      branchName: isSet(object.branchName)
+        ? globalThis.String(object.branchName)
+        : isSet(object.branch_name)
+        ? globalThis.String(object.branch_name)
+        : "",
+    };
+  },
+
+  toJSON(message: DeleteBranchRequest): unknown {
+    const obj: any = {};
+    if (message.repoPath !== "") {
+      obj.repoPath = message.repoPath;
+    }
+    if (message.branchName !== "") {
+      obj.branchName = message.branchName;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DeleteBranchRequest>, I>>(base?: I): DeleteBranchRequest {
+    return DeleteBranchRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<DeleteBranchRequest>, I>>(object: I): DeleteBranchRequest {
+    const message = createBaseDeleteBranchRequest();
+    message.repoPath = object.repoPath ?? "";
+    message.branchName = object.branchName ?? "";
+    return message;
+  },
+};
+
+function createBaseDeleteBranchResponse(): DeleteBranchResponse {
+  return { success: false, error: undefined };
+}
+
+export const DeleteBranchResponse: MessageFns<DeleteBranchResponse> = {
+  encode(message: DeleteBranchResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    if (message.error !== undefined) {
+      writer.uint32(18).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): DeleteBranchResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDeleteBranchResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DeleteBranchResponse {
+    return {
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: DeleteBranchResponse): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DeleteBranchResponse>, I>>(base?: I): DeleteBranchResponse {
+    return DeleteBranchResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<DeleteBranchResponse>, I>>(object: I): DeleteBranchResponse {
+    const message = createBaseDeleteBranchResponse();
+    message.success = object.success ?? false;
+    message.error = object.error ?? undefined;
+    return message;
+  },
+};
+
+function createBaseUncommittedFile(): UncommittedFile {
+  return { path: "", status: "", staged: false, additions: 0, deletions: 0 };
+}
+
+export const UncommittedFile: MessageFns<UncommittedFile> = {
+  encode(message: UncommittedFile, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.path !== "") {
+      writer.uint32(10).string(message.path);
+    }
+    if (message.status !== "") {
+      writer.uint32(18).string(message.status);
+    }
+    if (message.staged !== false) {
+      writer.uint32(24).bool(message.staged);
+    }
+    if (message.additions !== 0) {
+      writer.uint32(32).int32(message.additions);
+    }
+    if (message.deletions !== 0) {
+      writer.uint32(40).int32(message.deletions);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): UncommittedFile {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseUncommittedFile();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.path = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.status = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.staged = reader.bool();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.additions = reader.int32();
+          continue;
+        }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.deletions = reader.int32();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): UncommittedFile {
+    return {
+      path: isSet(object.path) ? globalThis.String(object.path) : "",
+      status: isSet(object.status) ? globalThis.String(object.status) : "",
+      staged: isSet(object.staged) ? globalThis.Boolean(object.staged) : false,
+      additions: isSet(object.additions) ? globalThis.Number(object.additions) : 0,
+      deletions: isSet(object.deletions) ? globalThis.Number(object.deletions) : 0,
+    };
+  },
+
+  toJSON(message: UncommittedFile): unknown {
+    const obj: any = {};
+    if (message.path !== "") {
+      obj.path = message.path;
+    }
+    if (message.status !== "") {
+      obj.status = message.status;
+    }
+    if (message.staged !== false) {
+      obj.staged = message.staged;
+    }
+    if (message.additions !== 0) {
+      obj.additions = Math.round(message.additions);
+    }
+    if (message.deletions !== 0) {
+      obj.deletions = Math.round(message.deletions);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<UncommittedFile>, I>>(base?: I): UncommittedFile {
+    return UncommittedFile.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<UncommittedFile>, I>>(object: I): UncommittedFile {
+    const message = createBaseUncommittedFile();
+    message.path = object.path ?? "";
+    message.status = object.status ?? "";
+    message.staged = object.staged ?? false;
+    message.additions = object.additions ?? 0;
+    message.deletions = object.deletions ?? 0;
+    return message;
+  },
+};
+
+function createBaseUncommittedChanges(): UncommittedChanges {
+  return { files: [], totalAdditions: 0, totalDeletions: 0 };
+}
+
+export const UncommittedChanges: MessageFns<UncommittedChanges> = {
+  encode(message: UncommittedChanges, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.files) {
+      UncommittedFile.encode(v!, writer.uint32(10).fork()).join();
+    }
+    if (message.totalAdditions !== 0) {
+      writer.uint32(16).int32(message.totalAdditions);
+    }
+    if (message.totalDeletions !== 0) {
+      writer.uint32(24).int32(message.totalDeletions);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): UncommittedChanges {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseUncommittedChanges();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.files.push(UncommittedFile.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.totalAdditions = reader.int32();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.totalDeletions = reader.int32();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): UncommittedChanges {
+    return {
+      files: globalThis.Array.isArray(object?.files) ? object.files.map((e: any) => UncommittedFile.fromJSON(e)) : [],
+      totalAdditions: isSet(object.totalAdditions)
+        ? globalThis.Number(object.totalAdditions)
+        : isSet(object.total_additions)
+        ? globalThis.Number(object.total_additions)
+        : 0,
+      totalDeletions: isSet(object.totalDeletions)
+        ? globalThis.Number(object.totalDeletions)
+        : isSet(object.total_deletions)
+        ? globalThis.Number(object.total_deletions)
+        : 0,
+    };
+  },
+
+  toJSON(message: UncommittedChanges): unknown {
+    const obj: any = {};
+    if (message.files?.length) {
+      obj.files = message.files.map((e) => UncommittedFile.toJSON(e));
+    }
+    if (message.totalAdditions !== 0) {
+      obj.totalAdditions = Math.round(message.totalAdditions);
+    }
+    if (message.totalDeletions !== 0) {
+      obj.totalDeletions = Math.round(message.totalDeletions);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<UncommittedChanges>, I>>(base?: I): UncommittedChanges {
+    return UncommittedChanges.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<UncommittedChanges>, I>>(object: I): UncommittedChanges {
+    const message = createBaseUncommittedChanges();
+    message.files = object.files?.map((e) => UncommittedFile.fromPartial(e)) || [];
+    message.totalAdditions = object.totalAdditions ?? 0;
+    message.totalDeletions = object.totalDeletions ?? 0;
+    return message;
+  },
+};
+
+function createBaseGetUncommittedChangesRequest(): GetUncommittedChangesRequest {
+  return { repoPath: "" };
+}
+
+export const GetUncommittedChangesRequest: MessageFns<GetUncommittedChangesRequest> = {
+  encode(message: GetUncommittedChangesRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.repoPath !== "") {
+      writer.uint32(10).string(message.repoPath);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GetUncommittedChangesRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetUncommittedChangesRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.repoPath = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetUncommittedChangesRequest {
+    return {
+      repoPath: isSet(object.repoPath)
+        ? globalThis.String(object.repoPath)
+        : isSet(object.repo_path)
+        ? globalThis.String(object.repo_path)
+        : "",
+    };
+  },
+
+  toJSON(message: GetUncommittedChangesRequest): unknown {
+    const obj: any = {};
+    if (message.repoPath !== "") {
+      obj.repoPath = message.repoPath;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetUncommittedChangesRequest>, I>>(base?: I): GetUncommittedChangesRequest {
+    return GetUncommittedChangesRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GetUncommittedChangesRequest>, I>>(object: I): GetUncommittedChangesRequest {
+    const message = createBaseGetUncommittedChangesRequest();
+    message.repoPath = object.repoPath ?? "";
+    return message;
+  },
+};
+
+function createBaseGetUncommittedChangesResponse(): GetUncommittedChangesResponse {
+  return { success: false, changes: undefined, error: undefined };
+}
+
+export const GetUncommittedChangesResponse: MessageFns<GetUncommittedChangesResponse> = {
+  encode(message: GetUncommittedChangesResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    if (message.changes !== undefined) {
+      UncommittedChanges.encode(message.changes, writer.uint32(18).fork()).join();
+    }
+    if (message.error !== undefined) {
+      writer.uint32(26).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GetUncommittedChangesResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetUncommittedChangesResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.changes = UncommittedChanges.decode(reader, reader.uint32());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetUncommittedChangesResponse {
+    return {
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      changes: isSet(object.changes) ? UncommittedChanges.fromJSON(object.changes) : undefined,
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: GetUncommittedChangesResponse): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.changes !== undefined) {
+      obj.changes = UncommittedChanges.toJSON(message.changes);
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetUncommittedChangesResponse>, I>>(base?: I): GetUncommittedChangesResponse {
+    return GetUncommittedChangesResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GetUncommittedChangesResponse>, I>>(
+    object: I,
+  ): GetUncommittedChangesResponse {
+    const message = createBaseGetUncommittedChangesResponse();
+    message.success = object.success ?? false;
+    message.changes = (object.changes !== undefined && object.changes !== null)
+      ? UncommittedChanges.fromPartial(object.changes)
+      : undefined;
+    message.error = object.error ?? undefined;
+    return message;
+  },
+};
+
+function createBaseGetUncommittedFileDiffRequest(): GetUncommittedFileDiffRequest {
+  return { repoPath: "", filePath: "", staged: false };
+}
+
+export const GetUncommittedFileDiffRequest: MessageFns<GetUncommittedFileDiffRequest> = {
+  encode(message: GetUncommittedFileDiffRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.repoPath !== "") {
+      writer.uint32(10).string(message.repoPath);
+    }
+    if (message.filePath !== "") {
+      writer.uint32(18).string(message.filePath);
+    }
+    if (message.staged !== false) {
+      writer.uint32(24).bool(message.staged);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GetUncommittedFileDiffRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetUncommittedFileDiffRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.repoPath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.filePath = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.staged = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetUncommittedFileDiffRequest {
+    return {
+      repoPath: isSet(object.repoPath)
+        ? globalThis.String(object.repoPath)
+        : isSet(object.repo_path)
+        ? globalThis.String(object.repo_path)
+        : "",
+      filePath: isSet(object.filePath)
+        ? globalThis.String(object.filePath)
+        : isSet(object.file_path)
+        ? globalThis.String(object.file_path)
+        : "",
+      staged: isSet(object.staged) ? globalThis.Boolean(object.staged) : false,
+    };
+  },
+
+  toJSON(message: GetUncommittedFileDiffRequest): unknown {
+    const obj: any = {};
+    if (message.repoPath !== "") {
+      obj.repoPath = message.repoPath;
+    }
+    if (message.filePath !== "") {
+      obj.filePath = message.filePath;
+    }
+    if (message.staged !== false) {
+      obj.staged = message.staged;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetUncommittedFileDiffRequest>, I>>(base?: I): GetUncommittedFileDiffRequest {
+    return GetUncommittedFileDiffRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GetUncommittedFileDiffRequest>, I>>(
+    object: I,
+  ): GetUncommittedFileDiffRequest {
+    const message = createBaseGetUncommittedFileDiffRequest();
+    message.repoPath = object.repoPath ?? "";
+    message.filePath = object.filePath ?? "";
+    message.staged = object.staged ?? false;
+    return message;
+  },
+};
+
+function createBaseStageFileRequest(): StageFileRequest {
+  return { repoPath: "", filePath: "" };
+}
+
+export const StageFileRequest: MessageFns<StageFileRequest> = {
+  encode(message: StageFileRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.repoPath !== "") {
+      writer.uint32(10).string(message.repoPath);
+    }
+    if (message.filePath !== "") {
+      writer.uint32(18).string(message.filePath);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): StageFileRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseStageFileRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.repoPath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.filePath = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): StageFileRequest {
+    return {
+      repoPath: isSet(object.repoPath)
+        ? globalThis.String(object.repoPath)
+        : isSet(object.repo_path)
+        ? globalThis.String(object.repo_path)
+        : "",
+      filePath: isSet(object.filePath)
+        ? globalThis.String(object.filePath)
+        : isSet(object.file_path)
+        ? globalThis.String(object.file_path)
+        : "",
+    };
+  },
+
+  toJSON(message: StageFileRequest): unknown {
+    const obj: any = {};
+    if (message.repoPath !== "") {
+      obj.repoPath = message.repoPath;
+    }
+    if (message.filePath !== "") {
+      obj.filePath = message.filePath;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<StageFileRequest>, I>>(base?: I): StageFileRequest {
+    return StageFileRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<StageFileRequest>, I>>(object: I): StageFileRequest {
+    const message = createBaseStageFileRequest();
+    message.repoPath = object.repoPath ?? "";
+    message.filePath = object.filePath ?? "";
+    return message;
+  },
+};
+
+function createBaseStageFileResponse(): StageFileResponse {
+  return { success: false, error: undefined };
+}
+
+export const StageFileResponse: MessageFns<StageFileResponse> = {
+  encode(message: StageFileResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    if (message.error !== undefined) {
+      writer.uint32(18).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): StageFileResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseStageFileResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): StageFileResponse {
+    return {
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: StageFileResponse): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<StageFileResponse>, I>>(base?: I): StageFileResponse {
+    return StageFileResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<StageFileResponse>, I>>(object: I): StageFileResponse {
+    const message = createBaseStageFileResponse();
+    message.success = object.success ?? false;
+    message.error = object.error ?? undefined;
+    return message;
+  },
+};
+
+function createBaseStageAllRequest(): StageAllRequest {
+  return { repoPath: "" };
+}
+
+export const StageAllRequest: MessageFns<StageAllRequest> = {
+  encode(message: StageAllRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.repoPath !== "") {
+      writer.uint32(10).string(message.repoPath);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): StageAllRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseStageAllRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.repoPath = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): StageAllRequest {
+    return {
+      repoPath: isSet(object.repoPath)
+        ? globalThis.String(object.repoPath)
+        : isSet(object.repo_path)
+        ? globalThis.String(object.repo_path)
+        : "",
+    };
+  },
+
+  toJSON(message: StageAllRequest): unknown {
+    const obj: any = {};
+    if (message.repoPath !== "") {
+      obj.repoPath = message.repoPath;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<StageAllRequest>, I>>(base?: I): StageAllRequest {
+    return StageAllRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<StageAllRequest>, I>>(object: I): StageAllRequest {
+    const message = createBaseStageAllRequest();
+    message.repoPath = object.repoPath ?? "";
+    return message;
+  },
+};
+
+function createBaseStageAllResponse(): StageAllResponse {
+  return { success: false, error: undefined };
+}
+
+export const StageAllResponse: MessageFns<StageAllResponse> = {
+  encode(message: StageAllResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    if (message.error !== undefined) {
+      writer.uint32(18).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): StageAllResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseStageAllResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): StageAllResponse {
+    return {
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: StageAllResponse): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<StageAllResponse>, I>>(base?: I): StageAllResponse {
+    return StageAllResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<StageAllResponse>, I>>(object: I): StageAllResponse {
+    const message = createBaseStageAllResponse();
+    message.success = object.success ?? false;
+    message.error = object.error ?? undefined;
+    return message;
+  },
+};
+
+function createBaseCommitStagedRequest(): CommitStagedRequest {
+  return { repoPath: "", message: "" };
+}
+
+export const CommitStagedRequest: MessageFns<CommitStagedRequest> = {
+  encode(message: CommitStagedRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.repoPath !== "") {
+      writer.uint32(10).string(message.repoPath);
+    }
+    if (message.message !== "") {
+      writer.uint32(18).string(message.message);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CommitStagedRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCommitStagedRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.repoPath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.message = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CommitStagedRequest {
+    return {
+      repoPath: isSet(object.repoPath)
+        ? globalThis.String(object.repoPath)
+        : isSet(object.repo_path)
+        ? globalThis.String(object.repo_path)
+        : "",
+      message: isSet(object.message) ? globalThis.String(object.message) : "",
+    };
+  },
+
+  toJSON(message: CommitStagedRequest): unknown {
+    const obj: any = {};
+    if (message.repoPath !== "") {
+      obj.repoPath = message.repoPath;
+    }
+    if (message.message !== "") {
+      obj.message = message.message;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CommitStagedRequest>, I>>(base?: I): CommitStagedRequest {
+    return CommitStagedRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CommitStagedRequest>, I>>(object: I): CommitStagedRequest {
+    const message = createBaseCommitStagedRequest();
+    message.repoPath = object.repoPath ?? "";
+    message.message = object.message ?? "";
+    return message;
+  },
+};
+
+function createBaseCommitStagedResponse(): CommitStagedResponse {
+  return { success: false, error: undefined };
+}
+
+export const CommitStagedResponse: MessageFns<CommitStagedResponse> = {
+  encode(message: CommitStagedResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    if (message.error !== undefined) {
+      writer.uint32(18).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CommitStagedResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCommitStagedResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CommitStagedResponse {
+    return {
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: CommitStagedResponse): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CommitStagedResponse>, I>>(base?: I): CommitStagedResponse {
+    return CommitStagedResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CommitStagedResponse>, I>>(object: I): CommitStagedResponse {
+    const message = createBaseCommitStagedResponse();
+    message.success = object.success ?? false;
+    message.error = object.error ?? undefined;
+    return message;
+  },
+};
+
+function createBaseConflictInfo(): ConflictInfo {
+  return { hasConflicts: false, conflictedFiles: [], messages: [] };
+}
+
+export const ConflictInfo: MessageFns<ConflictInfo> = {
+  encode(message: ConflictInfo, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.hasConflicts !== false) {
+      writer.uint32(8).bool(message.hasConflicts);
+    }
+    for (const v of message.conflictedFiles) {
+      writer.uint32(18).string(v!);
+    }
+    for (const v of message.messages) {
+      writer.uint32(26).string(v!);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ConflictInfo {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseConflictInfo();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.hasConflicts = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.conflictedFiles.push(reader.string());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.messages.push(reader.string());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ConflictInfo {
+    return {
+      hasConflicts: isSet(object.hasConflicts)
+        ? globalThis.Boolean(object.hasConflicts)
+        : isSet(object.has_conflicts)
+        ? globalThis.Boolean(object.has_conflicts)
+        : false,
+      conflictedFiles: globalThis.Array.isArray(object?.conflictedFiles)
+        ? object.conflictedFiles.map((e: any) => globalThis.String(e))
+        : globalThis.Array.isArray(object?.conflicted_files)
+        ? object.conflicted_files.map((e: any) => globalThis.String(e))
+        : [],
+      messages: globalThis.Array.isArray(object?.messages) ? object.messages.map((e: any) => globalThis.String(e)) : [],
+    };
+  },
+
+  toJSON(message: ConflictInfo): unknown {
+    const obj: any = {};
+    if (message.hasConflicts !== false) {
+      obj.hasConflicts = message.hasConflicts;
+    }
+    if (message.conflictedFiles?.length) {
+      obj.conflictedFiles = message.conflictedFiles;
+    }
+    if (message.messages?.length) {
+      obj.messages = message.messages;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ConflictInfo>, I>>(base?: I): ConflictInfo {
+    return ConflictInfo.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ConflictInfo>, I>>(object: I): ConflictInfo {
+    const message = createBaseConflictInfo();
+    message.hasConflicts = object.hasConflicts ?? false;
+    message.conflictedFiles = object.conflictedFiles?.map((e) => e) || [];
+    message.messages = object.messages?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseCheckMergeConflictsRequest(): CheckMergeConflictsRequest {
+  return { repoPath: "", sourceBranch: "", targetBranch: "" };
+}
+
+export const CheckMergeConflictsRequest: MessageFns<CheckMergeConflictsRequest> = {
+  encode(message: CheckMergeConflictsRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.repoPath !== "") {
+      writer.uint32(10).string(message.repoPath);
+    }
+    if (message.sourceBranch !== "") {
+      writer.uint32(18).string(message.sourceBranch);
+    }
+    if (message.targetBranch !== "") {
+      writer.uint32(26).string(message.targetBranch);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CheckMergeConflictsRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCheckMergeConflictsRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.repoPath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.sourceBranch = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.targetBranch = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CheckMergeConflictsRequest {
+    return {
+      repoPath: isSet(object.repoPath)
+        ? globalThis.String(object.repoPath)
+        : isSet(object.repo_path)
+        ? globalThis.String(object.repo_path)
+        : "",
+      sourceBranch: isSet(object.sourceBranch)
+        ? globalThis.String(object.sourceBranch)
+        : isSet(object.source_branch)
+        ? globalThis.String(object.source_branch)
+        : "",
+      targetBranch: isSet(object.targetBranch)
+        ? globalThis.String(object.targetBranch)
+        : isSet(object.target_branch)
+        ? globalThis.String(object.target_branch)
+        : "",
+    };
+  },
+
+  toJSON(message: CheckMergeConflictsRequest): unknown {
+    const obj: any = {};
+    if (message.repoPath !== "") {
+      obj.repoPath = message.repoPath;
+    }
+    if (message.sourceBranch !== "") {
+      obj.sourceBranch = message.sourceBranch;
+    }
+    if (message.targetBranch !== "") {
+      obj.targetBranch = message.targetBranch;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CheckMergeConflictsRequest>, I>>(base?: I): CheckMergeConflictsRequest {
+    return CheckMergeConflictsRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CheckMergeConflictsRequest>, I>>(object: I): CheckMergeConflictsRequest {
+    const message = createBaseCheckMergeConflictsRequest();
+    message.repoPath = object.repoPath ?? "";
+    message.sourceBranch = object.sourceBranch ?? "";
+    message.targetBranch = object.targetBranch ?? "";
+    return message;
+  },
+};
+
+function createBaseCheckMergeConflictsResponse(): CheckMergeConflictsResponse {
+  return { success: false, conflicts: undefined, error: undefined };
+}
+
+export const CheckMergeConflictsResponse: MessageFns<CheckMergeConflictsResponse> = {
+  encode(message: CheckMergeConflictsResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    if (message.conflicts !== undefined) {
+      ConflictInfo.encode(message.conflicts, writer.uint32(18).fork()).join();
+    }
+    if (message.error !== undefined) {
+      writer.uint32(26).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CheckMergeConflictsResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCheckMergeConflictsResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.conflicts = ConflictInfo.decode(reader, reader.uint32());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CheckMergeConflictsResponse {
+    return {
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      conflicts: isSet(object.conflicts) ? ConflictInfo.fromJSON(object.conflicts) : undefined,
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: CheckMergeConflictsResponse): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.conflicts !== undefined) {
+      obj.conflicts = ConflictInfo.toJSON(message.conflicts);
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CheckMergeConflictsResponse>, I>>(base?: I): CheckMergeConflictsResponse {
+    return CheckMergeConflictsResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CheckMergeConflictsResponse>, I>>(object: I): CheckMergeConflictsResponse {
+    const message = createBaseCheckMergeConflictsResponse();
+    message.success = object.success ?? false;
+    message.conflicts = (object.conflicts !== undefined && object.conflicts !== null)
+      ? ConflictInfo.fromPartial(object.conflicts)
+      : undefined;
+    message.error = object.error ?? undefined;
+    return message;
+  },
+};
+
+function createBaseFileDiffContents(): FileDiffContents {
+  return { originalContent: "", modifiedContent: "", language: "" };
+}
+
+export const FileDiffContents: MessageFns<FileDiffContents> = {
+  encode(message: FileDiffContents, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.originalContent !== "") {
+      writer.uint32(10).string(message.originalContent);
+    }
+    if (message.modifiedContent !== "") {
+      writer.uint32(18).string(message.modifiedContent);
+    }
+    if (message.language !== "") {
+      writer.uint32(26).string(message.language);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FileDiffContents {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFileDiffContents();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.originalContent = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.modifiedContent = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.language = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FileDiffContents {
+    return {
+      originalContent: isSet(object.originalContent)
+        ? globalThis.String(object.originalContent)
+        : isSet(object.original_content)
+        ? globalThis.String(object.original_content)
+        : "",
+      modifiedContent: isSet(object.modifiedContent)
+        ? globalThis.String(object.modifiedContent)
+        : isSet(object.modified_content)
+        ? globalThis.String(object.modified_content)
+        : "",
+      language: isSet(object.language) ? globalThis.String(object.language) : "",
+    };
+  },
+
+  toJSON(message: FileDiffContents): unknown {
+    const obj: any = {};
+    if (message.originalContent !== "") {
+      obj.originalContent = message.originalContent;
+    }
+    if (message.modifiedContent !== "") {
+      obj.modifiedContent = message.modifiedContent;
+    }
+    if (message.language !== "") {
+      obj.language = message.language;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FileDiffContents>, I>>(base?: I): FileDiffContents {
+    return FileDiffContents.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FileDiffContents>, I>>(object: I): FileDiffContents {
+    const message = createBaseFileDiffContents();
+    message.originalContent = object.originalContent ?? "";
+    message.modifiedContent = object.modifiedContent ?? "";
+    message.language = object.language ?? "";
+    return message;
+  },
+};
+
+function createBaseGetFileContentsForDiffRequest(): GetFileContentsForDiffRequest {
+  return { worktreePath: "", parentBranch: "", filePath: "" };
+}
+
+export const GetFileContentsForDiffRequest: MessageFns<GetFileContentsForDiffRequest> = {
+  encode(message: GetFileContentsForDiffRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.worktreePath !== "") {
+      writer.uint32(10).string(message.worktreePath);
+    }
+    if (message.parentBranch !== "") {
+      writer.uint32(18).string(message.parentBranch);
+    }
+    if (message.filePath !== "") {
+      writer.uint32(26).string(message.filePath);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GetFileContentsForDiffRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetFileContentsForDiffRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.worktreePath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.parentBranch = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.filePath = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetFileContentsForDiffRequest {
+    return {
+      worktreePath: isSet(object.worktreePath)
+        ? globalThis.String(object.worktreePath)
+        : isSet(object.worktree_path)
+        ? globalThis.String(object.worktree_path)
+        : "",
+      parentBranch: isSet(object.parentBranch)
+        ? globalThis.String(object.parentBranch)
+        : isSet(object.parent_branch)
+        ? globalThis.String(object.parent_branch)
+        : "",
+      filePath: isSet(object.filePath)
+        ? globalThis.String(object.filePath)
+        : isSet(object.file_path)
+        ? globalThis.String(object.file_path)
+        : "",
+    };
+  },
+
+  toJSON(message: GetFileContentsForDiffRequest): unknown {
+    const obj: any = {};
+    if (message.worktreePath !== "") {
+      obj.worktreePath = message.worktreePath;
+    }
+    if (message.parentBranch !== "") {
+      obj.parentBranch = message.parentBranch;
+    }
+    if (message.filePath !== "") {
+      obj.filePath = message.filePath;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetFileContentsForDiffRequest>, I>>(base?: I): GetFileContentsForDiffRequest {
+    return GetFileContentsForDiffRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GetFileContentsForDiffRequest>, I>>(
+    object: I,
+  ): GetFileContentsForDiffRequest {
+    const message = createBaseGetFileContentsForDiffRequest();
+    message.worktreePath = object.worktreePath ?? "";
+    message.parentBranch = object.parentBranch ?? "";
+    message.filePath = object.filePath ?? "";
+    return message;
+  },
+};
+
+function createBaseGetFileContentsForDiffResponse(): GetFileContentsForDiffResponse {
+  return { success: false, contents: undefined, error: undefined };
+}
+
+export const GetFileContentsForDiffResponse: MessageFns<GetFileContentsForDiffResponse> = {
+  encode(message: GetFileContentsForDiffResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    if (message.contents !== undefined) {
+      FileDiffContents.encode(message.contents, writer.uint32(18).fork()).join();
+    }
+    if (message.error !== undefined) {
+      writer.uint32(26).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GetFileContentsForDiffResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetFileContentsForDiffResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.contents = FileDiffContents.decode(reader, reader.uint32());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetFileContentsForDiffResponse {
+    return {
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      contents: isSet(object.contents) ? FileDiffContents.fromJSON(object.contents) : undefined,
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: GetFileContentsForDiffResponse): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.contents !== undefined) {
+      obj.contents = FileDiffContents.toJSON(message.contents);
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetFileContentsForDiffResponse>, I>>(base?: I): GetFileContentsForDiffResponse {
+    return GetFileContentsForDiffResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GetFileContentsForDiffResponse>, I>>(
+    object: I,
+  ): GetFileContentsForDiffResponse {
+    const message = createBaseGetFileContentsForDiffResponse();
+    message.success = object.success ?? false;
+    message.contents = (object.contents !== undefined && object.contents !== null)
+      ? FileDiffContents.fromPartial(object.contents)
+      : undefined;
+    message.error = object.error ?? undefined;
+    return message;
+  },
+};
+
+function createBaseGetUncommittedFileContentsForDiffRequest(): GetUncommittedFileContentsForDiffRequest {
+  return { repoPath: "", filePath: "", staged: false };
+}
+
+export const GetUncommittedFileContentsForDiffRequest: MessageFns<GetUncommittedFileContentsForDiffRequest> = {
+  encode(message: GetUncommittedFileContentsForDiffRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.repoPath !== "") {
+      writer.uint32(10).string(message.repoPath);
+    }
+    if (message.filePath !== "") {
+      writer.uint32(18).string(message.filePath);
+    }
+    if (message.staged !== false) {
+      writer.uint32(24).bool(message.staged);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GetUncommittedFileContentsForDiffRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetUncommittedFileContentsForDiffRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.repoPath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.filePath = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.staged = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetUncommittedFileContentsForDiffRequest {
+    return {
+      repoPath: isSet(object.repoPath)
+        ? globalThis.String(object.repoPath)
+        : isSet(object.repo_path)
+        ? globalThis.String(object.repo_path)
+        : "",
+      filePath: isSet(object.filePath)
+        ? globalThis.String(object.filePath)
+        : isSet(object.file_path)
+        ? globalThis.String(object.file_path)
+        : "",
+      staged: isSet(object.staged) ? globalThis.Boolean(object.staged) : false,
+    };
+  },
+
+  toJSON(message: GetUncommittedFileContentsForDiffRequest): unknown {
+    const obj: any = {};
+    if (message.repoPath !== "") {
+      obj.repoPath = message.repoPath;
+    }
+    if (message.filePath !== "") {
+      obj.filePath = message.filePath;
+    }
+    if (message.staged !== false) {
+      obj.staged = message.staged;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetUncommittedFileContentsForDiffRequest>, I>>(
+    base?: I,
+  ): GetUncommittedFileContentsForDiffRequest {
+    return GetUncommittedFileContentsForDiffRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GetUncommittedFileContentsForDiffRequest>, I>>(
+    object: I,
+  ): GetUncommittedFileContentsForDiffRequest {
+    const message = createBaseGetUncommittedFileContentsForDiffRequest();
+    message.repoPath = object.repoPath ?? "";
+    message.filePath = object.filePath ?? "";
+    message.staged = object.staged ?? false;
+    return message;
+  },
+};
+
+function createBaseListLocalBranchesRequest(): ListLocalBranchesRequest {
+  return { repoPath: "" };
+}
+
+export const ListLocalBranchesRequest: MessageFns<ListLocalBranchesRequest> = {
+  encode(message: ListLocalBranchesRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.repoPath !== "") {
+      writer.uint32(10).string(message.repoPath);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListLocalBranchesRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListLocalBranchesRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.repoPath = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListLocalBranchesRequest {
+    return {
+      repoPath: isSet(object.repoPath)
+        ? globalThis.String(object.repoPath)
+        : isSet(object.repo_path)
+        ? globalThis.String(object.repo_path)
+        : "",
+    };
+  },
+
+  toJSON(message: ListLocalBranchesRequest): unknown {
+    const obj: any = {};
+    if (message.repoPath !== "") {
+      obj.repoPath = message.repoPath;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListLocalBranchesRequest>, I>>(base?: I): ListLocalBranchesRequest {
+    return ListLocalBranchesRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListLocalBranchesRequest>, I>>(object: I): ListLocalBranchesRequest {
+    const message = createBaseListLocalBranchesRequest();
+    message.repoPath = object.repoPath ?? "";
+    return message;
+  },
+};
+
+function createBaseListLocalBranchesResponse(): ListLocalBranchesResponse {
+  return { branches: [] };
+}
+
+export const ListLocalBranchesResponse: MessageFns<ListLocalBranchesResponse> = {
+  encode(message: ListLocalBranchesResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.branches) {
+      writer.uint32(10).string(v!);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListLocalBranchesResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListLocalBranchesResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.branches.push(reader.string());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListLocalBranchesResponse {
+    return {
+      branches: globalThis.Array.isArray(object?.branches) ? object.branches.map((e: any) => globalThis.String(e)) : [],
+    };
+  },
+
+  toJSON(message: ListLocalBranchesResponse): unknown {
+    const obj: any = {};
+    if (message.branches?.length) {
+      obj.branches = message.branches;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListLocalBranchesResponse>, I>>(base?: I): ListLocalBranchesResponse {
+    return ListLocalBranchesResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListLocalBranchesResponse>, I>>(object: I): ListLocalBranchesResponse {
+    const message = createBaseListLocalBranchesResponse();
+    message.branches = object.branches?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseListRemoteBranchesRequest(): ListRemoteBranchesRequest {
+  return { repoPath: "" };
+}
+
+export const ListRemoteBranchesRequest: MessageFns<ListRemoteBranchesRequest> = {
+  encode(message: ListRemoteBranchesRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.repoPath !== "") {
+      writer.uint32(10).string(message.repoPath);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListRemoteBranchesRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListRemoteBranchesRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.repoPath = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListRemoteBranchesRequest {
+    return {
+      repoPath: isSet(object.repoPath)
+        ? globalThis.String(object.repoPath)
+        : isSet(object.repo_path)
+        ? globalThis.String(object.repo_path)
+        : "",
+    };
+  },
+
+  toJSON(message: ListRemoteBranchesRequest): unknown {
+    const obj: any = {};
+    if (message.repoPath !== "") {
+      obj.repoPath = message.repoPath;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListRemoteBranchesRequest>, I>>(base?: I): ListRemoteBranchesRequest {
+    return ListRemoteBranchesRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListRemoteBranchesRequest>, I>>(object: I): ListRemoteBranchesRequest {
+    const message = createBaseListRemoteBranchesRequest();
+    message.repoPath = object.repoPath ?? "";
+    return message;
+  },
+};
+
+function createBaseListRemoteBranchesResponse(): ListRemoteBranchesResponse {
+  return { branches: [] };
+}
+
+export const ListRemoteBranchesResponse: MessageFns<ListRemoteBranchesResponse> = {
+  encode(message: ListRemoteBranchesResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.branches) {
+      writer.uint32(10).string(v!);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListRemoteBranchesResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListRemoteBranchesResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.branches.push(reader.string());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListRemoteBranchesResponse {
+    return {
+      branches: globalThis.Array.isArray(object?.branches) ? object.branches.map((e: any) => globalThis.String(e)) : [],
+    };
+  },
+
+  toJSON(message: ListRemoteBranchesResponse): unknown {
+    const obj: any = {};
+    if (message.branches?.length) {
+      obj.branches = message.branches;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListRemoteBranchesResponse>, I>>(base?: I): ListRemoteBranchesResponse {
+    return ListRemoteBranchesResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ListRemoteBranchesResponse>, I>>(object: I): ListRemoteBranchesResponse {
+    const message = createBaseListRemoteBranchesResponse();
+    message.branches = object.branches?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseGetBranchesInWorktreesRequest(): GetBranchesInWorktreesRequest {
+  return { repoPath: "" };
+}
+
+export const GetBranchesInWorktreesRequest: MessageFns<GetBranchesInWorktreesRequest> = {
+  encode(message: GetBranchesInWorktreesRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.repoPath !== "") {
+      writer.uint32(10).string(message.repoPath);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GetBranchesInWorktreesRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetBranchesInWorktreesRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.repoPath = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetBranchesInWorktreesRequest {
+    return {
+      repoPath: isSet(object.repoPath)
+        ? globalThis.String(object.repoPath)
+        : isSet(object.repo_path)
+        ? globalThis.String(object.repo_path)
+        : "",
+    };
+  },
+
+  toJSON(message: GetBranchesInWorktreesRequest): unknown {
+    const obj: any = {};
+    if (message.repoPath !== "") {
+      obj.repoPath = message.repoPath;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetBranchesInWorktreesRequest>, I>>(base?: I): GetBranchesInWorktreesRequest {
+    return GetBranchesInWorktreesRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GetBranchesInWorktreesRequest>, I>>(
+    object: I,
+  ): GetBranchesInWorktreesRequest {
+    const message = createBaseGetBranchesInWorktreesRequest();
+    message.repoPath = object.repoPath ?? "";
+    return message;
+  },
+};
+
+function createBaseGetBranchesInWorktreesResponse(): GetBranchesInWorktreesResponse {
+  return { branches: [] };
+}
+
+export const GetBranchesInWorktreesResponse: MessageFns<GetBranchesInWorktreesResponse> = {
+  encode(message: GetBranchesInWorktreesResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.branches) {
+      writer.uint32(10).string(v!);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): GetBranchesInWorktreesResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetBranchesInWorktreesResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.branches.push(reader.string());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetBranchesInWorktreesResponse {
+    return {
+      branches: globalThis.Array.isArray(object?.branches) ? object.branches.map((e: any) => globalThis.String(e)) : [],
+    };
+  },
+
+  toJSON(message: GetBranchesInWorktreesResponse): unknown {
+    const obj: any = {};
+    if (message.branches?.length) {
+      obj.branches = message.branches;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetBranchesInWorktreesResponse>, I>>(base?: I): GetBranchesInWorktreesResponse {
+    return GetBranchesInWorktreesResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<GetBranchesInWorktreesResponse>, I>>(
+    object: I,
+  ): GetBranchesInWorktreesResponse {
+    const message = createBaseGetBranchesInWorktreesResponse();
+    message.branches = object.branches?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseCreateWorktreeFromBranchRequest(): CreateWorktreeFromBranchRequest {
+  return { repoPath: "", branch: "", worktreeName: "" };
+}
+
+export const CreateWorktreeFromBranchRequest: MessageFns<CreateWorktreeFromBranchRequest> = {
+  encode(message: CreateWorktreeFromBranchRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.repoPath !== "") {
+      writer.uint32(10).string(message.repoPath);
+    }
+    if (message.branch !== "") {
+      writer.uint32(18).string(message.branch);
+    }
+    if (message.worktreeName !== "") {
+      writer.uint32(26).string(message.worktreeName);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CreateWorktreeFromBranchRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCreateWorktreeFromBranchRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.repoPath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.branch = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.worktreeName = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CreateWorktreeFromBranchRequest {
+    return {
+      repoPath: isSet(object.repoPath)
+        ? globalThis.String(object.repoPath)
+        : isSet(object.repo_path)
+        ? globalThis.String(object.repo_path)
+        : "",
+      branch: isSet(object.branch) ? globalThis.String(object.branch) : "",
+      worktreeName: isSet(object.worktreeName)
+        ? globalThis.String(object.worktreeName)
+        : isSet(object.worktree_name)
+        ? globalThis.String(object.worktree_name)
+        : "",
+    };
+  },
+
+  toJSON(message: CreateWorktreeFromBranchRequest): unknown {
+    const obj: any = {};
+    if (message.repoPath !== "") {
+      obj.repoPath = message.repoPath;
+    }
+    if (message.branch !== "") {
+      obj.branch = message.branch;
+    }
+    if (message.worktreeName !== "") {
+      obj.worktreeName = message.worktreeName;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CreateWorktreeFromBranchRequest>, I>>(base?: I): CreateWorktreeFromBranchRequest {
+    return CreateWorktreeFromBranchRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CreateWorktreeFromBranchRequest>, I>>(
+    object: I,
+  ): CreateWorktreeFromBranchRequest {
+    const message = createBaseCreateWorktreeFromBranchRequest();
+    message.repoPath = object.repoPath ?? "";
+    message.branch = object.branch ?? "";
+    message.worktreeName = object.worktreeName ?? "";
+    return message;
+  },
+};
+
+function createBaseCreateWorktreeFromRemoteRequest(): CreateWorktreeFromRemoteRequest {
+  return { repoPath: "", remoteBranch: "", worktreeName: "" };
+}
+
+export const CreateWorktreeFromRemoteRequest: MessageFns<CreateWorktreeFromRemoteRequest> = {
+  encode(message: CreateWorktreeFromRemoteRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.repoPath !== "") {
+      writer.uint32(10).string(message.repoPath);
+    }
+    if (message.remoteBranch !== "") {
+      writer.uint32(18).string(message.remoteBranch);
+    }
+    if (message.worktreeName !== "") {
+      writer.uint32(26).string(message.worktreeName);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): CreateWorktreeFromRemoteRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCreateWorktreeFromRemoteRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.repoPath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.remoteBranch = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.worktreeName = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CreateWorktreeFromRemoteRequest {
+    return {
+      repoPath: isSet(object.repoPath)
+        ? globalThis.String(object.repoPath)
+        : isSet(object.repo_path)
+        ? globalThis.String(object.repo_path)
+        : "",
+      remoteBranch: isSet(object.remoteBranch)
+        ? globalThis.String(object.remoteBranch)
+        : isSet(object.remote_branch)
+        ? globalThis.String(object.remote_branch)
+        : "",
+      worktreeName: isSet(object.worktreeName)
+        ? globalThis.String(object.worktreeName)
+        : isSet(object.worktree_name)
+        ? globalThis.String(object.worktree_name)
+        : "",
+    };
+  },
+
+  toJSON(message: CreateWorktreeFromRemoteRequest): unknown {
+    const obj: any = {};
+    if (message.repoPath !== "") {
+      obj.repoPath = message.repoPath;
+    }
+    if (message.remoteBranch !== "") {
+      obj.remoteBranch = message.remoteBranch;
+    }
+    if (message.worktreeName !== "") {
+      obj.worktreeName = message.worktreeName;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CreateWorktreeFromRemoteRequest>, I>>(base?: I): CreateWorktreeFromRemoteRequest {
+    return CreateWorktreeFromRemoteRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CreateWorktreeFromRemoteRequest>, I>>(
+    object: I,
+  ): CreateWorktreeFromRemoteRequest {
+    const message = createBaseCreateWorktreeFromRemoteRequest();
+    message.repoPath = object.repoPath ?? "";
+    message.remoteBranch = object.remoteBranch ?? "";
+    message.worktreeName = object.worktreeName ?? "";
+    return message;
+  },
+};
+
+function createBaseFileEntry(): FileEntry {
+  return { name: "", path: "", relativePath: "", isDirectory: false, size: undefined, modifiedTime: undefined };
+}
+
+export const FileEntry: MessageFns<FileEntry> = {
+  encode(message: FileEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.path !== "") {
+      writer.uint32(18).string(message.path);
+    }
+    if (message.relativePath !== "") {
+      writer.uint32(26).string(message.relativePath);
+    }
+    if (message.isDirectory !== false) {
+      writer.uint32(32).bool(message.isDirectory);
+    }
+    if (message.size !== undefined) {
+      writer.uint32(40).int64(message.size);
+    }
+    if (message.modifiedTime !== undefined) {
+      writer.uint32(49).double(message.modifiedTime);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FileEntry {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFileEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.path = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.relativePath = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.isDirectory = reader.bool();
+          continue;
+        }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.size = longToNumber(reader.int64());
+          continue;
+        }
+        case 6: {
+          if (tag !== 49) {
+            break;
+          }
+
+          message.modifiedTime = reader.double();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FileEntry {
+    return {
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+      path: isSet(object.path) ? globalThis.String(object.path) : "",
+      relativePath: isSet(object.relativePath)
+        ? globalThis.String(object.relativePath)
+        : isSet(object.relative_path)
+        ? globalThis.String(object.relative_path)
+        : "",
+      isDirectory: isSet(object.isDirectory)
+        ? globalThis.Boolean(object.isDirectory)
+        : isSet(object.is_directory)
+        ? globalThis.Boolean(object.is_directory)
+        : false,
+      size: isSet(object.size) ? globalThis.Number(object.size) : undefined,
+      modifiedTime: isSet(object.modifiedTime)
+        ? globalThis.Number(object.modifiedTime)
+        : isSet(object.modified_time)
+        ? globalThis.Number(object.modified_time)
+        : undefined,
+    };
+  },
+
+  toJSON(message: FileEntry): unknown {
+    const obj: any = {};
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    if (message.path !== "") {
+      obj.path = message.path;
+    }
+    if (message.relativePath !== "") {
+      obj.relativePath = message.relativePath;
+    }
+    if (message.isDirectory !== false) {
+      obj.isDirectory = message.isDirectory;
+    }
+    if (message.size !== undefined) {
+      obj.size = Math.round(message.size);
+    }
+    if (message.modifiedTime !== undefined) {
+      obj.modifiedTime = message.modifiedTime;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FileEntry>, I>>(base?: I): FileEntry {
+    return FileEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FileEntry>, I>>(object: I): FileEntry {
+    const message = createBaseFileEntry();
+    message.name = object.name ?? "";
+    message.path = object.path ?? "";
+    message.relativePath = object.relativePath ?? "";
+    message.isDirectory = object.isDirectory ?? false;
+    message.size = object.size ?? undefined;
+    message.modifiedTime = object.modifiedTime ?? undefined;
+    return message;
+  },
+};
+
+function createBaseDirectoryContents(): DirectoryContents {
+  return { path: "", entries: [] };
+}
+
+export const DirectoryContents: MessageFns<DirectoryContents> = {
+  encode(message: DirectoryContents, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.path !== "") {
+      writer.uint32(10).string(message.path);
+    }
+    for (const v of message.entries) {
+      FileEntry.encode(v!, writer.uint32(18).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): DirectoryContents {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDirectoryContents();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.path = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.entries.push(FileEntry.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DirectoryContents {
+    return {
+      path: isSet(object.path) ? globalThis.String(object.path) : "",
+      entries: globalThis.Array.isArray(object?.entries) ? object.entries.map((e: any) => FileEntry.fromJSON(e)) : [],
+    };
+  },
+
+  toJSON(message: DirectoryContents): unknown {
+    const obj: any = {};
+    if (message.path !== "") {
+      obj.path = message.path;
+    }
+    if (message.entries?.length) {
+      obj.entries = message.entries.map((e) => FileEntry.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DirectoryContents>, I>>(base?: I): DirectoryContents {
+    return DirectoryContents.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<DirectoryContents>, I>>(object: I): DirectoryContents {
+    const message = createBaseDirectoryContents();
+    message.path = object.path ?? "";
+    message.entries = object.entries?.map((e) => FileEntry.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseReadDirectoryRequest(): ReadDirectoryRequest {
+  return { workspacePath: "", dirPath: "" };
+}
+
+export const ReadDirectoryRequest: MessageFns<ReadDirectoryRequest> = {
+  encode(message: ReadDirectoryRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.workspacePath !== "") {
+      writer.uint32(10).string(message.workspacePath);
+    }
+    if (message.dirPath !== "") {
+      writer.uint32(18).string(message.dirPath);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ReadDirectoryRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseReadDirectoryRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.workspacePath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.dirPath = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ReadDirectoryRequest {
+    return {
+      workspacePath: isSet(object.workspacePath)
+        ? globalThis.String(object.workspacePath)
+        : isSet(object.workspace_path)
+        ? globalThis.String(object.workspace_path)
+        : "",
+      dirPath: isSet(object.dirPath)
+        ? globalThis.String(object.dirPath)
+        : isSet(object.dir_path)
+        ? globalThis.String(object.dir_path)
+        : "",
+    };
+  },
+
+  toJSON(message: ReadDirectoryRequest): unknown {
+    const obj: any = {};
+    if (message.workspacePath !== "") {
+      obj.workspacePath = message.workspacePath;
+    }
+    if (message.dirPath !== "") {
+      obj.dirPath = message.dirPath;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ReadDirectoryRequest>, I>>(base?: I): ReadDirectoryRequest {
+    return ReadDirectoryRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ReadDirectoryRequest>, I>>(object: I): ReadDirectoryRequest {
+    const message = createBaseReadDirectoryRequest();
+    message.workspacePath = object.workspacePath ?? "";
+    message.dirPath = object.dirPath ?? "";
+    return message;
+  },
+};
+
+function createBaseReadDirectoryResponse(): ReadDirectoryResponse {
+  return { success: false, contents: undefined, error: undefined };
+}
+
+export const ReadDirectoryResponse: MessageFns<ReadDirectoryResponse> = {
+  encode(message: ReadDirectoryResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    if (message.contents !== undefined) {
+      DirectoryContents.encode(message.contents, writer.uint32(18).fork()).join();
+    }
+    if (message.error !== undefined) {
+      writer.uint32(26).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ReadDirectoryResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseReadDirectoryResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.contents = DirectoryContents.decode(reader, reader.uint32());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ReadDirectoryResponse {
+    return {
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      contents: isSet(object.contents) ? DirectoryContents.fromJSON(object.contents) : undefined,
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: ReadDirectoryResponse): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.contents !== undefined) {
+      obj.contents = DirectoryContents.toJSON(message.contents);
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ReadDirectoryResponse>, I>>(base?: I): ReadDirectoryResponse {
+    return ReadDirectoryResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ReadDirectoryResponse>, I>>(object: I): ReadDirectoryResponse {
+    const message = createBaseReadDirectoryResponse();
+    message.success = object.success ?? false;
+    message.contents = (object.contents !== undefined && object.contents !== null)
+      ? DirectoryContents.fromPartial(object.contents)
+      : undefined;
+    message.error = object.error ?? undefined;
+    return message;
+  },
+};
+
+function createBaseFileContents(): FileContents {
+  return { path: "", content: "", size: 0, language: "" };
+}
+
+export const FileContents: MessageFns<FileContents> = {
+  encode(message: FileContents, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.path !== "") {
+      writer.uint32(10).string(message.path);
+    }
+    if (message.content !== "") {
+      writer.uint32(18).string(message.content);
+    }
+    if (message.size !== 0) {
+      writer.uint32(24).int64(message.size);
+    }
+    if (message.language !== "") {
+      writer.uint32(34).string(message.language);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FileContents {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFileContents();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.path = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.content = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.size = longToNumber(reader.int64());
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.language = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FileContents {
+    return {
+      path: isSet(object.path) ? globalThis.String(object.path) : "",
+      content: isSet(object.content) ? globalThis.String(object.content) : "",
+      size: isSet(object.size) ? globalThis.Number(object.size) : 0,
+      language: isSet(object.language) ? globalThis.String(object.language) : "",
+    };
+  },
+
+  toJSON(message: FileContents): unknown {
+    const obj: any = {};
+    if (message.path !== "") {
+      obj.path = message.path;
+    }
+    if (message.content !== "") {
+      obj.content = message.content;
+    }
+    if (message.size !== 0) {
+      obj.size = Math.round(message.size);
+    }
+    if (message.language !== "") {
+      obj.language = message.language;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FileContents>, I>>(base?: I): FileContents {
+    return FileContents.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FileContents>, I>>(object: I): FileContents {
+    const message = createBaseFileContents();
+    message.path = object.path ?? "";
+    message.content = object.content ?? "";
+    message.size = object.size ?? 0;
+    message.language = object.language ?? "";
+    return message;
+  },
+};
+
+function createBaseReadFileRequest(): ReadFileRequest {
+  return { workspacePath: "", filePath: "" };
+}
+
+export const ReadFileRequest: MessageFns<ReadFileRequest> = {
+  encode(message: ReadFileRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.workspacePath !== "") {
+      writer.uint32(10).string(message.workspacePath);
+    }
+    if (message.filePath !== "") {
+      writer.uint32(18).string(message.filePath);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ReadFileRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseReadFileRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.workspacePath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.filePath = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ReadFileRequest {
+    return {
+      workspacePath: isSet(object.workspacePath)
+        ? globalThis.String(object.workspacePath)
+        : isSet(object.workspace_path)
+        ? globalThis.String(object.workspace_path)
+        : "",
+      filePath: isSet(object.filePath)
+        ? globalThis.String(object.filePath)
+        : isSet(object.file_path)
+        ? globalThis.String(object.file_path)
+        : "",
+    };
+  },
+
+  toJSON(message: ReadFileRequest): unknown {
+    const obj: any = {};
+    if (message.workspacePath !== "") {
+      obj.workspacePath = message.workspacePath;
+    }
+    if (message.filePath !== "") {
+      obj.filePath = message.filePath;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ReadFileRequest>, I>>(base?: I): ReadFileRequest {
+    return ReadFileRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ReadFileRequest>, I>>(object: I): ReadFileRequest {
+    const message = createBaseReadFileRequest();
+    message.workspacePath = object.workspacePath ?? "";
+    message.filePath = object.filePath ?? "";
+    return message;
+  },
+};
+
+function createBaseReadFileResponse(): ReadFileResponse {
+  return { success: false, file: undefined, error: undefined };
+}
+
+export const ReadFileResponse: MessageFns<ReadFileResponse> = {
+  encode(message: ReadFileResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    if (message.file !== undefined) {
+      FileContents.encode(message.file, writer.uint32(18).fork()).join();
+    }
+    if (message.error !== undefined) {
+      writer.uint32(26).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ReadFileResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseReadFileResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.file = FileContents.decode(reader, reader.uint32());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ReadFileResponse {
+    return {
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      file: isSet(object.file) ? FileContents.fromJSON(object.file) : undefined,
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: ReadFileResponse): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.file !== undefined) {
+      obj.file = FileContents.toJSON(message.file);
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ReadFileResponse>, I>>(base?: I): ReadFileResponse {
+    return ReadFileResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ReadFileResponse>, I>>(object: I): ReadFileResponse {
+    const message = createBaseReadFileResponse();
+    message.success = object.success ?? false;
+    message.file = (object.file !== undefined && object.file !== null)
+      ? FileContents.fromPartial(object.file)
+      : undefined;
+    message.error = object.error ?? undefined;
+    return message;
+  },
+};
+
+function createBaseWriteFileRequest(): WriteFileRequest {
+  return { workspacePath: "", filePath: "", content: "" };
+}
+
+export const WriteFileRequest: MessageFns<WriteFileRequest> = {
+  encode(message: WriteFileRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.workspacePath !== "") {
+      writer.uint32(10).string(message.workspacePath);
+    }
+    if (message.filePath !== "") {
+      writer.uint32(18).string(message.filePath);
+    }
+    if (message.content !== "") {
+      writer.uint32(26).string(message.content);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): WriteFileRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseWriteFileRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.workspacePath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.filePath = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.content = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): WriteFileRequest {
+    return {
+      workspacePath: isSet(object.workspacePath)
+        ? globalThis.String(object.workspacePath)
+        : isSet(object.workspace_path)
+        ? globalThis.String(object.workspace_path)
+        : "",
+      filePath: isSet(object.filePath)
+        ? globalThis.String(object.filePath)
+        : isSet(object.file_path)
+        ? globalThis.String(object.file_path)
+        : "",
+      content: isSet(object.content) ? globalThis.String(object.content) : "",
+    };
+  },
+
+  toJSON(message: WriteFileRequest): unknown {
+    const obj: any = {};
+    if (message.workspacePath !== "") {
+      obj.workspacePath = message.workspacePath;
+    }
+    if (message.filePath !== "") {
+      obj.filePath = message.filePath;
+    }
+    if (message.content !== "") {
+      obj.content = message.content;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<WriteFileRequest>, I>>(base?: I): WriteFileRequest {
+    return WriteFileRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<WriteFileRequest>, I>>(object: I): WriteFileRequest {
+    const message = createBaseWriteFileRequest();
+    message.workspacePath = object.workspacePath ?? "";
+    message.filePath = object.filePath ?? "";
+    message.content = object.content ?? "";
+    return message;
+  },
+};
+
+function createBaseWriteFileResponse(): WriteFileResponse {
+  return { success: false, error: undefined };
+}
+
+export const WriteFileResponse: MessageFns<WriteFileResponse> = {
+  encode(message: WriteFileResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    if (message.error !== undefined) {
+      writer.uint32(18).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): WriteFileResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseWriteFileResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): WriteFileResponse {
+    return {
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: WriteFileResponse): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<WriteFileResponse>, I>>(base?: I): WriteFileResponse {
+    return WriteFileResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<WriteFileResponse>, I>>(object: I): WriteFileResponse {
+    const message = createBaseWriteFileResponse();
+    message.success = object.success ?? false;
+    message.error = object.error ?? undefined;
+    return message;
+  },
+};
+
 export type TreeTermDaemonService = typeof TreeTermDaemonService;
 export const TreeTermDaemonService = {
   /** PTY Session Management (Unary RPCs) */
@@ -3267,6 +8881,337 @@ export const TreeTermDaemonService = {
     responseSerialize: (value: Empty): Buffer => Buffer.from(Empty.encode(value).finish()),
     responseDeserialize: (value: Buffer): Empty => Empty.decode(value),
   },
+  /** Git Operations */
+  getGitInfo: {
+    path: "/treeterm.TreeTermDaemon/GetGitInfo" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GitInfoRequest): Buffer => Buffer.from(GitInfoRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GitInfoRequest => GitInfoRequest.decode(value),
+    responseSerialize: (value: GitInfoResponse): Buffer => Buffer.from(GitInfoResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GitInfoResponse => GitInfoResponse.decode(value),
+  },
+  createWorktree: {
+    path: "/treeterm.TreeTermDaemon/CreateWorktree" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: CreateWorktreeRequest): Buffer =>
+      Buffer.from(CreateWorktreeRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): CreateWorktreeRequest => CreateWorktreeRequest.decode(value),
+    responseSerialize: (value: CreateWorktreeResponse): Buffer =>
+      Buffer.from(CreateWorktreeResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CreateWorktreeResponse => CreateWorktreeResponse.decode(value),
+  },
+  removeWorktree: {
+    path: "/treeterm.TreeTermDaemon/RemoveWorktree" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: RemoveWorktreeRequest): Buffer =>
+      Buffer.from(RemoveWorktreeRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): RemoveWorktreeRequest => RemoveWorktreeRequest.decode(value),
+    responseSerialize: (value: MergeWorktreeResponse): Buffer =>
+      Buffer.from(MergeWorktreeResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): MergeWorktreeResponse => MergeWorktreeResponse.decode(value),
+  },
+  listWorktrees: {
+    path: "/treeterm.TreeTermDaemon/ListWorktrees" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: ListWorktreesRequest): Buffer => Buffer.from(ListWorktreesRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ListWorktreesRequest => ListWorktreesRequest.decode(value),
+    responseSerialize: (value: ListWorktreesResponse): Buffer =>
+      Buffer.from(ListWorktreesResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): ListWorktreesResponse => ListWorktreesResponse.decode(value),
+  },
+  getChildWorktrees: {
+    path: "/treeterm.TreeTermDaemon/GetChildWorktrees" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GetChildWorktreesRequest): Buffer =>
+      Buffer.from(GetChildWorktreesRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GetChildWorktreesRequest => GetChildWorktreesRequest.decode(value),
+    responseSerialize: (value: GetChildWorktreesResponse): Buffer =>
+      Buffer.from(GetChildWorktreesResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GetChildWorktreesResponse => GetChildWorktreesResponse.decode(value),
+  },
+  getDiff: {
+    path: "/treeterm.TreeTermDaemon/GetDiff" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GetDiffRequest): Buffer => Buffer.from(GetDiffRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GetDiffRequest => GetDiffRequest.decode(value),
+    responseSerialize: (value: GetDiffResponse): Buffer => Buffer.from(GetDiffResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GetDiffResponse => GetDiffResponse.decode(value),
+  },
+  getFileDiff: {
+    path: "/treeterm.TreeTermDaemon/GetFileDiff" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GetFileDiffRequest): Buffer => Buffer.from(GetFileDiffRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GetFileDiffRequest => GetFileDiffRequest.decode(value),
+    responseSerialize: (value: GetFileDiffResponse): Buffer => Buffer.from(GetFileDiffResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GetFileDiffResponse => GetFileDiffResponse.decode(value),
+  },
+  getDiffAgainstHead: {
+    path: "/treeterm.TreeTermDaemon/GetDiffAgainstHead" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GetDiffRequest): Buffer => Buffer.from(GetDiffRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GetDiffRequest => GetDiffRequest.decode(value),
+    responseSerialize: (value: GetDiffResponse): Buffer => Buffer.from(GetDiffResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GetDiffResponse => GetDiffResponse.decode(value),
+  },
+  getFileDiffAgainstHead: {
+    path: "/treeterm.TreeTermDaemon/GetFileDiffAgainstHead" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GetFileDiffRequest): Buffer => Buffer.from(GetFileDiffRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GetFileDiffRequest => GetFileDiffRequest.decode(value),
+    responseSerialize: (value: GetFileDiffResponse): Buffer => Buffer.from(GetFileDiffResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GetFileDiffResponse => GetFileDiffResponse.decode(value),
+  },
+  mergeWorktree: {
+    path: "/treeterm.TreeTermDaemon/MergeWorktree" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: MergeWorktreeRequest): Buffer => Buffer.from(MergeWorktreeRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): MergeWorktreeRequest => MergeWorktreeRequest.decode(value),
+    responseSerialize: (value: MergeWorktreeResponse): Buffer =>
+      Buffer.from(MergeWorktreeResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): MergeWorktreeResponse => MergeWorktreeResponse.decode(value),
+  },
+  hasUncommittedChanges: {
+    path: "/treeterm.TreeTermDaemon/HasUncommittedChanges" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: HasUncommittedChangesRequest): Buffer =>
+      Buffer.from(HasUncommittedChangesRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): HasUncommittedChangesRequest => HasUncommittedChangesRequest.decode(value),
+    responseSerialize: (value: HasUncommittedChangesResponse): Buffer =>
+      Buffer.from(HasUncommittedChangesResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): HasUncommittedChangesResponse => HasUncommittedChangesResponse.decode(value),
+  },
+  commitAll: {
+    path: "/treeterm.TreeTermDaemon/CommitAll" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: CommitAllRequest): Buffer => Buffer.from(CommitAllRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): CommitAllRequest => CommitAllRequest.decode(value),
+    responseSerialize: (value: CommitAllResponse): Buffer => Buffer.from(CommitAllResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CommitAllResponse => CommitAllResponse.decode(value),
+  },
+  deleteBranch: {
+    path: "/treeterm.TreeTermDaemon/DeleteBranch" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: DeleteBranchRequest): Buffer => Buffer.from(DeleteBranchRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): DeleteBranchRequest => DeleteBranchRequest.decode(value),
+    responseSerialize: (value: DeleteBranchResponse): Buffer =>
+      Buffer.from(DeleteBranchResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): DeleteBranchResponse => DeleteBranchResponse.decode(value),
+  },
+  getUncommittedChanges: {
+    path: "/treeterm.TreeTermDaemon/GetUncommittedChanges" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GetUncommittedChangesRequest): Buffer =>
+      Buffer.from(GetUncommittedChangesRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GetUncommittedChangesRequest => GetUncommittedChangesRequest.decode(value),
+    responseSerialize: (value: GetUncommittedChangesResponse): Buffer =>
+      Buffer.from(GetUncommittedChangesResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GetUncommittedChangesResponse => GetUncommittedChangesResponse.decode(value),
+  },
+  getUncommittedFileDiff: {
+    path: "/treeterm.TreeTermDaemon/GetUncommittedFileDiff" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GetUncommittedFileDiffRequest): Buffer =>
+      Buffer.from(GetUncommittedFileDiffRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GetUncommittedFileDiffRequest => GetUncommittedFileDiffRequest.decode(value),
+    responseSerialize: (value: GetFileDiffResponse): Buffer => Buffer.from(GetFileDiffResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GetFileDiffResponse => GetFileDiffResponse.decode(value),
+  },
+  stageFile: {
+    path: "/treeterm.TreeTermDaemon/StageFile" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: StageFileRequest): Buffer => Buffer.from(StageFileRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): StageFileRequest => StageFileRequest.decode(value),
+    responseSerialize: (value: StageFileResponse): Buffer => Buffer.from(StageFileResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): StageFileResponse => StageFileResponse.decode(value),
+  },
+  unstageFile: {
+    path: "/treeterm.TreeTermDaemon/UnstageFile" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: StageFileRequest): Buffer => Buffer.from(StageFileRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): StageFileRequest => StageFileRequest.decode(value),
+    responseSerialize: (value: StageFileResponse): Buffer => Buffer.from(StageFileResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): StageFileResponse => StageFileResponse.decode(value),
+  },
+  stageAll: {
+    path: "/treeterm.TreeTermDaemon/StageAll" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: StageAllRequest): Buffer => Buffer.from(StageAllRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): StageAllRequest => StageAllRequest.decode(value),
+    responseSerialize: (value: StageAllResponse): Buffer => Buffer.from(StageAllResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): StageAllResponse => StageAllResponse.decode(value),
+  },
+  unstageAll: {
+    path: "/treeterm.TreeTermDaemon/UnstageAll" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: StageAllRequest): Buffer => Buffer.from(StageAllRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): StageAllRequest => StageAllRequest.decode(value),
+    responseSerialize: (value: StageAllResponse): Buffer => Buffer.from(StageAllResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): StageAllResponse => StageAllResponse.decode(value),
+  },
+  commitStaged: {
+    path: "/treeterm.TreeTermDaemon/CommitStaged" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: CommitStagedRequest): Buffer => Buffer.from(CommitStagedRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): CommitStagedRequest => CommitStagedRequest.decode(value),
+    responseSerialize: (value: CommitStagedResponse): Buffer =>
+      Buffer.from(CommitStagedResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CommitStagedResponse => CommitStagedResponse.decode(value),
+  },
+  checkMergeConflicts: {
+    path: "/treeterm.TreeTermDaemon/CheckMergeConflicts" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: CheckMergeConflictsRequest): Buffer =>
+      Buffer.from(CheckMergeConflictsRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): CheckMergeConflictsRequest => CheckMergeConflictsRequest.decode(value),
+    responseSerialize: (value: CheckMergeConflictsResponse): Buffer =>
+      Buffer.from(CheckMergeConflictsResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CheckMergeConflictsResponse => CheckMergeConflictsResponse.decode(value),
+  },
+  getFileContentsForDiff: {
+    path: "/treeterm.TreeTermDaemon/GetFileContentsForDiff" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GetFileContentsForDiffRequest): Buffer =>
+      Buffer.from(GetFileContentsForDiffRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GetFileContentsForDiffRequest => GetFileContentsForDiffRequest.decode(value),
+    responseSerialize: (value: GetFileContentsForDiffResponse): Buffer =>
+      Buffer.from(GetFileContentsForDiffResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GetFileContentsForDiffResponse =>
+      GetFileContentsForDiffResponse.decode(value),
+  },
+  getFileContentsForDiffAgainstHead: {
+    path: "/treeterm.TreeTermDaemon/GetFileContentsForDiffAgainstHead" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GetFileContentsForDiffRequest): Buffer =>
+      Buffer.from(GetFileContentsForDiffRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GetFileContentsForDiffRequest => GetFileContentsForDiffRequest.decode(value),
+    responseSerialize: (value: GetFileContentsForDiffResponse): Buffer =>
+      Buffer.from(GetFileContentsForDiffResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GetFileContentsForDiffResponse =>
+      GetFileContentsForDiffResponse.decode(value),
+  },
+  getUncommittedFileContentsForDiff: {
+    path: "/treeterm.TreeTermDaemon/GetUncommittedFileContentsForDiff" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GetUncommittedFileContentsForDiffRequest): Buffer =>
+      Buffer.from(GetUncommittedFileContentsForDiffRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GetUncommittedFileContentsForDiffRequest =>
+      GetUncommittedFileContentsForDiffRequest.decode(value),
+    responseSerialize: (value: GetFileContentsForDiffResponse): Buffer =>
+      Buffer.from(GetFileContentsForDiffResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GetFileContentsForDiffResponse =>
+      GetFileContentsForDiffResponse.decode(value),
+  },
+  listLocalBranches: {
+    path: "/treeterm.TreeTermDaemon/ListLocalBranches" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: ListLocalBranchesRequest): Buffer =>
+      Buffer.from(ListLocalBranchesRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ListLocalBranchesRequest => ListLocalBranchesRequest.decode(value),
+    responseSerialize: (value: ListLocalBranchesResponse): Buffer =>
+      Buffer.from(ListLocalBranchesResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): ListLocalBranchesResponse => ListLocalBranchesResponse.decode(value),
+  },
+  listRemoteBranches: {
+    path: "/treeterm.TreeTermDaemon/ListRemoteBranches" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: ListRemoteBranchesRequest): Buffer =>
+      Buffer.from(ListRemoteBranchesRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ListRemoteBranchesRequest => ListRemoteBranchesRequest.decode(value),
+    responseSerialize: (value: ListRemoteBranchesResponse): Buffer =>
+      Buffer.from(ListRemoteBranchesResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): ListRemoteBranchesResponse => ListRemoteBranchesResponse.decode(value),
+  },
+  getBranchesInWorktrees: {
+    path: "/treeterm.TreeTermDaemon/GetBranchesInWorktrees" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: GetBranchesInWorktreesRequest): Buffer =>
+      Buffer.from(GetBranchesInWorktreesRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): GetBranchesInWorktreesRequest => GetBranchesInWorktreesRequest.decode(value),
+    responseSerialize: (value: GetBranchesInWorktreesResponse): Buffer =>
+      Buffer.from(GetBranchesInWorktreesResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GetBranchesInWorktreesResponse =>
+      GetBranchesInWorktreesResponse.decode(value),
+  },
+  createWorktreeFromBranch: {
+    path: "/treeterm.TreeTermDaemon/CreateWorktreeFromBranch" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: CreateWorktreeFromBranchRequest): Buffer =>
+      Buffer.from(CreateWorktreeFromBranchRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): CreateWorktreeFromBranchRequest =>
+      CreateWorktreeFromBranchRequest.decode(value),
+    responseSerialize: (value: CreateWorktreeResponse): Buffer =>
+      Buffer.from(CreateWorktreeResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CreateWorktreeResponse => CreateWorktreeResponse.decode(value),
+  },
+  createWorktreeFromRemote: {
+    path: "/treeterm.TreeTermDaemon/CreateWorktreeFromRemote" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: CreateWorktreeFromRemoteRequest): Buffer =>
+      Buffer.from(CreateWorktreeFromRemoteRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): CreateWorktreeFromRemoteRequest =>
+      CreateWorktreeFromRemoteRequest.decode(value),
+    responseSerialize: (value: CreateWorktreeResponse): Buffer =>
+      Buffer.from(CreateWorktreeResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): CreateWorktreeResponse => CreateWorktreeResponse.decode(value),
+  },
+  /** Filesystem Operations */
+  readDirectory: {
+    path: "/treeterm.TreeTermDaemon/ReadDirectory" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: ReadDirectoryRequest): Buffer => Buffer.from(ReadDirectoryRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ReadDirectoryRequest => ReadDirectoryRequest.decode(value),
+    responseSerialize: (value: ReadDirectoryResponse): Buffer =>
+      Buffer.from(ReadDirectoryResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): ReadDirectoryResponse => ReadDirectoryResponse.decode(value),
+  },
+  readFile: {
+    path: "/treeterm.TreeTermDaemon/ReadFile" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: ReadFileRequest): Buffer => Buffer.from(ReadFileRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ReadFileRequest => ReadFileRequest.decode(value),
+    responseSerialize: (value: ReadFileResponse): Buffer => Buffer.from(ReadFileResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): ReadFileResponse => ReadFileResponse.decode(value),
+  },
+  writeFile: {
+    path: "/treeterm.TreeTermDaemon/WriteFile" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: WriteFileRequest): Buffer => Buffer.from(WriteFileRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): WriteFileRequest => WriteFileRequest.decode(value),
+    responseSerialize: (value: WriteFileResponse): Buffer => Buffer.from(WriteFileResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): WriteFileResponse => WriteFileResponse.decode(value),
+  },
 } as const;
 
 export interface TreeTermDaemonServer extends UntypedServiceImplementation {
@@ -3291,6 +9236,43 @@ export interface TreeTermDaemonServer extends UntypedServiceImplementation {
   listSessions: handleUnaryCall<Empty, ListSessionsResponse>;
   /** Daemon Control */
   shutdown: handleUnaryCall<Empty, Empty>;
+  /** Git Operations */
+  getGitInfo: handleUnaryCall<GitInfoRequest, GitInfoResponse>;
+  createWorktree: handleUnaryCall<CreateWorktreeRequest, CreateWorktreeResponse>;
+  removeWorktree: handleUnaryCall<RemoveWorktreeRequest, MergeWorktreeResponse>;
+  listWorktrees: handleUnaryCall<ListWorktreesRequest, ListWorktreesResponse>;
+  getChildWorktrees: handleUnaryCall<GetChildWorktreesRequest, GetChildWorktreesResponse>;
+  getDiff: handleUnaryCall<GetDiffRequest, GetDiffResponse>;
+  getFileDiff: handleUnaryCall<GetFileDiffRequest, GetFileDiffResponse>;
+  getDiffAgainstHead: handleUnaryCall<GetDiffRequest, GetDiffResponse>;
+  getFileDiffAgainstHead: handleUnaryCall<GetFileDiffRequest, GetFileDiffResponse>;
+  mergeWorktree: handleUnaryCall<MergeWorktreeRequest, MergeWorktreeResponse>;
+  hasUncommittedChanges: handleUnaryCall<HasUncommittedChangesRequest, HasUncommittedChangesResponse>;
+  commitAll: handleUnaryCall<CommitAllRequest, CommitAllResponse>;
+  deleteBranch: handleUnaryCall<DeleteBranchRequest, DeleteBranchResponse>;
+  getUncommittedChanges: handleUnaryCall<GetUncommittedChangesRequest, GetUncommittedChangesResponse>;
+  getUncommittedFileDiff: handleUnaryCall<GetUncommittedFileDiffRequest, GetFileDiffResponse>;
+  stageFile: handleUnaryCall<StageFileRequest, StageFileResponse>;
+  unstageFile: handleUnaryCall<StageFileRequest, StageFileResponse>;
+  stageAll: handleUnaryCall<StageAllRequest, StageAllResponse>;
+  unstageAll: handleUnaryCall<StageAllRequest, StageAllResponse>;
+  commitStaged: handleUnaryCall<CommitStagedRequest, CommitStagedResponse>;
+  checkMergeConflicts: handleUnaryCall<CheckMergeConflictsRequest, CheckMergeConflictsResponse>;
+  getFileContentsForDiff: handleUnaryCall<GetFileContentsForDiffRequest, GetFileContentsForDiffResponse>;
+  getFileContentsForDiffAgainstHead: handleUnaryCall<GetFileContentsForDiffRequest, GetFileContentsForDiffResponse>;
+  getUncommittedFileContentsForDiff: handleUnaryCall<
+    GetUncommittedFileContentsForDiffRequest,
+    GetFileContentsForDiffResponse
+  >;
+  listLocalBranches: handleUnaryCall<ListLocalBranchesRequest, ListLocalBranchesResponse>;
+  listRemoteBranches: handleUnaryCall<ListRemoteBranchesRequest, ListRemoteBranchesResponse>;
+  getBranchesInWorktrees: handleUnaryCall<GetBranchesInWorktreesRequest, GetBranchesInWorktreesResponse>;
+  createWorktreeFromBranch: handleUnaryCall<CreateWorktreeFromBranchRequest, CreateWorktreeResponse>;
+  createWorktreeFromRemote: handleUnaryCall<CreateWorktreeFromRemoteRequest, CreateWorktreeResponse>;
+  /** Filesystem Operations */
+  readDirectory: handleUnaryCall<ReadDirectoryRequest, ReadDirectoryResponse>;
+  readFile: handleUnaryCall<ReadFileRequest, ReadFileResponse>;
+  writeFile: handleUnaryCall<WriteFileRequest, WriteFileResponse>;
 }
 
 export interface TreeTermDaemonClient extends Client {
@@ -3492,6 +9474,488 @@ export interface TreeTermDaemonClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: Empty) => void,
+  ): ClientUnaryCall;
+  /** Git Operations */
+  getGitInfo(
+    request: GitInfoRequest,
+    callback: (error: ServiceError | null, response: GitInfoResponse) => void,
+  ): ClientUnaryCall;
+  getGitInfo(
+    request: GitInfoRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GitInfoResponse) => void,
+  ): ClientUnaryCall;
+  getGitInfo(
+    request: GitInfoRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GitInfoResponse) => void,
+  ): ClientUnaryCall;
+  createWorktree(
+    request: CreateWorktreeRequest,
+    callback: (error: ServiceError | null, response: CreateWorktreeResponse) => void,
+  ): ClientUnaryCall;
+  createWorktree(
+    request: CreateWorktreeRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CreateWorktreeResponse) => void,
+  ): ClientUnaryCall;
+  createWorktree(
+    request: CreateWorktreeRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CreateWorktreeResponse) => void,
+  ): ClientUnaryCall;
+  removeWorktree(
+    request: RemoveWorktreeRequest,
+    callback: (error: ServiceError | null, response: MergeWorktreeResponse) => void,
+  ): ClientUnaryCall;
+  removeWorktree(
+    request: RemoveWorktreeRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: MergeWorktreeResponse) => void,
+  ): ClientUnaryCall;
+  removeWorktree(
+    request: RemoveWorktreeRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: MergeWorktreeResponse) => void,
+  ): ClientUnaryCall;
+  listWorktrees(
+    request: ListWorktreesRequest,
+    callback: (error: ServiceError | null, response: ListWorktreesResponse) => void,
+  ): ClientUnaryCall;
+  listWorktrees(
+    request: ListWorktreesRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: ListWorktreesResponse) => void,
+  ): ClientUnaryCall;
+  listWorktrees(
+    request: ListWorktreesRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: ListWorktreesResponse) => void,
+  ): ClientUnaryCall;
+  getChildWorktrees(
+    request: GetChildWorktreesRequest,
+    callback: (error: ServiceError | null, response: GetChildWorktreesResponse) => void,
+  ): ClientUnaryCall;
+  getChildWorktrees(
+    request: GetChildWorktreesRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GetChildWorktreesResponse) => void,
+  ): ClientUnaryCall;
+  getChildWorktrees(
+    request: GetChildWorktreesRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GetChildWorktreesResponse) => void,
+  ): ClientUnaryCall;
+  getDiff(
+    request: GetDiffRequest,
+    callback: (error: ServiceError | null, response: GetDiffResponse) => void,
+  ): ClientUnaryCall;
+  getDiff(
+    request: GetDiffRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GetDiffResponse) => void,
+  ): ClientUnaryCall;
+  getDiff(
+    request: GetDiffRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GetDiffResponse) => void,
+  ): ClientUnaryCall;
+  getFileDiff(
+    request: GetFileDiffRequest,
+    callback: (error: ServiceError | null, response: GetFileDiffResponse) => void,
+  ): ClientUnaryCall;
+  getFileDiff(
+    request: GetFileDiffRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GetFileDiffResponse) => void,
+  ): ClientUnaryCall;
+  getFileDiff(
+    request: GetFileDiffRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GetFileDiffResponse) => void,
+  ): ClientUnaryCall;
+  getDiffAgainstHead(
+    request: GetDiffRequest,
+    callback: (error: ServiceError | null, response: GetDiffResponse) => void,
+  ): ClientUnaryCall;
+  getDiffAgainstHead(
+    request: GetDiffRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GetDiffResponse) => void,
+  ): ClientUnaryCall;
+  getDiffAgainstHead(
+    request: GetDiffRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GetDiffResponse) => void,
+  ): ClientUnaryCall;
+  getFileDiffAgainstHead(
+    request: GetFileDiffRequest,
+    callback: (error: ServiceError | null, response: GetFileDiffResponse) => void,
+  ): ClientUnaryCall;
+  getFileDiffAgainstHead(
+    request: GetFileDiffRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GetFileDiffResponse) => void,
+  ): ClientUnaryCall;
+  getFileDiffAgainstHead(
+    request: GetFileDiffRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GetFileDiffResponse) => void,
+  ): ClientUnaryCall;
+  mergeWorktree(
+    request: MergeWorktreeRequest,
+    callback: (error: ServiceError | null, response: MergeWorktreeResponse) => void,
+  ): ClientUnaryCall;
+  mergeWorktree(
+    request: MergeWorktreeRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: MergeWorktreeResponse) => void,
+  ): ClientUnaryCall;
+  mergeWorktree(
+    request: MergeWorktreeRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: MergeWorktreeResponse) => void,
+  ): ClientUnaryCall;
+  hasUncommittedChanges(
+    request: HasUncommittedChangesRequest,
+    callback: (error: ServiceError | null, response: HasUncommittedChangesResponse) => void,
+  ): ClientUnaryCall;
+  hasUncommittedChanges(
+    request: HasUncommittedChangesRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: HasUncommittedChangesResponse) => void,
+  ): ClientUnaryCall;
+  hasUncommittedChanges(
+    request: HasUncommittedChangesRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: HasUncommittedChangesResponse) => void,
+  ): ClientUnaryCall;
+  commitAll(
+    request: CommitAllRequest,
+    callback: (error: ServiceError | null, response: CommitAllResponse) => void,
+  ): ClientUnaryCall;
+  commitAll(
+    request: CommitAllRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CommitAllResponse) => void,
+  ): ClientUnaryCall;
+  commitAll(
+    request: CommitAllRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CommitAllResponse) => void,
+  ): ClientUnaryCall;
+  deleteBranch(
+    request: DeleteBranchRequest,
+    callback: (error: ServiceError | null, response: DeleteBranchResponse) => void,
+  ): ClientUnaryCall;
+  deleteBranch(
+    request: DeleteBranchRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: DeleteBranchResponse) => void,
+  ): ClientUnaryCall;
+  deleteBranch(
+    request: DeleteBranchRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: DeleteBranchResponse) => void,
+  ): ClientUnaryCall;
+  getUncommittedChanges(
+    request: GetUncommittedChangesRequest,
+    callback: (error: ServiceError | null, response: GetUncommittedChangesResponse) => void,
+  ): ClientUnaryCall;
+  getUncommittedChanges(
+    request: GetUncommittedChangesRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GetUncommittedChangesResponse) => void,
+  ): ClientUnaryCall;
+  getUncommittedChanges(
+    request: GetUncommittedChangesRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GetUncommittedChangesResponse) => void,
+  ): ClientUnaryCall;
+  getUncommittedFileDiff(
+    request: GetUncommittedFileDiffRequest,
+    callback: (error: ServiceError | null, response: GetFileDiffResponse) => void,
+  ): ClientUnaryCall;
+  getUncommittedFileDiff(
+    request: GetUncommittedFileDiffRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GetFileDiffResponse) => void,
+  ): ClientUnaryCall;
+  getUncommittedFileDiff(
+    request: GetUncommittedFileDiffRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GetFileDiffResponse) => void,
+  ): ClientUnaryCall;
+  stageFile(
+    request: StageFileRequest,
+    callback: (error: ServiceError | null, response: StageFileResponse) => void,
+  ): ClientUnaryCall;
+  stageFile(
+    request: StageFileRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: StageFileResponse) => void,
+  ): ClientUnaryCall;
+  stageFile(
+    request: StageFileRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: StageFileResponse) => void,
+  ): ClientUnaryCall;
+  unstageFile(
+    request: StageFileRequest,
+    callback: (error: ServiceError | null, response: StageFileResponse) => void,
+  ): ClientUnaryCall;
+  unstageFile(
+    request: StageFileRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: StageFileResponse) => void,
+  ): ClientUnaryCall;
+  unstageFile(
+    request: StageFileRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: StageFileResponse) => void,
+  ): ClientUnaryCall;
+  stageAll(
+    request: StageAllRequest,
+    callback: (error: ServiceError | null, response: StageAllResponse) => void,
+  ): ClientUnaryCall;
+  stageAll(
+    request: StageAllRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: StageAllResponse) => void,
+  ): ClientUnaryCall;
+  stageAll(
+    request: StageAllRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: StageAllResponse) => void,
+  ): ClientUnaryCall;
+  unstageAll(
+    request: StageAllRequest,
+    callback: (error: ServiceError | null, response: StageAllResponse) => void,
+  ): ClientUnaryCall;
+  unstageAll(
+    request: StageAllRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: StageAllResponse) => void,
+  ): ClientUnaryCall;
+  unstageAll(
+    request: StageAllRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: StageAllResponse) => void,
+  ): ClientUnaryCall;
+  commitStaged(
+    request: CommitStagedRequest,
+    callback: (error: ServiceError | null, response: CommitStagedResponse) => void,
+  ): ClientUnaryCall;
+  commitStaged(
+    request: CommitStagedRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CommitStagedResponse) => void,
+  ): ClientUnaryCall;
+  commitStaged(
+    request: CommitStagedRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CommitStagedResponse) => void,
+  ): ClientUnaryCall;
+  checkMergeConflicts(
+    request: CheckMergeConflictsRequest,
+    callback: (error: ServiceError | null, response: CheckMergeConflictsResponse) => void,
+  ): ClientUnaryCall;
+  checkMergeConflicts(
+    request: CheckMergeConflictsRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CheckMergeConflictsResponse) => void,
+  ): ClientUnaryCall;
+  checkMergeConflicts(
+    request: CheckMergeConflictsRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CheckMergeConflictsResponse) => void,
+  ): ClientUnaryCall;
+  getFileContentsForDiff(
+    request: GetFileContentsForDiffRequest,
+    callback: (error: ServiceError | null, response: GetFileContentsForDiffResponse) => void,
+  ): ClientUnaryCall;
+  getFileContentsForDiff(
+    request: GetFileContentsForDiffRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GetFileContentsForDiffResponse) => void,
+  ): ClientUnaryCall;
+  getFileContentsForDiff(
+    request: GetFileContentsForDiffRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GetFileContentsForDiffResponse) => void,
+  ): ClientUnaryCall;
+  getFileContentsForDiffAgainstHead(
+    request: GetFileContentsForDiffRequest,
+    callback: (error: ServiceError | null, response: GetFileContentsForDiffResponse) => void,
+  ): ClientUnaryCall;
+  getFileContentsForDiffAgainstHead(
+    request: GetFileContentsForDiffRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GetFileContentsForDiffResponse) => void,
+  ): ClientUnaryCall;
+  getFileContentsForDiffAgainstHead(
+    request: GetFileContentsForDiffRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GetFileContentsForDiffResponse) => void,
+  ): ClientUnaryCall;
+  getUncommittedFileContentsForDiff(
+    request: GetUncommittedFileContentsForDiffRequest,
+    callback: (error: ServiceError | null, response: GetFileContentsForDiffResponse) => void,
+  ): ClientUnaryCall;
+  getUncommittedFileContentsForDiff(
+    request: GetUncommittedFileContentsForDiffRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GetFileContentsForDiffResponse) => void,
+  ): ClientUnaryCall;
+  getUncommittedFileContentsForDiff(
+    request: GetUncommittedFileContentsForDiffRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GetFileContentsForDiffResponse) => void,
+  ): ClientUnaryCall;
+  listLocalBranches(
+    request: ListLocalBranchesRequest,
+    callback: (error: ServiceError | null, response: ListLocalBranchesResponse) => void,
+  ): ClientUnaryCall;
+  listLocalBranches(
+    request: ListLocalBranchesRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: ListLocalBranchesResponse) => void,
+  ): ClientUnaryCall;
+  listLocalBranches(
+    request: ListLocalBranchesRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: ListLocalBranchesResponse) => void,
+  ): ClientUnaryCall;
+  listRemoteBranches(
+    request: ListRemoteBranchesRequest,
+    callback: (error: ServiceError | null, response: ListRemoteBranchesResponse) => void,
+  ): ClientUnaryCall;
+  listRemoteBranches(
+    request: ListRemoteBranchesRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: ListRemoteBranchesResponse) => void,
+  ): ClientUnaryCall;
+  listRemoteBranches(
+    request: ListRemoteBranchesRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: ListRemoteBranchesResponse) => void,
+  ): ClientUnaryCall;
+  getBranchesInWorktrees(
+    request: GetBranchesInWorktreesRequest,
+    callback: (error: ServiceError | null, response: GetBranchesInWorktreesResponse) => void,
+  ): ClientUnaryCall;
+  getBranchesInWorktrees(
+    request: GetBranchesInWorktreesRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GetBranchesInWorktreesResponse) => void,
+  ): ClientUnaryCall;
+  getBranchesInWorktrees(
+    request: GetBranchesInWorktreesRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GetBranchesInWorktreesResponse) => void,
+  ): ClientUnaryCall;
+  createWorktreeFromBranch(
+    request: CreateWorktreeFromBranchRequest,
+    callback: (error: ServiceError | null, response: CreateWorktreeResponse) => void,
+  ): ClientUnaryCall;
+  createWorktreeFromBranch(
+    request: CreateWorktreeFromBranchRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CreateWorktreeResponse) => void,
+  ): ClientUnaryCall;
+  createWorktreeFromBranch(
+    request: CreateWorktreeFromBranchRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CreateWorktreeResponse) => void,
+  ): ClientUnaryCall;
+  createWorktreeFromRemote(
+    request: CreateWorktreeFromRemoteRequest,
+    callback: (error: ServiceError | null, response: CreateWorktreeResponse) => void,
+  ): ClientUnaryCall;
+  createWorktreeFromRemote(
+    request: CreateWorktreeFromRemoteRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: CreateWorktreeResponse) => void,
+  ): ClientUnaryCall;
+  createWorktreeFromRemote(
+    request: CreateWorktreeFromRemoteRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: CreateWorktreeResponse) => void,
+  ): ClientUnaryCall;
+  /** Filesystem Operations */
+  readDirectory(
+    request: ReadDirectoryRequest,
+    callback: (error: ServiceError | null, response: ReadDirectoryResponse) => void,
+  ): ClientUnaryCall;
+  readDirectory(
+    request: ReadDirectoryRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: ReadDirectoryResponse) => void,
+  ): ClientUnaryCall;
+  readDirectory(
+    request: ReadDirectoryRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: ReadDirectoryResponse) => void,
+  ): ClientUnaryCall;
+  readFile(
+    request: ReadFileRequest,
+    callback: (error: ServiceError | null, response: ReadFileResponse) => void,
+  ): ClientUnaryCall;
+  readFile(
+    request: ReadFileRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: ReadFileResponse) => void,
+  ): ClientUnaryCall;
+  readFile(
+    request: ReadFileRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: ReadFileResponse) => void,
+  ): ClientUnaryCall;
+  writeFile(
+    request: WriteFileRequest,
+    callback: (error: ServiceError | null, response: WriteFileResponse) => void,
+  ): ClientUnaryCall;
+  writeFile(
+    request: WriteFileRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: WriteFileResponse) => void,
+  ): ClientUnaryCall;
+  writeFile(
+    request: WriteFileRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: WriteFileResponse) => void,
   ): ClientUnaryCall;
 }
 

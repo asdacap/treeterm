@@ -1,7 +1,6 @@
 import { app, BrowserWindow, dialog, shell } from 'electron'
 import { execSync } from 'child_process'
 import { join } from 'path'
-import { ptyManager } from './pty'
 import { GrpcDaemonClient } from './grpcClient'
 import { IpcServer } from './ipc/ipc-server'
 
@@ -13,46 +12,13 @@ for (const arg of process.argv) {
     break
   }
 }
-import {
-  getGitInfo,
-  createWorktree,
-  removeWorktree,
-  listWorktrees,
-  getChildWorktrees,
-  listLocalBranches,
-  listRemoteBranches,
-  getBranchesInWorktrees,
-  createWorktreeFromBranch,
-  createWorktreeFromRemote,
-  getDiff,
-  getFileDiff,
-  getDiffAgainstHead,
-  getFileDiffAgainstHead,
-  mergeWorktree,
-  hasUncommittedChanges,
-  commitAll,
-  deleteBranch,
-  checkMergeConflicts,
-  getUncommittedChanges,
-  getUncommittedFileDiff,
-  stageFile,
-  unstageFile,
-  stageAll,
-  unstageAll,
-  commitStaged,
-  getFileContentsForDiff,
-  getFileContentsForDiffAgainstHead,
-  getUncommittedFileContentsForDiff
-} from './git'
 import { loadSettings, saveSettings, Settings } from './settings'
 import { createApplicationMenu } from './menu'
-import { registerFilesystemHandlers } from './filesystem'
 import { registerSTTHandlers } from './stt'
 
 let mainWindow: BrowserWindow | null = null
 let closeConfirmed = false
 let daemonClient: GrpcDaemonClient | null = null
-let useDaemon = false
 let attachedSessions: Set<string> = new Set()
 
 // Initialize IPC server
@@ -138,16 +104,13 @@ function createWindow(): void {
   })
 
   mainWindow.on('closed', () => {
-    // Detach from sessions if using daemon
-    if (daemonClient && useDaemon) {
+    // Detach from sessions
+    if (daemonClient) {
       for (const sessionId of attachedSessions) {
         daemonClient.detachPtySession(sessionId).catch(console.error)
       }
       attachedSessions.clear()
       daemonClient.disconnect()
-    } else {
-      // Legacy mode: kill all PTYs
-      ptyManager.killAll()
     }
     mainWindow = null
   })
@@ -156,37 +119,33 @@ function createWindow(): void {
 // IPC Handlers
 server.onPtyCreate(async (cwd, sandbox, startupCommand) => {
   if (!mainWindow) return null
+  if (!daemonClient) throw new Error('Daemon not initialized')
 
-  if (useDaemon && daemonClient) {
-    try {
-      await daemonClient.ensureDaemonRunning()
-      const sessionId = await daemonClient.createPtySession({ cwd, sandbox, startupCommand })
+  try {
+    await daemonClient.ensureDaemonRunning()
+    const sessionId = await daemonClient.createPtySession({ cwd, sandbox, startupCommand })
 
-      // Set up data forwarding
-      daemonClient.onPtySessionData(sessionId, (data) => {
-        server.ptyData(sessionId, data)
-      })
+    // Set up data forwarding
+    daemonClient.onPtySessionData(sessionId, (data) => {
+      server.ptyData(sessionId, data)
+    })
 
-      daemonClient.onPtySessionExit(sessionId, (exitCode, signal) => {
-        server.ptyExit(sessionId, exitCode)
-        attachedSessions.delete(sessionId)
-      })
+    daemonClient.onPtySessionExit(sessionId, (exitCode, signal) => {
+      server.ptyExit(sessionId, exitCode)
+      attachedSessions.delete(sessionId)
+    })
 
-      attachedSessions.add(sessionId)
-      return sessionId
-    } catch (error) {
-      console.error('[main] failed to create session via daemon:', error)
-      return null
-    }
-  } else {
-    // Legacy mode: direct PTY
-    return ptyManager.create(cwd, mainWindow, sandbox, startupCommand)
+    attachedSessions.add(sessionId)
+    return sessionId
+  } catch (error) {
+    console.error('[main] failed to create session via daemon:', error)
+    return null
   }
 })
 
 server.onPtyAttach(async (sessionId) => {
-  if (!useDaemon || !daemonClient) {
-    return { success: false, error: 'Daemon not enabled' }
+  if (!daemonClient) {
+    return { success: false, error: 'Daemon not initialized' }
   }
 
   try {
@@ -216,16 +175,13 @@ server.onPtyAttach(async (sessionId) => {
 })
 
 server.onPtyDetach(async (sessionId) => {
-  if (useDaemon && daemonClient) {
-    await daemonClient.detachPtySession(sessionId)
-    attachedSessions.delete(sessionId)
-  }
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  await daemonClient.detachPtySession(sessionId)
+  attachedSessions.delete(sessionId)
 })
 
 server.onPtyList(async () => {
-  if (!useDaemon || !daemonClient) {
-    return []
-  }
+  if (!daemonClient) return []
 
   try {
     await daemonClient.ensureDaemonRunning()
@@ -237,46 +193,34 @@ server.onPtyList(async () => {
 })
 
 server.onPtyWrite((id, data) => {
-  if (useDaemon && daemonClient) {
-    daemonClient.writeToPtySession(id, data)
-  } else {
-    ptyManager.write(id, data)
-  }
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  daemonClient.writeToPtySession(id, data)
 })
 
 server.onPtyResize((id, cols, rows) => {
-  if (useDaemon && daemonClient) {
-    daemonClient.resizePtySession(id, cols, rows)
-  } else {
-    ptyManager.resize(id, cols, rows)
-  }
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  daemonClient.resizePtySession(id, cols, rows)
 })
 
 server.onPtyKill(async (id) => {
-  if (useDaemon && daemonClient) {
-    await daemonClient.killPtySession(id)
-    attachedSessions.delete(id)
-  } else {
-    ptyManager.kill(id)
-  }
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  await daemonClient.killPtySession(id)
+  attachedSessions.delete(id)
 })
 
 server.onPtyIsAlive(async (id) => {
-  if (useDaemon && daemonClient) {
-    try {
-      const sessions = await daemonClient.listPtySessions()
-      return sessions.some(s => s.id === id)
-    } catch {
-      return false
-    }
-  } else {
-    return ptyManager.isAlive(id)
+  if (!daemonClient) return false
+  try {
+    const sessions = await daemonClient.listPtySessions()
+    return sessions.some(s => s.id === id)
+  } catch {
+    return false
   }
 })
 
 server.onDaemonShutdown(async () => {
-  if (!useDaemon || !daemonClient) {
-    return { success: false, error: 'Daemon not enabled' }
+  if (!daemonClient) {
+    return { success: false, error: 'Daemon not initialized' }
   }
 
   try {
@@ -381,121 +325,150 @@ server.onDialogSelectFolder(async () => {
   return result.filePaths[0]
 })
 
-// Git IPC Handlers
+// Git IPC Handlers - All proxied to daemon
 server.onGitGetInfo(async (dirPath) => {
-  return getGitInfo(dirPath)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.getGitInfo(dirPath)
 })
 
 server.onGitCreateWorktree(async (repoPath, name, baseBranch) => {
-  return createWorktree(repoPath, name, baseBranch)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.createWorktree(repoPath, name, baseBranch)
 })
 
 server.onGitRemoveWorktree(async (repoPath, worktreePath, deleteBranch) => {
-  return removeWorktree(repoPath, worktreePath, deleteBranch)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.removeWorktree(repoPath, worktreePath, deleteBranch)
 })
 
 server.onGitListWorktrees(async (repoPath) => {
-  return listWorktrees(repoPath)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.listWorktrees(repoPath)
 })
 
 server.onGitGetChildWorktrees(async (repoPath, parentBranch) => {
-  return getChildWorktrees(repoPath, parentBranch)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.getChildWorktrees(repoPath, parentBranch)
 })
 
 server.onGitListLocalBranches(async (repoPath) => {
-  return listLocalBranches(repoPath)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.listLocalBranches(repoPath)
 })
 
 server.onGitListRemoteBranches(async (repoPath) => {
-  return listRemoteBranches(repoPath)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.listRemoteBranches(repoPath)
 })
 
 server.onGitGetBranchesInWorktrees(async (repoPath) => {
-  return getBranchesInWorktrees(repoPath)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.getBranchesInWorktrees(repoPath)
 })
 
 server.onGitCreateWorktreeFromBranch(async (repoPath, branch, worktreeName) => {
-  return createWorktreeFromBranch(repoPath, branch, worktreeName)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.createWorktreeFromBranch(repoPath, branch, worktreeName)
 })
 
 server.onGitCreateWorktreeFromRemote(async (repoPath, remoteBranch, worktreeName) => {
-  return createWorktreeFromRemote(repoPath, remoteBranch, worktreeName)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.createWorktreeFromRemote(repoPath, remoteBranch, worktreeName)
 })
 
 server.onGitGetDiff(async (worktreePath, parentBranch) => {
-  return getDiff(worktreePath, parentBranch)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.getDiff(worktreePath, parentBranch)
 })
 
 server.onGitGetFileDiff(async (worktreePath, parentBranch, filePath) => {
-  return getFileDiff(worktreePath, parentBranch, filePath)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.getFileDiff(worktreePath, parentBranch, filePath)
 })
 
 server.onGitGetDiffAgainstHead(async (worktreePath, parentBranch) => {
-  return getDiffAgainstHead(worktreePath, parentBranch)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.getDiffAgainstHead(worktreePath, parentBranch)
 })
 
 server.onGitGetFileDiffAgainstHead(async (worktreePath, parentBranch, filePath) => {
-  return getFileDiffAgainstHead(worktreePath, parentBranch, filePath)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.getFileDiffAgainstHead(worktreePath, parentBranch, filePath)
 })
 
 server.onGitMerge(async (mainRepoPath, worktreeBranch, targetBranch, squash) => {
-  return mergeWorktree(mainRepoPath, worktreeBranch, targetBranch, squash)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.mergeWorktree(mainRepoPath, worktreeBranch, targetBranch, squash)
 })
 
 server.onGitCheckMergeConflicts(async (repoPath, sourceBranch, targetBranch) => {
-  return checkMergeConflicts(repoPath, sourceBranch, targetBranch)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.checkMergeConflicts(repoPath, sourceBranch, targetBranch)
 })
 
 server.onGitHasUncommittedChanges(async (repoPath) => {
-  return hasUncommittedChanges(repoPath)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.hasUncommittedChanges(repoPath)
 })
 
 server.onGitCommitAll(async (repoPath, message) => {
-  return commitAll(repoPath, message)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.commitAll(repoPath, message)
 })
 
 server.onGitDeleteBranch(async (repoPath, branchName) => {
-  return deleteBranch(repoPath, branchName)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.deleteBranch(repoPath, branchName)
 })
 
 server.onGitGetUncommittedChanges(async (repoPath) => {
-  return getUncommittedChanges(repoPath)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.getUncommittedChanges(repoPath)
 })
 
 server.onGitGetUncommittedFileDiff(async (repoPath, filePath, staged) => {
-  return getUncommittedFileDiff(repoPath, filePath, staged)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.getUncommittedFileDiff(repoPath, filePath, staged)
 })
 
 server.onGitStageFile(async (repoPath, filePath) => {
-  return stageFile(repoPath, filePath)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.stageFile(repoPath, filePath)
 })
 
 server.onGitUnstageFile(async (repoPath, filePath) => {
-  return unstageFile(repoPath, filePath)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.unstageFile(repoPath, filePath)
 })
 
 server.onGitStageAll(async (repoPath) => {
-  return stageAll(repoPath)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.stageAll(repoPath)
 })
 
 server.onGitUnstageAll(async (repoPath) => {
-  return unstageAll(repoPath)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.unstageAll(repoPath)
 })
 
 server.onGitCommitStaged(async (repoPath, message) => {
-  return commitStaged(repoPath, message)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.commitStaged(repoPath, message)
 })
 
 server.onGitGetFileContentsForDiff(async (worktreePath, parentBranch, filePath) => {
-  return getFileContentsForDiff(worktreePath, parentBranch, filePath)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.getFileContentsForDiff(worktreePath, parentBranch, filePath)
 })
 
 server.onGitGetFileContentsForDiffAgainstHead(async (worktreePath, parentBranch, filePath) => {
-  return getFileContentsForDiffAgainstHead(worktreePath, parentBranch, filePath)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.getFileContentsForDiffAgainstHead(worktreePath, parentBranch, filePath)
 })
 
 server.onGitGetUncommittedFileContentsForDiff(async (repoPath, filePath, staged) => {
-  return getUncommittedFileContentsForDiff(repoPath, filePath, staged)
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.getUncommittedFileContentsForDiff(repoPath, filePath, staged)
 })
 
 // Settings IPC Handlers
@@ -506,6 +479,22 @@ server.onSettingsLoad(() => {
 server.onSettingsSave((settings) => {
   saveSettings(settings)
   return { success: true }
+})
+
+// Filesystem IPC Handlers - All proxied to daemon
+server.onFsReadDirectory(async (workspacePath, dirPath) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.readDirectory(workspacePath, dirPath)
+})
+
+server.onFsReadFile(async (workspacePath, filePath) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.readFile(workspacePath, filePath)
+})
+
+server.onFsWriteFile(async (workspacePath, filePath, content) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.writeFile(workspacePath, filePath, content)
 })
 
 // Sandbox IPC Handlers
@@ -542,18 +531,10 @@ server.onAppCloseCancelled(() => {
 
 // App lifecycle
 app.whenReady().then(async () => {
-  // Load settings to check daemon mode
-  const settings = loadSettings()
-  useDaemon = settings.daemon.enabled
+  // Always use daemon mode
+  console.log('[main] daemon mode enabled')
+  daemonClient = new GrpcDaemonClient()
 
-  if (useDaemon) {
-    console.log('[main] daemon mode enabled')
-    daemonClient = new GrpcDaemonClient()
-  } else {
-    console.log('[main] legacy mode enabled (direct PTY)')
-  }
-
-  registerFilesystemHandlers(server)
   registerSTTHandlers(server)
   createWindow()
   createApplicationMenu(mainWindow, server)
@@ -571,7 +552,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', async () => {
-  if (useDaemon && daemonClient) {
+  if (daemonClient) {
     const settings = loadSettings()
     if (settings.daemon.killOnQuit) {
       console.log('[main] killing all sessions before quit')
@@ -586,7 +567,5 @@ app.on('before-quit', async () => {
     }
     attachedSessions.clear()
     daemonClient.disconnect()
-  } else {
-    ptyManager.killAll()
   }
 })

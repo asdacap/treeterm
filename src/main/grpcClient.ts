@@ -436,6 +436,362 @@ export class GrpcDaemonClient {
     }
   }
 
+  // Git Operations
+
+  async getGitInfo(dirPath: string): Promise<{ isRepo: boolean; branch: string | null; rootPath: string | null }> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.getGitInfo({ dirPath }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async createWorktree(repoPath: string, worktreeName: string, baseBranch?: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.createWorktree({ repoPath, worktreeName, baseBranch }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async removeWorktree(repoPath: string, worktreePath: string, deleteBranch: boolean = false): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.removeWorktree({ repoPath, worktreePath, deleteBranch }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async listWorktrees(repoPath: string): Promise<any[]> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.listWorktrees({ repoPath }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response.worktrees)
+        else resolve([])
+      })
+    })
+  }
+
+  async getChildWorktrees(repoPath: string, parentBranch: string | null): Promise<any[]> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.getChildWorktrees({ repoPath, parentBranch }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response.worktrees)
+        else resolve([])
+      })
+    })
+  }
+
+  async getDiff(worktreePath: string, parentBranch: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.getDiff({ worktreePath, parentBranch }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async getFileDiff(worktreePath: string, parentBranch: string, filePath: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.getFileDiff({ worktreePath, parentBranch, filePath }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async getDiffAgainstHead(worktreePath: string, parentBranch: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.getDiffAgainstHead({ worktreePath, parentBranch }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async getFileDiffAgainstHead(worktreePath: string, parentBranch: string, filePath: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.getFileDiffAgainstHead({ worktreePath, parentBranch, filePath }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async mergeWorktree(mainRepoPath: string, worktreeBranch: string, targetBranch: string, squash: boolean = false): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.mergeWorktree({ mainRepoPath, worktreeBranch, targetBranch, squash }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async hasUncommittedChanges(repoPath: string): Promise<boolean> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.hasUncommittedChanges({ repoPath }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response.hasChanges)
+        else resolve(false)
+      })
+    })
+  }
+
+  async commitAll(repoPath: string, message: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.commitAll({ repoPath, message }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async deleteBranch(repoPath: string, branchName: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.deleteBranch({ repoPath, branchName }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async getUncommittedChanges(repoPath: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.getUncommittedChanges({ repoPath }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async getUncommittedFileDiff(repoPath: string, filePath: string, staged: boolean): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.getUncommittedFileDiff({ repoPath, filePath, staged }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async stageFile(repoPath: string, filePath: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.stageFile({ repoPath, filePath }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async unstageFile(repoPath: string, filePath: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.unstageFile({ repoPath, filePath }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async stageAll(repoPath: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.stageAll({ repoPath }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async unstageAll(repoPath: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.unstageAll({ repoPath }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async commitStaged(repoPath: string, message: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.commitStaged({ repoPath, message }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async checkMergeConflicts(repoPath: string, sourceBranch: string, targetBranch: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.checkMergeConflicts({ repoPath, sourceBranch, targetBranch }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async getFileContentsForDiff(worktreePath: string, parentBranch: string, filePath: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.getFileContentsForDiff({ worktreePath, parentBranch, filePath }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async getFileContentsForDiffAgainstHead(worktreePath: string, parentBranch: string, filePath: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.getFileContentsForDiffAgainstHead({ worktreePath, parentBranch, filePath }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async getUncommittedFileContentsForDiff(repoPath: string, filePath: string, staged: boolean): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.getUncommittedFileContentsForDiff({ repoPath, filePath, staged }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async listLocalBranches(repoPath: string): Promise<string[]> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.listLocalBranches({ repoPath }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response.branches)
+        else resolve([])
+      })
+    })
+  }
+
+  async listRemoteBranches(repoPath: string): Promise<string[]> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.listRemoteBranches({ repoPath }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response.branches)
+        else resolve([])
+      })
+    })
+  }
+
+  async getBranchesInWorktrees(repoPath: string): Promise<string[]> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.getBranchesInWorktrees({ repoPath }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response.branches)
+        else resolve([])
+      })
+    })
+  }
+
+  async createWorktreeFromBranch(repoPath: string, branch: string, worktreeName: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.createWorktreeFromBranch({ repoPath, branch, worktreeName }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async createWorktreeFromRemote(repoPath: string, remoteBranch: string, worktreeName: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.createWorktreeFromRemote({ repoPath, remoteBranch, worktreeName }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  // Filesystem Operations
+
+  async readDirectory(workspacePath: string, dirPath: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.readDirectory({ workspacePath, dirPath }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async readFile(workspacePath: string, filePath: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.readFile({ workspacePath, filePath }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
+  async writeFile(workspacePath: string, filePath: string, content: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.writeFile({ workspacePath, filePath, content }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
   disconnect(): void {
     if (this.stream) {
       this.stream.end()
