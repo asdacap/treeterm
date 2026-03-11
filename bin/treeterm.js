@@ -27,7 +27,7 @@ class CliDaemonClient {
     this.client = null
 
     // Load generated proto client
-    const { TreeTermDaemonClient } = require('../out/generated/treeterm')
+    const { TreeTermDaemonClient } = require('../out/daemon/generated/treeterm')
     this.TreeTermDaemonClient = TreeTermDaemonClient
   }
 
