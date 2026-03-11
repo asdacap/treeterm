@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import type { Terminal as XTerm } from '@xterm/xterm'
 import PushToTalkButton from './PushToTalkButton'
+import { ReviewCommentsButton } from './ReviewCommentsButton'
 
 interface TerminalScrollWrapperProps {
   terminalRef: React.RefObject<XTerm | null>
@@ -8,6 +9,8 @@ interface TerminalScrollWrapperProps {
   showPushToTalk?: boolean
   onPushToTalkTranscript?: (text: string) => void
   onPushToTalkSubmit?: () => void
+  workspacePath?: string
+  ptyId?: string
 }
 
 export default function TerminalScrollWrapper({
@@ -15,7 +18,9 @@ export default function TerminalScrollWrapper({
   children,
   showPushToTalk = false,
   onPushToTalkTranscript,
-  onPushToTalkSubmit
+  onPushToTalkSubmit,
+  workspacePath,
+  ptyId
 }: TerminalScrollWrapperProps) {
   const handleScrollDown = useCallback(() => {
     if (terminalRef.current) {
@@ -30,6 +35,12 @@ export default function TerminalScrollWrapper({
         <PushToTalkButton
           onTranscript={onPushToTalkTranscript}
           onSubmit={onPushToTalkSubmit}
+        />
+      )}
+      {workspacePath && ptyId && (
+        <ReviewCommentsButton
+          workspacePath={workspacePath}
+          ptyId={ptyId}
         />
       )}
       <button className="scroll-down-btn" onClick={handleScrollDown} title="Scroll to bottom">

@@ -1,6 +1,7 @@
 import { DiffEditor, DiffOnMount } from '@monaco-editor/react'
 import { useRef, useState, useEffect } from 'react'
 import type { editor } from 'monaco-editor'
+import type { ReviewComment } from '../types'
 
 interface MonacoDiffViewerProps {
   originalContent: string
@@ -13,6 +14,9 @@ interface MonacoDiffViewerProps {
   onNextFile?: () => void
   hasPreviousFile?: boolean
   hasNextFile?: boolean
+  // Comments props
+  comments?: ReviewComment[]
+  onLineClick?: (lineNumber: number, side: 'original' | 'modified') => void
 }
 
 export function MonacoDiffViewer({
@@ -24,11 +28,14 @@ export function MonacoDiffViewer({
   onPreviousFile,
   onNextFile,
   hasPreviousFile = false,
-  hasNextFile = false
+  hasNextFile = false,
+  comments = [],
+  onLineClick
 }: MonacoDiffViewerProps): JSX.Element {
   const diffEditorRef = useRef<editor.IStandaloneDiffEditor | null>(null)
   const [lineChanges, setLineChanges] = useState<editor.ILineChange[] | null>(null)
   const [currentChangeIndex, setCurrentChangeIndex] = useState<number>(-1)
+  const decorationsRef = useRef<{ original: string[]; modified: string[] }>({ original: [], modified: [] })
 
   // Reset when content changes
   useEffect(() => {
@@ -94,7 +101,7 @@ export function MonacoDiffViewer({
     }
   }
 
-  const handleEditorMount: DiffOnMount = (editor) => {
+  const handleEditorMount: DiffOnMount = (editor, monaco) => {
     diffEditorRef.current = editor
 
     // Listen for diff updates
@@ -106,6 +113,30 @@ export function MonacoDiffViewer({
     setTimeout(() => {
       updateLineChanges()
     }, 100)
+
+    // Add line click handlers if callback is provided
+    if (onLineClick) {
+      const modifiedEditor = editor.getModifiedEditor()
+      const originalEditor = editor.getOriginalEditor()
+
+      modifiedEditor.onMouseDown((e) => {
+        if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
+          const lineNumber = e.target.position?.lineNumber
+          if (lineNumber) {
+            onLineClick(lineNumber, 'modified')
+          }
+        }
+      })
+
+      originalEditor.onMouseDown((e) => {
+        if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
+          const lineNumber = e.target.position?.lineNumber
+          if (lineNumber) {
+            onLineClick(lineNumber, 'original')
+          }
+        }
+      })
+    }
   }
 
   const getNavInfo = () => {
@@ -128,6 +159,67 @@ export function MonacoDiffViewer({
     }
     return currentChangeIndex >= lineChanges.length - 1 && !hasNextFile
   }
+
+  // Add decorations for lines with comments
+  useEffect(() => {
+    if (!diffEditorRef.current || !comments.length) return
+
+    const modifiedEditor = diffEditorRef.current.getModifiedEditor()
+    const originalEditor = diffEditorRef.current.getOriginalEditor()
+
+    // Clear old decorations
+    decorationsRef.current.modified = modifiedEditor.deltaDecorations(
+      decorationsRef.current.modified,
+      []
+    )
+    decorationsRef.current.original = originalEditor.deltaDecorations(
+      decorationsRef.current.original,
+      []
+    )
+
+    // Add decorations for comments on modified side
+    const modifiedDecorations = comments
+      .filter(c => c.side === 'modified')
+      .map(comment => ({
+        range: {
+          startLineNumber: comment.lineNumber,
+          startColumn: 1,
+          endLineNumber: comment.lineNumber,
+          endColumn: 1
+        },
+        options: {
+          isWholeLine: true,
+          className: comment.isOutdated ? 'comment-line-outdated' : 'comment-line',
+          glyphMarginClassName: comment.isOutdated ? 'comment-glyph-outdated' : 'comment-glyph'
+        }
+      }))
+
+    // Add decorations for comments on original side
+    const originalDecorations = comments
+      .filter(c => c.side === 'original')
+      .map(comment => ({
+        range: {
+          startLineNumber: comment.lineNumber,
+          startColumn: 1,
+          endLineNumber: comment.lineNumber,
+          endColumn: 1
+        },
+        options: {
+          isWholeLine: true,
+          className: comment.isOutdated ? 'comment-line-outdated' : 'comment-line',
+          glyphMarginClassName: comment.isOutdated ? 'comment-glyph-outdated' : 'comment-glyph'
+        }
+      }))
+
+    decorationsRef.current.modified = modifiedEditor.deltaDecorations(
+      [],
+      modifiedDecorations
+    )
+    decorationsRef.current.original = originalEditor.deltaDecorations(
+      [],
+      originalDecorations
+    )
+  }, [comments])
 
   useEffect(() => {
     return () => {

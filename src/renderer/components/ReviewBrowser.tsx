@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
-import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents } from '../types'
+import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, ReviewsData, ReviewComment } from '../types'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
+import { CommentInput } from './CommentInput'
+import { CommentDisplay } from './CommentDisplay'
 
 interface ReviewBrowserProps {
   workspaceId: string
@@ -48,13 +50,41 @@ export default function ReviewBrowser({
   const [isProcessing, setIsProcessing] = useState(false)
   const [processingAction, setProcessingAction] = useState<'merge' | 'squash' | 'abandon' | null>(null)
 
+  // Reviews state
+  const [reviews, setReviews] = useState<ReviewsData | null>(null)
+  const [commentInput, setCommentInput] = useState<{
+    visible: boolean
+    lineNumber: number
+    side: 'original' | 'modified'
+  } | null>(null)
+  const [currentCommitHash, setCurrentCommitHash] = useState<string | null>(null)
+
   useEffect(() => {
     if (workspace && parentWorkspace) {
       loadDiff()
       loadUncommittedChanges()
       checkConflicts()
+      loadReviews()
     }
   }, [workspace, parentWorkspace])
+
+  const loadReviews = async () => {
+    try {
+      // Get current commit hash
+      const hashResult = await window.electron.git.getHeadCommitHash(workspacePath)
+      if (hashResult.success && hashResult.hash) {
+        setCurrentCommitHash(hashResult.hash)
+
+        // Load reviews and mark outdated
+        const result = await window.electron.reviews.updateOutdated(workspacePath, hashResult.hash)
+        if (result.success && result.reviews) {
+          setReviews(result.reviews)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load reviews:', error)
+    }
+  }
 
   const loadDiff = async () => {
     if (!workspace?.gitBranch || !parentWorkspace?.gitBranch) return
@@ -348,6 +378,56 @@ export default function ReviewBrowser({
     }
   }
 
+  // Comment handlers
+  const handleLineClick = (lineNumber: number, side: 'original' | 'modified') => {
+    setCommentInput({ visible: true, lineNumber, side })
+  }
+
+  const handleCommentSubmit = async (text: string) => {
+    if (!commentInput || !currentCommitHash || !selectedFile) return
+
+    try {
+      const comment = {
+        filePath: selectedFile,
+        lineNumber: commentInput.lineNumber,
+        text,
+        commitHash: currentCommitHash,
+        isOutdated: false,
+        side: commentInput.side
+      }
+
+      const result = await window.electron.reviews.addComment(workspacePath, comment)
+      if (result.success && result.comment) {
+        setReviews(prev => prev ? {
+          ...prev,
+          comments: [...prev.comments, result.comment!]
+        } : { version: 1, comments: [result.comment!] })
+      }
+      setCommentInput(null)
+    } catch (error) {
+      console.error('Failed to add comment:', error)
+    }
+  }
+
+  const handleCommentDelete = async (commentId: string) => {
+    try {
+      const result = await window.electron.reviews.deleteComment(workspacePath, commentId)
+      if (result.success) {
+        setReviews(prev => prev ? {
+          ...prev,
+          comments: prev.comments.filter(c => c.id !== commentId)
+        } : null)
+      }
+    } catch (error) {
+      console.error('Failed to delete comment:', error)
+    }
+  }
+
+  // Filter comments for current file
+  const fileComments = selectedFile && reviews
+    ? reviews.comments.filter(c => c.filePath === selectedFile)
+    : []
+
   return (
     <div className="review-browser">
       {/* Header */}
@@ -447,17 +527,31 @@ export default function ReviewBrowser({
                       loadingFileDiff ? (
                         <div className="diff-loading">Loading...</div>
                       ) : fileDiffContents ? (
-                        <MonacoDiffViewer
-                          originalContent={fileDiffContents.originalContent}
-                          modifiedContent={fileDiffContents.modifiedContent}
-                          language={fileDiffContents.language}
-                          originalLabel={diff?.baseBranch || 'Original'}
-                          modifiedLabel={diff?.headBranch || 'Modified'}
-                          onPreviousFile={handlePreviousFile}
-                          onNextFile={handleNextFile}
-                          hasPreviousFile={currentFileIndex > 0}
-                          hasNextFile={currentFileIndex < fileList.length - 1}
-                        />
+                        <>
+                          <MonacoDiffViewer
+                            originalContent={fileDiffContents.originalContent}
+                            modifiedContent={fileDiffContents.modifiedContent}
+                            language={fileDiffContents.language}
+                            originalLabel={diff?.baseBranch || 'Original'}
+                            modifiedLabel={diff?.headBranch || 'Modified'}
+                            onPreviousFile={handlePreviousFile}
+                            onNextFile={handleNextFile}
+                            hasPreviousFile={currentFileIndex > 0}
+                            hasNextFile={currentFileIndex < fileList.length - 1}
+                            comments={fileComments}
+                            onLineClick={handleLineClick}
+                          />
+                          {commentInput && (
+                            <div className="comment-input-overlay">
+                              <CommentInput
+                                lineNumber={commentInput.lineNumber}
+                                side={commentInput.side}
+                                onSubmit={handleCommentSubmit}
+                                onCancel={() => setCommentInput(null)}
+                              />
+                            </div>
+                          )}
+                        </>
                       ) : (
                         <div className="diff-placeholder">Failed to load diff contents</div>
                       )
@@ -465,6 +559,23 @@ export default function ReviewBrowser({
                       <div className="diff-placeholder">Select a file to view changes</div>
                     )}
                   </div>
+
+                  {selectedFile && fileComments.length > 0 && (
+                    <div className="diff-comments-panel">
+                      <div className="diff-comments-header">
+                        Comments ({fileComments.length})
+                      </div>
+                      <div className="diff-comments-list">
+                        {fileComments.map((comment) => (
+                          <CommentDisplay
+                            key={comment.id}
+                            comment={comment}
+                            onDelete={handleCommentDelete}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </>
             )

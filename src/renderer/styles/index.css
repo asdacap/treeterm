@@ -3050,3 +3050,239 @@ body,
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Review Comments */
+.comment-input-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 100;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  min-width: 400px;
+  max-width: 600px;
+}
+
+.comment-input-container {
+  padding: 16px;
+}
+
+.comment-input-header {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.comment-input-textarea {
+  width: 100%;
+  min-height: 100px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+}
+
+.comment-input-textarea:focus {
+  border-color: var(--accent);
+}
+
+.comment-input-textarea::placeholder {
+  color: var(--text-secondary);
+}
+
+.comment-input-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.comment-btn {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.comment-btn-cancel {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.comment-btn-cancel:hover {
+  background: var(--bg-hover);
+}
+
+.comment-btn-submit {
+  background: var(--accent);
+  color: white;
+}
+
+.comment-btn-submit:hover:not(:disabled) {
+  background: #006cbf;
+}
+
+.comment-btn-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Comment Display */
+.comment-display {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 12px;
+  margin-bottom: 8px;
+}
+
+.comment-display.outdated {
+  border-color: #f0a000;
+  background: rgba(240, 160, 0, 0.05);
+}
+
+.comment-display-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.comment-line-ref {
+  color: var(--accent);
+  font-family: monospace;
+}
+
+.comment-outdated-badge {
+  padding: 2px 6px;
+  background: #f0a000;
+  color: #1e1e1e;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.comment-delete-btn {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 18px;
+  cursor: pointer;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background 0.1s, color 0.1s;
+}
+
+.comment-delete-btn:hover {
+  background: var(--bg-hover);
+  color: #f14c4c;
+}
+
+.comment-display-text {
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+}
+
+.comment-display-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* Comments Panel */
+.diff-comments-panel {
+  width: 300px;
+  border-left: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.diff-comments-header {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.diff-comments-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+/* Monaco Editor Comment Decorations */
+.comment-line {
+  background: rgba(0, 120, 212, 0.1);
+}
+
+.comment-line-outdated {
+  background: rgba(240, 160, 0, 0.1);
+}
+
+.comment-glyph::before {
+  content: '💬';
+  font-size: 12px;
+}
+
+.comment-glyph-outdated::before {
+  content: '⚠️';
+  font-size: 12px;
+}
+
+/* Review Comments Button */
+.review-comments-button {
+  position: absolute;
+  bottom: 96px; /* Above scroll down button and push-to-talk button */
+  right: 16px;
+  background: #f0a000;
+  border: 1px solid #cc8800;
+  color: #1e1e1e;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.1s, border-color 0.1s, opacity 0.2s;
+  opacity: 0.9;
+  z-index: 10;
+  white-space: nowrap;
+}
+
+.review-comments-button:hover {
+  background: #ffb820;
+  border-color: #f0a000;
+  opacity: 1;
+}
+
+.review-abandon-keep-branch-btn {
+  background: #6e7681;
+  color: white;
+}
+
+.review-abandon-keep-branch-btn:hover:not(:disabled) {
+  background: #8b949e;
+}

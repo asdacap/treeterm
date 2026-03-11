@@ -473,6 +473,8 @@ export default function BaseTerminal({
       showPushToTalk={config.showPushToTalk}
       onPushToTalkTranscript={handlePushToTalkTranscript}
       onPushToTalkSubmit={handlePushToTalkSubmit}
+      workspacePath={cwd}
+      ptyId={ptyIdRef.current || undefined}
     >
       <div ref={containerRef} className="terminal-container" onContextMenu={handleContextMenu} />
 
