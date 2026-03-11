@@ -13,8 +13,8 @@ export function useCapsLockHold({
   enabled = true
 }: UseCapsLockHoldOptions): void {
   const isHoldingRef = useRef(false)
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastEventRef = useRef<KeyboardEvent | null>(null)
   const { settings } = useSettingsStore()
   const pushToTalkKey = settings.stt?.pushToTalkKey || 'Shift+Space'

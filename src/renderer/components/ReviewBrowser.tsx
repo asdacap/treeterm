@@ -352,10 +352,10 @@ export default function ReviewBrowser({
         <div className="review-conflict-banner">
           <span className="review-conflict-icon">⚠️</span>
           <div className="review-conflict-text">
-            <strong>{conflictInfo.conflictedFiles.length} conflict(s) detected</strong>
+            <strong>{conflictInfo?.conflictedFiles.length} conflict(s) detected</strong>
             <div className="review-conflict-files">
-              {conflictInfo.conflictedFiles.slice(0, 3).join(', ')}
-              {conflictInfo.conflictedFiles.length > 3 && ` and ${conflictInfo.conflictedFiles.length - 3} more`}
+              {conflictInfo?.conflictedFiles.slice(0, 3).join(', ')}
+              {conflictInfo && conflictInfo.conflictedFiles.length > 3 && ` and ${conflictInfo.conflictedFiles.length - 3} more`}
             </div>
           </div>
         </div>

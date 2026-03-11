@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react'
+// @ts-expect-error tinykeys has incorrect exports config
 import { parseKeybinding } from 'tinykeys'
 import { useSettingsStore } from '../store/settings'
 import { usePrefixModeStore } from '../store/prefixMode'

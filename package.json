@@ -13,7 +13,10 @@
   ],
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "npm run build:daemon && electron-vite build",
+    "typecheck": "tsc --noEmit",
+    "typecheck:web": "tsc -p tsconfig.web.json --noEmit",
+    "typecheck:node": "tsc -p tsconfig.node.json --noEmit",
+    "build": "npm run typecheck && npm run build:daemon && electron-vite build",
     "build:daemon": "tsc --project tsconfig.daemon.json",
     "preview": "electron-vite preview",
     "postinstall": "electron-builder install-app-deps",

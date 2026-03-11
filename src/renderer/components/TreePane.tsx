@@ -41,6 +41,8 @@ export default function TreePane() {
     addChildWorkspace,
     addTabWithState,
     adoptExistingWorktree,
+    createWorktreeFromBranch,
+    createWorktreeFromRemote,
     removeWorkspace,
     mergeAndRemoveWorkspace,
     setActiveWorkspace
@@ -83,13 +85,13 @@ export default function TreePane() {
     setCreateChildDialogParentId(parentId)
   }
 
-  const handleCreateChildSubmit = async (name: string) => {
+  const handleCreateChildSubmit = async (name: string, isDetached: boolean) => {
     if (!createChildDialogParentId) return { success: false, error: 'No parent selected' }
 
-    const result = await addChildWorkspace(createChildDialogParentId, name)
+    const result = await addChildWorkspace(createChildDialogParentId, name, isDetached)
     if (result.success) {
       // Expand the parent to show the new child
-      setExpanded((prev) => new Set([...prev, createChildDialogParentId]))
+      setExpanded((prev) => new Set([...Array.from(prev), createChildDialogParentId]))
       setCreateChildDialogParentId(null)
     }
     return result
@@ -109,7 +111,29 @@ export default function TreePane() {
       name
     )
     if (result.success) {
-      setExpanded((prev) => new Set([...prev, createChildDialogParentId]))
+      setExpanded((prev) => new Set([...Array.from(prev), createChildDialogParentId]))
+      setCreateChildDialogParentId(null)
+    }
+    return result
+  }
+
+  const handleCreateFromBranchSubmit = async (branch: string, isDetached: boolean) => {
+    if (!createChildDialogParentId) return { success: false, error: 'No parent selected' }
+
+    const result = await createWorktreeFromBranch(createChildDialogParentId, branch, isDetached)
+    if (result.success) {
+      setExpanded((prev) => new Set([...Array.from(prev), createChildDialogParentId]))
+      setCreateChildDialogParentId(null)
+    }
+    return result
+  }
+
+  const handleCreateFromRemoteSubmit = async (remoteBranch: string, isDetached: boolean) => {
+    if (!createChildDialogParentId) return { success: false, error: 'No parent selected' }
+
+    const result = await createWorktreeFromRemote(createChildDialogParentId, remoteBranch, isDetached)
+    if (result.success) {
+      setExpanded((prev) => new Set([...Array.from(prev), createChildDialogParentId]))
       setCreateChildDialogParentId(null)
     }
     return result
@@ -239,6 +263,8 @@ export default function TreePane() {
           parentWorkspace={createChildDialogParent}
           onCreate={handleCreateChildSubmit}
           onAdopt={handleAdoptWorktreeSubmit}
+          onCreateFromBranch={handleCreateFromBranchSubmit}
+          onCreateFromRemote={handleCreateFromRemoteSubmit}
           onCancel={() => setCreateChildDialogParentId(null)}
           openWorktreePaths={openWorktreePaths}
         />

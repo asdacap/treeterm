@@ -71,6 +71,7 @@ export interface TerminalInstance {
 }
 
 export interface PrefixModeConfig {
+  enabled: boolean
   prefixKey: string // e.g., 'Control+B'
   timeout: number // ms (default: 1500)
 }

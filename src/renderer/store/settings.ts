@@ -25,6 +25,7 @@ const defaultSettings: Settings = {
     theme: 'dark'
   },
   prefixMode: {
+    enabled: true,
     prefixKey: 'Control+B',
     timeout: 1500
   },
@@ -43,6 +44,12 @@ const defaultSettings: Settings = {
     localWhisperModelPath: '',
     pushToTalkKey: 'Shift+Space',
     language: 'en'
+  },
+  daemon: {
+    enabled: false,
+    orphanTimeout: 30000,
+    scrollbackLimit: 10000,
+    killOnQuit: true
   }
 }
 

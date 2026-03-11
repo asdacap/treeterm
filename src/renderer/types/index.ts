@@ -290,6 +290,7 @@ export interface STTApi {
 }
 
 export interface AppApi {
+  onReady: (callback: () => void) => () => void
   onCloseConfirm: (callback: () => void) => () => void
   confirmClose: () => void
   cancelClose: () => void
@@ -313,7 +314,7 @@ export interface SessionApi {
 }
 
 export interface ElectronApi {
-  platform: NodeJS.Platform
+  platform: 'darwin' | 'linux' | 'win32' | 'aix' | 'android' | 'freebsd' | 'haiku' | 'openbsd' | 'sunos' | 'cygwin' | 'netbsd'
   terminal: TerminalApi
   selectFolder: () => Promise<string | null>
   git: GitApi

@@ -224,7 +224,7 @@ export default function App() {
           addTabWithState<TerminalState>(workspaceId, 'terminal', { ptyId: null })
         }
       } else {
-        addTabWithState(workspaceId, daemonTab.applicationId, daemonTab.state)
+        addTabWithState(workspaceId, daemonTab.applicationId, daemonTab.state as Record<string, unknown>)
       }
     }
 

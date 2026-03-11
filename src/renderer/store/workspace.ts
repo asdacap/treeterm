@@ -102,7 +102,7 @@ async function syncSessionToDaemon(
       if (sessionId) {
         console.log('[workspace] deleting session:', sessionId)
         await window.electron.session.delete(sessionId)
-        setSessionId(null)
+        // Note: sessionId will be set to null by the caller after deletion
       }
       return
     }
@@ -851,7 +851,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             if (existing) {
               // If tab exists, update its state and activate it
               const updatedTabs = workspace.tabs.map((t) =>
-                t.id === existing.id ? { ...t, state: { ...t.state, ...initialState } } : t
+                t.id === existing.id ? { ...t, state: { ...(t.state || {}), ...(initialState || {}) } } : t
               )
               return {
                 workspaces: {
@@ -874,7 +874,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             id: tabId,
             applicationId,
             title: `${app.name} ${existingCount + 1}`,
-            state: { ...app.createInitialState(), ...initialState }
+            state: { ...(app.createInitialState() || {}), ...(initialState || {}) }
           }
 
           return {
