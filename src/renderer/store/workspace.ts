@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
 import type { Workspace, GitInfo, Tab, DaemonWorkspace } from '../types'
 import { applicationRegistry } from '../registry/applicationRegistry'
 import { useSettingsStore } from '../store/settings'
@@ -133,9 +132,25 @@ async function syncSessionToDaemon(
   }
 }
 
+// Debounced sync for frequently-called methods
+let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+function debouncedSyncSessionToDaemon(
+  sessionId: string | null,
+  workspaces: Record<string, Workspace>,
+  setSessionId: (id: string) => void,
+  isRestoring: boolean = false
+) {
+  if (syncDebounceTimer) {
+    clearTimeout(syncDebounceTimer)
+  }
+  syncDebounceTimer = setTimeout(() => {
+    syncSessionToDaemon(sessionId, workspaces, setSessionId, isRestoring)
+  }, 500)
+}
+
 export const useWorkspaceStore = create<WorkspaceState>()(
-  persist(
-    (set, get) => ({
+  (set, get) => ({
       workspaces: {},
       activeWorkspaceId: null,
       sessionId: null,
@@ -723,6 +738,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
       setActiveWorkspace: (id: string | null) => {
         set({ activeWorkspaceId: id })
+        const state = get()
+        syncSessionToDaemon(state.sessionId, state.workspaces, (sid) =>
+          set({ sessionId: sid }), state.isRestoring
+        ).catch(console.error)
       },
 
       updateGitInfo: (id: string, gitInfo: GitInfo) => {
@@ -741,6 +760,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             }
           }
         })
+        const state = get()
+        syncSessionToDaemon(state.sessionId, state.workspaces, (sid) =>
+          set({ sessionId: sid }), state.isRestoring
+        ).catch(console.error)
       },
 
       refreshGitInfo: async (id: string) => {
@@ -1052,6 +1075,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             }
           }
         })
+        const state = get()
+        syncSessionToDaemon(state.sessionId, state.workspaces, (sid) =>
+          set({ sessionId: sid }), state.isRestoring
+        ).catch(console.error)
       },
 
       updateTabState: <T>(workspaceId: string, tabId: string, updater: (state: T) => T) => {
@@ -1071,6 +1098,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             }
           }
         })
+        const state = get()
+        debouncedSyncSessionToDaemon(state.sessionId, state.workspaces, (sid) =>
+          set({ sessionId: sid }), state.isRestoring
+        )
       },
 
       syncToDaemon: async () => {
@@ -1079,105 +1110,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           set({ sessionId: sid }), state.isRestoring
         )
       }
-    }),
-    {
-      name: 'treeterm-workspaces',
-      version: 4,
-      migrate: (persistedState: unknown, version: number) => {
-        const state = persistedState as { workspaces?: Record<string, unknown>; sessionId?: string | null }
-
-        if (version === 0 && state.workspaces) {
-          // Migrate from old format (terminals/activeTerminalId) to new format (tabs/activeTabId)
-          for (const ws of Object.values(state.workspaces) as Array<{
-            terminals?: Array<{ id: string; title: string; ptyId: string | null }>
-            tabs?: Tab[]
-            activeTerminalId?: string | null
-            activeTabId?: string | null
-          }>) {
-            if (ws.terminals && !ws.tabs) {
-              ws.tabs = ws.terminals.map((t) => ({
-                id: t.id,
-                applicationId: 'terminal',
-                title: t.title,
-                state: { ptyId: t.ptyId }
-              }))
-              delete ws.terminals
-            }
-            if (ws.activeTerminalId !== undefined && ws.activeTabId === undefined) {
-              ws.activeTabId = ws.activeTerminalId
-              delete ws.activeTerminalId
-            }
-          }
-        }
-
-        if (version <= 1 && state.workspaces) {
-          // Migrate from version 1 (type-based tabs) to version 2 (application-based tabs)
-          for (const ws of Object.values(state.workspaces) as Array<{
-            tabs?: Array<{
-              type?: string
-              id: string
-              title: string
-              ptyId?: string | null
-              applicationId?: string
-              selectedPath?: string | null
-              expandedDirs?: string[]
-              state?: unknown
-            }>
-          }>) {
-            if (ws.tabs) {
-              ws.tabs = ws.tabs.map((t) => {
-                // If already migrated (has state), skip
-                if (t.state !== undefined && !t.type) return t as Tab
-
-                if (t.type === 'terminal') {
-                  return {
-                    id: t.id,
-                    applicationId: 'terminal',
-                    title: t.title,
-                    state: { ptyId: t.ptyId || null }
-                  }
-                } else if (t.type === 'filesystem') {
-                  return {
-                    id: t.id,
-                    applicationId: 'filesystem',
-                    title: t.title,
-                    state: { selectedPath: t.selectedPath || null, expandedDirs: t.expandedDirs || [] }
-                  }
-                }
-                return t as Tab
-              })
-            }
-          }
-        }
-
-        if (version <= 2 && state.workspaces) {
-          // Migrate from version 2 to 3: remove config field from tabs
-          for (const ws of Object.values(state.workspaces) as Array<{
-            tabs?: Array<Tab & { config?: unknown }>
-          }>) {
-            if (ws.tabs) {
-              ws.tabs = ws.tabs.map((t) => {
-                const { config, ...rest } = t
-                return rest
-              })
-            }
-          }
-        }
-
-        if (version <= 3) {
-          // Migrate from version 3 to 4: add sessionId and isRestoring fields
-          if (!('sessionId' in state)) {
-            state.sessionId = null
-          }
-          if (!('isRestoring' in state)) {
-            (state as any).isRestoring = false
-          }
-        }
-
-        return state as WorkspaceState
-      }
-    }
-  )
+  })
 )
 
 /**

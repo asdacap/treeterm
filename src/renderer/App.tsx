@@ -27,6 +27,11 @@ export default function App() {
 
   console.log('[App] Current workspaces:', Object.keys(workspaces).length)
 
+  // One-time migration: clear localStorage since daemon is now source of truth
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem('treeterm-workspaces')
+  }
+
   // Use ref to access latest workspaces in the close confirm callback
   const workspacesRef = useRef(workspaces)
   workspacesRef.current = workspaces
