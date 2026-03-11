@@ -63,6 +63,26 @@ export default function ReviewBrowser({
   const [fileListWidth, setFileListWidth] = useState(250)
   const [isResizing, setIsResizing] = useState(false)
 
+  // Resize handlers (must be defined before any early returns)
+  const handleResizeMouseDown = useCallback(() => {
+    setIsResizing(true)
+  }, [])
+
+  const handleResizeMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isResizing) return
+      const container = e.currentTarget as HTMLElement
+      const rect = container.getBoundingClientRect()
+      const newWidth = Math.max(150, Math.min(500, e.clientX - rect.left))
+      setFileListWidth(newWidth)
+    },
+    [isResizing]
+  )
+
+  const handleResizeMouseUp = useCallback(() => {
+    setIsResizing(false)
+  }, [])
+
   useEffect(() => {
     if (workspace && parentWorkspace) {
       loadDiff()
@@ -426,26 +446,6 @@ export default function ReviewBrowser({
       console.error('Failed to delete comment:', error)
     }
   }
-
-  // Resize handlers
-  const handleResizeMouseDown = useCallback(() => {
-    setIsResizing(true)
-  }, [])
-
-  const handleResizeMouseMove = useCallback(
-    (e: React.MouseEvent) => {
-      if (!isResizing) return
-      const container = e.currentTarget as HTMLElement
-      const rect = container.getBoundingClientRect()
-      const newWidth = Math.max(150, Math.min(500, e.clientX - rect.left))
-      setFileListWidth(newWidth)
-    },
-    [isResizing]
-  )
-
-  const handleResizeMouseUp = useCallback(() => {
-    setIsResizing(false)
-  }, [])
 
   // Filter comments for current file
   const fileComments = selectedFile && reviews
