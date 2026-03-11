@@ -146,11 +146,26 @@ export default function BaseTerminal({
     // Delayed fit to ensure proper dimensions after layout stabilizes
     // This helps fix scrollbar viewport calculation issues
     setTimeout(() => {
-      if (isMountedRef.current && fitAddonRef.current) {
+      if (isMountedRef.current && fitAddonRef.current && terminalRef.current) {
+        const term = terminalRef.current
+
+        // Save scroll position before fit to prevent scroll jumping
+        const prevViewportY = term.buffer.active.viewportY
+        const prevBaseY = term.buffer.active.baseY
+        const wasAtBottom = prevViewportY === prevBaseY
+
         fitAddonRef.current.fit()
+
+        // Restore scroll position after fit
+        if (wasAtBottom) {
+          term.scrollToBottom()
+        } else {
+          term.scrollToLine(prevViewportY)
+        }
+
         console.log(`[${config.logPrefix} ${tabId}] delayed fit terminal size:`, {
-          cols: terminal.cols,
-          rows: terminal.rows
+          cols: term.cols,
+          rows: term.rows
         })
       }
     }, 100)
@@ -271,10 +286,25 @@ export default function BaseTerminal({
       const { width, height } = entry.contentRect
       if (width === 0 || height === 0) return
 
+      // Save scroll position before fit to prevent scroll jumping
+      const prevViewportY = terminal.buffer.active.viewportY
+      const prevBaseY = terminal.buffer.active.baseY
+      const wasAtBottom = prevViewportY === prevBaseY
+
       fitAddon.fit()
+
+      // Restore scroll position after fit (unless user was at bottom, then stay at bottom)
+      if (wasAtBottom) {
+        terminal.scrollToBottom()
+      } else {
+        // Restore to previous viewport position
+        terminal.scrollToLine(prevViewportY)
+      }
+
       console.log(`[${config.logPrefix} ${tabId}] resize detected:`, {
         containerSize: { width, height },
-        terminalSize: { cols: terminal.cols, rows: terminal.rows }
+        terminalSize: { cols: terminal.cols, rows: terminal.rows },
+        scrollPreserved: { prevViewportY, wasAtBottom }
       })
       if (ptyIdRef.current) {
         window.electron.terminal.resize(ptyIdRef.current, terminal.cols, terminal.rows)
@@ -311,11 +341,26 @@ export default function BaseTerminal({
   // Refresh terminal when tab becomes visible to fix blank screen issue
   useEffect(() => {
     if (isVisible && terminalRef.current && fitAddonRef.current) {
+      const terminal = terminalRef.current
+
+      // Save scroll position before fit to prevent scroll jumping
+      const prevViewportY = terminal.buffer.active.viewportY
+      const prevBaseY = terminal.buffer.active.baseY
+      const wasAtBottom = prevViewportY === prevBaseY
+
       // Re-fit and refresh the terminal when becoming visible
       fitAddonRef.current.fit()
-      terminalRef.current.refresh(0, terminalRef.current.rows)
+      terminal.refresh(0, terminal.rows)
+
+      // Restore scroll position after fit
+      if (wasAtBottom) {
+        terminal.scrollToBottom()
+      } else {
+        terminal.scrollToLine(prevViewportY)
+      }
+
       // Focus the terminal so keyboard input works immediately
-      terminalRef.current.focus()
+      terminal.focus()
     }
   }, [isVisible])
 
@@ -337,6 +382,9 @@ export default function BaseTerminal({
       const scrollTop = xtermViewport.scrollTop
       const scrollHeight = xtermViewport.scrollHeight
       const clientHeight = xtermViewport.clientHeight
+
+      // Skip logging if viewport hasn't been sized yet (similar to resize handler)
+      if (clientHeight === 0 || scrollHeight === 0) return
 
       // Calculate expected scrollbar height based on viewport ratio
       const expectedScrollbarHeight = (clientHeight / scrollHeight) * clientHeight
