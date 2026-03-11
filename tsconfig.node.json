@@ -8,12 +8,16 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
+    "downlevelIteration": true,
     "types": ["node", "vitest/globals"]
   },
   "include": [
     "electron.vite.config.ts",
     "src/main/**/*.ts",
     "src/preload/**/*.ts",
-    "src/shared/**/*.ts"
+    "src/shared/**/*.ts",
+    "src/daemon/**/*.ts",
+    "src/generated/**/*.ts",
+    "src/renderer/types/**/*.ts"
   ]
 }

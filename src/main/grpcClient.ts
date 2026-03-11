@@ -443,7 +443,11 @@ export class GrpcDaemonClient {
     return new Promise((resolve, reject) => {
       this.client!.getGitInfo({ dirPath }, (error, response) => {
         if (error) reject(new Error(error.message))
-        else if (response) resolve(response)
+        else if (response) resolve({
+          isRepo: response.isRepo,
+          branch: response.branch ?? null,
+          rootPath: response.rootPath ?? null
+        })
         else reject(new Error('No response from server'))
       })
     })
@@ -485,7 +489,7 @@ export class GrpcDaemonClient {
   async getChildWorktrees(repoPath: string, parentBranch: string | null): Promise<any[]> {
     if (!this.client) throw new Error('Not connected to daemon')
     return new Promise((resolve, reject) => {
-      this.client!.getChildWorktrees({ repoPath, parentBranch }, (error, response) => {
+      this.client!.getChildWorktrees({ repoPath, parentBranch: parentBranch ?? undefined }, (error, response) => {
         if (error) reject(new Error(error.message))
         else if (response) resolve(response.worktrees)
         else resolve([])

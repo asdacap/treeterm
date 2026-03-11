@@ -33,6 +33,7 @@ const defaultSettings: Settings = {
     theme: 'dark'
   },
   prefixMode: {
+    enabled: true,
     prefixKey: 'Control+B',
     timeout: 1500
   },

@@ -42,7 +42,7 @@ function createWindow(): void {
 
   // Handle media permissions for speech recognition and microphone
   mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
-    if (permission === 'media' || permission === 'microphone') {
+    if (permission === 'media') {
       // Always allow microphone access for push-to-talk
       callback(true)
     } else {

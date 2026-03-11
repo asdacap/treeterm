@@ -1,5 +1,5 @@
 import { contextBridge } from 'electron'
-import type { SandboxConfig, DaemonSession, WorkspaceInput } from '../shared/types'
+import type { SandboxConfig, DaemonSession, DaemonSessionInfo, WorkspaceInput } from '../shared/types'
 import { IpcClient } from './ipc-client'
 
 type DataCallback = (data: string) => void
@@ -58,7 +58,7 @@ client.onAppReady(() => {
   readyListeners.forEach((cb) => cb())
 })
 
-type DaemonSessionsCallback = (sessions: DaemonSession[]) => void
+type DaemonSessionsCallback = (sessions: DaemonSessionInfo[]) => void
 const daemonSessionsListeners: DaemonSessionsCallback[] = []
 
 client.onDaemonSessions((sessions) => {
@@ -88,7 +88,7 @@ client.onSessionShowSessions(() => {
 contextBridge.exposeInMainWorld('electron', {
   platform: process.platform,
   terminal: {
-    create: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string): Promise<string> => {
+    create: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string): Promise<string | null> => {
       return client.ptyCreate(cwd, sandbox, startupCommand)
     },
     attach: (sessionId: string): Promise<{ success: boolean; scrollback?: string[]; error?: string }> => {
