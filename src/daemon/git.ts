@@ -86,12 +86,12 @@ export async function createWorktree(
       worktreePath = path.join(parentDir, `${repoName}-${worktreeName}`)
     }
 
-    // Hierarchical branch naming: if base branch is treeterm/*, append child name
+    // Hierarchical branch naming: if base branch has '/', append child name
     let branchName: string
-    if (baseBranch && baseBranch.startsWith('treeterm/')) {
+    if (baseBranch && baseBranch.includes('/')) {
       branchName = `${baseBranch}/${worktreeName}`
     } else {
-      branchName = `treeterm/${worktreeName}`
+      branchName = worktreeName
     }
 
     // Check if path already exists
@@ -145,7 +145,7 @@ export async function removeWorktree(
     await git.raw(['worktree', 'remove', worktreePath, '--force'])
 
     // Delete the branch if requested
-    if (deleteBranch && branchName && branchName.startsWith('treeterm/')) {
+    if (deleteBranch && branchName) {
       try {
         await git.raw(['branch', '-D', branchName])
       } catch {
@@ -204,10 +204,20 @@ export async function getChildWorktrees(
   const allWorktrees = await listWorktrees(repoPath)
   console.log('[getChildWorktrees] allWorktrees:', allWorktrees)
 
-  // Determine the expected prefix for child branches
-  const branchPrefix = (parentBranch && parentBranch.startsWith('treeterm/'))
-    ? `${parentBranch}/`
-    : 'treeterm/'
+  // If no parent branch, find top-level worktrees (branches without '/')
+  if (!parentBranch) {
+    const filtered = allWorktrees.filter(wt => !wt.branch.includes('/'))
+    console.log('[getChildWorktrees] top-level worktrees:', filtered)
+    const result = filtered.map(wt => ({
+      ...wt,
+      displayName: wt.branch
+    }))
+    console.log('[getChildWorktrees] returning:', result)
+    return result
+  }
+
+  // Find child worktrees
+  const branchPrefix = `${parentBranch}/`
   console.log('[getChildWorktrees] branchPrefix:', branchPrefix)
 
   const filtered = allWorktrees
