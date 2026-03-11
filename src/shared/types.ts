@@ -70,6 +70,17 @@ export interface TerminalInstance {
   isDefault: boolean
 }
 
+export interface AiHarnessInstance {
+  id: string
+  name: string
+  icon: string
+  command: string
+  isDefault: boolean
+  enableSandbox: boolean
+  allowNetwork: boolean
+  backgroundColor: string
+}
+
 export interface PrefixModeConfig {
   enabled: boolean
   prefixKey: string // e.g., 'Control+B'
@@ -92,10 +103,8 @@ export interface Settings {
     enabledByDefault: boolean
     allowNetworkByDefault: boolean
   }
-  claude: {
-    command: string
-    startByDefault: boolean
-    enableSandbox: boolean
+  aiHarness: {
+    instances: AiHarnessInstance[]
   }
   appearance: {
     theme: 'dark' | 'light' | 'system'

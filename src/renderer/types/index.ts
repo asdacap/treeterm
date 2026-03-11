@@ -9,6 +9,7 @@ import type {
   DaemonSessionInfo,
   WorkspaceInput,
   TerminalInstance,
+  AiHarnessInstance,
   PrefixModeConfig,
   STTProvider,
   Settings
@@ -22,6 +23,7 @@ export type {
   DaemonSessionInfo,
   WorkspaceInput,
   TerminalInstance,
+  AiHarnessInstance,
   PrefixModeConfig,
   STTProvider,
   Settings
@@ -71,7 +73,7 @@ export interface TerminalState {
   ptyId: string | null
 }
 
-export interface ClaudeState extends TerminalState {
+export interface AiHarnessState extends TerminalState {
   sandbox: SandboxConfig
 }
 
@@ -370,12 +372,12 @@ export function isTerminalState(state: unknown): state is TerminalState {
   )
 }
 
-export function isClaudeState(state: unknown): state is ClaudeState {
+export function isAiHarnessState(state: unknown): state is AiHarnessState {
   return (
     isTerminalState(state) &&
     'sandbox' in state &&
-    typeof (state as ClaudeState).sandbox === 'object' &&
-    (state as ClaudeState).sandbox !== null
+    typeof (state as AiHarnessState).sandbox === 'object' &&
+    (state as AiHarnessState).sandbox !== null
   )
 }
 

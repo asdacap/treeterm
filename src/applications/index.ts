@@ -1,10 +1,10 @@
 import { applicationRegistry } from '../renderer/registry/applicationRegistry'
 import { terminalApplication, createTerminalApplication, createTerminalVariant } from './terminal/renderer'
 import { filesystemApplication } from './filesystem/renderer'
-import { claudeApplication } from './claude/renderer'
+import { createAiHarnessVariant } from './aiHarness/renderer'
 import { reviewApplication } from './review/renderer'
 import { editorApplication } from './editor/renderer'
-import type { TerminalInstance, Settings } from '../renderer/types'
+import type { TerminalInstance, AiHarnessInstance, Settings } from '../renderer/types'
 
 let initialized = false
 
@@ -13,7 +13,7 @@ export function initializeApplications(): void {
 
   applicationRegistry.register(terminalApplication)
   applicationRegistry.register(filesystemApplication)
-  applicationRegistry.register(claudeApplication)
+  // NOTE: AI Harness variants are registered dynamically from settings
   applicationRegistry.register(reviewApplication)
   applicationRegistry.register(editorApplication)
 
@@ -43,4 +43,21 @@ export function registerTerminalVariants(instances: TerminalInstance[], terminal
   }
 }
 
-export { terminalApplication, filesystemApplication, claudeApplication, reviewApplication }
+// Register dynamic AI Harness variants from settings
+export function registerAiHarnessVariants(instances: AiHarnessInstance[]): void {
+  // First, unregister any existing dynamic AI Harness apps
+  const allApps = applicationRegistry.getAll()
+  for (const app of allApps) {
+    if (app.id.startsWith('aiharness-')) {
+      applicationRegistry.unregister(app.id)
+    }
+  }
+
+  // Register new variants
+  for (const instance of instances) {
+    const variant = createAiHarnessVariant(instance)
+    applicationRegistry.register(variant)
+  }
+}
+
+export { terminalApplication, filesystemApplication, reviewApplication, createAiHarnessVariant }

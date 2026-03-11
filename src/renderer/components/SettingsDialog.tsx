@@ -7,12 +7,12 @@ interface SettingsDialogProps {
   onClose: () => void
 }
 
-type TabId = 'terminal' | 'sandbox' | 'claude' | 'appearance' | 'keybindings' | 'terminal-profiles' | 'speech'
+type TabId = 'terminal' | 'sandbox' | 'ai-harness' | 'appearance' | 'keybindings' | 'terminal-profiles' | 'speech'
 
 const tabs: { id: TabId; label: string }[] = [
   { id: 'terminal', label: 'Terminal' },
   { id: 'terminal-profiles', label: 'Terminal Profiles' },
-  { id: 'claude', label: 'Claude' },
+  { id: 'ai-harness', label: 'AI Harness' },
   { id: 'sandbox', label: 'Sandbox' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'keybindings', label: 'Keybindings' },
@@ -300,65 +300,193 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
               </div>
             )}
 
-            {activeTab === 'claude' && (
+            {activeTab === 'ai-harness' && (
               <div className="settings-section">
-                <div className="settings-group">
-                  <label className="settings-label">Claude Command</label>
-                  <input
-                    type="text"
-                    className="settings-input"
-                    value={localSettings.claude.command}
-                    placeholder={window.electron.platform === 'darwin' ? 'claude' : 'npx @anthropic-ai/claude-code'}
-                    onChange={(e) =>
-                      setLocalSettings((prev) => ({
-                        ...prev,
-                        claude: { ...prev.claude, command: e.target.value }
-                      }))
-                    }
-                  />
-                  <p className="settings-hint">
-                    Command to launch Claude Code (e.g., &quot;claude&quot; on macOS, &quot;npx @anthropic-ai/claude-code&quot; on Linux)
-                  </p>
+                <p className="settings-hint">
+                  Configure AI tools like Claude, Cline, OpenCode, etc.
+                  These appear as separate options in the new tab menu.
+                </p>
+                <div className="applications-list">
+                  {localSettings.aiHarness.instances.map((inst, index) => (
+                    <div key={inst.id} className="application-item ai-harness-item">
+                      <div className="application-icon">
+                        <input
+                          type="text"
+                          className="settings-input icon-input"
+                          value={inst.icon}
+                          maxLength={2}
+                          onChange={(e) =>
+                            setLocalSettings((prev) => ({
+                              ...prev,
+                              aiHarness: {
+                                ...prev.aiHarness,
+                                instances: prev.aiHarness.instances.map((a, i) =>
+                                  i === index ? { ...a, icon: e.target.value } : a
+                                )
+                              }
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="application-fields">
+                        <input
+                          type="text"
+                          className="settings-input"
+                          value={inst.name}
+                          placeholder="Name (e.g., Claude)"
+                          onChange={(e) =>
+                            setLocalSettings((prev) => ({
+                              ...prev,
+                              aiHarness: {
+                                ...prev.aiHarness,
+                                instances: prev.aiHarness.instances.map((a, i) =>
+                                  i === index ? { ...a, name: e.target.value } : a
+                                )
+                              }
+                            }))
+                          }
+                        />
+                        <input
+                          type="text"
+                          className="settings-input"
+                          value={inst.command}
+                          placeholder="Command (e.g., claude, cline, opencode)"
+                          onChange={(e) =>
+                            setLocalSettings((prev) => ({
+                              ...prev,
+                              aiHarness: {
+                                ...prev.aiHarness,
+                                instances: prev.aiHarness.instances.map((a, i) =>
+                                  i === index ? { ...a, command: e.target.value } : a
+                                )
+                              }
+                            }))
+                          }
+                        />
+                        <input
+                          type="text"
+                          className="settings-input"
+                          value={inst.backgroundColor}
+                          placeholder="Background color (e.g., #1a1a24)"
+                          onChange={(e) =>
+                            setLocalSettings((prev) => ({
+                              ...prev,
+                              aiHarness: {
+                                ...prev.aiHarness,
+                                instances: prev.aiHarness.instances.map((a, i) =>
+                                  i === index ? { ...a, backgroundColor: e.target.value } : a
+                                )
+                              }
+                            }))
+                          }
+                        />
+                        <div className="ai-harness-options">
+                          <label className="settings-checkbox-label">
+                            <input
+                              type="checkbox"
+                              checked={inst.isDefault}
+                              onChange={(e) =>
+                                setLocalSettings((prev) => ({
+                                  ...prev,
+                                  aiHarness: {
+                                    ...prev.aiHarness,
+                                    instances: prev.aiHarness.instances.map((a, i) =>
+                                      i === index ? { ...a, isDefault: e.target.checked } : a
+                                    )
+                                  }
+                                }))
+                              }
+                            />
+                            Start by Default
+                          </label>
+                          <label className="settings-checkbox-label">
+                            <input
+                              type="checkbox"
+                              disabled={!sandboxAvailable}
+                              checked={inst.enableSandbox}
+                              onChange={(e) =>
+                                setLocalSettings((prev) => ({
+                                  ...prev,
+                                  aiHarness: {
+                                    ...prev.aiHarness,
+                                    instances: prev.aiHarness.instances.map((a, i) =>
+                                      i === index ? { ...a, enableSandbox: e.target.checked } : a
+                                    )
+                                  }
+                                }))
+                              }
+                            />
+                            Enable Sandbox
+                          </label>
+                          <label className="settings-checkbox-label">
+                            <input
+                              type="checkbox"
+                              disabled={!sandboxAvailable || !inst.enableSandbox}
+                              checked={inst.allowNetwork}
+                              onChange={(e) =>
+                                setLocalSettings((prev) => ({
+                                  ...prev,
+                                  aiHarness: {
+                                    ...prev.aiHarness,
+                                    instances: prev.aiHarness.instances.map((a, i) =>
+                                      i === index ? { ...a, allowNetwork: e.target.checked } : a
+                                    )
+                                  }
+                                }))
+                              }
+                            />
+                            Allow Network
+                          </label>
+                        </div>
+                      </div>
+                      <button
+                        className="application-delete"
+                        onClick={() =>
+                          setLocalSettings((prev) => ({
+                            ...prev,
+                            aiHarness: {
+                              ...prev.aiHarness,
+                              instances: prev.aiHarness.instances.filter((_, i) => i !== index)
+                            }
+                          }))
+                        }
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ))}
                 </div>
-
-                <div className="settings-group">
-                  <label className="settings-checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={localSettings.claude.startByDefault}
-                      onChange={(e) =>
-                        setLocalSettings((prev) => ({
-                          ...prev,
-                          claude: { ...prev.claude, startByDefault: e.target.checked }
-                        }))
+                <button
+                  className="settings-btn add-app"
+                  onClick={() => {
+                    const newId = `ai-${Date.now()}`
+                    setLocalSettings((prev) => ({
+                      ...prev,
+                      aiHarness: {
+                        ...prev.aiHarness,
+                        instances: [
+                          ...prev.aiHarness.instances,
+                          {
+                            id: newId,
+                            name: 'New AI Tool',
+                            icon: '🤖',
+                            command: '',
+                            isDefault: false,
+                            enableSandbox: false,
+                            allowNetwork: true,
+                            backgroundColor: '#1a1a1a'
+                          }
+                        ]
                       }
-                    />
-                    Start by Default
-                  </label>
-                  <p className="settings-hint">
-                    Automatically open a Claude tab when creating new workspaces
-                  </p>
-                </div>
-
-                <div className="settings-group">
-                  <label className="settings-checkbox-label">
-                    <input
-                      type="checkbox"
-                      disabled={!sandboxAvailable}
-                      checked={localSettings.claude.enableSandbox}
-                      onChange={(e) =>
-                        setLocalSettings((prev) => ({
-                          ...prev,
-                          claude: { ...prev.claude, enableSandbox: e.target.checked }
-                        }))
-                      }
-                    />
-                    Enable Sandbox
-                  </label>
-                  <p className="settings-hint">
-                    Run Claude in a sandboxed terminal with restricted file and network access
-                  </p>
-                </div>
+                    }))
+                  }}
+                >
+                  + Add AI Tool
+                </button>
+                <p className="settings-hint">
+                  Default profiles open automatically in new workspaces.
+                  Sandbox settings restrict file and network access.
+                </p>
               </div>
             )}
 
