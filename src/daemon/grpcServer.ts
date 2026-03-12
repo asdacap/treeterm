@@ -170,6 +170,7 @@ export class GrpcServer {
       getSession: this.handleGetSession.bind(this),
       deleteSession: this.handleDeleteSession.bind(this),
       listSessions: this.handleListSessions.bind(this),
+      getDefaultSession: this.handleGetDefaultSession.bind(this),
       shutdown: this.handleShutdown.bind(this),
       // Filesystem operations
       readDirectory: this.handleReadDirectory.bind(this),
@@ -590,6 +591,26 @@ export class GrpcServer {
       callback(null, { sessions: protoSessions })
     } catch (error) {
       log.error({ err: error }, 'listSessions error')
+      callback({
+        code: grpc.status.INTERNAL,
+        message: error instanceof Error ? error.message : 'Unknown error'
+      })
+    }
+  }
+
+  private handleGetDefaultSession(
+    call: grpc.ServerUnaryCall<Empty, ProtoDaemonSession>,
+    callback: grpc.sendUnaryData<ProtoDaemonSession>
+  ): void {
+    try {
+      // Get or create the default session for this client
+      const clientId = call.metadata.get('client-id')[0]?.toString() || 'unknown'
+      const session = this.sessionStore.getOrCreateDefaultSession(clientId)
+      log.debug({ sessionId: session.id, clientId }, 'getDefaultSession called')
+
+      callback(null, this.convertToProtoSession(session))
+    } catch (error) {
+      log.error({ err: error }, 'getDefaultSession error')
       callback({
         code: grpc.status.INTERNAL,
         message: error instanceof Error ? error.message : 'Unknown error'

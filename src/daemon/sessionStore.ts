@@ -19,6 +19,47 @@ export class SessionStore {
   // Track which client IDs are attached to which session IDs
   private clientAttachments: Map<string, Set<string>> = new Map() // clientId -> Set<sessionId>
 
+  // The default session ID - always exists after daemon starts
+  private defaultSessionId: string | null = null
+
+  /**
+   * Initialize the default session (called once on daemon startup)
+   * Creates a new session with empty workspaces
+   */
+  initializeDefaultSession(clientId: string): DaemonSession {
+    const session = this.createSession(clientId, [])
+    this.defaultSessionId = session.id
+    log.info({ sessionId: session.id }, 'default session initialized')
+    return session
+  }
+
+  /**
+   * Get the default session, creating it if necessary
+   */
+  getOrCreateDefaultSession(clientId: string): DaemonSession {
+    // Return existing default session if it exists
+    if (this.defaultSessionId) {
+      const session = this.sessions.get(this.defaultSessionId)
+      if (session) {
+        // Attach this client to the session
+        this.attachClient(clientId, session.id)
+        return session
+      }
+      // Session was deleted, clear the reference
+      this.defaultSessionId = null
+    }
+
+    // Create new default session
+    return this.initializeDefaultSession(clientId)
+  }
+
+  /**
+   * Get the default session ID (or null if not created yet)
+   */
+  getDefaultSessionId(): string | null {
+    return this.defaultSessionId
+  }
+
   /**
    * Create a new session with workspaces
    * Returns the created session

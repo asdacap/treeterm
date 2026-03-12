@@ -83,6 +83,12 @@ async function main(): Promise<void> {
   // Initialize components
   const ptyManager = new DaemonPtyManager(config.orphanTimeout, config.scrollbackLimit)
   const sessionStore = new SessionStore()
+
+  // Initialize default session on daemon startup
+  // This ensures there's always a session available for clients
+  const defaultSession = sessionStore.initializeDefaultSession('daemon-init')
+  log.info({ defaultSessionId: defaultSession.id }, 'default session created at startup')
+
   const grpcServer = new GrpcServer(config.socketPath, ptyManager, sessionStore)
 
   // Load persisted sessions (future enhancement)

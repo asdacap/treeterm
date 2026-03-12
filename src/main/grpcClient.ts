@@ -394,6 +394,24 @@ export class GrpcDaemonClient {
     })
   }
 
+  async getDefaultSession(): Promise<DaemonSession> {
+    if (!this.client) {
+      throw new Error('Not connected to daemon')
+    }
+
+    return new Promise((resolve, reject) => {
+      this.client!.getDefaultSession({}, (error, response) => {
+        if (error) {
+          reject(new Error(error.message))
+        } else if (response) {
+          resolve(this.convertFromProtoSession(response))
+        } else {
+          reject(new Error('No response from daemon'))
+        }
+      })
+    })
+  }
+
   async deleteSession(sessionId: string): Promise<void> {
     if (!this.client) {
       throw new Error('Not connected to daemon')

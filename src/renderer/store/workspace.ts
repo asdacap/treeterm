@@ -116,15 +116,9 @@ async function syncSessionToDaemon(
         console.log('[workspace] session updated successfully')
       }
     } else {
-      // Create new session
-      console.log('[workspace] creating new session with', daemonWorkspaces.length, 'workspaces')
-      const result = await window.electron.session.create(daemonWorkspaces)
-      if (result.success && result.session) {
-        console.log('[workspace] session created:', result.session.id)
-        setSessionId(result.session.id)
-      } else {
-        console.error('[workspace] failed to create session:', result.error)
-      }
+      // No sessionId - this should never happen now since daemon always provides one
+      console.error('[workspace] no sessionId available - daemon should have provided one at startup')
+      // Do not create a new session - the daemon owns session creation
     }
   } catch (error) {
     console.error('[workspace] failed to sync session to daemon:', error)

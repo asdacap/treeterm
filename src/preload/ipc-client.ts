@@ -444,8 +444,9 @@ export class IpcClient {
     return () => ipcRenderer.removeListener(CHANNELS.appConfirmClose, handler)
   }
 
-  onAppReady(callback: () => void): () => void {
-    const handler = () => callback()
+  onAppReady(callback: (...args: IpcEvents['appReady']['params']) => void): () => void {
+    const handler = (_event: IpcRendererEvent, ...args: any[]) =>
+      callback(...(args as IpcEvents['appReady']['params']))
     ipcRenderer.on(CHANNELS.appReady, handler)
     return () => ipcRenderer.removeListener(CHANNELS.appReady, handler)
   }

@@ -132,10 +132,24 @@ function createWindow(): void {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
-  // Signal renderer when ready to initialize
+  // Signal renderer when ready to initialize with the default session
   mainWindow.webContents.on('did-finish-load', async () => {
-    server.appReady()
-    // Renderer will request workspaces when ready via workspace:list
+    if (!daemonClient) {
+      server.appReady(null)
+      return
+    }
+
+    try {
+      await daemonClient.ensureDaemonRunning()
+      // Get the default session from daemon (creates one if doesn't exist)
+      const session = await daemonClient.getDefaultSession()
+      console.log('[main] got default session:', session.id)
+      server.appReady(session)
+    } catch (error) {
+      console.error('[main] failed to get default session:', error)
+      // Still signal ready but without a session
+      server.appReady(null)
+    }
   })
 
   mainWindow.on('closed', () => {

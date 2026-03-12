@@ -54,9 +54,24 @@ export default function App() {
       }
     })
 
+    // Listen for app ready with the default session from daemon
+    const unsubReady = window.electron.app.onReady((session) => {
+      console.log('[App] Received app:ready with session:', session?.id)
+      if (session) {
+        // Set the sessionId in the workspace store
+        useWorkspaceStore.setState({ sessionId: session.id })
+        
+        // If the session has workspaces, restore them
+        if (session.workspaces && session.workspaces.length > 0) {
+          handleSessionRestore(session)
+        }
+      }
+    })
+
     return () => {
       unsubSettings()
       unsubClose()
+      unsubReady()
     }
   }, [loadSettings])
 
@@ -83,42 +98,8 @@ export default function App() {
     handleInitialWorkspace()
   }, [])
 
-  // Handle daemon session restoration
-  useEffect(() => {
-    const loadDaemonSessions = async () => {
-      try {
-        console.log('[App] Loading daemon sessions...')
-        // Request sessions from daemon when component mounts (after listeners ready)
-        const result = await window.electron.session.list()
-
-        console.log('[App] Session list result:', result)
-
-        if (!result.success || !result.sessions || result.sessions.length === 0) {
-          // No sessions, normal startup
-          console.log('[App] No sessions found, normal startup')
-          return
-        }
-
-        console.log('[App] Found', result.sessions.length, 'session(s)')
-
-        if (result.sessions.length === 1) {
-          // Auto-restore single session
-          console.log('[App] Auto-restoring single session')
-          handleSessionRestore(result.sessions[0])
-        } else {
-          // Multiple sessions - show picker
-          console.log('[App] Showing session picker')
-          setDaemonSessions(result.sessions)
-          setShowWorkspacePicker(true)
-        }
-      } catch (error) {
-        console.error('[App] Failed to list daemon sessions:', error)
-      }
-    }
-
-    console.log('[App] useEffect triggered - loading sessions')
-    loadDaemonSessions()
-  }, [])
+  // Session is now received via onReady callback from main process
+  // The daemon always provides a default session, so no need to list sessions here
 
   const handleSessionRestore = async (daemonSession: DaemonSession) => {
     console.log('[App] Restoring session', daemonSession.id, 'with', daemonSession.workspaces.length, 'workspaces')

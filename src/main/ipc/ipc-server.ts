@@ -727,8 +727,8 @@ export class IpcServer {
     this.window?.webContents.send(CHANNELS.appConfirmClose)
   }
 
-  appReady(): void {
-    this.window?.webContents.send(CHANNELS.appReady)
+  appReady(...args: IpcEvents['appReady']['params']): void {
+    this.window?.webContents.send(CHANNELS.appReady, ...args)
   }
 
   capsLockEvent(...args: IpcEvents['capsLockEvent']['params']): void {

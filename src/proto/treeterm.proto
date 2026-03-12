@@ -704,6 +704,7 @@ service TreeTermDaemon {
   rpc GetSession(GetSessionRequest) returns (DaemonSession);
   rpc DeleteSession(DeleteSessionRequest) returns (Empty);
   rpc ListSessions(Empty) returns (ListSessionsResponse);
+  rpc GetDefaultSession(Empty) returns (DaemonSession);
 
   // Daemon Control
   rpc Shutdown(Empty) returns (Empty);

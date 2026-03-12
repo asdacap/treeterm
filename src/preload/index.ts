@@ -49,13 +49,15 @@ client.onCapsLockEvent((event) => {
   capsLockListeners.forEach((cb) => cb(event))
 })
 
-type ReadyCallback = () => void
+type ReadyCallback = (session: DaemonSession | null) => void
 const readyListeners: ReadyCallback[] = []
 let isReady = false
+let initialSession: DaemonSession | null = null
 
-client.onAppReady(() => {
+client.onAppReady((session) => {
   isReady = true
-  readyListeners.forEach((cb) => cb())
+  initialSession = session
+  readyListeners.forEach((cb) => cb(session))
 })
 
 type DaemonSessionsCallback = (sessions: DaemonSessionInfo[]) => void
@@ -327,8 +329,8 @@ contextBridge.exposeInMainWorld('electron', {
   app: {
     onReady: (callback: ReadyCallback): (() => void) => {
       if (isReady) {
-        // Already ready, call immediately
-        callback()
+        // Already ready, call immediately with the initial session
+        callback(initialSession)
       } else {
         readyListeners.push(callback)
       }

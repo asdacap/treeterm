@@ -316,7 +316,7 @@ export interface IpcEvents {
     params: []
   }
   appReady: {
-    params: []
+    params: [session: DaemonSession | null]
   }
   capsLockEvent: {
     params: [event: { type: string; key: string; code: string }]

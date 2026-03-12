@@ -317,7 +317,7 @@ export interface STTApi {
 }
 
 export interface AppApi {
-  onReady: (callback: () => void) => () => void
+  onReady: (callback: (session: DaemonSession | null) => void) => () => void
   onCloseConfirm: (callback: () => void) => () => void
   confirmClose: () => void
   cancelClose: () => void
