@@ -403,6 +403,7 @@ export default function App() {
       }
     } catch (error) {
       console.error('Failed to open session in new window:', error)
+      alert(`Failed to open session: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
@@ -424,6 +425,7 @@ export default function App() {
         }
       } catch (error) {
         console.error('Failed to list daemon sessions:', error)
+        alert(`Failed to list sessions: ${error instanceof Error ? error.message : 'Unknown error'}`)
       }
     })
 

@@ -84,7 +84,7 @@ export function loadSettings(): Settings {
       return mergeSettings(defaultSettings, loaded)
     }
   } catch (error) {
-    console.error('Failed to load settings:', error)
+    console.warn('[settings] Failed to load settings, using defaults:', error)
   }
 
   // Return defaults and save them
