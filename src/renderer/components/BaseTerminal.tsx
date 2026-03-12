@@ -47,6 +47,8 @@ export interface BaseTerminalConfig {
   logPrefix: string
   // Whether to show push-to-talk button
   showPushToTalk?: boolean
+  // Whether to disable the scrollbar (for tools with own scrolling like opencode)
+  disableScrollbar?: boolean
 }
 
 export interface BaseTerminalProps {
@@ -488,7 +490,11 @@ export default function BaseTerminal({
       workspacePath={cwd}
       ptyId={ptyIdRef.current || undefined}
     >
-      <div ref={containerRef} className="terminal-container" onContextMenu={handleContextMenu} />
+      <div
+        ref={containerRef}
+        className={`terminal-container${config.disableScrollbar ? ' disable-scrollbar' : ''}`}
+        onContextMenu={handleContextMenu}
+      />
 
       {contextMenu && (
         <div

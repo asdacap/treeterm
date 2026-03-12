@@ -10,6 +10,7 @@ interface AiHarnessProps {
   isVisible?: boolean
   command: string
   backgroundColor: string
+  disableScrollbar?: boolean
 }
 
 export default function AiHarness({
@@ -19,7 +20,8 @@ export default function AiHarness({
   sandbox,
   isVisible,
   command,
-  backgroundColor
+  backgroundColor,
+  disableScrollbar
 }: AiHarnessProps) {
   // Memoize config based on props to prevent unnecessary re-renders
   const config = useMemo<BaseTerminalConfig>(() => ({
@@ -27,8 +29,9 @@ export default function AiHarness({
     promptPatterns: [/❯\s/], // Common AI tool prompt pattern
     startupCommand: command,
     logPrefix: 'AiHarness',
-    showPushToTalk: true
-  }), [backgroundColor, command])
+    showPushToTalk: true,
+    disableScrollbar
+  }), [backgroundColor, command, disableScrollbar])
 
   return (
     <BaseTerminal
