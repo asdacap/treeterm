@@ -350,6 +350,7 @@ export interface ElectronApi {
   platform: 'darwin' | 'linux' | 'win32' | 'aix' | 'android' | 'freebsd' | 'haiku' | 'openbsd' | 'sunos' | 'cygwin' | 'netbsd'
   terminal: TerminalApi
   selectFolder: () => Promise<string | null>
+  getRecentDirectories: () => Promise<string[]>
   git: GitApi
   settings: SettingsApi
   filesystem: FilesystemApi

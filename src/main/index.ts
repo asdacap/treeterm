@@ -16,7 +16,7 @@ for (const arg of process.argv) {
     break
   }
 }
-import { loadSettings, saveSettings, Settings } from './settings'
+import { loadSettings, saveSettings, Settings, addRecentDirectory } from './settings'
 import { createApplicationMenu } from './menu'
 import { registerSTTHandlers } from './stt'
 
@@ -499,7 +499,26 @@ server.onDialogSelectFolder(async () => {
   if (result.canceled || result.filePaths.length === 0) {
     return null
   }
-  return result.filePaths[0]
+  const selectedPath = result.filePaths[0]
+  // Add to recent directories
+  try {
+    const settings = loadSettings()
+    const updatedSettings = addRecentDirectory(settings, selectedPath)
+    saveSettings(updatedSettings)
+  } catch (error) {
+    console.error('[main] failed to save recent directory:', error)
+  }
+  return selectedPath
+})
+
+server.onDialogGetRecentDirectories(async () => {
+  try {
+    const settings = loadSettings()
+    return settings.recentDirectories || []
+  } catch (error) {
+    console.error('[main] failed to load recent directories:', error)
+    return []
+  }
 })
 
 // Initialize git client when daemon is ready

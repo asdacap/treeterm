@@ -270,6 +270,10 @@ export interface IpcRequests {
     params: []
     result: string | null
   }
+  dialogGetRecentDirectories: {
+    params: []
+    result: string[]
+  }
 
   // Sandbox operations
   sandboxIsAvailable: {

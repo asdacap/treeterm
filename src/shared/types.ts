@@ -144,4 +144,6 @@ export interface Settings {
   // Global default application for new worktrees
   // If not set, falls back to 'terminal' or first available app
   globalDefaultApplicationId: string
+  // Recently opened directories (max 10)
+  recentDirectories: string[]
 }
