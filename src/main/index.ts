@@ -567,6 +567,9 @@ app.whenReady().then(async () => {
   console.log('[main] daemon mode enabled')
   daemonClient = new GrpcDaemonClient()
 
+  // Proactively connect to daemon on startup
+  await daemonClient.ensureDaemonRunning()
+
   registerSTTHandlers(server)
   createWindow()
   createApplicationMenu(mainWindow, server)
