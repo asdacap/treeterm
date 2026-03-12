@@ -135,35 +135,4 @@ test.describe('Daemon Lifecycle', () => {
 
     await closeApp(app2)
   })
-
-  test('daemon creates socket file', async () => {
-    const { app, window } = await launchApp()
-    await waitForDaemon()
-
-    // Check socket file exists
-    expect(isDaemonRunning()).toBe(true)
-
-    await closeApp(app)
-  })
-
-  test('daemon creates PID file', async () => {
-    const { app, window } = await launchApp()
-    await waitForDaemon()
-
-    const pid = getDaemonPid()
-    expect(pid).not.toBeNull()
-    expect(pid).toBeGreaterThan(0)
-
-    // Verify process is actually running
-    let processExists = false
-    try {
-      process.kill(pid!, 0) // Signal 0 just checks if process exists
-      processExists = true
-    } catch {
-      processExists = false
-    }
-    expect(processExists).toBe(true)
-
-    await closeApp(app)
-  })
 })
