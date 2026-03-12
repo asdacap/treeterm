@@ -257,7 +257,12 @@ export class DaemonPtyManager {
     // Execute startup command if provided
     if (config.startupCommand && config.startupCommand.trim()) {
       setTimeout(() => {
-        ptyProcess.write(config.startupCommand!.trim() + '\n')
+        // Use 'exec' on Unix platforms to replace the shell process
+        // This ensures the PTY exits when the command exits (e.g., AI terminal closes when AI exits)
+        const cmd = process.platform === 'win32'
+          ? config.startupCommand!.trim()
+          : `exec ${config.startupCommand!.trim()}`
+        ptyProcess.write(cmd + '\n')
       }, 100)
     }
 
