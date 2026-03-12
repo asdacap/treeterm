@@ -1,15 +1,17 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { Settings } from '../types'
 import { useSettingsStore } from '../store/settings'
+import { applicationRegistry } from '../registry/applicationRegistry'
 
 interface SettingsDialogProps {
   isOpen: boolean
   onClose: () => void
 }
 
-type TabId = 'terminal' | 'sandbox' | 'ai-harness' | 'appearance' | 'keybindings' | 'terminal-profiles' | 'speech'
+type TabId = 'general' | 'terminal' | 'sandbox' | 'ai-harness' | 'appearance' | 'keybindings' | 'terminal-profiles' | 'speech'
 
 const tabs: { id: TabId; label: string }[] = [
+  { id: 'general', label: 'General' },
   { id: 'terminal', label: 'Terminal' },
   { id: 'terminal-profiles', label: 'Terminal Profiles' },
   { id: 'ai-harness', label: 'AI Harness' },
@@ -138,6 +140,34 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
           </div>
 
           <div className="settings-panel">
+            {activeTab === 'general' && (
+              <div className="settings-section">
+                <div className="settings-group">
+                  <label className="settings-label">Default Application for New Worktrees</label>
+                  <select
+                    className="settings-select"
+                    value={localSettings.globalDefaultApplicationId}
+                    onChange={(e) =>
+                      setLocalSettings((prev) => ({
+                        ...prev,
+                        globalDefaultApplicationId: e.target.value
+                      }))
+                    }
+                  >
+                    {applicationRegistry.getAll().map((app) => (
+                      <option key={app.id} value={app.id}>
+                        {app.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="settings-hint">
+                    The default application to open when creating a new worktree. 
+                    Child worktrees can inherit or override this setting.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {activeTab === 'terminal' && (
               <div className="settings-section">
                 <div className="settings-group">

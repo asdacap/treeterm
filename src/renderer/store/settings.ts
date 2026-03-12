@@ -57,7 +57,8 @@ const defaultSettings: Settings = {
     orphanTimeout: 30000,
     scrollbackLimit: 10000,
     killOnQuit: true
-  }
+  },
+  globalDefaultApplicationId: 'terminal'
 }
 
 interface SettingsState {
@@ -106,13 +107,25 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   updateSetting: (category, key, value) => {
     const { settings, saveSettings } = get()
-    const newSettings = {
-      ...settings,
-      [category]: {
-        ...settings[category],
+    const categoryValue = settings[category]
+    
+    // Handle nested object categories (terminal, sandbox, etc.)
+    if (typeof categoryValue === 'object' && categoryValue !== null && !Array.isArray(categoryValue)) {
+      const newSettings = {
+        ...settings,
+        [category]: {
+          ...categoryValue,
+          [key]: value
+        }
+      }
+      saveSettings(newSettings)
+    } else {
+      // Handle top-level primitive values (for future use)
+      const newSettings = {
+        ...settings,
         [key]: value
       }
+      saveSettings(newSettings)
     }
-    saveSettings(newSettings)
   }
 }))

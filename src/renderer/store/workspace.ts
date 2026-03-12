@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import type { Workspace, GitInfo, Tab, DaemonWorkspace } from '../types'
+import type { Workspace, GitInfo, Tab, DaemonWorkspace, WorktreeSettings } from '../types'
+import type { Application } from '../types'
 import { applicationRegistry } from '../registry/applicationRegistry'
 import { useSettingsStore } from '../store/settings'
 
@@ -8,11 +9,11 @@ interface WorkspaceState {
   activeWorkspaceId: string | null
   sessionId: string | null  // Daemon session ID for syncing
   isRestoring: boolean  // Flag to prevent syncing during restoration
-  addWorkspace: (path: string, options?: { skipDefaultTabs?: boolean }) => Promise<string>
-  addChildWorkspace: (parentId: string, name: string, isDetached?: boolean) => Promise<{ success: boolean; error?: string }>
-  adoptExistingWorktree: (parentId: string, worktreePath: string, branch: string, name: string) => Promise<{ success: boolean; error?: string }>
-  createWorktreeFromBranch: (parentId: string, branch: string, isDetached: boolean) => Promise<{ success: boolean; error?: string }>
-  createWorktreeFromRemote: (parentId: string, remoteBranch: string, isDetached: boolean) => Promise<{ success: boolean; error?: string }>
+  addWorkspace: (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => Promise<string>
+  addChildWorkspace: (parentId: string, name: string, isDetached?: boolean, settings?: WorktreeSettings) => Promise<{ success: boolean; error?: string }>
+  adoptExistingWorktree: (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings) => Promise<{ success: boolean; error?: string }>
+  createWorktreeFromBranch: (parentId: string, branch: string, isDetached: boolean, settings?: WorktreeSettings) => Promise<{ success: boolean; error?: string }>
+  createWorktreeFromRemote: (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings) => Promise<{ success: boolean; error?: string }>
   removeWorkspace: (id: string) => Promise<void>
   removeWorkspaceKeepBranch: (id: string) => Promise<void>
   mergeAndRemoveWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
@@ -43,6 +44,35 @@ function getNameFromPath(path: string): string {
   return path.split('/').pop() || path
 }
 
+// Helper to get default application based on worktree settings
+// Priority: worktree settings > parent settings > global settings > fallback
+function getDefaultAppForWorktree(
+  settings?: WorktreeSettings,
+  parentSettings?: WorktreeSettings
+): Application | null {
+  // Check worktree's own settings first
+  if (settings?.defaultApplicationId) {
+    const app = applicationRegistry.get(settings.defaultApplicationId)
+    if (app) return app
+  }
+  
+  // Fall back to parent's settings
+  if (parentSettings?.defaultApplicationId) {
+    const app = applicationRegistry.get(parentSettings.defaultApplicationId)
+    if (app) return app
+  }
+  
+  // Fall back to global settings
+  const { settings: globalSettings } = useSettingsStore.getState()
+  if (globalSettings.globalDefaultApplicationId) {
+    const app = applicationRegistry.get(globalSettings.globalDefaultApplicationId)
+    if (app) return app
+  }
+  
+  // Final fallback: first available app
+  return applicationRegistry.getDefaultApp()
+}
+
 // Helper to convert Workspace to DaemonWorkspace format
 function workspaceToDaemonWorkspace(
   workspace: Workspace,
@@ -64,7 +94,8 @@ function workspaceToDaemonWorkspace(
       title: tab.title,
       state: tab.state
     })),
-    activeTabId: workspace.activeTabId
+    activeTabId: workspace.activeTabId,
+    settings: workspace.settings
   }
 }
 
@@ -149,7 +180,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       sessionId: null,
       isRestoring: false,
 
-      addWorkspace: async (path: string, options?: { skipDefaultTabs?: boolean }) => {
+      addWorkspace: async (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => {
         console.log('[workspace] addWorkspace called for path:', path)
         const id = generateId()
 
@@ -162,24 +193,18 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
         // Only create default tabs if not skipped (e.g., when restoring from daemon)
         if (!options?.skipDefaultTabs) {
-          const defaultApps = applicationRegistry.getDefaultApps()
+          // Get default app based on provided settings (for root worktrees)
+          const defaultApp = getDefaultAppForWorktree(options?.settings, undefined)
 
-
-          for (const app of defaultApps) {
+          if (defaultApp) {
             const tabId = generateTabId()
-            const existingCount = tabs.filter((t) => t.applicationId === app.id).length
-
             tabs.push({
               id: tabId,
-              applicationId: app.id,
-              title: `${app.name} ${existingCount + 1}`,
-              state: app.createInitialState()
+              applicationId: defaultApp.id,
+              title: defaultApp.name,
+              state: defaultApp.createInitialState()
             })
-
-            // Make first closable tab active, or first tab if none are closable
-            if (activeTabId === null || (app.canClose && !applicationRegistry.get(tabs.find((t) => t.id === activeTabId)?.applicationId ?? '')?.canClose)) {
-              activeTabId = tabId
-            }
+            activeTabId = tabId
           }
         }
 
@@ -195,7 +220,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           gitRootPath: gitInfo.rootPath,
           isWorktree: false,
           tabs,
-          activeTabId
+          activeTabId,
+          settings: options?.settings
         }
 
         set((state) => ({
@@ -215,7 +241,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         return id
       },
 
-      addChildWorkspace: async (parentId: string, name: string, isDetached: boolean = false) => {
+      addChildWorkspace: async (parentId: string, name: string, isDetached: boolean = false, settings?: WorktreeSettings) => {
         const state = get()
         const parent = state.workspaces[parentId]
 
@@ -254,24 +280,18 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         const tabs: Tab[] = []
         let activeTabId: string | null = null
 
-        const defaultApps = applicationRegistry.getDefaultApps()
+        // Get default app based on settings inheritance
+        const defaultApp = getDefaultAppForWorktree(settings, parent.settings)
 
-
-        for (const app of defaultApps) {
+        if (defaultApp) {
           const tabId = generateTabId()
-          const existingCount = tabs.filter((t) => t.applicationId === app.id).length
-
           tabs.push({
             id: tabId,
-            applicationId: app.id,
-            title: `${app.name} ${existingCount + 1}`,
-            state: app.createInitialState()
+            applicationId: defaultApp.id,
+            title: defaultApp.name,
+            state: defaultApp.createInitialState()
           })
-
-          // Make first closable tab active, or first tab if none are closable
-          if (activeTabId === null || (app.canClose && !applicationRegistry.get(tabs.find((t) => t.id === activeTabId)?.applicationId ?? '')?.canClose)) {
-            activeTabId = tabId
-          }
+          activeTabId = tabId
         }
 
         const childWorkspace: Workspace = {
@@ -287,7 +307,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           isWorktree: true,
           isDetached,
           tabs,
-          activeTabId
+          activeTabId,
+          settings
         }
 
         set((state) => ({
@@ -311,7 +332,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         return { success: true }
       },
 
-      adoptExistingWorktree: async (parentId: string, worktreePath: string, branch: string, name: string) => {
+      adoptExistingWorktree: async (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings) => {
         const state = get()
         const parent = state.workspaces[parentId]
 
@@ -334,24 +355,18 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         const tabs: Tab[] = []
         let activeTabId: string | null = null
 
-        const defaultApps = applicationRegistry.getDefaultApps()
+        // Get default app based on settings inheritance
+        const defaultApp = getDefaultAppForWorktree(settings, parent.settings)
 
-
-        for (const app of defaultApps) {
+        if (defaultApp) {
           const tabId = generateTabId()
-          const existingCount = tabs.filter((t) => t.applicationId === app.id).length
-
           tabs.push({
             id: tabId,
-            applicationId: app.id,
-            title: `${app.name} ${existingCount + 1}`,
-            state: app.createInitialState()
+            applicationId: defaultApp.id,
+            title: defaultApp.name,
+            state: defaultApp.createInitialState()
           })
-
-          // Make first closable tab active, or first tab if none are closable
-          if (activeTabId === null || (app.canClose && !applicationRegistry.get(tabs.find((t) => t.id === activeTabId)?.applicationId ?? '')?.canClose)) {
-            activeTabId = tabId
-          }
+          activeTabId = tabId
         }
 
         const childWorkspace: Workspace = {
@@ -366,7 +381,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           gitRootPath: parent.gitRootPath,
           isWorktree: true,
           tabs,
-          activeTabId
+          activeTabId,
+          settings
         }
 
         set((state) => ({
@@ -390,7 +406,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         return { success: true }
       },
 
-      createWorktreeFromBranch: async (parentId: string, branch: string, isDetached: boolean) => {
+      createWorktreeFromBranch: async (parentId: string, branch: string, isDetached: boolean, settings?: WorktreeSettings) => {
         console.log('[workspace] createWorktreeFromBranch called:', { parentId, branch, isDetached })
         const state = get()
         const parent = state.workspaces[parentId]
@@ -428,23 +444,18 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         const tabs: Tab[] = []
         let activeTabId: string | null = null
 
-        const defaultApps = applicationRegistry.getDefaultApps()
+        // Get default app based on settings inheritance
+        const defaultApp = getDefaultAppForWorktree(settings, parent.settings)
 
-
-        for (const app of defaultApps) {
+        if (defaultApp) {
           const tabId = generateTabId()
-          const existingCount = tabs.filter((t) => t.applicationId === app.id).length
-
           tabs.push({
             id: tabId,
-            applicationId: app.id,
-            title: `${app.name} ${existingCount + 1}`,
-            state: app.createInitialState()
+            applicationId: defaultApp.id,
+            title: defaultApp.name,
+            state: defaultApp.createInitialState()
           })
-
-          if (activeTabId === null || (app.canClose && !applicationRegistry.get(tabs.find((t) => t.id === activeTabId)?.applicationId ?? '')?.canClose)) {
-            activeTabId = tabId
-          }
+          activeTabId = tabId
         }
 
         const childWorkspace: Workspace = {
@@ -460,7 +471,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           isWorktree: true,
           isDetached,
           tabs,
-          activeTabId
+          activeTabId,
+          settings
         }
 
         set((state) => ({
@@ -484,7 +496,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         return { success: true }
       },
 
-      createWorktreeFromRemote: async (parentId: string, remoteBranch: string, isDetached: boolean) => {
+      createWorktreeFromRemote: async (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings) => {
         console.log('[workspace] createWorktreeFromRemote called:', { parentId, remoteBranch, isDetached })
         const state = get()
         const parent = state.workspaces[parentId]
@@ -522,23 +534,18 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         const tabs: Tab[] = []
         let activeTabId: string | null = null
 
-        const defaultApps = applicationRegistry.getDefaultApps()
+        // Get default app based on settings inheritance
+        const defaultApp = getDefaultAppForWorktree(settings, parent.settings)
 
-
-        for (const app of defaultApps) {
+        if (defaultApp) {
           const tabId = generateTabId()
-          const existingCount = tabs.filter((t) => t.applicationId === app.id).length
-
           tabs.push({
             id: tabId,
-            applicationId: app.id,
-            title: `${app.name} ${existingCount + 1}`,
-            state: app.createInitialState()
+            applicationId: defaultApp.id,
+            title: defaultApp.name,
+            state: defaultApp.createInitialState()
           })
-
-          if (activeTabId === null || (app.canClose && !applicationRegistry.get(tabs.find((t) => t.id === activeTabId)?.applicationId ?? '')?.canClose)) {
-            activeTabId = tabId
-          }
+          activeTabId = tabId
         }
 
         const childWorkspace: Workspace = {
@@ -554,7 +561,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           isWorktree: true,
           isDetached,
           tabs,
-          activeTabId
+          activeTabId,
+          settings
         }
 
         set((state) => ({
