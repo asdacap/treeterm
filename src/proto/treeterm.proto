@@ -478,6 +478,98 @@ message GetHeadCommitHashResponse {
 }
 
 // ============================================
+// Streaming Messages for Diffs and File I/O
+// ============================================
+
+// Diff streaming messages
+message DiffChunk {
+  oneof chunk {
+    DiffChunkData data = 1;
+    DiffChunkEnd end = 2;
+    DiffChunkError error = 3;
+  }
+}
+
+message DiffChunkData {
+  bytes data = 1;  // Chunk of diff content
+}
+
+message DiffChunkEnd {
+  bool success = 1;
+}
+
+message DiffChunkError {
+  string message = 1;
+}
+
+// File contents streaming messages
+message FileContentsChunk {
+  oneof chunk {
+    FileContentsHeader header = 1;    // First message with metadata
+    FileContentsData data = 2;        // Content chunks
+    FileContentsEnd end = 3;
+  }
+}
+
+message FileContentsHeader {
+  string language = 1;
+  bool is_original = 2;  // true = original content, false = modified
+}
+
+message FileContentsData {
+  bytes data = 1;
+}
+
+message FileContentsEnd {
+  bool success = 1;
+  optional string error = 2;
+}
+
+// File read streaming messages
+message FileReadChunk {
+  oneof chunk {
+    FileReadHeader header = 1;
+    FileReadData data = 2;
+    FileReadEnd end = 3;
+  }
+}
+
+message FileReadHeader {
+  string path = 1;
+  int64 size = 2;
+  string language = 3;
+}
+
+message FileReadData {
+  bytes data = 1;
+}
+
+message FileReadEnd {
+  bool success = 1;
+  optional string error = 2;
+}
+
+// File write streaming messages (client to server)
+message FileWriteChunk {
+  oneof chunk {
+    FileWriteHeader header = 1;   // First message with path
+    FileWriteData data = 2;       // Content chunks
+    FileWriteEnd end = 3;
+  }
+}
+
+message FileWriteHeader {
+  string workspace_path = 1;
+  string file_path = 2;
+}
+
+message FileWriteData {
+  bytes data = 1;
+}
+
+message FileWriteEnd {}
+
+// ============================================
 // Reviews Messages
 // ============================================
 
@@ -647,24 +739,24 @@ service TreeTermDaemon {
   rpc ListWorktrees(ListWorktreesRequest) returns (ListWorktreesResponse);
   rpc GetChildWorktrees(GetChildWorktreesRequest) returns (GetChildWorktreesResponse);
   rpc GetDiff(GetDiffRequest) returns (GetDiffResponse);
-  rpc GetFileDiff(GetFileDiffRequest) returns (GetFileDiffResponse);
+  rpc GetFileDiff(GetFileDiffRequest) returns (stream DiffChunk);
   rpc GetDiffAgainstHead(GetDiffRequest) returns (GetDiffResponse);
-  rpc GetFileDiffAgainstHead(GetFileDiffRequest) returns (GetFileDiffResponse);
+  rpc GetFileDiffAgainstHead(GetFileDiffRequest) returns (stream DiffChunk);
   rpc MergeWorktree(MergeWorktreeRequest) returns (MergeWorktreeResponse);
   rpc HasUncommittedChanges(HasUncommittedChangesRequest) returns (HasUncommittedChangesResponse);
   rpc CommitAll(CommitAllRequest) returns (CommitAllResponse);
   rpc DeleteBranch(DeleteBranchRequest) returns (DeleteBranchResponse);
   rpc GetUncommittedChanges(GetUncommittedChangesRequest) returns (GetUncommittedChangesResponse);
-  rpc GetUncommittedFileDiff(GetUncommittedFileDiffRequest) returns (GetFileDiffResponse);
+  rpc GetUncommittedFileDiff(GetUncommittedFileDiffRequest) returns (stream DiffChunk);
   rpc StageFile(StageFileRequest) returns (StageFileResponse);
   rpc UnstageFile(StageFileRequest) returns (StageFileResponse);
   rpc StageAll(StageAllRequest) returns (StageAllResponse);
   rpc UnstageAll(StageAllRequest) returns (StageAllResponse);
   rpc CommitStaged(CommitStagedRequest) returns (CommitStagedResponse);
   rpc CheckMergeConflicts(CheckMergeConflictsRequest) returns (CheckMergeConflictsResponse);
-  rpc GetFileContentsForDiff(GetFileContentsForDiffRequest) returns (GetFileContentsForDiffResponse);
-  rpc GetFileContentsForDiffAgainstHead(GetFileContentsForDiffRequest) returns (GetFileContentsForDiffResponse);
-  rpc GetUncommittedFileContentsForDiff(GetUncommittedFileContentsForDiffRequest) returns (GetFileContentsForDiffResponse);
+  rpc GetFileContentsForDiff(GetFileContentsForDiffRequest) returns (stream FileContentsChunk);
+  rpc GetFileContentsForDiffAgainstHead(GetFileContentsForDiffRequest) returns (stream FileContentsChunk);
+  rpc GetUncommittedFileContentsForDiff(GetUncommittedFileContentsForDiffRequest) returns (stream FileContentsChunk);
   rpc ListLocalBranches(ListLocalBranchesRequest) returns (ListLocalBranchesResponse);
   rpc ListRemoteBranches(ListRemoteBranchesRequest) returns (ListRemoteBranchesResponse);
   rpc GetBranchesInWorktrees(GetBranchesInWorktreesRequest) returns (GetBranchesInWorktreesResponse);
@@ -681,6 +773,6 @@ service TreeTermDaemon {
 
   // Filesystem Operations
   rpc ReadDirectory(ReadDirectoryRequest) returns (ReadDirectoryResponse);
-  rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
-  rpc WriteFile(WriteFileRequest) returns (WriteFileResponse);
+  rpc ReadFile(ReadFileRequest) returns (stream FileReadChunk);
+  rpc WriteFile(stream FileWriteChunk) returns (WriteFileResponse);
 }
