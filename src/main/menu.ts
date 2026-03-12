@@ -1,7 +1,11 @@
 import { Menu, app, BrowserWindow } from 'electron'
 import type { IpcServer } from './ipc/ipc-server'
 
-export function createApplicationMenu(mainWindow: BrowserWindow | null, server: IpcServer): void {
+export function createApplicationMenu(
+  mainWindow: BrowserWindow | null,
+  server: IpcServer,
+  onQuitAndKillDaemon?: () => void
+): void {
   const isMac = process.platform === 'darwin'
 
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -49,7 +53,19 @@ export function createApplicationMenu(mainWindow: BrowserWindow | null, server: 
               },
               { type: 'separator' as const }
             ]),
-        isMac ? { role: 'close' as const } : { role: 'quit' as const }
+        isMac ? { role: 'close' as const } : { role: 'quit' as const },
+        { type: 'separator' as const },
+        {
+          label: 'Exit and Kill Daemon',
+          accelerator: isMac ? 'Cmd+Shift+Q' : 'Ctrl+Shift+Q',
+          click: () => {
+            if (onQuitAndKillDaemon) {
+              onQuitAndKillDaemon()
+            } else {
+              app.quit()
+            }
+          }
+        }
       ]
     },
 

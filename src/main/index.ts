@@ -778,19 +778,32 @@ app.whenReady().then(async () => {
 
   registerSTTHandlers(server)
   createWindow()
-  createApplicationMenu(mainWindow, server)
+  createApplicationMenu(mainWindow, server, quitAndKillDaemon)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow()
-      createApplicationMenu(mainWindow, server)
+      createApplicationMenu(mainWindow, server, quitAndKillDaemon)
     }
   })
 })
 
-app.on('window-all-closed', () => {
+  app.on('window-all-closed', () => {
   app.quit()
 })
+
+async function quitAndKillDaemon(): Promise<void> {
+  if (daemonClient) {
+    try {
+      console.log('[main] shutting down daemon before quit')
+      await daemonClient.shutdownDaemon()
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[main] failed to shutdown daemon:', errorMessage)
+    }
+  }
+  app.quit()
+}
 
 app.on('before-quit', async () => {
   if (daemonClient) {
