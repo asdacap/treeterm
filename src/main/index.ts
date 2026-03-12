@@ -4,6 +4,7 @@ import { join } from 'path'
 import { GrpcDaemonClient } from './grpcClient'
 import { IpcServer } from './ipc/ipc-server'
 import { GitClient } from './git'
+import { ReviewsClient } from './reviews'
 
 // Parse initial workspace from command line
 let initialWorkspacePath: string | null = null
@@ -22,6 +23,7 @@ let loadingWindow: BrowserWindow | null = null
 let closeConfirmed = false
 let daemonClient: GrpcDaemonClient | null = null
 let gitClient: GitClient | null = null
+let reviewsClient: ReviewsClient | null = null
 let useDaemon = true // Always use daemon mode
 let attachedSessions: Set<string> = new Set()
 
@@ -366,6 +368,13 @@ function initializeGitClient() {
   }
 }
 
+// Initialize reviews client when daemon is ready
+function initializeReviewsClient() {
+  if (daemonClient && !reviewsClient) {
+    reviewsClient = new ReviewsClient(daemonClient)
+  }
+}
+
 // Git IPC Handlers - Now handled in main process via ExecStream
 server.onGitGetInfo(async (dirPath) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
@@ -635,30 +644,45 @@ server.onGitGetHeadCommitHash(async (repoPath) => {
   return { success: true, hash }
 })
 
-// Reviews IPC Handlers
+// Reviews IPC Handlers - Now handled in main process via daemon filesystem gRPC
 server.onReviewsLoad(async (worktreePath) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
-  return daemonClient.loadReviews(worktreePath)
+  initializeReviewsClient()
+  if (!reviewsClient) throw new Error('Reviews client not initialized')
+  const reviews = await reviewsClient.loadReviews(worktreePath)
+  return { success: true, reviews }
 })
 
 server.onReviewsSave(async (worktreePath, reviews) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
-  return daemonClient.saveReviews(worktreePath, reviews)
+  initializeReviewsClient()
+  if (!reviewsClient) throw new Error('Reviews client not initialized')
+  await reviewsClient.saveReviews(worktreePath, reviews)
+  return { success: true }
 })
 
 server.onReviewsAddComment(async (worktreePath, comment) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
-  return daemonClient.addReviewComment(worktreePath, comment)
+  initializeReviewsClient()
+  if (!reviewsClient) throw new Error('Reviews client not initialized')
+  const newComment = await reviewsClient.addComment(worktreePath, comment)
+  return { success: true, comment: newComment }
 })
 
 server.onReviewsDeleteComment(async (worktreePath, commentId) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
-  return daemonClient.deleteReviewComment(worktreePath, commentId)
+  initializeReviewsClient()
+  if (!reviewsClient) throw new Error('Reviews client not initialized')
+  const success = await reviewsClient.deleteComment(worktreePath, commentId)
+  return { success }
 })
 
 server.onReviewsUpdateOutdated(async (worktreePath, currentCommitHash) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
-  return daemonClient.updateOutdatedReviews(worktreePath, currentCommitHash)
+  initializeReviewsClient()
+  if (!reviewsClient) throw new Error('Reviews client not initialized')
+  const reviews = await reviewsClient.updateOutdatedComments(worktreePath, currentCommitHash)
+  return { success: true, reviews }
 })
 
 // Settings IPC Handlers

@@ -10,7 +10,6 @@ import type { SessionStore } from './sessionStore'
 import { createModuleLogger } from './logger'
 import { getDefaultSocketPath } from './socketPath'
 import * as filesystem from './filesystem'
-import * as reviews from './reviews'
 import { execManager } from './execManager'
 import {
   TreeTermDaemonService,
@@ -37,16 +36,6 @@ import {
   type PtySessionInfo,
   type ExecInput,
   type ExecOutput,
-  type LoadReviewsRequest,
-  type LoadReviewsResponse,
-  type SaveReviewsRequest,
-  type SaveReviewsResponse,
-  type AddReviewCommentRequest,
-  type AddReviewCommentResponse,
-  type DeleteReviewCommentRequest,
-  type DeleteReviewCommentResponse,
-  type UpdateOutdatedReviewsRequest,
-  type UpdateOutdatedReviewsResponse,
   type ReadDirectoryRequest,
   type ReadDirectoryResponse,
   type ReadFileRequest,
@@ -182,12 +171,6 @@ export class GrpcServer {
       deleteSession: this.handleDeleteSession.bind(this),
       listSessions: this.handleListSessions.bind(this),
       shutdown: this.handleShutdown.bind(this),
-      // Reviews operations
-      loadReviews: this.handleLoadReviews.bind(this),
-      saveReviews: this.handleSaveReviews.bind(this),
-      addReviewComment: this.handleAddReviewComment.bind(this),
-      deleteReviewComment: this.handleDeleteReviewComment.bind(this),
-      updateOutdatedReviews: this.handleUpdateOutdatedReviews.bind(this),
       // Filesystem operations
       readDirectory: this.handleReadDirectory.bind(this),
       readFile: this.handleReadFile.bind(this),
@@ -725,101 +708,6 @@ export class GrpcServer {
       createdAt: session.createdAt,
       lastActivity: session.lastActivity,
       attachedClients: session.attachedClients
-    }
-  }
-
-  // Reviews Operation Handlers
-
-  private async handleLoadReviews(
-    call: grpc.ServerUnaryCall<LoadReviewsRequest, LoadReviewsResponse>,
-    callback: grpc.sendUnaryData<LoadReviewsResponse>
-  ): Promise<void> {
-    try {
-      const reviewsData = reviews.loadReviews(call.request.worktreePath)
-      callback(null, { success: true, reviews: reviewsData })
-    } catch (error) {
-      callback(null, {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error loading reviews'
-      })
-    }
-  }
-
-  private async handleSaveReviews(
-    call: grpc.ServerUnaryCall<SaveReviewsRequest, SaveReviewsResponse>,
-    callback: grpc.sendUnaryData<SaveReviewsResponse>
-  ): Promise<void> {
-    try {
-      if (!call.request.reviews) {
-        callback(null, { success: false, error: 'Reviews data is required' })
-        return
-      }
-      reviews.saveReviews(call.request.worktreePath, call.request.reviews as any)
-      callback(null, { success: true })
-    } catch (error) {
-      callback(null, {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error saving reviews'
-      })
-    }
-  }
-
-  private async handleAddReviewComment(
-    call: grpc.ServerUnaryCall<AddReviewCommentRequest, AddReviewCommentResponse>,
-    callback: grpc.sendUnaryData<AddReviewCommentResponse>
-  ): Promise<void> {
-    try {
-      const comment = reviews.addComment(call.request.worktreePath, {
-        filePath: call.request.filePath,
-        lineNumber: call.request.lineNumber,
-        text: call.request.text,
-        commitHash: call.request.commitHash,
-        isOutdated: call.request.isOutdated,
-        side: call.request.side as 'original' | 'modified'
-      })
-      callback(null, { success: true, comment })
-    } catch (error) {
-      callback(null, {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error adding comment'
-      })
-    }
-  }
-
-  private async handleDeleteReviewComment(
-    call: grpc.ServerUnaryCall<DeleteReviewCommentRequest, DeleteReviewCommentResponse>,
-    callback: grpc.sendUnaryData<DeleteReviewCommentResponse>
-  ): Promise<void> {
-    try {
-      const success = reviews.deleteComment(call.request.worktreePath, call.request.commentId)
-      if (success) {
-        callback(null, { success: true })
-      } else {
-        callback(null, { success: false, error: 'Comment not found' })
-      }
-    } catch (error) {
-      callback(null, {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error deleting comment'
-      })
-    }
-  }
-
-  private async handleUpdateOutdatedReviews(
-    call: grpc.ServerUnaryCall<UpdateOutdatedReviewsRequest, UpdateOutdatedReviewsResponse>,
-    callback: grpc.sendUnaryData<UpdateOutdatedReviewsResponse>
-  ): Promise<void> {
-    try {
-      const reviewsData = reviews.updateOutdatedComments(
-        call.request.worktreePath,
-        call.request.currentCommitHash
-      )
-      callback(null, { success: true, reviews: reviewsData })
-    } catch (error) {
-      callback(null, {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error updating outdated reviews'
-      })
     }
   }
 

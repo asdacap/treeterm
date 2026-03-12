@@ -278,6 +278,8 @@ interface Daemon {
 - Audit trail of changes
 - Security boundary enforcement
 
+**No direct filesystem operations in Main.** Main must use daemon's filesystem gRPC for all file I/O operations. This maintains the security boundary and ensures all file changes go through the daemon.
+
 ```typescript
 // Good - file write through daemon
 await daemonClient.writeFile({
