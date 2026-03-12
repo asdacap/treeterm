@@ -440,19 +440,29 @@ export default function BaseTerminal({
   }
 
   const handleCopy = async () => {
-    const selection = terminalRef.current?.getSelection()
-    if (selection) {
-      await navigator.clipboard.writeText(selection)
+    try {
+      const selection = terminalRef.current?.getSelection()
+      if (selection) {
+        await navigator.clipboard.writeText(selection)
+      }
+    } catch (error) {
+      console.error(`[${config.logPrefix} ${tabId}] Failed to write to clipboard:`, error)
+    } finally {
+      setContextMenu(null)
     }
-    setContextMenu(null)
   }
 
   const handlePaste = async () => {
-    const text = await navigator.clipboard.readText()
-    if (text && ptyIdRef.current) {
-      window.electron.terminal.write(ptyIdRef.current, text)
+    try {
+      const text = await navigator.clipboard.readText()
+      if (text && ptyIdRef.current) {
+        window.electron.terminal.write(ptyIdRef.current, text)
+      }
+    } catch (error) {
+      console.error(`[${config.logPrefix} ${tabId}] Failed to read from clipboard:`, error)
+    } finally {
+      setContextMenu(null)
     }
-    setContextMenu(null)
   }
 
   const handlePushToTalkTranscript = (text: string) => {
