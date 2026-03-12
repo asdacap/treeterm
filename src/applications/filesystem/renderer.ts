@@ -21,9 +21,9 @@ export const filesystemApplication: Application<FilesystemState> = {
     })
   },
 
-  canClose: false,
-  canHaveMultiple: false,
-  showInNewTabMenu: false,
+  canClose: true,
+  canHaveMultiple: true,
+  showInNewTabMenu: true,
   keepAlive: false,
   displayStyle: 'flex',
   isDefault: true
