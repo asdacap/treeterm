@@ -57,7 +57,7 @@ export default function CreateChildDialog({
       setIsLoadingWorktrees(true)
       window.electron.git.getChildWorktrees(
         parentWorkspace.gitRootPath,
-        parentWorkspace.gitBranch
+        parentWorkspace.parentId === null ? null : parentWorkspace.gitBranch
       ).then(worktrees => {
         console.log('[CreateChildDialog] Received worktrees:', worktrees)
         // Filter out worktrees that are already open
@@ -76,7 +76,7 @@ export default function CreateChildDialog({
         hasGitRootPath: !!parentWorkspace.gitRootPath
       })
     }
-  }, [mode, parentWorkspace.gitRootPath, parentWorkspace.gitBranch, openWorktreePaths])
+  }, [mode, parentWorkspace.gitRootPath, parentWorkspace.gitBranch, parentWorkspace.parentId, openWorktreePaths])
 
   // Load local branches when "branch" tab is selected
   useEffect(() => {
