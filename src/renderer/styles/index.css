@@ -3526,3 +3526,163 @@ body,
 .tab-error-close-btn:hover {
   background: var(--bg-hover);
 }
+
+/* Create Child Dialog - Settings Section */
+.create-child-settings-section {
+  margin-top: 16px;
+  border-top: 1px solid var(--border-color);
+  padding-top: 16px;
+}
+
+.create-child-settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 0;
+  width: 100%;
+  text-align: left;
+}
+
+.create-child-settings-toggle:hover {
+  color: var(--text-primary);
+}
+
+.create-child-settings-content {
+  margin-top: 12px;
+  padding-left: 16px;
+}
+
+.create-child-settings-inherited {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.create-child-settings-inherited .settings-label {
+  font-weight: 500;
+}
+
+.create-child-settings-inherited .settings-value {
+  color: var(--text-primary);
+}
+
+.create-child-settings-option {
+  margin-bottom: 12px;
+}
+
+.create-child-settings-select {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.create-child-settings-select label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.create-child-settings-select select {
+  padding: 6px 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.create-child-settings-select select:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+
+/* Open Workspace Dialog */
+.open-workspace-dialog {
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  width: 500px;
+  max-width: 90%;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.open-workspace-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.open-workspace-dialog-header h2 {
+  font-size: 16px;
+  font-weight: 500;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.open-workspace-dialog-content {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.open-workspace-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.open-workspace-field label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.folder-picker-row {
+  display: flex;
+  gap: 8px;
+}
+
+.folder-path-input {
+  flex: 1;
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.folder-path-input:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+
+.open-workspace-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-color);
+}
+
+.open-workspace-dialog .dialog-btn.browse {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  padding: 8px 16px;
+}
+
+.open-workspace-dialog .dialog-btn.browse:hover:not(:disabled) {
+  background: var(--bg-hover);
+}

@@ -1,12 +1,13 @@
 import { useState, useEffect, useMemo } from 'react'
-import type { Workspace, ChildWorktreeInfo, BranchInfo } from '../types'
+import type { Workspace, ChildWorktreeInfo, BranchInfo, WorktreeSettings } from '../types'
+import { applicationRegistry } from '../registry/applicationRegistry'
 
 interface CreateChildDialogProps {
   parentWorkspace: Workspace
-  onCreate: (name: string, isDetached: boolean) => Promise<{ success: boolean; error?: string }>
-  onAdopt: (worktreePath: string, branch: string, name: string) => Promise<{ success: boolean; error?: string }>
-  onCreateFromBranch: (branch: string, isDetached: boolean) => Promise<{ success: boolean; error?: string }>
-  onCreateFromRemote: (remoteBranch: string, isDetached: boolean) => Promise<{ success: boolean; error?: string }>
+  onCreate: (name: string, isDetached: boolean, settings?: WorktreeSettings) => Promise<{ success: boolean; error?: string }>
+  onAdopt: (worktreePath: string, branch: string, name: string, settings?: WorktreeSettings) => Promise<{ success: boolean; error?: string }>
+  onCreateFromBranch: (branch: string, isDetached: boolean, settings?: WorktreeSettings) => Promise<{ success: boolean; error?: string }>
+  onCreateFromRemote: (remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings) => Promise<{ success: boolean; error?: string }>
   onCancel: () => void
   openWorktreePaths: string[]
 }
@@ -45,6 +46,25 @@ export default function CreateChildDialog({
   const [isLoadingRemoteBranches, setIsLoadingRemoteBranches] = useState(false)
   const [selectedRemoteBranch, setSelectedRemoteBranch] = useState<BranchInfo | null>(null)
   const [remoteBranchSearch, setRemoteBranchSearch] = useState('')
+
+  // Settings section state
+  const [settingsExpanded, setSettingsExpanded] = useState(false)
+  const [useCustomSettings, setUseCustomSettings] = useState(false)
+  const [selectedAppId, setSelectedAppId] = useState<string>('')
+
+  // Get inherited app name
+  const inheritedApp = useMemo(() => {
+    if (parentWorkspace.settings?.defaultApplicationId) {
+      const app = applicationRegistry.get(parentWorkspace.settings.defaultApplicationId)
+      if (app) return app
+    }
+    return null
+  }, [parentWorkspace.settings])
+
+  // Get available apps
+  const availableApps = useMemo(() => {
+    return applicationRegistry.getAll().filter(app => app.showInNewTabMenu)
+  }, [])
 
   // Load existing worktrees when "existing" tab is selected
   useEffect(() => {
@@ -152,6 +172,14 @@ export default function CreateChildDialog({
     return null
   }, [name])
 
+  // Build settings object for child worktree
+  const buildSettings = (): WorktreeSettings | undefined => {
+    if (useCustomSettings && selectedAppId) {
+      return { defaultApplicationId: selectedAppId }
+    }
+    return undefined
+  }
+
   const handleCreateSubmit = async () => {
     if (!name.trim()) {
       setError('Please enter a workspace name')
@@ -168,7 +196,8 @@ export default function CreateChildDialog({
     setError(null)
 
     console.log('[CreateChildDialog] Creating new worktree:', name.trim())
-    const result = await onCreate(name.trim(), isDetached)
+    const settings = buildSettings()
+    const result = await onCreate(name.trim(), isDetached, settings)
     if (!result.success) {
       console.error('[CreateChildDialog] Failed to create worktree:', result.error)
       setError(result.error || 'Failed to create workspace')
@@ -190,10 +219,12 @@ export default function CreateChildDialog({
     setError(null)
 
     console.log('[CreateChildDialog] Adopting existing worktree:', selectedWorktree.path)
+    const settings = buildSettings()
     const result = await onAdopt(
       selectedWorktree.path,
       selectedWorktree.branch,
-      selectedWorktree.displayName
+      selectedWorktree.displayName,
+      settings
     )
     if (!result.success) {
       console.error('[CreateChildDialog] Failed to adopt worktree:', result.error)
@@ -216,7 +247,8 @@ export default function CreateChildDialog({
     setError(null)
 
     console.log('[CreateChildDialog] Creating worktree from branch:', selectedBranch.name)
-    const result = await onCreateFromBranch(selectedBranch.name, isDetached)
+    const settings = buildSettings()
+    const result = await onCreateFromBranch(selectedBranch.name, isDetached, settings)
     if (!result.success) {
       console.error('[CreateChildDialog] Failed to create worktree from branch:', result.error)
       setError(result.error || 'Failed to create worktree from branch')
@@ -245,7 +277,8 @@ export default function CreateChildDialog({
     setError(null)
 
     console.log('[CreateChildDialog] Creating worktree from remote branch:', selectedRemoteBranch.name)
-    const result = await onCreateFromRemote(selectedRemoteBranch.name, isDetached)
+    const settings = buildSettings()
+    const result = await onCreateFromRemote(selectedRemoteBranch.name, isDetached, settings)
     if (!result.success) {
       console.error('[CreateChildDialog] Failed to create worktree:', result.error)
       setError(result.error || 'Failed to create worktree from remote branch')
@@ -460,6 +493,64 @@ export default function CreateChildDialog({
               </div>
             </>
           )}
+
+          {/* Settings Section */}
+          <div className="create-child-settings-section">
+            <button
+              className="create-child-settings-toggle"
+              onClick={() => setSettingsExpanded(!settingsExpanded)}
+              type="button"
+            >
+              <span>{settingsExpanded ? '▼' : '▶'}</span>
+              <span>Settings</span>
+            </button>
+
+            {settingsExpanded && (
+              <div className="create-child-settings-content">
+                <div className="create-child-settings-inherited">
+                  <span className="settings-label">Inherited:</span>
+                  <span className="settings-value">
+                    {inheritedApp ? inheritedApp.name : 'Global Default'}
+                  </span>
+                </div>
+
+                <div className="create-child-settings-option">
+                  <label className="settings-checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={useCustomSettings}
+                      onChange={(e) => {
+                        setUseCustomSettings(e.target.checked)
+                        if (!e.target.checked) {
+                          setSelectedAppId('')
+                        }
+                      }}
+                      disabled={isProcessing}
+                    />
+                    Use custom default application
+                  </label>
+                </div>
+
+                {useCustomSettings && (
+                  <div className="create-child-settings-select">
+                    <label>Default Application</label>
+                    <select
+                      value={selectedAppId}
+                      onChange={(e) => setSelectedAppId(e.target.value)}
+                      disabled={isProcessing}
+                    >
+                      <option value="">Select an application...</option>
+                      {availableApps.map((app) => (
+                        <option key={app.id} value={app.id}>
+                          {app.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {error && <div className="create-child-error">{error}</div>}
           {isProcessing && processingMessage && (

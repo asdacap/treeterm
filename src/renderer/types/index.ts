@@ -12,7 +12,8 @@ import type {
   AiHarnessInstance,
   PrefixModeConfig,
   STTProvider,
-  Settings
+  Settings,
+  WorktreeSettings
 } from '../../shared/types'
 
 export type {
@@ -26,7 +27,8 @@ export type {
   AiHarnessInstance,
   PrefixModeConfig,
   STTProvider,
-  Settings
+  Settings,
+  WorktreeSettings
 }
 
 // Activity state for applications that can report their state
@@ -151,6 +153,8 @@ export interface Workspace {
   // Tabs
   tabs: Tab[]
   activeTabId: string | null
+  // Worktree-specific settings
+  settings?: WorktreeSettings
 }
 
 export interface GitInfo {

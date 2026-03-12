@@ -61,7 +61,8 @@ const defaultSettings: Settings = {
     orphanTimeout: 0,
     scrollbackLimit: 50000,
     killOnQuit: false
-  }
+  },
+  globalDefaultApplicationId: 'terminal'
 }
 
 function getSettingsDir(): string {
@@ -213,7 +214,8 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
     daemon: {
       ...defaults.daemon,
       ...loaded.daemon
-    }
+    },
+    globalDefaultApplicationId: loaded.globalDefaultApplicationId || defaults.globalDefaultApplicationId
   }
 }
 
