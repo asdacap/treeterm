@@ -199,6 +199,16 @@ private async execCommand(
 - **Main/Renderer**: Integration tests that verify orchestration
 - **gRPC**: Contract tests to ensure protocol compliance
 
+## Code Coverage Requirements
+
+**Always run code coverage** when writing or modifying code. Use `npm run test:coverage` to generate coverage reports.
+
+**Minimum coverage for new code:**
+- **Code coverage**: At least 10%
+- **Branch coverage**: At least 10%
+
+Coverage reports are generated in the `coverage/` directory. The HTML report shows detailed breakdowns of which lines and branches are covered.
+
 ## Development Practices
 
 ### Fail Loudly
