@@ -201,6 +201,57 @@ private async execCommand(
 
 ## Development Practices
 
+### Fail Loudly
+
+**Never silently swallow errors or return empty/default values when something unexpected happens.** Unexpected conditions must be made visible.
+
+**Principles:**
+- Throw errors rather than returning `null`, `undefined`, or empty arrays when something is wrong
+- Return errors to callers - let the upper level decide how to handle (log or show dialog)
+- Log or show dialogs at the appropriate level (usually where the error is consumed, not where it's caught)
+- Never catch an error and do nothing with it
+
+**Good - Fail loudly:**
+```typescript
+// Good - throws with clear message
+if (!daemonClient) {
+  throw new Error('Daemon not initialized - cannot list sessions')
+}
+
+// Good - returns error to caller, let upper level handle logging/dialog
+try {
+  const sessions = await daemonClient.listSessions()
+  return { success: true, sessions }
+} catch (error) {
+  const message = error instanceof Error ? error.message : 'Unknown error'
+  return { success: false, error: message }
+}
+```
+
+**Bad - Silent failure:**
+```typescript
+// Bad - silently returns empty, hides the problem
+if (!daemonClient) {
+  return { success: true, sessions: [] }
+}
+
+// Bad - catches and does nothing
+try {
+  await doSomething()
+} catch (e) {
+  // silently ignored
+}
+
+// Bad - returns null without indicating why
+if (!client) {
+  return null
+}
+```
+
+**When to show dialogs vs log:**
+- **Dialog**: Error blocks user action or requires their attention (e.g., "Failed to save file")
+- **Console**: Internal errors that don't need user intervention but should be visible in logs
+
 ### Type Safety First
 
 Always add types and use typed operations where possible. Structure the application to enforce type safety at compile time.
