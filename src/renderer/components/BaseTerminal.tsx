@@ -289,6 +289,42 @@ export default function BaseTerminal({
       const { width, height } = entry.contentRect
       if (width === 0 || height === 0) return
 
+      // Helper to log scroll debug info
+      const logScrollDebug = (label: string) => {
+        const xtermViewport = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement
+        if (!xtermViewport) return
+
+        const viewportY = terminal.buffer.active.viewportY
+        const baseY = terminal.buffer.active.baseY
+        const bufferLength = terminal.buffer.active.length
+        const rows = terminal.rows
+
+        const scrollTop = xtermViewport.scrollTop
+        const scrollHeight = xtermViewport.scrollHeight
+        const clientHeight = xtermViewport.clientHeight
+
+        if (clientHeight === 0 || scrollHeight === 0) return
+
+        const expectedScrollbarHeight = (clientHeight / scrollHeight) * clientHeight
+        const ratio = (clientHeight / scrollHeight) * 100
+
+        console.log(`[${config.logPrefix} ${tabId}] scroll debug (${label}):`, {
+          xtermBuffer: { viewportY, baseY, bufferLength, rows },
+          viewportScroll: {
+            scrollTop: Math.round(scrollTop),
+            scrollHeight: Math.round(scrollHeight),
+            clientHeight: Math.round(clientHeight)
+          },
+          scrollbar: {
+            expectedHeight: Math.round(expectedScrollbarHeight),
+            ratio: ratio.toFixed(1) + '%'
+          }
+        })
+      }
+
+      // Log before resize
+      logScrollDebug('before resize')
+
       // Save scroll position as ratio before fit to prevent scroll jumping
       const prevViewportY = terminal.buffer.active.viewportY
       const prevBaseY = terminal.buffer.active.baseY
@@ -303,8 +339,18 @@ export default function BaseTerminal({
       } else {
         // Use ratio to calculate new scroll position after buffer reflow
         const newScrollLine = Math.round(terminal.buffer.active.baseY * scrollRatio)
+        console.log(`[${config.logPrefix} ${tabId}] scroll preservation (not at bottom):`, {
+          before: { viewportY: prevViewportY, baseY: prevBaseY },
+          wasAtBottom,
+          scrollRatio,
+          after: { baseY: terminal.buffer.active.baseY, newScrollLine },
+          action: 'scrollToLine'
+        })
         terminal.scrollToLine(newScrollLine)
       }
+
+      // Log after resize
+      logScrollDebug('after resize')
 
       console.log(`[${config.logPrefix} ${tabId}] resize detected:`, {
         containerSize: { width, height },
@@ -372,53 +418,6 @@ export default function BaseTerminal({
     }
   }, [isVisible])
 
-  // Debug scroll state - log to console periodically
-  useEffect(() => {
-    const logScrollDebug = () => {
-      if (!terminalRef.current || !containerRef.current) return
-
-      const terminal = terminalRef.current
-      const xtermViewport = containerRef.current.querySelector('.xterm-viewport') as HTMLElement
-
-      if (!xtermViewport) return
-
-      const viewportY = terminal.buffer.active.viewportY
-      const baseY = terminal.buffer.active.baseY
-      const bufferLength = terminal.buffer.active.length
-      const rows = terminal.rows
-
-      const scrollTop = xtermViewport.scrollTop
-      const scrollHeight = xtermViewport.scrollHeight
-      const clientHeight = xtermViewport.clientHeight
-
-      // Skip logging if viewport hasn't been sized yet (similar to resize handler)
-      if (clientHeight === 0 || scrollHeight === 0) return
-
-      // Calculate expected scrollbar height based on viewport ratio
-      const expectedScrollbarHeight = (clientHeight / scrollHeight) * clientHeight
-      const ratio = (clientHeight / scrollHeight) * 100
-
-      console.log(`[${config.logPrefix} ${tabId}] scroll debug:`, {
-        xtermBuffer: { viewportY, baseY, bufferLength, rows },
-        viewportScroll: {
-          scrollTop: Math.round(scrollTop),
-          scrollHeight: Math.round(scrollHeight),
-          clientHeight: Math.round(clientHeight)
-        },
-        scrollbar: {
-          expectedHeight: Math.round(expectedScrollbarHeight),
-          ratio: ratio.toFixed(1) + '%'
-        }
-      })
-    }
-
-    // Log periodically
-    const interval = setInterval(logScrollDebug, 2000)
-
-    return () => {
-      clearInterval(interval)
-    }
-  }, [config.logPrefix, tabId])
 
   // Close context menu when clicking outside
   useEffect(() => {
