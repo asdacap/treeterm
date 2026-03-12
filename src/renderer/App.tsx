@@ -4,6 +4,8 @@ import WorkspacePane from './components/WorkspacePane'
 import SettingsDialog from './components/SettingsDialog'
 import CloseConfirmDialog from './components/CloseConfirmDialog'
 import WorkspacePickerDialog from './components/WorkspacePickerDialog'
+import { ErrorBoundary } from './components/ErrorBoundary'
+import AppErrorFallback from './components/AppErrorFallback'
 import { useSettingsStore } from './store/settings'
 import { useWorkspaceStore, getUnmergedSubWorkspaces } from './store/workspace'
 import type { Workspace, DaemonWorkspace, DaemonSession, TerminalState, Tab, DaemonSessionInfo } from './types'
@@ -376,38 +378,40 @@ export default function App() {
   }, [])
 
   return (
-    <div
-      className="app"
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
-    >
-      <div className="tree-pane" style={{ width: treeWidth }}>
-        <TreePane />
-      </div>
+    <ErrorBoundary fallback={<AppErrorFallback />}>
       <div
-        className={`divider ${isResizing ? 'active' : ''}`}
-        onMouseDown={handleMouseDown}
-      />
-      <div className="workspace-pane">
-        <WorkspacePane />
+        className="app"
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+      >
+        <div className="tree-pane" style={{ width: treeWidth }}>
+          <TreePane />
+        </div>
+        <div
+          className={`divider ${isResizing ? 'active' : ''}`}
+          onMouseDown={handleMouseDown}
+        />
+        <div className="workspace-pane">
+          <WorkspacePane />
+        </div>
+        <SettingsDialog isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+        {showCloseConfirm && (
+          <CloseConfirmDialog
+            unmergedWorkspaces={unmergedWorkspaces}
+            onConfirm={handleConfirmClose}
+            onCancel={handleCancelClose}
+          />
+        )}
+        {showWorkspacePicker && (
+          <WorkspacePickerDialog
+            sessions={daemonSessions}
+            onSelect={handleSessionRestore}
+            onCreateNew={handleCreateNewFromPicker}
+            onCancel={() => setShowWorkspacePicker(false)}
+          />
+        )}
       </div>
-      <SettingsDialog isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-      {showCloseConfirm && (
-        <CloseConfirmDialog
-          unmergedWorkspaces={unmergedWorkspaces}
-          onConfirm={handleConfirmClose}
-          onCancel={handleCancelClose}
-        />
-      )}
-      {showWorkspacePicker && (
-        <WorkspacePickerDialog
-          sessions={daemonSessions}
-          onSelect={handleSessionRestore}
-          onCreateNew={handleCreateNewFromPicker}
-          onCancel={() => setShowWorkspacePicker(false)}
-        />
-      )}
-    </div>
+    </ErrorBoundary>
   )
 }

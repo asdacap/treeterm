@@ -6,6 +6,9 @@ import { usePrefixKeybindings } from '../hooks/usePrefixKeybindings'
 import TabBar from './TabBar'
 import CreateChildDialog from './CreateChildDialog'
 import KeybindingOverlay from './KeybindingOverlay'
+import { ErrorBoundary } from './ErrorBoundary'
+import WorkspaceErrorFallback from './WorkspaceErrorFallback'
+import TabErrorFallback from './TabErrorFallback'
 import type { ReviewState } from '../types'
 
 export default function WorkspacePane() {
@@ -226,104 +229,118 @@ export default function WorkspacePane() {
   const activeTabId = activeWorkspace?.activeTabId || tabs[0]?.id
 
   return (
-    <div className="workspace-content">
-      {/* Show empty state when no workspace is active, but keep terminals mounted below */}
-      {!activeWorkspace ? (
-        <div className="workspace-empty">
-          <div className="workspace-empty-content">
-            <h2>No workspace selected</h2>
-            <p>Select a workspace from the sidebar or add a new one to get started.</p>
-          </div>
-        </div>
-      ) : (
-        <>
-          <div className="workspace-header">
-            <span className="workspace-title">{activeWorkspace.name}</span>
-            <span className="workspace-path">{activeWorkspace.path}</span>
-            {activeWorkspace.gitBranch && (
-              <span className="workspace-branch">{activeWorkspace.gitBranch}</span>
-            )}
-            <div className="workspace-actions">
-              {activeWorkspace.isGitRepo && (
-                <button
-                  className="workspace-action-btn"
-                  onClick={() => setShowCreateChildDialog(true)}
-                  title="Fork: Create new child workspace"
-                >
-                  Fork
-                </button>
-              )}
-              {activeWorkspace.isWorktree && activeWorkspace.parentId && (
-                <>
-                  <button
-                    className="workspace-action-btn workspace-action-btn-merge"
-                    onClick={handleOpenReview}
-                    title="Review & Merge: Review changes and merge this workspace"
-                  >
-                    Review & Merge
-                  </button>
-                </>
-              )}
+    <ErrorBoundary fallback={(error, reset) => <WorkspaceErrorFallback error={error} onReset={reset} />}>
+      <div className="workspace-content">
+        {/* Show empty state when no workspace is active, but keep terminals mounted below */}
+        {!activeWorkspace ? (
+          <div className="workspace-empty">
+            <div className="workspace-empty-content">
+              <h2>No workspace selected</h2>
+              <p>Select a workspace from the sidebar or add a new one to get started.</p>
             </div>
           </div>
-          <TabBar
-            tabs={tabs}
-            activeTabId={activeTabId}
-            onSelectTab={handleSelectTab}
-            onCloseTab={handleCloseTab}
-            onNewTab={handleNewTab}
-          />
-        </>
-      )}
-      <div className="workspace-terminal" style={{ display: activeWorkspace ? 'flex' : 'none' }}>
-        {/* Render tabs for ALL workspaces to keep PTYs alive when switching */}
-        {Object.values(workspaces).map((workspace) => {
-          const wsTabs = workspace.tabs || []
-          const wsActiveTabId = workspace.activeTabId || wsTabs[0]?.id
-          const isActiveWorkspace = workspace.id === activeWorkspaceId
-
-          return wsTabs.map((tab) => {
-            const isVisible = isActiveWorkspace && tab.id === wsActiveTabId
-            const app = applicationRegistry.get(tab.applicationId)
-
-            if (!app) return null
-
-            // Skip rendering if app doesn't need to stay alive and workspace is inactive
-            if (!app.keepAlive && !isActiveWorkspace) return null
-
-            return (
-              <div
-                key={`${workspace.id}-${tab.id}`}
-                className={`app-wrapper ${tab.applicationId}-wrapper`}
-                style={{ display: isVisible ? app.displayStyle : 'none' }}
-              >
-                {app.render({
-                  tab,
-                  workspaceId: workspace.id,
-                  workspacePath: workspace.path,
-                  isVisible
-                })}
+        ) : (
+          <>
+            <div className="workspace-header">
+              <span className="workspace-title">{activeWorkspace.name}</span>
+              <span className="workspace-path">{activeWorkspace.path}</span>
+              {activeWorkspace.gitBranch && (
+                <span className="workspace-branch">{activeWorkspace.gitBranch}</span>
+              )}
+              <div className="workspace-actions">
+                {activeWorkspace.isGitRepo && (
+                  <button
+                    className="workspace-action-btn"
+                    onClick={() => setShowCreateChildDialog(true)}
+                    title="Fork: Create new child workspace"
+                  >
+                    Fork
+                  </button>
+                )}
+                {activeWorkspace.isWorktree && activeWorkspace.parentId && (
+                  <>
+                    <button
+                      className="workspace-action-btn workspace-action-btn-merge"
+                      onClick={handleOpenReview}
+                      title="Review & Merge: Review changes and merge this workspace"
+                    >
+                      Review & Merge
+                    </button>
+                  </>
+                )}
               </div>
-            )
-          })
-        })}
+            </div>
+            <TabBar
+              tabs={tabs}
+              activeTabId={activeTabId}
+              onSelectTab={handleSelectTab}
+              onCloseTab={handleCloseTab}
+              onNewTab={handleNewTab}
+            />
+          </>
+        )}
+        <div className="workspace-terminal" style={{ display: activeWorkspace ? 'flex' : 'none' }}>
+          {/* Render tabs for ALL workspaces to keep PTYs alive when switching */}
+          {Object.values(workspaces).map((workspace) => {
+            const wsTabs = workspace.tabs || []
+            const wsActiveTabId = workspace.activeTabId || wsTabs[0]?.id
+            const isActiveWorkspace = workspace.id === activeWorkspaceId
+
+            return wsTabs.map((tab) => {
+              const isVisible = isActiveWorkspace && tab.id === wsActiveTabId
+              const app = applicationRegistry.get(tab.applicationId)
+
+              if (!app) return null
+
+              // Skip rendering if app doesn't need to stay alive and workspace is inactive
+              if (!app.keepAlive && !isActiveWorkspace) return null
+
+              return (
+                <div
+                  key={`${workspace.id}-${tab.id}`}
+                  className={`app-wrapper ${tab.applicationId}-wrapper`}
+                  style={{ display: isVisible ? app.displayStyle : 'none' }}
+                >
+                  <ErrorBoundary
+                    key={`error-${workspace.id}-${tab.id}`}
+                    fallback={(error, reset) => (
+                      <TabErrorFallback
+                        error={error}
+                        tabTitle={tab.title}
+                        onReset={reset}
+                        onClose={() => handleCloseTab(tab.id)}
+                      />
+                    )}
+                  >
+                    {app.render({
+                      tab,
+                      workspaceId: workspace.id,
+                      workspacePath: workspace.path,
+                      isVisible
+                    })}
+                  </ErrorBoundary>
+                </div>
+              )
+            })
+          })}
+        </div>
+
+        {/* Create Child Dialog (Fork) */}
+        {showCreateChildDialog && activeWorkspace && (
+          <CreateChildDialog
+            parentWorkspace={activeWorkspace}
+            onCreate={handleCreateChildSubmit}
+            onAdopt={handleAdoptWorktreeSubmit}
+            onCreateFromBranch={handleCreateFromBranchSubmit}
+            onCreateFromRemote={handleCreateFromRemoteSubmit}
+            onCancel={() => setShowCreateChildDialog(false)}
+            openWorktreePaths={openWorktreePaths}
+          />
+        )}
+
+        {/* Keybinding Overlay */}
+        <KeybindingOverlay />
       </div>
-
-      {/* Create Child Dialog (Fork) */}
-      {showCreateChildDialog && activeWorkspace && (
-        <CreateChildDialog
-          parentWorkspace={activeWorkspace}
-          onCreate={handleCreateChildSubmit}
-          onAdopt={handleAdoptWorktreeSubmit}
-          onCreateFromBranch={handleCreateFromBranchSubmit}
-          onCreateFromRemote={handleCreateFromRemoteSubmit}
-          onCancel={() => setShowCreateChildDialog(false)}
-          openWorktreePaths={openWorktreePaths}
-        />
-      )}
-
-      {/* Keybinding Overlay */}
-      <KeybindingOverlay />
-    </div>
+    </ErrorBoundary>
   )
 }
