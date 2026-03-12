@@ -401,8 +401,14 @@ server.onGitCreateWorktree(async (repoPath, name, baseBranch) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
   initializeGitClient()
   if (!gitClient) throw new Error('Git client not initialized')
-  const result = await gitClient.createWorktree(repoPath, name, baseBranch)
-  return { success: true, path: result.path, branch: result.branch }
+  try {
+    const result = await gitClient.createWorktree(repoPath, name, baseBranch)
+    return { success: true, path: result.path, branch: result.branch }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Failed to create worktree'
+    console.error('[main] Failed to create worktree:', errorMessage)
+    return { success: false, error: errorMessage }
+  }
 })
 
 server.onGitRemoveWorktree(async (repoPath, worktreePath, deleteBranch) => {
@@ -452,16 +458,28 @@ server.onGitCreateWorktreeFromBranch(async (repoPath, branch, worktreeName) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
   initializeGitClient()
   if (!gitClient) throw new Error('Git client not initialized')
-  const result = await gitClient.createWorktreeFromBranch(repoPath, branch, worktreeName)
-  return { success: true, path: result.path, branch: result.branch }
+  try {
+    const result = await gitClient.createWorktreeFromBranch(repoPath, branch, worktreeName)
+    return { success: true, path: result.path, branch: result.branch }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Failed to create worktree from branch'
+    console.error('[main] Failed to create worktree from branch:', errorMessage)
+    return { success: false, error: errorMessage }
+  }
 })
 
 server.onGitCreateWorktreeFromRemote(async (repoPath, remoteBranch, worktreeName) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
   initializeGitClient()
   if (!gitClient) throw new Error('Git client not initialized')
-  const result = await gitClient.createWorktreeFromRemote(repoPath, remoteBranch, worktreeName)
-  return { success: true, path: result.path, branch: result.branch }
+  try {
+    const result = await gitClient.createWorktreeFromRemote(repoPath, remoteBranch, worktreeName)
+    return { success: true, path: result.path, branch: result.branch }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Failed to create worktree from remote branch'
+    console.error('[main] Failed to create worktree from remote branch:', errorMessage)
+    return { success: false, error: errorMessage }
+  }
 })
 
 server.onGitGetDiff(async (worktreePath, parentBranch) => {
