@@ -859,11 +859,13 @@ app.whenReady().then(async () => {
 
   registerSTTHandlers(server)
   mainWindow = createWindow()
+  server.setWindow(mainWindow)  // Set window on global server for PTY data forwarding
   createApplicationMenu(mainWindow, server, quitAndKillDaemon)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       mainWindow = createWindow()
+      server.setWindow(mainWindow)  // Set window on global server for PTY data forwarding
       createApplicationMenu(mainWindow, server, quitAndKillDaemon)
     }
   })

@@ -716,10 +716,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
 
       setActiveWorkspace: (id: string | null) => {
         set({ activeWorkspaceId: id })
-        const state = get()
-        syncSessionToDaemon(state.sessionId, state.workspaces, (sid) =>
-          set({ sessionId: sid }), state.isRestoring
-        ).catch(console.error)
+        // Don't sync active workspace changes - they're too frequent
       },
 
       updateGitInfo: (id: string, gitInfo: GitInfo) => {
@@ -1071,10 +1068,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             }
           }
         })
-        const state = get()
-        debouncedSyncSessionToDaemon(state.sessionId, state.workspaces, (sid) =>
-          set({ sessionId: sid }), state.isRestoring
-        )
+        // Don't sync tab state changes - they're too frequent and non-critical
       },
 
       syncToDaemon: async () => {
