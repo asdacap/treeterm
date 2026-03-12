@@ -17,6 +17,7 @@ import { createApplicationMenu } from './menu'
 import { registerSTTHandlers } from './stt'
 
 let mainWindow: BrowserWindow | null = null
+let loadingWindow: BrowserWindow | null = null
 let closeConfirmed = false
 let daemonClient: GrpcDaemonClient | null = null
 let useDaemon = true // Always use daemon mode
@@ -24,6 +25,35 @@ let attachedSessions: Set<string> = new Set()
 
 // Initialize IPC server
 const server = new IpcServer()
+
+function createLoadingWindow(): BrowserWindow {
+  loadingWindow = new BrowserWindow({
+    width: 300,
+    height: 200,
+    frame: false,
+    show: false,
+    center: true,
+    alwaysOnTop: true,
+    resizable: false,
+    movable: false,
+    skipTaskbar: true,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      nodeIntegration: false,
+      contextIsolation: true
+    },
+    transparent: true,
+    backgroundColor: '#00000000'
+  })
+
+  loadingWindow.loadFile(join(__dirname, 'loading.html'))
+
+  loadingWindow.once('ready-to-show', () => {
+    loadingWindow?.show()
+  })
+
+  return loadingWindow
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -565,10 +595,20 @@ server.onAppCloseCancelled(() => {
 app.whenReady().then(async () => {
   // Always use daemon mode
   console.log('[main] daemon mode enabled')
+
+  // Show loading screen while connecting to daemon
+  createLoadingWindow()
+
   daemonClient = new GrpcDaemonClient()
 
   // Proactively connect to daemon on startup
   await daemonClient.ensureDaemonRunning()
+
+  // Close loading window and show main window
+  if (loadingWindow) {
+    loadingWindow.close()
+    loadingWindow = null
+  }
 
   registerSTTHandlers(server)
   createWindow()
