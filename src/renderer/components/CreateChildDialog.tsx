@@ -112,9 +112,11 @@ export default function CreateChildDialog({
         }))
         setBranches(branchInfos)
         setIsLoadingBranches(false)
-      }).catch(() => {
+      }).catch((error) => {
+        console.error('[CreateChildDialog] Error loading local branches:', error)
         setBranches([])
         setIsLoadingBranches(false)
+        setError(`Failed to load branches: ${error instanceof Error ? error.message : 'Unknown error'}`)
       })
     }
   }, [mode, parentWorkspace.gitRootPath])
@@ -142,9 +144,11 @@ export default function CreateChildDialog({
         })
         setRemoteBranches(branchInfos)
         setIsLoadingRemoteBranches(false)
-      }).catch(() => {
+      }).catch((error) => {
+        console.error('[CreateChildDialog] Error loading remote branches:', error)
         setRemoteBranches([])
         setIsLoadingRemoteBranches(false)
+        setError(`Failed to load remote branches: ${error instanceof Error ? error.message : 'Unknown error'}`)
       })
     }
   }, [mode, parentWorkspace.gitRootPath])

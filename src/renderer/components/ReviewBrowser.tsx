@@ -123,7 +123,8 @@ export default function ReviewBrowser({
         setError(result.error || 'Failed to load diff')
       }
     } catch (err) {
-      setError('Failed to load diff')
+      console.error('[ReviewBrowser] Error loading diff:', err)
+      setError(`Failed to load diff: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
     setLoading(false)
   }
@@ -430,6 +431,7 @@ export default function ReviewBrowser({
       setCommentInput(null)
     } catch (error) {
       console.error('Failed to add comment:', error)
+      alert(`Failed to add comment: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
@@ -444,6 +446,7 @@ export default function ReviewBrowser({
       }
     } catch (error) {
       console.error('Failed to delete comment:', error)
+      alert(`Failed to delete comment: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 

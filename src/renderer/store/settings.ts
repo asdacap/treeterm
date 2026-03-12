@@ -86,7 +86,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       // Register dynamic AI Harness variants
       registerAiHarnessVariants(settings.aiHarness.instances)
     } catch (error) {
-      console.error('Failed to load settings:', error)
+      console.warn('[settings] Failed to load settings, using defaults:', error)
       set({ isLoaded: true })
     }
   },

@@ -48,7 +48,8 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
         setError(result.error || 'Failed to load diff')
       }
     } catch (err) {
-      setError('Failed to load diff')
+      console.error('[DiffView] Error loading diff:', err)
+      setError(`Failed to load diff: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
     setLoading(false)
   }

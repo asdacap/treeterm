@@ -67,7 +67,8 @@ export function killDaemon(): void {
         attempts++
       }
     } catch (error) {
-      // Process might already be dead
+      // Expected: ESRCH if process already dead - this is the desired state for cleanup
+      // Intentionally not failing loudly here as "already dead" is success for cleanup
     }
   }
 

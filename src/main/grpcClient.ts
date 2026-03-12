@@ -227,6 +227,8 @@ export class GrpcDaemonClient {
       }
       this.stream.write(input)
     } catch (error) {
+      // Terminal I/O is best-effort - log but don't block. User will see visual feedback
+      // (missing characters or incorrect size) which is appropriate for this failure mode
       console.error('[grpcDaemonClient] failed to write to session:', error)
     }
   }
@@ -247,6 +249,8 @@ export class GrpcDaemonClient {
       }
       this.stream.write(input)
     } catch (error) {
+      // Terminal I/O is best-effort - log but don't block. User will see visual feedback
+      // (missing characters or incorrect size) which is appropriate for this failure mode
       console.error('[grpcDaemonClient] failed to resize session:', error)
     }
   }
