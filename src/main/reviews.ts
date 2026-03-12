@@ -1,6 +1,6 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
+import type { GrpcDaemonClient } from './grpcClient'
 
 const REVIEWS_FILENAME = 'reviews.json'
 const TREETERM_DIR = '.treeterm'
@@ -27,90 +27,136 @@ const defaultReviewsData: ReviewsData = {
 }
 
 function getReviewsPath(worktreePath: string): string {
-  return join(worktreePath, TREETERM_DIR, REVIEWS_FILENAME)
+  return join(TREETERM_DIR, REVIEWS_FILENAME)
 }
 
-export function loadReviews(worktreePath: string): ReviewsData {
-  const reviewsPath = getReviewsPath(worktreePath)
+export class ReviewsClient {
+  constructor(private daemonClient: GrpcDaemonClient) {}
 
-  try {
-    if (existsSync(reviewsPath)) {
-      const data = readFileSync(reviewsPath, 'utf-8')
-      return JSON.parse(data)
+  async loadReviews(worktreePath: string): Promise<ReviewsData> {
+    const reviewsPath = getReviewsPath(worktreePath)
+    
+    try {
+      const result = await this.daemonClient.readFile(worktreePath, reviewsPath)
+      if (result.success && result.file) {
+        return JSON.parse(result.file.content)
+      }
+    } catch (error) {
+      // File doesn't exist or is unreadable - return default
+      console.log('[reviews] No existing reviews file, returning defaults')
     }
-  } catch (error) {
-    console.error('Failed to load reviews:', error)
+
+    return { ...defaultReviewsData }
   }
 
-  return { ...defaultReviewsData }
-}
-
-export function saveReviews(worktreePath: string, reviews: ReviewsData): void {
-  const treetermDir = join(worktreePath, TREETERM_DIR)
-  const reviewsPath = getReviewsPath(worktreePath)
-
-  try {
-    if (!existsSync(treetermDir)) {
-      mkdirSync(treetermDir, { recursive: true })
+  async saveReviews(worktreePath: string, reviews: ReviewsData): Promise<void> {
+    const reviewsPath = getReviewsPath(worktreePath)
+    const content = JSON.stringify(reviews, null, 2)
+    
+    const result = await this.daemonClient.writeFile(worktreePath, reviewsPath, content)
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to save reviews')
     }
-    writeFileSync(reviewsPath, JSON.stringify(reviews, null, 2), 'utf-8')
-  } catch (error) {
-    console.error('Failed to save reviews:', error)
-    throw error
+  }
+
+  async addComment(
+    worktreePath: string,
+    comment: Omit<ReviewComment, 'id' | 'createdAt'>
+  ): Promise<ReviewComment> {
+    const reviews = await this.loadReviews(worktreePath)
+
+    const newComment: ReviewComment = {
+      ...comment,
+      id: randomUUID(),
+      createdAt: Date.now()
+    }
+
+    reviews.comments.push(newComment)
+    await this.saveReviews(worktreePath, reviews)
+
+    return newComment
+  }
+
+  async deleteComment(worktreePath: string, commentId: string): Promise<boolean> {
+    const reviews = await this.loadReviews(worktreePath)
+    const initialLength = reviews.comments.length
+
+    reviews.comments = reviews.comments.filter(c => c.id !== commentId)
+
+    if (reviews.comments.length < initialLength) {
+      await this.saveReviews(worktreePath, reviews)
+      return true
+    }
+
+    return false
+  }
+
+  async updateOutdatedComments(
+    worktreePath: string,
+    currentCommitHash: string
+  ): Promise<ReviewsData> {
+    const reviews = await this.loadReviews(worktreePath)
+
+    let modified = false
+    reviews.comments = reviews.comments.map(comment => {
+      const shouldBeOutdated = comment.commitHash !== currentCommitHash
+      if (comment.isOutdated !== shouldBeOutdated) {
+        modified = true
+        return { ...comment, isOutdated: shouldBeOutdated }
+      }
+      return comment
+    })
+
+    if (modified) {
+      await this.saveReviews(worktreePath, reviews)
+    }
+
+    return reviews
   }
 }
 
-export function addComment(
+// Export standalone functions for backward compatibility during migration
+// These will be removed once index.ts is fully updated
+export async function loadReviews(
+  daemonClient: GrpcDaemonClient,
+  worktreePath: string
+): Promise<ReviewsData> {
+  const client = new ReviewsClient(daemonClient)
+  return client.loadReviews(worktreePath)
+}
+
+export async function saveReviews(
+  daemonClient: GrpcDaemonClient,
+  worktreePath: string,
+  reviews: ReviewsData
+): Promise<void> {
+  const client = new ReviewsClient(daemonClient)
+  return client.saveReviews(worktreePath, reviews)
+}
+
+export async function addComment(
+  daemonClient: GrpcDaemonClient,
   worktreePath: string,
   comment: Omit<ReviewComment, 'id' | 'createdAt'>
-): ReviewComment {
-  const reviews = loadReviews(worktreePath)
-
-  const newComment: ReviewComment = {
-    ...comment,
-    id: randomUUID(),
-    createdAt: Date.now()
-  }
-
-  reviews.comments.push(newComment)
-  saveReviews(worktreePath, reviews)
-
-  return newComment
+): Promise<ReviewComment> {
+  const client = new ReviewsClient(daemonClient)
+  return client.addComment(worktreePath, comment)
 }
 
-export function deleteComment(worktreePath: string, commentId: string): boolean {
-  const reviews = loadReviews(worktreePath)
-  const initialLength = reviews.comments.length
-
-  reviews.comments = reviews.comments.filter(c => c.id !== commentId)
-
-  if (reviews.comments.length < initialLength) {
-    saveReviews(worktreePath, reviews)
-    return true
-  }
-
-  return false
+export async function deleteComment(
+  daemonClient: GrpcDaemonClient,
+  worktreePath: string,
+  commentId: string
+): Promise<boolean> {
+  const client = new ReviewsClient(daemonClient)
+  return client.deleteComment(worktreePath, commentId)
 }
 
-export function updateOutdatedComments(
+export async function updateOutdatedComments(
+  daemonClient: GrpcDaemonClient,
   worktreePath: string,
   currentCommitHash: string
-): ReviewsData {
-  const reviews = loadReviews(worktreePath)
-
-  let modified = false
-  reviews.comments = reviews.comments.map(comment => {
-    const shouldBeOutdated = comment.commitHash !== currentCommitHash
-    if (comment.isOutdated !== shouldBeOutdated) {
-      modified = true
-      return { ...comment, isOutdated: shouldBeOutdated }
-    }
-    return comment
-  })
-
-  if (modified) {
-    saveReviews(worktreePath, reviews)
-  }
-
-  return reviews
+): Promise<ReviewsData> {
+  const client = new ReviewsClient(daemonClient)
+  return client.updateOutdatedComments(worktreePath, currentCommitHash)
 }

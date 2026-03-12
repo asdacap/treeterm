@@ -619,83 +619,6 @@ message FileWriteData {
 message FileWriteEnd {}
 
 // ============================================
-// Reviews Messages
-// ============================================
-
-message ReviewComment {
-  string id = 1;
-  string file_path = 2;
-  int32 line_number = 3;
-  string text = 4;
-  string commit_hash = 5;
-  int64 created_at = 6;
-  bool is_outdated = 7;
-  string side = 8;  // 'original' | 'modified'
-}
-
-message ReviewsData {
-  int32 version = 1;
-  repeated ReviewComment comments = 2;
-}
-
-message LoadReviewsRequest {
-  string worktree_path = 1;
-}
-
-message LoadReviewsResponse {
-  bool success = 1;
-  optional ReviewsData reviews = 2;
-  optional string error = 3;
-}
-
-message SaveReviewsRequest {
-  string worktree_path = 1;
-  ReviewsData reviews = 2;
-}
-
-message SaveReviewsResponse {
-  bool success = 1;
-  optional string error = 2;
-}
-
-message AddReviewCommentRequest {
-  string worktree_path = 1;
-  string file_path = 2;
-  int32 line_number = 3;
-  string text = 4;
-  string commit_hash = 5;
-  bool is_outdated = 6;
-  string side = 7;
-}
-
-message AddReviewCommentResponse {
-  bool success = 1;
-  optional ReviewComment comment = 2;
-  optional string error = 3;
-}
-
-message DeleteReviewCommentRequest {
-  string worktree_path = 1;
-  string comment_id = 2;
-}
-
-message DeleteReviewCommentResponse {
-  bool success = 1;
-  optional string error = 2;
-}
-
-message UpdateOutdatedReviewsRequest {
-  string worktree_path = 1;
-  string current_commit_hash = 2;
-}
-
-message UpdateOutdatedReviewsResponse {
-  bool success = 1;
-  optional ReviewsData reviews = 2;
-  optional string error = 3;
-}
-
-// ============================================
 // Filesystem Messages
 // ============================================
 
@@ -784,13 +707,6 @@ service TreeTermDaemon {
 
   // Daemon Control
   rpc Shutdown(Empty) returns (Empty);
-
-  // Reviews Operations
-  rpc LoadReviews(LoadReviewsRequest) returns (LoadReviewsResponse);
-  rpc SaveReviews(SaveReviewsRequest) returns (SaveReviewsResponse);
-  rpc AddReviewComment(AddReviewCommentRequest) returns (AddReviewCommentResponse);
-  rpc DeleteReviewComment(DeleteReviewCommentRequest) returns (DeleteReviewCommentResponse);
-  rpc UpdateOutdatedReviews(UpdateOutdatedReviewsRequest) returns (UpdateOutdatedReviewsResponse);
 
   // Filesystem Operations
   rpc ReadDirectory(ReadDirectoryRequest) returns (ReadDirectoryResponse);
