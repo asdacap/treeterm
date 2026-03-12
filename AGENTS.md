@@ -292,6 +292,89 @@ await daemonClient.writeFile({
 await fs.writeFile(filePath, content)
 ```
 
+### Missing Functionality - Ask for Clarification
+
+When you encounter incomplete implementations or missing connections between components, **ask the user for clarification** before making assumptions. Don't silently work around the issue or implement workarounds without understanding the intent.
+
+**Example - Missing gRPC Client Method:**
+
+The gRPC server defined `ListSessions` but the client didn't implement it:
+
+```typescript
+// src/main/index.ts - IPC handler was returning empty array
+server.onSessionList(async () => {
+  if (!useDaemon || !daemonClient) {
+    return { success: true, sessions: [] }
+  }
+
+  try {
+    await daemonClient.ensureDaemonRunning()
+    // Note: daemonClient doesn't have listSessions method directly,
+    // sessions are managed differently now
+    return { success: true, sessions: [] }  // WRONG: silent failure
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[main] failed to list sessions:', errorMessage)
+    return { success: false, error: errorMessage }
+  }
+})
+```
+
+**What the agent should have done:**
+
+Ask the user: "I see the daemon has a `ListSessions` gRPC method defined in the proto, but the grpcClient doesn't implement it. Should I add the `listSessions()` method to the client to enable session restoration?"
+
+**Correct implementation:**
+
+Add the missing method to the client:
+```typescript
+// src/main/grpcClient.ts
+async listSessions(): Promise<DaemonSession[]> {
+  if (!this.client) {
+    throw new Error('Not connected to daemon')
+  }
+
+  return new Promise((resolve, reject) => {
+    this.client!.listSessions({}, (error, response) => {
+      if (error) {
+        reject(new Error(error.message))
+      } else if (response) {
+        resolve(response.sessions.map(s => this.convertFromProtoSession(s)))
+      } else {
+        resolve([])
+      }
+    })
+  })
+}
+```
+
+Then update the IPC handler to use it:
+```typescript
+server.onSessionList(async () => {
+  if (!useDaemon || !daemonClient) {
+    return { success: true, sessions: [] }
+  }
+
+  try {
+    await daemonClient.ensureDaemonRunning()
+    const sessions = await daemonClient.listSessions()
+    console.log('[main] listed sessions:', sessions.length)
+    return { success: true, sessions }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[main] failed to list sessions:', errorMessage)
+    return { success: false, error: errorMessage }
+  }
+})
+```
+
+**Lesson:** If you find code that says "X doesn't exist" or "X is managed differently now", verify whether it's:
+1. Truly not needed anymore
+2. Not implemented yet (intentional TODO)
+3. Not implemented yet (oversight - needs to be added)
+
+When in doubt, ask the user rather than silently returning empty results.
+
 ## Key Takeaways
 
 1. **Daemon is stable** - Low-level operations that rarely change

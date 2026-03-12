@@ -309,9 +309,9 @@ server.onSessionList(async () => {
 
   try {
     await daemonClient.ensureDaemonRunning()
-    // Note: daemonClient doesn't have listSessions method directly,
-    // sessions are managed differently now
-    return { success: true, sessions: [] }
+    const sessions = await daemonClient.listSessions()
+    console.log('[main] listed sessions:', sessions.length)
+    return { success: true, sessions }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     console.error('[main] failed to list sessions:', errorMessage)
