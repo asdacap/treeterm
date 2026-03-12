@@ -222,6 +222,18 @@ message CreateSessionRequest {
 message UpdateSessionRequest {
   string session_id = 1;
   repeated WorkspaceInput workspaces = 2;
+  optional string sender_id = 3;  // Window UUID to exclude from broadcast
+}
+
+message SessionWatchRequest {
+  string session_id = 1;
+  string listener_id = 2;  // Window UUID
+}
+
+message SessionWatchEvent {
+  string session_id = 1;
+  DaemonSession session = 2;
+  string sender_id = 3;  // Who triggered the update
 }
 
 message GetSessionRequest {
@@ -705,6 +717,7 @@ service TreeTermDaemon {
   rpc DeleteSession(DeleteSessionRequest) returns (Empty);
   rpc ListSessions(Empty) returns (ListSessionsResponse);
   rpc GetDefaultSession(Empty) returns (DaemonSession);
+  rpc SessionWatch(SessionWatchRequest) returns (stream SessionWatchEvent);
 
   // Daemon Control
   rpc Shutdown(Empty) returns (Empty);

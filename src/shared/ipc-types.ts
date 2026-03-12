@@ -239,7 +239,7 @@ export interface IpcRequests {
     result: { success: boolean; session?: DaemonSession; error?: string }
   }
   sessionUpdate: {
-    params: [sessionId: string, workspaces: WorkspaceInput[]]
+    params: [sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string]
     result: { success: boolean; session?: DaemonSession; error?: string }
   }
   sessionList: {
@@ -281,6 +281,12 @@ export interface IpcRequests {
   appGetInitialWorkspace: {
     params: []
     result: string | null
+  }
+
+  // Window UUID (used for session sync deduplication)
+  appGetWindowUuid: {
+    params: []
+    result: string
   }
 }
 
@@ -336,6 +342,9 @@ export interface IpcEvents {
   }
   sessionShowSessions: {
     params: []
+  }
+  sessionSync: {
+    params: [session: DaemonSession]
   }
 }
 

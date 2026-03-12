@@ -67,6 +67,7 @@ const CHANNELS = {
   dialogSelectFolder: 'dialog:selectFolder',
   sandboxIsAvailable: 'sandbox:isAvailable',
   appGetInitialWorkspace: 'app:getInitialWorkspace',
+  appGetWindowUuid: 'app:getWindowUuid',
 
   // Send channels
   ptyWrite: 'pty:write',
@@ -85,7 +86,8 @@ const CHANNELS = {
   daemonSessions: 'daemon:sessions',
   terminalNew: 'terminal:new',
   terminalShowSessions: 'terminal:show-sessions',
-  sessionShowSessions: 'session:show-sessions'
+  sessionShowSessions: 'session:show-sessions',
+  sessionSync: 'session:sync'
 } as const
 
 export class IpcClient {
@@ -399,6 +401,10 @@ export class IpcClient {
     return ipcRenderer.invoke(CHANNELS.appGetInitialWorkspace, ...args)
   }
 
+  appGetWindowUuid(): Promise<IpcRequests['appGetWindowUuid']['result']> {
+    return ipcRenderer.invoke(CHANNELS.appGetWindowUuid)
+  }
+
   // ==================== Fire-and-Forget Methods (send pattern, no return) ====================
 
   ptyWrite(...args: IpcSends['ptyWrite']['params']): void {
@@ -486,5 +492,12 @@ export class IpcClient {
     const handler = () => callback()
     ipcRenderer.on(CHANNELS.sessionShowSessions, handler)
     return () => ipcRenderer.removeListener(CHANNELS.sessionShowSessions, handler)
+  }
+
+  onSessionSync(callback: (...args: IpcEvents['sessionSync']['params']) => void): () => void {
+    const handler = (_event: IpcRendererEvent, ...args: any[]) =>
+      callback(...(args as IpcEvents['sessionSync']['params']))
+    ipcRenderer.on(CHANNELS.sessionSync, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.sessionSync, handler)
   }
 }

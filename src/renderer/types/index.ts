@@ -336,13 +336,14 @@ export interface DaemonApi {
 export interface SessionApi {
   create: (workspaces: WorkspaceInput[]) =>
     Promise<{ success: boolean; session?: DaemonSession; error?: string }>
-  update: (sessionId: string, workspaces: WorkspaceInput[]) =>
+  update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string) =>
     Promise<{ success: boolean; session?: DaemonSession; error?: string }>
   list: () => Promise<{ success: boolean; sessions?: DaemonSession[]; error?: string }>
   get: (sessionId: string) => Promise<{ success: boolean; session?: DaemonSession; error?: string }>
   delete: (sessionId: string) => Promise<{ success: boolean; error?: string }>
   openInNewWindow: (sessionId: string) => Promise<{ success: boolean; error?: string }>
   onShowSessions: (callback: () => void) => () => void
+  onSync: (callback: (session: DaemonSession) => void) => () => void
 }
 
 export interface ElectronApi {
@@ -359,6 +360,7 @@ export interface ElectronApi {
   app: AppApi
   daemon: DaemonApi
   session: SessionApi
+  getWindowUuid: () => Promise<string>
 }
 
 declare global {

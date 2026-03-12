@@ -67,6 +67,7 @@ const CHANNELS = {
   dialogSelectFolder: 'dialog:selectFolder',
   sandboxIsAvailable: 'sandbox:isAvailable',
   appGetInitialWorkspace: 'app:getInitialWorkspace',
+  appGetWindowUuid: 'app:getWindowUuid',
 
   // Send channels
   ptyWrite: 'pty:write',
@@ -85,7 +86,8 @@ const CHANNELS = {
   daemonSessions: 'daemon:sessions',
   terminalNew: 'terminal:new',
   terminalShowSessions: 'terminal:show-sessions',
-  sessionShowSessions: 'session:show-sessions'
+  sessionShowSessions: 'session:show-sessions',
+  sessionSync: 'session:sync'
 } as const
 
 export class IpcServer {
@@ -688,6 +690,12 @@ export class IpcServer {
     )
   }
 
+  onAppGetWindowUuid(
+    handler: (event: IpcMainInvokeEvent) => IpcRequests['appGetWindowUuid']['result'] | Promise<IpcRequests['appGetWindowUuid']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.appGetWindowUuid, (event: IpcMainInvokeEvent) => handler(event))
+  }
+
   // ==================== Fire-and-Forget Handlers (send/on pattern) ====================
 
   onPtyWrite(handler: (...args: IpcSends['ptyWrite']['params']) => void): void {
@@ -760,5 +768,9 @@ export class IpcServer {
 
   sessionShowSessions(): void {
     this.window?.webContents.send(CHANNELS.sessionShowSessions)
+  }
+
+  sessionSync(...args: IpcEvents['sessionSync']['params']): void {
+    this.window?.webContents.send(CHANNELS.sessionSync, ...args)
   }
 }

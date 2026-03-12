@@ -1,6 +1,7 @@
-import { app, BrowserWindow, dialog, shell } from 'electron'
+import { app, BrowserWindow, dialog, shell, ipcMain } from 'electron'
 import { execSync } from 'child_process'
 import { join } from 'path'
+import { randomUUID } from 'crypto'
 import { GrpcDaemonClient } from './grpcClient'
 import { IpcServer } from './ipc/ipc-server'
 import { GitClient } from './git'
@@ -27,6 +28,9 @@ let gitClient: GitClient | null = null
 let reviewsClient: ReviewsClient | null = null
 let useDaemon = true // Always use daemon mode
 let attachedSessions: Set<string> = new Set()
+
+// Maps PTY session IDs to the BrowserWindow ID that owns them
+const ptyToWindow: Map<string, number> = new Map()
 
 // Initialize IPC server
 const server = new IpcServer()
@@ -78,6 +82,12 @@ function createWindow(initialSessionId?: string): BrowserWindow {
   // Create a dedicated IPC server for this window
   const windowServer = new IpcServer()
   windowServer.setWindow(window)
+
+  // Assign a unique UUID to this window for session sync deduplication
+  const windowUuid = randomUUID()
+
+  // Cleanup for session watch stream
+  let unwatchSession: (() => void) | null = null
 
   // Handle media permissions for speech recognition and microphone
   window.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
@@ -156,76 +166,115 @@ function createWindow(initialSessionId?: string): BrowserWindow {
 
     try {
       await daemonClient.ensureDaemonRunning()
-      
+
+      let session
       if (initialSessionId) {
         // Get the specific session from daemon
-        const session = await daemonClient.getSession(initialSessionId)
+        session = await daemonClient.getSession(initialSessionId)
         if (session) {
           console.log('[main] loaded session:', session.id)
-          windowServer.appReady(session)
         } else {
           // Session not found, fall back to default
-          const defaultSession = await daemonClient.getDefaultSession()
-          console.log('[main] session not found, using default:', defaultSession.id)
-          windowServer.appReady(defaultSession)
+          session = await daemonClient.getDefaultSession()
+          console.log('[main] session not found, using default:', session.id)
         }
       } else {
         // Get the default session from daemon (creates one if doesn't exist)
-        const session = await daemonClient.getDefaultSession()
+        session = await daemonClient.getDefaultSession()
         console.log('[main] got default session:', session.id)
-        windowServer.appReady(session)
       }
+
+      // Update window manager with the actual session ID
+      windowManager.updateSessionId(window.id, session.id)
+
+      // Start watching this session for changes from other windows (cancel previous if HMR reload)
+      if (unwatchSession) {
+        unwatchSession()
+      }
+      unwatchSession = daemonClient.watchSession(session.id, windowUuid, (updatedSession) => {
+        console.log('[main] session sync received for window', window.id)
+        windowServer.sessionSync(updatedSession)
+      })
+
+      windowServer.appReady(session)
     } catch (error) {
       console.error('[main] failed to get session:', error)
-      // Still signal ready but without a session
       windowServer.appReady(null)
     }
   })
 
   window.on('closed', () => {
-    // Detach from sessions
-    if (daemonClient) {
-      for (const sessionId of attachedSessions) {
-        daemonClient.detachPtySession(sessionId).catch(console.error)
+    // Stop watching session
+    if (unwatchSession) {
+      unwatchSession()
+      unwatchSession = null
+    }
+    // Collect PTY sessions owned by this window, clean up ownership
+    const windowPtySessions: string[] = []
+    for (const [ptyId, winId] of ptyToWindow.entries()) {
+      if (winId === window.id) {
+        windowPtySessions.push(ptyId)
+        ptyToWindow.delete(ptyId)
       }
-      attachedSessions.clear()
+    }
+    // Detach only this window's PTY sessions
+    if (daemonClient) {
+      for (const sessionId of windowPtySessions) {
+        daemonClient.detachPtySession(sessionId).catch(console.error)
+        attachedSessions.delete(sessionId)
+      }
     }
   })
 
-  // Register with window manager
-  windowManager.registerWindow(window, initialSessionId || null, windowServer)
+  // Register with window manager (session ID updated later in did-finish-load)
+  windowManager.registerWindow(window, initialSessionId || null, windowServer, windowUuid)
 
   return window
 }
 
 // IPC Handlers
-server.onPtyCreate(async (cwd, sandbox, startupCommand) => {
-  if (!mainWindow) return null
+// PTY create/attach use ipcMain.handle directly to get event.sender for routing PTY data to the correct window
+ipcMain.handle('pty:create', async (event, cwd: string, sandbox?: unknown, startupCommand?: string) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
 
   try {
     await daemonClient.ensureDaemonRunning()
-    const sessionId = await daemonClient.createPtySession({ cwd, sandbox, startupCommand })
+    const ptySessionId = await daemonClient.createPtySession({ cwd, sandbox: sandbox as any, startupCommand })
 
-    // Set up data forwarding
-    daemonClient.onPtySessionData(sessionId, (data) => {
-      server.ptyData(sessionId, data)
+    // Track which window owns this PTY session
+    const senderWindow = BrowserWindow.fromWebContents(event.sender)
+    if (senderWindow) {
+      ptyToWindow.set(ptySessionId, senderWindow.id)
+    }
+
+    // Route PTY data to the owning window
+    daemonClient.onPtySessionData(ptySessionId, (data) => {
+      const windowId = ptyToWindow.get(ptySessionId)
+      if (windowId) {
+        const windowInfo = windowManager.getWindow(windowId)
+        windowInfo?.ipcServer.ptyData(ptySessionId, data)
+      }
     })
 
-    daemonClient.onPtySessionExit(sessionId, (exitCode, signal) => {
-      server.ptyExit(sessionId, exitCode)
-      attachedSessions.delete(sessionId)
+    daemonClient.onPtySessionExit(ptySessionId, (exitCode) => {
+      const windowId = ptyToWindow.get(ptySessionId)
+      if (windowId) {
+        const windowInfo = windowManager.getWindow(windowId)
+        windowInfo?.ipcServer.ptyExit(ptySessionId, exitCode)
+      }
+      ptyToWindow.delete(ptySessionId)
+      attachedSessions.delete(ptySessionId)
     })
 
-    attachedSessions.add(sessionId)
-    return sessionId
+    attachedSessions.add(ptySessionId)
+    return ptySessionId
   } catch (error) {
-    console.error('[main] failed to create session via daemon:', error)
+    console.error('[main] failed to create PTY session via daemon:', error)
     return null
   }
 })
 
-server.onPtyAttach(async (sessionId) => {
+ipcMain.handle('pty:attach', async (event, sessionId: string) => {
   if (!daemonClient) {
     return { success: false, error: 'Daemon not initialized' }
   }
@@ -234,14 +283,29 @@ server.onPtyAttach(async (sessionId) => {
     await daemonClient.ensureDaemonRunning()
     const result = await daemonClient.attachPtySession(sessionId)
 
+    // Track which window owns this PTY session
+    const senderWindow = BrowserWindow.fromWebContents(event.sender)
+    if (senderWindow) {
+      ptyToWindow.set(sessionId, senderWindow.id)
+    }
+
     // Set up data forwarding if not already attached
     if (!attachedSessions.has(sessionId)) {
       daemonClient.onPtySessionData(sessionId, (data) => {
-        server.ptyData(sessionId, data)
+        const windowId = ptyToWindow.get(sessionId)
+        if (windowId) {
+          const windowInfo = windowManager.getWindow(windowId)
+          windowInfo?.ipcServer.ptyData(sessionId, data)
+        }
       })
 
-      daemonClient.onPtySessionExit(sessionId, (exitCode, signal) => {
-        server.ptyExit(sessionId, exitCode)
+      daemonClient.onPtySessionExit(sessionId, (exitCode) => {
+        const windowId = ptyToWindow.get(sessionId)
+        if (windowId) {
+          const windowInfo = windowManager.getWindow(windowId)
+          windowInfo?.ipcServer.ptyExit(sessionId, exitCode)
+        }
+        ptyToWindow.delete(sessionId)
         attachedSessions.delete(sessionId)
       })
 
@@ -251,7 +315,7 @@ server.onPtyAttach(async (sessionId) => {
     return { success: true, scrollback: result.scrollback }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-    console.error('[main] failed to attach to session:', errorMessage)
+    console.error('[main] failed to attach to PTY session:', errorMessage)
     return { success: false, error: errorMessage }
   }
 })
@@ -333,14 +397,14 @@ server.onSessionCreate(async (workspaces) => {
   }
 })
 
-server.onSessionUpdate(async (sessionId, workspaces) => {
+server.onSessionUpdate(async (sessionId, workspaces, senderUuid) => {
   if (!useDaemon || !daemonClient) {
     return { success: false, error: 'Daemon not enabled' }
   }
 
   try {
     await daemonClient.ensureDaemonRunning()
-    const result = await daemonClient.updateSession(sessionId, workspaces)
+    const result = await daemonClient.updateSession(sessionId, workspaces, senderUuid)
     return { success: true, session: result }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -826,6 +890,11 @@ server.onAppGetInitialWorkspace(() => {
   const path = initialWorkspacePath
   initialWorkspacePath = null // Clear after first read
   return path
+})
+
+server.onAppGetWindowUuid((event) => {
+  const windowInfo = windowManager.findWindowByWebContentsId(event.sender.id)
+  return windowInfo?.uuid || ''
 })
 
 // App close confirmation IPC handlers

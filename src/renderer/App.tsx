@@ -40,6 +40,15 @@ export default function App() {
 
   useEffect(() => {
     loadSettings()
+
+    // Fetch and store this window's UUID for session sync deduplication
+    window.electron.getWindowUuid().then((uuid) => {
+      if (uuid) {
+        useWorkspaceStore.setState({ windowUuid: uuid })
+        console.log('[App] Window UUID:', uuid)
+      }
+    })
+
     const unsubSettings = window.electron.settings.onOpen(() => {
       setIsSettingsOpen(true)
     })
@@ -60,7 +69,7 @@ export default function App() {
       if (session) {
         // Set the sessionId in the workspace store
         useWorkspaceStore.setState({ sessionId: session.id })
-        
+
         // If the session has workspaces, restore them
         if (session.workspaces && session.workspaces.length > 0) {
           handleSessionRestore(session)
@@ -68,10 +77,17 @@ export default function App() {
       }
     })
 
+    // Listen for session sync events from other windows sharing the same session
+    const unsubSync = window.electron.session.onSync((session) => {
+      console.log('[App] Received session:sync with', session.workspaces.length, 'workspaces')
+      handleExternalSessionUpdate(session)
+    })
+
     return () => {
       unsubSettings()
       unsubClose()
       unsubReady()
+      unsubSync()
     }
   }, [loadSettings])
 
@@ -191,6 +207,79 @@ export default function App() {
     console.log('[App] Final sync complete')
 
     setShowWorkspacePicker(false)
+  }
+
+  // Handle session updates pushed from other windows (via daemon broadcast)
+  const handleExternalSessionUpdate = async (daemonSession: DaemonSession) => {
+    // Set isRestoring to prevent this window from syncing back (would create a loop)
+    useWorkspaceStore.setState({ isRestoring: true })
+
+    const currentState = useWorkspaceStore.getState()
+    const currentPaths = new Set(Object.values(currentState.workspaces).map(ws => ws.path))
+    const incomingPaths = new Set(daemonSession.workspaces.map(ws => ws.path))
+
+    // Add workspaces that exist in the session but not locally
+    const sessions = await window.electron.terminal.list()
+    const sessionMap = new Map(sessions.map(s => [s.id, s]))
+    const pathToIdMap = new Map<string, string>()
+
+    // First pass: roots
+    const rootWorkspaces = daemonSession.workspaces.filter(w => w.parentPath === null)
+    const childWorkspaces = daemonSession.workspaces.filter(w => w.parentPath !== null)
+
+    const { addWorkspace, addTabWithState, setActiveTab } = useWorkspaceStore.getState()
+
+    for (const daemonWorkspace of rootWorkspaces) {
+      const existing = Object.values(currentState.workspaces).find(ws => ws.path === daemonWorkspace.path)
+      if (!existing) {
+        const workspaceId = await addWorkspace(daemonWorkspace.path, { skipDefaultTabs: true })
+        if (workspaceId) {
+          pathToIdMap.set(daemonWorkspace.path, workspaceId)
+          await restoreWorkspaceTabs(workspaceId, daemonWorkspace, sessionMap, addTabWithState, setActiveTab)
+        }
+      } else {
+        pathToIdMap.set(daemonWorkspace.path, existing.id)
+      }
+    }
+
+    for (const daemonWorkspace of childWorkspaces) {
+      const existing = Object.values(useWorkspaceStore.getState().workspaces).find(ws => ws.path === daemonWorkspace.path)
+      if (!existing && daemonWorkspace.parentPath) {
+        const parentId = pathToIdMap.get(daemonWorkspace.parentPath)
+        if (parentId) {
+          const workspaceId = await reconstructChildWorkspace(daemonWorkspace, parentId, addTabWithState, setActiveTab, sessionMap)
+          if (workspaceId) {
+            pathToIdMap.set(daemonWorkspace.path, workspaceId)
+          }
+        }
+      } else if (existing) {
+        pathToIdMap.set(daemonWorkspace.path, existing.id)
+      }
+    }
+
+    // Remove workspaces that no longer exist in the session
+    const updatedState = useWorkspaceStore.getState()
+    for (const [id, ws] of Object.entries(updatedState.workspaces)) {
+      if (!incomingPaths.has(ws.path)) {
+        // Remove workspace from store state directly (no sync back)
+        useWorkspaceStore.setState((state) => {
+          const newWorkspaces = { ...state.workspaces }
+          delete newWorkspaces[id]
+          // Remove from parent's children list too
+          if (ws.parentId && newWorkspaces[ws.parentId]) {
+            newWorkspaces[ws.parentId] = {
+              ...newWorkspaces[ws.parentId],
+              children: newWorkspaces[ws.parentId].children.filter(c => c !== id)
+            }
+          }
+          return { workspaces: newWorkspaces }
+        })
+      }
+    }
+
+    // Re-enable syncing (but don't sync — the daemon already has the correct state)
+    useWorkspaceStore.setState({ isRestoring: false })
+    console.log('[App] External session update applied')
   }
 
   // Helper function to restore workspace tabs

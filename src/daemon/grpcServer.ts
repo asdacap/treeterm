@@ -44,7 +44,9 @@ import {
   type WriteFileResponse,
   type FileReadChunk,
   type FileWriteChunk,
-  type DiffChunk
+  type DiffChunk,
+  type SessionWatchRequest,
+  type SessionWatchEvent
 } from '../generated/treeterm'
 
 const log = createModuleLogger('grpcServer')
@@ -58,11 +60,18 @@ interface ClientStream {
   attachedSessions: Set<string>
 }
 
+interface SessionWatcher {
+  listenerId: string
+  sessionId: string
+  stream: grpc.ServerWritableStream<SessionWatchRequest, SessionWatchEvent>
+}
+
 export class GrpcServer {
   private server: grpc.Server
   private ptyManager: DaemonPtyManager
   private sessionStore: SessionStore
   private clientStreams: Map<string, ClientStream> = new Map()
+  private sessionWatchers: Map<string, SessionWatcher> = new Map() // listenerId -> watcher
   private clientCounter = 0
 
   constructor(
@@ -171,6 +180,7 @@ export class GrpcServer {
       deleteSession: this.handleDeleteSession.bind(this),
       listSessions: this.handleListSessions.bind(this),
       getDefaultSession: this.handleGetDefaultSession.bind(this),
+      sessionWatch: this.handleSessionWatch.bind(this),
       shutdown: this.handleShutdown.bind(this),
       // Filesystem operations
       readDirectory: this.handleReadDirectory.bind(this),
@@ -507,8 +517,8 @@ export class GrpcServer {
   ): void {
     try {
       const clientId = this.getClientId(call.metadata)
-      const { sessionId, workspaces } = call.request
-      log.debug({ clientId, sessionId }, 'updateSession called')
+      const { sessionId, workspaces, senderId } = call.request
+      log.debug({ clientId, sessionId, senderId }, 'updateSession called')
 
       const convertedWorkspaces = this.convertWorkspaceInputs(workspaces)
       const session = this.sessionStore.updateSession(clientId, sessionId, convertedWorkspaces)
@@ -523,12 +533,56 @@ export class GrpcServer {
 
       const protoSession = this.convertToProtoSession(session)
       callback(null, protoSession)
+
+      // Broadcast to all watchers of this session except the sender
+      if (senderId) {
+        this.broadcastSessionUpdate(sessionId, protoSession, senderId)
+      }
     } catch (error) {
       log.error({ err: error }, 'updateSession error')
       callback({
         code: grpc.status.INTERNAL,
         message: error instanceof Error ? error.message : 'Unknown error'
       })
+    }
+  }
+
+  private handleSessionWatch(
+    call: grpc.ServerWritableStream<SessionWatchRequest, SessionWatchEvent>
+  ): void {
+    const { sessionId, listenerId } = call.request
+    log.info({ sessionId, listenerId }, 'sessionWatch registered')
+
+    const watcher: SessionWatcher = { listenerId, sessionId, stream: call }
+    this.sessionWatchers.set(listenerId, watcher)
+
+    call.on('cancelled', () => {
+      log.info({ listenerId }, 'sessionWatch cancelled')
+      this.sessionWatchers.delete(listenerId)
+    })
+
+    call.on('error', (error) => {
+      log.error({ err: error, listenerId }, 'sessionWatch error')
+      this.sessionWatchers.delete(listenerId)
+    })
+  }
+
+  private broadcastSessionUpdate(sessionId: string, protoSession: ProtoDaemonSession, senderId: string): void {
+    const event: SessionWatchEvent = {
+      sessionId,
+      session: protoSession,
+      senderId
+    }
+
+    for (const watcher of this.sessionWatchers.values()) {
+      if (watcher.sessionId === sessionId && watcher.listenerId !== senderId) {
+        try {
+          watcher.stream.write(event)
+        } catch (error) {
+          log.error({ err: error, listenerId: watcher.listenerId }, 'error broadcasting session update')
+          this.sessionWatchers.delete(watcher.listenerId)
+        }
+      }
     }
   }
 

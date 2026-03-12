@@ -239,6 +239,23 @@ export interface CreateSessionRequest {
 export interface UpdateSessionRequest {
   sessionId: string;
   workspaces: WorkspaceInput[];
+  /** Window UUID to exclude from broadcast */
+  senderId?: string | undefined;
+}
+
+export interface SessionWatchRequest {
+  sessionId: string;
+  /** Window UUID */
+  listenerId: string;
+}
+
+export interface SessionWatchEvent {
+  sessionId: string;
+  session?:
+    | DaemonSession
+    | undefined;
+  /** Who triggered the update */
+  senderId: string;
 }
 
 export interface GetSessionRequest {
@@ -4013,7 +4030,7 @@ export const CreateSessionRequest: MessageFns<CreateSessionRequest> = {
 };
 
 function createBaseUpdateSessionRequest(): UpdateSessionRequest {
-  return { sessionId: "", workspaces: [] };
+  return { sessionId: "", workspaces: [], senderId: undefined };
 }
 
 export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
@@ -4023,6 +4040,9 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
     }
     for (const v of message.workspaces) {
       WorkspaceInput.encode(v!, writer.uint32(18).fork()).join();
+    }
+    if (message.senderId !== undefined) {
+      writer.uint32(26).string(message.senderId);
     }
     return writer;
   },
@@ -4050,6 +4070,14 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
           message.workspaces.push(WorkspaceInput.decode(reader, reader.uint32()));
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.senderId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -4069,6 +4097,11 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
       workspaces: globalThis.Array.isArray(object?.workspaces)
         ? object.workspaces.map((e: any) => WorkspaceInput.fromJSON(e))
         : [],
+      senderId: isSet(object.senderId)
+        ? globalThis.String(object.senderId)
+        : isSet(object.sender_id)
+        ? globalThis.String(object.sender_id)
+        : undefined,
     };
   },
 
@@ -4080,6 +4113,9 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
     if (message.workspaces?.length) {
       obj.workspaces = message.workspaces.map((e) => WorkspaceInput.toJSON(e));
     }
+    if (message.senderId !== undefined) {
+      obj.senderId = message.senderId;
+    }
     return obj;
   },
 
@@ -4090,6 +4126,193 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
     const message = createBaseUpdateSessionRequest();
     message.sessionId = object.sessionId ?? "";
     message.workspaces = object.workspaces?.map((e) => WorkspaceInput.fromPartial(e)) || [];
+    message.senderId = object.senderId ?? undefined;
+    return message;
+  },
+};
+
+function createBaseSessionWatchRequest(): SessionWatchRequest {
+  return { sessionId: "", listenerId: "" };
+}
+
+export const SessionWatchRequest: MessageFns<SessionWatchRequest> = {
+  encode(message: SessionWatchRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    if (message.listenerId !== "") {
+      writer.uint32(18).string(message.listenerId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SessionWatchRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSessionWatchRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.listenerId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SessionWatchRequest {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+      listenerId: isSet(object.listenerId)
+        ? globalThis.String(object.listenerId)
+        : isSet(object.listener_id)
+        ? globalThis.String(object.listener_id)
+        : "",
+    };
+  },
+
+  toJSON(message: SessionWatchRequest): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.listenerId !== "") {
+      obj.listenerId = message.listenerId;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SessionWatchRequest>, I>>(base?: I): SessionWatchRequest {
+    return SessionWatchRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SessionWatchRequest>, I>>(object: I): SessionWatchRequest {
+    const message = createBaseSessionWatchRequest();
+    message.sessionId = object.sessionId ?? "";
+    message.listenerId = object.listenerId ?? "";
+    return message;
+  },
+};
+
+function createBaseSessionWatchEvent(): SessionWatchEvent {
+  return { sessionId: "", session: undefined, senderId: "" };
+}
+
+export const SessionWatchEvent: MessageFns<SessionWatchEvent> = {
+  encode(message: SessionWatchEvent, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    if (message.session !== undefined) {
+      DaemonSession.encode(message.session, writer.uint32(18).fork()).join();
+    }
+    if (message.senderId !== "") {
+      writer.uint32(26).string(message.senderId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SessionWatchEvent {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSessionWatchEvent();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.session = DaemonSession.decode(reader, reader.uint32());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.senderId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SessionWatchEvent {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+      session: isSet(object.session) ? DaemonSession.fromJSON(object.session) : undefined,
+      senderId: isSet(object.senderId)
+        ? globalThis.String(object.senderId)
+        : isSet(object.sender_id)
+        ? globalThis.String(object.sender_id)
+        : "",
+    };
+  },
+
+  toJSON(message: SessionWatchEvent): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    if (message.session !== undefined) {
+      obj.session = DaemonSession.toJSON(message.session);
+    }
+    if (message.senderId !== "") {
+      obj.senderId = message.senderId;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SessionWatchEvent>, I>>(base?: I): SessionWatchEvent {
+    return SessionWatchEvent.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SessionWatchEvent>, I>>(object: I): SessionWatchEvent {
+    const message = createBaseSessionWatchEvent();
+    message.sessionId = object.sessionId ?? "";
+    message.session = (object.session !== undefined && object.session !== null)
+      ? DaemonSession.fromPartial(object.session)
+      : undefined;
+    message.senderId = object.senderId ?? "";
     return message;
   },
 };
@@ -11061,6 +11284,15 @@ export const TreeTermDaemonService = {
     responseSerialize: (value: DaemonSession): Buffer => Buffer.from(DaemonSession.encode(value).finish()),
     responseDeserialize: (value: Buffer): DaemonSession => DaemonSession.decode(value),
   },
+  sessionWatch: {
+    path: "/treeterm.TreeTermDaemon/SessionWatch" as const,
+    requestStream: false as const,
+    responseStream: true as const,
+    requestSerialize: (value: SessionWatchRequest): Buffer => Buffer.from(SessionWatchRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): SessionWatchRequest => SessionWatchRequest.decode(value),
+    responseSerialize: (value: SessionWatchEvent): Buffer => Buffer.from(SessionWatchEvent.encode(value).finish()),
+    responseDeserialize: (value: Buffer): SessionWatchEvent => SessionWatchEvent.decode(value),
+  },
   /** Daemon Control */
   shutdown: {
     path: "/treeterm.TreeTermDaemon/Shutdown" as const,
@@ -11128,6 +11360,7 @@ export interface TreeTermDaemonServer extends UntypedServiceImplementation {
   deleteSession: handleUnaryCall<DeleteSessionRequest, Empty>;
   listSessions: handleUnaryCall<Empty, ListSessionsResponse>;
   getDefaultSession: handleUnaryCall<Empty, DaemonSession>;
+  sessionWatch: handleServerStreamingCall<SessionWatchRequest, SessionWatchEvent>;
   /** Daemon Control */
   shutdown: handleUnaryCall<Empty, Empty>;
   /** Filesystem Operations */
@@ -11345,6 +11578,12 @@ export interface TreeTermDaemonClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: DaemonSession) => void,
   ): ClientUnaryCall;
+  sessionWatch(request: SessionWatchRequest, options?: Partial<CallOptions>): ClientReadableStream<SessionWatchEvent>;
+  sessionWatch(
+    request: SessionWatchRequest,
+    metadata?: Metadata,
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<SessionWatchEvent>;
   /** Daemon Control */
   shutdown(request: Empty, callback: (error: ServiceError | null, response: Empty) => void): ClientUnaryCall;
   shutdown(

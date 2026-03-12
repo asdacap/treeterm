@@ -87,6 +87,13 @@ client.onSessionShowSessions(() => {
   sessionShowSessionsListeners.forEach((cb) => cb())
 })
 
+type SessionSyncCallback = (session: DaemonSession) => void
+const sessionSyncListeners: SessionSyncCallback[] = []
+
+client.onSessionSync((session) => {
+  sessionSyncListeners.forEach((cb) => cb(session))
+})
+
 contextBridge.exposeInMainWorld('electron', {
   platform: process.platform,
   terminal: {
@@ -405,6 +412,16 @@ contextBridge.exposeInMainWorld('electron', {
         const index = sessionShowSessionsListeners.indexOf(callback)
         if (index > -1) sessionShowSessionsListeners.splice(index, 1)
       }
+    },
+    onSync: (callback: SessionSyncCallback): (() => void) => {
+      sessionSyncListeners.push(callback)
+      return () => {
+        const index = sessionSyncListeners.indexOf(callback)
+        if (index > -1) sessionSyncListeners.splice(index, 1)
+      }
     }
+  },
+  getWindowUuid: (): Promise<string> => {
+    return client.appGetWindowUuid()
   }
 })

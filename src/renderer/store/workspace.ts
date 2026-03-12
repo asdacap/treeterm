@@ -9,6 +9,7 @@ interface WorkspaceState {
   activeWorkspaceId: string | null
   sessionId: string | null  // Daemon session ID for syncing
   isRestoring: boolean  // Flag to prevent syncing during restoration
+  windowUuid: string | null  // This window's UUID for session sync deduplication
   addWorkspace: (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => Promise<string>
   addChildWorkspace: (parentId: string, name: string, isDetached?: boolean, settings?: WorktreeSettings) => Promise<{ success: boolean; error?: string }>
   adoptExistingWorktree: (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings) => Promise<{ success: boolean; error?: string }>
@@ -138,9 +139,10 @@ async function syncSessionToDaemon(
     }
 
     if (sessionId) {
-      // Update existing session
-      console.log('[workspace] updating session:', sessionId)
-      const result = await window.electron.session.update(sessionId, daemonWorkspaces)
+      // Update existing session, passing window UUID so daemon doesn't echo back to us
+      const windowUuid = useWorkspaceStore.getState().windowUuid
+      console.log('[workspace] updating session:', sessionId, 'senderUuid:', windowUuid)
+      const result = await window.electron.session.update(sessionId, daemonWorkspaces, windowUuid || undefined)
       if (!result.success) {
         console.error('[workspace] failed to update session:', result.error)
       } else {
@@ -179,6 +181,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       activeWorkspaceId: null,
       sessionId: null,
       isRestoring: false,
+      windowUuid: null,
 
       addWorkspace: async (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => {
         console.log('[workspace] addWorkspace called for path:', path)

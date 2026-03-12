@@ -10,6 +10,7 @@ interface WindowInfo {
   window: BrowserWindow
   sessionId: string | null
   ipcServer: IpcServer
+  uuid: string
 }
 
 class WindowManager {
@@ -26,9 +27,9 @@ class WindowManager {
   /**
    * Register a window with its associated session
    */
-  registerWindow(window: BrowserWindow, sessionId: string | null, ipcServer: IpcServer): void {
+  registerWindow(window: BrowserWindow, sessionId: string | null, ipcServer: IpcServer, uuid?: string): void {
     const id = window.id
-    this.windows.set(id, { window, sessionId, ipcServer })
+    this.windows.set(id, { window, sessionId, ipcServer, uuid: uuid || `win-${id}` })
 
     // Clean up when window closes
     window.on('closed', () => {
@@ -74,6 +75,35 @@ class WindowManager {
    */
   isSessionOpen(sessionId: string): boolean {
     return this.findWindowBySessionId(sessionId) !== undefined
+  }
+
+  /**
+   * Update the session ID for a window (called after session is determined in did-finish-load)
+   */
+  updateSessionId(windowId: number, sessionId: string): void {
+    const info = this.windows.get(windowId)
+    if (info) {
+      this.windows.set(windowId, { ...info, sessionId })
+    }
+  }
+
+  /**
+   * Find window by webContents ID
+   */
+  findWindowByWebContentsId(webContentsId: number): WindowInfo | undefined {
+    for (const info of this.windows.values()) {
+      if (info.window.webContents.id === webContentsId) {
+        return info
+      }
+    }
+    return undefined
+  }
+
+  /**
+   * Get all windows sharing a given session ID
+   */
+  getWindowsBySessionId(sessionId: string): WindowInfo[] {
+    return Array.from(this.windows.values()).filter(info => info.sessionId === sessionId)
   }
 
   /**

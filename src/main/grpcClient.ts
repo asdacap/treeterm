@@ -26,7 +26,8 @@ import {
   type DeleteSessionRequest,
   type DaemonSession as ProtoDaemonSession,
   type DaemonWorkspace as ProtoDaemonWorkspace,
-  type WorkspaceInput
+  type WorkspaceInput,
+  type SessionWatchRequest
 } from '../generated/treeterm'
 import { getDefaultSocketPath } from '../daemon/socketPath'
 import type {
@@ -329,7 +330,11 @@ export class GrpcDaemonClient {
     })
   }
 
-  async updateSession(sessionId: string, workspaces: Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]): Promise<DaemonSession> {
+  async updateSession(
+    sessionId: string,
+    workspaces: Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[],
+    senderId?: string
+  ): Promise<DaemonSession> {
     if (!this.client) {
       throw new Error('Not connected to daemon')
     }
@@ -337,7 +342,8 @@ export class GrpcDaemonClient {
     return new Promise((resolve, reject) => {
       const request: UpdateSessionRequest = {
         sessionId,
-        workspaces: this.convertToProtoWorkspaceInputs(workspaces)
+        workspaces: this.convertToProtoWorkspaceInputs(workspaces),
+        senderId
       }
 
       this.client!.updateSession(request, (error, response) => {
@@ -350,6 +356,34 @@ export class GrpcDaemonClient {
         }
       })
     })
+  }
+
+  watchSession(
+    sessionId: string,
+    listenerId: string,
+    onUpdate: (session: DaemonSession) => void
+  ): () => void {
+    if (!this.client) {
+      console.error('[grpcDaemonClient] cannot watch session: not connected')
+      return () => {}
+    }
+
+    const request: SessionWatchRequest = { sessionId, listenerId }
+    const stream = this.client.sessionWatch(request)
+
+    stream.on('data', (event) => {
+      if (event.session) {
+        onUpdate(this.convertFromProtoSession(event.session))
+      }
+    })
+
+    stream.on('error', (error) => {
+      console.error('[grpcDaemonClient] sessionWatch stream error:', error)
+    })
+
+    return () => {
+      stream.cancel()
+    }
   }
 
   async getSession(sessionId: string): Promise<DaemonSession | null> {
