@@ -164,7 +164,12 @@ class PtyManager {
     if (startupCommand && startupCommand.trim()) {
       // Small delay to ensure shell is ready
       setTimeout(() => {
-        ptyProcess.write(startupCommand.trim() + '\n')
+        // Use 'exec' on Unix platforms to replace the shell process
+        // This ensures the PTY exits when the command exits (e.g., AI terminal closes when AI exits)
+        const cmd = process.platform === 'win32'
+          ? startupCommand.trim()
+          : `exec ${startupCommand.trim()}`
+        ptyProcess.write(cmd + '\n')
       }, 100)
     }
 
