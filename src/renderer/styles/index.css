@@ -2887,6 +2887,157 @@ body,
   text-align: center;
 }
 
+/* Workspace Picker Dialog */
+.workspace-picker-dialog {
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  width: 600px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.workspace-picker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.workspace-picker-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.workspace-picker-content {
+  padding: 16px 20px;
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-picker-description {
+  margin: 0 0 12px 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.workspace-picker-search {
+  margin-bottom: 12px;
+}
+
+.workspace-picker-search input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+}
+
+.workspace-picker-search input:focus {
+  border-color: var(--accent);
+}
+
+.workspace-picker-list {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  max-height: 350px;
+}
+
+.workspace-picker-empty {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.workspace-picker-actions {
+  display: flex;
+  gap: 8px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-color);
+  justify-content: flex-end;
+}
+
+/* Session header within workspace picker */
+.session-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.session-info {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.session-workspaces,
+.session-tabs,
+.session-time {
+  background: var(--bg-tertiary);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.session-workspaces-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Workspace info within session */
+.workspace-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.workspace-status {
+  font-size: 12px;
+  width: 16px;
+  text-align: center;
+}
+
+.workspace-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.workspace-branch {
+  font-size: 11px;
+  color: var(--accent);
+  background: rgba(0, 120, 212, 0.15);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.workspace-tabs {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.workspace-children {
+  border-left: 2px solid var(--border-color);
+  margin-left: 8px;
+  padding-left: 8px;
+}
+
 /* Session Picker Dialog */
 .session-picker-dialog {
   background: var(--bg-secondary);
@@ -2977,7 +3128,7 @@ body,
 }
 
 .session-picker-item.selected {
-  background: var(--bg-selected);
+  background: var(--bg-active);
   border-left: 3px solid var(--accent);
 }
 
@@ -3048,7 +3199,7 @@ body,
 }
 
 .dialog-btn.primary:hover:not(:disabled) {
-  background: var(--accent-hover);
+  background: #006cbf;
 }
 
 .dialog-btn.primary:disabled {
@@ -3605,7 +3756,7 @@ body,
 
 .create-child-settings-select select:focus {
   outline: none;
-  border-color: var(--accent-color);
+  border-color: var(--accent);
 }
 
 /* Open Workspace Dialog */
@@ -3670,7 +3821,7 @@ body,
 
 .folder-path-input:focus {
   outline: none;
-  border-color: var(--accent-color);
+  border-color: var(--accent);
 }
 
 .open-workspace-dialog-actions {
