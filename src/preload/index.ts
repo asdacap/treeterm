@@ -166,6 +166,9 @@ contextBridge.exposeInMainWorld('electron', {
   selectFolder: (): Promise<string | null> => {
     return client.dialogSelectFolder()
   },
+  getRecentDirectories: (): Promise<string[]> => {
+    return client.dialogGetRecentDirectories()
+  },
   git: {
     getInfo: (dirPath: string) => {
       return client.gitGetInfo(dirPath)

@@ -58,7 +58,8 @@ const defaultSettings: Settings = {
     scrollbackLimit: 10000,
     killOnQuit: true
   },
-  globalDefaultApplicationId: 'terminal'
+  globalDefaultApplicationId: 'terminal',
+  recentDirectories: []
 }
 
 interface SettingsState {

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { applicationRegistry } from '../registry/applicationRegistry'
 import type { WorktreeSettings } from '../types'
 
@@ -11,6 +11,24 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel }: OpenWorkspaceD
   const [selectedPath, setSelectedPath] = useState<string>('')
   const [isSelecting, setIsSelecting] = useState(false)
   const [selectedAppId, setSelectedAppId] = useState<string>('')
+  const [recentDirectories, setRecentDirectories] = useState<string[]>([])
+  const [isLoadingRecent, setIsLoadingRecent] = useState(false)
+
+  // Fetch recent directories on mount
+  useEffect(() => {
+    const loadRecentDirectories = async () => {
+      setIsLoadingRecent(true)
+      try {
+        const recent = await window.electron.getRecentDirectories()
+        setRecentDirectories(recent)
+      } catch (error) {
+        console.error('Failed to load recent directories:', error)
+      } finally {
+        setIsLoadingRecent(false)
+      }
+    }
+    loadRecentDirectories()
+  }, [])
 
   const availableApps = useMemo(() => {
     return applicationRegistry.getAll().filter(app => app.showInNewTabMenu)
@@ -47,6 +65,15 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel }: OpenWorkspaceD
     }
   }
 
+  const handleSelectRecent = (path: string) => {
+    setSelectedPath(path)
+  }
+
+  const getFolderName = (path: string) => {
+    const parts = path.split(/[/\\]/)
+    return parts[parts.length - 1] || path
+  }
+
   return (
     <div className="dialog-overlay" onClick={onCancel}>
       <div className="open-workspace-dialog" onClick={(e) => e.stopPropagation()} onKeyDown={handleKeyDown}>
@@ -58,6 +85,25 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel }: OpenWorkspaceD
         </div>
 
         <div className="open-workspace-dialog-content">
+          {recentDirectories.length > 0 && (
+            <div className="open-workspace-field">
+              <label>Recent Directories</label>
+              <div className="recent-directories-list">
+                {recentDirectories.map((dir) => (
+                  <button
+                    key={dir}
+                    className="recent-directory-item"
+                    onClick={() => handleSelectRecent(dir)}
+                    title={dir}
+                  >
+                    <span className="recent-directory-name">{getFolderName(dir)}</span>
+                    <span className="recent-directory-path">{dir}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="open-workspace-field">
             <label>Folder</label>
             <div className="folder-picker-row">
@@ -68,8 +114,8 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel }: OpenWorkspaceD
                 placeholder="Select a folder..."
                 className="folder-path-input"
               />
-              <button 
-                className="dialog-btn browse" 
+              <button
+                className="dialog-btn browse"
                 onClick={handleSelectFolder}
                 disabled={isSelecting}
               >

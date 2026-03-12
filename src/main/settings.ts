@@ -62,7 +62,19 @@ const defaultSettings: Settings = {
     scrollbackLimit: 50000,
     killOnQuit: false
   },
-  globalDefaultApplicationId: 'terminal'
+  globalDefaultApplicationId: 'terminal',
+  recentDirectories: []
+}
+
+// Helper to add a directory to recent directories list
+export function addRecentDirectory(settings: Settings, dirPath: string): Settings {
+  // Remove existing entry if present
+  const filtered = settings.recentDirectories.filter(d => d !== dirPath)
+  // Add to front
+  const updated = [dirPath, ...filtered]
+  // Keep only first 10
+  const limited = updated.slice(0, 10)
+  return { ...settings, recentDirectories: limited }
 }
 
 function getSettingsDir(): string {
@@ -215,7 +227,8 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
       ...defaults.daemon,
       ...loaded.daemon
     },
-    globalDefaultApplicationId: loaded.globalDefaultApplicationId || defaults.globalDefaultApplicationId
+    globalDefaultApplicationId: loaded.globalDefaultApplicationId || defaults.globalDefaultApplicationId,
+    recentDirectories: loaded.recentDirectories || defaults.recentDirectories
   }
 }
 

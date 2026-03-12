@@ -65,6 +65,7 @@ const CHANNELS = {
   sessionOpenInNewWindow: 'session:open-in-new-window',
   daemonShutdown: 'daemon:shutdown',
   dialogSelectFolder: 'dialog:selectFolder',
+  dialogGetRecentDirectories: 'dialog:getRecentDirectories',
   sandboxIsAvailable: 'sandbox:isAvailable',
   appGetInitialWorkspace: 'app:getInitialWorkspace',
 
@@ -385,6 +386,12 @@ export class IpcClient {
     ...args: IpcRequests['dialogSelectFolder']['params']
   ): Promise<IpcRequests['dialogSelectFolder']['result']> {
     return ipcRenderer.invoke(CHANNELS.dialogSelectFolder, ...args)
+  }
+
+  dialogGetRecentDirectories(
+    ...args: IpcRequests['dialogGetRecentDirectories']['params']
+  ): Promise<IpcRequests['dialogGetRecentDirectories']['result']> {
+    return ipcRenderer.invoke(CHANNELS.dialogGetRecentDirectories, ...args)
   }
 
   sandboxIsAvailable(
