@@ -16,6 +16,8 @@ import {
 
 test.describe('Daemon Lifecycle', () => {
   test.beforeEach(async () => {
+    const { resetTestSocketPath } = await import('./helpers')
+    resetTestSocketPath()
     killDaemon()
     cleanupTestData()
   })

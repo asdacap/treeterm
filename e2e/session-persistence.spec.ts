@@ -17,6 +17,8 @@ import {
 test.describe('Session Persistence', () => {
   test.beforeEach(async () => {
     // Clean up any existing daemon
+    const { resetTestSocketPath } = await import('./helpers')
+    resetTestSocketPath()
     killDaemon()
     cleanupTestData()
   })

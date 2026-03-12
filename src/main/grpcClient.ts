@@ -706,6 +706,9 @@ export class GrpcDaemonClient {
 
     const logPath = path.join(app.getPath('userData'), 'daemon.log')
 
+    // Derive PID file path from socket path (replace .sock with .pid)
+    const pidPath = this.socketPath.replace(/\.sock$/, '.pid')
+
     console.log('[grpcDaemonClient] spawning daemon at', daemonPath)
 
     const child = spawn(process.execPath, [daemonPath], {
@@ -714,7 +717,8 @@ export class GrpcDaemonClient {
       env: {
         ...process.env,
         TREETERM_DAEMON: '1',
-        TREETERM_SOCKET_PATH: this.socketPath
+        TREETERM_SOCKET_PATH: this.socketPath,
+        TREETERM_PID_FILE: pidPath
       }
     })
 

@@ -8,6 +8,27 @@ import * as path from 'path'
 import * as fs from 'fs'
 import * as os from 'os'
 
+// Test-specific socket path management
+let testSocketPath: string | null = null
+
+export function getTestSocketPath(): string {
+  if (!testSocketPath) {
+    const uid = process.getuid ? process.getuid() : os.userInfo().uid
+    const testId = `test-${process.pid}-${Date.now()}`
+    testSocketPath = path.join(os.tmpdir(), `treeterm-${uid}`, `${testId}.sock`)
+  }
+  return testSocketPath
+}
+
+export function getTestPidPath(): string {
+  // Derive PID path from socket path (replace .sock with .pid)
+  return getTestSocketPath().replace(/\.sock$/, '.pid')
+}
+
+export function resetTestSocketPath(): void {
+  testSocketPath = null
+}
+
 export async function launchApp(workspacePath?: string): Promise<{ app: ElectronApplication; window: Page }> {
   // Use current directory as test workspace if not specified
   const workspace = workspacePath || process.cwd()
@@ -19,7 +40,9 @@ export async function launchApp(workspacePath?: string): Promise<{ app: Electron
     ],
     env: {
       ...process.env,
-      NODE_ENV: 'test'
+      NODE_ENV: 'test',
+      TREETERM_SOCKET_PATH: getTestSocketPath(),
+      TREETERM_PID_FILE: getTestPidPath()
     }
   })
 
@@ -37,6 +60,11 @@ export async function closeApp(app: ElectronApplication): Promise<void> {
 }
 
 export function getDaemonSocketPath(): string {
+  // In test environment, use test-specific socket path
+  if (testSocketPath) {
+    return testSocketPath
+  }
+  // Default production path
   const uid = process.getuid ? process.getuid() : os.userInfo().uid
   return path.join(os.tmpdir(), `treeterm-${uid}`, 'daemon.sock')
 }
@@ -47,7 +75,7 @@ export function isDaemonRunning(): boolean {
 }
 
 export function getDaemonPid(): number | null {
-  const pidFile = path.join(os.homedir(), '.treeterm', 'daemon.pid')
+  const pidFile = getTestPidPath()
   if (!fs.existsSync(pidFile)) {
     return null
   }
@@ -79,7 +107,7 @@ export function killDaemon(): void {
   }
 
   // Clean up pid file
-  const pidFile = path.join(os.homedir(), '.treeterm', 'daemon.pid')
+  const pidFile = getTestPidPath()
   if (fs.existsSync(pidFile)) {
     fs.unlinkSync(pidFile)
   }

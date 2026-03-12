@@ -36,6 +36,8 @@ const ptyToWindow: Map<string, number> = new Map()
 const server = new IpcServer()
 
 function createLoadingWindow(): BrowserWindow {
+  const isTest = process.env.NODE_ENV === 'test'
+
   loadingWindow = new BrowserWindow({
     width: 300,
     height: 200,
@@ -58,18 +60,23 @@ function createLoadingWindow(): BrowserWindow {
   loadingWindow.loadFile(join(__dirname, 'loading.html'))
 
   loadingWindow.once('ready-to-show', () => {
-    loadingWindow?.show()
+    if (!isTest) {
+      loadingWindow?.show()
+    }
   })
 
   return loadingWindow
 }
 
 function createWindow(initialSessionId?: string): BrowserWindow {
+  const isTest = process.env.NODE_ENV === 'test'
+
   const window = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
     minHeight: 600,
+    show: !isTest,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
@@ -940,7 +947,7 @@ app.whenReady().then(async () => {
   // Show loading screen while connecting to daemon
   createLoadingWindow()
 
-  daemonClient = new GrpcDaemonClient()
+  daemonClient = new GrpcDaemonClient(process.env.TREETERM_SOCKET_PATH)
 
   // Forward daemon disconnections to renderer so the UI can show a warning
   daemonClient.onDisconnect(() => {
