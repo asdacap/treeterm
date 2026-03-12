@@ -187,6 +187,51 @@ export interface PtyExit {
   signal?: number | undefined;
 }
 
+export interface ExecInput {
+  start?: ExecStart | undefined;
+  stdin?: Buffer | undefined;
+  signal?: ExecSignal | undefined;
+}
+
+export interface ExecStart {
+  cwd: string;
+  command: string;
+  args: string[];
+  /** Environment variable injection */
+  env: { [key: string]: string };
+  /** 0 = no timeout, default 30000 (30s) */
+  timeoutMs?: number | undefined;
+}
+
+export interface ExecStart_EnvEntry {
+  key: string;
+  value: string;
+}
+
+export interface ExecSignal {
+  signal: number;
+}
+
+export interface ExecOutput {
+  stdout?: ExecStdout | undefined;
+  stderr?: ExecStderr | undefined;
+  result?: ExecResult | undefined;
+}
+
+export interface ExecStdout {
+  data: Buffer;
+}
+
+export interface ExecStderr {
+  data: Buffer;
+}
+
+export interface ExecResult {
+  exitCode: number;
+  /** System error only (spawn failure, etc.) */
+  error?: string | undefined;
+}
+
 export interface CreateSessionRequest {
   workspaces: WorkspaceInput[];
 }
@@ -3298,6 +3343,683 @@ export const PtyExit: MessageFns<PtyExit> = {
     message.sessionId = object.sessionId ?? "";
     message.exitCode = object.exitCode ?? 0;
     message.signal = object.signal ?? undefined;
+    return message;
+  },
+};
+
+function createBaseExecInput(): ExecInput {
+  return { start: undefined, stdin: undefined, signal: undefined };
+}
+
+export const ExecInput: MessageFns<ExecInput> = {
+  encode(message: ExecInput, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.start !== undefined) {
+      ExecStart.encode(message.start, writer.uint32(10).fork()).join();
+    }
+    if (message.stdin !== undefined) {
+      writer.uint32(18).bytes(message.stdin);
+    }
+    if (message.signal !== undefined) {
+      ExecSignal.encode(message.signal, writer.uint32(26).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ExecInput {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseExecInput();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.start = ExecStart.decode(reader, reader.uint32());
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.stdin = Buffer.from(reader.bytes());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.signal = ExecSignal.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ExecInput {
+    return {
+      start: isSet(object.start) ? ExecStart.fromJSON(object.start) : undefined,
+      stdin: isSet(object.stdin) ? Buffer.from(bytesFromBase64(object.stdin)) : undefined,
+      signal: isSet(object.signal) ? ExecSignal.fromJSON(object.signal) : undefined,
+    };
+  },
+
+  toJSON(message: ExecInput): unknown {
+    const obj: any = {};
+    if (message.start !== undefined) {
+      obj.start = ExecStart.toJSON(message.start);
+    }
+    if (message.stdin !== undefined) {
+      obj.stdin = base64FromBytes(message.stdin);
+    }
+    if (message.signal !== undefined) {
+      obj.signal = ExecSignal.toJSON(message.signal);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ExecInput>, I>>(base?: I): ExecInput {
+    return ExecInput.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ExecInput>, I>>(object: I): ExecInput {
+    const message = createBaseExecInput();
+    message.start = (object.start !== undefined && object.start !== null)
+      ? ExecStart.fromPartial(object.start)
+      : undefined;
+    message.stdin = object.stdin ?? undefined;
+    message.signal = (object.signal !== undefined && object.signal !== null)
+      ? ExecSignal.fromPartial(object.signal)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseExecStart(): ExecStart {
+  return { cwd: "", command: "", args: [], env: {}, timeoutMs: undefined };
+}
+
+export const ExecStart: MessageFns<ExecStart> = {
+  encode(message: ExecStart, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.cwd !== "") {
+      writer.uint32(10).string(message.cwd);
+    }
+    if (message.command !== "") {
+      writer.uint32(18).string(message.command);
+    }
+    for (const v of message.args) {
+      writer.uint32(26).string(v!);
+    }
+    globalThis.Object.entries(message.env).forEach(([key, value]: [string, string]) => {
+      ExecStart_EnvEntry.encode({ key: key as any, value }, writer.uint32(34).fork()).join();
+    });
+    if (message.timeoutMs !== undefined) {
+      writer.uint32(40).int32(message.timeoutMs);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ExecStart {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseExecStart();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.cwd = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.command = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.args.push(reader.string());
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          const entry4 = ExecStart_EnvEntry.decode(reader, reader.uint32());
+          if (entry4.value !== undefined) {
+            message.env[entry4.key] = entry4.value;
+          }
+          continue;
+        }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.timeoutMs = reader.int32();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ExecStart {
+    return {
+      cwd: isSet(object.cwd) ? globalThis.String(object.cwd) : "",
+      command: isSet(object.command) ? globalThis.String(object.command) : "",
+      args: globalThis.Array.isArray(object?.args) ? object.args.map((e: any) => globalThis.String(e)) : [],
+      env: isObject(object.env)
+        ? (globalThis.Object.entries(object.env) as [string, any][]).reduce(
+          (acc: { [key: string]: string }, [key, value]: [string, any]) => {
+            acc[key] = globalThis.String(value);
+            return acc;
+          },
+          {},
+        )
+        : {},
+      timeoutMs: isSet(object.timeoutMs)
+        ? globalThis.Number(object.timeoutMs)
+        : isSet(object.timeout_ms)
+        ? globalThis.Number(object.timeout_ms)
+        : undefined,
+    };
+  },
+
+  toJSON(message: ExecStart): unknown {
+    const obj: any = {};
+    if (message.cwd !== "") {
+      obj.cwd = message.cwd;
+    }
+    if (message.command !== "") {
+      obj.command = message.command;
+    }
+    if (message.args?.length) {
+      obj.args = message.args;
+    }
+    if (message.env) {
+      const entries = globalThis.Object.entries(message.env) as [string, string][];
+      if (entries.length > 0) {
+        obj.env = {};
+        entries.forEach(([k, v]) => {
+          obj.env[k] = v;
+        });
+      }
+    }
+    if (message.timeoutMs !== undefined) {
+      obj.timeoutMs = Math.round(message.timeoutMs);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ExecStart>, I>>(base?: I): ExecStart {
+    return ExecStart.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ExecStart>, I>>(object: I): ExecStart {
+    const message = createBaseExecStart();
+    message.cwd = object.cwd ?? "";
+    message.command = object.command ?? "";
+    message.args = object.args?.map((e) => e) || [];
+    message.env = (globalThis.Object.entries(object.env ?? {}) as [string, string][]).reduce(
+      (acc: { [key: string]: string }, [key, value]: [string, string]) => {
+        if (value !== undefined) {
+          acc[key] = globalThis.String(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    message.timeoutMs = object.timeoutMs ?? undefined;
+    return message;
+  },
+};
+
+function createBaseExecStart_EnvEntry(): ExecStart_EnvEntry {
+  return { key: "", value: "" };
+}
+
+export const ExecStart_EnvEntry: MessageFns<ExecStart_EnvEntry> = {
+  encode(message: ExecStart_EnvEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.key !== "") {
+      writer.uint32(10).string(message.key);
+    }
+    if (message.value !== "") {
+      writer.uint32(18).string(message.value);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ExecStart_EnvEntry {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseExecStart_EnvEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ExecStart_EnvEntry {
+    return {
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      value: isSet(object.value) ? globalThis.String(object.value) : "",
+    };
+  },
+
+  toJSON(message: ExecStart_EnvEntry): unknown {
+    const obj: any = {};
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.value !== "") {
+      obj.value = message.value;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ExecStart_EnvEntry>, I>>(base?: I): ExecStart_EnvEntry {
+    return ExecStart_EnvEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ExecStart_EnvEntry>, I>>(object: I): ExecStart_EnvEntry {
+    const message = createBaseExecStart_EnvEntry();
+    message.key = object.key ?? "";
+    message.value = object.value ?? "";
+    return message;
+  },
+};
+
+function createBaseExecSignal(): ExecSignal {
+  return { signal: 0 };
+}
+
+export const ExecSignal: MessageFns<ExecSignal> = {
+  encode(message: ExecSignal, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.signal !== 0) {
+      writer.uint32(8).int32(message.signal);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ExecSignal {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseExecSignal();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.signal = reader.int32();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ExecSignal {
+    return { signal: isSet(object.signal) ? globalThis.Number(object.signal) : 0 };
+  },
+
+  toJSON(message: ExecSignal): unknown {
+    const obj: any = {};
+    if (message.signal !== 0) {
+      obj.signal = Math.round(message.signal);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ExecSignal>, I>>(base?: I): ExecSignal {
+    return ExecSignal.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ExecSignal>, I>>(object: I): ExecSignal {
+    const message = createBaseExecSignal();
+    message.signal = object.signal ?? 0;
+    return message;
+  },
+};
+
+function createBaseExecOutput(): ExecOutput {
+  return { stdout: undefined, stderr: undefined, result: undefined };
+}
+
+export const ExecOutput: MessageFns<ExecOutput> = {
+  encode(message: ExecOutput, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.stdout !== undefined) {
+      ExecStdout.encode(message.stdout, writer.uint32(10).fork()).join();
+    }
+    if (message.stderr !== undefined) {
+      ExecStderr.encode(message.stderr, writer.uint32(18).fork()).join();
+    }
+    if (message.result !== undefined) {
+      ExecResult.encode(message.result, writer.uint32(26).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ExecOutput {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseExecOutput();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.stdout = ExecStdout.decode(reader, reader.uint32());
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.stderr = ExecStderr.decode(reader, reader.uint32());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.result = ExecResult.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ExecOutput {
+    return {
+      stdout: isSet(object.stdout) ? ExecStdout.fromJSON(object.stdout) : undefined,
+      stderr: isSet(object.stderr) ? ExecStderr.fromJSON(object.stderr) : undefined,
+      result: isSet(object.result) ? ExecResult.fromJSON(object.result) : undefined,
+    };
+  },
+
+  toJSON(message: ExecOutput): unknown {
+    const obj: any = {};
+    if (message.stdout !== undefined) {
+      obj.stdout = ExecStdout.toJSON(message.stdout);
+    }
+    if (message.stderr !== undefined) {
+      obj.stderr = ExecStderr.toJSON(message.stderr);
+    }
+    if (message.result !== undefined) {
+      obj.result = ExecResult.toJSON(message.result);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ExecOutput>, I>>(base?: I): ExecOutput {
+    return ExecOutput.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ExecOutput>, I>>(object: I): ExecOutput {
+    const message = createBaseExecOutput();
+    message.stdout = (object.stdout !== undefined && object.stdout !== null)
+      ? ExecStdout.fromPartial(object.stdout)
+      : undefined;
+    message.stderr = (object.stderr !== undefined && object.stderr !== null)
+      ? ExecStderr.fromPartial(object.stderr)
+      : undefined;
+    message.result = (object.result !== undefined && object.result !== null)
+      ? ExecResult.fromPartial(object.result)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseExecStdout(): ExecStdout {
+  return { data: Buffer.alloc(0) };
+}
+
+export const ExecStdout: MessageFns<ExecStdout> = {
+  encode(message: ExecStdout, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.data.length !== 0) {
+      writer.uint32(10).bytes(message.data);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ExecStdout {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseExecStdout();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.data = Buffer.from(reader.bytes());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ExecStdout {
+    return { data: isSet(object.data) ? Buffer.from(bytesFromBase64(object.data)) : Buffer.alloc(0) };
+  },
+
+  toJSON(message: ExecStdout): unknown {
+    const obj: any = {};
+    if (message.data.length !== 0) {
+      obj.data = base64FromBytes(message.data);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ExecStdout>, I>>(base?: I): ExecStdout {
+    return ExecStdout.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ExecStdout>, I>>(object: I): ExecStdout {
+    const message = createBaseExecStdout();
+    message.data = object.data ?? Buffer.alloc(0);
+    return message;
+  },
+};
+
+function createBaseExecStderr(): ExecStderr {
+  return { data: Buffer.alloc(0) };
+}
+
+export const ExecStderr: MessageFns<ExecStderr> = {
+  encode(message: ExecStderr, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.data.length !== 0) {
+      writer.uint32(10).bytes(message.data);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ExecStderr {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseExecStderr();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.data = Buffer.from(reader.bytes());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ExecStderr {
+    return { data: isSet(object.data) ? Buffer.from(bytesFromBase64(object.data)) : Buffer.alloc(0) };
+  },
+
+  toJSON(message: ExecStderr): unknown {
+    const obj: any = {};
+    if (message.data.length !== 0) {
+      obj.data = base64FromBytes(message.data);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ExecStderr>, I>>(base?: I): ExecStderr {
+    return ExecStderr.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ExecStderr>, I>>(object: I): ExecStderr {
+    const message = createBaseExecStderr();
+    message.data = object.data ?? Buffer.alloc(0);
+    return message;
+  },
+};
+
+function createBaseExecResult(): ExecResult {
+  return { exitCode: 0, error: undefined };
+}
+
+export const ExecResult: MessageFns<ExecResult> = {
+  encode(message: ExecResult, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.exitCode !== 0) {
+      writer.uint32(8).int32(message.exitCode);
+    }
+    if (message.error !== undefined) {
+      writer.uint32(18).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ExecResult {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseExecResult();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.exitCode = reader.int32();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ExecResult {
+    return {
+      exitCode: isSet(object.exitCode)
+        ? globalThis.Number(object.exitCode)
+        : isSet(object.exit_code)
+        ? globalThis.Number(object.exit_code)
+        : 0,
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: ExecResult): unknown {
+    const obj: any = {};
+    if (message.exitCode !== 0) {
+      obj.exitCode = Math.round(message.exitCode);
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ExecResult>, I>>(base?: I): ExecResult {
+    return ExecResult.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ExecResult>, I>>(object: I): ExecResult {
+    const message = createBaseExecResult();
+    message.exitCode = object.exitCode ?? 0;
+    message.error = object.error ?? undefined;
     return message;
   },
 };
@@ -11540,6 +12262,19 @@ export const TreeTermDaemonService = {
     responseSerialize: (value: PtyOutput): Buffer => Buffer.from(PtyOutput.encode(value).finish()),
     responseDeserialize: (value: Buffer): PtyOutput => PtyOutput.decode(value),
   },
+  /**
+   * Exec Streaming (Bidirectional)
+   * For executing one-shot shell commands with streaming I/O
+   */
+  execStream: {
+    path: "/treeterm.TreeTermDaemon/ExecStream" as const,
+    requestStream: true as const,
+    responseStream: true as const,
+    requestSerialize: (value: ExecInput): Buffer => Buffer.from(ExecInput.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ExecInput => ExecInput.decode(value),
+    responseSerialize: (value: ExecOutput): Buffer => Buffer.from(ExecOutput.encode(value).finish()),
+    responseDeserialize: (value: Buffer): ExecOutput => ExecOutput.decode(value),
+  },
   /** Workspace Session Management */
   createSession: {
     path: "/treeterm.TreeTermDaemon/CreateSession" as const,
@@ -11596,313 +12331,6 @@ export const TreeTermDaemonService = {
     requestDeserialize: (value: Buffer): Empty => Empty.decode(value),
     responseSerialize: (value: Empty): Buffer => Buffer.from(Empty.encode(value).finish()),
     responseDeserialize: (value: Buffer): Empty => Empty.decode(value),
-  },
-  /** Git Operations */
-  getGitInfo: {
-    path: "/treeterm.TreeTermDaemon/GetGitInfo" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: GitInfoRequest): Buffer => Buffer.from(GitInfoRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): GitInfoRequest => GitInfoRequest.decode(value),
-    responseSerialize: (value: GitInfoResponse): Buffer => Buffer.from(GitInfoResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): GitInfoResponse => GitInfoResponse.decode(value),
-  },
-  createWorktree: {
-    path: "/treeterm.TreeTermDaemon/CreateWorktree" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: CreateWorktreeRequest): Buffer =>
-      Buffer.from(CreateWorktreeRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): CreateWorktreeRequest => CreateWorktreeRequest.decode(value),
-    responseSerialize: (value: CreateWorktreeResponse): Buffer =>
-      Buffer.from(CreateWorktreeResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): CreateWorktreeResponse => CreateWorktreeResponse.decode(value),
-  },
-  removeWorktree: {
-    path: "/treeterm.TreeTermDaemon/RemoveWorktree" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: RemoveWorktreeRequest): Buffer =>
-      Buffer.from(RemoveWorktreeRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): RemoveWorktreeRequest => RemoveWorktreeRequest.decode(value),
-    responseSerialize: (value: MergeWorktreeResponse): Buffer =>
-      Buffer.from(MergeWorktreeResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): MergeWorktreeResponse => MergeWorktreeResponse.decode(value),
-  },
-  listWorktrees: {
-    path: "/treeterm.TreeTermDaemon/ListWorktrees" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: ListWorktreesRequest): Buffer => Buffer.from(ListWorktreesRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): ListWorktreesRequest => ListWorktreesRequest.decode(value),
-    responseSerialize: (value: ListWorktreesResponse): Buffer =>
-      Buffer.from(ListWorktreesResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): ListWorktreesResponse => ListWorktreesResponse.decode(value),
-  },
-  getChildWorktrees: {
-    path: "/treeterm.TreeTermDaemon/GetChildWorktrees" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: GetChildWorktreesRequest): Buffer =>
-      Buffer.from(GetChildWorktreesRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): GetChildWorktreesRequest => GetChildWorktreesRequest.decode(value),
-    responseSerialize: (value: GetChildWorktreesResponse): Buffer =>
-      Buffer.from(GetChildWorktreesResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): GetChildWorktreesResponse => GetChildWorktreesResponse.decode(value),
-  },
-  getDiff: {
-    path: "/treeterm.TreeTermDaemon/GetDiff" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: GetDiffRequest): Buffer => Buffer.from(GetDiffRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): GetDiffRequest => GetDiffRequest.decode(value),
-    responseSerialize: (value: GetDiffResponse): Buffer => Buffer.from(GetDiffResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): GetDiffResponse => GetDiffResponse.decode(value),
-  },
-  getFileDiff: {
-    path: "/treeterm.TreeTermDaemon/GetFileDiff" as const,
-    requestStream: false as const,
-    responseStream: true as const,
-    requestSerialize: (value: GetFileDiffRequest): Buffer => Buffer.from(GetFileDiffRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): GetFileDiffRequest => GetFileDiffRequest.decode(value),
-    responseSerialize: (value: DiffChunk): Buffer => Buffer.from(DiffChunk.encode(value).finish()),
-    responseDeserialize: (value: Buffer): DiffChunk => DiffChunk.decode(value),
-  },
-  getDiffAgainstHead: {
-    path: "/treeterm.TreeTermDaemon/GetDiffAgainstHead" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: GetDiffRequest): Buffer => Buffer.from(GetDiffRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): GetDiffRequest => GetDiffRequest.decode(value),
-    responseSerialize: (value: GetDiffResponse): Buffer => Buffer.from(GetDiffResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): GetDiffResponse => GetDiffResponse.decode(value),
-  },
-  getFileDiffAgainstHead: {
-    path: "/treeterm.TreeTermDaemon/GetFileDiffAgainstHead" as const,
-    requestStream: false as const,
-    responseStream: true as const,
-    requestSerialize: (value: GetFileDiffRequest): Buffer => Buffer.from(GetFileDiffRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): GetFileDiffRequest => GetFileDiffRequest.decode(value),
-    responseSerialize: (value: DiffChunk): Buffer => Buffer.from(DiffChunk.encode(value).finish()),
-    responseDeserialize: (value: Buffer): DiffChunk => DiffChunk.decode(value),
-  },
-  mergeWorktree: {
-    path: "/treeterm.TreeTermDaemon/MergeWorktree" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: MergeWorktreeRequest): Buffer => Buffer.from(MergeWorktreeRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): MergeWorktreeRequest => MergeWorktreeRequest.decode(value),
-    responseSerialize: (value: MergeWorktreeResponse): Buffer =>
-      Buffer.from(MergeWorktreeResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): MergeWorktreeResponse => MergeWorktreeResponse.decode(value),
-  },
-  hasUncommittedChanges: {
-    path: "/treeterm.TreeTermDaemon/HasUncommittedChanges" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: HasUncommittedChangesRequest): Buffer =>
-      Buffer.from(HasUncommittedChangesRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): HasUncommittedChangesRequest => HasUncommittedChangesRequest.decode(value),
-    responseSerialize: (value: HasUncommittedChangesResponse): Buffer =>
-      Buffer.from(HasUncommittedChangesResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): HasUncommittedChangesResponse => HasUncommittedChangesResponse.decode(value),
-  },
-  commitAll: {
-    path: "/treeterm.TreeTermDaemon/CommitAll" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: CommitAllRequest): Buffer => Buffer.from(CommitAllRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): CommitAllRequest => CommitAllRequest.decode(value),
-    responseSerialize: (value: CommitAllResponse): Buffer => Buffer.from(CommitAllResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): CommitAllResponse => CommitAllResponse.decode(value),
-  },
-  deleteBranch: {
-    path: "/treeterm.TreeTermDaemon/DeleteBranch" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: DeleteBranchRequest): Buffer => Buffer.from(DeleteBranchRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): DeleteBranchRequest => DeleteBranchRequest.decode(value),
-    responseSerialize: (value: DeleteBranchResponse): Buffer =>
-      Buffer.from(DeleteBranchResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): DeleteBranchResponse => DeleteBranchResponse.decode(value),
-  },
-  getUncommittedChanges: {
-    path: "/treeterm.TreeTermDaemon/GetUncommittedChanges" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: GetUncommittedChangesRequest): Buffer =>
-      Buffer.from(GetUncommittedChangesRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): GetUncommittedChangesRequest => GetUncommittedChangesRequest.decode(value),
-    responseSerialize: (value: GetUncommittedChangesResponse): Buffer =>
-      Buffer.from(GetUncommittedChangesResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): GetUncommittedChangesResponse => GetUncommittedChangesResponse.decode(value),
-  },
-  getUncommittedFileDiff: {
-    path: "/treeterm.TreeTermDaemon/GetUncommittedFileDiff" as const,
-    requestStream: false as const,
-    responseStream: true as const,
-    requestSerialize: (value: GetUncommittedFileDiffRequest): Buffer =>
-      Buffer.from(GetUncommittedFileDiffRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): GetUncommittedFileDiffRequest => GetUncommittedFileDiffRequest.decode(value),
-    responseSerialize: (value: DiffChunk): Buffer => Buffer.from(DiffChunk.encode(value).finish()),
-    responseDeserialize: (value: Buffer): DiffChunk => DiffChunk.decode(value),
-  },
-  stageFile: {
-    path: "/treeterm.TreeTermDaemon/StageFile" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: StageFileRequest): Buffer => Buffer.from(StageFileRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): StageFileRequest => StageFileRequest.decode(value),
-    responseSerialize: (value: StageFileResponse): Buffer => Buffer.from(StageFileResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): StageFileResponse => StageFileResponse.decode(value),
-  },
-  unstageFile: {
-    path: "/treeterm.TreeTermDaemon/UnstageFile" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: StageFileRequest): Buffer => Buffer.from(StageFileRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): StageFileRequest => StageFileRequest.decode(value),
-    responseSerialize: (value: StageFileResponse): Buffer => Buffer.from(StageFileResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): StageFileResponse => StageFileResponse.decode(value),
-  },
-  stageAll: {
-    path: "/treeterm.TreeTermDaemon/StageAll" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: StageAllRequest): Buffer => Buffer.from(StageAllRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): StageAllRequest => StageAllRequest.decode(value),
-    responseSerialize: (value: StageAllResponse): Buffer => Buffer.from(StageAllResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): StageAllResponse => StageAllResponse.decode(value),
-  },
-  unstageAll: {
-    path: "/treeterm.TreeTermDaemon/UnstageAll" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: StageAllRequest): Buffer => Buffer.from(StageAllRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): StageAllRequest => StageAllRequest.decode(value),
-    responseSerialize: (value: StageAllResponse): Buffer => Buffer.from(StageAllResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): StageAllResponse => StageAllResponse.decode(value),
-  },
-  commitStaged: {
-    path: "/treeterm.TreeTermDaemon/CommitStaged" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: CommitStagedRequest): Buffer => Buffer.from(CommitStagedRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): CommitStagedRequest => CommitStagedRequest.decode(value),
-    responseSerialize: (value: CommitStagedResponse): Buffer =>
-      Buffer.from(CommitStagedResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): CommitStagedResponse => CommitStagedResponse.decode(value),
-  },
-  checkMergeConflicts: {
-    path: "/treeterm.TreeTermDaemon/CheckMergeConflicts" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: CheckMergeConflictsRequest): Buffer =>
-      Buffer.from(CheckMergeConflictsRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): CheckMergeConflictsRequest => CheckMergeConflictsRequest.decode(value),
-    responseSerialize: (value: CheckMergeConflictsResponse): Buffer =>
-      Buffer.from(CheckMergeConflictsResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): CheckMergeConflictsResponse => CheckMergeConflictsResponse.decode(value),
-  },
-  getFileContentsForDiff: {
-    path: "/treeterm.TreeTermDaemon/GetFileContentsForDiff" as const,
-    requestStream: false as const,
-    responseStream: true as const,
-    requestSerialize: (value: GetFileContentsForDiffRequest): Buffer =>
-      Buffer.from(GetFileContentsForDiffRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): GetFileContentsForDiffRequest => GetFileContentsForDiffRequest.decode(value),
-    responseSerialize: (value: FileContentsChunk): Buffer => Buffer.from(FileContentsChunk.encode(value).finish()),
-    responseDeserialize: (value: Buffer): FileContentsChunk => FileContentsChunk.decode(value),
-  },
-  getFileContentsForDiffAgainstHead: {
-    path: "/treeterm.TreeTermDaemon/GetFileContentsForDiffAgainstHead" as const,
-    requestStream: false as const,
-    responseStream: true as const,
-    requestSerialize: (value: GetFileContentsForDiffRequest): Buffer =>
-      Buffer.from(GetFileContentsForDiffRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): GetFileContentsForDiffRequest => GetFileContentsForDiffRequest.decode(value),
-    responseSerialize: (value: FileContentsChunk): Buffer => Buffer.from(FileContentsChunk.encode(value).finish()),
-    responseDeserialize: (value: Buffer): FileContentsChunk => FileContentsChunk.decode(value),
-  },
-  getUncommittedFileContentsForDiff: {
-    path: "/treeterm.TreeTermDaemon/GetUncommittedFileContentsForDiff" as const,
-    requestStream: false as const,
-    responseStream: true as const,
-    requestSerialize: (value: GetUncommittedFileContentsForDiffRequest): Buffer =>
-      Buffer.from(GetUncommittedFileContentsForDiffRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): GetUncommittedFileContentsForDiffRequest =>
-      GetUncommittedFileContentsForDiffRequest.decode(value),
-    responseSerialize: (value: FileContentsChunk): Buffer => Buffer.from(FileContentsChunk.encode(value).finish()),
-    responseDeserialize: (value: Buffer): FileContentsChunk => FileContentsChunk.decode(value),
-  },
-  listLocalBranches: {
-    path: "/treeterm.TreeTermDaemon/ListLocalBranches" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: ListLocalBranchesRequest): Buffer =>
-      Buffer.from(ListLocalBranchesRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): ListLocalBranchesRequest => ListLocalBranchesRequest.decode(value),
-    responseSerialize: (value: ListLocalBranchesResponse): Buffer =>
-      Buffer.from(ListLocalBranchesResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): ListLocalBranchesResponse => ListLocalBranchesResponse.decode(value),
-  },
-  listRemoteBranches: {
-    path: "/treeterm.TreeTermDaemon/ListRemoteBranches" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: ListRemoteBranchesRequest): Buffer =>
-      Buffer.from(ListRemoteBranchesRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): ListRemoteBranchesRequest => ListRemoteBranchesRequest.decode(value),
-    responseSerialize: (value: ListRemoteBranchesResponse): Buffer =>
-      Buffer.from(ListRemoteBranchesResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): ListRemoteBranchesResponse => ListRemoteBranchesResponse.decode(value),
-  },
-  getBranchesInWorktrees: {
-    path: "/treeterm.TreeTermDaemon/GetBranchesInWorktrees" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: GetBranchesInWorktreesRequest): Buffer =>
-      Buffer.from(GetBranchesInWorktreesRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): GetBranchesInWorktreesRequest => GetBranchesInWorktreesRequest.decode(value),
-    responseSerialize: (value: GetBranchesInWorktreesResponse): Buffer =>
-      Buffer.from(GetBranchesInWorktreesResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): GetBranchesInWorktreesResponse =>
-      GetBranchesInWorktreesResponse.decode(value),
-  },
-  createWorktreeFromBranch: {
-    path: "/treeterm.TreeTermDaemon/CreateWorktreeFromBranch" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: CreateWorktreeFromBranchRequest): Buffer =>
-      Buffer.from(CreateWorktreeFromBranchRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): CreateWorktreeFromBranchRequest =>
-      CreateWorktreeFromBranchRequest.decode(value),
-    responseSerialize: (value: CreateWorktreeResponse): Buffer =>
-      Buffer.from(CreateWorktreeResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): CreateWorktreeResponse => CreateWorktreeResponse.decode(value),
-  },
-  createWorktreeFromRemote: {
-    path: "/treeterm.TreeTermDaemon/CreateWorktreeFromRemote" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: CreateWorktreeFromRemoteRequest): Buffer =>
-      Buffer.from(CreateWorktreeFromRemoteRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): CreateWorktreeFromRemoteRequest =>
-      CreateWorktreeFromRemoteRequest.decode(value),
-    responseSerialize: (value: CreateWorktreeResponse): Buffer =>
-      Buffer.from(CreateWorktreeResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): CreateWorktreeResponse => CreateWorktreeResponse.decode(value),
-  },
-  getHeadCommitHash: {
-    path: "/treeterm.TreeTermDaemon/GetHeadCommitHash" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: GetHeadCommitHashRequest): Buffer =>
-      Buffer.from(GetHeadCommitHashRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): GetHeadCommitHashRequest => GetHeadCommitHashRequest.decode(value),
-    responseSerialize: (value: GetHeadCommitHashResponse): Buffer =>
-      Buffer.from(GetHeadCommitHashResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): GetHeadCommitHashResponse => GetHeadCommitHashResponse.decode(value),
   },
   /** Reviews Operations */
   loadReviews: {
@@ -12001,6 +12429,11 @@ export interface TreeTermDaemonServer extends UntypedServiceImplementation {
    * Client sends input (write/resize), server sends output (data/exit)
    */
   ptyStream: handleBidiStreamingCall<PtyInput, PtyOutput>;
+  /**
+   * Exec Streaming (Bidirectional)
+   * For executing one-shot shell commands with streaming I/O
+   */
+  execStream: handleBidiStreamingCall<ExecInput, ExecOutput>;
   /** Workspace Session Management */
   createSession: handleUnaryCall<CreateSessionRequest, DaemonSession>;
   updateSession: handleUnaryCall<UpdateSessionRequest, DaemonSession>;
@@ -12009,40 +12442,6 @@ export interface TreeTermDaemonServer extends UntypedServiceImplementation {
   listSessions: handleUnaryCall<Empty, ListSessionsResponse>;
   /** Daemon Control */
   shutdown: handleUnaryCall<Empty, Empty>;
-  /** Git Operations */
-  getGitInfo: handleUnaryCall<GitInfoRequest, GitInfoResponse>;
-  createWorktree: handleUnaryCall<CreateWorktreeRequest, CreateWorktreeResponse>;
-  removeWorktree: handleUnaryCall<RemoveWorktreeRequest, MergeWorktreeResponse>;
-  listWorktrees: handleUnaryCall<ListWorktreesRequest, ListWorktreesResponse>;
-  getChildWorktrees: handleUnaryCall<GetChildWorktreesRequest, GetChildWorktreesResponse>;
-  getDiff: handleUnaryCall<GetDiffRequest, GetDiffResponse>;
-  getFileDiff: handleServerStreamingCall<GetFileDiffRequest, DiffChunk>;
-  getDiffAgainstHead: handleUnaryCall<GetDiffRequest, GetDiffResponse>;
-  getFileDiffAgainstHead: handleServerStreamingCall<GetFileDiffRequest, DiffChunk>;
-  mergeWorktree: handleUnaryCall<MergeWorktreeRequest, MergeWorktreeResponse>;
-  hasUncommittedChanges: handleUnaryCall<HasUncommittedChangesRequest, HasUncommittedChangesResponse>;
-  commitAll: handleUnaryCall<CommitAllRequest, CommitAllResponse>;
-  deleteBranch: handleUnaryCall<DeleteBranchRequest, DeleteBranchResponse>;
-  getUncommittedChanges: handleUnaryCall<GetUncommittedChangesRequest, GetUncommittedChangesResponse>;
-  getUncommittedFileDiff: handleServerStreamingCall<GetUncommittedFileDiffRequest, DiffChunk>;
-  stageFile: handleUnaryCall<StageFileRequest, StageFileResponse>;
-  unstageFile: handleUnaryCall<StageFileRequest, StageFileResponse>;
-  stageAll: handleUnaryCall<StageAllRequest, StageAllResponse>;
-  unstageAll: handleUnaryCall<StageAllRequest, StageAllResponse>;
-  commitStaged: handleUnaryCall<CommitStagedRequest, CommitStagedResponse>;
-  checkMergeConflicts: handleUnaryCall<CheckMergeConflictsRequest, CheckMergeConflictsResponse>;
-  getFileContentsForDiff: handleServerStreamingCall<GetFileContentsForDiffRequest, FileContentsChunk>;
-  getFileContentsForDiffAgainstHead: handleServerStreamingCall<GetFileContentsForDiffRequest, FileContentsChunk>;
-  getUncommittedFileContentsForDiff: handleServerStreamingCall<
-    GetUncommittedFileContentsForDiffRequest,
-    FileContentsChunk
-  >;
-  listLocalBranches: handleUnaryCall<ListLocalBranchesRequest, ListLocalBranchesResponse>;
-  listRemoteBranches: handleUnaryCall<ListRemoteBranchesRequest, ListRemoteBranchesResponse>;
-  getBranchesInWorktrees: handleUnaryCall<GetBranchesInWorktreesRequest, GetBranchesInWorktreesResponse>;
-  createWorktreeFromBranch: handleUnaryCall<CreateWorktreeFromBranchRequest, CreateWorktreeResponse>;
-  createWorktreeFromRemote: handleUnaryCall<CreateWorktreeFromRemoteRequest, CreateWorktreeResponse>;
-  getHeadCommitHash: handleUnaryCall<GetHeadCommitHashRequest, GetHeadCommitHashResponse>;
   /** Reviews Operations */
   loadReviews: handleUnaryCall<LoadReviewsRequest, LoadReviewsResponse>;
   saveReviews: handleUnaryCall<SaveReviewsRequest, SaveReviewsResponse>;
@@ -12166,6 +12565,13 @@ export interface TreeTermDaemonClient extends Client {
   ptyStream(): ClientDuplexStream<PtyInput, PtyOutput>;
   ptyStream(options: Partial<CallOptions>): ClientDuplexStream<PtyInput, PtyOutput>;
   ptyStream(metadata: Metadata, options?: Partial<CallOptions>): ClientDuplexStream<PtyInput, PtyOutput>;
+  /**
+   * Exec Streaming (Bidirectional)
+   * For executing one-shot shell commands with streaming I/O
+   */
+  execStream(): ClientDuplexStream<ExecInput, ExecOutput>;
+  execStream(options: Partial<CallOptions>): ClientDuplexStream<ExecInput, ExecOutput>;
+  execStream(metadata: Metadata, options?: Partial<CallOptions>): ClientDuplexStream<ExecInput, ExecOutput>;
   /** Workspace Session Management */
   createSession(
     request: CreateSessionRequest,
@@ -12254,415 +12660,6 @@ export interface TreeTermDaemonClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: Empty) => void,
-  ): ClientUnaryCall;
-  /** Git Operations */
-  getGitInfo(
-    request: GitInfoRequest,
-    callback: (error: ServiceError | null, response: GitInfoResponse) => void,
-  ): ClientUnaryCall;
-  getGitInfo(
-    request: GitInfoRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: GitInfoResponse) => void,
-  ): ClientUnaryCall;
-  getGitInfo(
-    request: GitInfoRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: GitInfoResponse) => void,
-  ): ClientUnaryCall;
-  createWorktree(
-    request: CreateWorktreeRequest,
-    callback: (error: ServiceError | null, response: CreateWorktreeResponse) => void,
-  ): ClientUnaryCall;
-  createWorktree(
-    request: CreateWorktreeRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: CreateWorktreeResponse) => void,
-  ): ClientUnaryCall;
-  createWorktree(
-    request: CreateWorktreeRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: CreateWorktreeResponse) => void,
-  ): ClientUnaryCall;
-  removeWorktree(
-    request: RemoveWorktreeRequest,
-    callback: (error: ServiceError | null, response: MergeWorktreeResponse) => void,
-  ): ClientUnaryCall;
-  removeWorktree(
-    request: RemoveWorktreeRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: MergeWorktreeResponse) => void,
-  ): ClientUnaryCall;
-  removeWorktree(
-    request: RemoveWorktreeRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: MergeWorktreeResponse) => void,
-  ): ClientUnaryCall;
-  listWorktrees(
-    request: ListWorktreesRequest,
-    callback: (error: ServiceError | null, response: ListWorktreesResponse) => void,
-  ): ClientUnaryCall;
-  listWorktrees(
-    request: ListWorktreesRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: ListWorktreesResponse) => void,
-  ): ClientUnaryCall;
-  listWorktrees(
-    request: ListWorktreesRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: ListWorktreesResponse) => void,
-  ): ClientUnaryCall;
-  getChildWorktrees(
-    request: GetChildWorktreesRequest,
-    callback: (error: ServiceError | null, response: GetChildWorktreesResponse) => void,
-  ): ClientUnaryCall;
-  getChildWorktrees(
-    request: GetChildWorktreesRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: GetChildWorktreesResponse) => void,
-  ): ClientUnaryCall;
-  getChildWorktrees(
-    request: GetChildWorktreesRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: GetChildWorktreesResponse) => void,
-  ): ClientUnaryCall;
-  getDiff(
-    request: GetDiffRequest,
-    callback: (error: ServiceError | null, response: GetDiffResponse) => void,
-  ): ClientUnaryCall;
-  getDiff(
-    request: GetDiffRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: GetDiffResponse) => void,
-  ): ClientUnaryCall;
-  getDiff(
-    request: GetDiffRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: GetDiffResponse) => void,
-  ): ClientUnaryCall;
-  getFileDiff(request: GetFileDiffRequest, options?: Partial<CallOptions>): ClientReadableStream<DiffChunk>;
-  getFileDiff(
-    request: GetFileDiffRequest,
-    metadata?: Metadata,
-    options?: Partial<CallOptions>,
-  ): ClientReadableStream<DiffChunk>;
-  getDiffAgainstHead(
-    request: GetDiffRequest,
-    callback: (error: ServiceError | null, response: GetDiffResponse) => void,
-  ): ClientUnaryCall;
-  getDiffAgainstHead(
-    request: GetDiffRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: GetDiffResponse) => void,
-  ): ClientUnaryCall;
-  getDiffAgainstHead(
-    request: GetDiffRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: GetDiffResponse) => void,
-  ): ClientUnaryCall;
-  getFileDiffAgainstHead(request: GetFileDiffRequest, options?: Partial<CallOptions>): ClientReadableStream<DiffChunk>;
-  getFileDiffAgainstHead(
-    request: GetFileDiffRequest,
-    metadata?: Metadata,
-    options?: Partial<CallOptions>,
-  ): ClientReadableStream<DiffChunk>;
-  mergeWorktree(
-    request: MergeWorktreeRequest,
-    callback: (error: ServiceError | null, response: MergeWorktreeResponse) => void,
-  ): ClientUnaryCall;
-  mergeWorktree(
-    request: MergeWorktreeRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: MergeWorktreeResponse) => void,
-  ): ClientUnaryCall;
-  mergeWorktree(
-    request: MergeWorktreeRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: MergeWorktreeResponse) => void,
-  ): ClientUnaryCall;
-  hasUncommittedChanges(
-    request: HasUncommittedChangesRequest,
-    callback: (error: ServiceError | null, response: HasUncommittedChangesResponse) => void,
-  ): ClientUnaryCall;
-  hasUncommittedChanges(
-    request: HasUncommittedChangesRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: HasUncommittedChangesResponse) => void,
-  ): ClientUnaryCall;
-  hasUncommittedChanges(
-    request: HasUncommittedChangesRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: HasUncommittedChangesResponse) => void,
-  ): ClientUnaryCall;
-  commitAll(
-    request: CommitAllRequest,
-    callback: (error: ServiceError | null, response: CommitAllResponse) => void,
-  ): ClientUnaryCall;
-  commitAll(
-    request: CommitAllRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: CommitAllResponse) => void,
-  ): ClientUnaryCall;
-  commitAll(
-    request: CommitAllRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: CommitAllResponse) => void,
-  ): ClientUnaryCall;
-  deleteBranch(
-    request: DeleteBranchRequest,
-    callback: (error: ServiceError | null, response: DeleteBranchResponse) => void,
-  ): ClientUnaryCall;
-  deleteBranch(
-    request: DeleteBranchRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: DeleteBranchResponse) => void,
-  ): ClientUnaryCall;
-  deleteBranch(
-    request: DeleteBranchRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: DeleteBranchResponse) => void,
-  ): ClientUnaryCall;
-  getUncommittedChanges(
-    request: GetUncommittedChangesRequest,
-    callback: (error: ServiceError | null, response: GetUncommittedChangesResponse) => void,
-  ): ClientUnaryCall;
-  getUncommittedChanges(
-    request: GetUncommittedChangesRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: GetUncommittedChangesResponse) => void,
-  ): ClientUnaryCall;
-  getUncommittedChanges(
-    request: GetUncommittedChangesRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: GetUncommittedChangesResponse) => void,
-  ): ClientUnaryCall;
-  getUncommittedFileDiff(
-    request: GetUncommittedFileDiffRequest,
-    options?: Partial<CallOptions>,
-  ): ClientReadableStream<DiffChunk>;
-  getUncommittedFileDiff(
-    request: GetUncommittedFileDiffRequest,
-    metadata?: Metadata,
-    options?: Partial<CallOptions>,
-  ): ClientReadableStream<DiffChunk>;
-  stageFile(
-    request: StageFileRequest,
-    callback: (error: ServiceError | null, response: StageFileResponse) => void,
-  ): ClientUnaryCall;
-  stageFile(
-    request: StageFileRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: StageFileResponse) => void,
-  ): ClientUnaryCall;
-  stageFile(
-    request: StageFileRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: StageFileResponse) => void,
-  ): ClientUnaryCall;
-  unstageFile(
-    request: StageFileRequest,
-    callback: (error: ServiceError | null, response: StageFileResponse) => void,
-  ): ClientUnaryCall;
-  unstageFile(
-    request: StageFileRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: StageFileResponse) => void,
-  ): ClientUnaryCall;
-  unstageFile(
-    request: StageFileRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: StageFileResponse) => void,
-  ): ClientUnaryCall;
-  stageAll(
-    request: StageAllRequest,
-    callback: (error: ServiceError | null, response: StageAllResponse) => void,
-  ): ClientUnaryCall;
-  stageAll(
-    request: StageAllRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: StageAllResponse) => void,
-  ): ClientUnaryCall;
-  stageAll(
-    request: StageAllRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: StageAllResponse) => void,
-  ): ClientUnaryCall;
-  unstageAll(
-    request: StageAllRequest,
-    callback: (error: ServiceError | null, response: StageAllResponse) => void,
-  ): ClientUnaryCall;
-  unstageAll(
-    request: StageAllRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: StageAllResponse) => void,
-  ): ClientUnaryCall;
-  unstageAll(
-    request: StageAllRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: StageAllResponse) => void,
-  ): ClientUnaryCall;
-  commitStaged(
-    request: CommitStagedRequest,
-    callback: (error: ServiceError | null, response: CommitStagedResponse) => void,
-  ): ClientUnaryCall;
-  commitStaged(
-    request: CommitStagedRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: CommitStagedResponse) => void,
-  ): ClientUnaryCall;
-  commitStaged(
-    request: CommitStagedRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: CommitStagedResponse) => void,
-  ): ClientUnaryCall;
-  checkMergeConflicts(
-    request: CheckMergeConflictsRequest,
-    callback: (error: ServiceError | null, response: CheckMergeConflictsResponse) => void,
-  ): ClientUnaryCall;
-  checkMergeConflicts(
-    request: CheckMergeConflictsRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: CheckMergeConflictsResponse) => void,
-  ): ClientUnaryCall;
-  checkMergeConflicts(
-    request: CheckMergeConflictsRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: CheckMergeConflictsResponse) => void,
-  ): ClientUnaryCall;
-  getFileContentsForDiff(
-    request: GetFileContentsForDiffRequest,
-    options?: Partial<CallOptions>,
-  ): ClientReadableStream<FileContentsChunk>;
-  getFileContentsForDiff(
-    request: GetFileContentsForDiffRequest,
-    metadata?: Metadata,
-    options?: Partial<CallOptions>,
-  ): ClientReadableStream<FileContentsChunk>;
-  getFileContentsForDiffAgainstHead(
-    request: GetFileContentsForDiffRequest,
-    options?: Partial<CallOptions>,
-  ): ClientReadableStream<FileContentsChunk>;
-  getFileContentsForDiffAgainstHead(
-    request: GetFileContentsForDiffRequest,
-    metadata?: Metadata,
-    options?: Partial<CallOptions>,
-  ): ClientReadableStream<FileContentsChunk>;
-  getUncommittedFileContentsForDiff(
-    request: GetUncommittedFileContentsForDiffRequest,
-    options?: Partial<CallOptions>,
-  ): ClientReadableStream<FileContentsChunk>;
-  getUncommittedFileContentsForDiff(
-    request: GetUncommittedFileContentsForDiffRequest,
-    metadata?: Metadata,
-    options?: Partial<CallOptions>,
-  ): ClientReadableStream<FileContentsChunk>;
-  listLocalBranches(
-    request: ListLocalBranchesRequest,
-    callback: (error: ServiceError | null, response: ListLocalBranchesResponse) => void,
-  ): ClientUnaryCall;
-  listLocalBranches(
-    request: ListLocalBranchesRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: ListLocalBranchesResponse) => void,
-  ): ClientUnaryCall;
-  listLocalBranches(
-    request: ListLocalBranchesRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: ListLocalBranchesResponse) => void,
-  ): ClientUnaryCall;
-  listRemoteBranches(
-    request: ListRemoteBranchesRequest,
-    callback: (error: ServiceError | null, response: ListRemoteBranchesResponse) => void,
-  ): ClientUnaryCall;
-  listRemoteBranches(
-    request: ListRemoteBranchesRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: ListRemoteBranchesResponse) => void,
-  ): ClientUnaryCall;
-  listRemoteBranches(
-    request: ListRemoteBranchesRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: ListRemoteBranchesResponse) => void,
-  ): ClientUnaryCall;
-  getBranchesInWorktrees(
-    request: GetBranchesInWorktreesRequest,
-    callback: (error: ServiceError | null, response: GetBranchesInWorktreesResponse) => void,
-  ): ClientUnaryCall;
-  getBranchesInWorktrees(
-    request: GetBranchesInWorktreesRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: GetBranchesInWorktreesResponse) => void,
-  ): ClientUnaryCall;
-  getBranchesInWorktrees(
-    request: GetBranchesInWorktreesRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: GetBranchesInWorktreesResponse) => void,
-  ): ClientUnaryCall;
-  createWorktreeFromBranch(
-    request: CreateWorktreeFromBranchRequest,
-    callback: (error: ServiceError | null, response: CreateWorktreeResponse) => void,
-  ): ClientUnaryCall;
-  createWorktreeFromBranch(
-    request: CreateWorktreeFromBranchRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: CreateWorktreeResponse) => void,
-  ): ClientUnaryCall;
-  createWorktreeFromBranch(
-    request: CreateWorktreeFromBranchRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: CreateWorktreeResponse) => void,
-  ): ClientUnaryCall;
-  createWorktreeFromRemote(
-    request: CreateWorktreeFromRemoteRequest,
-    callback: (error: ServiceError | null, response: CreateWorktreeResponse) => void,
-  ): ClientUnaryCall;
-  createWorktreeFromRemote(
-    request: CreateWorktreeFromRemoteRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: CreateWorktreeResponse) => void,
-  ): ClientUnaryCall;
-  createWorktreeFromRemote(
-    request: CreateWorktreeFromRemoteRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: CreateWorktreeResponse) => void,
-  ): ClientUnaryCall;
-  getHeadCommitHash(
-    request: GetHeadCommitHashRequest,
-    callback: (error: ServiceError | null, response: GetHeadCommitHashResponse) => void,
-  ): ClientUnaryCall;
-  getHeadCommitHash(
-    request: GetHeadCommitHashRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: GetHeadCommitHashResponse) => void,
-  ): ClientUnaryCall;
-  getHeadCommitHash(
-    request: GetHeadCommitHashRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: GetHeadCommitHashResponse) => void,
   ): ClientUnaryCall;
   /** Reviews Operations */
   loadReviews(

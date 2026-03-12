@@ -9,9 +9,9 @@ import type { DaemonPtyManager } from './ptyManager'
 import type { SessionStore } from './sessionStore'
 import { createModuleLogger } from './logger'
 import { getDefaultSocketPath } from './socketPath'
-import * as git from './git'
 import * as filesystem from './filesystem'
 import * as reviews from './reviews'
+import { execManager } from './execManager'
 import {
   TreeTermDaemonService,
   type CreatePtyRequest,
@@ -35,51 +35,8 @@ import {
   type DaemonSession as ProtoDaemonSession,
   type WorkspaceInput,
   type PtySessionInfo,
-  type GitInfoRequest,
-  type GitInfoResponse,
-  type CreateWorktreeRequest,
-  type CreateWorktreeResponse,
-  type RemoveWorktreeRequest,
-  type MergeWorktreeResponse,
-  type ListWorktreesRequest,
-  type ListWorktreesResponse,
-  type GetChildWorktreesRequest,
-  type GetChildWorktreesResponse,
-  type GetDiffRequest,
-  type GetDiffResponse,
-  type GetFileDiffRequest,
-  type GetFileDiffResponse,
-  type MergeWorktreeRequest,
-  type HasUncommittedChangesRequest,
-  type HasUncommittedChangesResponse,
-  type CommitAllRequest,
-  type CommitAllResponse,
-  type DeleteBranchRequest,
-  type DeleteBranchResponse,
-  type GetUncommittedChangesRequest,
-  type GetUncommittedChangesResponse,
-  type GetUncommittedFileDiffRequest,
-  type StageFileRequest,
-  type StageFileResponse,
-  type StageAllRequest,
-  type StageAllResponse,
-  type CommitStagedRequest,
-  type CommitStagedResponse,
-  type CheckMergeConflictsRequest,
-  type CheckMergeConflictsResponse,
-  type GetFileContentsForDiffRequest,
-  type GetFileContentsForDiffResponse,
-  type GetUncommittedFileContentsForDiffRequest,
-  type ListLocalBranchesRequest,
-  type ListLocalBranchesResponse,
-  type ListRemoteBranchesRequest,
-  type ListRemoteBranchesResponse,
-  type GetBranchesInWorktreesRequest,
-  type GetBranchesInWorktreesResponse,
-  type CreateWorktreeFromBranchRequest,
-  type CreateWorktreeFromRemoteRequest,
-  type GetHeadCommitHashRequest,
-  type GetHeadCommitHashResponse,
+  type ExecInput,
+  type ExecOutput,
   type LoadReviewsRequest,
   type LoadReviewsResponse,
   type SaveReviewsRequest,
@@ -96,10 +53,9 @@ import {
   type ReadFileResponse,
   type WriteFileRequest,
   type WriteFileResponse,
-  type DiffChunk,
-  type FileContentsChunk,
   type FileReadChunk,
-  type FileWriteChunk
+  type FileWriteChunk,
+  type DiffChunk
 } from '../generated/treeterm'
 
 const log = createModuleLogger('grpcServer')
@@ -197,6 +153,9 @@ export class GrpcServer {
       this.clientStreams.delete(clientId)
     }
 
+    // Shutdown exec manager
+    execManager.shutdown()
+
     // Stop server
     this.server.forceShutdown()
 
@@ -216,43 +175,13 @@ export class GrpcServer {
       listPtySessions: this.handleListPtySessions.bind(this),
       getScrollback: this.handleGetScrollback.bind(this),
       ptyStream: this.handlePtyStream.bind(this),
+      execStream: this.handleExecStream.bind(this),
       createSession: this.handleCreateSession.bind(this),
       updateSession: this.handleUpdateSession.bind(this),
       getSession: this.handleGetSession.bind(this),
       deleteSession: this.handleDeleteSession.bind(this),
       listSessions: this.handleListSessions.bind(this),
       shutdown: this.handleShutdown.bind(this),
-      // Git operations
-      getGitInfo: this.handleGetGitInfo.bind(this),
-      createWorktree: this.handleCreateWorktree.bind(this),
-      removeWorktree: this.handleRemoveWorktree.bind(this),
-      listWorktrees: this.handleListWorktrees.bind(this),
-      getChildWorktrees: this.handleGetChildWorktrees.bind(this),
-      getDiff: this.handleGetDiff.bind(this),
-      getFileDiff: this.handleGetFileDiff.bind(this),
-      getDiffAgainstHead: this.handleGetDiffAgainstHead.bind(this),
-      getFileDiffAgainstHead: this.handleGetFileDiffAgainstHead.bind(this),
-      mergeWorktree: this.handleMergeWorktree.bind(this),
-      hasUncommittedChanges: this.handleHasUncommittedChanges.bind(this),
-      commitAll: this.handleCommitAll.bind(this),
-      deleteBranch: this.handleDeleteBranch.bind(this),
-      getUncommittedChanges: this.handleGetUncommittedChanges.bind(this),
-      getUncommittedFileDiff: this.handleGetUncommittedFileDiff.bind(this),
-      stageFile: this.handleStageFile.bind(this),
-      unstageFile: this.handleUnstageFile.bind(this),
-      stageAll: this.handleStageAll.bind(this),
-      unstageAll: this.handleUnstageAll.bind(this),
-      commitStaged: this.handleCommitStaged.bind(this),
-      checkMergeConflicts: this.handleCheckMergeConflicts.bind(this),
-      getFileContentsForDiff: this.handleGetFileContentsForDiff.bind(this),
-      getFileContentsForDiffAgainstHead: this.handleGetFileContentsForDiffAgainstHead.bind(this),
-      getUncommittedFileContentsForDiff: this.handleGetUncommittedFileContentsForDiff.bind(this),
-      listLocalBranches: this.handleListLocalBranches.bind(this),
-      listRemoteBranches: this.handleListRemoteBranches.bind(this),
-      getBranchesInWorktrees: this.handleGetBranchesInWorktrees.bind(this),
-      createWorktreeFromBranch: this.handleCreateWorktreeFromBranch.bind(this),
-      createWorktreeFromRemote: this.handleCreateWorktreeFromRemote.bind(this),
-      getHeadCommitHash: this.handleGetHeadCommitHash.bind(this),
       // Reviews operations
       loadReviews: this.handleLoadReviews.bind(this),
       saveReviews: this.handleSaveReviews.bind(this),
@@ -300,15 +229,18 @@ export class GrpcServer {
   ): void {
     try {
       const { sessionId } = call.request
-      log.debug({ sessionId }, 'attachPty called')
-
-      // Get client ID from metadata
       const clientId = this.getClientId(call.metadata)
+      log.info({ sessionId, clientId }, 'attachPty called')
 
-      const result = this.ptyManager.attach(sessionId, clientId)
-      callback(null, { scrollback: result.scrollback })
+      // Attach client to PTY session
+      this.ptyManager.attach(sessionId, clientId)
+
+      // Get scrollback history
+      const scrollback = this.ptyManager.getScrollback(sessionId)
+
+      callback(null, { scrollback })
     } catch (error) {
-      log.error({ err: error }, 'attachPty error')
+      log.error({ err: error, sessionId: call.request.sessionId }, 'attachPty error')
       callback({
         code: grpc.status.NOT_FOUND,
         message: error instanceof Error ? error.message : 'Unknown error'
@@ -323,12 +255,12 @@ export class GrpcServer {
     try {
       const { sessionId } = call.request
       const clientId = this.getClientId(call.metadata)
+      log.info({ sessionId, clientId }, 'detachPty called')
 
-      log.debug({ sessionId, clientId }, 'detachPty called')
       this.ptyManager.detach(sessionId, clientId)
       callback(null, {})
     } catch (error) {
-      log.error({ err: error }, 'detachPty error')
+      log.error({ err: error, sessionId: call.request.sessionId }, 'detachPty error')
       callback({
         code: grpc.status.INTERNAL,
         message: error instanceof Error ? error.message : 'Unknown error'
@@ -482,6 +414,81 @@ export class GrpcServer {
     this.sessionStore.detachClient(clientId)
 
     this.clientStreams.delete(clientId)
+  }
+
+  // Exec Streaming Handler (Bidirectional)
+
+  private handleExecStream(
+    call: grpc.ServerDuplexStream<ExecInput, ExecOutput>
+  ): void {
+    const clientId = this.getClientId(call.metadata) || `client-${++this.clientCounter}`
+    log.info({ clientId }, 'exec stream connected')
+
+    let execId: string | null = null
+    let started = false
+
+    call.on('data', (input: ExecInput) => {
+      try {
+        if (!started && input.start) {
+          started = true
+          execId = `exec-${++this.clientCounter}-${Date.now()}`
+          
+          log.debug({ execId, command: input.start.command, args: input.start.args }, 'starting exec')
+          
+          execManager.start(execId, {
+            cwd: input.start.cwd,
+            command: input.start.command,
+            args: input.start.args,
+            env: input.start.env,
+            timeoutMs: input.start.timeoutMs ?? 30000
+          }, {
+            onStdout: (data) => {
+              call.write({ stdout: { data } })
+            },
+            onStderr: (data) => {
+              call.write({ stderr: { data } })
+            },
+            onExit: (code, signal, error) => {
+              log.debug({ execId, code, signal, error: error?.message }, 'exec completed')
+              call.write({
+                result: {
+                  exitCode: code ?? -1,
+                  error: error?.message
+                }
+              })
+              call.end()
+            }
+          })
+        } else if (execId && input.stdin) {
+          execManager.writeStdin(execId, input.stdin)
+        } else if (execId && input.signal) {
+          execManager.kill(execId, input.signal.signal)
+        }
+      } catch (error) {
+        log.error({ err: error, clientId }, 'error processing exec input')
+        call.write({
+          result: {
+            exitCode: -1,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          }
+        })
+        call.end()
+      }
+    })
+
+    call.on('end', () => {
+      log.info({ clientId }, 'exec stream ended')
+      if (execId) {
+        execManager.closeStdin(execId)
+      }
+    })
+
+    call.on('error', (error) => {
+      log.error({ err: error, clientId }, 'exec stream error')
+      if (execId) {
+        execManager.kill(execId, 15) // SIGTERM
+      }
+    })
   }
 
   // Workspace Session Handlers
@@ -718,625 +725,6 @@ export class GrpcServer {
       createdAt: session.createdAt,
       lastActivity: session.lastActivity,
       attachedClients: session.attachedClients
-    }
-  }
-
-  // Git Operation Handlers
-
-  private async handleGetGitInfo(
-    call: grpc.ServerUnaryCall<GitInfoRequest, GitInfoResponse>,
-    callback: grpc.sendUnaryData<GitInfoResponse>
-  ): Promise<void> {
-    try {
-      const info = await git.getGitInfo(call.request.dirPath)
-      callback(null, {
-        isRepo: info.isRepo,
-        branch: info.branch ?? undefined,
-        rootPath: info.rootPath ?? undefined
-      })
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleCreateWorktree(
-    call: grpc.ServerUnaryCall<CreateWorktreeRequest, CreateWorktreeResponse>,
-    callback: grpc.sendUnaryData<CreateWorktreeResponse>
-  ): Promise<void> {
-    try {
-      const result = await git.createWorktree(
-        call.request.repoPath,
-        call.request.worktreeName,
-        call.request.baseBranch
-      )
-      callback(null, result)
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleRemoveWorktree(
-    call: grpc.ServerUnaryCall<RemoveWorktreeRequest, MergeWorktreeResponse>,
-    callback: grpc.sendUnaryData<MergeWorktreeResponse>
-  ): Promise<void> {
-    try {
-      const result = await git.removeWorktree(
-        call.request.repoPath,
-        call.request.worktreePath,
-        call.request.deleteBranch
-      )
-      callback(null, result)
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleListWorktrees(
-    call: grpc.ServerUnaryCall<ListWorktreesRequest, ListWorktreesResponse>,
-    callback: grpc.sendUnaryData<ListWorktreesResponse>
-  ): Promise<void> {
-    try {
-      const worktrees = await git.listWorktrees(call.request.repoPath)
-      callback(null, { worktrees })
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleGetChildWorktrees(
-    call: grpc.ServerUnaryCall<GetChildWorktreesRequest, GetChildWorktreesResponse>,
-    callback: grpc.sendUnaryData<GetChildWorktreesResponse>
-  ): Promise<void> {
-    try {
-      const worktrees = await git.getChildWorktrees(
-        call.request.repoPath,
-        call.request.parentBranch ?? null
-      )
-      callback(null, { worktrees })
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleGetDiff(
-    call: grpc.ServerUnaryCall<GetDiffRequest, GetDiffResponse>,
-    callback: grpc.sendUnaryData<GetDiffResponse>
-  ): Promise<void> {
-    try {
-      const result = await git.getDiff(call.request.worktreePath, call.request.parentBranch)
-      callback(null, result)
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleGetFileDiff(
-    call: grpc.ServerWritableStream<GetFileDiffRequest, DiffChunk>
-  ): Promise<void> {
-    try {
-      const result = await git.getFileDiff(
-        call.request.worktreePath,
-        call.request.parentBranch,
-        call.request.filePath
-      )
-
-      if (!result.success || !result.diff) {
-        call.write({ error: { message: result.error || 'Unknown error' } })
-        call.end()
-        return
-      }
-
-      // Stream diff in 64KB chunks
-      const diff = result.diff
-      const chunkSize = 64 * 1024
-
-      for (let i = 0; i < diff.length; i += chunkSize) {
-        const chunk = diff.slice(i, i + chunkSize)
-        call.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
-      }
-
-      call.write({ end: { success: true } })
-      call.end()
-    } catch (error) {
-      call.write({ error: { message: error instanceof Error ? error.message : 'Unknown error' } })
-      call.end()
-    }
-  }
-
-  private async handleGetDiffAgainstHead(
-    call: grpc.ServerUnaryCall<GetDiffRequest, GetDiffResponse>,
-    callback: grpc.sendUnaryData<GetDiffResponse>
-  ): Promise<void> {
-    try {
-      const result = await git.getDiffAgainstHead(
-        call.request.worktreePath,
-        call.request.parentBranch
-      )
-      callback(null, result)
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleGetFileDiffAgainstHead(
-    call: grpc.ServerWritableStream<GetFileDiffRequest, DiffChunk>
-  ): Promise<void> {
-    try {
-      const result = await git.getFileDiffAgainstHead(
-        call.request.worktreePath,
-        call.request.parentBranch,
-        call.request.filePath
-      )
-
-      if (!result.success || !result.diff) {
-        call.write({ error: { message: result.error || 'Unknown error' } })
-        call.end()
-        return
-      }
-
-      // Stream diff in 64KB chunks
-      const diff = result.diff
-      const chunkSize = 64 * 1024
-
-      for (let i = 0; i < diff.length; i += chunkSize) {
-        const chunk = diff.slice(i, i + chunkSize)
-        call.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
-      }
-
-      call.write({ end: { success: true } })
-      call.end()
-    } catch (error) {
-      call.write({ error: { message: error instanceof Error ? error.message : 'Unknown error' } })
-      call.end()
-    }
-  }
-
-  private async handleMergeWorktree(
-    call: grpc.ServerUnaryCall<MergeWorktreeRequest, MergeWorktreeResponse>,
-    callback: grpc.sendUnaryData<MergeWorktreeResponse>
-  ): Promise<void> {
-    try {
-      const result = await git.mergeWorktree(
-        call.request.mainRepoPath,
-        call.request.worktreeBranch,
-        call.request.targetBranch,
-        call.request.squash
-      )
-      callback(null, result)
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleHasUncommittedChanges(
-    call: grpc.ServerUnaryCall<HasUncommittedChangesRequest, HasUncommittedChangesResponse>,
-    callback: grpc.sendUnaryData<HasUncommittedChangesResponse>
-  ): Promise<void> {
-    try {
-      const hasChanges = await git.hasUncommittedChanges(call.request.repoPath)
-      callback(null, { hasChanges })
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleCommitAll(
-    call: grpc.ServerUnaryCall<CommitAllRequest, CommitAllResponse>,
-    callback: grpc.sendUnaryData<CommitAllResponse>
-  ): Promise<void> {
-    try {
-      const result = await git.commitAll(call.request.repoPath, call.request.message)
-      callback(null, result)
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleDeleteBranch(
-    call: grpc.ServerUnaryCall<DeleteBranchRequest, DeleteBranchResponse>,
-    callback: grpc.sendUnaryData<DeleteBranchResponse>
-  ): Promise<void> {
-    try {
-      const result = await git.deleteBranch(call.request.repoPath, call.request.branchName)
-      callback(null, result)
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleGetUncommittedChanges(
-    call: grpc.ServerUnaryCall<GetUncommittedChangesRequest, GetUncommittedChangesResponse>,
-    callback: grpc.sendUnaryData<GetUncommittedChangesResponse>
-  ): Promise<void> {
-    try {
-      const result = await git.getUncommittedChanges(call.request.repoPath)
-      callback(null, result)
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleGetUncommittedFileDiff(
-    call: grpc.ServerWritableStream<GetUncommittedFileDiffRequest, DiffChunk>
-  ): Promise<void> {
-    try {
-      const result = await git.getUncommittedFileDiff(
-        call.request.repoPath,
-        call.request.filePath,
-        call.request.staged
-      )
-
-      if (!result.success || !result.diff) {
-        call.write({ error: { message: result.error || 'Unknown error' } })
-        call.end()
-        return
-      }
-
-      // Stream diff in 64KB chunks
-      const diff = result.diff
-      const chunkSize = 64 * 1024
-
-      for (let i = 0; i < diff.length; i += chunkSize) {
-        const chunk = diff.slice(i, i + chunkSize)
-        call.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
-      }
-
-      call.write({ end: { success: true } })
-      call.end()
-    } catch (error) {
-      call.write({ error: { message: error instanceof Error ? error.message : 'Unknown error' } })
-      call.end()
-    }
-  }
-
-  private async handleStageFile(
-    call: grpc.ServerUnaryCall<StageFileRequest, StageFileResponse>,
-    callback: grpc.sendUnaryData<StageFileResponse>
-  ): Promise<void> {
-    try {
-      const result = await git.stageFile(call.request.repoPath, call.request.filePath)
-      callback(null, result)
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleUnstageFile(
-    call: grpc.ServerUnaryCall<StageFileRequest, StageFileResponse>,
-    callback: grpc.sendUnaryData<StageFileResponse>
-  ): Promise<void> {
-    try {
-      const result = await git.unstageFile(call.request.repoPath, call.request.filePath)
-      callback(null, result)
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleStageAll(
-    call: grpc.ServerUnaryCall<StageAllRequest, StageAllResponse>,
-    callback: grpc.sendUnaryData<StageAllResponse>
-  ): Promise<void> {
-    try {
-      const result = await git.stageAll(call.request.repoPath)
-      callback(null, result)
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleUnstageAll(
-    call: grpc.ServerUnaryCall<StageAllRequest, StageAllResponse>,
-    callback: grpc.sendUnaryData<StageAllResponse>
-  ): Promise<void> {
-    try {
-      const result = await git.unstageAll(call.request.repoPath)
-      callback(null, result)
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleCommitStaged(
-    call: grpc.ServerUnaryCall<CommitStagedRequest, CommitStagedResponse>,
-    callback: grpc.sendUnaryData<CommitStagedResponse>
-  ): Promise<void> {
-    try {
-      const result = await git.commitStaged(call.request.repoPath, call.request.message)
-      callback(null, result)
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleCheckMergeConflicts(
-    call: grpc.ServerUnaryCall<CheckMergeConflictsRequest, CheckMergeConflictsResponse>,
-    callback: grpc.sendUnaryData<CheckMergeConflictsResponse>
-  ): Promise<void> {
-    try {
-      const result = await git.checkMergeConflicts(
-        call.request.repoPath,
-        call.request.sourceBranch,
-        call.request.targetBranch
-      )
-      callback(null, result)
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleGetFileContentsForDiff(
-    call: grpc.ServerWritableStream<GetFileContentsForDiffRequest, FileContentsChunk>
-  ): Promise<void> {
-    try {
-      const result = await git.getFileContentsForDiff(
-        call.request.worktreePath,
-        call.request.parentBranch,
-        call.request.filePath
-      )
-
-      if (!result.success || !result.contents) {
-        call.write({ end: { success: false, error: result.error || 'Unknown error' } })
-        call.end()
-        return
-      }
-
-      const chunkSize = 64 * 1024
-      const { originalContent, modifiedContent, language } = result.contents
-
-      // Stream original content
-      call.write({ header: { language, isOriginal: true } })
-      for (let i = 0; i < originalContent.length; i += chunkSize) {
-        const chunk = originalContent.slice(i, i + chunkSize)
-        call.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
-      }
-
-      // Stream modified content
-      call.write({ header: { language, isOriginal: false } })
-      for (let i = 0; i < modifiedContent.length; i += chunkSize) {
-        const chunk = modifiedContent.slice(i, i + chunkSize)
-        call.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
-      }
-
-      call.write({ end: { success: true } })
-      call.end()
-    } catch (error) {
-      call.write({ end: { success: false, error: error instanceof Error ? error.message : 'Unknown error' } })
-      call.end()
-    }
-  }
-
-  private async handleGetFileContentsForDiffAgainstHead(
-    call: grpc.ServerWritableStream<GetFileContentsForDiffRequest, FileContentsChunk>
-  ): Promise<void> {
-    try {
-      const result = await git.getFileContentsForDiffAgainstHead(
-        call.request.worktreePath,
-        call.request.parentBranch,
-        call.request.filePath
-      )
-
-      if (!result.success || !result.contents) {
-        call.write({ end: { success: false, error: result.error || 'Unknown error' } })
-        call.end()
-        return
-      }
-
-      const chunkSize = 64 * 1024
-      const { originalContent, modifiedContent, language } = result.contents
-
-      // Stream original content
-      call.write({ header: { language, isOriginal: true } })
-      for (let i = 0; i < originalContent.length; i += chunkSize) {
-        const chunk = originalContent.slice(i, i + chunkSize)
-        call.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
-      }
-
-      // Stream modified content
-      call.write({ header: { language, isOriginal: false } })
-      for (let i = 0; i < modifiedContent.length; i += chunkSize) {
-        const chunk = modifiedContent.slice(i, i + chunkSize)
-        call.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
-      }
-
-      call.write({ end: { success: true } })
-      call.end()
-    } catch (error) {
-      call.write({ end: { success: false, error: error instanceof Error ? error.message : 'Unknown error' } })
-      call.end()
-    }
-  }
-
-  private async handleGetUncommittedFileContentsForDiff(
-    call: grpc.ServerWritableStream<GetUncommittedFileContentsForDiffRequest, FileContentsChunk>
-  ): Promise<void> {
-    try {
-      const result = await git.getUncommittedFileContentsForDiff(
-        call.request.repoPath,
-        call.request.filePath,
-        call.request.staged
-      )
-
-      if (!result.success || !result.contents) {
-        call.write({ end: { success: false, error: result.error || 'Unknown error' } })
-        call.end()
-        return
-      }
-
-      const chunkSize = 64 * 1024
-      const { originalContent, modifiedContent, language } = result.contents
-
-      // Stream original content
-      call.write({ header: { language, isOriginal: true } })
-      for (let i = 0; i < originalContent.length; i += chunkSize) {
-        const chunk = originalContent.slice(i, i + chunkSize)
-        call.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
-      }
-
-      // Stream modified content
-      call.write({ header: { language, isOriginal: false } })
-      for (let i = 0; i < modifiedContent.length; i += chunkSize) {
-        const chunk = modifiedContent.slice(i, i + chunkSize)
-        call.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
-      }
-
-      call.write({ end: { success: true } })
-      call.end()
-    } catch (error) {
-      call.write({ end: { success: false, error: error instanceof Error ? error.message : 'Unknown error' } })
-      call.end()
-    }
-  }
-
-  private async handleListLocalBranches(
-    call: grpc.ServerUnaryCall<ListLocalBranchesRequest, ListLocalBranchesResponse>,
-    callback: grpc.sendUnaryData<ListLocalBranchesResponse>
-  ): Promise<void> {
-    try {
-      const branches = await git.listLocalBranches(call.request.repoPath)
-      callback(null, { branches })
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleListRemoteBranches(
-    call: grpc.ServerUnaryCall<ListRemoteBranchesRequest, ListRemoteBranchesResponse>,
-    callback: grpc.sendUnaryData<ListRemoteBranchesResponse>
-  ): Promise<void> {
-    try {
-      const branches = await git.listRemoteBranches(call.request.repoPath)
-      callback(null, { branches })
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleGetBranchesInWorktrees(
-    call: grpc.ServerUnaryCall<GetBranchesInWorktreesRequest, GetBranchesInWorktreesResponse>,
-    callback: grpc.sendUnaryData<GetBranchesInWorktreesResponse>
-  ): Promise<void> {
-    try {
-      const branches = await git.getBranchesInWorktrees(call.request.repoPath)
-      callback(null, { branches })
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleCreateWorktreeFromBranch(
-    call: grpc.ServerUnaryCall<CreateWorktreeFromBranchRequest, CreateWorktreeResponse>,
-    callback: grpc.sendUnaryData<CreateWorktreeResponse>
-  ): Promise<void> {
-    try {
-      const result = await git.createWorktreeFromBranch(
-        call.request.repoPath,
-        call.request.branch,
-        call.request.worktreeName
-      )
-      callback(null, result)
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleCreateWorktreeFromRemote(
-    call: grpc.ServerUnaryCall<CreateWorktreeFromRemoteRequest, CreateWorktreeResponse>,
-    callback: grpc.sendUnaryData<CreateWorktreeResponse>
-  ): Promise<void> {
-    try {
-      const result = await git.createWorktreeFromRemote(
-        call.request.repoPath,
-        call.request.remoteBranch,
-        call.request.worktreeName
-      )
-      callback(null, result)
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private async handleGetHeadCommitHash(
-    call: grpc.ServerUnaryCall<GetHeadCommitHashRequest, GetHeadCommitHashResponse>,
-    callback: grpc.sendUnaryData<GetHeadCommitHashResponse>
-  ): Promise<void> {
-    try {
-      const result = await git.getHeadCommitHash(call.request.repoPath)
-      callback(null, result)
-    } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
     }
   }
 

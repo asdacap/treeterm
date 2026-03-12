@@ -167,6 +167,51 @@ message PtyExit {
 }
 
 // ============================================
+// Exec Streaming Messages (Bidirectional)
+// ============================================
+
+message ExecInput {
+  oneof input {
+    ExecStart start = 1;
+    bytes stdin = 2;
+    ExecSignal signal = 3;
+  }
+}
+
+message ExecStart {
+  string cwd = 1;
+  string command = 2;
+  repeated string args = 3;
+  map<string, string> env = 4;    // Environment variable injection
+  optional int32 timeout_ms = 5;  // 0 = no timeout, default 30000 (30s)
+}
+
+message ExecSignal {
+  int32 signal = 1;
+}
+
+message ExecOutput {
+  oneof output {
+    ExecStdout stdout = 1;
+    ExecStderr stderr = 2;
+    ExecResult result = 3;
+  }
+}
+
+message ExecStdout {
+  bytes data = 1;
+}
+
+message ExecStderr {
+  bytes data = 1;
+}
+
+message ExecResult {
+  int32 exit_code = 1;
+  optional string error = 2;  // System error only (spawn failure, etc.)
+}
+
+// ============================================
 // Workspace Session Messages
 // ============================================
 
@@ -192,8 +237,12 @@ message ListSessionsResponse {
 }
 
 // ============================================
-// Git Messages
+// Git Messages - Kept for backward compatibility
+// Note: Git operations are now handled in Main process via ExecStream
 // ============================================
+
+// Legacy git messages retained for generated type compatibility
+// These will be removed in a future version
 
 message GitInfoRequest {
   string dir_path = 1;
@@ -722,6 +771,10 @@ service TreeTermDaemon {
   // Client sends input (write/resize), server sends output (data/exit)
   rpc PtyStream(stream PtyInput) returns (stream PtyOutput);
 
+  // Exec Streaming (Bidirectional)
+  // For executing one-shot shell commands with streaming I/O
+  rpc ExecStream(stream ExecInput) returns (stream ExecOutput);
+
   // Workspace Session Management
   rpc CreateSession(CreateSessionRequest) returns (DaemonSession);
   rpc UpdateSession(UpdateSessionRequest) returns (DaemonSession);
@@ -731,38 +784,6 @@ service TreeTermDaemon {
 
   // Daemon Control
   rpc Shutdown(Empty) returns (Empty);
-
-  // Git Operations
-  rpc GetGitInfo(GitInfoRequest) returns (GitInfoResponse);
-  rpc CreateWorktree(CreateWorktreeRequest) returns (CreateWorktreeResponse);
-  rpc RemoveWorktree(RemoveWorktreeRequest) returns (MergeWorktreeResponse);
-  rpc ListWorktrees(ListWorktreesRequest) returns (ListWorktreesResponse);
-  rpc GetChildWorktrees(GetChildWorktreesRequest) returns (GetChildWorktreesResponse);
-  rpc GetDiff(GetDiffRequest) returns (GetDiffResponse);
-  rpc GetFileDiff(GetFileDiffRequest) returns (stream DiffChunk);
-  rpc GetDiffAgainstHead(GetDiffRequest) returns (GetDiffResponse);
-  rpc GetFileDiffAgainstHead(GetFileDiffRequest) returns (stream DiffChunk);
-  rpc MergeWorktree(MergeWorktreeRequest) returns (MergeWorktreeResponse);
-  rpc HasUncommittedChanges(HasUncommittedChangesRequest) returns (HasUncommittedChangesResponse);
-  rpc CommitAll(CommitAllRequest) returns (CommitAllResponse);
-  rpc DeleteBranch(DeleteBranchRequest) returns (DeleteBranchResponse);
-  rpc GetUncommittedChanges(GetUncommittedChangesRequest) returns (GetUncommittedChangesResponse);
-  rpc GetUncommittedFileDiff(GetUncommittedFileDiffRequest) returns (stream DiffChunk);
-  rpc StageFile(StageFileRequest) returns (StageFileResponse);
-  rpc UnstageFile(StageFileRequest) returns (StageFileResponse);
-  rpc StageAll(StageAllRequest) returns (StageAllResponse);
-  rpc UnstageAll(StageAllRequest) returns (StageAllResponse);
-  rpc CommitStaged(CommitStagedRequest) returns (CommitStagedResponse);
-  rpc CheckMergeConflicts(CheckMergeConflictsRequest) returns (CheckMergeConflictsResponse);
-  rpc GetFileContentsForDiff(GetFileContentsForDiffRequest) returns (stream FileContentsChunk);
-  rpc GetFileContentsForDiffAgainstHead(GetFileContentsForDiffRequest) returns (stream FileContentsChunk);
-  rpc GetUncommittedFileContentsForDiff(GetUncommittedFileContentsForDiffRequest) returns (stream FileContentsChunk);
-  rpc ListLocalBranches(ListLocalBranchesRequest) returns (ListLocalBranchesResponse);
-  rpc ListRemoteBranches(ListRemoteBranchesRequest) returns (ListRemoteBranchesResponse);
-  rpc GetBranchesInWorktrees(GetBranchesInWorktreesRequest) returns (GetBranchesInWorktreesResponse);
-  rpc CreateWorktreeFromBranch(CreateWorktreeFromBranchRequest) returns (CreateWorktreeResponse);
-  rpc CreateWorktreeFromRemote(CreateWorktreeFromRemoteRequest) returns (CreateWorktreeResponse);
-  rpc GetHeadCommitHash(GetHeadCommitHashRequest) returns (GetHeadCommitHashResponse);
 
   // Reviews Operations
   rpc LoadReviews(LoadReviewsRequest) returns (LoadReviewsResponse);
