@@ -12,8 +12,12 @@ import {
   Client,
   type ClientDuplexStream,
   type ClientOptions,
+  type ClientReadableStream,
   type ClientUnaryCall,
+  type ClientWritableStream,
   type handleBidiStreamingCall,
+  type handleClientStreamingCall,
+  type handleServerStreamingCall,
   type handleUnaryCall,
   makeGenericClientConstructor,
   type Metadata,
@@ -486,6 +490,97 @@ export interface GetHeadCommitHashResponse {
   success: boolean;
   hash?: string | undefined;
   error?: string | undefined;
+}
+
+/** Diff streaming messages */
+export interface DiffChunk {
+  data?: DiffChunkData | undefined;
+  end?: DiffChunkEnd | undefined;
+  error?: DiffChunkError | undefined;
+}
+
+export interface DiffChunkData {
+  /** Chunk of diff content */
+  data: Buffer;
+}
+
+export interface DiffChunkEnd {
+  success: boolean;
+}
+
+export interface DiffChunkError {
+  message: string;
+}
+
+/** File contents streaming messages */
+export interface FileContentsChunk {
+  /** First message with metadata */
+  header?:
+    | FileContentsHeader
+    | undefined;
+  /** Content chunks */
+  data?: FileContentsData | undefined;
+  end?: FileContentsEnd | undefined;
+}
+
+export interface FileContentsHeader {
+  language: string;
+  /** true = original content, false = modified */
+  isOriginal: boolean;
+}
+
+export interface FileContentsData {
+  data: Buffer;
+}
+
+export interface FileContentsEnd {
+  success: boolean;
+  error?: string | undefined;
+}
+
+/** File read streaming messages */
+export interface FileReadChunk {
+  header?: FileReadHeader | undefined;
+  data?: FileReadData | undefined;
+  end?: FileReadEnd | undefined;
+}
+
+export interface FileReadHeader {
+  path: string;
+  size: number;
+  language: string;
+}
+
+export interface FileReadData {
+  data: Buffer;
+}
+
+export interface FileReadEnd {
+  success: boolean;
+  error?: string | undefined;
+}
+
+/** File write streaming messages (client to server) */
+export interface FileWriteChunk {
+  /** First message with path */
+  header?:
+    | FileWriteHeader
+    | undefined;
+  /** Content chunks */
+  data?: FileWriteData | undefined;
+  end?: FileWriteEnd | undefined;
+}
+
+export interface FileWriteHeader {
+  workspacePath: string;
+  filePath: string;
+}
+
+export interface FileWriteData {
+  data: Buffer;
+}
+
+export interface FileWriteEnd {
 }
 
 export interface ReviewComment {
@@ -8115,6 +8210,1191 @@ export const GetHeadCommitHashResponse: MessageFns<GetHeadCommitHashResponse> = 
   },
 };
 
+function createBaseDiffChunk(): DiffChunk {
+  return { data: undefined, end: undefined, error: undefined };
+}
+
+export const DiffChunk: MessageFns<DiffChunk> = {
+  encode(message: DiffChunk, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.data !== undefined) {
+      DiffChunkData.encode(message.data, writer.uint32(10).fork()).join();
+    }
+    if (message.end !== undefined) {
+      DiffChunkEnd.encode(message.end, writer.uint32(18).fork()).join();
+    }
+    if (message.error !== undefined) {
+      DiffChunkError.encode(message.error, writer.uint32(26).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): DiffChunk {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDiffChunk();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.data = DiffChunkData.decode(reader, reader.uint32());
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.end = DiffChunkEnd.decode(reader, reader.uint32());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.error = DiffChunkError.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DiffChunk {
+    return {
+      data: isSet(object.data) ? DiffChunkData.fromJSON(object.data) : undefined,
+      end: isSet(object.end) ? DiffChunkEnd.fromJSON(object.end) : undefined,
+      error: isSet(object.error) ? DiffChunkError.fromJSON(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: DiffChunk): unknown {
+    const obj: any = {};
+    if (message.data !== undefined) {
+      obj.data = DiffChunkData.toJSON(message.data);
+    }
+    if (message.end !== undefined) {
+      obj.end = DiffChunkEnd.toJSON(message.end);
+    }
+    if (message.error !== undefined) {
+      obj.error = DiffChunkError.toJSON(message.error);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DiffChunk>, I>>(base?: I): DiffChunk {
+    return DiffChunk.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<DiffChunk>, I>>(object: I): DiffChunk {
+    const message = createBaseDiffChunk();
+    message.data = (object.data !== undefined && object.data !== null)
+      ? DiffChunkData.fromPartial(object.data)
+      : undefined;
+    message.end = (object.end !== undefined && object.end !== null) ? DiffChunkEnd.fromPartial(object.end) : undefined;
+    message.error = (object.error !== undefined && object.error !== null)
+      ? DiffChunkError.fromPartial(object.error)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseDiffChunkData(): DiffChunkData {
+  return { data: Buffer.alloc(0) };
+}
+
+export const DiffChunkData: MessageFns<DiffChunkData> = {
+  encode(message: DiffChunkData, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.data.length !== 0) {
+      writer.uint32(10).bytes(message.data);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): DiffChunkData {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDiffChunkData();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.data = Buffer.from(reader.bytes());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DiffChunkData {
+    return { data: isSet(object.data) ? Buffer.from(bytesFromBase64(object.data)) : Buffer.alloc(0) };
+  },
+
+  toJSON(message: DiffChunkData): unknown {
+    const obj: any = {};
+    if (message.data.length !== 0) {
+      obj.data = base64FromBytes(message.data);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DiffChunkData>, I>>(base?: I): DiffChunkData {
+    return DiffChunkData.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<DiffChunkData>, I>>(object: I): DiffChunkData {
+    const message = createBaseDiffChunkData();
+    message.data = object.data ?? Buffer.alloc(0);
+    return message;
+  },
+};
+
+function createBaseDiffChunkEnd(): DiffChunkEnd {
+  return { success: false };
+}
+
+export const DiffChunkEnd: MessageFns<DiffChunkEnd> = {
+  encode(message: DiffChunkEnd, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): DiffChunkEnd {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDiffChunkEnd();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DiffChunkEnd {
+    return { success: isSet(object.success) ? globalThis.Boolean(object.success) : false };
+  },
+
+  toJSON(message: DiffChunkEnd): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DiffChunkEnd>, I>>(base?: I): DiffChunkEnd {
+    return DiffChunkEnd.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<DiffChunkEnd>, I>>(object: I): DiffChunkEnd {
+    const message = createBaseDiffChunkEnd();
+    message.success = object.success ?? false;
+    return message;
+  },
+};
+
+function createBaseDiffChunkError(): DiffChunkError {
+  return { message: "" };
+}
+
+export const DiffChunkError: MessageFns<DiffChunkError> = {
+  encode(message: DiffChunkError, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.message !== "") {
+      writer.uint32(10).string(message.message);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): DiffChunkError {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDiffChunkError();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.message = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DiffChunkError {
+    return { message: isSet(object.message) ? globalThis.String(object.message) : "" };
+  },
+
+  toJSON(message: DiffChunkError): unknown {
+    const obj: any = {};
+    if (message.message !== "") {
+      obj.message = message.message;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DiffChunkError>, I>>(base?: I): DiffChunkError {
+    return DiffChunkError.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<DiffChunkError>, I>>(object: I): DiffChunkError {
+    const message = createBaseDiffChunkError();
+    message.message = object.message ?? "";
+    return message;
+  },
+};
+
+function createBaseFileContentsChunk(): FileContentsChunk {
+  return { header: undefined, data: undefined, end: undefined };
+}
+
+export const FileContentsChunk: MessageFns<FileContentsChunk> = {
+  encode(message: FileContentsChunk, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.header !== undefined) {
+      FileContentsHeader.encode(message.header, writer.uint32(10).fork()).join();
+    }
+    if (message.data !== undefined) {
+      FileContentsData.encode(message.data, writer.uint32(18).fork()).join();
+    }
+    if (message.end !== undefined) {
+      FileContentsEnd.encode(message.end, writer.uint32(26).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FileContentsChunk {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFileContentsChunk();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.header = FileContentsHeader.decode(reader, reader.uint32());
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.data = FileContentsData.decode(reader, reader.uint32());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.end = FileContentsEnd.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FileContentsChunk {
+    return {
+      header: isSet(object.header) ? FileContentsHeader.fromJSON(object.header) : undefined,
+      data: isSet(object.data) ? FileContentsData.fromJSON(object.data) : undefined,
+      end: isSet(object.end) ? FileContentsEnd.fromJSON(object.end) : undefined,
+    };
+  },
+
+  toJSON(message: FileContentsChunk): unknown {
+    const obj: any = {};
+    if (message.header !== undefined) {
+      obj.header = FileContentsHeader.toJSON(message.header);
+    }
+    if (message.data !== undefined) {
+      obj.data = FileContentsData.toJSON(message.data);
+    }
+    if (message.end !== undefined) {
+      obj.end = FileContentsEnd.toJSON(message.end);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FileContentsChunk>, I>>(base?: I): FileContentsChunk {
+    return FileContentsChunk.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FileContentsChunk>, I>>(object: I): FileContentsChunk {
+    const message = createBaseFileContentsChunk();
+    message.header = (object.header !== undefined && object.header !== null)
+      ? FileContentsHeader.fromPartial(object.header)
+      : undefined;
+    message.data = (object.data !== undefined && object.data !== null)
+      ? FileContentsData.fromPartial(object.data)
+      : undefined;
+    message.end = (object.end !== undefined && object.end !== null)
+      ? FileContentsEnd.fromPartial(object.end)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseFileContentsHeader(): FileContentsHeader {
+  return { language: "", isOriginal: false };
+}
+
+export const FileContentsHeader: MessageFns<FileContentsHeader> = {
+  encode(message: FileContentsHeader, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.language !== "") {
+      writer.uint32(10).string(message.language);
+    }
+    if (message.isOriginal !== false) {
+      writer.uint32(16).bool(message.isOriginal);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FileContentsHeader {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFileContentsHeader();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.language = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.isOriginal = reader.bool();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FileContentsHeader {
+    return {
+      language: isSet(object.language) ? globalThis.String(object.language) : "",
+      isOriginal: isSet(object.isOriginal)
+        ? globalThis.Boolean(object.isOriginal)
+        : isSet(object.is_original)
+        ? globalThis.Boolean(object.is_original)
+        : false,
+    };
+  },
+
+  toJSON(message: FileContentsHeader): unknown {
+    const obj: any = {};
+    if (message.language !== "") {
+      obj.language = message.language;
+    }
+    if (message.isOriginal !== false) {
+      obj.isOriginal = message.isOriginal;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FileContentsHeader>, I>>(base?: I): FileContentsHeader {
+    return FileContentsHeader.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FileContentsHeader>, I>>(object: I): FileContentsHeader {
+    const message = createBaseFileContentsHeader();
+    message.language = object.language ?? "";
+    message.isOriginal = object.isOriginal ?? false;
+    return message;
+  },
+};
+
+function createBaseFileContentsData(): FileContentsData {
+  return { data: Buffer.alloc(0) };
+}
+
+export const FileContentsData: MessageFns<FileContentsData> = {
+  encode(message: FileContentsData, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.data.length !== 0) {
+      writer.uint32(10).bytes(message.data);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FileContentsData {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFileContentsData();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.data = Buffer.from(reader.bytes());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FileContentsData {
+    return { data: isSet(object.data) ? Buffer.from(bytesFromBase64(object.data)) : Buffer.alloc(0) };
+  },
+
+  toJSON(message: FileContentsData): unknown {
+    const obj: any = {};
+    if (message.data.length !== 0) {
+      obj.data = base64FromBytes(message.data);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FileContentsData>, I>>(base?: I): FileContentsData {
+    return FileContentsData.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FileContentsData>, I>>(object: I): FileContentsData {
+    const message = createBaseFileContentsData();
+    message.data = object.data ?? Buffer.alloc(0);
+    return message;
+  },
+};
+
+function createBaseFileContentsEnd(): FileContentsEnd {
+  return { success: false, error: undefined };
+}
+
+export const FileContentsEnd: MessageFns<FileContentsEnd> = {
+  encode(message: FileContentsEnd, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    if (message.error !== undefined) {
+      writer.uint32(18).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FileContentsEnd {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFileContentsEnd();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FileContentsEnd {
+    return {
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: FileContentsEnd): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FileContentsEnd>, I>>(base?: I): FileContentsEnd {
+    return FileContentsEnd.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FileContentsEnd>, I>>(object: I): FileContentsEnd {
+    const message = createBaseFileContentsEnd();
+    message.success = object.success ?? false;
+    message.error = object.error ?? undefined;
+    return message;
+  },
+};
+
+function createBaseFileReadChunk(): FileReadChunk {
+  return { header: undefined, data: undefined, end: undefined };
+}
+
+export const FileReadChunk: MessageFns<FileReadChunk> = {
+  encode(message: FileReadChunk, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.header !== undefined) {
+      FileReadHeader.encode(message.header, writer.uint32(10).fork()).join();
+    }
+    if (message.data !== undefined) {
+      FileReadData.encode(message.data, writer.uint32(18).fork()).join();
+    }
+    if (message.end !== undefined) {
+      FileReadEnd.encode(message.end, writer.uint32(26).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FileReadChunk {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFileReadChunk();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.header = FileReadHeader.decode(reader, reader.uint32());
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.data = FileReadData.decode(reader, reader.uint32());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.end = FileReadEnd.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FileReadChunk {
+    return {
+      header: isSet(object.header) ? FileReadHeader.fromJSON(object.header) : undefined,
+      data: isSet(object.data) ? FileReadData.fromJSON(object.data) : undefined,
+      end: isSet(object.end) ? FileReadEnd.fromJSON(object.end) : undefined,
+    };
+  },
+
+  toJSON(message: FileReadChunk): unknown {
+    const obj: any = {};
+    if (message.header !== undefined) {
+      obj.header = FileReadHeader.toJSON(message.header);
+    }
+    if (message.data !== undefined) {
+      obj.data = FileReadData.toJSON(message.data);
+    }
+    if (message.end !== undefined) {
+      obj.end = FileReadEnd.toJSON(message.end);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FileReadChunk>, I>>(base?: I): FileReadChunk {
+    return FileReadChunk.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FileReadChunk>, I>>(object: I): FileReadChunk {
+    const message = createBaseFileReadChunk();
+    message.header = (object.header !== undefined && object.header !== null)
+      ? FileReadHeader.fromPartial(object.header)
+      : undefined;
+    message.data = (object.data !== undefined && object.data !== null)
+      ? FileReadData.fromPartial(object.data)
+      : undefined;
+    message.end = (object.end !== undefined && object.end !== null) ? FileReadEnd.fromPartial(object.end) : undefined;
+    return message;
+  },
+};
+
+function createBaseFileReadHeader(): FileReadHeader {
+  return { path: "", size: 0, language: "" };
+}
+
+export const FileReadHeader: MessageFns<FileReadHeader> = {
+  encode(message: FileReadHeader, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.path !== "") {
+      writer.uint32(10).string(message.path);
+    }
+    if (message.size !== 0) {
+      writer.uint32(16).int64(message.size);
+    }
+    if (message.language !== "") {
+      writer.uint32(26).string(message.language);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FileReadHeader {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFileReadHeader();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.path = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.size = longToNumber(reader.int64());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.language = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FileReadHeader {
+    return {
+      path: isSet(object.path) ? globalThis.String(object.path) : "",
+      size: isSet(object.size) ? globalThis.Number(object.size) : 0,
+      language: isSet(object.language) ? globalThis.String(object.language) : "",
+    };
+  },
+
+  toJSON(message: FileReadHeader): unknown {
+    const obj: any = {};
+    if (message.path !== "") {
+      obj.path = message.path;
+    }
+    if (message.size !== 0) {
+      obj.size = Math.round(message.size);
+    }
+    if (message.language !== "") {
+      obj.language = message.language;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FileReadHeader>, I>>(base?: I): FileReadHeader {
+    return FileReadHeader.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FileReadHeader>, I>>(object: I): FileReadHeader {
+    const message = createBaseFileReadHeader();
+    message.path = object.path ?? "";
+    message.size = object.size ?? 0;
+    message.language = object.language ?? "";
+    return message;
+  },
+};
+
+function createBaseFileReadData(): FileReadData {
+  return { data: Buffer.alloc(0) };
+}
+
+export const FileReadData: MessageFns<FileReadData> = {
+  encode(message: FileReadData, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.data.length !== 0) {
+      writer.uint32(10).bytes(message.data);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FileReadData {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFileReadData();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.data = Buffer.from(reader.bytes());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FileReadData {
+    return { data: isSet(object.data) ? Buffer.from(bytesFromBase64(object.data)) : Buffer.alloc(0) };
+  },
+
+  toJSON(message: FileReadData): unknown {
+    const obj: any = {};
+    if (message.data.length !== 0) {
+      obj.data = base64FromBytes(message.data);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FileReadData>, I>>(base?: I): FileReadData {
+    return FileReadData.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FileReadData>, I>>(object: I): FileReadData {
+    const message = createBaseFileReadData();
+    message.data = object.data ?? Buffer.alloc(0);
+    return message;
+  },
+};
+
+function createBaseFileReadEnd(): FileReadEnd {
+  return { success: false, error: undefined };
+}
+
+export const FileReadEnd: MessageFns<FileReadEnd> = {
+  encode(message: FileReadEnd, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    if (message.error !== undefined) {
+      writer.uint32(18).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FileReadEnd {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFileReadEnd();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FileReadEnd {
+    return {
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: FileReadEnd): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FileReadEnd>, I>>(base?: I): FileReadEnd {
+    return FileReadEnd.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FileReadEnd>, I>>(object: I): FileReadEnd {
+    const message = createBaseFileReadEnd();
+    message.success = object.success ?? false;
+    message.error = object.error ?? undefined;
+    return message;
+  },
+};
+
+function createBaseFileWriteChunk(): FileWriteChunk {
+  return { header: undefined, data: undefined, end: undefined };
+}
+
+export const FileWriteChunk: MessageFns<FileWriteChunk> = {
+  encode(message: FileWriteChunk, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.header !== undefined) {
+      FileWriteHeader.encode(message.header, writer.uint32(10).fork()).join();
+    }
+    if (message.data !== undefined) {
+      FileWriteData.encode(message.data, writer.uint32(18).fork()).join();
+    }
+    if (message.end !== undefined) {
+      FileWriteEnd.encode(message.end, writer.uint32(26).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FileWriteChunk {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFileWriteChunk();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.header = FileWriteHeader.decode(reader, reader.uint32());
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.data = FileWriteData.decode(reader, reader.uint32());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.end = FileWriteEnd.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FileWriteChunk {
+    return {
+      header: isSet(object.header) ? FileWriteHeader.fromJSON(object.header) : undefined,
+      data: isSet(object.data) ? FileWriteData.fromJSON(object.data) : undefined,
+      end: isSet(object.end) ? FileWriteEnd.fromJSON(object.end) : undefined,
+    };
+  },
+
+  toJSON(message: FileWriteChunk): unknown {
+    const obj: any = {};
+    if (message.header !== undefined) {
+      obj.header = FileWriteHeader.toJSON(message.header);
+    }
+    if (message.data !== undefined) {
+      obj.data = FileWriteData.toJSON(message.data);
+    }
+    if (message.end !== undefined) {
+      obj.end = FileWriteEnd.toJSON(message.end);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FileWriteChunk>, I>>(base?: I): FileWriteChunk {
+    return FileWriteChunk.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FileWriteChunk>, I>>(object: I): FileWriteChunk {
+    const message = createBaseFileWriteChunk();
+    message.header = (object.header !== undefined && object.header !== null)
+      ? FileWriteHeader.fromPartial(object.header)
+      : undefined;
+    message.data = (object.data !== undefined && object.data !== null)
+      ? FileWriteData.fromPartial(object.data)
+      : undefined;
+    message.end = (object.end !== undefined && object.end !== null) ? FileWriteEnd.fromPartial(object.end) : undefined;
+    return message;
+  },
+};
+
+function createBaseFileWriteHeader(): FileWriteHeader {
+  return { workspacePath: "", filePath: "" };
+}
+
+export const FileWriteHeader: MessageFns<FileWriteHeader> = {
+  encode(message: FileWriteHeader, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.workspacePath !== "") {
+      writer.uint32(10).string(message.workspacePath);
+    }
+    if (message.filePath !== "") {
+      writer.uint32(18).string(message.filePath);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FileWriteHeader {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFileWriteHeader();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.workspacePath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.filePath = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FileWriteHeader {
+    return {
+      workspacePath: isSet(object.workspacePath)
+        ? globalThis.String(object.workspacePath)
+        : isSet(object.workspace_path)
+        ? globalThis.String(object.workspace_path)
+        : "",
+      filePath: isSet(object.filePath)
+        ? globalThis.String(object.filePath)
+        : isSet(object.file_path)
+        ? globalThis.String(object.file_path)
+        : "",
+    };
+  },
+
+  toJSON(message: FileWriteHeader): unknown {
+    const obj: any = {};
+    if (message.workspacePath !== "") {
+      obj.workspacePath = message.workspacePath;
+    }
+    if (message.filePath !== "") {
+      obj.filePath = message.filePath;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FileWriteHeader>, I>>(base?: I): FileWriteHeader {
+    return FileWriteHeader.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FileWriteHeader>, I>>(object: I): FileWriteHeader {
+    const message = createBaseFileWriteHeader();
+    message.workspacePath = object.workspacePath ?? "";
+    message.filePath = object.filePath ?? "";
+    return message;
+  },
+};
+
+function createBaseFileWriteData(): FileWriteData {
+  return { data: Buffer.alloc(0) };
+}
+
+export const FileWriteData: MessageFns<FileWriteData> = {
+  encode(message: FileWriteData, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.data.length !== 0) {
+      writer.uint32(10).bytes(message.data);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FileWriteData {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFileWriteData();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.data = Buffer.from(reader.bytes());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FileWriteData {
+    return { data: isSet(object.data) ? Buffer.from(bytesFromBase64(object.data)) : Buffer.alloc(0) };
+  },
+
+  toJSON(message: FileWriteData): unknown {
+    const obj: any = {};
+    if (message.data.length !== 0) {
+      obj.data = base64FromBytes(message.data);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FileWriteData>, I>>(base?: I): FileWriteData {
+    return FileWriteData.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FileWriteData>, I>>(object: I): FileWriteData {
+    const message = createBaseFileWriteData();
+    message.data = object.data ?? Buffer.alloc(0);
+    return message;
+  },
+};
+
+function createBaseFileWriteEnd(): FileWriteEnd {
+  return {};
+}
+
+export const FileWriteEnd: MessageFns<FileWriteEnd> = {
+  encode(_: FileWriteEnd, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FileWriteEnd {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFileWriteEnd();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(_: any): FileWriteEnd {
+    return {};
+  },
+
+  toJSON(_: FileWriteEnd): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FileWriteEnd>, I>>(base?: I): FileWriteEnd {
+    return FileWriteEnd.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FileWriteEnd>, I>>(_: I): FileWriteEnd {
+    const message = createBaseFileWriteEnd();
+    return message;
+  },
+};
+
 function createBaseReviewComment(): ReviewComment {
   return { id: "", filePath: "", lineNumber: 0, text: "", commitHash: "", createdAt: 0, isOutdated: false, side: "" };
 }
@@ -10382,11 +11662,11 @@ export const TreeTermDaemonService = {
   getFileDiff: {
     path: "/treeterm.TreeTermDaemon/GetFileDiff" as const,
     requestStream: false as const,
-    responseStream: false as const,
+    responseStream: true as const,
     requestSerialize: (value: GetFileDiffRequest): Buffer => Buffer.from(GetFileDiffRequest.encode(value).finish()),
     requestDeserialize: (value: Buffer): GetFileDiffRequest => GetFileDiffRequest.decode(value),
-    responseSerialize: (value: GetFileDiffResponse): Buffer => Buffer.from(GetFileDiffResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): GetFileDiffResponse => GetFileDiffResponse.decode(value),
+    responseSerialize: (value: DiffChunk): Buffer => Buffer.from(DiffChunk.encode(value).finish()),
+    responseDeserialize: (value: Buffer): DiffChunk => DiffChunk.decode(value),
   },
   getDiffAgainstHead: {
     path: "/treeterm.TreeTermDaemon/GetDiffAgainstHead" as const,
@@ -10400,11 +11680,11 @@ export const TreeTermDaemonService = {
   getFileDiffAgainstHead: {
     path: "/treeterm.TreeTermDaemon/GetFileDiffAgainstHead" as const,
     requestStream: false as const,
-    responseStream: false as const,
+    responseStream: true as const,
     requestSerialize: (value: GetFileDiffRequest): Buffer => Buffer.from(GetFileDiffRequest.encode(value).finish()),
     requestDeserialize: (value: Buffer): GetFileDiffRequest => GetFileDiffRequest.decode(value),
-    responseSerialize: (value: GetFileDiffResponse): Buffer => Buffer.from(GetFileDiffResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): GetFileDiffResponse => GetFileDiffResponse.decode(value),
+    responseSerialize: (value: DiffChunk): Buffer => Buffer.from(DiffChunk.encode(value).finish()),
+    responseDeserialize: (value: Buffer): DiffChunk => DiffChunk.decode(value),
   },
   mergeWorktree: {
     path: "/treeterm.TreeTermDaemon/MergeWorktree" as const,
@@ -10460,12 +11740,12 @@ export const TreeTermDaemonService = {
   getUncommittedFileDiff: {
     path: "/treeterm.TreeTermDaemon/GetUncommittedFileDiff" as const,
     requestStream: false as const,
-    responseStream: false as const,
+    responseStream: true as const,
     requestSerialize: (value: GetUncommittedFileDiffRequest): Buffer =>
       Buffer.from(GetUncommittedFileDiffRequest.encode(value).finish()),
     requestDeserialize: (value: Buffer): GetUncommittedFileDiffRequest => GetUncommittedFileDiffRequest.decode(value),
-    responseSerialize: (value: GetFileDiffResponse): Buffer => Buffer.from(GetFileDiffResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): GetFileDiffResponse => GetFileDiffResponse.decode(value),
+    responseSerialize: (value: DiffChunk): Buffer => Buffer.from(DiffChunk.encode(value).finish()),
+    responseDeserialize: (value: Buffer): DiffChunk => DiffChunk.decode(value),
   },
   stageFile: {
     path: "/treeterm.TreeTermDaemon/StageFile" as const,
@@ -10527,39 +11807,33 @@ export const TreeTermDaemonService = {
   getFileContentsForDiff: {
     path: "/treeterm.TreeTermDaemon/GetFileContentsForDiff" as const,
     requestStream: false as const,
-    responseStream: false as const,
+    responseStream: true as const,
     requestSerialize: (value: GetFileContentsForDiffRequest): Buffer =>
       Buffer.from(GetFileContentsForDiffRequest.encode(value).finish()),
     requestDeserialize: (value: Buffer): GetFileContentsForDiffRequest => GetFileContentsForDiffRequest.decode(value),
-    responseSerialize: (value: GetFileContentsForDiffResponse): Buffer =>
-      Buffer.from(GetFileContentsForDiffResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): GetFileContentsForDiffResponse =>
-      GetFileContentsForDiffResponse.decode(value),
+    responseSerialize: (value: FileContentsChunk): Buffer => Buffer.from(FileContentsChunk.encode(value).finish()),
+    responseDeserialize: (value: Buffer): FileContentsChunk => FileContentsChunk.decode(value),
   },
   getFileContentsForDiffAgainstHead: {
     path: "/treeterm.TreeTermDaemon/GetFileContentsForDiffAgainstHead" as const,
     requestStream: false as const,
-    responseStream: false as const,
+    responseStream: true as const,
     requestSerialize: (value: GetFileContentsForDiffRequest): Buffer =>
       Buffer.from(GetFileContentsForDiffRequest.encode(value).finish()),
     requestDeserialize: (value: Buffer): GetFileContentsForDiffRequest => GetFileContentsForDiffRequest.decode(value),
-    responseSerialize: (value: GetFileContentsForDiffResponse): Buffer =>
-      Buffer.from(GetFileContentsForDiffResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): GetFileContentsForDiffResponse =>
-      GetFileContentsForDiffResponse.decode(value),
+    responseSerialize: (value: FileContentsChunk): Buffer => Buffer.from(FileContentsChunk.encode(value).finish()),
+    responseDeserialize: (value: Buffer): FileContentsChunk => FileContentsChunk.decode(value),
   },
   getUncommittedFileContentsForDiff: {
     path: "/treeterm.TreeTermDaemon/GetUncommittedFileContentsForDiff" as const,
     requestStream: false as const,
-    responseStream: false as const,
+    responseStream: true as const,
     requestSerialize: (value: GetUncommittedFileContentsForDiffRequest): Buffer =>
       Buffer.from(GetUncommittedFileContentsForDiffRequest.encode(value).finish()),
     requestDeserialize: (value: Buffer): GetUncommittedFileContentsForDiffRequest =>
       GetUncommittedFileContentsForDiffRequest.decode(value),
-    responseSerialize: (value: GetFileContentsForDiffResponse): Buffer =>
-      Buffer.from(GetFileContentsForDiffResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): GetFileContentsForDiffResponse =>
-      GetFileContentsForDiffResponse.decode(value),
+    responseSerialize: (value: FileContentsChunk): Buffer => Buffer.from(FileContentsChunk.encode(value).finish()),
+    responseDeserialize: (value: Buffer): FileContentsChunk => FileContentsChunk.decode(value),
   },
   listLocalBranches: {
     path: "/treeterm.TreeTermDaemon/ListLocalBranches" as const,
@@ -10696,18 +11970,18 @@ export const TreeTermDaemonService = {
   readFile: {
     path: "/treeterm.TreeTermDaemon/ReadFile" as const,
     requestStream: false as const,
-    responseStream: false as const,
+    responseStream: true as const,
     requestSerialize: (value: ReadFileRequest): Buffer => Buffer.from(ReadFileRequest.encode(value).finish()),
     requestDeserialize: (value: Buffer): ReadFileRequest => ReadFileRequest.decode(value),
-    responseSerialize: (value: ReadFileResponse): Buffer => Buffer.from(ReadFileResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): ReadFileResponse => ReadFileResponse.decode(value),
+    responseSerialize: (value: FileReadChunk): Buffer => Buffer.from(FileReadChunk.encode(value).finish()),
+    responseDeserialize: (value: Buffer): FileReadChunk => FileReadChunk.decode(value),
   },
   writeFile: {
     path: "/treeterm.TreeTermDaemon/WriteFile" as const,
-    requestStream: false as const,
+    requestStream: true as const,
     responseStream: false as const,
-    requestSerialize: (value: WriteFileRequest): Buffer => Buffer.from(WriteFileRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): WriteFileRequest => WriteFileRequest.decode(value),
+    requestSerialize: (value: FileWriteChunk): Buffer => Buffer.from(FileWriteChunk.encode(value).finish()),
+    requestDeserialize: (value: Buffer): FileWriteChunk => FileWriteChunk.decode(value),
     responseSerialize: (value: WriteFileResponse): Buffer => Buffer.from(WriteFileResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): WriteFileResponse => WriteFileResponse.decode(value),
   },
@@ -10742,26 +12016,26 @@ export interface TreeTermDaemonServer extends UntypedServiceImplementation {
   listWorktrees: handleUnaryCall<ListWorktreesRequest, ListWorktreesResponse>;
   getChildWorktrees: handleUnaryCall<GetChildWorktreesRequest, GetChildWorktreesResponse>;
   getDiff: handleUnaryCall<GetDiffRequest, GetDiffResponse>;
-  getFileDiff: handleUnaryCall<GetFileDiffRequest, GetFileDiffResponse>;
+  getFileDiff: handleServerStreamingCall<GetFileDiffRequest, DiffChunk>;
   getDiffAgainstHead: handleUnaryCall<GetDiffRequest, GetDiffResponse>;
-  getFileDiffAgainstHead: handleUnaryCall<GetFileDiffRequest, GetFileDiffResponse>;
+  getFileDiffAgainstHead: handleServerStreamingCall<GetFileDiffRequest, DiffChunk>;
   mergeWorktree: handleUnaryCall<MergeWorktreeRequest, MergeWorktreeResponse>;
   hasUncommittedChanges: handleUnaryCall<HasUncommittedChangesRequest, HasUncommittedChangesResponse>;
   commitAll: handleUnaryCall<CommitAllRequest, CommitAllResponse>;
   deleteBranch: handleUnaryCall<DeleteBranchRequest, DeleteBranchResponse>;
   getUncommittedChanges: handleUnaryCall<GetUncommittedChangesRequest, GetUncommittedChangesResponse>;
-  getUncommittedFileDiff: handleUnaryCall<GetUncommittedFileDiffRequest, GetFileDiffResponse>;
+  getUncommittedFileDiff: handleServerStreamingCall<GetUncommittedFileDiffRequest, DiffChunk>;
   stageFile: handleUnaryCall<StageFileRequest, StageFileResponse>;
   unstageFile: handleUnaryCall<StageFileRequest, StageFileResponse>;
   stageAll: handleUnaryCall<StageAllRequest, StageAllResponse>;
   unstageAll: handleUnaryCall<StageAllRequest, StageAllResponse>;
   commitStaged: handleUnaryCall<CommitStagedRequest, CommitStagedResponse>;
   checkMergeConflicts: handleUnaryCall<CheckMergeConflictsRequest, CheckMergeConflictsResponse>;
-  getFileContentsForDiff: handleUnaryCall<GetFileContentsForDiffRequest, GetFileContentsForDiffResponse>;
-  getFileContentsForDiffAgainstHead: handleUnaryCall<GetFileContentsForDiffRequest, GetFileContentsForDiffResponse>;
-  getUncommittedFileContentsForDiff: handleUnaryCall<
+  getFileContentsForDiff: handleServerStreamingCall<GetFileContentsForDiffRequest, FileContentsChunk>;
+  getFileContentsForDiffAgainstHead: handleServerStreamingCall<GetFileContentsForDiffRequest, FileContentsChunk>;
+  getUncommittedFileContentsForDiff: handleServerStreamingCall<
     GetUncommittedFileContentsForDiffRequest,
-    GetFileContentsForDiffResponse
+    FileContentsChunk
   >;
   listLocalBranches: handleUnaryCall<ListLocalBranchesRequest, ListLocalBranchesResponse>;
   listRemoteBranches: handleUnaryCall<ListRemoteBranchesRequest, ListRemoteBranchesResponse>;
@@ -10777,8 +12051,8 @@ export interface TreeTermDaemonServer extends UntypedServiceImplementation {
   updateOutdatedReviews: handleUnaryCall<UpdateOutdatedReviewsRequest, UpdateOutdatedReviewsResponse>;
   /** Filesystem Operations */
   readDirectory: handleUnaryCall<ReadDirectoryRequest, ReadDirectoryResponse>;
-  readFile: handleUnaryCall<ReadFileRequest, ReadFileResponse>;
-  writeFile: handleUnaryCall<WriteFileRequest, WriteFileResponse>;
+  readFile: handleServerStreamingCall<ReadFileRequest, FileReadChunk>;
+  writeFile: handleClientStreamingCall<FileWriteChunk, WriteFileResponse>;
 }
 
 export interface TreeTermDaemonClient extends Client {
@@ -11072,21 +12346,12 @@ export interface TreeTermDaemonClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: GetDiffResponse) => void,
   ): ClientUnaryCall;
+  getFileDiff(request: GetFileDiffRequest, options?: Partial<CallOptions>): ClientReadableStream<DiffChunk>;
   getFileDiff(
     request: GetFileDiffRequest,
-    callback: (error: ServiceError | null, response: GetFileDiffResponse) => void,
-  ): ClientUnaryCall;
-  getFileDiff(
-    request: GetFileDiffRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: GetFileDiffResponse) => void,
-  ): ClientUnaryCall;
-  getFileDiff(
-    request: GetFileDiffRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: GetFileDiffResponse) => void,
-  ): ClientUnaryCall;
+    metadata?: Metadata,
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<DiffChunk>;
   getDiffAgainstHead(
     request: GetDiffRequest,
     callback: (error: ServiceError | null, response: GetDiffResponse) => void,
@@ -11102,21 +12367,12 @@ export interface TreeTermDaemonClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: GetDiffResponse) => void,
   ): ClientUnaryCall;
+  getFileDiffAgainstHead(request: GetFileDiffRequest, options?: Partial<CallOptions>): ClientReadableStream<DiffChunk>;
   getFileDiffAgainstHead(
     request: GetFileDiffRequest,
-    callback: (error: ServiceError | null, response: GetFileDiffResponse) => void,
-  ): ClientUnaryCall;
-  getFileDiffAgainstHead(
-    request: GetFileDiffRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: GetFileDiffResponse) => void,
-  ): ClientUnaryCall;
-  getFileDiffAgainstHead(
-    request: GetFileDiffRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: GetFileDiffResponse) => void,
-  ): ClientUnaryCall;
+    metadata?: Metadata,
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<DiffChunk>;
   mergeWorktree(
     request: MergeWorktreeRequest,
     callback: (error: ServiceError | null, response: MergeWorktreeResponse) => void,
@@ -11194,19 +12450,13 @@ export interface TreeTermDaemonClient extends Client {
   ): ClientUnaryCall;
   getUncommittedFileDiff(
     request: GetUncommittedFileDiffRequest,
-    callback: (error: ServiceError | null, response: GetFileDiffResponse) => void,
-  ): ClientUnaryCall;
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<DiffChunk>;
   getUncommittedFileDiff(
     request: GetUncommittedFileDiffRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: GetFileDiffResponse) => void,
-  ): ClientUnaryCall;
-  getUncommittedFileDiff(
-    request: GetUncommittedFileDiffRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: GetFileDiffResponse) => void,
-  ): ClientUnaryCall;
+    metadata?: Metadata,
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<DiffChunk>;
   stageFile(
     request: StageFileRequest,
     callback: (error: ServiceError | null, response: StageFileResponse) => void,
@@ -11299,49 +12549,31 @@ export interface TreeTermDaemonClient extends Client {
   ): ClientUnaryCall;
   getFileContentsForDiff(
     request: GetFileContentsForDiffRequest,
-    callback: (error: ServiceError | null, response: GetFileContentsForDiffResponse) => void,
-  ): ClientUnaryCall;
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<FileContentsChunk>;
   getFileContentsForDiff(
     request: GetFileContentsForDiffRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: GetFileContentsForDiffResponse) => void,
-  ): ClientUnaryCall;
-  getFileContentsForDiff(
-    request: GetFileContentsForDiffRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: GetFileContentsForDiffResponse) => void,
-  ): ClientUnaryCall;
+    metadata?: Metadata,
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<FileContentsChunk>;
   getFileContentsForDiffAgainstHead(
     request: GetFileContentsForDiffRequest,
-    callback: (error: ServiceError | null, response: GetFileContentsForDiffResponse) => void,
-  ): ClientUnaryCall;
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<FileContentsChunk>;
   getFileContentsForDiffAgainstHead(
     request: GetFileContentsForDiffRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: GetFileContentsForDiffResponse) => void,
-  ): ClientUnaryCall;
-  getFileContentsForDiffAgainstHead(
-    request: GetFileContentsForDiffRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: GetFileContentsForDiffResponse) => void,
-  ): ClientUnaryCall;
+    metadata?: Metadata,
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<FileContentsChunk>;
   getUncommittedFileContentsForDiff(
     request: GetUncommittedFileContentsForDiffRequest,
-    callback: (error: ServiceError | null, response: GetFileContentsForDiffResponse) => void,
-  ): ClientUnaryCall;
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<FileContentsChunk>;
   getUncommittedFileContentsForDiff(
     request: GetUncommittedFileContentsForDiffRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: GetFileContentsForDiffResponse) => void,
-  ): ClientUnaryCall;
-  getUncommittedFileContentsForDiff(
-    request: GetUncommittedFileContentsForDiffRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: GetFileContentsForDiffResponse) => void,
-  ): ClientUnaryCall;
+    metadata?: Metadata,
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<FileContentsChunk>;
   listLocalBranches(
     request: ListLocalBranchesRequest,
     callback: (error: ServiceError | null, response: ListLocalBranchesResponse) => void,
@@ -11524,36 +12756,28 @@ export interface TreeTermDaemonClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: ReadDirectoryResponse) => void,
   ): ClientUnaryCall;
+  readFile(request: ReadFileRequest, options?: Partial<CallOptions>): ClientReadableStream<FileReadChunk>;
   readFile(
     request: ReadFileRequest,
-    callback: (error: ServiceError | null, response: ReadFileResponse) => void,
-  ): ClientUnaryCall;
-  readFile(
-    request: ReadFileRequest,
+    metadata?: Metadata,
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<FileReadChunk>;
+  writeFile(
+    callback: (error: ServiceError | null, response: WriteFileResponse) => void,
+  ): ClientWritableStream<FileWriteChunk>;
+  writeFile(
     metadata: Metadata,
-    callback: (error: ServiceError | null, response: ReadFileResponse) => void,
-  ): ClientUnaryCall;
-  readFile(
-    request: ReadFileRequest,
-    metadata: Metadata,
+    callback: (error: ServiceError | null, response: WriteFileResponse) => void,
+  ): ClientWritableStream<FileWriteChunk>;
+  writeFile(
     options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: ReadFileResponse) => void,
-  ): ClientUnaryCall;
-  writeFile(
-    request: WriteFileRequest,
     callback: (error: ServiceError | null, response: WriteFileResponse) => void,
-  ): ClientUnaryCall;
+  ): ClientWritableStream<FileWriteChunk>;
   writeFile(
-    request: WriteFileRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: WriteFileResponse) => void,
-  ): ClientUnaryCall;
-  writeFile(
-    request: WriteFileRequest,
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: WriteFileResponse) => void,
-  ): ClientUnaryCall;
+  ): ClientWritableStream<FileWriteChunk>;
 }
 
 export const TreeTermDaemonClient = makeGenericClientConstructor(

@@ -95,7 +95,11 @@ import {
   type ReadFileRequest,
   type ReadFileResponse,
   type WriteFileRequest,
-  type WriteFileResponse
+  type WriteFileResponse,
+  type DiffChunk,
+  type FileContentsChunk,
+  type FileReadChunk,
+  type FileWriteChunk
 } from '../generated/treeterm'
 
 const log = createModuleLogger('grpcServer')
@@ -126,7 +130,13 @@ export class GrpcServer {
     const { SessionStore: SS } = require('./sessionStore')
     this.sessionStore = sessionStore || new SS()
 
-    this.server = new grpc.Server()
+    // Configure larger message size limits as a safety buffer
+    // Default is 4MB, we set to 8MB for headroom
+    // Note: Scrollback is limited to 1MB on the PTY manager side
+    this.server = new grpc.Server({
+      'grpc.max_receive_message_length': 8 * 1024 * 1024, // 8 MB
+      'grpc.max_send_message_length': 8 * 1024 * 1024 // 8 MB
+    })
     this.server.addService(TreeTermDaemonService, this.createServiceImpl())
   }
 
@@ -819,8 +829,7 @@ export class GrpcServer {
   }
 
   private async handleGetFileDiff(
-    call: grpc.ServerUnaryCall<GetFileDiffRequest, GetFileDiffResponse>,
-    callback: grpc.sendUnaryData<GetFileDiffResponse>
+    call: grpc.ServerWritableStream<GetFileDiffRequest, DiffChunk>
   ): Promise<void> {
     try {
       const result = await git.getFileDiff(
@@ -828,12 +837,27 @@ export class GrpcServer {
         call.request.parentBranch,
         call.request.filePath
       )
-      callback(null, result)
+
+      if (!result.success || !result.diff) {
+        call.write({ error: { message: result.error || 'Unknown error' } })
+        call.end()
+        return
+      }
+
+      // Stream diff in 64KB chunks
+      const diff = result.diff
+      const chunkSize = 64 * 1024
+
+      for (let i = 0; i < diff.length; i += chunkSize) {
+        const chunk = diff.slice(i, i + chunkSize)
+        call.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
+      }
+
+      call.write({ end: { success: true } })
+      call.end()
     } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
+      call.write({ error: { message: error instanceof Error ? error.message : 'Unknown error' } })
+      call.end()
     }
   }
 
@@ -856,8 +880,7 @@ export class GrpcServer {
   }
 
   private async handleGetFileDiffAgainstHead(
-    call: grpc.ServerUnaryCall<GetFileDiffRequest, GetFileDiffResponse>,
-    callback: grpc.sendUnaryData<GetFileDiffResponse>
+    call: grpc.ServerWritableStream<GetFileDiffRequest, DiffChunk>
   ): Promise<void> {
     try {
       const result = await git.getFileDiffAgainstHead(
@@ -865,12 +888,27 @@ export class GrpcServer {
         call.request.parentBranch,
         call.request.filePath
       )
-      callback(null, result)
+
+      if (!result.success || !result.diff) {
+        call.write({ error: { message: result.error || 'Unknown error' } })
+        call.end()
+        return
+      }
+
+      // Stream diff in 64KB chunks
+      const diff = result.diff
+      const chunkSize = 64 * 1024
+
+      for (let i = 0; i < diff.length; i += chunkSize) {
+        const chunk = diff.slice(i, i + chunkSize)
+        call.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
+      }
+
+      call.write({ end: { success: true } })
+      call.end()
     } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
+      call.write({ error: { message: error instanceof Error ? error.message : 'Unknown error' } })
+      call.end()
     }
   }
 
@@ -955,8 +993,7 @@ export class GrpcServer {
   }
 
   private async handleGetUncommittedFileDiff(
-    call: grpc.ServerUnaryCall<GetUncommittedFileDiffRequest, GetFileDiffResponse>,
-    callback: grpc.sendUnaryData<GetFileDiffResponse>
+    call: grpc.ServerWritableStream<GetUncommittedFileDiffRequest, DiffChunk>
   ): Promise<void> {
     try {
       const result = await git.getUncommittedFileDiff(
@@ -964,12 +1001,27 @@ export class GrpcServer {
         call.request.filePath,
         call.request.staged
       )
-      callback(null, result)
+
+      if (!result.success || !result.diff) {
+        call.write({ error: { message: result.error || 'Unknown error' } })
+        call.end()
+        return
+      }
+
+      // Stream diff in 64KB chunks
+      const diff = result.diff
+      const chunkSize = 64 * 1024
+
+      for (let i = 0; i < diff.length; i += chunkSize) {
+        const chunk = diff.slice(i, i + chunkSize)
+        call.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
+      }
+
+      call.write({ end: { success: true } })
+      call.end()
     } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
+      call.write({ error: { message: error instanceof Error ? error.message : 'Unknown error' } })
+      call.end()
     }
   }
 
@@ -1068,8 +1120,7 @@ export class GrpcServer {
   }
 
   private async handleGetFileContentsForDiff(
-    call: grpc.ServerUnaryCall<GetFileContentsForDiffRequest, GetFileContentsForDiffResponse>,
-    callback: grpc.sendUnaryData<GetFileContentsForDiffResponse>
+    call: grpc.ServerWritableStream<GetFileContentsForDiffRequest, FileContentsChunk>
   ): Promise<void> {
     try {
       const result = await git.getFileContentsForDiff(
@@ -1077,18 +1128,40 @@ export class GrpcServer {
         call.request.parentBranch,
         call.request.filePath
       )
-      callback(null, result)
+
+      if (!result.success || !result.contents) {
+        call.write({ end: { success: false, error: result.error || 'Unknown error' } })
+        call.end()
+        return
+      }
+
+      const chunkSize = 64 * 1024
+      const { originalContent, modifiedContent, language } = result.contents
+
+      // Stream original content
+      call.write({ header: { language, isOriginal: true } })
+      for (let i = 0; i < originalContent.length; i += chunkSize) {
+        const chunk = originalContent.slice(i, i + chunkSize)
+        call.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
+      }
+
+      // Stream modified content
+      call.write({ header: { language, isOriginal: false } })
+      for (let i = 0; i < modifiedContent.length; i += chunkSize) {
+        const chunk = modifiedContent.slice(i, i + chunkSize)
+        call.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
+      }
+
+      call.write({ end: { success: true } })
+      call.end()
     } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
+      call.write({ end: { success: false, error: error instanceof Error ? error.message : 'Unknown error' } })
+      call.end()
     }
   }
 
   private async handleGetFileContentsForDiffAgainstHead(
-    call: grpc.ServerUnaryCall<GetFileContentsForDiffRequest, GetFileContentsForDiffResponse>,
-    callback: grpc.sendUnaryData<GetFileContentsForDiffResponse>
+    call: grpc.ServerWritableStream<GetFileContentsForDiffRequest, FileContentsChunk>
   ): Promise<void> {
     try {
       const result = await git.getFileContentsForDiffAgainstHead(
@@ -1096,18 +1169,40 @@ export class GrpcServer {
         call.request.parentBranch,
         call.request.filePath
       )
-      callback(null, result)
+
+      if (!result.success || !result.contents) {
+        call.write({ end: { success: false, error: result.error || 'Unknown error' } })
+        call.end()
+        return
+      }
+
+      const chunkSize = 64 * 1024
+      const { originalContent, modifiedContent, language } = result.contents
+
+      // Stream original content
+      call.write({ header: { language, isOriginal: true } })
+      for (let i = 0; i < originalContent.length; i += chunkSize) {
+        const chunk = originalContent.slice(i, i + chunkSize)
+        call.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
+      }
+
+      // Stream modified content
+      call.write({ header: { language, isOriginal: false } })
+      for (let i = 0; i < modifiedContent.length; i += chunkSize) {
+        const chunk = modifiedContent.slice(i, i + chunkSize)
+        call.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
+      }
+
+      call.write({ end: { success: true } })
+      call.end()
     } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
+      call.write({ end: { success: false, error: error instanceof Error ? error.message : 'Unknown error' } })
+      call.end()
     }
   }
 
   private async handleGetUncommittedFileContentsForDiff(
-    call: grpc.ServerUnaryCall<GetUncommittedFileContentsForDiffRequest, GetFileContentsForDiffResponse>,
-    callback: grpc.sendUnaryData<GetFileContentsForDiffResponse>
+    call: grpc.ServerWritableStream<GetUncommittedFileContentsForDiffRequest, FileContentsChunk>
   ): Promise<void> {
     try {
       const result = await git.getUncommittedFileContentsForDiff(
@@ -1115,12 +1210,35 @@ export class GrpcServer {
         call.request.filePath,
         call.request.staged
       )
-      callback(null, result)
+
+      if (!result.success || !result.contents) {
+        call.write({ end: { success: false, error: result.error || 'Unknown error' } })
+        call.end()
+        return
+      }
+
+      const chunkSize = 64 * 1024
+      const { originalContent, modifiedContent, language } = result.contents
+
+      // Stream original content
+      call.write({ header: { language, isOriginal: true } })
+      for (let i = 0; i < originalContent.length; i += chunkSize) {
+        const chunk = originalContent.slice(i, i + chunkSize)
+        call.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
+      }
+
+      // Stream modified content
+      call.write({ header: { language, isOriginal: false } })
+      for (let i = 0; i < modifiedContent.length; i += chunkSize) {
+        const chunk = modifiedContent.slice(i, i + chunkSize)
+        call.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
+      }
+
+      call.write({ end: { success: true } })
+      call.end()
     } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
+      call.write({ end: { success: false, error: error instanceof Error ? error.message : 'Unknown error' } })
+      call.end()
     }
   }
 
@@ -1338,39 +1456,75 @@ export class GrpcServer {
   }
 
   private async handleReadFile(
-    call: grpc.ServerUnaryCall<ReadFileRequest, ReadFileResponse>,
-    callback: grpc.sendUnaryData<ReadFileResponse>
+    call: grpc.ServerWritableStream<ReadFileRequest, FileReadChunk>
   ): Promise<void> {
     try {
       const result = await filesystem.readFile(
         call.request.workspacePath,
         call.request.filePath
       )
-      callback(null, result)
+
+      if (!result.success || !result.file) {
+        call.write({ end: { success: false, error: result.error || 'Unknown error' } })
+        call.end()
+        return
+      }
+
+      const { path: filePath, content, size, language } = result.file
+
+      // Send header with metadata
+      call.write({ header: { path: filePath, size, language } })
+
+      // Stream content in 64KB chunks
+      const chunkSize = 64 * 1024
+      for (let i = 0; i < content.length; i += chunkSize) {
+        const chunk = content.slice(i, i + chunkSize)
+        call.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
+      }
+
+      call.write({ end: { success: true } })
+      call.end()
     } catch (error) {
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
+      call.write({ end: { success: false, error: error instanceof Error ? error.message : 'Unknown error' } })
+      call.end()
     }
   }
 
-  private async handleWriteFile(
-    call: grpc.ServerUnaryCall<WriteFileRequest, WriteFileResponse>,
+  private handleWriteFile(
+    call: grpc.ServerReadableStream<FileWriteChunk, WriteFileResponse>,
     callback: grpc.sendUnaryData<WriteFileResponse>
-  ): Promise<void> {
-    try {
-      const result = await filesystem.writeFile(
-        call.request.workspacePath,
-        call.request.filePath,
-        call.request.content
-      )
-      callback(null, result)
-    } catch (error) {
+  ): void {
+    let workspacePath: string = ''
+    let filePath: string = ''
+    const chunks: Buffer[] = []
+
+    call.on('data', (chunk: FileWriteChunk) => {
+      if (chunk.header) {
+        workspacePath = chunk.header.workspacePath
+        filePath = chunk.header.filePath
+      } else if (chunk.data) {
+        chunks.push(chunk.data.data)
+      }
+    })
+
+    call.on('end', async () => {
+      try {
+        const content = Buffer.concat(chunks).toString('utf-8')
+        const result = await filesystem.writeFile(workspacePath, filePath, content)
+        callback(null, result)
+      } catch (error) {
+        callback({
+          code: grpc.status.INTERNAL,
+          message: error instanceof Error ? error.message : 'Unknown error'
+        })
+      }
+    })
+
+    call.on('error', (error) => {
       callback({
         code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
+        message: error.message
       })
-    }
+    })
   }
 }

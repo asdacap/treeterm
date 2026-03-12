@@ -57,7 +57,15 @@ export class GrpcDaemonClient {
       const socketUri = `unix://${this.socketPath}`
       const credentials = grpc.credentials.createInsecure()
 
-      this.client = new TreeTermDaemonClient(socketUri, credentials)
+      // Configure larger message size limits as a safety buffer
+      // Default is 4MB, we set to 8MB for headroom
+      // Note: Scrollback is limited to 1MB on the daemon side
+      const channelOptions = {
+        'grpc.max_receive_message_length': 8 * 1024 * 1024, // 8 MB
+        'grpc.max_send_message_length': 8 * 1024 * 1024 // 8 MB
+      }
+
+      this.client = new TreeTermDaemonClient(socketUri, credentials, channelOptions)
 
       this.client.waitForReady(Date.now() + 5000, (error) => {
         if (error) {
@@ -510,12 +518,22 @@ export class GrpcDaemonClient {
 
   async getFileDiff(worktreePath: string, parentBranch: string, filePath: string): Promise<any> {
     if (!this.client) throw new Error('Not connected to daemon')
+
     return new Promise((resolve, reject) => {
-      this.client!.getFileDiff({ worktreePath, parentBranch, filePath }, (error, response) => {
-        if (error) reject(new Error(error.message))
-        else if (response) resolve(response)
-        else reject(new Error('No response from server'))
+      const stream = this.client!.getFileDiff({ worktreePath, parentBranch, filePath })
+      const chunks: Buffer[] = []
+
+      stream.on('data', (chunk) => {
+        if (chunk.data) {
+          chunks.push(chunk.data.data)
+        } else if (chunk.end) {
+          resolve({ success: chunk.end.success, diff: Buffer.concat(chunks).toString('utf-8') })
+        } else if (chunk.error) {
+          resolve({ success: false, error: chunk.error.message })
+        }
       })
+
+      stream.on('error', (err) => reject(err))
     })
   }
 
@@ -532,12 +550,22 @@ export class GrpcDaemonClient {
 
   async getFileDiffAgainstHead(worktreePath: string, parentBranch: string, filePath: string): Promise<any> {
     if (!this.client) throw new Error('Not connected to daemon')
+
     return new Promise((resolve, reject) => {
-      this.client!.getFileDiffAgainstHead({ worktreePath, parentBranch, filePath }, (error, response) => {
-        if (error) reject(new Error(error.message))
-        else if (response) resolve(response)
-        else reject(new Error('No response from server'))
+      const stream = this.client!.getFileDiffAgainstHead({ worktreePath, parentBranch, filePath })
+      const chunks: Buffer[] = []
+
+      stream.on('data', (chunk) => {
+        if (chunk.data) {
+          chunks.push(chunk.data.data)
+        } else if (chunk.end) {
+          resolve({ success: chunk.end.success, diff: Buffer.concat(chunks).toString('utf-8') })
+        } else if (chunk.error) {
+          resolve({ success: false, error: chunk.error.message })
+        }
       })
+
+      stream.on('error', (err) => reject(err))
     })
   }
 
@@ -598,12 +626,22 @@ export class GrpcDaemonClient {
 
   async getUncommittedFileDiff(repoPath: string, filePath: string, staged: boolean): Promise<any> {
     if (!this.client) throw new Error('Not connected to daemon')
+
     return new Promise((resolve, reject) => {
-      this.client!.getUncommittedFileDiff({ repoPath, filePath, staged }, (error, response) => {
-        if (error) reject(new Error(error.message))
-        else if (response) resolve(response)
-        else reject(new Error('No response from server'))
+      const stream = this.client!.getUncommittedFileDiff({ repoPath, filePath, staged })
+      const chunks: Buffer[] = []
+
+      stream.on('data', (chunk) => {
+        if (chunk.data) {
+          chunks.push(chunk.data.data)
+        } else if (chunk.end) {
+          resolve({ success: chunk.end.success, diff: Buffer.concat(chunks).toString('utf-8') })
+        } else if (chunk.error) {
+          resolve({ success: false, error: chunk.error.message })
+        }
       })
+
+      stream.on('error', (err) => reject(err))
     })
   }
 
@@ -675,34 +713,121 @@ export class GrpcDaemonClient {
 
   async getFileContentsForDiff(worktreePath: string, parentBranch: string, filePath: string): Promise<any> {
     if (!this.client) throw new Error('Not connected to daemon')
+
     return new Promise((resolve, reject) => {
-      this.client!.getFileContentsForDiff({ worktreePath, parentBranch, filePath }, (error, response) => {
-        if (error) reject(new Error(error.message))
-        else if (response) resolve(response)
-        else reject(new Error('No response from server'))
+      const stream = this.client!.getFileContentsForDiff({ worktreePath, parentBranch, filePath })
+      let language = ''
+      let originalChunks: Buffer[] = []
+      let modifiedChunks: Buffer[] = []
+      let currentIsOriginal = true
+
+      stream.on('data', (chunk) => {
+        if (chunk.header) {
+          language = chunk.header.language
+          currentIsOriginal = chunk.header.isOriginal
+        } else if (chunk.data) {
+          if (currentIsOriginal) {
+            originalChunks.push(chunk.data.data)
+          } else {
+            modifiedChunks.push(chunk.data.data)
+          }
+        } else if (chunk.end) {
+          if (!chunk.end.success) {
+            resolve({ success: false, error: chunk.end.error })
+          } else {
+            resolve({
+              success: true,
+              contents: {
+                originalContent: Buffer.concat(originalChunks).toString('utf-8'),
+                modifiedContent: Buffer.concat(modifiedChunks).toString('utf-8'),
+                language
+              }
+            })
+          }
+        }
       })
+
+      stream.on('error', (err) => reject(err))
     })
   }
 
   async getFileContentsForDiffAgainstHead(worktreePath: string, parentBranch: string, filePath: string): Promise<any> {
     if (!this.client) throw new Error('Not connected to daemon')
+
     return new Promise((resolve, reject) => {
-      this.client!.getFileContentsForDiffAgainstHead({ worktreePath, parentBranch, filePath }, (error, response) => {
-        if (error) reject(new Error(error.message))
-        else if (response) resolve(response)
-        else reject(new Error('No response from server'))
+      const stream = this.client!.getFileContentsForDiffAgainstHead({ worktreePath, parentBranch, filePath })
+      let language = ''
+      let originalChunks: Buffer[] = []
+      let modifiedChunks: Buffer[] = []
+      let currentIsOriginal = true
+
+      stream.on('data', (chunk) => {
+        if (chunk.header) {
+          language = chunk.header.language
+          currentIsOriginal = chunk.header.isOriginal
+        } else if (chunk.data) {
+          if (currentIsOriginal) {
+            originalChunks.push(chunk.data.data)
+          } else {
+            modifiedChunks.push(chunk.data.data)
+          }
+        } else if (chunk.end) {
+          if (!chunk.end.success) {
+            resolve({ success: false, error: chunk.end.error })
+          } else {
+            resolve({
+              success: true,
+              contents: {
+                originalContent: Buffer.concat(originalChunks).toString('utf-8'),
+                modifiedContent: Buffer.concat(modifiedChunks).toString('utf-8'),
+                language
+              }
+            })
+          }
+        }
       })
+
+      stream.on('error', (err) => reject(err))
     })
   }
 
   async getUncommittedFileContentsForDiff(repoPath: string, filePath: string, staged: boolean): Promise<any> {
     if (!this.client) throw new Error('Not connected to daemon')
+
     return new Promise((resolve, reject) => {
-      this.client!.getUncommittedFileContentsForDiff({ repoPath, filePath, staged }, (error, response) => {
-        if (error) reject(new Error(error.message))
-        else if (response) resolve(response)
-        else reject(new Error('No response from server'))
+      const stream = this.client!.getUncommittedFileContentsForDiff({ repoPath, filePath, staged })
+      let language = ''
+      let originalChunks: Buffer[] = []
+      let modifiedChunks: Buffer[] = []
+      let currentIsOriginal = true
+
+      stream.on('data', (chunk) => {
+        if (chunk.header) {
+          language = chunk.header.language
+          currentIsOriginal = chunk.header.isOriginal
+        } else if (chunk.data) {
+          if (currentIsOriginal) {
+            originalChunks.push(chunk.data.data)
+          } else {
+            modifiedChunks.push(chunk.data.data)
+          }
+        } else if (chunk.end) {
+          if (!chunk.end.success) {
+            resolve({ success: false, error: chunk.end.error })
+          } else {
+            resolve({
+              success: true,
+              contents: {
+                originalContent: Buffer.concat(originalChunks).toString('utf-8'),
+                modifiedContent: Buffer.concat(modifiedChunks).toString('utf-8'),
+                language
+              }
+            })
+          }
+        }
       })
+
+      stream.on('error', (err) => reject(err))
     })
   }
 
@@ -852,23 +977,61 @@ export class GrpcDaemonClient {
 
   async readFile(workspacePath: string, filePath: string): Promise<any> {
     if (!this.client) throw new Error('Not connected to daemon')
+
     return new Promise((resolve, reject) => {
-      this.client!.readFile({ workspacePath, filePath }, (error, response) => {
-        if (error) reject(new Error(error.message))
-        else if (response) resolve(response)
-        else reject(new Error('No response from server'))
+      const stream = this.client!.readFile({ workspacePath, filePath })
+      const chunks: Buffer[] = []
+      let fileMetadata: { path: string; size: number; language: string } | null = null
+
+      stream.on('data', (chunk) => {
+        if (chunk.header) {
+          fileMetadata = { path: chunk.header.path, size: Number(chunk.header.size), language: chunk.header.language }
+        } else if (chunk.data) {
+          chunks.push(chunk.data.data)
+        } else if (chunk.end) {
+          if (!chunk.end.success) {
+            resolve({ success: false, error: chunk.end.error })
+          } else if (fileMetadata) {
+            resolve({
+              success: true,
+              file: {
+                path: fileMetadata.path,
+                content: Buffer.concat(chunks).toString('utf-8'),
+                size: fileMetadata.size,
+                language: fileMetadata.language
+              }
+            })
+          }
+        }
       })
+
+      stream.on('error', (err) => reject(err))
     })
   }
 
   async writeFile(workspacePath: string, filePath: string, content: string): Promise<any> {
     if (!this.client) throw new Error('Not connected to daemon')
+
     return new Promise((resolve, reject) => {
-      this.client!.writeFile({ workspacePath, filePath, content }, (error, response) => {
+      const stream = this.client!.writeFile((error, response) => {
         if (error) reject(new Error(error.message))
         else if (response) resolve(response)
         else reject(new Error('No response from server'))
       })
+
+      // Send header first
+      stream.write({ header: { workspacePath, filePath } })
+
+      // Stream content in 64KB chunks
+      const chunkSize = 64 * 1024
+      for (let i = 0; i < content.length; i += chunkSize) {
+        const chunk = content.slice(i, i + chunkSize)
+        stream.write({ data: { data: Buffer.from(chunk, 'utf-8') } })
+      }
+
+      // Signal end of stream
+      stream.write({ end: {} })
+      stream.end()
     })
   }
 

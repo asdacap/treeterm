@@ -23,6 +23,7 @@ export interface PtySession {
   rows: number
   scrollback: string[]
   scrollbackLimit: number
+  scrollbackSize: number // Track current size in bytes
   createdAt: number
   lastActivity: number
   sandbox?: SandboxConfig
@@ -171,7 +172,8 @@ export class DaemonPtyManager {
   private orphanCleanupInterval: NodeJS.Timeout | null = null
   private orphanTimeout: number
 
-  constructor(orphanTimeout: number = 0, private scrollbackLimit: number = 50000) {
+  constructor(orphanTimeout: number = 0, private scrollbackLimit: number = 1024 * 1024) {
+    // scrollbackLimit is now in bytes (default 1 MB)
     this.orphanTimeout = orphanTimeout
     if (orphanTimeout > 0) {
       this.startOrphanCleanup()
@@ -231,6 +233,7 @@ export class DaemonPtyManager {
       rows,
       scrollback: [],
       scrollbackLimit: this.scrollbackLimit,
+      scrollbackSize: 0,
       createdAt: Date.now(),
       lastActivity: Date.now(),
       sandbox: config.sandbox,
@@ -357,11 +360,12 @@ export class DaemonPtyManager {
 
   private appendScrollback(session: PtySession, data: string): void {
     session.scrollback.push(data)
+    session.scrollbackSize += Buffer.byteLength(data, 'utf-8')
 
-    // Truncate if exceeds limit
-    if (session.scrollback.length > session.scrollbackLimit) {
-      const excess = session.scrollback.length - session.scrollbackLimit
-      session.scrollback.splice(0, excess)
+    // Truncate if exceeds size limit (in bytes)
+    while (session.scrollbackSize > session.scrollbackLimit && session.scrollback.length > 0) {
+      const removed = session.scrollback.shift()!
+      session.scrollbackSize -= Buffer.byteLength(removed, 'utf-8')
     }
   }
 
