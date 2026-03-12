@@ -304,6 +304,19 @@ export default function App() {
     // Normal startup - workspace will be created via folder selection or CLI
   }
 
+  const handleOpenInNewWindow = async (session: DaemonSession) => {
+    try {
+      const result = await window.electron.session.openInNewWindow(session.id)
+      if (result.success) {
+        setShowWorkspacePicker(false)
+      } else {
+        console.error('Failed to open session in new window:', result.error)
+      }
+    } catch (error) {
+      console.error('Failed to open session in new window:', error)
+    }
+  }
+
   // Handle workspace menu commands
   useEffect(() => {
     const unsubNewTerminal = window.electron.terminal.onNewTerminal(() => {
@@ -388,6 +401,7 @@ export default function App() {
           <WorkspacePickerDialog
             sessions={daemonSessions}
             onSelect={handleSessionRestore}
+            onOpenInNewWindow={handleOpenInNewWindow}
             onCreateNew={handleCreateNewFromPicker}
             onCancel={() => setShowWorkspacePicker(false)}
           />

@@ -62,6 +62,7 @@ const CHANNELS = {
   sessionList: 'session:list',
   sessionGet: 'session:get',
   sessionDelete: 'session:delete',
+  sessionOpenInNewWindow: 'session:open-in-new-window',
   daemonShutdown: 'daemon:shutdown',
   dialogSelectFolder: 'dialog:selectFolder',
   sandboxIsAvailable: 'sandbox:isAvailable',
@@ -633,6 +634,16 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.sessionDelete, (_event: IpcMainInvokeEvent, ...args: any[]) =>
       handler(...(args as IpcRequests['sessionDelete']['params']))
+    )
+  }
+
+  onSessionOpenInNewWindow(
+    handler: (
+      ...args: IpcRequests['sessionOpenInNewWindow']['params']
+    ) => IpcRequests['sessionOpenInNewWindow']['result'] | Promise<IpcRequests['sessionOpenInNewWindow']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sessionOpenInNewWindow, (_event: IpcMainInvokeEvent, ...args: any[]) =>
+      handler(...(args as IpcRequests['sessionOpenInNewWindow']['params']))
     )
   }
 

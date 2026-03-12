@@ -396,6 +396,9 @@ contextBridge.exposeInMainWorld('electron', {
     delete: (sessionId: string): Promise<{ success: boolean; error?: string }> => {
       return client.sessionDelete(sessionId)
     },
+    openInNewWindow: (sessionId: string): Promise<{ success: boolean; error?: string }> => {
+      return client.sessionOpenInNewWindow(sessionId)
+    },
     onShowSessions: (callback: SessionMenuCallback): (() => void) => {
       sessionShowSessionsListeners.push(callback)
       return () => {

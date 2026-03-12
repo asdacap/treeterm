@@ -62,6 +62,7 @@ const CHANNELS = {
   sessionList: 'session:list',
   sessionGet: 'session:get',
   sessionDelete: 'session:delete',
+  sessionOpenInNewWindow: 'session:open-in-new-window',
   daemonShutdown: 'daemon:shutdown',
   dialogSelectFolder: 'dialog:selectFolder',
   sandboxIsAvailable: 'sandbox:isAvailable',
@@ -367,6 +368,10 @@ export class IpcClient {
 
   sessionDelete(...args: IpcRequests['sessionDelete']['params']): Promise<IpcRequests['sessionDelete']['result']> {
     return ipcRenderer.invoke(CHANNELS.sessionDelete, ...args)
+  }
+
+  sessionOpenInNewWindow(...args: IpcRequests['sessionOpenInNewWindow']['params']): Promise<IpcRequests['sessionOpenInNewWindow']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sessionOpenInNewWindow, ...args)
   }
 
   // Other requests

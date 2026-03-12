@@ -5,6 +5,7 @@ import { GrpcDaemonClient } from './grpcClient'
 import { IpcServer } from './ipc/ipc-server'
 import { GitClient } from './git'
 import { ReviewsClient } from './reviews'
+import { windowManager } from './windowManager'
 
 // Parse initial workspace from command line
 let initialWorkspacePath: string | null = null
@@ -59,8 +60,8 @@ function createLoadingWindow(): BrowserWindow {
   return loadingWindow
 }
 
-function createWindow(): void {
-  mainWindow = new BrowserWindow({
+function createWindow(initialSessionId?: string): BrowserWindow {
+  const window = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
@@ -74,8 +75,12 @@ function createWindow(): void {
     trafficLightPosition: { x: 15, y: 15 }
   })
 
+  // Create a dedicated IPC server for this window
+  const windowServer = new IpcServer()
+  windowServer.setWindow(window)
+
   // Handle media permissions for speech recognition and microphone
-  mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+  window.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
     if (permission === 'media') {
       // Always allow microphone access for push-to-talk
       callback(true)
@@ -84,14 +89,11 @@ function createWindow(): void {
     }
   })
 
-  // Set the window on the IPC server
-  server.setWindow(mainWindow)
-
   // Forward all keyboard events including Caps Lock to renderer
-  mainWindow.webContents.on('before-input-event', (event, input) => {
+  window.webContents.on('before-input-event', (event, input) => {
     // Forward Caps Lock events to renderer via IPC
     if (input.code === 'CapsLock' || input.key === 'CapsLock') {
-      server.capsLockEvent({
+      windowServer.capsLockEvent({
         type: input.type, // 'keyDown' or 'keyUp'
         key: input.key,
         code: input.code
@@ -100,7 +102,7 @@ function createWindow(): void {
   })
 
   // Open external links in the default browser instead of within Electron
-  mainWindow.webContents.on('will-navigate', (event, url) => {
+  window.webContents.on('will-navigate', (event, url) => {
     const parsedUrl = new URL(url)
     if (
       parsedUrl.protocol === 'file:' ||
@@ -112,57 +114,88 @@ function createWindow(): void {
     shell.openExternal(url)
   })
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  window.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
   })
 
   // Intercept close event to check for unmerged workspaces
-  mainWindow.on('close', (event) => {
+  window.on('close', (event) => {
     if (!closeConfirmed) {
       event.preventDefault()
-      mainWindow?.webContents.send('app:confirm-close')
+      window.webContents.send('app:confirm-close')
     }
   })
 
-  // Load the renderer
+  // Build the load URL with sessionId query parameter if provided
+  let loadUrl: string
   if (process.env.ELECTRON_RENDERER_URL) {
-    mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
+    const url = new URL(process.env.ELECTRON_RENDERER_URL)
+    if (initialSessionId) {
+      url.searchParams.set('sessionId', initialSessionId)
+    }
+    loadUrl = url.toString()
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    const basePath = join(__dirname, '../renderer/index.html')
+    if (initialSessionId) {
+      loadUrl = `file://${basePath}?sessionId=${encodeURIComponent(initialSessionId)}`
+    } else {
+      loadUrl = `file://${basePath}`
+    }
   }
 
-  // Signal renderer when ready to initialize with the default session
-  mainWindow.webContents.on('did-finish-load', async () => {
+  // Load the renderer
+  window.loadURL(loadUrl)
+
+  // Signal renderer when ready to initialize with the session
+  window.webContents.on('did-finish-load', async () => {
     if (!daemonClient) {
-      server.appReady(null)
+      windowServer.appReady(null)
       return
     }
 
     try {
       await daemonClient.ensureDaemonRunning()
-      // Get the default session from daemon (creates one if doesn't exist)
-      const session = await daemonClient.getDefaultSession()
-      console.log('[main] got default session:', session.id)
-      server.appReady(session)
+      
+      if (initialSessionId) {
+        // Get the specific session from daemon
+        const session = await daemonClient.getSession(initialSessionId)
+        if (session) {
+          console.log('[main] loaded session:', session.id)
+          windowServer.appReady(session)
+        } else {
+          // Session not found, fall back to default
+          const defaultSession = await daemonClient.getDefaultSession()
+          console.log('[main] session not found, using default:', defaultSession.id)
+          windowServer.appReady(defaultSession)
+        }
+      } else {
+        // Get the default session from daemon (creates one if doesn't exist)
+        const session = await daemonClient.getDefaultSession()
+        console.log('[main] got default session:', session.id)
+        windowServer.appReady(session)
+      }
     } catch (error) {
-      console.error('[main] failed to get default session:', error)
+      console.error('[main] failed to get session:', error)
       // Still signal ready but without a session
-      server.appReady(null)
+      windowServer.appReady(null)
     }
   })
 
-  mainWindow.on('closed', () => {
+  window.on('closed', () => {
     // Detach from sessions
     if (daemonClient) {
       for (const sessionId of attachedSessions) {
         daemonClient.detachPtySession(sessionId).catch(console.error)
       }
       attachedSessions.clear()
-      daemonClient.disconnect()
     }
-    mainWindow = null
   })
+
+  // Register with window manager
+  windowManager.registerWindow(window, initialSessionId || null, windowServer)
+
+  return window
 }
 
 // IPC Handlers
@@ -360,6 +393,36 @@ server.onSessionDelete(async (sessionId) => {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     console.error('[main] failed to delete session:', errorMessage)
+    return { success: false, error: errorMessage }
+  }
+})
+
+server.onSessionOpenInNewWindow(async (sessionId) => {
+  if (!useDaemon || !daemonClient) {
+    return { success: false, error: 'Daemon not enabled' }
+  }
+
+  try {
+    // Check if session is already open in another window
+    if (windowManager.isSessionOpen(sessionId)) {
+      // Focus the existing window
+      windowManager.focusWindowBySessionId(sessionId)
+      return { success: true }
+    }
+
+    // Verify the session exists
+    const session = await daemonClient.getSession(sessionId)
+    if (!session) {
+      return { success: false, error: 'Session not found' }
+    }
+
+    // Create new window with the session
+    createWindow(sessionId)
+    console.log('[main] opened session in new window:', sessionId)
+    return { success: true }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[main] failed to open session in new window:', errorMessage)
     return { success: false, error: errorMessage }
   }
 })
@@ -777,12 +840,12 @@ app.whenReady().then(async () => {
   }
 
   registerSTTHandlers(server)
-  createWindow()
+  mainWindow = createWindow()
   createApplicationMenu(mainWindow, server, quitAndKillDaemon)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
+      mainWindow = createWindow()
       createApplicationMenu(mainWindow, server, quitAndKillDaemon)
     }
   })

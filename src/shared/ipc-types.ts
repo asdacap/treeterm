@@ -254,6 +254,10 @@ export interface IpcRequests {
     params: [sessionId: string]
     result: { success: boolean; error?: string }
   }
+  sessionOpenInNewWindow: {
+    params: [sessionId: string]
+    result: { success: boolean; error?: string }
+  }
 
   // Daemon operations
   daemonShutdown: {

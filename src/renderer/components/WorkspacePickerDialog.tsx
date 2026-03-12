@@ -4,6 +4,7 @@ import type { DaemonWorkspace, DaemonSession } from '../types'
 interface WorkspacePickerDialogProps {
   sessions: DaemonSession[]
   onSelect: (session: DaemonSession) => void
+  onOpenInNewWindow: (session: DaemonSession) => void
   onCreateNew: () => void
   onCancel: () => void
 }
@@ -11,6 +12,7 @@ interface WorkspacePickerDialogProps {
 export default function WorkspacePickerDialog({
   sessions,
   onSelect,
+  onOpenInNewWindow,
   onCreateNew,
   onCancel
 }: WorkspacePickerDialogProps) {
@@ -172,6 +174,13 @@ export default function WorkspacePickerDialog({
           </button>
           <button className="dialog-btn cancel" onClick={onCancel}>
             Cancel
+          </button>
+          <button
+            className="dialog-btn secondary"
+            onClick={() => selectedSession && onOpenInNewWindow(selectedSession)}
+            disabled={!selectedSession}
+          >
+            Open in New Window
           </button>
           <button
             className="dialog-btn primary"

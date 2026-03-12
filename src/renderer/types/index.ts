@@ -337,6 +337,7 @@ export interface SessionApi {
   list: () => Promise<{ success: boolean; sessions?: DaemonSession[]; error?: string }>
   get: (sessionId: string) => Promise<{ success: boolean; session?: DaemonSession; error?: string }>
   delete: (sessionId: string) => Promise<{ success: boolean; error?: string }>
+  openInNewWindow: (sessionId: string) => Promise<{ success: boolean; error?: string }>
   onShowSessions: (callback: () => void) => () => void
 }
 
