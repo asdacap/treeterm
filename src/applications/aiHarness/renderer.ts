@@ -41,7 +41,8 @@ export function createAiHarnessVariant(instance: AiHarnessInstance): Application
         sandbox: tab.state.sandbox,
         isVisible,
         command: instance.command,
-        backgroundColor: instance.backgroundColor
+        backgroundColor: instance.backgroundColor,
+        disableScrollbar: instance.disableScrollbar
       })
     },
 

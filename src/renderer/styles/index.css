@@ -744,6 +744,11 @@ body,
   background: var(--bg-hover);
 }
 
+/* Hide scrollbar when disabled (for AI tools with own scrolling) */
+.disable-scrollbar .xterm-viewport::-webkit-scrollbar {
+  display: none;
+}
+
 /* Dialog Overlay */
 .dialog-overlay {
   position: fixed;

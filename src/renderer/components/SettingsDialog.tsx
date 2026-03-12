@@ -467,6 +467,24 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
                             />
                             Allow Network
                           </label>
+                          <label className="settings-checkbox-label">
+                            <input
+                              type="checkbox"
+                              checked={inst.disableScrollbar}
+                              onChange={(e) =>
+                                setLocalSettings((prev) => ({
+                                  ...prev,
+                                  aiHarness: {
+                                    ...prev.aiHarness,
+                                    instances: prev.aiHarness.instances.map((a, i) =>
+                                      i === index ? { ...a, disableScrollbar: e.target.checked } : a
+                                    )
+                                  }
+                                }))
+                              }
+                            />
+                            Disable Scrollbar
+                          </label>
                         </div>
                       </div>
                       <button
@@ -504,7 +522,8 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
                             isDefault: false,
                             enableSandbox: false,
                             allowNetwork: true,
-                            backgroundColor: '#1a1a1a'
+                            backgroundColor: '#1a1a1a',
+                            disableScrollbar: false
                           }
                         ]
                       }

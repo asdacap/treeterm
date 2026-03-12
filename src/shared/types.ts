@@ -87,6 +87,7 @@ export interface AiHarnessInstance {
   enableSandbox: boolean
   allowNetwork: boolean
   backgroundColor: string
+  disableScrollbar?: boolean
 }
 
 export interface PrefixModeConfig {
