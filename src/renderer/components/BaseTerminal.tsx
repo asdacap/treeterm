@@ -152,7 +152,8 @@ export default function BaseTerminal({
         // Save scroll position as ratio before fit to prevent scroll jumping
         const prevViewportY = term.buffer.active.viewportY
         const prevBaseY = term.buffer.active.baseY
-        const wasAtBottom = prevViewportY === prevBaseY
+        // Consider "at bottom" if within 3 lines of the bottom (accounts for partial scrolls)
+        const wasAtBottom = prevBaseY - prevViewportY <= 3
         const scrollRatio = prevBaseY > 0 ? prevViewportY / prevBaseY : 0
 
         fitAddonRef.current.fit()
@@ -328,7 +329,8 @@ export default function BaseTerminal({
       // Save scroll position as ratio before fit to prevent scroll jumping
       const prevViewportY = terminal.buffer.active.viewportY
       const prevBaseY = terminal.buffer.active.baseY
-      const wasAtBottom = prevViewportY === prevBaseY
+      // Consider "at bottom" if within 3 lines of the bottom (accounts for partial scrolls)
+      const wasAtBottom = prevBaseY - prevViewportY <= 3
       const scrollRatio = prevBaseY > 0 ? prevViewportY / prevBaseY : 0
 
       fitAddon.fit()
@@ -397,7 +399,8 @@ export default function BaseTerminal({
       // Save scroll position as ratio before fit to prevent scroll jumping
       const prevViewportY = terminal.buffer.active.viewportY
       const prevBaseY = terminal.buffer.active.baseY
-      const wasAtBottom = prevViewportY === prevBaseY
+      // Consider "at bottom" if within 3 lines of the bottom (accounts for partial scrolls)
+      const wasAtBottom = prevBaseY - prevViewportY <= 3
       const scrollRatio = prevBaseY > 0 ? prevViewportY / prevBaseY : 0
 
       // Re-fit and refresh the terminal when becoming visible
