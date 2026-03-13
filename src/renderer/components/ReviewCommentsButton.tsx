@@ -22,7 +22,8 @@ export function ReviewCommentsButton({ workspacePath, ptyId }: ReviewCommentsBut
       } else {
         setHasComments(false)
       }
-    } catch {
+    } catch (error) {
+      console.warn('[ReviewCommentsButton] failed to check for comments:', error)
       setHasComments(false)
     }
   }

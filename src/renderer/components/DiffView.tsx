@@ -20,6 +20,7 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
   // Uncommitted changes state
   const [uncommitted, setUncommitted] = useState<UncommittedChanges | null>(null)
   const [loadingUncommitted, setLoadingUncommitted] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('committed')
   const [selectedUncommittedFile, setSelectedUncommittedFile] = useState<UncommittedFile | null>(null)
 
@@ -61,8 +62,8 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
       if (result.success && result.changes) {
         setUncommitted(result.changes)
       }
-    } catch {
-      // Ignore errors for uncommitted changes
+    } catch (err) {
+      setLoadError(`Failed to load uncommitted changes: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
     setLoadingUncommitted(false)
   }
@@ -72,15 +73,18 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
     setSelectedUncommittedFile(null)
     setLoadingFileDiff(true)
     setFileDiffContents(null)
+    setLoadError(null)
     try {
       const result = await window.electron.git.getFileContentsForDiff(worktreePath, parentBranch, filePath)
       if (result.success && result.contents) {
         setFileDiffContents(result.contents)
       } else {
         setFileDiffContents(null)
+        setLoadError(result.error || 'Failed to load file diff')
       }
-    } catch {
+    } catch (err) {
       setFileDiffContents(null)
+      setLoadError(`Failed to load file diff: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
     setLoadingFileDiff(false)
   }
@@ -90,15 +94,18 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
     setSelectedFile(null)
     setLoadingFileDiff(true)
     setFileDiffContents(null)
+    setLoadError(null)
     try {
       const result = await window.electron.git.getUncommittedFileContentsForDiff(worktreePath, file.path, file.staged)
       if (result.success && result.contents) {
         setFileDiffContents(result.contents)
       } else {
         setFileDiffContents(null)
+        setLoadError(result.error || 'Failed to load uncommitted file diff')
       }
-    } catch {
+    } catch (err) {
       setFileDiffContents(null)
+      setLoadError(`Failed to load uncommitted file diff: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
     setLoadingFileDiff(false)
   }
@@ -149,8 +156,8 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
       } else {
         setCommitError(result.error || 'Failed to commit')
       }
-    } catch {
-      setCommitError('Failed to commit')
+    } catch (err) {
+      setCommitError(`Failed to commit: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
 
     setCommitting(false)
@@ -242,6 +249,9 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
 
   return (
     <div className="diff-view">
+      {loadError && (
+        <div className="diff-load-error">{loadError}</div>
+      )}
       {/* View mode tabs */}
       <div className="diff-tabs">
         <button

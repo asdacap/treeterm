@@ -112,6 +112,8 @@ export function saveSettings(settings: Settings): void {
     if (!existsSync(settingsDir)) {
       mkdirSync(settingsDir, { recursive: true })
     }
+    // Exception to "all file mutations through daemon gRPC" rule:
+    // Settings live in the app data dir (outside any workspace), so direct fs access is correct here.
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8')
   } catch (error) {
     console.error('Failed to save settings:', error)

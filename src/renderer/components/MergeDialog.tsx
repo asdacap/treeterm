@@ -18,7 +18,7 @@ export default function MergeDialog({
   onAbandon,
   onCloseAndClean,
   onCancel
-}: MergeDialogProps) {
+}: MergeDialogProps): JSX.Element {
   const [isProcessing, setIsProcessing] = useState(false)
   const [isCheckingConflicts, setIsCheckingConflicts] = useState(true)
   const [conflictInfo, setConflictInfo] = useState<ConflictInfo | null>(null)
@@ -26,6 +26,7 @@ export default function MergeDialog({
   const [error, setError] = useState<string | null>(null)
   const [uncommittedChanges, setUncommittedChanges] = useState<UncommittedChanges | null>(null)
   const [isCheckingUncommitted, setIsCheckingUncommitted] = useState(true)
+  const [checkError, setCheckError] = useState<string | null>(null)
 
   // Check for conflicts when dialog opens
   useEffect(() => {
@@ -64,9 +65,11 @@ export default function MergeDialog({
         const result = await window.electron.git.getUncommittedChanges(workspace.path)
         if (result.success && result.changes) {
           setUncommittedChanges(result.changes)
+        } else if (!result.success) {
+          setCheckError(result.error || 'Failed to check for uncommitted changes')
         }
-      } catch {
-        // Ignore errors
+      } catch (err) {
+        setCheckError(err instanceof Error ? err.message : 'Failed to check for uncommitted changes')
       } finally {
         setIsCheckingUncommitted(false)
       }
@@ -78,7 +81,7 @@ export default function MergeDialog({
   const hasConflicts = conflictInfo?.hasConflicts ?? false
   const hasUncommitted = uncommittedChanges && uncommittedChanges.files.length > 0
 
-  const handleMerge = async (squash: boolean) => {
+  const handleMerge = async (squash: boolean): Promise<void> => {
     setIsProcessing(true)
     setError(null)
     try {
@@ -89,7 +92,7 @@ export default function MergeDialog({
     }
   }
 
-  const handleAbandon = async () => {
+  const handleAbandon = async (): Promise<void> => {
     setIsProcessing(true)
     setError(null)
     try {
@@ -100,7 +103,7 @@ export default function MergeDialog({
     }
   }
 
-  const handleCloseAndClean = async () => {
+  const handleCloseAndClean = async (): Promise<void> => {
     setIsProcessing(true)
     setError(null)
     try {
@@ -170,6 +173,14 @@ export default function MergeDialog({
             </div>
           )}
         </div>
+
+        {/* Uncommitted Changes Check Error */}
+        {!isCheckingUncommitted && checkError && (
+          <div className="merge-uncommitted-error">
+            <span className="merge-conflict-icon">⚠</span>
+            <span>Could not check for uncommitted changes: {checkError}</span>
+          </div>
+        )}
 
         {/* Uncommitted Changes Warning */}
         {!isCheckingUncommitted && hasUncommitted && (

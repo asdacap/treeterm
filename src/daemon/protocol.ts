@@ -18,7 +18,9 @@ export type {
   Tab,
   Workspace,
   Session,
-  WorkspaceInput
+  WorkspaceInput,
+  // Re-export DaemonSessionInfo as SessionInfo to eliminate type duplication
+  DaemonSessionInfo as SessionInfo
 }
 
 export type MessageType =
@@ -49,15 +51,6 @@ export interface CreateSessionConfig {
   startupCommand?: string
 }
 
-export interface SessionInfo {
-  id: string
-  cwd: string
-  cols: number
-  rows: number
-  createdAt: number
-  lastActivity: number
-  attachedClients: number
-}
 
 export interface DaemonMessage {
   type: MessageType

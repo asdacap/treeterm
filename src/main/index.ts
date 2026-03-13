@@ -359,7 +359,8 @@ server.onPtyIsAlive(async (id) => {
   try {
     const sessions = await daemonClient.listPtySessions()
     return sessions.some(s => s.id === id)
-  } catch {
+  } catch (error) {
+    console.warn('[main] PTY alive check failed:', error)
     return false
   }
 })
@@ -522,14 +523,14 @@ server.onDialogGetRecentDirectories(async () => {
 })
 
 // Initialize git client when daemon is ready
-function initializeGitClient() {
+function initializeGitClient(): void {
   if (daemonClient && !gitClient) {
     gitClient = new GitClient(daemonClient)
   }
 }
 
 // Initialize reviews client when daemon is ready
-function initializeReviewsClient() {
+function initializeReviewsClient(): void {
   if (daemonClient && !reviewsClient) {
     reviewsClient = new ReviewsClient(daemonClient)
   }
@@ -936,6 +937,11 @@ app.whenReady().then(async () => {
 
   daemonClient = new GrpcDaemonClient()
 
+  // Forward daemon disconnections to renderer so the UI can show a warning
+  daemonClient.onDisconnect(() => {
+    server.daemonDisconnected()
+  })
+
   // Proactively connect to daemon on startup
   await daemonClient.ensureDaemonRunning()
 
@@ -957,6 +963,10 @@ app.whenReady().then(async () => {
       createApplicationMenu(mainWindow, server, quitAndKillDaemon)
     }
   })
+}).catch((error) => {
+  console.error('[main] startup failed:', error)
+  dialog.showErrorBox('Startup Error', `TreeTerm failed to start: ${error instanceof Error ? error.message : String(error)}`)
+  app.quit()
 })
 
   app.on('window-all-closed', () => {

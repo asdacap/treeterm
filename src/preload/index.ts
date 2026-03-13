@@ -94,6 +94,13 @@ client.onSessionSync((session) => {
   sessionSyncListeners.forEach((cb) => cb(session))
 })
 
+type DaemonDisconnectedCallback = () => void
+const daemonDisconnectedListeners: DaemonDisconnectedCallback[] = []
+
+client.onDaemonDisconnected(() => {
+  daemonDisconnectedListeners.forEach((cb) => cb())
+})
+
 contextBridge.exposeInMainWorld('electron', {
   platform: process.platform,
   terminal: {
@@ -386,6 +393,15 @@ contextBridge.exposeInMainWorld('electron', {
         const index = daemonSessionsListeners.indexOf(callback)
         if (index > -1) {
           daemonSessionsListeners.splice(index, 1)
+        }
+      }
+    },
+    onDisconnected: (callback: DaemonDisconnectedCallback): (() => void) => {
+      daemonDisconnectedListeners.push(callback)
+      return () => {
+        const index = daemonDisconnectedListeners.indexOf(callback)
+        if (index > -1) {
+          daemonDisconnectedListeners.splice(index, 1)
         }
       }
     }

@@ -66,7 +66,7 @@ function TimeoutProgress({ timeout, activatedAt }: { timeout: number; activatedA
   )
 }
 
-export default function KeybindingOverlay() {
+export default function KeybindingOverlay(): JSX.Element | null {
   const { state, activatedAt, focusedWorkspaceIndex, workspaceIds } = usePrefixModeStore()
   const { settings } = useSettingsStore()
 

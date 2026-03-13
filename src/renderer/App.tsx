@@ -24,6 +24,7 @@ export default function App() {
   const [unmergedWorkspaces, setUnmergedWorkspaces] = useState<Workspace[]>([])
   const [daemonSessions, setDaemonSessions] = useState<Session[]>([])
   const [showWorkspacePicker, setShowWorkspacePicker] = useState(false)
+  const [daemonDisconnected, setDaemonDisconnected] = useState(false)
   const { loadSettings } = useSettingsStore()
   const { workspaces } = useWorkspaceStore()
 
@@ -47,6 +48,8 @@ export default function App() {
         useWorkspaceStore.setState({ windowUuid: uuid })
         console.log('[App] Window UUID:', uuid)
       }
+    }).catch((error) => {
+      console.error('[App] Failed to fetch window UUID:', error)
     })
 
     const unsubSettings = window.electron.settings.onOpen(() => {
@@ -83,11 +86,18 @@ export default function App() {
       handleExternalSessionUpdate(session)
     })
 
+    // Listen for daemon disconnection to show a warning banner
+    const unsubDisconnect = window.electron.daemon.onDisconnected(() => {
+      console.error('[App] Daemon disconnected')
+      setDaemonDisconnected(true)
+    })
+
     return () => {
       unsubSettings()
       unsubClose()
       unsubReady()
       unsubSync()
+      unsubDisconnect()
     }
   }, [loadSettings])
 
@@ -459,6 +469,11 @@ export default function App() {
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       >
+        {daemonDisconnected && (
+          <div className="daemon-disconnect-banner">
+            Daemon disconnected — terminal sessions may be unavailable. Please restart the app.
+          </div>
+        )}
         <div className="tree-pane" style={{ width: treeWidth }}>
           <TreePane />
         </div>

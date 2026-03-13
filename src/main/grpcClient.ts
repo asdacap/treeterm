@@ -40,6 +40,7 @@ import type {
 
 type DataListener = (data: string) => void
 type ExitListener = (exitCode: number, signal?: number) => void
+type DisconnectListener = () => void
 
 export class GrpcDaemonClient {
   private client: TreeTermDaemonClient | null = null
@@ -47,6 +48,7 @@ export class GrpcDaemonClient {
   private connected: boolean = false
   private dataListeners: Map<string, Set<DataListener>> = new Map()
   private exitListeners: Map<string, Set<ExitListener>> = new Map()
+  private disconnectListeners: Set<DisconnectListener> = new Set()
   private clientId: string = `client-${Date.now()}`
 
   constructor(private socketPath: string = getDefaultSocketPath()) {}
@@ -126,13 +128,24 @@ export class GrpcDaemonClient {
     this.stream.on('error', (error) => {
       console.error('[grpcDaemonClient] stream error:', error)
       this.connected = false
+      for (const listener of this.disconnectListeners) {
+        listener()
+      }
     })
 
     this.stream.on('end', () => {
       console.log('[grpcDaemonClient] stream ended')
       this.connected = false
       this.stream = null
+      for (const listener of this.disconnectListeners) {
+        listener()
+      }
     })
+  }
+
+  onDisconnect(listener: DisconnectListener): () => void {
+    this.disconnectListeners.add(listener)
+    return () => this.disconnectListeners.delete(listener)
   }
 
   async ensureDaemonRunning(): Promise<void> {
@@ -365,7 +378,8 @@ export class GrpcDaemonClient {
   watchSession(
     sessionId: string,
     listenerId: string,
-    onUpdate: (session: Session) => void
+    onUpdate: (session: Session) => void,
+    onError?: (error: Error) => void
   ): () => void {
     if (!this.client) {
       console.error('[grpcDaemonClient] cannot watch session: not connected')
@@ -383,6 +397,9 @@ export class GrpcDaemonClient {
 
     stream.on('error', (error) => {
       console.error('[grpcDaemonClient] sessionWatch stream error:', error)
+      if (onError) {
+        onError(error)
+      }
     })
 
     return () => {

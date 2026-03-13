@@ -7,6 +7,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import type { DaemonPtyManager } from './ptyManager'
 import type { SessionStore } from './sessionStore'
+import type { Session, Workspace, Tab } from '../shared/types'
 import { createModuleLogger } from './logger'
 import { getDefaultSocketPath } from './socketPath'
 import * as filesystem from './filesystem'
@@ -735,7 +736,7 @@ export class GrpcServer {
     }
   }
 
-  private convertWorkspaceInputs(inputs: WorkspaceInput[]): any[] {
+  private convertWorkspaceInputs(inputs: WorkspaceInput[]): Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[] {
     return inputs.map(input => ({
       id: input.id || undefined,
       path: input.path,
@@ -758,10 +759,10 @@ export class GrpcServer {
     }))
   }
 
-  private convertToProtoSession(session: any): ProtoSession {
+  private convertToProtoSession(session: Session): ProtoSession {
     return {
       id: session.id,
-      workspaces: session.workspaces.map((w: any) => ({
+      workspaces: session.workspaces.map((w: Workspace) => ({
         id: w.id,
         path: w.path,
         name: w.name,
@@ -773,7 +774,7 @@ export class GrpcServer {
         gitRootPath: w.gitRootPath || undefined,
         isWorktree: w.isWorktree,
         isDetached: w.isDetached,
-        tabs: w.tabs.map((t: any) => ({
+        tabs: w.tabs.map((t: Tab) => ({
           id: t.id,
           applicationId: t.applicationId,
           title: t.title,

@@ -44,7 +44,9 @@ export default function ReviewBrowser({
 
   // Conflict state
   const [conflictInfo, setConflictInfo] = useState<ConflictInfo | null>(null)
+  const [conflictError, setConflictError] = useState<string | null>(null)
   const [isCheckingConflicts, setIsCheckingConflicts] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   // Action state
   const [isProcessing, setIsProcessing] = useState(false)
@@ -135,8 +137,8 @@ export default function ReviewBrowser({
       if (result.success && result.changes) {
         setUncommitted(result.changes)
       }
-    } catch {
-      // Ignore errors for uncommitted changes
+    } catch (err) {
+      setLoadError(`Failed to load uncommitted changes: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
   }
 
@@ -144,6 +146,7 @@ export default function ReviewBrowser({
     if (!workspace?.gitBranch || !parentWorkspace?.gitBranch || !parentWorkspace.gitRootPath) return
 
     setIsCheckingConflicts(true)
+    setConflictError(null)
     try {
       const result = await window.electron.git.checkMergeConflicts(
         parentWorkspace.gitRootPath,
@@ -152,9 +155,11 @@ export default function ReviewBrowser({
       )
       if (result.success && result.conflicts) {
         setConflictInfo(result.conflicts)
+      } else if (!result.success) {
+        setConflictError(result.error || 'Failed to check for conflicts')
       }
-    } catch {
-      // Ignore conflict check errors
+    } catch (err) {
+      setConflictError(err instanceof Error ? err.message : 'Failed to check for conflicts')
     }
     setIsCheckingConflicts(false)
   }
@@ -166,15 +171,18 @@ export default function ReviewBrowser({
     setSelectedUncommittedFile(null)
     setLoadingFileDiff(true)
     setFileDiffContents(null)
+    setLoadError(null)
     try {
       const result = await window.electron.git.getFileContentsForDiffAgainstHead(workspacePath, parentWorkspace.gitBranch, filePath)
       if (result.success && result.contents) {
         setFileDiffContents(result.contents)
       } else {
         setFileDiffContents(null)
+        setLoadError(result.error || 'Failed to load file diff')
       }
-    } catch {
+    } catch (err) {
       setFileDiffContents(null)
+      setLoadError(`Failed to load file diff: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
     setLoadingFileDiff(false)
   }
@@ -184,15 +192,18 @@ export default function ReviewBrowser({
     setSelectedFile(null)
     setLoadingFileDiff(true)
     setFileDiffContents(null)
+    setLoadError(null)
     try {
       const result = await window.electron.git.getUncommittedFileContentsForDiff(workspacePath, file.path, file.staged)
       if (result.success && result.contents) {
         setFileDiffContents(result.contents)
       } else {
         setFileDiffContents(null)
+        setLoadError(result.error || 'Failed to load uncommitted file diff')
       }
-    } catch {
+    } catch (err) {
       setFileDiffContents(null)
+      setLoadError(`Failed to load uncommitted file diff: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
     setLoadingFileDiff(false)
   }
@@ -243,8 +254,8 @@ export default function ReviewBrowser({
       } else {
         setCommitError(result.error || 'Failed to commit')
       }
-    } catch {
-      setCommitError('Failed to commit')
+    } catch (err) {
+      setCommitError(`Failed to commit: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
 
     setCommitting(false)
@@ -471,6 +482,16 @@ export default function ReviewBrowser({
           <span className="review-checking">Checking for conflicts...</span>
         )}
       </div>
+
+      {/* Load Error */}
+      {loadError && (
+        <div className="review-load-error">{loadError}</div>
+      )}
+
+      {/* Conflict Check Error */}
+      {conflictError && (
+        <div className="review-conflict-error">Could not check for conflicts: {conflictError}</div>
+      )}
 
       {/* Conflict Warning */}
       {hasConflicts && (

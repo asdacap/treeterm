@@ -137,7 +137,8 @@ export class GitClient {
         branch: branchResult.stdout.trim() || null,
         rootPath: rootResult.stdout.trim() || null
       }
-    } catch {
+    } catch (error) {
+      console.warn('[git] getGitInfo failed, treating as non-repo:', error)
       return { isRepo: false, branch: null, rootPath: null }
     }
   }
@@ -485,8 +486,8 @@ export class GitClient {
         if (branchResult.exitCode === 0) {
           branchName = branchResult.stdout.trim()
         }
-      } catch {
-        // Ignore
+      } catch (error) {
+        console.warn('[git] could not get branch name before worktree removal:', error)
       }
     }
 
@@ -500,8 +501,8 @@ export class GitClient {
     if (deleteBranch && branchName) {
       try {
         await this.deleteBranch(repoPath, branchName, true)
-      } catch {
-        // Ignore branch deletion errors
+      } catch (error) {
+        console.warn('[git] branch deletion after worktree removal failed:', error)
       }
     }
   }
@@ -897,7 +898,8 @@ export class GitClient {
     try {
       const result = await this.exec(rootPath, ['check-ignore', '.worktrees'])
       return result.exitCode === 0 // Exit code 0 means it's ignored
-    } catch {
+    } catch (error) {
+      console.warn('[git] gitignore check failed:', error)
       return false
     }
   }

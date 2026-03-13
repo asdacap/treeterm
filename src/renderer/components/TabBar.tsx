@@ -40,7 +40,7 @@ export default function TabBar({
   onSelectTab,
   onCloseTab,
   onNewTab
-}: TabBarProps) {
+}: TabBarProps): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
