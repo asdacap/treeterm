@@ -1,5 +1,5 @@
 import { contextBridge } from 'electron'
-import type { SandboxConfig, Session, DaemonSessionInfo, WorkspaceInput } from '../shared/types'
+import type { SandboxConfig, Session, SessionInfo, WorkspaceInput } from '../shared/types'
 import { IpcClient } from './ipc-client'
 
 type DataCallback = (data: string) => void
@@ -60,7 +60,7 @@ client.onAppReady((session) => {
   readyListeners.forEach((cb) => cb(session))
 })
 
-type SessionsCallback = (sessions: DaemonSessionInfo[]) => void
+type SessionsCallback = (sessions: SessionInfo[]) => void
 const daemonSessionsListeners: SessionsCallback[] = []
 
 client.onDaemonSessions((sessions) => {

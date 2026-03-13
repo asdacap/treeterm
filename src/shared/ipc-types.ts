@@ -7,7 +7,7 @@ import type {
   SandboxConfig,
   Settings,
   Session,
-  DaemonSessionInfo,
+  SessionInfo,
   WorkspaceInput
 } from './types'
 
@@ -45,7 +45,7 @@ export interface IpcRequests {
   }
   ptyList: {
     params: []
-    result: DaemonSessionInfo[]
+    result: SessionInfo[]
   }
   ptyIsAlive: {
     params: [id: string]
@@ -341,7 +341,7 @@ export interface IpcEvents {
     params: [event: { type: string; key: string; code: string }]
   }
   daemonSessions: {
-    params: [sessions: DaemonSessionInfo[]]
+    params: [sessions: SessionInfo[]]
   }
   terminalNew: {
     params: []

@@ -8,10 +8,10 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import AppErrorFallback from './components/AppErrorFallback'
 import { useSettingsStore } from './store/settings'
 import { useWorkspaceStore, getUnmergedSubWorkspaces } from './store/workspace'
-import type { Workspace, Session, TerminalState, Tab, DaemonSessionInfo } from './types'
+import type { Workspace, Session, TerminalState, Tab, SessionInfo } from './types'
 
 // Helper types for session restoration
-type SessionMap = Map<string, DaemonSessionInfo>
+type SessionMap = Map<string, SessionInfo>
 type AddTabWithStateFn = <T>(workspaceId: string, applicationId: string, initialState: Partial<T>, existingTabId?: string) => string
 type SetActiveTabFn = (workspaceId: string, tabId: string) => void
 

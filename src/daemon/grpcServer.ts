@@ -741,7 +741,7 @@ export class GrpcServer {
 
   private convertWorkspaceInputs(inputs: WorkspaceInput[]): Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[] {
     return inputs.map(input => ({
-      id: input.id || undefined,
+      id: input.id,
       path: input.path,
       name: input.name,
       parentId: input.parentId || null,

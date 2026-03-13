@@ -6,7 +6,7 @@ import type {
   Tab,
   Workspace,
   Session,
-  DaemonSessionInfo,
+  SessionInfo,
   WorkspaceInput,
   TerminalInstance,
   AiHarnessInstance,
@@ -21,7 +21,7 @@ export type {
   Tab,
   Workspace,
   Session,
-  DaemonSessionInfo,
+  SessionInfo,
   WorkspaceInput,
   TerminalInstance,
   AiHarnessInstance,
@@ -229,7 +229,7 @@ export interface TerminalApi {
   create: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
   attach: (sessionId: string) => Promise<{ success: boolean; scrollback?: string[]; error?: string }>
   detach: (sessionId: string) => Promise<void>
-  list: () => Promise<DaemonSessionInfo[]>
+  list: () => Promise<SessionInfo[]>
   write: (id: string, data: string) => void
   resize: (id: string, cols: number, rows: number) => void
   kill: (id: string) => void
@@ -307,7 +307,8 @@ export interface AppApi {
 
 export interface DaemonApi {
   shutdown: () => Promise<{ success: boolean; error?: string }>
-  onSessions: (callback: (sessions: DaemonSessionInfo[]) => void) => () => void
+  onSessions: (callback: (sessions: SessionInfo[]) => void) => () => void
+  onDisconnected: (callback: () => void) => () => void
 }
 
 export interface SessionApi {

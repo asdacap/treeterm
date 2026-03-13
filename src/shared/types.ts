@@ -60,7 +60,7 @@ export type WorkspaceInput = Omit<Workspace, 'createdAt' | 'lastActivity' | 'att
 
 // === PTY Session Types ===
 
-export interface DaemonSessionInfo {
+export interface SessionInfo {
   id: string
   cwd: string
   cols: number

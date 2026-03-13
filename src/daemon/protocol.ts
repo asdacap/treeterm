@@ -8,7 +8,7 @@ import type {
   Tab,
   Workspace,
   Session,
-  DaemonSessionInfo,
+  SessionInfo,
   WorkspaceInput
 } from '../shared/types'
 
@@ -18,9 +18,8 @@ export type {
   Tab,
   Workspace,
   Session,
-  WorkspaceInput,
-  // Re-export DaemonSessionInfo as SessionInfo to eliminate type duplication
-  DaemonSessionInfo as SessionInfo
+  SessionInfo,
+  WorkspaceInput
 }
 
 export type MessageType =
