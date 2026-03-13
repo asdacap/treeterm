@@ -1,10 +1,10 @@
 import { useState, useMemo } from 'react'
-import type { DaemonWorkspace, DaemonSession } from '../types'
+import type { Workspace, Session } from '../types'
 
 interface WorkspacePickerDialogProps {
-  sessions: DaemonSession[]
-  onSelect: (session: DaemonSession) => void
-  onOpenInNewWindow: (session: DaemonSession) => void
+  sessions: Session[]
+  onSelect: (session: Session) => void
+  onOpenInNewWindow: (session: Session) => void
   onCreateNew: () => void
   onCancel: () => void
 }
@@ -16,7 +16,7 @@ export default function WorkspacePickerDialog({
   onCreateNew,
   onCancel
 }: WorkspacePickerDialogProps) {
-  const [selectedSession, setSelectedSession] = useState<DaemonSession | null>(null)
+  const [selectedSession, setSelectedSession] = useState<Session | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
 
   const filteredSessions = useMemo(() => {
@@ -31,17 +31,17 @@ export default function WorkspacePickerDialog({
   }, [sessions, searchQuery])
 
   // Build workspace hierarchy for each session
-  const buildWorkspaceHierarchy = (workspaces: DaemonWorkspace[]) => {
-    const roots: DaemonWorkspace[] = []
-    const children: Map<string, DaemonWorkspace[]> = new Map()
+  const buildWorkspaceHierarchy = (workspaces: Workspace[]) => {
+    const roots: Workspace[] = []
+    const children: Map<string, Workspace[]> = new Map()
 
     for (const workspace of workspaces) {
-      if (workspace.parentPath === null) {
+      if (workspace.parentId === null) {
         roots.push(workspace)
       } else {
-        const siblings = children.get(workspace.parentPath) || []
+        const siblings = children.get(workspace.parentId) || []
         siblings.push(workspace)
-        children.set(workspace.parentPath, siblings)
+        children.set(workspace.parentId, siblings)
       }
     }
 
@@ -79,8 +79,8 @@ export default function WorkspacePickerDialog({
     }
   }
 
-  const renderWorkspace = (workspace: DaemonWorkspace, childWorkspaces: Map<string, DaemonWorkspace[]>, isChild: boolean = false) => {
-    const children = childWorkspaces.get(workspace.path) || []
+  const renderWorkspace = (workspace: Workspace, childWorkspaces: Map<string, Workspace[]>, isChild: boolean = false) => {
+    const children = childWorkspaces.get(workspace.id) || []
 
     return (
       <div key={workspace.path} style={{ marginLeft: isChild ? '20px' : '0' }}>
@@ -103,7 +103,7 @@ export default function WorkspacePickerDialog({
     )
   }
 
-  const renderSession = (session: DaemonSession) => {
+  const renderSession = (session: Session) => {
     const { rootWorkspaces, childWorkspaces } = buildWorkspaceHierarchy(session.workspaces)
     const totalTabs = session.workspaces.reduce((sum, w) => sum + w.tabs.length, 0)
 

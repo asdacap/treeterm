@@ -3,9 +3,9 @@ import type { ReactNode } from 'react'
 // Import and re-export shared types
 import type {
   SandboxConfig,
-  DaemonTab,
-  DaemonWorkspace,
-  DaemonSession,
+  Tab,
+  Workspace,
+  Session,
   DaemonSessionInfo,
   WorkspaceInput,
   TerminalInstance,
@@ -18,9 +18,9 @@ import type {
 
 export type {
   SandboxConfig,
-  DaemonTab,
-  DaemonWorkspace,
-  DaemonSession,
+  Tab,
+  Workspace,
+  Session,
   DaemonSessionInfo,
   WorkspaceInput,
   TerminalInstance,
@@ -60,14 +60,6 @@ export interface ApplicationRenderProps {
   workspaceId: string
   workspacePath: string
   isVisible: boolean
-}
-
-// Tab - unified tab type, references application by id
-export interface Tab {
-  id: string
-  applicationId: string
-  title: string
-  state: unknown
 }
 
 // Type-specific state interfaces (for internal use within applications)
@@ -135,26 +127,6 @@ export interface FilesystemApi {
     success: boolean
     error?: string
   }>
-}
-
-export interface Workspace {
-  id: string
-  name: string
-  path: string
-  parentId: string | null
-  children: string[]
-  status: 'active' | 'merged' | 'abandoned'
-  // Git-related fields
-  isGitRepo: boolean
-  gitBranch: string | null
-  gitRootPath: string | null
-  isWorktree: boolean
-  isDetached?: boolean  // If true, no merge - just "Close and Clean"
-  // Tabs
-  tabs: Tab[]
-  activeTabId: string | null
-  // Worktree-specific settings
-  settings?: WorktreeSettings
 }
 
 export interface GitInfo {
@@ -321,7 +293,7 @@ export interface STTApi {
 }
 
 export interface AppApi {
-  onReady: (callback: (session: DaemonSession | null) => void) => () => void
+  onReady: (callback: (session: Session | null) => void) => () => void
   onCloseConfirm: (callback: () => void) => () => void
   confirmClose: () => void
   cancelClose: () => void
@@ -335,15 +307,15 @@ export interface DaemonApi {
 
 export interface SessionApi {
   create: (workspaces: WorkspaceInput[]) =>
-    Promise<{ success: boolean; session?: DaemonSession; error?: string }>
+    Promise<{ success: boolean; session?: Session; error?: string }>
   update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string) =>
-    Promise<{ success: boolean; session?: DaemonSession; error?: string }>
-  list: () => Promise<{ success: boolean; sessions?: DaemonSession[]; error?: string }>
-  get: (sessionId: string) => Promise<{ success: boolean; session?: DaemonSession; error?: string }>
+    Promise<{ success: boolean; session?: Session; error?: string }>
+  list: () => Promise<{ success: boolean; sessions?: Session[]; error?: string }>
+  get: (sessionId: string) => Promise<{ success: boolean; session?: Session; error?: string }>
   delete: (sessionId: string) => Promise<{ success: boolean; error?: string }>
   openInNewWindow: (sessionId: string) => Promise<{ success: boolean; error?: string }>
   onShowSessions: (callback: () => void) => () => void
-  onSync: (callback: (session: DaemonSession) => void) => () => void
+  onSync: (callback: (session: Session) => void) => () => void
 }
 
 export interface ElectronApi {

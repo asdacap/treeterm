@@ -3,7 +3,7 @@
  * A session contains multiple workspaces that were open together
  */
 
-import type { DaemonSession, DaemonWorkspace } from './protocol'
+import type { Session, Workspace } from './protocol'
 import { createModuleLogger } from './logger'
 
 const log = createModuleLogger('sessionStore')
@@ -12,9 +12,13 @@ function generateSessionId(): string {
   return `session-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
+function generateWorkspaceId(): string {
+  return `ws-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
 export class SessionStore {
   // Map from sessionId -> session
-  private sessions: Map<string, DaemonSession> = new Map()
+  private sessions: Map<string, Session> = new Map()
 
   // Track which client IDs are attached to which session IDs
   private clientAttachments: Map<string, Set<string>> = new Map() // clientId -> Set<sessionId>
@@ -26,7 +30,7 @@ export class SessionStore {
    * Initialize the default session (called once on daemon startup)
    * Creates a new session with empty workspaces
    */
-  initializeDefaultSession(clientId: string): DaemonSession {
+  initializeDefaultSession(clientId: string): Session {
     const session = this.createSession(clientId, [])
     this.defaultSessionId = session.id
     log.info({ sessionId: session.id }, 'default session initialized')
@@ -36,7 +40,7 @@ export class SessionStore {
   /**
    * Get the default session, creating it if necessary
    */
-  getOrCreateDefaultSession(clientId: string): DaemonSession {
+  getOrCreateDefaultSession(clientId: string): Session {
     // Return existing default session if it exists
     if (this.defaultSessionId) {
       const session = this.sessions.get(this.defaultSessionId)
@@ -66,20 +70,21 @@ export class SessionStore {
    */
   createSession(
     clientId: string,
-    workspaces: Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]
-  ): DaemonSession {
+    workspaces: Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]
+  ): Session {
     const sessionId = generateSessionId()
     const now = Date.now()
 
-    // Add metadata to each workspace
-    const fullWorkspaces: DaemonWorkspace[] = workspaces.map(ws => ({
+    // Add metadata to each workspace, generating ID if not provided
+    const fullWorkspaces: Workspace[] = workspaces.map(ws => ({
       ...ws,
+      id: ws.id || generateWorkspaceId(),
       createdAt: now,
       lastActivity: now,
       attachedClients: 1
     }))
 
-    const session: DaemonSession = {
+    const session: Session = {
       id: sessionId,
       workspaces: fullWorkspaces,
       createdAt: now,
@@ -101,25 +106,26 @@ export class SessionStore {
   updateSession(
     clientId: string,
     sessionId: string,
-    workspaces: Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]
-  ): DaemonSession | null {
+    workspaces: Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]
+  ): Session | null {
     const session = this.sessions.get(sessionId)
     if (!session) return null
 
     const now = Date.now()
 
-    // Update workspace metadata, preserving createdAt
-    const fullWorkspaces: DaemonWorkspace[] = workspaces.map(ws => {
-      const existing = session.workspaces.find(w => w.path === ws.path)
+    // Update workspace metadata, preserving createdAt; match by id or path for backward compat
+    const fullWorkspaces: Workspace[] = workspaces.map(ws => {
+      const existing = session.workspaces.find(w => (ws.id && w.id === ws.id) || w.path === ws.path)
       return {
         ...ws,
+        id: ws.id || existing?.id || generateWorkspaceId(),
         createdAt: existing?.createdAt || now,
         lastActivity: now,
         attachedClients: existing?.attachedClients || 1
       }
     })
 
-    const updated: DaemonSession = {
+    const updated: Session = {
       ...session,
       workspaces: fullWorkspaces,
       lastActivity: now,
@@ -139,14 +145,14 @@ export class SessionStore {
   /**
    * Get session by ID
    */
-  getSession(sessionId: string): DaemonSession | null {
+  getSession(sessionId: string): Session | null {
     return this.sessions.get(sessionId) || null
   }
 
   /**
    * List all sessions
    */
-  listSessions(): DaemonSession[] {
+  listSessions(): Session[] {
     return Array.from(this.sessions.values())
   }
 

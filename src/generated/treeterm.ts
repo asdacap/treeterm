@@ -36,7 +36,7 @@ export interface SandboxConfig {
   allowedPaths: string[];
 }
 
-export interface DaemonTab {
+export interface Tab {
   id: string;
   applicationId: string;
   title: string;
@@ -44,10 +44,10 @@ export interface DaemonTab {
   state: Buffer;
 }
 
-export interface DaemonWorkspace {
+export interface Workspace {
   path: string;
   name: string;
-  parentPath?:
+  parentId?:
     | string
     | undefined;
   /** 'active' | 'merged' | 'abandoned' */
@@ -57,16 +57,18 @@ export interface DaemonWorkspace {
   gitRootPath?: string | undefined;
   isWorktree: boolean;
   isDetached?: boolean | undefined;
-  tabs: DaemonTab[];
+  tabs: Tab[];
   activeTabId?: string | undefined;
   createdAt: number;
   lastActivity: number;
   attachedClients: number;
+  id: string;
+  children: string[];
 }
 
-export interface DaemonSession {
+export interface Session {
   id: string;
-  workspaces: DaemonWorkspace[];
+  workspaces: Workspace[];
   createdAt: number;
   lastActivity: number;
   attachedClients: number;
@@ -75,15 +77,17 @@ export interface DaemonSession {
 export interface WorkspaceInput {
   path: string;
   name: string;
-  parentPath?: string | undefined;
+  parentId?: string | undefined;
   status: string;
   isGitRepo: boolean;
   gitBranch?: string | undefined;
   gitRootPath?: string | undefined;
   isWorktree: boolean;
   isDetached?: boolean | undefined;
-  tabs: DaemonTab[];
+  tabs: Tab[];
   activeTabId?: string | undefined;
+  id: string;
+  children: string[];
 }
 
 export interface PtySessionInfo {
@@ -252,7 +256,7 @@ export interface SessionWatchRequest {
 export interface SessionWatchEvent {
   sessionId: string;
   session?:
-    | DaemonSession
+    | Session
     | undefined;
   /** Who triggered the update */
   senderId: string;
@@ -267,7 +271,7 @@ export interface DeleteSessionRequest {
 }
 
 export interface ListSessionsResponse {
-  sessions: DaemonSession[];
+  sessions: Session[];
 }
 
 export interface GitInfoRequest {
@@ -842,12 +846,12 @@ export const SandboxConfig: MessageFns<SandboxConfig> = {
   },
 };
 
-function createBaseDaemonTab(): DaemonTab {
+function createBaseTab(): Tab {
   return { id: "", applicationId: "", title: "", state: Buffer.alloc(0) };
 }
 
-export const DaemonTab: MessageFns<DaemonTab> = {
-  encode(message: DaemonTab, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+export const Tab: MessageFns<Tab> = {
+  encode(message: Tab, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.id !== "") {
       writer.uint32(10).string(message.id);
     }
@@ -863,10 +867,10 @@ export const DaemonTab: MessageFns<DaemonTab> = {
     return writer;
   },
 
-  decode(input: BinaryReader | Uint8Array, length?: number): DaemonTab {
+  decode(input: BinaryReader | Uint8Array, length?: number): Tab {
     const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
     const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDaemonTab();
+    const message = createBaseTab();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -911,7 +915,7 @@ export const DaemonTab: MessageFns<DaemonTab> = {
     return message;
   },
 
-  fromJSON(object: any): DaemonTab {
+  fromJSON(object: any): Tab {
     return {
       id: isSet(object.id) ? globalThis.String(object.id) : "",
       applicationId: isSet(object.applicationId)
@@ -924,7 +928,7 @@ export const DaemonTab: MessageFns<DaemonTab> = {
     };
   },
 
-  toJSON(message: DaemonTab): unknown {
+  toJSON(message: Tab): unknown {
     const obj: any = {};
     if (message.id !== "") {
       obj.id = message.id;
@@ -941,11 +945,11 @@ export const DaemonTab: MessageFns<DaemonTab> = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DaemonTab>, I>>(base?: I): DaemonTab {
-    return DaemonTab.fromPartial(base ?? ({} as any));
+  create<I extends Exact<DeepPartial<Tab>, I>>(base?: I): Tab {
+    return Tab.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<DaemonTab>, I>>(object: I): DaemonTab {
-    const message = createBaseDaemonTab();
+  fromPartial<I extends Exact<DeepPartial<Tab>, I>>(object: I): Tab {
+    const message = createBaseTab();
     message.id = object.id ?? "";
     message.applicationId = object.applicationId ?? "";
     message.title = object.title ?? "";
@@ -954,11 +958,11 @@ export const DaemonTab: MessageFns<DaemonTab> = {
   },
 };
 
-function createBaseDaemonWorkspace(): DaemonWorkspace {
+function createBaseWorkspace(): Workspace {
   return {
     path: "",
     name: "",
-    parentPath: undefined,
+    parentId: undefined,
     status: "",
     isGitRepo: false,
     gitBranch: undefined,
@@ -970,19 +974,21 @@ function createBaseDaemonWorkspace(): DaemonWorkspace {
     createdAt: 0,
     lastActivity: 0,
     attachedClients: 0,
+    id: "",
+    children: [],
   };
 }
 
-export const DaemonWorkspace: MessageFns<DaemonWorkspace> = {
-  encode(message: DaemonWorkspace, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+export const Workspace: MessageFns<Workspace> = {
+  encode(message: Workspace, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.path !== "") {
       writer.uint32(10).string(message.path);
     }
     if (message.name !== "") {
       writer.uint32(18).string(message.name);
     }
-    if (message.parentPath !== undefined) {
-      writer.uint32(26).string(message.parentPath);
+    if (message.parentId !== undefined) {
+      writer.uint32(26).string(message.parentId);
     }
     if (message.status !== "") {
       writer.uint32(34).string(message.status);
@@ -1003,7 +1009,7 @@ export const DaemonWorkspace: MessageFns<DaemonWorkspace> = {
       writer.uint32(72).bool(message.isDetached);
     }
     for (const v of message.tabs) {
-      DaemonTab.encode(v!, writer.uint32(82).fork()).join();
+      Tab.encode(v!, writer.uint32(82).fork()).join();
     }
     if (message.activeTabId !== undefined) {
       writer.uint32(90).string(message.activeTabId);
@@ -1017,13 +1023,19 @@ export const DaemonWorkspace: MessageFns<DaemonWorkspace> = {
     if (message.attachedClients !== 0) {
       writer.uint32(112).int32(message.attachedClients);
     }
+    if (message.id !== "") {
+      writer.uint32(122).string(message.id);
+    }
+    for (const v of message.children) {
+      writer.uint32(130).string(v!);
+    }
     return writer;
   },
 
-  decode(input: BinaryReader | Uint8Array, length?: number): DaemonWorkspace {
+  decode(input: BinaryReader | Uint8Array, length?: number): Workspace {
     const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
     const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDaemonWorkspace();
+    const message = createBaseWorkspace();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -1048,7 +1060,7 @@ export const DaemonWorkspace: MessageFns<DaemonWorkspace> = {
             break;
           }
 
-          message.parentPath = reader.string();
+          message.parentId = reader.string();
           continue;
         }
         case 4: {
@@ -1104,7 +1116,7 @@ export const DaemonWorkspace: MessageFns<DaemonWorkspace> = {
             break;
           }
 
-          message.tabs.push(DaemonTab.decode(reader, reader.uint32()));
+          message.tabs.push(Tab.decode(reader, reader.uint32()));
           continue;
         }
         case 11: {
@@ -1139,6 +1151,22 @@ export const DaemonWorkspace: MessageFns<DaemonWorkspace> = {
           message.attachedClients = reader.int32();
           continue;
         }
+        case 15: {
+          if (tag !== 122) {
+            break;
+          }
+
+          message.id = reader.string();
+          continue;
+        }
+        case 16: {
+          if (tag !== 130) {
+            break;
+          }
+
+          message.children.push(reader.string());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1148,14 +1176,14 @@ export const DaemonWorkspace: MessageFns<DaemonWorkspace> = {
     return message;
   },
 
-  fromJSON(object: any): DaemonWorkspace {
+  fromJSON(object: any): Workspace {
     return {
       path: isSet(object.path) ? globalThis.String(object.path) : "",
       name: isSet(object.name) ? globalThis.String(object.name) : "",
-      parentPath: isSet(object.parentPath)
-        ? globalThis.String(object.parentPath)
-        : isSet(object.parent_path)
-        ? globalThis.String(object.parent_path)
+      parentId: isSet(object.parentId)
+        ? globalThis.String(object.parentId)
+        : isSet(object.parent_id)
+        ? globalThis.String(object.parent_id)
         : undefined,
       status: isSet(object.status) ? globalThis.String(object.status) : "",
       isGitRepo: isSet(object.isGitRepo)
@@ -1184,7 +1212,7 @@ export const DaemonWorkspace: MessageFns<DaemonWorkspace> = {
         ? globalThis.Boolean(object.is_detached)
         : undefined,
       tabs: globalThis.Array.isArray(object?.tabs)
-        ? object.tabs.map((e: any) => DaemonTab.fromJSON(e))
+        ? object.tabs.map((e: any) => Tab.fromJSON(e))
         : [],
       activeTabId: isSet(object.activeTabId)
         ? globalThis.String(object.activeTabId)
@@ -1206,10 +1234,14 @@ export const DaemonWorkspace: MessageFns<DaemonWorkspace> = {
         : isSet(object.attached_clients)
         ? globalThis.Number(object.attached_clients)
         : 0,
+      id: isSet(object.id) ? globalThis.String(object.id) : "",
+      children: globalThis.Array.isArray(object?.children)
+        ? object.children.map((e: any) => globalThis.String(e))
+        : [],
     };
   },
 
-  toJSON(message: DaemonWorkspace): unknown {
+  toJSON(message: Workspace): unknown {
     const obj: any = {};
     if (message.path !== "") {
       obj.path = message.path;
@@ -1217,8 +1249,8 @@ export const DaemonWorkspace: MessageFns<DaemonWorkspace> = {
     if (message.name !== "") {
       obj.name = message.name;
     }
-    if (message.parentPath !== undefined) {
-      obj.parentPath = message.parentPath;
+    if (message.parentId !== undefined) {
+      obj.parentId = message.parentId;
     }
     if (message.status !== "") {
       obj.status = message.status;
@@ -1239,7 +1271,7 @@ export const DaemonWorkspace: MessageFns<DaemonWorkspace> = {
       obj.isDetached = message.isDetached;
     }
     if (message.tabs?.length) {
-      obj.tabs = message.tabs.map((e) => DaemonTab.toJSON(e));
+      obj.tabs = message.tabs.map((e) => Tab.toJSON(e));
     }
     if (message.activeTabId !== undefined) {
       obj.activeTabId = message.activeTabId;
@@ -1253,43 +1285,51 @@ export const DaemonWorkspace: MessageFns<DaemonWorkspace> = {
     if (message.attachedClients !== 0) {
       obj.attachedClients = Math.round(message.attachedClients);
     }
+    if (message.id !== "") {
+      obj.id = message.id;
+    }
+    if (message.children?.length) {
+      obj.children = message.children;
+    }
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DaemonWorkspace>, I>>(base?: I): DaemonWorkspace {
-    return DaemonWorkspace.fromPartial(base ?? ({} as any));
+  create<I extends Exact<DeepPartial<Workspace>, I>>(base?: I): Workspace {
+    return Workspace.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<DaemonWorkspace>, I>>(object: I): DaemonWorkspace {
-    const message = createBaseDaemonWorkspace();
+  fromPartial<I extends Exact<DeepPartial<Workspace>, I>>(object: I): Workspace {
+    const message = createBaseWorkspace();
     message.path = object.path ?? "";
     message.name = object.name ?? "";
-    message.parentPath = object.parentPath ?? undefined;
+    message.parentId = object.parentId ?? undefined;
     message.status = object.status ?? "";
     message.isGitRepo = object.isGitRepo ?? false;
     message.gitBranch = object.gitBranch ?? undefined;
     message.gitRootPath = object.gitRootPath ?? undefined;
     message.isWorktree = object.isWorktree ?? false;
     message.isDetached = object.isDetached ?? undefined;
-    message.tabs = object.tabs?.map((e) => DaemonTab.fromPartial(e)) || [];
+    message.tabs = object.tabs?.map((e) => Tab.fromPartial(e)) || [];
     message.activeTabId = object.activeTabId ?? undefined;
     message.createdAt = object.createdAt ?? 0;
     message.lastActivity = object.lastActivity ?? 0;
     message.attachedClients = object.attachedClients ?? 0;
+    message.id = object.id ?? "";
+    message.children = object.children?.map((e) => e) || [];
     return message;
   },
 };
 
-function createBaseDaemonSession(): DaemonSession {
+function createBaseSession(): Session {
   return { id: "", workspaces: [], createdAt: 0, lastActivity: 0, attachedClients: 0 };
 }
 
-export const DaemonSession: MessageFns<DaemonSession> = {
-  encode(message: DaemonSession, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+export const Session: MessageFns<Session> = {
+  encode(message: Session, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.id !== "") {
       writer.uint32(10).string(message.id);
     }
     for (const v of message.workspaces) {
-      DaemonWorkspace.encode(v!, writer.uint32(18).fork()).join();
+      Workspace.encode(v!, writer.uint32(18).fork()).join();
     }
     if (message.createdAt !== 0) {
       writer.uint32(24).int64(message.createdAt);
@@ -1303,10 +1343,10 @@ export const DaemonSession: MessageFns<DaemonSession> = {
     return writer;
   },
 
-  decode(input: BinaryReader | Uint8Array, length?: number): DaemonSession {
+  decode(input: BinaryReader | Uint8Array, length?: number): Session {
     const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
     const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDaemonSession();
+    const message = createBaseSession();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -1323,7 +1363,7 @@ export const DaemonSession: MessageFns<DaemonSession> = {
             break;
           }
 
-          message.workspaces.push(DaemonWorkspace.decode(reader, reader.uint32()));
+          message.workspaces.push(Workspace.decode(reader, reader.uint32()));
           continue;
         }
         case 3: {
@@ -1359,11 +1399,11 @@ export const DaemonSession: MessageFns<DaemonSession> = {
     return message;
   },
 
-  fromJSON(object: any): DaemonSession {
+  fromJSON(object: any): Session {
     return {
       id: isSet(object.id) ? globalThis.String(object.id) : "",
       workspaces: globalThis.Array.isArray(object?.workspaces)
-        ? object.workspaces.map((e: any) => DaemonWorkspace.fromJSON(e))
+        ? object.workspaces.map((e: any) => Workspace.fromJSON(e))
         : [],
       createdAt: isSet(object.createdAt)
         ? globalThis.Number(object.createdAt)
@@ -1383,13 +1423,13 @@ export const DaemonSession: MessageFns<DaemonSession> = {
     };
   },
 
-  toJSON(message: DaemonSession): unknown {
+  toJSON(message: Session): unknown {
     const obj: any = {};
     if (message.id !== "") {
       obj.id = message.id;
     }
     if (message.workspaces?.length) {
-      obj.workspaces = message.workspaces.map((e) => DaemonWorkspace.toJSON(e));
+      obj.workspaces = message.workspaces.map((e) => Workspace.toJSON(e));
     }
     if (message.createdAt !== 0) {
       obj.createdAt = Math.round(message.createdAt);
@@ -1403,13 +1443,13 @@ export const DaemonSession: MessageFns<DaemonSession> = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DaemonSession>, I>>(base?: I): DaemonSession {
-    return DaemonSession.fromPartial(base ?? ({} as any));
+  create<I extends Exact<DeepPartial<Session>, I>>(base?: I): Session {
+    return Session.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<DaemonSession>, I>>(object: I): DaemonSession {
-    const message = createBaseDaemonSession();
+  fromPartial<I extends Exact<DeepPartial<Session>, I>>(object: I): Session {
+    const message = createBaseSession();
     message.id = object.id ?? "";
-    message.workspaces = object.workspaces?.map((e) => DaemonWorkspace.fromPartial(e)) || [];
+    message.workspaces = object.workspaces?.map((e) => Workspace.fromPartial(e)) || [];
     message.createdAt = object.createdAt ?? 0;
     message.lastActivity = object.lastActivity ?? 0;
     message.attachedClients = object.attachedClients ?? 0;
@@ -1421,7 +1461,7 @@ function createBaseWorkspaceInput(): WorkspaceInput {
   return {
     path: "",
     name: "",
-    parentPath: undefined,
+    parentId: undefined,
     status: "",
     isGitRepo: false,
     gitBranch: undefined,
@@ -1430,6 +1470,8 @@ function createBaseWorkspaceInput(): WorkspaceInput {
     isDetached: undefined,
     tabs: [],
     activeTabId: undefined,
+    id: "",
+    children: [],
   };
 }
 
@@ -1441,8 +1483,8 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
     if (message.name !== "") {
       writer.uint32(18).string(message.name);
     }
-    if (message.parentPath !== undefined) {
-      writer.uint32(26).string(message.parentPath);
+    if (message.parentId !== undefined) {
+      writer.uint32(26).string(message.parentId);
     }
     if (message.status !== "") {
       writer.uint32(34).string(message.status);
@@ -1463,10 +1505,16 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
       writer.uint32(72).bool(message.isDetached);
     }
     for (const v of message.tabs) {
-      DaemonTab.encode(v!, writer.uint32(82).fork()).join();
+      Tab.encode(v!, writer.uint32(82).fork()).join();
     }
     if (message.activeTabId !== undefined) {
       writer.uint32(90).string(message.activeTabId);
+    }
+    if (message.id !== "") {
+      writer.uint32(98).string(message.id);
+    }
+    for (const v of message.children) {
+      writer.uint32(106).string(v!);
     }
     return writer;
   },
@@ -1499,7 +1547,7 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
             break;
           }
 
-          message.parentPath = reader.string();
+          message.parentId = reader.string();
           continue;
         }
         case 4: {
@@ -1555,7 +1603,7 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
             break;
           }
 
-          message.tabs.push(DaemonTab.decode(reader, reader.uint32()));
+          message.tabs.push(Tab.decode(reader, reader.uint32()));
           continue;
         }
         case 11: {
@@ -1564,6 +1612,22 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
           }
 
           message.activeTabId = reader.string();
+          continue;
+        }
+        case 12: {
+          if (tag !== 98) {
+            break;
+          }
+
+          message.id = reader.string();
+          continue;
+        }
+        case 13: {
+          if (tag !== 106) {
+            break;
+          }
+
+          message.children.push(reader.string());
           continue;
         }
       }
@@ -1579,10 +1643,10 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
     return {
       path: isSet(object.path) ? globalThis.String(object.path) : "",
       name: isSet(object.name) ? globalThis.String(object.name) : "",
-      parentPath: isSet(object.parentPath)
-        ? globalThis.String(object.parentPath)
-        : isSet(object.parent_path)
-        ? globalThis.String(object.parent_path)
+      parentId: isSet(object.parentId)
+        ? globalThis.String(object.parentId)
+        : isSet(object.parent_id)
+        ? globalThis.String(object.parent_id)
         : undefined,
       status: isSet(object.status) ? globalThis.String(object.status) : "",
       isGitRepo: isSet(object.isGitRepo)
@@ -1611,13 +1675,17 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
         ? globalThis.Boolean(object.is_detached)
         : undefined,
       tabs: globalThis.Array.isArray(object?.tabs)
-        ? object.tabs.map((e: any) => DaemonTab.fromJSON(e))
+        ? object.tabs.map((e: any) => Tab.fromJSON(e))
         : [],
       activeTabId: isSet(object.activeTabId)
         ? globalThis.String(object.activeTabId)
         : isSet(object.active_tab_id)
         ? globalThis.String(object.active_tab_id)
         : undefined,
+      id: isSet(object.id) ? globalThis.String(object.id) : "",
+      children: globalThis.Array.isArray(object?.children)
+        ? object.children.map((e: any) => globalThis.String(e))
+        : [],
     };
   },
 
@@ -1629,8 +1697,8 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
     if (message.name !== "") {
       obj.name = message.name;
     }
-    if (message.parentPath !== undefined) {
-      obj.parentPath = message.parentPath;
+    if (message.parentId !== undefined) {
+      obj.parentId = message.parentId;
     }
     if (message.status !== "") {
       obj.status = message.status;
@@ -1651,10 +1719,16 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
       obj.isDetached = message.isDetached;
     }
     if (message.tabs?.length) {
-      obj.tabs = message.tabs.map((e) => DaemonTab.toJSON(e));
+      obj.tabs = message.tabs.map((e) => Tab.toJSON(e));
     }
     if (message.activeTabId !== undefined) {
       obj.activeTabId = message.activeTabId;
+    }
+    if (message.id !== "") {
+      obj.id = message.id;
+    }
+    if (message.children?.length) {
+      obj.children = message.children;
     }
     return obj;
   },
@@ -1666,15 +1740,17 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
     const message = createBaseWorkspaceInput();
     message.path = object.path ?? "";
     message.name = object.name ?? "";
-    message.parentPath = object.parentPath ?? undefined;
+    message.parentId = object.parentId ?? undefined;
     message.status = object.status ?? "";
     message.isGitRepo = object.isGitRepo ?? false;
     message.gitBranch = object.gitBranch ?? undefined;
     message.gitRootPath = object.gitRootPath ?? undefined;
     message.isWorktree = object.isWorktree ?? false;
     message.isDetached = object.isDetached ?? undefined;
-    message.tabs = object.tabs?.map((e) => DaemonTab.fromPartial(e)) || [];
+    message.tabs = object.tabs?.map((e) => Tab.fromPartial(e)) || [];
     message.activeTabId = object.activeTabId ?? undefined;
+    message.id = object.id ?? "";
+    message.children = object.children?.map((e) => e) || [];
     return message;
   },
 };
@@ -4225,7 +4301,7 @@ export const SessionWatchEvent: MessageFns<SessionWatchEvent> = {
       writer.uint32(10).string(message.sessionId);
     }
     if (message.session !== undefined) {
-      DaemonSession.encode(message.session, writer.uint32(18).fork()).join();
+      Session.encode(message.session, writer.uint32(18).fork()).join();
     }
     if (message.senderId !== "") {
       writer.uint32(26).string(message.senderId);
@@ -4253,7 +4329,7 @@ export const SessionWatchEvent: MessageFns<SessionWatchEvent> = {
             break;
           }
 
-          message.session = DaemonSession.decode(reader, reader.uint32());
+          message.session = Session.decode(reader, reader.uint32());
           continue;
         }
         case 3: {
@@ -4280,7 +4356,7 @@ export const SessionWatchEvent: MessageFns<SessionWatchEvent> = {
         : isSet(object.session_id)
         ? globalThis.String(object.session_id)
         : "",
-      session: isSet(object.session) ? DaemonSession.fromJSON(object.session) : undefined,
+      session: isSet(object.session) ? Session.fromJSON(object.session) : undefined,
       senderId: isSet(object.senderId)
         ? globalThis.String(object.senderId)
         : isSet(object.sender_id)
@@ -4295,7 +4371,7 @@ export const SessionWatchEvent: MessageFns<SessionWatchEvent> = {
       obj.sessionId = message.sessionId;
     }
     if (message.session !== undefined) {
-      obj.session = DaemonSession.toJSON(message.session);
+      obj.session = Session.toJSON(message.session);
     }
     if (message.senderId !== "") {
       obj.senderId = message.senderId;
@@ -4310,7 +4386,7 @@ export const SessionWatchEvent: MessageFns<SessionWatchEvent> = {
     const message = createBaseSessionWatchEvent();
     message.sessionId = object.sessionId ?? "";
     message.session = (object.session !== undefined && object.session !== null)
-      ? DaemonSession.fromPartial(object.session)
+      ? Session.fromPartial(object.session)
       : undefined;
     message.senderId = object.senderId ?? "";
     return message;
@@ -4452,7 +4528,7 @@ function createBaseListSessionsResponse(): ListSessionsResponse {
 export const ListSessionsResponse: MessageFns<ListSessionsResponse> = {
   encode(message: ListSessionsResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     for (const v of message.sessions) {
-      DaemonSession.encode(v!, writer.uint32(10).fork()).join();
+      Session.encode(v!, writer.uint32(10).fork()).join();
     }
     return writer;
   },
@@ -4469,7 +4545,7 @@ export const ListSessionsResponse: MessageFns<ListSessionsResponse> = {
             break;
           }
 
-          message.sessions.push(DaemonSession.decode(reader, reader.uint32()));
+          message.sessions.push(Session.decode(reader, reader.uint32()));
           continue;
         }
       }
@@ -4483,16 +4559,14 @@ export const ListSessionsResponse: MessageFns<ListSessionsResponse> = {
 
   fromJSON(object: any): ListSessionsResponse {
     return {
-      sessions: globalThis.Array.isArray(object?.sessions)
-        ? object.sessions.map((e: any) => DaemonSession.fromJSON(e))
-        : [],
+      sessions: globalThis.Array.isArray(object?.sessions) ? object.sessions.map((e: any) => Session.fromJSON(e)) : [],
     };
   },
 
   toJSON(message: ListSessionsResponse): unknown {
     const obj: any = {};
     if (message.sessions?.length) {
-      obj.sessions = message.sessions.map((e) => DaemonSession.toJSON(e));
+      obj.sessions = message.sessions.map((e) => Session.toJSON(e));
     }
     return obj;
   },
@@ -4502,7 +4576,7 @@ export const ListSessionsResponse: MessageFns<ListSessionsResponse> = {
   },
   fromPartial<I extends Exact<DeepPartial<ListSessionsResponse>, I>>(object: I): ListSessionsResponse {
     const message = createBaseListSessionsResponse();
-    message.sessions = object.sessions?.map((e) => DaemonSession.fromPartial(e)) || [];
+    message.sessions = object.sessions?.map((e) => Session.fromPartial(e)) || [];
     return message;
   },
 };
@@ -11235,8 +11309,8 @@ export const TreeTermDaemonService = {
     responseStream: false as const,
     requestSerialize: (value: CreateSessionRequest): Buffer => Buffer.from(CreateSessionRequest.encode(value).finish()),
     requestDeserialize: (value: Buffer): CreateSessionRequest => CreateSessionRequest.decode(value),
-    responseSerialize: (value: DaemonSession): Buffer => Buffer.from(DaemonSession.encode(value).finish()),
-    responseDeserialize: (value: Buffer): DaemonSession => DaemonSession.decode(value),
+    responseSerialize: (value: Session): Buffer => Buffer.from(Session.encode(value).finish()),
+    responseDeserialize: (value: Buffer): Session => Session.decode(value),
   },
   updateSession: {
     path: "/treeterm.TreeTermDaemon/UpdateSession" as const,
@@ -11244,8 +11318,8 @@ export const TreeTermDaemonService = {
     responseStream: false as const,
     requestSerialize: (value: UpdateSessionRequest): Buffer => Buffer.from(UpdateSessionRequest.encode(value).finish()),
     requestDeserialize: (value: Buffer): UpdateSessionRequest => UpdateSessionRequest.decode(value),
-    responseSerialize: (value: DaemonSession): Buffer => Buffer.from(DaemonSession.encode(value).finish()),
-    responseDeserialize: (value: Buffer): DaemonSession => DaemonSession.decode(value),
+    responseSerialize: (value: Session): Buffer => Buffer.from(Session.encode(value).finish()),
+    responseDeserialize: (value: Buffer): Session => Session.decode(value),
   },
   getSession: {
     path: "/treeterm.TreeTermDaemon/GetSession" as const,
@@ -11253,8 +11327,8 @@ export const TreeTermDaemonService = {
     responseStream: false as const,
     requestSerialize: (value: GetSessionRequest): Buffer => Buffer.from(GetSessionRequest.encode(value).finish()),
     requestDeserialize: (value: Buffer): GetSessionRequest => GetSessionRequest.decode(value),
-    responseSerialize: (value: DaemonSession): Buffer => Buffer.from(DaemonSession.encode(value).finish()),
-    responseDeserialize: (value: Buffer): DaemonSession => DaemonSession.decode(value),
+    responseSerialize: (value: Session): Buffer => Buffer.from(Session.encode(value).finish()),
+    responseDeserialize: (value: Buffer): Session => Session.decode(value),
   },
   deleteSession: {
     path: "/treeterm.TreeTermDaemon/DeleteSession" as const,
@@ -11281,8 +11355,8 @@ export const TreeTermDaemonService = {
     responseStream: false as const,
     requestSerialize: (value: Empty): Buffer => Buffer.from(Empty.encode(value).finish()),
     requestDeserialize: (value: Buffer): Empty => Empty.decode(value),
-    responseSerialize: (value: DaemonSession): Buffer => Buffer.from(DaemonSession.encode(value).finish()),
-    responseDeserialize: (value: Buffer): DaemonSession => DaemonSession.decode(value),
+    responseSerialize: (value: Session): Buffer => Buffer.from(Session.encode(value).finish()),
+    responseDeserialize: (value: Buffer): Session => Session.decode(value),
   },
   sessionWatch: {
     path: "/treeterm.TreeTermDaemon/SessionWatch" as const,
@@ -11354,12 +11428,12 @@ export interface TreeTermDaemonServer extends UntypedServiceImplementation {
    */
   execStream: handleBidiStreamingCall<ExecInput, ExecOutput>;
   /** Workspace Session Management */
-  createSession: handleUnaryCall<CreateSessionRequest, DaemonSession>;
-  updateSession: handleUnaryCall<UpdateSessionRequest, DaemonSession>;
-  getSession: handleUnaryCall<GetSessionRequest, DaemonSession>;
+  createSession: handleUnaryCall<CreateSessionRequest, Session>;
+  updateSession: handleUnaryCall<UpdateSessionRequest, Session>;
+  getSession: handleUnaryCall<GetSessionRequest, Session>;
   deleteSession: handleUnaryCall<DeleteSessionRequest, Empty>;
   listSessions: handleUnaryCall<Empty, ListSessionsResponse>;
-  getDefaultSession: handleUnaryCall<Empty, DaemonSession>;
+  getDefaultSession: handleUnaryCall<Empty, Session>;
   sessionWatch: handleServerStreamingCall<SessionWatchRequest, SessionWatchEvent>;
   /** Daemon Control */
   shutdown: handleUnaryCall<Empty, Empty>;
@@ -11490,48 +11564,48 @@ export interface TreeTermDaemonClient extends Client {
   /** Workspace Session Management */
   createSession(
     request: CreateSessionRequest,
-    callback: (error: ServiceError | null, response: DaemonSession) => void,
+    callback: (error: ServiceError | null, response: Session) => void,
   ): ClientUnaryCall;
   createSession(
     request: CreateSessionRequest,
     metadata: Metadata,
-    callback: (error: ServiceError | null, response: DaemonSession) => void,
+    callback: (error: ServiceError | null, response: Session) => void,
   ): ClientUnaryCall;
   createSession(
     request: CreateSessionRequest,
     metadata: Metadata,
     options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: DaemonSession) => void,
+    callback: (error: ServiceError | null, response: Session) => void,
   ): ClientUnaryCall;
   updateSession(
     request: UpdateSessionRequest,
-    callback: (error: ServiceError | null, response: DaemonSession) => void,
+    callback: (error: ServiceError | null, response: Session) => void,
   ): ClientUnaryCall;
   updateSession(
     request: UpdateSessionRequest,
     metadata: Metadata,
-    callback: (error: ServiceError | null, response: DaemonSession) => void,
+    callback: (error: ServiceError | null, response: Session) => void,
   ): ClientUnaryCall;
   updateSession(
     request: UpdateSessionRequest,
     metadata: Metadata,
     options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: DaemonSession) => void,
+    callback: (error: ServiceError | null, response: Session) => void,
   ): ClientUnaryCall;
   getSession(
     request: GetSessionRequest,
-    callback: (error: ServiceError | null, response: DaemonSession) => void,
+    callback: (error: ServiceError | null, response: Session) => void,
   ): ClientUnaryCall;
   getSession(
     request: GetSessionRequest,
     metadata: Metadata,
-    callback: (error: ServiceError | null, response: DaemonSession) => void,
+    callback: (error: ServiceError | null, response: Session) => void,
   ): ClientUnaryCall;
   getSession(
     request: GetSessionRequest,
     metadata: Metadata,
     options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: DaemonSession) => void,
+    callback: (error: ServiceError | null, response: Session) => void,
   ): ClientUnaryCall;
   deleteSession(
     request: DeleteSessionRequest,
@@ -11563,20 +11637,17 @@ export interface TreeTermDaemonClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: ListSessionsResponse) => void,
   ): ClientUnaryCall;
-  getDefaultSession(
-    request: Empty,
-    callback: (error: ServiceError | null, response: DaemonSession) => void,
-  ): ClientUnaryCall;
+  getDefaultSession(request: Empty, callback: (error: ServiceError | null, response: Session) => void): ClientUnaryCall;
   getDefaultSession(
     request: Empty,
     metadata: Metadata,
-    callback: (error: ServiceError | null, response: DaemonSession) => void,
+    callback: (error: ServiceError | null, response: Session) => void,
   ): ClientUnaryCall;
   getDefaultSession(
     request: Empty,
     metadata: Metadata,
     options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: DaemonSession) => void,
+    callback: (error: ServiceError | null, response: Session) => void,
   ): ClientUnaryCall;
   sessionWatch(request: SessionWatchRequest, options?: Partial<CallOptions>): ClientReadableStream<SessionWatchEvent>;
   sessionWatch(

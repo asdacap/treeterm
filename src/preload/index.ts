@@ -1,5 +1,5 @@
 import { contextBridge } from 'electron'
-import type { SandboxConfig, DaemonSession, DaemonSessionInfo, WorkspaceInput } from '../shared/types'
+import type { SandboxConfig, Session, DaemonSessionInfo, WorkspaceInput } from '../shared/types'
 import { IpcClient } from './ipc-client'
 
 type DataCallback = (data: string) => void
@@ -49,10 +49,10 @@ client.onCapsLockEvent((event) => {
   capsLockListeners.forEach((cb) => cb(event))
 })
 
-type ReadyCallback = (session: DaemonSession | null) => void
+type ReadyCallback = (session: Session | null) => void
 const readyListeners: ReadyCallback[] = []
 let isReady = false
-let initialSession: DaemonSession | null = null
+let initialSession: Session | null = null
 
 client.onAppReady((session) => {
   isReady = true
@@ -60,8 +60,8 @@ client.onAppReady((session) => {
   readyListeners.forEach((cb) => cb(session))
 })
 
-type DaemonSessionsCallback = (sessions: DaemonSessionInfo[]) => void
-const daemonSessionsListeners: DaemonSessionsCallback[] = []
+type SessionsCallback = (sessions: DaemonSessionInfo[]) => void
+const daemonSessionsListeners: SessionsCallback[] = []
 
 client.onDaemonSessions((sessions) => {
   daemonSessionsListeners.forEach((cb) => cb(sessions))
@@ -87,7 +87,7 @@ client.onSessionShowSessions(() => {
   sessionShowSessionsListeners.forEach((cb) => cb())
 })
 
-type SessionSyncCallback = (session: DaemonSession) => void
+type SessionSyncCallback = (session: Session) => void
 const sessionSyncListeners: SessionSyncCallback[] = []
 
 client.onSessionSync((session) => {
@@ -380,7 +380,7 @@ contextBridge.exposeInMainWorld('electron', {
     shutdown: (): Promise<{ success: boolean; error?: string }> => {
       return client.daemonShutdown()
     },
-    onSessions: (callback: DaemonSessionsCallback): (() => void) => {
+    onSessions: (callback: SessionsCallback): (() => void) => {
       daemonSessionsListeners.push(callback)
       return () => {
         const index = daemonSessionsListeners.indexOf(callback)
@@ -391,16 +391,16 @@ contextBridge.exposeInMainWorld('electron', {
     }
   },
   session: {
-    create: (workspaces: WorkspaceInput[]): Promise<{ success: boolean; session?: DaemonSession; error?: string }> => {
+    create: (workspaces: WorkspaceInput[]): Promise<{ success: boolean; session?: Session; error?: string }> => {
       return client.sessionCreate(workspaces)
     },
-    update: (sessionId: string, workspaces: WorkspaceInput[]): Promise<{ success: boolean; session?: DaemonSession; error?: string }> => {
+    update: (sessionId: string, workspaces: WorkspaceInput[]): Promise<{ success: boolean; session?: Session; error?: string }> => {
       return client.sessionUpdate(sessionId, workspaces)
     },
-    list: (): Promise<{ success: boolean; sessions?: DaemonSession[]; error?: string }> => {
+    list: (): Promise<{ success: boolean; sessions?: Session[]; error?: string }> => {
       return client.sessionList()
     },
-    get: (sessionId: string): Promise<{ success: boolean; session?: DaemonSession; error?: string }> => {
+    get: (sessionId: string): Promise<{ success: boolean; session?: Session; error?: string }> => {
       return client.sessionGet(sessionId)
     },
     delete: (sessionId: string): Promise<{ success: boolean; error?: string }> => {

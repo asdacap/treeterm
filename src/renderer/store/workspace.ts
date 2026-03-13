@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Workspace, GitInfo, Tab, DaemonWorkspace, WorktreeSettings } from '../types'
+import type { Workspace, GitInfo, Tab, WorktreeSettings } from '../types'
 import type { Application } from '../types'
 import { applicationRegistry } from '../registry/applicationRegistry'
 import { useSettingsStore } from '../store/settings'
@@ -25,7 +25,7 @@ interface WorkspaceState {
   updateWorkspaceStatus: (id: string, status: Workspace['status']) => void
   // Tab management (application-agnostic)
   addTab: (workspaceId: string, applicationId: string) => string
-  addTabWithState: <T>(workspaceId: string, applicationId: string, initialState: Partial<T>) => string
+  addTabWithState: <T>(workspaceId: string, applicationId: string, initialState: Partial<T>, existingTabId?: string) => string
   removeTab: (workspaceId: string, tabId: string) => Promise<void>
   setActiveTab: (workspaceId: string, tabId: string) => void
   updateTabTitle: (workspaceId: string, tabId: string, title: string) => void
@@ -74,32 +74,6 @@ function getDefaultAppForWorktree(
   return applicationRegistry.getDefaultApp()
 }
 
-// Helper to convert Workspace to DaemonWorkspace format
-function workspaceToDaemonWorkspace(
-  workspace: Workspace,
-  workspaces: Record<string, Workspace>
-): Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'> {
-  return {
-    path: workspace.path,
-    name: workspace.name,
-    parentPath: workspace.parentId ? workspaces[workspace.parentId]?.path || null : null,
-    status: workspace.status,
-    isGitRepo: workspace.isGitRepo,
-    gitBranch: workspace.gitBranch,
-    gitRootPath: workspace.gitRootPath,
-    isWorktree: workspace.isWorktree,
-    isDetached: workspace.isDetached,
-    tabs: workspace.tabs.map(tab => ({
-      id: tab.id,
-      applicationId: tab.applicationId,
-      title: tab.title,
-      state: tab.state
-    })),
-    activeTabId: workspace.activeTabId,
-    settings: workspace.settings
-  }
-}
-
 // Helper to sync entire workspace tree to daemon as a session (if daemon is enabled)
 async function syncSessionToDaemon(
   sessionId: string | null,
@@ -121,12 +95,10 @@ async function syncSessionToDaemon(
       return
     }
 
-    // Convert all workspaces to daemon format
-    const daemonWorkspaces = Object.values(workspaces).map(ws =>
-      workspaceToDaemonWorkspace(ws, workspaces)
-    )
+    // Strip daemon-managed fields when syncing to daemon
+    const daemonWorkspaces = Object.values(workspaces).map(({ createdAt, lastActivity, attachedClients, ...ws }) => ws)
 
-    console.log('[workspace] converted to daemon format:', daemonWorkspaces.length, 'workspaces')
+    console.log('[workspace] syncing to daemon:', daemonWorkspaces.length, 'workspaces')
 
     if (daemonWorkspaces.length === 0) {
       // No workspaces - delete session if it exists
@@ -224,7 +196,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           isWorktree: false,
           tabs,
           activeTabId,
-          settings: options?.settings
+          settings: options?.settings,
+          createdAt: Date.now(),
+          lastActivity: Date.now(),
+          attachedClients: 0
         }
 
         set((state) => ({
@@ -311,7 +286,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           isDetached,
           tabs,
           activeTabId,
-          settings
+          settings,
+          createdAt: Date.now(),
+          lastActivity: Date.now(),
+          attachedClients: 0
         }
 
         set((state) => ({
@@ -385,7 +363,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           isWorktree: true,
           tabs,
           activeTabId,
-          settings
+          settings,
+          createdAt: Date.now(),
+          lastActivity: Date.now(),
+          attachedClients: 0
         }
 
         set((state) => ({
@@ -475,7 +456,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           isDetached,
           tabs,
           activeTabId,
-          settings
+          settings,
+          createdAt: Date.now(),
+          lastActivity: Date.now(),
+          attachedClients: 0
         }
 
         set((state) => ({
@@ -565,7 +549,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           isDetached,
           tabs,
           activeTabId,
-          settings
+          settings,
+          createdAt: Date.now(),
+          lastActivity: Date.now(),
+          attachedClients: 0
         }
 
         set((state) => ({
@@ -895,8 +882,9 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         return tabId
       },
 
-      addTabWithState: <T>(workspaceId: string, applicationId: string, initialState: Partial<T>) => {
-        const tabId = generateTabId()
+      addTabWithState: <T>(workspaceId: string, applicationId: string, initialState: Partial<T>, existingTabId?: string) => {
+        // Use existing tab ID if provided (for session restoration), otherwise generate new one
+        const tabId = existingTabId || generateTabId()
         const app = applicationRegistry.get(applicationId)
 
         if (!app) return tabId
@@ -904,6 +892,24 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         set((state) => {
           const workspace = state.workspaces[workspaceId]
           if (!workspace) return state
+
+          // Check if this tab already exists (by ID) - prevents duplicates during session restoration
+          if (existingTabId && workspace.tabs.some((t) => t.id === existingTabId)) {
+            // Tab already exists, update its state
+            const updatedTabs = workspace.tabs.map((t) =>
+              t.id === existingTabId ? { ...t, state: { ...(t.state || {}), ...(initialState || {}) } } : t
+            )
+            return {
+              workspaces: {
+                ...state.workspaces,
+                [workspaceId]: {
+                  ...workspace,
+                  tabs: updatedTabs,
+                  activeTabId: existingTabId
+                }
+              }
+            }
+          }
 
           // Check if app allows multiple instances
           if (!app.canHaveMultiple) {

@@ -24,8 +24,8 @@ import {
   type UpdateSessionRequest,
   type GetSessionRequest,
   type DeleteSessionRequest,
-  type DaemonSession as ProtoDaemonSession,
-  type DaemonWorkspace as ProtoDaemonWorkspace,
+  type Session as ProtoSession,
+  type Workspace as ProtoWorkspace,
   type WorkspaceInput,
   type SessionWatchRequest
 } from '../generated/treeterm'
@@ -33,9 +33,9 @@ import { getDefaultSocketPath } from '../daemon/socketPath'
 import type {
   CreateSessionConfig,
   SessionInfo,
-  DaemonWorkspace,
-  DaemonSession,
-  DaemonTab
+  Workspace,
+  Session,
+  Tab
 } from '../daemon/protocol'
 
 type DataListener = (data: string) => void
@@ -312,7 +312,7 @@ export class GrpcDaemonClient {
     })
   }
 
-  async createSession(workspaces: Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]): Promise<DaemonSession> {
+  async createSession(workspaces: Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]): Promise<Session> {
     if (!this.client) {
       throw new Error('Not connected to daemon')
     }
@@ -336,9 +336,9 @@ export class GrpcDaemonClient {
 
   async updateSession(
     sessionId: string,
-    workspaces: Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[],
+    workspaces: Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[],
     senderId?: string
-  ): Promise<DaemonSession> {
+  ): Promise<Session> {
     if (!this.client) {
       throw new Error('Not connected to daemon')
     }
@@ -365,7 +365,7 @@ export class GrpcDaemonClient {
   watchSession(
     sessionId: string,
     listenerId: string,
-    onUpdate: (session: DaemonSession) => void
+    onUpdate: (session: Session) => void
   ): () => void {
     if (!this.client) {
       console.error('[grpcDaemonClient] cannot watch session: not connected')
@@ -390,7 +390,7 @@ export class GrpcDaemonClient {
     }
   }
 
-  async getSession(sessionId: string): Promise<DaemonSession | null> {
+  async getSession(sessionId: string): Promise<Session | null> {
     if (!this.client) {
       throw new Error('Not connected to daemon')
     }
@@ -414,7 +414,7 @@ export class GrpcDaemonClient {
     })
   }
 
-  async listSessions(): Promise<DaemonSession[]> {
+  async listSessions(): Promise<Session[]> {
     if (!this.client) {
       throw new Error('Not connected to daemon')
     }
@@ -432,7 +432,7 @@ export class GrpcDaemonClient {
     })
   }
 
-  async getDefaultSession(): Promise<DaemonSession> {
+  async getDefaultSession(): Promise<Session> {
     if (!this.client) {
       throw new Error('Not connected to daemon')
     }
@@ -602,19 +602,21 @@ export class GrpcDaemonClient {
   // Helper methods for proto conversion
 
   private convertToProtoWorkspaceInputs(
-    workspaces: Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]
+    workspaces: Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]
   ): WorkspaceInput[] {
     return workspaces.map(w => ({
+      id: w.id,
       path: w.path,
       name: w.name,
-      parentPath: w.parentPath || undefined,
+      parentId: w.parentId || undefined,
+      children: w.children || [],
       status: w.status,
       isGitRepo: w.isGitRepo,
       gitBranch: w.gitBranch || undefined,
       gitRootPath: w.gitRootPath || undefined,
       isWorktree: w.isWorktree,
       isDetached: w.isDetached,
-      tabs: w.tabs.map(t => ({
+      tabs: w.tabs.map((t: Tab) => ({
         id: t.id,
         applicationId: t.applicationId,
         title: t.title,
@@ -624,7 +626,7 @@ export class GrpcDaemonClient {
     }))
   }
 
-  private convertFromProtoSession(protoSession: ProtoDaemonSession): DaemonSession {
+  private convertFromProtoSession(protoSession: ProtoSession): Session {
     return {
       id: protoSession.id,
       workspaces: protoSession.workspaces.map(w => this.convertFromProtoWorkspace(w)),
@@ -634,11 +636,13 @@ export class GrpcDaemonClient {
     }
   }
 
-  private convertFromProtoWorkspace(protoWorkspace: ProtoDaemonWorkspace): DaemonWorkspace {
+  private convertFromProtoWorkspace(protoWorkspace: ProtoWorkspace): Workspace {
     return {
+      id: protoWorkspace.id,
       path: protoWorkspace.path,
       name: protoWorkspace.name,
-      parentPath: protoWorkspace.parentPath || null,
+      parentId: protoWorkspace.parentId || null,
+      children: protoWorkspace.children || [],
       status: protoWorkspace.status as 'active' | 'merged' | 'abandoned',
       isGitRepo: protoWorkspace.isGitRepo,
       gitBranch: protoWorkspace.gitBranch || null,

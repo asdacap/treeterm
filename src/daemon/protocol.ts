@@ -5,9 +5,9 @@
 // Import shared types
 import type {
   SandboxConfig,
-  DaemonTab,
-  DaemonWorkspace,
-  DaemonSession,
+  Tab,
+  Workspace,
+  Session,
   DaemonSessionInfo,
   WorkspaceInput
 } from '../shared/types'
@@ -15,9 +15,9 @@ import type {
 // Re-export for backward compatibility
 export type {
   SandboxConfig,
-  DaemonTab,
-  DaemonWorkspace,
-  DaemonSession,
+  Tab,
+  Workspace,
+  Session,
   WorkspaceInput
 }
 
@@ -113,7 +113,7 @@ export interface ShutdownMessage extends DaemonMessage {
 
 // Response payload type map for better type safety
 export interface ResponsePayloadMap {
-  success: { sessionId?: string } | DaemonSession | DaemonSession[] | SessionInfo[] | null
+  success: { sessionId?: string } | Session | Session[] | SessionInfo[] | null
   error: never
   data: string
   scrollback: string[]

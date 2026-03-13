@@ -31,7 +31,7 @@ import {
   type DeleteSessionRequest,
   type ListSessionsResponse,
   type Empty,
-  type DaemonSession as ProtoDaemonSession,
+  type Session as ProtoSession,
   type WorkspaceInput,
   type PtySessionInfo,
   type ExecInput,
@@ -488,8 +488,8 @@ export class GrpcServer {
   // Workspace Session Handlers
 
   private handleCreateSession(
-    call: grpc.ServerUnaryCall<CreateSessionRequest, ProtoDaemonSession>,
-    callback: grpc.sendUnaryData<ProtoDaemonSession>
+    call: grpc.ServerUnaryCall<CreateSessionRequest, ProtoSession>,
+    callback: grpc.sendUnaryData<ProtoSession>
   ): void {
     try {
       const clientId = this.getClientId(call.metadata)
@@ -512,8 +512,8 @@ export class GrpcServer {
   }
 
   private handleUpdateSession(
-    call: grpc.ServerUnaryCall<UpdateSessionRequest, ProtoDaemonSession>,
-    callback: grpc.sendUnaryData<ProtoDaemonSession>
+    call: grpc.ServerUnaryCall<UpdateSessionRequest, ProtoSession>,
+    callback: grpc.sendUnaryData<ProtoSession>
   ): void {
     try {
       const clientId = this.getClientId(call.metadata)
@@ -567,7 +567,7 @@ export class GrpcServer {
     })
   }
 
-  private broadcastSessionUpdate(sessionId: string, protoSession: ProtoDaemonSession, senderId: string): void {
+  private broadcastSessionUpdate(sessionId: string, protoSession: ProtoSession, senderId: string): void {
     const event: SessionWatchEvent = {
       sessionId,
       session: protoSession,
@@ -587,8 +587,8 @@ export class GrpcServer {
   }
 
   private handleGetSession(
-    call: grpc.ServerUnaryCall<GetSessionRequest, ProtoDaemonSession>,
-    callback: grpc.sendUnaryData<ProtoDaemonSession>
+    call: grpc.ServerUnaryCall<GetSessionRequest, ProtoSession>,
+    callback: grpc.sendUnaryData<ProtoSession>
   ): void {
     try {
       const { sessionId } = call.request
@@ -653,8 +653,8 @@ export class GrpcServer {
   }
 
   private handleGetDefaultSession(
-    call: grpc.ServerUnaryCall<Empty, ProtoDaemonSession>,
-    callback: grpc.sendUnaryData<ProtoDaemonSession>
+    call: grpc.ServerUnaryCall<Empty, ProtoSession>,
+    callback: grpc.sendUnaryData<ProtoSession>
   ): void {
     try {
       // Get or create the default session for this client
@@ -737,9 +737,11 @@ export class GrpcServer {
 
   private convertWorkspaceInputs(inputs: WorkspaceInput[]): any[] {
     return inputs.map(input => ({
+      id: input.id || undefined,
       path: input.path,
       name: input.name,
-      parentPath: input.parentPath || null,
+      parentId: input.parentId || null,
+      children: input.children || [],
       status: input.status as 'active' | 'merged' | 'abandoned',
       isGitRepo: input.isGitRepo,
       gitBranch: input.gitBranch || null,
@@ -756,17 +758,19 @@ export class GrpcServer {
     }))
   }
 
-  private convertToProtoSession(session: any): ProtoDaemonSession {
+  private convertToProtoSession(session: any): ProtoSession {
     return {
       id: session.id,
       workspaces: session.workspaces.map((w: any) => ({
+        id: w.id,
         path: w.path,
         name: w.name,
-        parentPath: w.parentPath,
+        parentId: w.parentId || undefined,
+        children: w.children || [],
         status: w.status,
         isGitRepo: w.isGitRepo,
-        gitBranch: w.gitBranch,
-        gitRootPath: w.gitRootPath,
+        gitBranch: w.gitBranch || undefined,
+        gitRootPath: w.gitRootPath || undefined,
         isWorktree: w.isWorktree,
         isDetached: w.isDetached,
         tabs: w.tabs.map((t: any) => ({
@@ -775,7 +779,7 @@ export class GrpcServer {
           title: t.title,
           state: Buffer.from(JSON.stringify(t.state), 'utf-8')
         })),
-        activeTabId: w.activeTabId,
+        activeTabId: w.activeTabId || undefined,
         createdAt: w.createdAt,
         lastActivity: w.lastActivity,
         attachedClients: w.attachedClients

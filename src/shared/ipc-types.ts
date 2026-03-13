@@ -6,7 +6,7 @@
 import type {
   SandboxConfig,
   Settings,
-  DaemonSession,
+  Session,
   DaemonSessionInfo,
   WorkspaceInput
 } from './types'
@@ -236,19 +236,19 @@ export interface IpcRequests {
   // Session operations
   sessionCreate: {
     params: [workspaces: WorkspaceInput[]]
-    result: { success: boolean; session?: DaemonSession; error?: string }
+    result: { success: boolean; session?: Session; error?: string }
   }
   sessionUpdate: {
     params: [sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string]
-    result: { success: boolean; session?: DaemonSession; error?: string }
+    result: { success: boolean; session?: Session; error?: string }
   }
   sessionList: {
     params: []
-    result: { success: boolean; sessions?: DaemonSession[]; error?: string }
+    result: { success: boolean; sessions?: Session[]; error?: string }
   }
   sessionGet: {
     params: [sessionId: string]
-    result: { success: boolean; session?: DaemonSession; error?: string }
+    result: { success: boolean; session?: Session; error?: string }
   }
   sessionDelete: {
     params: [sessionId: string]
@@ -330,7 +330,7 @@ export interface IpcEvents {
     params: []
   }
   appReady: {
-    params: [session: DaemonSession | null]
+    params: [session: Session | null]
   }
   capsLockEvent: {
     params: [event: { type: string; key: string; code: string }]
@@ -348,7 +348,7 @@ export interface IpcEvents {
     params: []
   }
   sessionSync: {
-    params: [session: DaemonSession]
+    params: [session: Session]
   }
 }
 

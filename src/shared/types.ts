@@ -13,7 +13,7 @@ export interface SandboxConfig {
 
 // === Daemon Session Types ===
 
-export interface DaemonTab {
+export interface Tab {
   id: string
   applicationId: string
   title: string
@@ -27,34 +27,36 @@ export interface WorktreeSettings {
   defaultApplicationId: string | null
 }
 
-export interface DaemonWorkspace {
-  path: string              // Primary key - same folder = same workspace session
+export interface Workspace {
+  id: string
+  path: string
   name: string
-  parentPath: string | null // For tree reconstruction
+  parentId: string | null
+  children: string[]
   status: 'active' | 'merged' | 'abandoned'
   isGitRepo: boolean
   gitBranch: string | null
   gitRootPath: string | null
   isWorktree: boolean
   isDetached?: boolean
-  tabs: DaemonTab[]
+  tabs: Tab[]
   activeTabId: string | null
-  settings?: WorktreeSettings  // Worktree-specific settings
+  settings?: WorktreeSettings
   createdAt: number
   lastActivity: number
   attachedClients: number
 }
 
-export interface DaemonSession {
+export interface Session {
   id: string
-  workspaces: DaemonWorkspace[]
+  workspaces: Workspace[]
   createdAt: number
   lastActivity: number
   attachedClients: number
 }
 
 // Helper type for workspace input (without daemon-managed fields)
-export type WorkspaceInput = Omit<DaemonWorkspace, 'createdAt' | 'lastActivity' | 'attachedClients'>
+export type WorkspaceInput = Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>
 
 // === PTY Session Types ===
 

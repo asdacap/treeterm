@@ -8,11 +8,11 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import AppErrorFallback from './components/AppErrorFallback'
 import { useSettingsStore } from './store/settings'
 import { useWorkspaceStore, getUnmergedSubWorkspaces } from './store/workspace'
-import type { Workspace, DaemonWorkspace, DaemonSession, TerminalState, Tab, DaemonSessionInfo } from './types'
+import type { Workspace, Session, TerminalState, Tab, DaemonSessionInfo } from './types'
 
 // Helper types for session restoration
 type SessionMap = Map<string, DaemonSessionInfo>
-type AddTabWithStateFn = <T>(workspaceId: string, applicationId: string, initialState: Partial<T>) => string
+type AddTabWithStateFn = <T>(workspaceId: string, applicationId: string, initialState: Partial<T>, existingTabId?: string) => string
 type SetActiveTabFn = (workspaceId: string, tabId: string) => void
 
 export default function App() {
@@ -22,7 +22,7 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
   const [unmergedWorkspaces, setUnmergedWorkspaces] = useState<Workspace[]>([])
-  const [daemonSessions, setDaemonSessions] = useState<DaemonSession[]>([])
+  const [daemonSessions, setDaemonSessions] = useState<Session[]>([])
   const [showWorkspacePicker, setShowWorkspacePicker] = useState(false)
   const { loadSettings } = useSettingsStore()
   const { workspaces } = useWorkspaceStore()
@@ -117,7 +117,7 @@ export default function App() {
   // Session is now received via onReady callback from main process
   // The daemon always provides a default session, so no need to list sessions here
 
-  const handleSessionRestore = async (daemonSession: DaemonSession) => {
+  const handleSessionRestore = async (daemonSession: Session) => {
     console.log('[App] Restoring session', daemonSession.id, 'with', daemonSession.workspaces.length, 'workspaces')
 
     // IMPORTANT: Set the sessionId and isRestoring flag FIRST
@@ -135,8 +135,8 @@ export default function App() {
     const pathToIdMap = new Map<string, string>()
 
     // First pass: Restore root workspaces (those without parents)
-    const rootWorkspaces = daemonSession.workspaces.filter(w => w.parentPath === null)
-    const childWorkspaces = daemonSession.workspaces.filter(w => w.parentPath !== null)
+    const rootWorkspaces = daemonSession.workspaces.filter(w => !w.parentId)
+    const childWorkspaces = daemonSession.workspaces.filter(w => w.parentId)
 
     console.log('[App] Restoring', rootWorkspaces.length, 'root workspaces and', childWorkspaces.length, 'child workspaces')
 
@@ -163,12 +163,12 @@ export default function App() {
     // Second pass: Restore child workspaces using the restored workspace store
     const store = useWorkspaceStore.getState()
     for (const daemonWorkspace of childWorkspaces) {
-      // Find parent workspace by path
-      const parentId = daemonWorkspace.parentPath ? pathToIdMap.get(daemonWorkspace.parentPath) : null
+      // Use parentId directly from the daemon workspace
+      const parentId = daemonWorkspace.parentId
 
       if (!parentId) {
-        console.warn('[App] Parent not found for child workspace:', daemonWorkspace.path, 'parent:', daemonWorkspace.parentPath)
-        // Create as root if parent not found
+        console.warn('[App] Child workspace missing parentId:', daemonWorkspace.path)
+        // Create as root if no parentId
         const workspaceId = await addWorkspace(daemonWorkspace.path, { skipDefaultTabs: true })
         if (workspaceId) {
           pathToIdMap.set(daemonWorkspace.path, workspaceId)
@@ -210,7 +210,7 @@ export default function App() {
   }
 
   // Handle session updates pushed from other windows (via daemon broadcast)
-  const handleExternalSessionUpdate = async (daemonSession: DaemonSession) => {
+  const handleExternalSessionUpdate = async (daemonSession: Session) => {
     // Set isRestoring to prevent this window from syncing back (would create a loop)
     useWorkspaceStore.setState({ isRestoring: true })
 
@@ -224,8 +224,8 @@ export default function App() {
     const pathToIdMap = new Map<string, string>()
 
     // First pass: roots
-    const rootWorkspaces = daemonSession.workspaces.filter(w => w.parentPath === null)
-    const childWorkspaces = daemonSession.workspaces.filter(w => w.parentPath !== null)
+    const rootWorkspaces = daemonSession.workspaces.filter(w => !w.parentId)
+    const childWorkspaces = daemonSession.workspaces.filter(w => w.parentId)
 
     const { addWorkspace, addTabWithState, setActiveTab } = useWorkspaceStore.getState()
 
@@ -244,13 +244,11 @@ export default function App() {
 
     for (const daemonWorkspace of childWorkspaces) {
       const existing = Object.values(useWorkspaceStore.getState().workspaces).find(ws => ws.path === daemonWorkspace.path)
-      if (!existing && daemonWorkspace.parentPath) {
-        const parentId = pathToIdMap.get(daemonWorkspace.parentPath)
-        if (parentId) {
-          const workspaceId = await reconstructChildWorkspace(daemonWorkspace, parentId, addTabWithState, setActiveTab, sessionMap)
-          if (workspaceId) {
-            pathToIdMap.set(daemonWorkspace.path, workspaceId)
-          }
+      if (!existing && daemonWorkspace.parentId) {
+        const parentId = daemonWorkspace.parentId
+        const workspaceId = await reconstructChildWorkspace(daemonWorkspace, parentId, addTabWithState, setActiveTab, sessionMap)
+        if (workspaceId) {
+          pathToIdMap.set(daemonWorkspace.path, workspaceId)
         }
       } else if (existing) {
         pathToIdMap.set(daemonWorkspace.path, existing.id)
@@ -285,23 +283,23 @@ export default function App() {
   // Helper function to restore workspace tabs
   const restoreWorkspaceTabs = async (
     workspaceId: string,
-    daemonWorkspace: DaemonWorkspace,
+    daemonWorkspace: Workspace,
     sessionMap: SessionMap,
     addTabWithState: AddTabWithStateFn,
     setActiveTab: SetActiveTabFn
   ) => {
     for (const daemonTab of daemonWorkspace.tabs) {
-      if (daemonTab.applicationId === 'terminal') {
+      if (daemonTab.applicationId === 'terminal' || daemonTab.applicationId === 'ai-harness') {
         const terminalState = daemonTab.state as TerminalState
         const ptyId = terminalState?.ptyId
 
         if (ptyId && sessionMap.has(ptyId)) {
-          addTabWithState<TerminalState>(workspaceId, 'terminal', { ptyId })
+          addTabWithState<TerminalState>(workspaceId, daemonTab.applicationId, { ...(daemonTab.state as Record<string, unknown>), ptyId }, daemonTab.id)
         } else {
-          addTabWithState<TerminalState>(workspaceId, 'terminal', { ptyId: null })
+          addTabWithState<TerminalState>(workspaceId, daemonTab.applicationId, { ...(daemonTab.state as Record<string, unknown>), ptyId: null }, daemonTab.id)
         }
       } else {
-        addTabWithState(workspaceId, daemonTab.applicationId, daemonTab.state as Record<string, unknown>)
+        addTabWithState(workspaceId, daemonTab.applicationId, daemonTab.state as Record<string, unknown>, daemonTab.id)
       }
     }
 
@@ -312,7 +310,7 @@ export default function App() {
 
   // Helper function to reconstruct child workspace with parent link
   const reconstructChildWorkspace = async (
-    daemonWorkspace: DaemonWorkspace,
+    daemonWorkspace: Workspace,
     parentId: string,
     addTabWithState: AddTabWithStateFn,
     setActiveTab: SetActiveTabFn,
@@ -326,27 +324,25 @@ export default function App() {
       return null
     }
 
-    // Generate a new workspace ID
-    const id = `ws-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+    // Use the daemon's workspace ID directly for stable cross-session identity
+    const id = daemonWorkspace.id
 
-    // Create tabs
+    // Create tabs - clean up stale pty IDs
     const tabs: Tab[] = []
     for (const daemonTab of daemonWorkspace.tabs) {
-      const tabId = `tab-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-
-      if (daemonTab.applicationId === 'terminal') {
+      if (daemonTab.applicationId === 'terminal' || daemonTab.applicationId === 'ai-harness') {
         const terminalState = daemonTab.state as TerminalState
         const ptyId = terminalState?.ptyId
 
         tabs.push({
-          id: tabId,
-          applicationId: 'terminal',
+          id: daemonTab.id,
+          applicationId: daemonTab.applicationId,
           title: daemonTab.title,
-          state: { ptyId: ptyId && sessionMap.has(ptyId) ? ptyId : null }
+          state: { ...(daemonTab.state as Record<string, unknown>), ptyId: ptyId && sessionMap.has(ptyId) ? ptyId : null }
         })
       } else {
         tabs.push({
-          id: tabId,
+          id: daemonTab.id,
           applicationId: daemonTab.applicationId,
           title: daemonTab.title,
           state: daemonTab.state
@@ -354,19 +350,12 @@ export default function App() {
       }
     }
 
-    // Build the workspace object
-    const workspace = {
+    // Build the workspace object using the daemon workspace as the source of truth
+    const workspace: Workspace = {
+      ...daemonWorkspace,
       id,
-      name: daemonWorkspace.name,
-      path: daemonWorkspace.path,
-      parentId: parentId,
+      parentId,
       children: [],
-      status: daemonWorkspace.status,
-      isGitRepo: daemonWorkspace.isGitRepo,
-      gitBranch: daemonWorkspace.gitBranch,
-      gitRootPath: daemonWorkspace.gitRootPath,
-      isWorktree: daemonWorkspace.isWorktree,
-      isDetached: daemonWorkspace.isDetached,
       tabs,
       activeTabId: daemonWorkspace.activeTabId || (tabs.length > 0 ? tabs[0].id : null)
     }
@@ -393,7 +382,7 @@ export default function App() {
     // Normal startup - workspace will be created via folder selection or CLI
   }
 
-  const handleOpenInNewWindow = async (session: DaemonSession) => {
+  const handleOpenInNewWindow = async (session: Session) => {
     try {
       const result = await window.electron.session.openInNewWindow(session.id)
       if (result.success) {

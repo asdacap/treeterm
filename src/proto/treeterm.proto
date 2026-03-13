@@ -14,33 +14,35 @@ message SandboxConfig {
   repeated string allowed_paths = 3;
 }
 
-message DaemonTab {
+message Tab {
   string id = 1;
   string application_id = 2;
   string title = 3;
   bytes state = 4;  // JSON-encoded arbitrary state
 }
 
-message DaemonWorkspace {
+message Workspace {
   string path = 1;
   string name = 2;
-  optional string parent_path = 3;
+  optional string parent_id = 3;
   string status = 4;  // 'active' | 'merged' | 'abandoned'
   bool is_git_repo = 5;
   optional string git_branch = 6;
   optional string git_root_path = 7;
   bool is_worktree = 8;
   optional bool is_detached = 9;
-  repeated DaemonTab tabs = 10;
+  repeated Tab tabs = 10;
   optional string active_tab_id = 11;
   int64 created_at = 12;
   int64 last_activity = 13;
   int32 attached_clients = 14;
+  string id = 15;
+  repeated string children = 16;
 }
 
-message DaemonSession {
+message Session {
   string id = 1;
-  repeated DaemonWorkspace workspaces = 2;
+  repeated Workspace workspaces = 2;
   int64 created_at = 3;
   int64 last_activity = 4;
   int32 attached_clients = 5;
@@ -49,15 +51,17 @@ message DaemonSession {
 message WorkspaceInput {
   string path = 1;
   string name = 2;
-  optional string parent_path = 3;
+  optional string parent_id = 3;
   string status = 4;
   bool is_git_repo = 5;
   optional string git_branch = 6;
   optional string git_root_path = 7;
   bool is_worktree = 8;
   optional bool is_detached = 9;
-  repeated DaemonTab tabs = 10;
+  repeated Tab tabs = 10;
   optional string active_tab_id = 11;
+  string id = 12;
+  repeated string children = 13;
 }
 
 message PtySessionInfo {
@@ -232,7 +236,7 @@ message SessionWatchRequest {
 
 message SessionWatchEvent {
   string session_id = 1;
-  DaemonSession session = 2;
+  Session session = 2;
   string sender_id = 3;  // Who triggered the update
 }
 
@@ -245,7 +249,7 @@ message DeleteSessionRequest {
 }
 
 message ListSessionsResponse {
-  repeated DaemonSession sessions = 1;
+  repeated Session sessions = 1;
 }
 
 // ============================================
@@ -711,12 +715,12 @@ service TreeTermDaemon {
   rpc ExecStream(stream ExecInput) returns (stream ExecOutput);
 
   // Workspace Session Management
-  rpc CreateSession(CreateSessionRequest) returns (DaemonSession);
-  rpc UpdateSession(UpdateSessionRequest) returns (DaemonSession);
-  rpc GetSession(GetSessionRequest) returns (DaemonSession);
+  rpc CreateSession(CreateSessionRequest) returns (Session);
+  rpc UpdateSession(UpdateSessionRequest) returns (Session);
+  rpc GetSession(GetSessionRequest) returns (Session);
   rpc DeleteSession(DeleteSessionRequest) returns (Empty);
   rpc ListSessions(Empty) returns (ListSessionsResponse);
-  rpc GetDefaultSession(Empty) returns (DaemonSession);
+  rpc GetDefaultSession(Empty) returns (Session);
   rpc SessionWatch(SessionWatchRequest) returns (stream SessionWatchEvent);
 
   // Daemon Control
