@@ -84,6 +84,7 @@ If you find an incomplete implementation (e.g., a gRPC method defined in proto b
 ## Testing
 
 - Run `npm run test:coverage` when writing or modifying code
+- AlWAYS run `npm run build` 
 - Minimum 10% code and branch coverage for new code
 - Daemon: unit tests in isolation; Main/Renderer: integration tests; gRPC: contract tests
 
