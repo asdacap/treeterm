@@ -1077,7 +1077,14 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             }
           }
         })
-        // Don't sync tab state changes - they're too frequent and non-critical
+        // Only sync to daemon when a ptyId is present — never sync with empty pty
+        const updated = get()
+        const tab = updated.workspaces[workspaceId]?.tabs.find((t) => t.id === tabId)
+        if (tab?.state && (tab.state as { ptyId?: string }).ptyId) {
+          syncSessionToDaemon(updated.sessionId, updated.workspaces, (sid) =>
+            set({ sessionId: sid }), updated.isRestoring
+          ).catch(console.error)
+        }
       },
 
       syncToDaemon: async () => {

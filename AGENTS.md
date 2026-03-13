@@ -67,6 +67,10 @@ Never silently swallow errors or return empty/default values on failure. Throw e
 - Use Zod for runtime validation at system boundaries
 - Make invalid states unrepresentable via interface design
 
+### Do not do stupid things
+- Some stupid agent decided to not save a state because its updated too much. How do you know what is too much? Too much that it still works? No, dont do that. 
+- Do no optimize until I say so. Just make the flow as is.
+
 ### Anti Pattern
 - If you have a daemon type and a main type variant, something is wrong. Eg: DaemonSession and Session. They should use the same type. Use a wrapper like UISession if needed, but its a wrapper, not a copy, it should contain a Session.
 - Composition over Inheritence. No inheritence! I got burned on that many times already!
