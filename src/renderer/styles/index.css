@@ -2045,6 +2045,95 @@ body,
   /* Children inherit structure */
 }
 
+/* File Tree Search */
+.file-tree-search {
+  padding: 8px;
+  border-bottom: 1px solid var(--border-color);
+  position: relative;
+}
+
+.file-tree-search-input {
+  width: 100%;
+  padding: 6px 28px 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.file-tree-search-input:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+
+.file-tree-search-input::placeholder {
+  color: var(--text-secondary);
+}
+
+.file-tree-search-clear {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 12px;
+  border-radius: 3px;
+}
+
+.file-tree-search-clear:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.file-tree-search-results {
+  /* Search results container */
+}
+
+.file-tree-search-result {
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 6px 8px;
+}
+
+.file-tree-search-result .file-tree-icon {
+  flex-shrink: 0;
+}
+
+.file-tree-search-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.file-tree-search-path {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-left: 26px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.file-tree-search-match {
+  background: var(--accent-color);
+  color: var(--text-primary);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.file-tree-search-empty {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
 /* File Viewer */
 .file-viewer {
   flex: 1;

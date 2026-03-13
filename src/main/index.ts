@@ -889,6 +889,11 @@ server.onFsWriteFile(async (workspacePath, filePath, content) => {
   return daemonClient.writeFile(workspacePath, filePath, content)
 })
 
+server.onFsSearchFiles(async (workspacePath, query) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  return daemonClient.searchFiles(workspacePath, query)
+})
+
 // Sandbox IPC Handlers
 server.onSandboxIsAvailable(() => {
   if (process.platform === 'darwin') {

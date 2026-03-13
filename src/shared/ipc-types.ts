@@ -23,7 +23,8 @@ import type {
   DirectoryContents,
   FileContents,
   ReviewsData,
-  ReviewComment
+  ReviewComment,
+  FileEntry
 } from '../renderer/types'
 
 // === Request Types (renderer calls, server handles) ===
@@ -217,6 +218,10 @@ export interface IpcRequests {
   fsWriteFile: {
     params: [workspacePath: string, filePath: string, content: string]
     result: { success: boolean; error?: string }
+  }
+  fsSearchFiles: {
+    params: [workspacePath: string, query: string]
+    result: { success: boolean; entries?: FileEntry[]; error?: string }
   }
 
   // STT operations

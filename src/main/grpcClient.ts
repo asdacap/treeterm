@@ -587,6 +587,17 @@ export class GrpcDaemonClient {
     })
   }
 
+  async searchFiles(workspacePath: string, query: string): Promise<any> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    return new Promise((resolve, reject) => {
+      this.client!.searchFiles({ workspacePath, query }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response) resolve(response)
+        else reject(new Error('No response from server'))
+      })
+    })
+  }
+
   disconnect(): void {
     if (this.stream) {
       this.stream.end()

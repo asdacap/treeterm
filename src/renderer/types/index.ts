@@ -127,6 +127,11 @@ export interface FilesystemApi {
     success: boolean
     error?: string
   }>
+  searchFiles: (workspacePath: string, query: string) => Promise<{
+    success: boolean
+    entries?: FileEntry[]
+    error?: string
+  }>
 }
 
 export interface GitInfo {

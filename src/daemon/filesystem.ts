@@ -188,3 +188,83 @@ export async function writeFile(
     return { success: false, error: String(error) }
   }
 }
+
+export async function searchFiles(
+  workspacePath: string,
+  query: string
+): Promise<{ success: boolean; entries?: FileEntry[]; error?: string }> {
+  try {
+    // Security check
+    if (!isPathWithinWorkspace(workspacePath, workspacePath)) {
+      return { success: false, error: 'Access denied: Invalid workspace path' }
+    }
+
+    const normalizedQuery = query.toLowerCase().trim()
+    if (!normalizedQuery) {
+      return { success: true, entries: [] }
+    }
+
+    const results: FileEntry[] = []
+
+    const walkDir = async (dirPath: string): Promise<void> => {
+      try {
+        const entries = await fs.readdir(dirPath, { withFileTypes: true })
+
+        for (const entry of entries) {
+          // Skip hidden files and node_modules
+          if (entry.name.startsWith('.') || entry.name === 'node_modules') {
+            continue
+          }
+
+          const fullPath = path.join(dirPath, entry.name)
+          const relativePath = path.relative(workspacePath, fullPath)
+
+          // Check if name matches query
+          const nameLower = entry.name.toLowerCase()
+          const matches = nameLower.includes(normalizedQuery)
+
+          let stats = null
+          try {
+            stats = await fs.stat(fullPath)
+          } catch {
+            // Ignore stat errors
+          }
+
+          const fileEntry: FileEntry = {
+            name: entry.name,
+            path: fullPath,
+            relativePath,
+            isDirectory: entry.isDirectory(),
+            size: stats?.size,
+            modifiedTime: stats?.mtimeMs
+          }
+
+          if (matches) {
+            results.push(fileEntry)
+          }
+
+          // Recurse into directories
+          if (entry.isDirectory()) {
+            await walkDir(fullPath)
+          }
+        }
+      } catch (error) {
+        // Ignore errors for individual directories (e.g., permission denied)
+      }
+    }
+
+    await walkDir(workspacePath)
+
+    // Sort: directories first, then alphabetically
+    results.sort((a, b) => {
+      if (a.isDirectory !== b.isDirectory) {
+        return a.isDirectory ? -1 : 1
+      }
+      return a.name.localeCompare(b.name)
+    })
+
+    return { success: true, entries: results }
+  } catch (error) {
+    return { success: false, error: String(error) }
+  }
+}

@@ -54,6 +54,7 @@ const CHANNELS = {
   fsReadDirectory: 'fs:readDirectory',
   fsReadFile: 'fs:readFile',
   fsWriteFile: 'fs:writeFile',
+  fsSearchFiles: 'fs:searchFiles',
   sttTranscribeOpenai: 'stt:transcribe-openai',
   sttTranscribeLocal: 'stt:transcribe-local',
   sttCheckMicPermission: 'stt:check-mic-permission',
@@ -331,6 +332,10 @@ export class IpcClient {
 
   fsWriteFile(...args: IpcRequests['fsWriteFile']['params']): Promise<IpcRequests['fsWriteFile']['result']> {
     return ipcRenderer.invoke(CHANNELS.fsWriteFile, ...args)
+  }
+
+  fsSearchFiles(...args: IpcRequests['fsSearchFiles']['params']): Promise<IpcRequests['fsSearchFiles']['result']> {
+    return ipcRenderer.invoke(CHANNELS.fsSearchFiles, ...args)
   }
 
   // STT requests

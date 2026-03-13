@@ -663,6 +663,17 @@ export interface DirectoryContents {
   entries: FileEntry[];
 }
 
+export interface SearchFilesRequest {
+  workspacePath: string;
+  query: string;
+}
+
+export interface SearchFilesResponse {
+  success: boolean;
+  entries: FileEntry[];
+  error?: string | undefined;
+}
+
 export interface ReadDirectoryRequest {
   workspacePath: string;
   dirPath: string;
@@ -10568,6 +10579,178 @@ export const DirectoryContents: MessageFns<DirectoryContents> = {
   },
 };
 
+function createBaseSearchFilesRequest(): SearchFilesRequest {
+  return { workspacePath: "", query: "" };
+}
+
+export const SearchFilesRequest: MessageFns<SearchFilesRequest> = {
+  encode(message: SearchFilesRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.workspacePath !== "") {
+      writer.uint32(10).string(message.workspacePath);
+    }
+    if (message.query !== "") {
+      writer.uint32(18).string(message.query);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SearchFilesRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSearchFilesRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.workspacePath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.query = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SearchFilesRequest {
+    return {
+      workspacePath: isSet(object.workspacePath)
+        ? globalThis.String(object.workspacePath)
+        : isSet(object.workspace_path)
+        ? globalThis.String(object.workspace_path)
+        : "",
+      query: isSet(object.query) ? globalThis.String(object.query) : "",
+    };
+  },
+
+  toJSON(message: SearchFilesRequest): unknown {
+    const obj: any = {};
+    if (message.workspacePath !== "") {
+      obj.workspacePath = message.workspacePath;
+    }
+    if (message.query !== "") {
+      obj.query = message.query;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SearchFilesRequest>, I>>(base?: I): SearchFilesRequest {
+    return SearchFilesRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SearchFilesRequest>, I>>(object: I): SearchFilesRequest {
+    const message = createBaseSearchFilesRequest();
+    message.workspacePath = object.workspacePath ?? "";
+    message.query = object.query ?? "";
+    return message;
+  },
+};
+
+function createBaseSearchFilesResponse(): SearchFilesResponse {
+  return { success: false, entries: [], error: undefined };
+}
+
+export const SearchFilesResponse: MessageFns<SearchFilesResponse> = {
+  encode(message: SearchFilesResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    for (const v of message.entries) {
+      FileEntry.encode(v!, writer.uint32(18).fork()).join();
+    }
+    if (message.error !== undefined) {
+      writer.uint32(26).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SearchFilesResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSearchFilesResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.entries.push(FileEntry.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SearchFilesResponse {
+    return {
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      entries: globalThis.Array.isArray(object?.entries) ? object.entries.map((e: any) => FileEntry.fromJSON(e)) : [],
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: SearchFilesResponse): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.entries?.length) {
+      obj.entries = message.entries.map((e) => FileEntry.toJSON(e));
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SearchFilesResponse>, I>>(base?: I): SearchFilesResponse {
+    return SearchFilesResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SearchFilesResponse>, I>>(object: I): SearchFilesResponse {
+    const message = createBaseSearchFilesResponse();
+    message.success = object.success ?? false;
+    message.entries = object.entries?.map((e) => FileEntry.fromPartial(e)) || [];
+    message.error = object.error ?? undefined;
+    return message;
+  },
+};
+
 function createBaseReadDirectoryRequest(): ReadDirectoryRequest {
   return { workspacePath: "", dirPath: "" };
 }
@@ -11406,6 +11589,15 @@ export const TreeTermDaemonService = {
     responseSerialize: (value: WriteFileResponse): Buffer => Buffer.from(WriteFileResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): WriteFileResponse => WriteFileResponse.decode(value),
   },
+  searchFiles: {
+    path: "/treeterm.TreeTermDaemon/SearchFiles" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: SearchFilesRequest): Buffer => Buffer.from(SearchFilesRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): SearchFilesRequest => SearchFilesRequest.decode(value),
+    responseSerialize: (value: SearchFilesResponse): Buffer => Buffer.from(SearchFilesResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): SearchFilesResponse => SearchFilesResponse.decode(value),
+  },
 } as const;
 
 export interface TreeTermDaemonServer extends UntypedServiceImplementation {
@@ -11441,6 +11633,7 @@ export interface TreeTermDaemonServer extends UntypedServiceImplementation {
   readDirectory: handleUnaryCall<ReadDirectoryRequest, ReadDirectoryResponse>;
   readFile: handleServerStreamingCall<ReadFileRequest, FileReadChunk>;
   writeFile: handleClientStreamingCall<FileWriteChunk, WriteFileResponse>;
+  searchFiles: handleUnaryCall<SearchFilesRequest, SearchFilesResponse>;
 }
 
 export interface TreeTermDaemonClient extends Client {
@@ -11706,6 +11899,21 @@ export interface TreeTermDaemonClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: WriteFileResponse) => void,
   ): ClientWritableStream<FileWriteChunk>;
+  searchFiles(
+    request: SearchFilesRequest,
+    callback: (error: ServiceError | null, response: SearchFilesResponse) => void,
+  ): ClientUnaryCall;
+  searchFiles(
+    request: SearchFilesRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: SearchFilesResponse) => void,
+  ): ClientUnaryCall;
+  searchFiles(
+    request: SearchFilesRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: SearchFilesResponse) => void,
+  ): ClientUnaryCall;
 }
 
 export const TreeTermDaemonClient = makeGenericClientConstructor(

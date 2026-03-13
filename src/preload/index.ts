@@ -311,6 +311,9 @@ contextBridge.exposeInMainWorld('electron', {
     },
     writeFile: (workspacePath: string, filePath: string, content: string) => {
       return client.fsWriteFile(workspacePath, filePath, content)
+    },
+    searchFiles: (workspacePath: string, query: string) => {
+      return client.fsSearchFiles(workspacePath, query)
     }
   },
   sandbox: {

@@ -652,6 +652,17 @@ message DirectoryContents {
   repeated FileEntry entries = 2;
 }
 
+message SearchFilesRequest {
+  string workspace_path = 1;
+  string query = 2;
+}
+
+message SearchFilesResponse {
+  bool success = 1;
+  repeated FileEntry entries = 2;
+  optional string error = 3;
+}
+
 message ReadDirectoryRequest {
   string workspace_path = 1;
   string dir_path = 2;
@@ -730,4 +741,5 @@ service TreeTermDaemon {
   rpc ReadDirectory(ReadDirectoryRequest) returns (ReadDirectoryResponse);
   rpc ReadFile(ReadFileRequest) returns (stream FileReadChunk);
   rpc WriteFile(stream FileWriteChunk) returns (WriteFileResponse);
+  rpc SearchFiles(SearchFilesRequest) returns (SearchFilesResponse);
 }

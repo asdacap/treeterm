@@ -42,6 +42,8 @@ import {
   type ReadFileResponse,
   type WriteFileRequest,
   type WriteFileResponse,
+  type SearchFilesRequest,
+  type SearchFilesResponse,
   type FileReadChunk,
   type FileWriteChunk,
   type DiffChunk,
@@ -185,7 +187,8 @@ export class GrpcServer {
       // Filesystem operations
       readDirectory: this.handleReadDirectory.bind(this),
       readFile: this.handleReadFile.bind(this),
-      writeFile: this.handleWriteFile.bind(this)
+      writeFile: this.handleWriteFile.bind(this),
+      searchFiles: this.handleSearchFiles.bind(this)
     }
   }
 
@@ -881,5 +884,28 @@ export class GrpcServer {
         message: error.message
       })
     })
+  }
+
+  private handleSearchFiles(
+    call: grpc.ServerUnaryCall<SearchFilesRequest, SearchFilesResponse>,
+    callback: grpc.sendUnaryData<SearchFilesResponse>
+  ): void {
+    const { workspacePath, query } = call.request
+
+    filesystem
+      .searchFiles(workspacePath, query)
+      .then((result) => {
+        callback(null, {
+          success: result.success,
+          entries: result.entries || [],
+          error: result.error
+        })
+      })
+      .catch((error) => {
+        callback({
+          code: grpc.status.INTERNAL,
+          message: error instanceof Error ? error.message : 'Unknown error'
+        })
+      })
   }
 }
