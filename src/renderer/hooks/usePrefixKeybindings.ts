@@ -16,7 +16,7 @@ export interface KeybindingHandlers {
   workspaceFocus?: () => void
 }
 
-export function usePrefixKeybindings(handlers: KeybindingHandlers) {
+export function usePrefixKeybindings(handlers: KeybindingHandlers): void {
   const { settings } = useSettingsStore()
   const {
     state: prefixState,

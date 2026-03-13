@@ -36,7 +36,10 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
   const [sandboxAvailable, setSandboxAvailable] = useState<boolean | null>(null)
 
   useEffect(() => {
-    window.electron.sandbox.isAvailable().then(setSandboxAvailable)
+    window.electron.sandbox.isAvailable().then(setSandboxAvailable).catch((error) => {
+      console.error('[SettingsDialog] sandbox availability check failed:', error)
+      setSandboxAvailable(false)
+    })
   }, [])
 
   useEffect(() => {

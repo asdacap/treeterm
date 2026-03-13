@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import type { IpcServer } from './ipc/ipc-server'
+import type { GrpcDaemonClient } from './grpcClient'
 
 // Security: Ensure path is within workspace
 function isPathWithinWorkspace(workspacePath: string, targetPath: string): boolean {
@@ -62,7 +63,7 @@ function detectLanguage(filePath: string): string {
   return languageMap[ext] || 'plaintext'
 }
 
-export function registerFilesystemHandlers(server: IpcServer): void {
+export function registerFilesystemHandlers(server: IpcServer, daemonClient: GrpcDaemonClient): void {
   server.onFsReadDirectory(async (workspacePath, dirPath) => {
     try {
       // Security check
@@ -151,8 +152,8 @@ export function registerFilesystemHandlers(server: IpcServer): void {
         return { success: false, error: 'Access denied: Path outside workspace' }
       }
 
-      // Write file
-      await fs.writeFile(filePath, content, 'utf-8')
+      // Write file via daemon to comply with the "all file mutations through daemon gRPC" rule
+      await daemonClient.writeFile(workspacePath, filePath, content)
 
       return { success: true }
     } catch (error) {

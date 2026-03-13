@@ -89,7 +89,8 @@ const CHANNELS = {
   terminalNew: 'terminal:new',
   terminalShowSessions: 'terminal:show-sessions',
   sessionShowSessions: 'session:show-sessions',
-  sessionSync: 'session:sync'
+  sessionSync: 'session:sync',
+  daemonDisconnected: 'daemon:disconnected'
 } as const
 
 export class IpcClient {
@@ -511,5 +512,11 @@ export class IpcClient {
       callback(...(args as IpcEvents['sessionSync']['params']))
     ipcRenderer.on(CHANNELS.sessionSync, handler)
     return () => ipcRenderer.removeListener(CHANNELS.sessionSync, handler)
+  }
+
+  onDaemonDisconnected(callback: () => void): () => void {
+    const handler = () => callback()
+    ipcRenderer.on(CHANNELS.daemonDisconnected, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.daemonDisconnected, handler)
   }
 }

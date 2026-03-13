@@ -355,6 +355,9 @@ export interface IpcEvents {
   sessionSync: {
     params: [session: Session]
   }
+  daemonDisconnected: {
+    params: []
+  }
 }
 
 // === Type Helpers ===

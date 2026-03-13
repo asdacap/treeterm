@@ -34,7 +34,7 @@ function WorkspaceActivityIndicator({ tabIds }: { tabIds: string[] }) {
   )
 }
 
-export default function TreePane() {
+export default function TreePane(): JSX.Element {
   const {
     workspaces,
     activeWorkspaceId,
