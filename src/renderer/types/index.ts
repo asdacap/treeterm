@@ -369,16 +369,6 @@ export function isAiHarnessState(state: unknown): state is AiHarnessState {
   )
 }
 
-export function isFilesystemState(state: unknown): state is FilesystemState {
-  return (
-    state !== null &&
-    typeof state === 'object' &&
-    'selectedPath' in state &&
-    'expandedDirs' in state &&
-    Array.isArray((state as FilesystemState).expandedDirs)
-  )
-}
-
 export function isReviewState(state: unknown): state is ReviewState {
   return (
     state !== null &&

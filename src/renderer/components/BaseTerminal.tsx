@@ -51,7 +51,7 @@ export interface BaseTerminalConfig {
   disableScrollbar?: boolean
 }
 
-export interface BaseTerminalProps {
+interface BaseTerminalProps {
   cwd: string
   workspaceId: string
   tabId: string
