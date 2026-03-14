@@ -1,6 +1,5 @@
 import { useCallback, useState, useEffect } from 'react'
 import { usePushToTalk } from '../hooks/usePushToTalk'
-import { useCapsLockHold } from '../hooks/useCapsLockHold'
 import { useSettingsStore } from '../store/settings'
 
 interface PushToTalkButtonProps {
@@ -42,12 +41,6 @@ export default function PushToTalkButton({ onTranscript, onSubmit }: PushToTalkB
     onError: handleError
   })
 
-  // Handle Caps Lock hold
-  useCapsLockHold({
-    onHoldStart: startRecording,
-    onHoldEnd: stopRecording
-  })
-
   return (
     <>
       <button
@@ -69,7 +62,7 @@ export default function PushToTalkButton({ onTranscript, onSubmit }: PushToTalkB
           // Stop recording if mouse leaves while recording
           if (isRecording) stopRecording()
         }}
-        title={isRecording ? 'Recording... (release to stop)' : `Push to talk (hold ${pushToTalkKey} or click)`}
+        title={isRecording ? 'Recording... (release to stop)' : `Push to talk (click and hold)`}
       >
         {isProcessing ? '⋯' : isRecording ? '🎤' : '🎙️'}
       </button>
