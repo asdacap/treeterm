@@ -58,6 +58,11 @@ export class GrpcDaemonClient {
       return
     }
 
+    // Fast fail: check if socket file exists before attempting gRPC connection
+    if (!fs.existsSync(this.socketPath)) {
+      throw new Error(`Daemon socket not found at ${this.socketPath}`)
+    }
+
     return new Promise((resolve, reject) => {
       const socketUri = `unix://${this.socketPath}`
       const credentials = grpc.credentials.createInsecure()
