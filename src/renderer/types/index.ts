@@ -77,7 +77,9 @@ export interface FilesystemState {
 }
 
 export interface ReviewState {
-  parentWorkspaceId: string
+  // parentWorkspaceId identifies the target branch for merging.
+  // If undefined/null, this is a top-level worktree - review shows only uncommitted changes
+  parentWorkspaceId?: string
 }
 
 export interface EditorState {
@@ -381,8 +383,9 @@ export function isReviewState(state: unknown): state is ReviewState {
   return (
     state !== null &&
     typeof state === 'object' &&
-    'parentWorkspaceId' in state &&
-    typeof (state as ReviewState).parentWorkspaceId === 'string'
+    // parentWorkspaceId is optional - if present, must be a string
+    (!('parentWorkspaceId' in state) ||
+      typeof (state as ReviewState).parentWorkspaceId === 'string')
   )
 }
 

@@ -9,7 +9,7 @@ export const reviewApplication: Application<ReviewState> = {
   icon: '📋',
 
   createInitialState: () => ({
-    parentWorkspaceId: ''
+    // parentWorkspaceId is optional - null means top-level worktree (no merge parent)
   }),
 
   render: ({ tab, workspaceId, workspacePath }) => {
@@ -27,7 +27,7 @@ export const reviewApplication: Application<ReviewState> = {
 
   canClose: true,
   canHaveMultiple: false,
-  showInNewTabMenu: false,
+  showInNewTabMenu: true,
   keepAlive: false,
   displayStyle: 'flex',
   isDefault: false

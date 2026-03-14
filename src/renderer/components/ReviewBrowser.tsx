@@ -9,7 +9,9 @@ interface ReviewBrowserProps {
   workspaceId: string
   workspacePath: string
   tabId: string
-  parentWorkspaceId: string
+  // parentWorkspaceId is optional - if undefined, this is a top-level worktree
+  // and only uncommitted changes are shown (no merge functionality)
+  parentWorkspaceId?: string
 }
 
 type ViewMode = 'committed' | 'uncommitted'
@@ -22,7 +24,10 @@ export default function ReviewBrowser({
 }: ReviewBrowserProps) {
   const { workspaces, mergeAndRemoveWorkspace, removeWorkspace, removeWorkspaceKeepBranch, closeAndCleanWorkspace, removeTab } = useWorkspaceStore()
   const workspace = workspaces[workspaceId]
-  const parentWorkspace = workspaces[parentWorkspaceId]
+  const parentWorkspace = parentWorkspaceId ? workspaces[parentWorkspaceId] : undefined
+  
+  // For top-level worktrees, we only show uncommitted changes (no parent to compare against)
+  const hasParent = !!parentWorkspaceId
 
   // Diff state
   const [diff, setDiff] = useState<DiffResult | null>(null)
@@ -34,6 +39,7 @@ export default function ReviewBrowser({
 
   // Uncommitted changes state
   const [uncommitted, setUncommitted] = useState<UncommittedChanges | null>(null)
+  // Default to 'committed' view, but for top-level worktrees we only show uncommitted
   const [viewMode, setViewMode] = useState<ViewMode>('committed')
   const [selectedUncommittedFile, setSelectedUncommittedFile] = useState<UncommittedFile | null>(null)
 
@@ -86,11 +92,19 @@ export default function ReviewBrowser({
   }, [])
 
   useEffect(() => {
-    if (workspace && parentWorkspace) {
+    if (!workspace) return
+    
+    // Always load uncommitted changes
+    loadUncommittedChanges()
+    loadReviews()
+    
+    if (parentWorkspace) {
+      // For child worktrees: load diff and check conflicts for merge
       loadDiff()
-      loadUncommittedChanges()
       checkConflicts()
-      loadReviews()
+    } else {
+      // For top-level worktrees: no diff to show, just clear loading state
+      setLoading(false)
     }
   }, [workspace, parentWorkspace])
 
@@ -369,8 +383,8 @@ export default function ReviewBrowser({
     }
   }
 
-  if (!workspace || !parentWorkspace) {
-    return <div className="review-browser-error">Workspace or parent workspace not found</div>
+  if (!workspace) {
+    return <div className="review-browser-error">Workspace not found</div>
   }
 
   const stagedFiles = uncommitted?.files.filter((f) => f.staged) || []
@@ -474,8 +488,12 @@ export default function ReviewBrowser({
           <span className="review-workspace-name">{workspace.name}</span>
           <span className="review-branch-info">
             <span className="review-branch">{workspace.gitBranch}</span>
-            <span className="review-arrow">→</span>
-            <span className="review-branch">{parentWorkspace.gitBranch}</span>
+            {parentWorkspace && (
+              <>
+                <span className="review-arrow">→</span>
+                <span className="review-branch">{parentWorkspace.gitBranch}</span>
+              </>
+            )}
           </span>
         </div>
         {isCheckingConflicts && (
@@ -509,15 +527,25 @@ export default function ReviewBrowser({
 
       {/* View Mode Tabs */}
       <div className="diff-tabs">
-        <button
-          className={`diff-tab ${viewMode === 'committed' ? 'active' : ''}`}
-          onClick={() => setViewMode('committed')}
-        >
-          Committed Changes
-          {hasCommittedChanges && (
-            <span className="diff-tab-count">{diff.files.length}</span>
-          )}
-        </button>
+        {hasParent ? (
+          <button
+            className={`diff-tab ${viewMode === 'committed' ? 'active' : ''}`}
+            onClick={() => setViewMode('committed')}
+          >
+            Committed Changes
+            {hasCommittedChanges && (
+              <span className="diff-tab-count">{diff.files.length}</span>
+            )}
+          </button>
+        ) : (
+          <button
+            className="diff-tab disabled"
+            disabled
+            title="Top-level worktree - no parent branch to compare against"
+          >
+            Committed Changes
+          </button>
+        )}
         <button
           className={`diff-tab ${viewMode === 'uncommitted' ? 'active' : ''}`}
           onClick={() => setViewMode('uncommitted')}
@@ -538,7 +566,9 @@ export default function ReviewBrowser({
         <>
           {viewMode === 'committed' ? (
             // Committed view
-            !hasCommittedChanges ? (
+            !hasParent ? (
+              <div className="diff-empty">Top-level worktree - no parent branch to compare committed changes against</div>
+            ) : !hasCommittedChanges ? (
               <div className="diff-empty">No committed changes to show</div>
             ) : (
               <>
@@ -779,7 +809,19 @@ export default function ReviewBrowser({
 
       {/* Action Bar */}
       <div className="review-actions">
-        {workspace?.isDetached ? (
+        {!hasParent ? (
+          // Top-level worktree: only show Cancel (no merge/abandon actions)
+          <>
+            <span className="review-top-level-message">Top-level worktree - review only</span>
+            <button
+              className="review-action-btn review-cancel-btn"
+              onClick={handleCancel}
+              disabled={isProcessing}
+            >
+              Close Review
+            </button>
+          </>
+        ) : workspace?.isDetached ? (
           <>
             <button
               className="review-action-btn review-close-and-clean-btn"
