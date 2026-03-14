@@ -283,7 +283,7 @@ export function MonacoDiffViewer({
         afterLineNumber: lineNumber,
         heightInPx: 140,
         domNode: container,
-        suppressMouseDown: true
+        suppressMouseDown: false
       })
     })
 
