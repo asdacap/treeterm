@@ -70,8 +70,10 @@ describe('logger', () => {
       const { initLogger } = await import('./logger')
       initLogger()
 
-      const pinoConfig = mockPino.mock.calls[0][0]
-      expect(pinoConfig.level).toBe('debug')
+      expect(mockPino).toHaveBeenCalled()
+      const callArgs = mockPino.mock.calls[0] as unknown as [object] | undefined
+      expect(callArgs).toBeDefined()
+      expect(callArgs![0]).toHaveProperty('level', 'debug')
     })
 
     it('enables pretty printing when pretty option is true', async () => {
@@ -80,8 +82,10 @@ describe('logger', () => {
       const { initLogger } = await import('./logger')
       initLogger({ pretty: true })
 
-      const pinoConfig = mockPino.mock.calls[0][0]
-      expect(pinoConfig.transport.target).toBe('pino-pretty')
+      expect(mockPino).toHaveBeenCalled()
+      const callArgs = mockPino.mock.calls[0] as unknown as [object] | undefined
+      expect(callArgs).toBeDefined()
+      expect(callArgs![0]).toHaveProperty('transport.target', 'pino-pretty')
     })
 
     it('returns same logger on multiple calls', async () => {

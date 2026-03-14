@@ -13,7 +13,7 @@ const mockLoadSettings = vi.fn()
 const mockSaveSettings = vi.fn()
 
 // Define window.electron on global
-;(global as any).window = {
+;(globalThis as unknown as { window: { electron: { settings: { load: typeof mockLoadSettings; save: typeof mockSaveSettings } } } }).window = {
   electron: {
     settings: {
       load: mockLoadSettings,
@@ -169,7 +169,7 @@ describe('SettingsStore', () => {
       mockSaveSettings.mockResolvedValue(undefined)
       
       const currentSettings = useSettingsStore.getState().settings
-      const newSettings = {
+      const newSettings: Settings = {
         ...currentSettings,
         appearance: { theme: 'light' }
       }

@@ -7,24 +7,42 @@ describe('ApplicationRegistry', () => {
     id: 'app1',
     name: 'Application 1',
     icon: '📱',
-    isDefault: true,
-    showInNewTabMenu: true
+    createInitialState: () => ({}),
+    render: () => null,
+    canClose: true,
+    canHaveMultiple: false,
+    showInNewTabMenu: true,
+    keepAlive: false,
+    displayStyle: 'flex',
+    isDefault: true
   }
 
   const mockApp2: Application = {
     id: 'app2',
     name: 'Application 2',
     icon: '🔧',
-    isDefault: false,
-    showInNewTabMenu: true
+    createInitialState: () => ({}),
+    render: () => null,
+    canClose: true,
+    canHaveMultiple: true,
+    showInNewTabMenu: true,
+    keepAlive: false,
+    displayStyle: 'flex',
+    isDefault: false
   }
 
   const mockApp3: Application = {
     id: 'app3',
     name: 'Application 3',
     icon: '📝',
-    isDefault: false,
-    showInNewTabMenu: false
+    createInitialState: () => ({}),
+    render: () => null,
+    canClose: true,
+    canHaveMultiple: false,
+    showInNewTabMenu: false,
+    keepAlive: false,
+    displayStyle: 'flex',
+    isDefault: false
   }
 
   beforeEach(() => {
