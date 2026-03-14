@@ -42,7 +42,8 @@ export async function launchApp(workspacePath?: string): Promise<{ app: Electron
       ...process.env,
       NODE_ENV: 'test',
       TREETERM_SOCKET_PATH: getTestSocketPath(),
-      TREETERM_PID_FILE: getTestPidPath()
+      TREETERM_PID_FILE: getTestPidPath(),
+      TREETERM_DATA_DIR: path.join(os.homedir(), '.treeterm-e2e')
     }
   })
 
@@ -124,7 +125,7 @@ export async function waitForDaemon(timeoutMs: number = 5000): Promise<void> {
 }
 
 export async function waitForTerminalReady(window: Page): Promise<void> {
-  await window.waitForSelector('.xterm', { timeout: 10000 })
+  await window.locator('.xterm').filter({ visible: true }).first().waitFor({ timeout: 10000 })
   // Wait a bit for terminal to be fully initialized
   await window.waitForTimeout(500)
 }
@@ -156,7 +157,7 @@ export async function getTerminalText(window: Page): Promise<string> {
 }
 
 export function cleanupTestData(): void {
-  const treeTermDir = path.join(os.homedir(), '.treeterm')
+  const treeTermDir = path.join(os.homedir(), '.treeterm-e2e')
   if (fs.existsSync(treeTermDir)) {
     // Don't delete everything, just test-specific files
     const sessionsFile = path.join(treeTermDir, 'sessions.json')

@@ -11,8 +11,9 @@ import * as os from 'os'
 import { getDefaultSocketPath } from './socketPath'
 import { initLogger, createModuleLogger } from './logger'
 
-const DEFAULT_DAEMON_PID_FILE = path.join(os.homedir(), '.treeterm', 'daemon.pid')
-const DAEMON_LOG_FILE = path.join(os.homedir(), '.treeterm', 'daemon.log')
+const TREETERM_DATA_DIR = process.env.TREETERM_DATA_DIR || path.join(os.homedir(), '.treeterm')
+const DEFAULT_DAEMON_PID_FILE = path.join(TREETERM_DATA_DIR, 'daemon.pid')
+const DAEMON_LOG_FILE = path.join(TREETERM_DATA_DIR, 'daemon.log')
 
 interface DaemonConfig {
   socketPath: string

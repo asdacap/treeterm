@@ -153,6 +153,10 @@ export class GrpcDaemonClient {
     return () => this.disconnectListeners.delete(listener)
   }
 
+  isConnected(): boolean {
+    return this.connected
+  }
+
   async ensureDaemonRunning(): Promise<void> {
     try {
       await this.connect()
