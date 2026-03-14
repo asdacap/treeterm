@@ -36,6 +36,8 @@ const ptyToWindow: Map<string, number> = new Map()
 const server = new IpcServer()
 
 function createLoadingWindow(): BrowserWindow {
+  const isTest = process.env.NODE_ENV === 'test'
+
   loadingWindow = new BrowserWindow({
     width: 300,
     height: 200,
@@ -58,18 +60,23 @@ function createLoadingWindow(): BrowserWindow {
   loadingWindow.loadFile(join(__dirname, 'loading.html'))
 
   loadingWindow.once('ready-to-show', () => {
-    loadingWindow?.show()
+    if (!isTest) {
+      loadingWindow?.show()
+    }
   })
 
   return loadingWindow
 }
 
 function createWindow(initialSessionId?: string): BrowserWindow {
+  const isTest = process.env.NODE_ENV === 'test'
+
   const window = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
     minHeight: 600,
+    show: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
@@ -77,6 +84,10 @@ function createWindow(initialSessionId?: string): BrowserWindow {
     },
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 15, y: 15 }
+  })
+
+  window.once('ready-to-show', () => {
+    window.show()
   })
 
   // Create a dedicated IPC server for this window
@@ -937,10 +948,12 @@ app.whenReady().then(async () => {
   // Always use daemon mode
   console.log('[main] daemon mode enabled')
 
-  // Show loading screen while connecting to daemon
-  createLoadingWindow()
+  // Show loading screen while connecting to daemon (skip in test mode)
+  if (process.env.NODE_ENV !== 'test') {
+    createLoadingWindow()
+  }
 
-  daemonClient = new GrpcDaemonClient()
+  daemonClient = new GrpcDaemonClient(process.env.TREETERM_SOCKET_PATH)
 
   // Forward daemon disconnections to renderer so the UI can show a warning
   daemonClient.onDisconnect(() => {
@@ -992,7 +1005,7 @@ async function quitAndKillDaemon(): Promise<void> {
 }
 
 app.on('before-quit', async () => {
-  if (daemonClient) {
+  if (daemonClient && daemonClient.isConnected()) {
     const settings = loadSettings()
     if (settings.daemon.killOnQuit) {
       console.log('[main] killing all sessions before quit')

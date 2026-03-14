@@ -11,11 +11,13 @@ import * as os from 'os'
 import { getDefaultSocketPath } from './socketPath'
 import { initLogger, createModuleLogger } from './logger'
 
-const DAEMON_PID_FILE = path.join(os.homedir(), '.treeterm', 'daemon.pid')
-const DAEMON_LOG_FILE = path.join(os.homedir(), '.treeterm', 'daemon.log')
+const TREETERM_DATA_DIR = process.env.TREETERM_DATA_DIR || path.join(os.homedir(), '.treeterm')
+const DEFAULT_DAEMON_PID_FILE = path.join(TREETERM_DATA_DIR, 'daemon.pid')
+const DAEMON_LOG_FILE = path.join(TREETERM_DATA_DIR, 'daemon.log')
 
 interface DaemonConfig {
   socketPath: string
+  pidFile: string
   orphanTimeout: number // minutes
   scrollbackLimit: number
   logFile: string
@@ -26,6 +28,7 @@ interface DaemonConfig {
 function getConfig(): DaemonConfig {
   return {
     socketPath: process.env.TREETERM_SOCKET_PATH || getDefaultSocketPath(),
+    pidFile: process.env.TREETERM_PID_FILE || DEFAULT_DAEMON_PID_FILE,
     orphanTimeout: parseInt(process.env.TREETERM_ORPHAN_TIMEOUT || '0', 10),
     scrollbackLimit: parseInt(process.env.TREETERM_SCROLLBACK_LIMIT || '50000', 10),
     logFile: process.env.TREETERM_LOG_FILE || DAEMON_LOG_FILE,
@@ -35,18 +38,18 @@ function getConfig(): DaemonConfig {
 }
 
 
-function writePidFile(log: ReturnType<typeof createModuleLogger>): void {
-  const pidDir = path.dirname(DAEMON_PID_FILE)
+function writePidFile(pidFile: string, log: ReturnType<typeof createModuleLogger>): void {
+  const pidDir = path.dirname(pidFile)
   if (!fs.existsSync(pidDir)) {
     fs.mkdirSync(pidDir, { recursive: true })
   }
-  fs.writeFileSync(DAEMON_PID_FILE, process.pid.toString(), 'utf-8')
-  log.info({ pid: process.pid, pidFile: DAEMON_PID_FILE }, 'PID file written')
+  fs.writeFileSync(pidFile, process.pid.toString(), 'utf-8')
+  log.info({ pid: process.pid, pidFile }, 'PID file written')
 }
 
-function removePidFile(): void {
-  if (fs.existsSync(DAEMON_PID_FILE)) {
-    fs.unlinkSync(DAEMON_PID_FILE)
+function removePidFile(pidFile: string): void {
+  if (fs.existsSync(pidFile)) {
+    fs.unlinkSync(pidFile)
   }
 }
 
@@ -73,7 +76,7 @@ async function main(): Promise<void> {
   log.info('========================================')
 
   // Write PID file
-  writePidFile(log)
+  writePidFile(config.pidFile, log)
 
   // Dynamic imports after logger is initialized
   const { DaemonPtyManager } = await import('./ptyManager')
@@ -115,7 +118,7 @@ async function main(): Promise<void> {
     // Cleanup
     grpcServer.stop()
     ptyManager.shutdown()
-    removePidFile()
+    removePidFile(config.pidFile)
 
     log.info('shutdown complete')
     process.exit(0)
@@ -135,9 +138,12 @@ async function main(): Promise<void> {
   })
 }
 
+// Get config early to determine PID file location
+const startupConfig = getConfig()
+
 // Check if already running
-if (fs.existsSync(DAEMON_PID_FILE)) {
-  const pid = parseInt(fs.readFileSync(DAEMON_PID_FILE, 'utf-8'), 10)
+if (fs.existsSync(startupConfig.pidFile)) {
+  const pid = parseInt(fs.readFileSync(startupConfig.pidFile, 'utf-8'), 10)
   try {
     // Check if process is still alive
     process.kill(pid, 0)
@@ -145,7 +151,7 @@ if (fs.existsSync(DAEMON_PID_FILE)) {
     process.exit(0)
   } catch {
     // Process not running, remove stale PID file
-    fs.unlinkSync(DAEMON_PID_FILE)
+    fs.unlinkSync(startupConfig.pidFile)
   }
 }
 
@@ -159,6 +165,6 @@ main().catch((error) => {
     // Logger not initialized, use console.error
     console.error('[daemon] fatal error:', error)
   }
-  removePidFile()
+  removePidFile(startupConfig.pidFile)
   process.exit(1)
 })
