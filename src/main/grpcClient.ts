@@ -27,7 +27,9 @@ import {
   type Session as ProtoSession,
   type Workspace as ProtoWorkspace,
   type WorkspaceInput,
-  type SessionWatchRequest
+  type SessionWatchRequest,
+  type DirectoryContents,
+  type FileEntry
 } from '../generated/treeterm'
 import { getDefaultSocketPath } from '../daemon/socketPath'
 import type {
@@ -542,18 +544,18 @@ export class GrpcDaemonClient {
 
   // Filesystem Operations
 
-  async readDirectory(workspacePath: string, dirPath: string): Promise<any> {
+  async readDirectory(workspacePath: string, dirPath: string): Promise<{ success: boolean; contents?: DirectoryContents; error?: string }> {
     if (!this.client) throw new Error('Not connected to daemon')
     return new Promise((resolve, reject) => {
       this.client!.readDirectory({ workspacePath, dirPath }, (error, response) => {
         if (error) reject(new Error(error.message))
-        else if (response) resolve(response)
+        else if (response) resolve(response as { success: boolean; contents?: DirectoryContents; error?: string })
         else reject(new Error('No response from server'))
       })
     })
   }
 
-  async readFile(workspacePath: string, filePath: string): Promise<any> {
+  async readFile(workspacePath: string, filePath: string): Promise<{ success: boolean; file?: { path: string; content: string; size: number; language: string }; error?: string }> {
     if (!this.client) throw new Error('Not connected to daemon')
 
     return new Promise((resolve, reject) => {
@@ -587,13 +589,13 @@ export class GrpcDaemonClient {
     })
   }
 
-  async writeFile(workspacePath: string, filePath: string, content: string): Promise<any> {
+  async writeFile(workspacePath: string, filePath: string, content: string): Promise<{ success: boolean; error?: string }> {
     if (!this.client) throw new Error('Not connected to daemon')
 
     return new Promise((resolve, reject) => {
       const stream = this.client!.writeFile((error, response) => {
         if (error) reject(new Error(error.message))
-        else if (response) resolve(response)
+        else if (response) resolve(response as { success: boolean; error?: string })
         else reject(new Error('No response from server'))
       })
 
@@ -613,12 +615,12 @@ export class GrpcDaemonClient {
     })
   }
 
-  async searchFiles(workspacePath: string, query: string): Promise<any> {
+  async searchFiles(workspacePath: string, query: string): Promise<{ success: boolean; entries?: FileEntry[]; error?: string }> {
     if (!this.client) throw new Error('Not connected to daemon')
     return new Promise((resolve, reject) => {
       this.client!.searchFiles({ workspacePath, query }, (error, response) => {
         if (error) reject(new Error(error.message))
-        else if (response) resolve(response)
+        else if (response) resolve(response as { success: boolean; entries?: FileEntry[]; error?: string })
         else reject(new Error('No response from server'))
       })
     })

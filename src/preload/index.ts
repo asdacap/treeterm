@@ -1,5 +1,6 @@
 import { contextBridge } from 'electron'
-import type { SandboxConfig, Session, SessionInfo, WorkspaceInput } from '../shared/types'
+import type { SandboxConfig, Session, SessionInfo, WorkspaceInput, Settings } from '../shared/types'
+import type { ReviewsData, ReviewComment } from '../renderer/types'
 import { IpcClient } from './ipc-client'
 
 type DataCallback = (data: string) => void
@@ -279,11 +280,11 @@ contextBridge.exposeInMainWorld('electron', {
     load: (worktreePath: string) => {
       return client.reviewsLoad(worktreePath)
     },
-    save: (worktreePath: string, reviews: unknown) => {
-      return client.reviewsSave(worktreePath, reviews as any)
+    save: (worktreePath: string, reviews: ReviewsData) => {
+      return client.reviewsSave(worktreePath, reviews)
     },
-    addComment: (worktreePath: string, comment: unknown) => {
-      return client.reviewsAddComment(worktreePath, comment as any)
+    addComment: (worktreePath: string, comment: Omit<ReviewComment, 'id' | 'createdAt'>) => {
+      return client.reviewsAddComment(worktreePath, comment)
     },
     deleteComment: (worktreePath: string, commentId: string) => {
       return client.reviewsDeleteComment(worktreePath, commentId)
@@ -296,8 +297,8 @@ contextBridge.exposeInMainWorld('electron', {
     load: () => {
       return client.settingsLoad()
     },
-    save: (settings: unknown) => {
-      return client.settingsSave(settings as any)
+    save: (settings: Settings) => {
+      return client.settingsSave(settings)
     },
     onOpen: (callback: SettingsOpenCallback): (() => void) => {
       settingsOpenListeners.push(callback)

@@ -7,6 +7,7 @@ import { IpcServer } from './ipc/ipc-server'
 import { GitClient } from './git'
 import { ReviewsClient } from './reviews'
 import { windowManager } from './windowManager'
+import type { SandboxConfig } from '../shared/types'
 
 // Parse initial workspace from command line
 let initialWorkspacePath: string | null = null
@@ -250,7 +251,7 @@ ipcMain.handle('pty:create', async (event, cwd: string, sandbox?: unknown, start
 
   try {
     await daemonClient.ensureDaemonRunning()
-    const ptySessionId = await daemonClient.createPtySession({ cwd, sandbox: sandbox as any, startupCommand })
+    const ptySessionId = await daemonClient.createPtySession({ cwd, sandbox: sandbox as SandboxConfig | undefined, startupCommand })
 
     // Track which window owns this PTY session
     const senderWindow = BrowserWindow.fromWebContents(event.sender)

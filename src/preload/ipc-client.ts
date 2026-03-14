@@ -443,14 +443,14 @@ export class IpcClient {
   // ==================== Event Listeners (on pattern, returns unsubscribe function) ====================
 
   onPtyData(callback: (...args: IpcEvents['ptyData']['params']) => void): () => void {
-    const handler = (_event: IpcRendererEvent, ...args: any[]) =>
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
       callback(...(args as IpcEvents['ptyData']['params']))
     ipcRenderer.on(CHANNELS.ptyData, handler)
     return () => ipcRenderer.removeListener(CHANNELS.ptyData, handler)
   }
 
   onPtyExit(callback: (...args: IpcEvents['ptyExit']['params']) => void): () => void {
-    const handler = (_event: IpcRendererEvent, ...args: any[]) =>
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
       callback(...(args as IpcEvents['ptyExit']['params']))
     ipcRenderer.on(CHANNELS.ptyExit, handler)
     return () => ipcRenderer.removeListener(CHANNELS.ptyExit, handler)
@@ -469,21 +469,21 @@ export class IpcClient {
   }
 
   onAppReady(callback: (...args: IpcEvents['appReady']['params']) => void): () => void {
-    const handler = (_event: IpcRendererEvent, ...args: any[]) =>
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
       callback(...(args as IpcEvents['appReady']['params']))
     ipcRenderer.on(CHANNELS.appReady, handler)
     return () => ipcRenderer.removeListener(CHANNELS.appReady, handler)
   }
 
   onCapsLockEvent(callback: (...args: IpcEvents['capsLockEvent']['params']) => void): () => void {
-    const handler = (_event: IpcRendererEvent, ...args: any[]) =>
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
       callback(...(args as IpcEvents['capsLockEvent']['params']))
     ipcRenderer.on(CHANNELS.capsLockEvent, handler)
     return () => ipcRenderer.removeListener(CHANNELS.capsLockEvent, handler)
   }
 
   onDaemonSessions(callback: (...args: IpcEvents['daemonSessions']['params']) => void): () => void {
-    const handler = (_event: IpcRendererEvent, ...args: any[]) =>
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
       callback(...(args as IpcEvents['daemonSessions']['params']))
     ipcRenderer.on(CHANNELS.daemonSessions, handler)
     return () => ipcRenderer.removeListener(CHANNELS.daemonSessions, handler)
@@ -508,7 +508,7 @@ export class IpcClient {
   }
 
   onSessionSync(callback: (...args: IpcEvents['sessionSync']['params']) => void): () => void {
-    const handler = (_event: IpcRendererEvent, ...args: any[]) =>
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
       callback(...(args as IpcEvents['sessionSync']['params']))
     ipcRenderer.on(CHANNELS.sessionSync, handler)
     return () => ipcRenderer.removeListener(CHANNELS.sessionSync, handler)

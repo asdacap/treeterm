@@ -390,7 +390,6 @@ export default function BaseTerminal({
       terminal.dispose()
     }
     // Note: existingPtyId is intentionally NOT in deps - we only check it on mount/re-run
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd, tabId, sandbox?.enabled, workspaceId, config.startupCommand, config.themeBackground])
 
   // Refresh terminal when tab becomes visible to fix blank screen issue

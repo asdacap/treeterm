@@ -3,6 +3,9 @@ import tsparser from '@typescript-eslint/parser'
 
 export default [
   {
+    ignores: ['src/__mocks__/**', 'src/generated/**']
+  },
+  {
     files: ['src/**/*.ts', 'src/**/*.tsx'],
     languageOptions: {
       parser: tsparser,
@@ -15,6 +18,12 @@ export default [
     },
     rules: {
       '@typescript-eslint/no-explicit-any': 'error'
+    }
+  },
+  {
+    files: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off'
     }
   }
 ]
