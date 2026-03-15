@@ -81,6 +81,9 @@ All file/worktree mutations **must go through the daemon** (via gRPC `WriteFile`
 ### Missing Functionality — Ask, Don't Assume
 If you find an incomplete implementation (e.g., a gRPC method defined in proto but not in the client), **ask the user** before workarounds. Determine if it's intentionally removed, a TODO, or an oversight — then implement correctly or get clarification.
 
+### MVVC
+The zustand store should have all business logic. Coordination between store happens within the store itself, not within the react view.
+
 ## Testing
 
 - Run `npm run test:coverage` when writing or modifying code
