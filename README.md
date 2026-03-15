@@ -2,21 +2,35 @@
 
 A hierarchical terminal manager and IDE built for AI agent workflows. TreeTerm is an Electron-based desktop application that manages multiple workspaces using Git worktrees, enabling branching development with AI agents.
 
+## Architecture
+
+TreeTerm uses a three-layer architecture connected by IPC and gRPC:
+
+- **Renderer** (React) — UI components, Zustand state, thin orchestration layer
+- **Main** (Electron) — High-level business logic, Git operations, IPC bridge, gRPC client
+- **Daemon** (persistent process) — Low-level primitives: PTY, exec, file I/O, session persistence
+
+Communication: Renderer ↔ Main via Electron IPC; Main ↔ Daemon via gRPC over Unix socket.
+
+The daemon survives app restarts — terminal sessions and state persist when Electron closes.
+
 ## Features
 
 - **Hierarchical Workspaces** - Create parent and child workspaces using Git worktrees, forming a tree structure for branching development
 - **Multi-Tab Interface** - Each workspace supports multiple tabs for different applications
 - **Git Integration** - Full Git support including worktree management, merging with optional squashing, conflict detection, and diff viewing
 - **Built-in Applications**:
-  - **Terminal** - Full PTY support with xterm, customizable terminal instances
-  - **Files** - File browser and viewer
+  - **Terminal** - Full PTY support with xterm.js, run in the persistent daemon
+  - **Terminal Variants** - Custom terminal instances with configurable startup commands
+  - **Filesystem** - File browser and viewer
   - **Editor** - Monaco-based code editor with vim mode support
-  - **Claude** - Integration with Claude AI for agent workflows
+  - **AI Harness** - Integration with configurable AI CLI tools (Claude is the default)
   - **Review** - Review and merge changes from parent workspaces
+- **Daemon Persistence** - Terminal sessions survive app restarts via a background daemon process
 - **Speech-to-Text** - Push-to-talk functionality with multiple STT providers:
   - Web Speech API (browser-based)
   - OpenAI Whisper API
-  - Local Whisper (planned)
+  - Local Whisper (stub, not yet functional)
 - **Process Sandboxing** - Optional sandboxing with macOS sandbox-exec and Linux Bubblewrap
 - **Prefix Mode Keybindings** - tmux-style prefix key system for workspace and tab navigation
 - **Activity State Tracking** - Real-time indicators showing if applications are idle, working, or waiting for input
@@ -76,44 +90,35 @@ Runs the built application.
 ### Testing
 
 ```bash
-npm test          # Run tests in watch mode
-npm run test:run  # Run tests once
+npm test               # Run tests in watch mode
+npm run test:run       # Run tests once
+npm run test:coverage  # Run tests with coverage report
+npm run test:e2e       # Run Playwright end-to-end tests
 ```
 
 ### Global CLI
 
 ```bash
 npm install -g
-treeterm [directory]  # Open with optional workspace directory
+treeterm [directory]   # Open with optional workspace directory
+treeterm list-sessions # List all active daemon sessions
+treeterm shutdown-daemon  # Shutdown the daemon process
+treeterm status        # Show daemon status
+treeterm --help        # Show help
 ```
 
 ## Project Structure
 
 ```
 src/
-├── main/                    # Electron main process
-│   ├── index.ts             # Window creation, IPC handlers
-│   ├── git.ts               # Git operations
-│   ├── pty.ts               # PTY management
-│   ├── filesystem.ts        # Filesystem handlers
-│   ├── settings.ts          # Settings persistence
-│   ├── stt.ts               # Speech-to-text handlers
-│   └── menu.ts              # Application menu
-├── preload/
-│   └── index.ts             # Context bridge for secure IPC
-├── applications/            # Application definitions
-│   ├── terminal/            # Terminal application
-│   ├── filesystem/          # File browser
-│   ├── editor/              # Monaco editor
-│   ├── claude/              # Claude AI integration
-│   └── review/              # Review/merge interface
-└── renderer/                # React frontend
-    ├── App.tsx              # Main app component
-    ├── components/          # React components
-    ├── store/               # Zustand state management
-    ├── hooks/               # React hooks (PTT, keybindings)
-    ├── stt/                 # STT providers
-    └── types/               # TypeScript definitions
+├── daemon/           # Persistent daemon process (gRPC server, PTY, filesystem, exec, sessions)
+├── main/             # Electron main process (git, IPC bridge, gRPC client, settings)
+├── preload/          # Electron context bridge
+├── renderer/         # React UI (components, Zustand stores, hooks)
+├── applications/     # Application type definitions (terminal, aiHarness, editor, filesystem, review)
+├── proto/            # Protobuf definitions (treeterm.proto)
+├── generated/        # Auto-generated protobuf TypeScript
+└── shared/           # Shared types (IPC types, common types)
 ```
 
 ## Configuration
@@ -134,12 +139,12 @@ Settings are stored in the Electron userData directory:
 | Terminal | cursorBlink | true |
 | Terminal | showRawChars | false |
 | Terminal | startByDefault | true |
+| Terminal | instances | [] (custom terminal variants) |
 | Sandbox | enabledByDefault | false |
 | Sandbox | allowNetworkByDefault | true |
-| Claude | command | claude |
-| Claude | startByDefault | false |
-| Claude | enableSandbox | false |
+| AI Harness | instances | [{id: claude, command: claude, ...}] |
 | Appearance | theme | dark |
+| Prefix Mode | enabled | true |
 | Prefix Mode | prefixKey | Control+B |
 | Prefix Mode | timeout | 1500 |
 | Keybindings | newTab | c |
@@ -154,6 +159,12 @@ Settings are stored in the Electron userData directory:
 | STT | localWhisperModelPath | (empty) |
 | STT | pushToTalkKey | Shift+Space |
 | STT | language | en |
+| Daemon | enabled | true |
+| Daemon | orphanTimeout | 0 |
+| Daemon | scrollbackLimit | 50000 |
+| Daemon | killOnQuit | false |
+| Global | globalDefaultApplicationId | terminal |
+| Global | recentDirectories | [] |
 
 ### Keybindings
 
@@ -180,18 +191,22 @@ All keybindings are customizable in settings.
 
 ## Tech Stack
 
-- **Electron** - Desktop application runtime
+- **Electron 33** - Desktop application runtime
 - **React** - UI framework
 - **TypeScript** - Type-safe language
 - **Zustand** - State management
 - **xterm.js** - Terminal emulation
-- **node-pty** - Pseudo-terminal creation
-- **simple-git** - Git operations
+- **node-pty** - Pseudo-terminal creation (runs in the daemon)
+- **@grpc/grpc-js** + **ts-proto** - gRPC communication between Main and Daemon
 - **Monaco Editor** - Code editor with vim mode support (monaco-vim)
+- **pino** - Structured logging
+- **lucide-react** - Icons
 - **OpenAI SDK** - Speech-to-text via Whisper API
 - **tinykeys** - Keybinding management
 - **react-markdown** - Markdown rendering
 - **electron-vite** - Build tooling
+- **Vitest** - Unit and integration tests
+- **Playwright** - End-to-end tests
 
 ## License
 
