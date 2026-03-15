@@ -17,6 +17,7 @@ interface WorkspaceState {
   createWorktreeFromRemote: (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings) => Promise<{ success: boolean; error?: string }>
   removeWorkspace: (id: string) => Promise<void>
   removeWorkspaceKeepBranch: (id: string) => Promise<void>
+  removeWorkspaceKeepWorktree: (id: string) => Promise<void>
   mergeAndRemoveWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
   closeAndCleanWorkspace: (id: string) => Promise<{ success: boolean; error?: string }>
   setActiveWorkspace: (id: string | null) => void
@@ -668,6 +669,62 @@ export const useWorkspaceStore = create<WorkspaceState>()(
             false  // Always keep the branch
           )
         }
+
+        // Remove from parent's children array
+        if (workspace.parentId) {
+          set((state) => {
+            const parent = state.workspaces[workspace.parentId!]
+            if (parent) {
+              return {
+                workspaces: {
+                  ...state.workspaces,
+                  [workspace.parentId!]: {
+                    ...parent,
+                    children: parent.children.filter((cid) => cid !== id)
+                  }
+                }
+              }
+            }
+            return state
+          })
+        }
+
+        // Remove workspace
+        set((state) => {
+          const { [id]: removed, ...rest } = state.workspaces
+          return {
+            workspaces: rest,
+            activeWorkspaceId: state.activeWorkspaceId === id ? null : state.activeWorkspaceId
+          }
+        })
+
+        // Sync to daemon (after removing workspace)
+        const currentState = get()
+        await syncSessionToDaemon(currentState.sessionId, currentState.workspaces, (sid) =>
+          set({ sessionId: sid }), currentState.isRestoring
+        )
+      },
+
+      removeWorkspaceKeepWorktree: async (id: string) => {
+        const state = get()
+        const workspace = state.workspaces[id]
+
+        if (!workspace) return
+
+        // Recursively remove children first
+        for (const childId of workspace.children) {
+          await get().removeWorkspaceKeepWorktree(childId)
+        }
+
+        // Run cleanup for all tabs using the application registry
+        for (const tab of workspace.tabs) {
+          const app = applicationRegistry.get(tab.applicationId)
+          if (app?.cleanup) {
+            await app.cleanup(tab, workspace)
+          }
+        }
+
+        // DO NOT remove from git - just remove from TreeTerm's tracking
 
         // Remove from parent's children array
         if (workspace.parentId) {
