@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react'
 import { useWorkspaceStore } from '../store/workspace'
 import { useActivityStateStore } from '../store/activityState'
 import { usePrefixModeStore } from '../store/prefixMode'
+import { useAppStore } from '../store/app'
 import CreateChildDialog from './CreateChildDialog'
 import OpenWorkspaceDialog from './OpenWorkspaceDialog'
 import type { Workspace, ActivityState, ReviewState, WorktreeSettings } from '../types'
@@ -48,6 +49,9 @@ export default function TreePane(): JSX.Element {
     mergeAndRemoveWorkspace,
     setActiveWorkspace
   } = useWorkspaceStore()
+
+  const { activeSessionId, workspaceStores, switchSession } = useAppStore()
+  const sessionIds = Object.keys(workspaceStores)
   const {
     state: prefixState,
     focusedWorkspaceIndex,
@@ -231,6 +235,18 @@ export default function TreePane(): JSX.Element {
 
   return (
     <div className="tree-pane-content" onClick={closeContextMenu}>
+      {sessionIds.length > 1 && (
+        <div className="session-selector">
+          <select
+            value={activeSessionId || ''}
+            onChange={(e) => switchSession(e.target.value)}
+          >
+            {sessionIds.map((id) => (
+              <option key={id} value={id}>{id}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="tree-header">
         <span className="tree-title">Workspaces</span>
         <button className="add-button" onClick={handleAddWorkspace} title="Add workspace">
