@@ -104,6 +104,30 @@ describe('GitClient', () => {
       expect(entries[0].originalPath).toBe('new.ts')
     })
 
+    it('parses file with both staged andunstaged changes', async () => {
+      const client = makeMockClient([resultStream('MM src/app.ts')])
+      const git = new GitClient(client)
+      const entries = await git.getStatus('/repo')
+
+      expect(entries).toHaveLength(2)
+      const staged = entries.find(e => e.path === 'src/app.ts' && e.staged)
+      const unstaged = entries.find(e => e.path === 'src/app.ts' && !e.staged)
+      expect(staged).toBeDefined()
+      expect(unstaged).toBeDefined()
+      expect(staged!.status).toBe('modified')
+      expect(unstaged!.status).toBe('modified')
+    })
+
+    it('parses file with only staged changes', async () => {
+      const client = makeMockClient([resultStream('M  src/app.ts')])
+      const git = new GitClient(client)
+      const entries = await git.getStatus('/repo')
+
+      expect(entries).toHaveLength(1)
+      expect(entries[0].staged).toBe(true)
+      expect(entries[0].status).toBe('modified')
+    })
+
     it('throws when getStatus fails', async () => {
       const client = makeMockClient([errorStream('not a git repository')])
       const git = new GitClient(client)
