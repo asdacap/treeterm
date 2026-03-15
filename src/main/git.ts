@@ -8,6 +8,8 @@
 
 import { GrpcDaemonClient } from './grpcClient'
 import type { ExecInput, ExecOutput } from '../generated/treeterm'
+import { readFile } from 'fs/promises'
+import { join } from 'path'
 
 export interface GitStatusEntry {
   path: string
@@ -153,15 +155,15 @@ export class GitClient {
     for (const line of lines) {
       if (line.length < 3) continue
 
-      const staged = line[0]
-      const unstaged = line[1]
+      const stagedChar = line[0]
+      const unstagedChar = line[1]
       const afterStatus = line.slice(2).trim()
       
       // Handle renames: "R  new.txt -> old.txt"
       let path = afterStatus
       let originalPath: string | undefined
       
-      if (staged === 'R' || unstaged === 'R') {
+      if (stagedChar === 'R' || unstagedChar === 'R') {
         const arrowIndex = afterStatus.indexOf(' -> ')
         if (arrowIndex > -1) {
           originalPath = afterStatus.slice(0, arrowIndex)
@@ -169,22 +171,44 @@ export class GitClient {
         }
       }
 
-      // Determine status
-      let status: GitStatusEntry['status']
-      const statusChar = staged !== ' ' && staged !== '?' ? staged : unstaged
-      
-      if (statusChar === 'A') status = 'added'
-      else if (statusChar === 'D') status = 'deleted'
-      else if (statusChar === 'R') status = 'renamed'
-      else if (staged === '?' && unstaged === '?') status = 'untracked'
-      else status = 'modified'
+      // Helper to determine status from status char
+      const getStatusFromChar = (c: string): GitStatusEntry['status'] => {
+        if (c === 'A') return 'added'
+        if (c === 'D') return 'deleted'
+        if (c === 'R') return 'renamed'
+        return 'modified'
+      }
 
-      entries.push({
-        path,
-        status,
-        staged: staged !== ' ' && staged !== '?',
-        originalPath
-      })
+      // Untracked files
+      if (stagedChar === '?' && unstagedChar === '?') {
+        entries.push({
+          path,
+          status: 'untracked',
+          staged: false,
+          originalPath
+        })
+        continue
+      }
+
+      // Create entry for staged changes if any
+      if (stagedChar !== ' ' && stagedChar !== '?') {
+        entries.push({
+          path,
+          status: getStatusFromChar(stagedChar),
+          staged: true,
+          originalPath
+        })
+      }
+
+      // Create entry forunstaged changes if any
+      if (unstagedChar !== ' ' && unstagedChar !== '?') {
+        entries.push({
+          path,
+          status: getStatusFromChar(unstagedChar),
+          staged: false,
+          originalPath
+        })
+      }
     }
 
     return entries
@@ -765,23 +789,38 @@ export class GitClient {
 
     const status = this.parseStatus(statusResult.stdout)
 
-    // Get diff stats
-    const statResult = await this.exec(repoPath, ['diff', '--numstat', 'HEAD'])
-    const statMap = new Map<string, { additions: number; deletions: number }>()
+    // Get staged diff stats (cached changes)
+    const stagedStatResult = await this.exec(repoPath, ['diff', '--cached', '--numstat'])
+    const stagedStatMap = new Map<string, { additions: number; deletions: number }>()
     
-    for (const line of statResult.stdout.trim().split('\n').filter(Boolean)) {
+    for (const line of stagedStatResult.stdout.trim().split('\n').filter(Boolean)) {
       const [add, del, filePath] = line.split('\t')
-      statMap.set(filePath, {
+      stagedStatMap.set(filePath, {
         additions: add === '-' ? 0 : parseInt(add, 10) || 0,
         deletions: del === '-' ? 0 : parseInt(del, 10) || 0
       })
     }
 
-    const files = status.map(s => ({
-      ...s,
-      additions: statMap.get(s.path)?.additions || 0,
-      deletions: statMap.get(s.path)?.deletions || 0
-    }))
+    // Get unstaged diff stats (working tree changes)
+    const unstagedStatResult = await this.exec(repoPath, ['diff', '--numstat'])
+    const unstagedStatMap = new Map<string, { additions: number; deletions: number }>()
+    
+    for (const line of unstagedStatResult.stdout.trim().split('\n').filter(Boolean)) {
+      const [add, del, filePath] = line.split('\t')
+      unstagedStatMap.set(filePath, {
+        additions: add === '-' ? 0 : parseInt(add, 10) || 0,
+        deletions: del === '-' ? 0 : parseInt(del, 10) || 0
+      })
+    }
+
+    const files = status.map(s => {
+      const statMap = s.staged ? stagedStatMap : unstagedStatMap
+      return {
+        ...s,
+        additions: statMap.get(s.path)?.additions || 0,
+        deletions: statMap.get(s.path)?.deletions || 0
+      }
+    })
 
     const totalAdditions = files.reduce((sum, f) => sum + f.additions, 0)
     const totalDeletions = files.reduce((sum, f) => sum + f.deletions, 0)
@@ -865,31 +904,39 @@ export class GitClient {
     filePath: string,
     staged: boolean
   ): Promise<{ originalContent: string; modifiedContent: string; language: string }> {
-    // Get original content (HEAD for unstaged, HEAD^ for staged)
-    const originalResult = staged
-      ? await this.exec(repoPath, ['show', `HEAD:${filePath}`])
-      : await this.exec(repoPath, ['show', `HEAD:${filePath}`])
-    const originalContent = originalResult.exitCode === 0 ? originalResult.stdout : ''
-
-    // Get modified content (staged or working tree)
-    const modifiedResult = staged
-      ? await this.exec(repoPath, ['show', `:${filePath}`]) // Staged content
-      : await this.exec(repoPath, ['cat-file', 'blob', `:${filePath}`]) // Working tree not easily accessible via git show
-    
-    // For working tree, read directly from filesystem
-    let modifiedContent: string
-    if (staged) {
-      modifiedContent = modifiedResult.exitCode === 0 ? modifiedResult.stdout : ''
-    } else {
-      // Read from working tree using filesystem - this requires filesystem access
-      // For now, return empty if we can't get it via git
-      modifiedContent = ''
-    }
-
     const ext = filePath.split('.').pop() || ''
     const language = this.detectLanguage(ext)
 
-    return { originalContent, modifiedContent, language }
+    if (staged) {
+      // For staged files:
+      // Original = HEAD version
+      // Modified = index (staged) version
+      const originalResult = await this.exec(repoPath, ['show', `HEAD:${filePath}`])
+      const modifiedResult = await this.exec(repoPath, ['show', `:${filePath}`])
+      
+      const originalContent = originalResult.exitCode === 0 ? originalResult.stdout : ''
+      const modifiedContent = modifiedResult.exitCode === 0 ? modifiedResult.stdout : ''
+      
+      return { originalContent, modifiedContent, language }
+    } else {
+      // For unstaged files:
+      // Original = index version
+      // Modified = working tree version
+      const originalResult = await this.exec(repoPath, ['show', `:${filePath}`])
+      const originalContent = originalResult.exitCode === 0 ? originalResult.stdout : ''
+      
+      // Read working tree file directly
+      let modifiedContent = ''
+      try {
+        const fullPath = join(repoPath, filePath)
+        modifiedContent = await readFile(fullPath, 'utf-8')
+      } catch {
+        // File might not exist in working tree (deleted)
+        modifiedContent = ''
+      }
+      
+      return { originalContent, modifiedContent, language }
+    }
   }
 
   // Helper methods
