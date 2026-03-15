@@ -1,40 +1,32 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createWorkspaceStore, getUnmergedSubWorkspaces } from './createWorkspaceStore'
+import type { WorkspaceDeps } from './createWorkspaceStore'
 import type { Workspace } from '../types'
 
-// Mock the applicationRegistry
-vi.mock('../registry/applicationRegistry', () => ({
-  applicationRegistry: {
-    get: vi.fn().mockReturnValue(null),
-    getDefaultApp: vi.fn().mockReturnValue(null)
+function makeDeps(overrides?: Partial<WorkspaceDeps>): WorkspaceDeps {
+  return {
+    git: {
+      getInfo: vi.fn().mockResolvedValue({ isRepo: true, branch: 'main', rootPath: '/repo' }),
+      createWorktree: vi.fn().mockResolvedValue({ success: true }),
+      createWorktreeFromBranch: vi.fn().mockResolvedValue({ success: true }),
+      createWorktreeFromRemote: vi.fn().mockResolvedValue({ success: true }),
+      removeWorktree: vi.fn().mockResolvedValue(undefined),
+      hasUncommittedChanges: vi.fn().mockResolvedValue(false),
+      commitAll: vi.fn().mockResolvedValue({ success: true }),
+      merge: vi.fn().mockResolvedValue({ success: true }),
+    },
+    session: {
+      update: vi.fn().mockResolvedValue({ success: true }),
+      delete: vi.fn().mockResolvedValue({ success: true }),
+    },
+    getSettings: () => ({ daemon: { enabled: false }, globalDefaultApplicationId: null }),
+    appRegistry: {
+      get: vi.fn().mockReturnValue(null),
+      getDefaultApp: vi.fn().mockReturnValue(null),
+    },
+    ...overrides,
   }
-}))
-
-// Mock settings store
-vi.mock('./settings', () => ({
-  useSettingsStore: {
-    getState: vi.fn().mockReturnValue({
-      settings: {
-        daemon: {},
-        globalDefaultApplicationId: null
-      }
-    })
-  }
-}))
-
-// Mock window.electron
-const mockElectron = {
-  git: {
-    getInfo: vi.fn().mockResolvedValue({ isRepo: true, branch: 'main', rootPath: '/repo' })
-  },
-  session: {
-    update: vi.fn().mockResolvedValue({ success: true }),
-    delete: vi.fn().mockResolvedValue({ success: true })
-  },
-  terminal: { list: vi.fn().mockResolvedValue([]) }
 }
-
-;(globalThis as unknown as { window: unknown }).window = { electron: mockElectron }
 
 function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
   return {
@@ -89,7 +81,7 @@ describe('createWorkspaceStore', () => {
   })
 
   it('creates a store with initial state', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: 'uuid-1' })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: 'uuid-1', deps: makeDeps() })
     const state = store.getState()
 
     expect(state.workspaces).toEqual({})
@@ -98,7 +90,7 @@ describe('createWorkspaceStore', () => {
   })
 
   it('exposes all required action methods', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
     const state = store.getState()
 
     expect(typeof state.addWorkspace).toBe('function')
@@ -115,7 +107,7 @@ describe('createWorkspaceStore', () => {
   })
 
   it('setActiveWorkspace updates activeWorkspaceId', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
     store.setState({
       workspaces: { 'ws-1': makeWorkspace({ id: 'ws-1' }) }
     })
@@ -124,21 +116,21 @@ describe('createWorkspaceStore', () => {
   })
 
   it('setActiveWorkspace can set to null', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
     store.setState({ activeWorkspaceId: 'ws-1' })
     store.getState().setActiveWorkspace(null)
     expect(store.getState().activeWorkspaceId).toBeNull()
   })
 
   it('isRestoring can be set externally via setState', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
     expect(store.getState().isRestoring).toBe(false)
     store.setState({ isRestoring: true })
     expect(store.getState().isRestoring).toBe(true)
   })
 
   it('updateGitInfo updates workspace git fields', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
     store.setState({
       workspaces: { 'ws-1': makeWorkspace({ id: 'ws-1', isGitRepo: false, gitBranch: null, gitRootPath: null }) }
     })
@@ -150,14 +142,14 @@ describe('createWorkspaceStore', () => {
   })
 
   it('updateGitInfo is a no-op for unknown workspace', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
     // Should not throw
     store.getState().updateGitInfo('nonexistent', { isRepo: true, branch: 'main', rootPath: '/r' })
     expect(store.getState().workspaces).toEqual({})
   })
 
   it('updateWorkspaceStatus updates status field', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
     store.setState({
       workspaces: { 'ws-1': makeWorkspace({ id: 'ws-1', status: 'active' }) }
     })
@@ -166,7 +158,7 @@ describe('createWorkspaceStore', () => {
   })
 
   it('updateTabTitle updates the tab title', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
     store.setState({
       workspaces: {
         'ws-1': makeWorkspace({
@@ -181,7 +173,7 @@ describe('createWorkspaceStore', () => {
   })
 
   it('setActiveTab updates the workspace activeTabId', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
     store.setState({
       workspaces: {
         'ws-1': makeWorkspace({
@@ -199,8 +191,8 @@ describe('createWorkspaceStore', () => {
   })
 
   it('each store instance has its own debounce timer (no cross-instance leakage)', () => {
-    const store1 = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null })
-    const store2 = createWorkspaceStore({ sessionId: 'session-2', windowUuid: null })
+    const store1 = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
+    const store2 = createWorkspaceStore({ sessionId: 'session-2', windowUuid: null, deps: makeDeps() })
     // Both start with clean state — they are independent instances
     expect(store1.getState().workspaces).toEqual({})
     expect(store2.getState().workspaces).toEqual({})

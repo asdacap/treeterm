@@ -2,8 +2,28 @@ import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
 import type { Workspace, GitInfo, Tab, WorktreeSettings } from '../types'
 import type { Application } from '../types'
-import { applicationRegistry } from '../registry/applicationRegistry'
-import { useSettingsStore } from '../store/settings'
+
+export interface WorkspaceDeps {
+  git: {
+    getInfo: (path: string) => Promise<GitInfo>
+    createWorktree: (rootPath: string, name: string, currentBranch?: string) => Promise<{ success: boolean; error?: string; path?: string; branch?: string }>
+    createWorktreeFromBranch: (rootPath: string, branch: string, name: string) => Promise<{ success: boolean; error?: string; path?: string; branch?: string }>
+    createWorktreeFromRemote: (rootPath: string, remoteBranch: string, name: string) => Promise<{ success: boolean; error?: string; path?: string; branch?: string }>
+    removeWorktree: (rootPath: string, worktreePath: string, deleteBranch: boolean) => Promise<unknown>
+    hasUncommittedChanges: (path: string) => Promise<boolean>
+    commitAll: (path: string, message: string) => Promise<{ success: boolean; error?: string }>
+    merge: (rootPath: string, sourceBranch: string, targetBranch: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
+  }
+  session: {
+    update: (sessionId: string, workspaces: Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[], senderUuid?: string) => Promise<{ success: boolean; error?: string }>
+    delete: (sessionId: string) => Promise<{ success: boolean }>
+  }
+  getSettings: () => { daemon: { enabled: boolean }; globalDefaultApplicationId: string | null }
+  appRegistry: {
+    get: (id: string) => Application | undefined | null
+    getDefaultApp: () => Application | undefined | null
+  }
+}
 
 export interface WorkspaceState {
   workspaces: Record<string, Workspace>
@@ -45,23 +65,24 @@ function getNameFromPath(path: string): string {
 }
 
 function getDefaultAppForWorktree(
+  deps: Pick<WorkspaceDeps, 'appRegistry' | 'getSettings'>,
   settings?: WorktreeSettings,
   parentSettings?: WorktreeSettings
-): Application | null {
+): Application | null | undefined {
   if (settings?.defaultApplicationId) {
-    const app = applicationRegistry.get(settings.defaultApplicationId)
+    const app = deps.appRegistry.get(settings.defaultApplicationId)
     if (app) return app
   }
   if (parentSettings?.defaultApplicationId) {
-    const app = applicationRegistry.get(parentSettings.defaultApplicationId)
+    const app = deps.appRegistry.get(parentSettings.defaultApplicationId)
     if (app) return app
   }
-  const { settings: globalSettings } = useSettingsStore.getState()
+  const globalSettings = deps.getSettings()
   if (globalSettings.globalDefaultApplicationId) {
-    const app = applicationRegistry.get(globalSettings.globalDefaultApplicationId)
+    const app = deps.appRegistry.get(globalSettings.globalDefaultApplicationId)
     if (app) return app
   }
-  return applicationRegistry.getDefaultApp()
+  return deps.appRegistry.getDefaultApp()
 }
 
 /**
@@ -76,6 +97,7 @@ export function getUnmergedSubWorkspaces(workspaces: Record<string, Workspace>):
 export function createWorkspaceStore(config: {
   sessionId: string
   windowUuid: string | null
+  deps: WorkspaceDeps
 }): StoreApi<WorkspaceState> {
   let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -84,7 +106,8 @@ export function createWorkspaceStore(config: {
     isRestoring: boolean = false
   ) {
     try {
-      console.log('[workspace] syncSessionToDaemon called - workspaces:', Object.keys(workspaces).length, 'isRestoring:', isRestoring)
+      const settings = config.deps.getSettings()
+      console.log('[workspace] syncSessionToDaemon called - daemon enabled:', settings.daemon.enabled, 'workspaces:', Object.keys(workspaces).length, 'isRestoring:', isRestoring)
 
       if (isRestoring) {
         console.log('[workspace] currently restoring, skipping sync')
@@ -98,13 +121,13 @@ export function createWorkspaceStore(config: {
       if (daemonWorkspaces.length === 0) {
         if (config.sessionId) {
           console.log('[workspace] deleting session:', config.sessionId)
-          await window.electron.session.delete(config.sessionId)
+          await config.deps.session.delete(config.sessionId)
         }
         return
       }
 
       console.log('[workspace] updating session:', config.sessionId, 'senderUuid:', config.windowUuid)
-      const result = await window.electron.session.update(config.sessionId, daemonWorkspaces, config.windowUuid || undefined)
+      const result = await config.deps.session.update(config.sessionId, daemonWorkspaces, config.windowUuid || undefined)
       if (!result.success) {
         console.error('[workspace] failed to update session:', result.error)
       } else {
@@ -136,13 +159,13 @@ export function createWorkspaceStore(config: {
       console.log('[workspace] addWorkspace called for path:', path)
       const id = generateId()
 
-      const gitInfo = await window.electron.git.getInfo(path)
+      const gitInfo = await config.deps.git.getInfo(path)
 
       const tabs: Tab[] = []
       let activeTabId: string | null = null
 
       if (!options?.skipDefaultTabs) {
-        const defaultApp = getDefaultAppForWorktree(options?.settings, undefined)
+        const defaultApp = getDefaultAppForWorktree(config.deps, options?.settings, undefined)
         if (defaultApp) {
           const tabId = generateTabId()
           tabs.push({
@@ -197,10 +220,10 @@ export function createWorkspaceStore(config: {
         return { success: false, error: 'Parent workspace is not a git repository' }
       }
 
-      const currentGitInfo = await window.electron.git.getInfo(parent.path)
+      const currentGitInfo = await config.deps.git.getInfo(parent.path)
       const currentBranch = currentGitInfo.branch
 
-      const result = await window.electron.git.createWorktree(
+      const result = await config.deps.git.createWorktree(
         parent.gitRootPath,
         name,
         currentBranch || undefined
@@ -218,7 +241,7 @@ export function createWorkspaceStore(config: {
       const tabs: Tab[] = []
       let activeTabId: string | null = null
 
-      const defaultApp = getDefaultAppForWorktree(settings, parent.settings)
+      const defaultApp = getDefaultAppForWorktree(config.deps, settings, parent.settings)
       if (defaultApp) {
         const tabId = generateTabId()
         tabs.push({
@@ -287,7 +310,7 @@ export function createWorkspaceStore(config: {
       const tabs: Tab[] = []
       let activeTabId: string | null = null
 
-      const defaultApp = getDefaultAppForWorktree(settings, parent.settings)
+      const defaultApp = getDefaultAppForWorktree(config.deps, settings, parent.settings)
       if (defaultApp) {
         const tabId = generateTabId()
         tabs.push({
@@ -350,7 +373,7 @@ export function createWorkspaceStore(config: {
       }
 
       const worktreeName = branch.split('/').pop() || branch
-      const result = await window.electron.git.createWorktreeFromBranch(
+      const result = await config.deps.git.createWorktreeFromBranch(
         parent.gitRootPath,
         branch,
         worktreeName
@@ -364,7 +387,7 @@ export function createWorkspaceStore(config: {
       const tabs: Tab[] = []
       let activeTabId: string | null = null
 
-      const defaultApp = getDefaultAppForWorktree(settings, parent.settings)
+      const defaultApp = getDefaultAppForWorktree(config.deps, settings, parent.settings)
       if (defaultApp) {
         const tabId = generateTabId()
         tabs.push({
@@ -428,7 +451,7 @@ export function createWorkspaceStore(config: {
       }
 
       const worktreeName = remoteBranch.split('/').pop() || remoteBranch
-      const result = await window.electron.git.createWorktreeFromRemote(
+      const result = await config.deps.git.createWorktreeFromRemote(
         parent.gitRootPath,
         remoteBranch,
         worktreeName
@@ -442,7 +465,7 @@ export function createWorkspaceStore(config: {
       const tabs: Tab[] = []
       let activeTabId: string | null = null
 
-      const defaultApp = getDefaultAppForWorktree(settings, parent.settings)
+      const defaultApp = getDefaultAppForWorktree(config.deps, settings, parent.settings)
       if (defaultApp) {
         const tabId = generateTabId()
         tabs.push({
@@ -503,7 +526,7 @@ export function createWorkspaceStore(config: {
       }
 
       for (const tab of workspace.tabs) {
-        const app = applicationRegistry.get(tab.applicationId)
+        const app = config.deps.appRegistry.get(tab.applicationId)
         if (app?.cleanup) {
           await app.cleanup(tab, workspace)
         }
@@ -511,7 +534,7 @@ export function createWorkspaceStore(config: {
 
       if (workspace.isWorktree && workspace.gitRootPath) {
         const deleteBranch = !workspace.isDetached
-        await window.electron.git.removeWorktree(
+        await config.deps.git.removeWorktree(
           workspace.gitRootPath,
           workspace.path,
           deleteBranch
@@ -559,14 +582,14 @@ export function createWorkspaceStore(config: {
       }
 
       for (const tab of workspace.tabs) {
-        const app = applicationRegistry.get(tab.applicationId)
+        const app = config.deps.appRegistry.get(tab.applicationId)
         if (app?.cleanup) {
           await app.cleanup(tab, workspace)
         }
       }
 
       if (workspace.isWorktree && workspace.gitRootPath) {
-        await window.electron.git.removeWorktree(
+        await config.deps.git.removeWorktree(
           workspace.gitRootPath,
           workspace.path,
           false
@@ -614,7 +637,7 @@ export function createWorkspaceStore(config: {
       }
 
       for (const tab of workspace.tabs) {
-        const app = applicationRegistry.get(tab.applicationId)
+        const app = config.deps.appRegistry.get(tab.applicationId)
         if (app?.cleanup) {
           await app.cleanup(tab, workspace)
         }
@@ -679,7 +702,7 @@ export function createWorkspaceStore(config: {
       const workspace = state.workspaces[id]
       if (!workspace) return
 
-      const gitInfo = await window.electron.git.getInfo(workspace.path)
+      const gitInfo = await config.deps.git.getInfo(workspace.path)
       get().updateGitInfo(id, gitInfo)
     },
 
@@ -716,9 +739,9 @@ export function createWorkspaceStore(config: {
         return { success: false, error: 'Parent workspace not found or not a git repo' }
       }
 
-      const hasChanges = await window.electron.git.hasUncommittedChanges(workspace.path)
+      const hasChanges = await config.deps.git.hasUncommittedChanges(workspace.path)
       if (hasChanges) {
-        const commitResult = await window.electron.git.commitAll(
+        const commitResult = await config.deps.git.commitAll(
           workspace.path,
           `WIP: Auto-commit before merge from ${workspace.name}`
         )
@@ -727,7 +750,7 @@ export function createWorkspaceStore(config: {
         }
       }
 
-      const mergeResult = await window.electron.git.merge(
+      const mergeResult = await config.deps.git.merge(
         parent.gitRootPath,
         workspace.gitBranch!,
         parent.gitBranch,
@@ -768,7 +791,7 @@ export function createWorkspaceStore(config: {
 
     addTab: (workspaceId: string, applicationId: string) => {
       const tabId = generateTabId()
-      const app = applicationRegistry.get(applicationId)
+      const app = config.deps.appRegistry.get(applicationId)
 
       if (!app) return tabId
 
@@ -812,7 +835,7 @@ export function createWorkspaceStore(config: {
 
     addTabWithState: <T>(workspaceId: string, applicationId: string, initialState: Partial<T>, existingTabId?: string) => {
       const tabId = existingTabId || generateTabId()
-      const app = applicationRegistry.get(applicationId)
+      const app = config.deps.appRegistry.get(applicationId)
 
       if (!app) return tabId
 
@@ -891,7 +914,7 @@ export function createWorkspaceStore(config: {
       const tab = workspace.tabs.find((t) => t.id === tabId)
       if (!tab) return
 
-      const app = applicationRegistry.get(tab.applicationId)
+      const app = config.deps.appRegistry.get(tab.applicationId)
       if (!app) return
 
       if (!app.canClose) return

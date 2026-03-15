@@ -4,6 +4,7 @@ import { createWorkspaceStore } from './createWorkspaceStore'
 import type { WorkspaceState } from './createWorkspaceStore'
 import { useSettingsStore } from './settings'
 import { getUnmergedSubWorkspaces } from './createWorkspaceStore'
+import { applicationRegistry } from '../registry/applicationRegistry'
 import type { Workspace, Session, TerminalState, Tab, SessionInfo } from '../types'
 
 type SessionMap = Map<string, SessionInfo>
@@ -87,7 +88,16 @@ export const useAppStore = create<AppState>()((set, get) => ({
           // Ensure we have a store for this session even with no workspaces
           const { workspaceStores, windowUuid } = get()
           if (!workspaceStores[session.id]) {
-            const store = createWorkspaceStore({ sessionId: session.id, windowUuid })
+            const store = createWorkspaceStore({
+              sessionId: session.id,
+              windowUuid,
+              deps: {
+                git: window.electron.git,
+                session: window.electron.session,
+                getSettings: () => useSettingsStore.getState().settings,
+                appRegistry: applicationRegistry,
+              }
+            })
             set((state) => ({
               workspaceStores: { ...state.workspaceStores, [session.id]: store },
               activeSessionId: session.id
@@ -172,7 +182,16 @@ export const useAppStore = create<AppState>()((set, get) => ({
     // Create workspace store for this session if it doesn't exist
     let store = workspaceStores[daemonSession.id]
     if (!store) {
-      store = createWorkspaceStore({ sessionId: daemonSession.id, windowUuid })
+      store = createWorkspaceStore({
+        sessionId: daemonSession.id,
+        windowUuid,
+        deps: {
+          git: window.electron.git,
+          session: window.electron.session,
+          getSettings: () => useSettingsStore.getState().settings,
+          appRegistry: applicationRegistry,
+        }
+      })
       set((state) => ({
         workspaceStores: { ...state.workspaceStores, [daemonSession.id]: store! },
         activeSessionId: daemonSession.id
@@ -261,7 +280,16 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
     let store = workspaceStores[daemonSession.id]
     if (!store) {
-      store = createWorkspaceStore({ sessionId: daemonSession.id, windowUuid })
+      store = createWorkspaceStore({
+        sessionId: daemonSession.id,
+        windowUuid,
+        deps: {
+          git: window.electron.git,
+          session: window.electron.session,
+          getSettings: () => useSettingsStore.getState().settings,
+          appRegistry: applicationRegistry,
+        }
+      })
       set((state) => ({
         workspaceStores: { ...state.workspaceStores, [daemonSession.id]: store! }
       }))
