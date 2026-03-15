@@ -98,16 +98,20 @@ export default function App() {
               Daemon disconnected — terminal sessions may be unavailable. Please restart the app.
             </div>
           )}
-          <div className="tree-pane" style={{ width: treeWidth }}>
-            <TreePane />
-          </div>
-          <div
-            className={`divider ${isResizing ? 'active' : ''}`}
-            onMouseDown={handleMouseDown}
-          />
-          <div className="workspace-pane">
-            <WorkspacePane />
-          </div>
+          {activeStore && (
+            <>
+              <div className="tree-pane" style={{ width: treeWidth }}>
+                <TreePane />
+              </div>
+              <div
+                className={`divider ${isResizing ? 'active' : ''}`}
+                onMouseDown={handleMouseDown}
+              />
+              <div className="workspace-pane">
+                <WorkspacePane />
+              </div>
+            </>
+          )}
           <SettingsDialog isOpen={isSettingsOpen} onClose={() => useAppStore.setState({ isSettingsOpen: false })} />
           {showCloseConfirm && (
             <CloseConfirmDialog
