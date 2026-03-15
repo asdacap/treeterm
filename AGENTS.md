@@ -84,6 +84,9 @@ If you find an incomplete implementation (e.g., a gRPC method defined in proto b
 ### MVVC
 The zustand store should have all business logic. Coordination between store happens within the store itself, not within the react view.
 
+### Dependency injection
+Prefer to inject dependencies rather than using window or electron singleton. An exception is at the very top level where these dependencies are injected. This also means do not use global mutation state where possible.
+
 ## Testing
 
 - Run `npm run test:coverage` when writing or modifying code
