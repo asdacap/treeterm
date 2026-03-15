@@ -15,7 +15,7 @@ vi.mock('./settings', () => ({
   useSettingsStore: {
     getState: vi.fn().mockReturnValue({
       settings: {
-        daemon: { enabled: false },
+        daemon: {},
         globalDefaultApplicationId: null
       }
     })

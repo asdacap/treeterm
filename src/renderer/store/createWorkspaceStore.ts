@@ -84,16 +84,10 @@ export function createWorkspaceStore(config: {
     isRestoring: boolean = false
   ) {
     try {
-      const { settings } = useSettingsStore.getState()
-      console.log('[workspace] syncSessionToDaemon called - daemon enabled:', settings.daemon.enabled, 'workspaces:', Object.keys(workspaces).length, 'isRestoring:', isRestoring)
+      console.log('[workspace] syncSessionToDaemon called - workspaces:', Object.keys(workspaces).length, 'isRestoring:', isRestoring)
 
       if (isRestoring) {
         console.log('[workspace] currently restoring, skipping sync')
-        return
-      }
-
-      if (!settings.daemon.enabled) {
-        console.log('[workspace] daemon not enabled, skipping sync')
         return
       }
 

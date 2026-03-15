@@ -57,7 +57,6 @@ const defaultSettings: Settings = {
     language: 'en'
   },
   daemon: {
-    enabled: true,
     orphanTimeout: 0,
     scrollbackLimit: 50000,
     killOnQuit: false

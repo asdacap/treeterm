@@ -78,7 +78,6 @@ describe('SettingsStore', () => {
           language: 'en'
         },
         daemon: {
-          enabled: false,
           orphanTimeout: 30000,
           scrollbackLimit: 10000,
           killOnQuit: true
@@ -134,7 +133,6 @@ describe('SettingsStore', () => {
           language: 'en'
         },
         daemon: {
-          enabled: false,
           orphanTimeout: 30000,
           scrollbackLimit: 10000,
           killOnQuit: true
