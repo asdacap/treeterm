@@ -2603,6 +2603,55 @@ body,
   background: #0077ee;
 }
 
+/* Abandon dropdown styles */
+.abandon-dropdown-container {
+  position: relative;
+  display: inline-flex;
+}
+
+.abandon-split-btn {
+  border-radius: 4px 0 0 4px;
+}
+
+.abandon-dropdown-btn {border-radius: 0 4px 4px 0;
+  padding: 8px6px;
+  margin-left: 1px;
+}
+
+.abandon-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 4px 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  min-width: 200px;
+}
+
+.abandon-menu-item {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.1s;
+  white-space: nowrap;
+}
+
+.abandon-menu-item:hover {
+  background: var(--bg-hover);
+}
+
+.abandon-menu-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
 /* File section labels */
 .diff-file-section {
   padding: 8px 12px;
