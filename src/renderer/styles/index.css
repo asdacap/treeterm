@@ -3018,6 +3018,16 @@ body,
   cursor: not-allowed;
 }
 
+.monaco-diff-view-toggle {
+  margin-left: 12px;
+}
+
+.monaco-diff-view-toggle.active {
+  background: var(--bg-hover);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .monaco-diff-nav-info {
   font-size: 12px;
   color: var(--text-secondary);

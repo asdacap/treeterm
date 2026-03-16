@@ -47,6 +47,7 @@ export function MonacoDiffViewer({
   const diffEditorRef = useRef<editor.IStandaloneDiffEditor | null>(null)
   const [lineChanges, setLineChanges] = useState<editor.ILineChange[] | null>(null)
   const [currentChangeIndex, setCurrentChangeIndex] = useState<number>(-1)
+  const [isSplitView, setIsSplitView] = useState<boolean>(true)
   const decorationsRef = useRef<{ original: string[]; modified: string[] }>({ original: [], modified: [] })
   const viewZoneIdRef = useRef<string | null>(null)
   const commentContainerRef = useRef<HTMLDivElement | null>(null)
@@ -300,6 +301,13 @@ export function MonacoDiffViewer({
     }
   }, [inlineCommentInput])
 
+  // Update editor options when split view changes
+  useEffect(() => {
+    if (diffEditorRef.current) {
+      diffEditorRef.current.updateOptions({ renderSideBySide: isSplitView })
+    }
+  }, [isSplitView])
+
   useEffect(() => {
     return () => {
       if (diffEditorRef.current) {
@@ -333,6 +341,13 @@ export function MonacoDiffViewer({
         >
           ▼
         </button>
+        <button
+          className={`monaco-diff-nav-btn monaco-diff-view-toggle${isSplitView ? ' active' : ''}`}
+          onClick={() => setIsSplitView(prev => !prev)}
+          title={isSplitView ? 'Switch to unified view' : 'Switch to split view'}
+        >
+          {isSplitView ? '⇔' : '⇕'}
+        </button>
       </div>
       <div className="monaco-diff-editor-container">
         <DiffEditor
@@ -344,7 +359,8 @@ export function MonacoDiffViewer({
           onMount={handleEditorMount}
           options={{
             readOnly: true,
-            renderSideBySide: true,
+            renderSideBySide: isSplitView,
+            ...({ renderSideBySideMinWidthOverride: 0 } as Record<string, unknown>),
             minimap: { enabled: false },
             lineNumbers: 'on',
             scrollBeyondLastLine: false,
