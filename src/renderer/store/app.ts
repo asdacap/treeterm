@@ -130,22 +130,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
           get().handleSessionRestore(session)
         } else {
           // Ensure we have a store for this session even with no workspaces
-          const { workspaceStores, windowUuid } = get()
-          if (!workspaceStores[session.id]) {
-            const store = createWorkspaceStore(
-              { sessionId: session.id, windowUuid },
-              {
-                git,
-                session: sessionApi,
-                getSettings: () => useSettingsStore.getState().settings,
-                appRegistry: applicationRegistry,
-              }
-            )
-            set((state) => ({
-              workspaceStores: { ...state.workspaceStores, [session.id]: store },
-              activeSessionId: session.id
-            }))
-          }
+          getOrCreateSessionStore(session.id, get, set)
+          set({ activeSessionId: session.id })
         }
       }
     })
@@ -220,128 +206,25 @@ export const useAppStore = create<AppState>()((set, get) => ({
   handleSessionRestore: async (daemonSession: Session) => {
     console.log('[App] Restoring session', daemonSession.id, 'with', daemonSession.workspaces.length, 'workspaces')
 
-    const { workspaceStores, windowUuid, git, sessionApi } = get()
+    const store = getOrCreateSessionStore(daemonSession.id, get, set)
+    set({ activeSessionId: daemonSession.id })
 
-    // Create workspace store for this session if it doesn't exist
-    let store = workspaceStores[daemonSession.id]
-    if (!store) {
-      store = createWorkspaceStore(
-        { sessionId: daemonSession.id, windowUuid },
-        {
-          git,
-          session: sessionApi,
-          getSettings: () => useSettingsStore.getState().settings,
-          appRegistry: applicationRegistry,
-        }
-      )
-      set((state) => ({
-        workspaceStores: { ...state.workspaceStores, [daemonSession.id]: store! },
-        activeSessionId: daemonSession.id
-      }))
-    } else {
-      set({ activeSessionId: daemonSession.id })
-    }
-
-    // Set isRestoring to prevent intermediate syncs during restoration
     store.setState({ isRestoring: true })
-    console.log('[App] Set isRestoring to true for session', daemonSession.id)
-
-    const { workspaces, addWorkspace, addTabWithState, setActiveWorkspace, setActiveTab } = store.getState()
-
-    const rootWorkspaces = daemonSession.workspaces.filter(w => !w.parentId)
-    const childWorkspaces = daemonSession.workspaces.filter(w => w.parentId)
-
-    console.log('[App] Restoring', rootWorkspaces.length, 'root workspaces and', childWorkspaces.length, 'child workspaces')
-
-    for (const daemonWorkspace of rootWorkspaces) {
-      const existingWorkspace = Object.values(workspaces).find(
-        (ws) => ws.path === daemonWorkspace.path
-      )
-
-      let workspaceId: string | null = null
-      if (existingWorkspace) {
-        workspaceId = existingWorkspace.id
-        setActiveWorkspace(workspaceId)
-      } else {
-        workspaceId = await addWorkspace(daemonWorkspace.path, { skipDefaultTabs: true })
-      }
-
-      if (workspaceId) {
-        restoreWorkspaceTabs(workspaceId, daemonWorkspace, addTabWithState, setActiveTab)
-      }
-    }
-
-    const currentStoreState = store.getState()
-    for (const daemonWorkspace of childWorkspaces) {
-      const existingWorkspace = Object.values(currentStoreState.workspaces).find(
-        (ws) => ws.path === daemonWorkspace.path
-      )
-
-      if (existingWorkspace) {
-        restoreWorkspaceTabs(existingWorkspace.id, daemonWorkspace, addTabWithState, setActiveTab)
-      } else {
-        reconstructChildWorkspace(store, daemonWorkspace, addTabWithState, setActiveTab)
-      }
-    }
-
+    applySessionWorkspaces(store, daemonSession.workspaces, { restoreExisting: true })
     store.setState({ isRestoring: false })
-    console.log('[App] Set isRestoring to false, performing final sync')
 
-    const finalState = store.getState()
-    console.log('[App] Session restore complete, final workspace count:', Object.keys(finalState.workspaces).length)
-
-    await finalState.syncToDaemon()
-    console.log('[App] Final sync complete')
-
+    console.log('[App] Session restore complete, workspace count:', Object.keys(store.getState().workspaces).length)
     set({ showWorkspacePicker: false })
   },
 
   handleExternalSessionUpdate: async (daemonSession: Session) => {
-    const { workspaceStores, windowUuid, git, sessionApi } = get()
-
-    let store = workspaceStores[daemonSession.id]
-    if (!store) {
-      store = createWorkspaceStore(
-        { sessionId: daemonSession.id, windowUuid },
-        {
-          git,
-          session: sessionApi,
-          getSettings: () => useSettingsStore.getState().settings,
-          appRegistry: applicationRegistry,
-        }
-      )
-      set((state) => ({
-        workspaceStores: { ...state.workspaceStores, [daemonSession.id]: store! }
-      }))
-    }
+    const store = getOrCreateSessionStore(daemonSession.id, get, set)
 
     store.setState({ isRestoring: true })
+    applySessionWorkspaces(store, daemonSession.workspaces, { restoreExisting: false })
 
-    const currentState = store.getState()
+    // Remove workspaces not present in daemon session
     const incomingPaths = new Set(daemonSession.workspaces.map(ws => ws.path))
-
-    const rootWorkspaces = daemonSession.workspaces.filter(w => !w.parentId)
-    const childWorkspaces = daemonSession.workspaces.filter(w => w.parentId)
-
-    const { addWorkspace, addTabWithState, setActiveTab } = currentState
-
-    for (const daemonWorkspace of rootWorkspaces) {
-      const existing = Object.values(currentState.workspaces).find(ws => ws.path === daemonWorkspace.path)
-      if (!existing) {
-        const workspaceId = await addWorkspace(daemonWorkspace.path, { skipDefaultTabs: true })
-        if (workspaceId) {
-          restoreWorkspaceTabs(workspaceId, daemonWorkspace, addTabWithState, setActiveTab)
-        }
-      }
-    }
-
-    for (const daemonWorkspace of childWorkspaces) {
-      const existing = Object.values(store.getState().workspaces).find(ws => ws.path === daemonWorkspace.path)
-      if (!existing) {
-        reconstructChildWorkspace(store, daemonWorkspace, addTabWithState, setActiveTab)
-      }
-    }
-
     const updatedState = store.getState()
     for (const [id, ws] of Object.entries(updatedState.workspaces)) {
       if (!incomingPaths.has(ws.path)) {
@@ -364,13 +247,81 @@ export const useAppStore = create<AppState>()((set, get) => ({
   }
 }))
 
-// Helper function to restore workspace tabs — preserves ptyId as-is without validation
+// Helper: get or create a workspace store for a session
+function getOrCreateSessionStore(
+  sessionId: string,
+  get: () => AppState,
+  set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void
+): StoreApi<WorkspaceState> {
+  const { workspaceStores, windowUuid, git, sessionApi } = get()
+  let store = workspaceStores[sessionId]
+  if (!store) {
+    store = createWorkspaceStore(
+      { sessionId, windowUuid },
+      {
+        git,
+        session: sessionApi,
+        getSettings: () => useSettingsStore.getState().settings,
+        appRegistry: applicationRegistry,
+      }
+    )
+    set((state) => ({
+      workspaceStores: { ...state.workspaceStores, [sessionId]: store! }
+    }))
+  }
+  return store
+}
+
+// Helper: apply daemon workspaces to a store
+// restoreExisting: true = restore tabs on existing workspaces (session restore)
+// restoreExisting: false = skip existing workspaces (external sync)
+function applySessionWorkspaces(
+  store: StoreApi<WorkspaceState>,
+  daemonWorkspaces: Workspace[],
+  options: { restoreExisting: boolean }
+): void {
+  const { addTabWithState, setActiveTab, setActiveWorkspace } = store.getState()
+
+  const rootWorkspaces = daemonWorkspaces.filter(w => !w.parentId)
+  const childWorkspaces = daemonWorkspaces.filter(w => w.parentId)
+
+  for (const daemonWorkspace of rootWorkspaces) {
+    const existing = Object.values(store.getState().workspaces).find(
+      ws => ws.path === daemonWorkspace.path
+    )
+
+    if (existing) {
+      if (options.restoreExisting) {
+        setActiveWorkspace(existing.id)
+        restoreWorkspaceTabs(existing.id, daemonWorkspace, addTabWithState, setActiveTab)
+      }
+    } else {
+      reconstructWorkspace(store, daemonWorkspace)
+    }
+  }
+
+  for (const daemonWorkspace of childWorkspaces) {
+    const existing = Object.values(store.getState().workspaces).find(
+      ws => ws.path === daemonWorkspace.path
+    )
+
+    if (existing) {
+      if (options.restoreExisting) {
+        restoreWorkspaceTabs(existing.id, daemonWorkspace, addTabWithState, setActiveTab)
+      }
+    } else {
+      reconstructWorkspace(store, daemonWorkspace)
+    }
+  }
+}
+
+// Helper: restore workspace tabs — preserves ptyId as-is without validation
 function restoreWorkspaceTabs(
   workspaceId: string,
   daemonWorkspace: Workspace,
   addTabWithState: AddTabWithStateFn,
   setActiveTab: SetActiveTabFn
-) {
+): void {
   for (const daemonTab of daemonWorkspace.tabs) {
     addTabWithState(workspaceId, daemonTab.applicationId, daemonTab.state as Record<string, unknown>, daemonTab.id)
   }
@@ -380,13 +331,11 @@ function restoreWorkspaceTabs(
   }
 }
 
-// Helper function to reconstruct child workspace with parent link
+// Helper: reconstruct workspace preserving daemon IDs
 // Uses daemonWorkspace.parentId directly — no parent validation (lazy validation)
-function reconstructChildWorkspace(
+function reconstructWorkspace(
   store: StoreApi<WorkspaceState>,
-  daemonWorkspace: Workspace,
-  addTabWithState: AddTabWithStateFn,
-  setActiveTab: SetActiveTabFn
+  daemonWorkspace: Workspace
 ): string {
   const id = daemonWorkspace.id
   const parentId = daemonWorkspace.parentId
@@ -415,6 +364,6 @@ function reconstructChildWorkspace(
     return { workspaces: newWorkspaces, activeWorkspaceId: id }
   })
 
-  console.log('[App] Reconstructed child workspace:', daemonWorkspace.name, 'parentId:', parentId)
+  console.log('[App] Reconstructed workspace:', daemonWorkspace.name, 'parentId:', parentId)
   return id
 }
