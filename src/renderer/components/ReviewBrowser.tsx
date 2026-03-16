@@ -485,11 +485,12 @@ export default function ReviewBrowser({
   }
 
   const handleCommentSubmit = async (text: string) => {
-    if (!commentInput || !currentCommitHash || !selectedFile) return
+    const filePath = selectedFile || selectedUncommittedFile?.path
+    if (!commentInput || !currentCommitHash || !filePath) return
 
     try {
       const comment = {
-        filePath: selectedFile,
+        filePath,
         lineNumber: commentInput.lineNumber,
         text,
         commitHash: currentCommitHash,
@@ -527,8 +528,9 @@ export default function ReviewBrowser({
   }
 
   // Filter comments for current file
-  const fileComments = selectedFile && reviews
-    ? reviews.comments.filter(c => c.filePath === selectedFile)
+  const currentFilePath = selectedFile || selectedUncommittedFile?.path
+  const fileComments = currentFilePath && reviews
+    ? reviews.comments.filter(c => c.filePath === currentFilePath)
     : []
 
   return (
@@ -814,6 +816,11 @@ export default function ReviewBrowser({
                           onNextFile={handleNextFile}
                           hasPreviousFile={currentFileIndex > 0}
                           hasNextFile={currentFileIndex < fileList.length - 1}
+                          comments={fileComments}
+                          onLineClick={handleLineClick}
+                          inlineCommentInput={commentInput}
+                          onCommentSubmit={handleCommentSubmit}
+                          onCommentCancel={() => setCommentInput(null)}
                         />
                       ) : (
                         <div className="diff-placeholder">Failed to load diff contents</div>

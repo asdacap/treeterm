@@ -50,7 +50,7 @@ export function MonacoDiffViewer({
   const [isSplitView, setIsSplitView] = useState<boolean>(true)
   const decorationsRef = useRef<{ original: string[]; modified: string[] }>({ original: [], modified: [] })
   const viewZoneIdRef = useRef<string | null>(null)
-  const commentContainerRef = useRef<HTMLDivElement | null>(null)
+  const [commentContainer, setCommentContainer] = useState<HTMLDivElement | null>(null)
 
   // Reset when content changes
   useEffect(() => {
@@ -258,7 +258,7 @@ export function MonacoDiffViewer({
         })
 
         viewZoneIdRef.current = null
-        commentContainerRef.current = null
+        setCommentContainer(null)
       }
       return
     }
@@ -271,7 +271,9 @@ export function MonacoDiffViewer({
     // Create DOM container for inline comment
     const container = document.createElement('div')
     container.className = 'inline-comment-zone'
-    commentContainerRef.current = container
+    // Prevent Monaco from stealing focus when clicking inside the comment zone
+    container.addEventListener('mousedown', (e) => e.stopPropagation())
+    setCommentContainer(container)
 
     editor.changeViewZones((accessor) => {
       // Remove previous zone if exists
@@ -282,9 +284,9 @@ export function MonacoDiffViewer({
       // Add new zone
       viewZoneIdRef.current = accessor.addZone({
         afterLineNumber: lineNumber,
-        heightInPx: 140,
+        heightInPx: 180,
         domNode: container,
-        suppressMouseDown: false
+        suppressMouseDown: true
       })
     })
 
@@ -379,14 +381,14 @@ export function MonacoDiffViewer({
           }}
         />
       </div>
-      {commentContainerRef.current && inlineCommentInput && onCommentSubmit && onCommentCancel && createPortal(
+      {commentContainer && inlineCommentInput && onCommentSubmit && onCommentCancel && createPortal(
         <CommentInput
           lineNumber={inlineCommentInput.lineNumber}
           side={inlineCommentInput.side}
           onSubmit={onCommentSubmit}
           onCancel={onCommentCancel}
         />,
-        commentContainerRef.current
+        commentContainer
       )}
     </div>
   )
