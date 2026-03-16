@@ -248,8 +248,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
     const { workspaces, addWorkspace, addTabWithState, setActiveWorkspace, setActiveTab } = store.getState()
 
-    const pathToIdMap = new Map<string, string>()
-
     const rootWorkspaces = daemonSession.workspaces.filter(w => !w.parentId)
     const childWorkspaces = daemonSession.workspaces.filter(w => w.parentId)
 
@@ -269,7 +267,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
       }
 
       if (workspaceId) {
-        pathToIdMap.set(daemonWorkspace.path, workspaceId)
         restoreWorkspaceTabs(workspaceId, daemonWorkspace, addTabWithState, setActiveTab)
       }
     }
@@ -281,13 +278,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
       )
 
       if (existingWorkspace) {
-        pathToIdMap.set(daemonWorkspace.path, existingWorkspace.id)
         restoreWorkspaceTabs(existingWorkspace.id, daemonWorkspace, addTabWithState, setActiveTab)
       } else {
-        const workspaceId = reconstructChildWorkspace(store, daemonWorkspace, addTabWithState, setActiveTab)
-        if (workspaceId) {
-          pathToIdMap.set(daemonWorkspace.path, workspaceId)
-        }
+        reconstructChildWorkspace(store, daemonWorkspace, addTabWithState, setActiveTab)
       }
     }
 
@@ -327,8 +320,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const currentState = store.getState()
     const incomingPaths = new Set(daemonSession.workspaces.map(ws => ws.path))
 
-    const pathToIdMap = new Map<string, string>()
-
     const rootWorkspaces = daemonSession.workspaces.filter(w => !w.parentId)
     const childWorkspaces = daemonSession.workspaces.filter(w => w.parentId)
 
@@ -339,23 +330,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
       if (!existing) {
         const workspaceId = await addWorkspace(daemonWorkspace.path, { skipDefaultTabs: true })
         if (workspaceId) {
-          pathToIdMap.set(daemonWorkspace.path, workspaceId)
           restoreWorkspaceTabs(workspaceId, daemonWorkspace, addTabWithState, setActiveTab)
         }
-      } else {
-        pathToIdMap.set(daemonWorkspace.path, existing.id)
       }
     }
 
     for (const daemonWorkspace of childWorkspaces) {
       const existing = Object.values(store.getState().workspaces).find(ws => ws.path === daemonWorkspace.path)
       if (!existing) {
-        const workspaceId = reconstructChildWorkspace(store, daemonWorkspace, addTabWithState, setActiveTab)
-        if (workspaceId) {
-          pathToIdMap.set(daemonWorkspace.path, workspaceId)
-        }
-      } else if (existing) {
-        pathToIdMap.set(daemonWorkspace.path, existing.id)
+        reconstructChildWorkspace(store, daemonWorkspace, addTabWithState, setActiveTab)
       }
     }
 
