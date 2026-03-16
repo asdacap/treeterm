@@ -1,6 +1,6 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, GitInfo, Tab, WorktreeSettings, GitApi, SessionApi, Settings, AppRegistryApi } from '../types'
+import type { Workspace, GitInfo, Tab, WorktreeSettings, GitApi, SessionApi, Settings, AppRegistryApi, Application } from '../types'
 
 export interface WorkspaceDeps {
   git: GitApi
@@ -148,7 +148,7 @@ export function createWorkspaceStore(
       let activeTabId: string | null = null
 
       if (!options?.skipDefaultTabs) {
-        const defaultApp = getDefaultAppForWorktree(config.deps, options?.settings, undefined)
+        const defaultApp = getDefaultAppForWorktree(deps, options?.settings, undefined)
         if (defaultApp) {
           const tabId = generateTabId()
           tabs.push({
@@ -224,7 +224,7 @@ export function createWorkspaceStore(
       const tabs: Tab[] = []
       let activeTabId: string | null = null
 
-      const defaultApp = getDefaultAppForWorktree(config.deps, settings, parent.settings)
+      const defaultApp = getDefaultAppForWorktree(deps, settings, parent.settings)
       if (defaultApp) {
         const tabId = generateTabId()
         tabs.push({
@@ -293,7 +293,7 @@ export function createWorkspaceStore(
       const tabs: Tab[] = []
       let activeTabId: string | null = null
 
-      const defaultApp = getDefaultAppForWorktree(config.deps, settings, parent.settings)
+      const defaultApp = getDefaultAppForWorktree(deps, settings, parent.settings)
       if (defaultApp) {
         const tabId = generateTabId()
         tabs.push({
@@ -370,7 +370,7 @@ export function createWorkspaceStore(
       const tabs: Tab[] = []
       let activeTabId: string | null = null
 
-      const defaultApp = getDefaultAppForWorktree(config.deps, settings, parent.settings)
+      const defaultApp = getDefaultAppForWorktree(deps, settings, parent.settings)
       if (defaultApp) {
         const tabId = generateTabId()
         tabs.push({
@@ -448,7 +448,7 @@ export function createWorkspaceStore(
       const tabs: Tab[] = []
       let activeTabId: string | null = null
 
-      const defaultApp = getDefaultAppForWorktree(config.deps, settings, parent.settings)
+      const defaultApp = getDefaultAppForWorktree(deps, settings, parent.settings)
       if (defaultApp) {
         const tabId = generateTabId()
         tabs.push({
