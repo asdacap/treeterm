@@ -166,8 +166,9 @@ export class GrpcDaemonClient {
       console.log('[grpcDaemonClient] daemon not running, starting it...')
       await this.spawnDaemon()
 
-      // Wait for daemon to be ready and try connecting again
+      // Wait for socket file to appear, then give gRPC server a moment to fully bind
       await this.waitForSocket()
+      await new Promise(resolve => setTimeout(resolve, 300))
       await this.connect()
     }
   }
