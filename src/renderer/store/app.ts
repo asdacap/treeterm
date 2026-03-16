@@ -52,6 +52,7 @@ interface AppState extends AppDeps {
   getActiveWorkspaceStore: () => StoreApi<WorkspaceState> | null
 
   // Internal (moved from App.tsx)
+  createNewSession: () => Promise<void>
   handleSessionRestore: (session: Session) => Promise<void>
   handleExternalSessionUpdate: (session: Session) => Promise<void>
 }
@@ -158,7 +159,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const unsubShowSessions = sessionApi.onShowSessions(async () => {
       try {
         const result = await sessionApi.list()
-        if (result.success && result.sessions && result.sessions.length > 0) {
+        if (result.success && result.sessions) {
           set({ daemonSessions: result.sessions, showWorkspacePicker: true })
         }
       } catch (error) {
@@ -201,6 +202,20 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const { activeSessionId, workspaceStores } = get()
     if (!activeSessionId) return null
     return workspaceStores[activeSessionId] || null
+  },
+
+  createNewSession: async () => {
+    const { sessionApi } = get()
+    try {
+      const result = await sessionApi.create([])
+      if (!result.success || !result.session) {
+        throw new Error(result.error || 'Failed to create session')
+      }
+      await sessionApi.openInNewWindow(result.session.id)
+      set({ showWorkspacePicker: false })
+    } catch (error) {
+      alert(`Failed to create session: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
   },
 
   handleSessionRestore: async (daemonSession: Session) => {
