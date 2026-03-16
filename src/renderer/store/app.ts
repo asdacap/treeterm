@@ -92,16 +92,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
           // Ensure we have a store for this session even with no workspaces
           const { workspaceStores, windowUuid } = get()
           if (!workspaceStores[session.id]) {
-            const store = createWorkspaceStore({
-              sessionId: session.id,
-              windowUuid,
-              deps: {
+            const store = createWorkspaceStore(
+              { sessionId: session.id, windowUuid },
+              {
                 git: electron.git,
                 session: electron.session,
                 getSettings: () => useSettingsStore.getState().settings,
                 appRegistry: applicationRegistry,
               }
-            })
+            )
             set((state) => ({
               workspaceStores: { ...state.workspaceStores, [session.id]: store },
               activeSessionId: session.id
@@ -186,16 +185,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
     // Create workspace store for this session if it doesn't exist
     let store = workspaceStores[daemonSession.id]
     if (!store) {
-      store = createWorkspaceStore({
-        sessionId: daemonSession.id,
-        windowUuid,
-        deps: {
+      store = createWorkspaceStore(
+        { sessionId: daemonSession.id, windowUuid },
+        {
           git: electron!.git,
           session: electron!.session,
           getSettings: () => useSettingsStore.getState().settings,
           appRegistry: applicationRegistry,
         }
-      })
+      )
       set((state) => ({
         workspaceStores: { ...state.workspaceStores, [daemonSession.id]: store! },
         activeSessionId: daemonSession.id
@@ -284,16 +282,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
     let store = workspaceStores[daemonSession.id]
     if (!store) {
-      store = createWorkspaceStore({
-        sessionId: daemonSession.id,
-        windowUuid,
-        deps: {
+      store = createWorkspaceStore(
+        { sessionId: daemonSession.id, windowUuid },
+        {
           git: electron!.git,
           session: electron!.session,
           getSettings: () => useSettingsStore.getState().settings,
           appRegistry: applicationRegistry,
         }
-      })
+      )
       set((state) => ({
         workspaceStores: { ...state.workspaceStores, [daemonSession.id]: store! }
       }))

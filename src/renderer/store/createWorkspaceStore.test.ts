@@ -81,7 +81,7 @@ describe('createWorkspaceStore', () => {
   })
 
   it('creates a store with initial state', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: 'uuid-1', deps: makeDeps() })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: 'uuid-1' }, makeDeps())
     const state = store.getState()
 
     expect(state.workspaces).toEqual({})
@@ -90,7 +90,7 @@ describe('createWorkspaceStore', () => {
   })
 
   it('exposes all required action methods', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null }, makeDeps())
     const state = store.getState()
 
     expect(typeof state.addWorkspace).toBe('function')
@@ -107,7 +107,7 @@ describe('createWorkspaceStore', () => {
   })
 
   it('setActiveWorkspace updates activeWorkspaceId', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null }, makeDeps())
     store.setState({
       workspaces: { 'ws-1': makeWorkspace({ id: 'ws-1' }) }
     })
@@ -116,21 +116,21 @@ describe('createWorkspaceStore', () => {
   })
 
   it('setActiveWorkspace can set to null', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null }, makeDeps())
     store.setState({ activeWorkspaceId: 'ws-1' })
     store.getState().setActiveWorkspace(null)
     expect(store.getState().activeWorkspaceId).toBeNull()
   })
 
   it('isRestoring can be set externally via setState', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null }, makeDeps())
     expect(store.getState().isRestoring).toBe(false)
     store.setState({ isRestoring: true })
     expect(store.getState().isRestoring).toBe(true)
   })
 
   it('updateGitInfo updates workspace git fields', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null }, makeDeps())
     store.setState({
       workspaces: { 'ws-1': makeWorkspace({ id: 'ws-1', isGitRepo: false, gitBranch: null, gitRootPath: null }) }
     })
@@ -142,14 +142,14 @@ describe('createWorkspaceStore', () => {
   })
 
   it('updateGitInfo is a no-op for unknown workspace', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null }, makeDeps())
     // Should not throw
     store.getState().updateGitInfo('nonexistent', { isRepo: true, branch: 'main', rootPath: '/r' })
     expect(store.getState().workspaces).toEqual({})
   })
 
   it('updateWorkspaceStatus updates status field', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null }, makeDeps())
     store.setState({
       workspaces: { 'ws-1': makeWorkspace({ id: 'ws-1', status: 'active' }) }
     })
@@ -158,7 +158,7 @@ describe('createWorkspaceStore', () => {
   })
 
   it('updateTabTitle updates the tab title', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null }, makeDeps())
     store.setState({
       workspaces: {
         'ws-1': makeWorkspace({
@@ -173,7 +173,7 @@ describe('createWorkspaceStore', () => {
   })
 
   it('setActiveTab updates the workspace activeTabId', () => {
-    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
+    const store = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null }, makeDeps())
     store.setState({
       workspaces: {
         'ws-1': makeWorkspace({
@@ -191,8 +191,8 @@ describe('createWorkspaceStore', () => {
   })
 
   it('each store instance has its own debounce timer (no cross-instance leakage)', () => {
-    const store1 = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null, deps: makeDeps() })
-    const store2 = createWorkspaceStore({ sessionId: 'session-2', windowUuid: null, deps: makeDeps() })
+    const store1 = createWorkspaceStore({ sessionId: 'session-1', windowUuid: null }, makeDeps())
+    const store2 = createWorkspaceStore({ sessionId: 'session-2', windowUuid: null }, makeDeps())
     // Both start with clean state — they are independent instances
     expect(store1.getState().workspaces).toEqual({})
     expect(store2.getState().workspaces).toEqual({})

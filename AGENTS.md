@@ -74,6 +74,7 @@ Never silently swallow errors or return empty/default values on failure. Throw e
 ### Anti Pattern
 - If you have a daemon type and a main type variant, something is wrong. Eg: DaemonSession and Session. They should use the same type. Use a wrapper like UISession if needed, but its a wrapper, not a copy, it should contain a Session.
 - Composition over Inheritence. No inheritence! I got burned on that many times already!
+- What should not be nullable, do not mark as nullable. Prefer no nullable parameter where possible.
 
 ### Worktree and File Changes
 All file/worktree mutations **must go through the daemon** (via gRPC `WriteFile`). No `fs.writeFile` in Main or Renderer.

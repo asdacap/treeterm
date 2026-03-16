@@ -292,6 +292,11 @@ export interface ReviewsApi {
   updateOutdated: (worktreePath: string, currentCommitHash: string) => Promise<{ success: boolean; reviews?: ReviewsData; error?: string }>
 }
 
+export interface AppRegistryApi {
+  get: (id: string) => Application | undefined | null
+  getDefaultApp: (appId?: string) => Application | null
+}
+
 export interface SandboxApi {
   isAvailable: () => Promise<boolean>
 }
