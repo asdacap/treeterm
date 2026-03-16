@@ -657,22 +657,6 @@ server.onGitGetFileDiff(async (worktreePath, parentBranch, filePath) => {
   return { success: true, diff }
 })
 
-server.onGitGetDiffAgainstHead(async (worktreePath, parentBranch) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  const result = await gitClient.getDiffAgainstHead(worktreePath, parentBranch)
-  return { success: true, diff: result }
-})
-
-server.onGitGetFileDiffAgainstHead(async (worktreePath, parentBranch, filePath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  const diff = await gitClient.getFileDiffAgainstHead(worktreePath, parentBranch, filePath)
-  return { success: true, diff }
-})
-
 server.onGitMerge(async (mainRepoPath, worktreeBranch, targetBranch, squash) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
   initializeGitClient()
@@ -787,21 +771,6 @@ server.onGitGetFileContentsForDiff(async (worktreePath, parentBranch, filePath) 
   initializeGitClient()
   if (!gitClient) throw new Error('Git client not initialized')
   const result = await gitClient.getFileContentsForDiff(worktreePath, parentBranch, filePath)
-  return { 
-    success: true, 
-    contents: {
-      originalContent: result.originalContent,
-      modifiedContent: result.modifiedContent,
-      language: result.language
-    }
-  }
-})
-
-server.onGitGetFileContentsForDiffAgainstHead(async (worktreePath, parentBranch, filePath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  const result = await gitClient.getFileContentsForDiffAgainstHead(worktreePath, parentBranch, filePath)
   return { 
     success: true, 
     contents: {

@@ -698,20 +698,6 @@ export class GitClient {
   }
 
   /**
-   * Get diff against HEAD of parent branch
-   */
-  async getDiffAgainstHead(worktreePath: string, parentBranch: string): Promise<GitDiffResult> {
-    return this.getDiff(worktreePath, parentBranch)
-  }
-
-  /**
-   * Get diff for a file against HEAD of parent branch
-   */
-  async getFileDiffAgainstHead(worktreePath: string, parentBranch: string, filePath: string): Promise<string> {
-    return this.getFileDiff(worktreePath, parentBranch, filePath)
-  }
-
-  /**
    * Merge a worktree branch into target branch
    */
   async mergeWorktree(
@@ -883,17 +869,6 @@ export class GitClient {
     const language = this.detectLanguage(ext)
 
     return { originalContent, modifiedContent, language }
-  }
-
-  /**
-   * Get file contents for diff against HEAD of parent branch
-   */
-  async getFileContentsForDiffAgainstHead(
-    worktreePath: string,
-    parentBranch: string,
-    filePath: string
-  ): Promise<{ originalContent: string; modifiedContent: string; language: string }> {
-    return this.getFileContentsForDiff(worktreePath, parentBranch, filePath)
   }
 
   /**

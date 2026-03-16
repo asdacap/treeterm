@@ -133,7 +133,131 @@ export function createWorkspaceStore(
     }, 500)
   }
 
-  return createStore<WorkspaceState>()((set, get) => ({
+  // Shared helper: creates a child workspace from a git operation result and updates state
+  async function addChildWorkspaceFromResult(
+    parentId: string,
+    name: string,
+    path: string,
+    branch: string,
+    options: { isDetached?: boolean; isWorktree?: boolean; settings?: WorktreeSettings } = {}
+  ): Promise<string> {
+    const parent = store.getState().workspaces[parentId]
+
+    const id = generateId()
+    const tabs: Tab[] = []
+    let activeTabId: string | null = null
+
+    const defaultApp = getDefaultAppForWorktree(deps, options.settings, parent?.settings)
+    if (defaultApp) {
+      const tabId = generateTabId()
+      tabs.push({
+        id: tabId,
+        applicationId: defaultApp.id,
+        title: defaultApp.name,
+        state: defaultApp.createInitialState()
+      })
+      activeTabId = tabId
+    }
+
+    const childWorkspace: Workspace = {
+      id,
+      name,
+      path,
+      parentId,
+      children: [],
+      status: 'active',
+      isGitRepo: true,
+      gitBranch: branch,
+      gitRootPath: parent?.gitRootPath ?? null,
+      isWorktree: options.isWorktree ?? true,
+      isDetached: options.isDetached,
+      tabs,
+      activeTabId,
+      settings: options.settings,
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+      attachedClients: 0
+    }
+
+    store.setState((state) => ({
+      workspaces: {
+        ...state.workspaces,
+        [id]: childWorkspace,
+        [parentId]: {
+          ...state.workspaces[parentId],
+          children: [...state.workspaces[parentId].children, id]
+        }
+      },
+      activeWorkspaceId: id
+    }))
+
+    const currentState = store.getState()
+    await syncSessionToDaemon(currentState.workspaces, currentState.isRestoring)
+
+    return id
+  }
+
+  // Shared helper: removes a workspace with configurable git cleanup behavior
+  async function removeWorkspaceInternal(
+    id: string,
+    options: { keepBranch: boolean; keepWorktree: boolean }
+  ): Promise<void> {
+    const state = store.getState()
+    const workspace = state.workspaces[id]
+
+    if (!workspace) return
+
+    for (const childId of workspace.children) {
+      await removeWorkspaceInternal(childId, options)
+    }
+
+    for (const tab of workspace.tabs) {
+      const app = deps.appRegistry.get(tab.applicationId)
+      if (app?.cleanup) {
+        await app.cleanup(tab, workspace)
+      }
+    }
+
+    if (!options.keepWorktree && workspace.isWorktree && workspace.gitRootPath) {
+      const deleteBranch = !options.keepBranch && !workspace.isDetached
+      await deps.git.removeWorktree(
+        workspace.gitRootPath,
+        workspace.path,
+        deleteBranch
+      )
+    }
+
+    if (workspace.parentId) {
+      store.setState((state) => {
+        const parent = state.workspaces[workspace.parentId!]
+        if (parent) {
+          return {
+            workspaces: {
+              ...state.workspaces,
+              [workspace.parentId!]: {
+                ...parent,
+                children: parent.children.filter((cid) => cid !== id)
+              }
+            }
+          }
+        }
+        return state
+      })
+    }
+
+    store.setState((state) => {
+      const { [id]: removed, ...rest } = state.workspaces
+      return {
+        workspaces: rest,
+        activeWorkspaceId: state.activeWorkspaceId === id ? null : state.activeWorkspaceId
+      }
+    })
+
+    const currentState = store.getState()
+    await syncSessionToDaemon(currentState.workspaces, currentState.isRestoring)
+  }
+
+  const store = createStore<WorkspaceState>()((set, get) => ({
     workspaces: {},
     activeWorkspaceId: null,
     isRestoring: false,
@@ -220,57 +344,7 @@ export function createWorkspaceStore(
         get().updateGitInfo(parentId, currentGitInfo)
       }
 
-      const id = generateId()
-      const tabs: Tab[] = []
-      let activeTabId: string | null = null
-
-      const defaultApp = getDefaultAppForWorktree(deps, settings, parent.settings)
-      if (defaultApp) {
-        const tabId = generateTabId()
-        tabs.push({
-          id: tabId,
-          applicationId: defaultApp.id,
-          title: defaultApp.name,
-          state: defaultApp.createInitialState()
-        })
-        activeTabId = tabId
-      }
-
-      const childWorkspace: Workspace = {
-        id,
-        name,
-        path: result.path!,
-        parentId,
-        children: [],
-        status: 'active',
-        isGitRepo: true,
-        gitBranch: result.branch!,
-        gitRootPath: parent.gitRootPath,
-        isWorktree: true,
-        isDetached,
-        tabs,
-        activeTabId,
-        settings,
-        createdAt: Date.now(),
-        lastActivity: Date.now(),
-        attachedClients: 0
-      }
-
-      set((state) => ({
-        workspaces: {
-          ...state.workspaces,
-          [id]: childWorkspace,
-          [parentId]: {
-            ...state.workspaces[parentId],
-            children: [...state.workspaces[parentId].children, id]
-          }
-        },
-        activeWorkspaceId: id
-      }))
-
-      const currentState = get()
-      await syncSessionToDaemon(currentState.workspaces, currentState.isRestoring)
-
+      await addChildWorkspaceFromResult(parentId, name, result.path!, result.branch!, { isDetached, settings })
       return { success: true }
     },
 
@@ -289,56 +363,7 @@ export function createWorkspaceStore(
         return { success: false, error: 'This worktree is already open' }
       }
 
-      const id = generateId()
-      const tabs: Tab[] = []
-      let activeTabId: string | null = null
-
-      const defaultApp = getDefaultAppForWorktree(deps, settings, parent.settings)
-      if (defaultApp) {
-        const tabId = generateTabId()
-        tabs.push({
-          id: tabId,
-          applicationId: defaultApp.id,
-          title: defaultApp.name,
-          state: defaultApp.createInitialState()
-        })
-        activeTabId = tabId
-      }
-
-      const childWorkspace: Workspace = {
-        id,
-        name,
-        path: worktreePath,
-        parentId,
-        children: [],
-        status: 'active',
-        isGitRepo: true,
-        gitBranch: branch,
-        gitRootPath: parent.gitRootPath,
-        isWorktree: true,
-        tabs,
-        activeTabId,
-        settings,
-        createdAt: Date.now(),
-        lastActivity: Date.now(),
-        attachedClients: 0
-      }
-
-      set((state) => ({
-        workspaces: {
-          ...state.workspaces,
-          [id]: childWorkspace,
-          [parentId]: {
-            ...state.workspaces[parentId],
-            children: [...state.workspaces[parentId].children, id]
-          }
-        },
-        activeWorkspaceId: id
-      }))
-
-      const currentState = get()
-      await syncSessionToDaemon(currentState.workspaces, currentState.isRestoring)
-
+      await addChildWorkspaceFromResult(parentId, name, worktreePath, branch, { settings })
       return { success: true }
     },
 
@@ -366,57 +391,7 @@ export function createWorkspaceStore(
         return { success: false, error: result.error }
       }
 
-      const id = generateId()
-      const tabs: Tab[] = []
-      let activeTabId: string | null = null
-
-      const defaultApp = getDefaultAppForWorktree(deps, settings, parent.settings)
-      if (defaultApp) {
-        const tabId = generateTabId()
-        tabs.push({
-          id: tabId,
-          applicationId: defaultApp.id,
-          title: defaultApp.name,
-          state: defaultApp.createInitialState()
-        })
-        activeTabId = tabId
-      }
-
-      const childWorkspace: Workspace = {
-        id,
-        name: worktreeName,
-        path: result.path!,
-        parentId,
-        children: [],
-        status: 'active',
-        isGitRepo: true,
-        gitBranch: result.branch!,
-        gitRootPath: parent.gitRootPath,
-        isWorktree: true,
-        isDetached,
-        tabs,
-        activeTabId,
-        settings,
-        createdAt: Date.now(),
-        lastActivity: Date.now(),
-        attachedClients: 0
-      }
-
-      set((state) => ({
-        workspaces: {
-          ...state.workspaces,
-          [id]: childWorkspace,
-          [parentId]: {
-            ...state.workspaces[parentId],
-            children: [...state.workspaces[parentId].children, id]
-          }
-        },
-        activeWorkspaceId: id
-      }))
-
-      const currentState = get()
-      await syncSessionToDaemon(currentState.workspaces, currentState.isRestoring)
-
+      await addChildWorkspaceFromResult(parentId, worktreeName, result.path!, result.branch!, { isDetached, settings })
       return { success: true }
     },
 
@@ -444,216 +419,20 @@ export function createWorkspaceStore(
         return { success: false, error: result.error }
       }
 
-      const id = generateId()
-      const tabs: Tab[] = []
-      let activeTabId: string | null = null
-
-      const defaultApp = getDefaultAppForWorktree(deps, settings, parent.settings)
-      if (defaultApp) {
-        const tabId = generateTabId()
-        tabs.push({
-          id: tabId,
-          applicationId: defaultApp.id,
-          title: defaultApp.name,
-          state: defaultApp.createInitialState()
-        })
-        activeTabId = tabId
-      }
-
-      const childWorkspace: Workspace = {
-        id,
-        name: worktreeName,
-        path: result.path!,
-        parentId,
-        children: [],
-        status: 'active',
-        isGitRepo: true,
-        gitBranch: result.branch!,
-        gitRootPath: parent.gitRootPath,
-        isWorktree: true,
-        isDetached,
-        tabs,
-        activeTabId,
-        settings,
-        createdAt: Date.now(),
-        lastActivity: Date.now(),
-        attachedClients: 0
-      }
-
-      set((state) => ({
-        workspaces: {
-          ...state.workspaces,
-          [id]: childWorkspace,
-          [parentId]: {
-            ...state.workspaces[parentId],
-            children: [...state.workspaces[parentId].children, id]
-          }
-        },
-        activeWorkspaceId: id
-      }))
-
-      const currentState = get()
-      await syncSessionToDaemon(currentState.workspaces, currentState.isRestoring)
-
+      await addChildWorkspaceFromResult(parentId, worktreeName, result.path!, result.branch!, { isDetached, settings })
       return { success: true }
     },
 
     removeWorkspace: async (id: string) => {
-      const state = get()
-      const workspace = state.workspaces[id]
-
-      if (!workspace) return
-
-      for (const childId of workspace.children) {
-        await get().removeWorkspace(childId)
-      }
-
-      for (const tab of workspace.tabs) {
-        const app = deps.appRegistry.get(tab.applicationId)
-        if (app?.cleanup) {
-          await app.cleanup(tab, workspace)
-        }
-      }
-
-      if (workspace.isWorktree && workspace.gitRootPath) {
-        const deleteBranch = !workspace.isDetached
-        await deps.git.removeWorktree(
-          workspace.gitRootPath,
-          workspace.path,
-          deleteBranch
-        )
-      }
-
-      if (workspace.parentId) {
-        set((state) => {
-          const parent = state.workspaces[workspace.parentId!]
-          if (parent) {
-            return {
-              workspaces: {
-                ...state.workspaces,
-                [workspace.parentId!]: {
-                  ...parent,
-                  children: parent.children.filter((cid) => cid !== id)
-                }
-              }
-            }
-          }
-          return state
-        })
-      }
-
-      set((state) => {
-        const { [id]: removed, ...rest } = state.workspaces
-        return {
-          workspaces: rest,
-          activeWorkspaceId: state.activeWorkspaceId === id ? null : state.activeWorkspaceId
-        }
-      })
-
-      const currentState = get()
-      await syncSessionToDaemon(currentState.workspaces, currentState.isRestoring)
+      await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: false })
     },
 
     removeWorkspaceKeepBranch: async (id: string) => {
-      const state = get()
-      const workspace = state.workspaces[id]
-
-      if (!workspace) return
-
-      for (const childId of workspace.children) {
-        await get().removeWorkspaceKeepBranch(childId)
-      }
-
-      for (const tab of workspace.tabs) {
-        const app = deps.appRegistry.get(tab.applicationId)
-        if (app?.cleanup) {
-          await app.cleanup(tab, workspace)
-        }
-      }
-
-      if (workspace.isWorktree && workspace.gitRootPath) {
-        await deps.git.removeWorktree(
-          workspace.gitRootPath,
-          workspace.path,
-          false
-        )
-      }
-
-      if (workspace.parentId) {
-        set((state) => {
-          const parent = state.workspaces[workspace.parentId!]
-          if (parent) {
-            return {
-              workspaces: {
-                ...state.workspaces,
-                [workspace.parentId!]: {
-                  ...parent,
-                  children: parent.children.filter((cid) => cid !== id)
-                }
-              }
-            }
-          }
-          return state
-        })
-      }
-
-      set((state) => {
-        const { [id]: removed, ...rest } = state.workspaces
-        return {
-          workspaces: rest,
-          activeWorkspaceId: state.activeWorkspaceId === id ? null : state.activeWorkspaceId
-        }
-      })
-
-      const currentState = get()
-      await syncSessionToDaemon(currentState.workspaces, currentState.isRestoring)
+      await removeWorkspaceInternal(id, { keepBranch: true, keepWorktree: false })
     },
 
     removeWorkspaceKeepWorktree: async (id: string) => {
-      const state = get()
-      const workspace = state.workspaces[id]
-
-      if (!workspace) return
-
-      for (const childId of workspace.children) {
-        await get().removeWorkspaceKeepWorktree(childId)
-      }
-
-      for (const tab of workspace.tabs) {
-        const app = deps.appRegistry.get(tab.applicationId)
-        if (app?.cleanup) {
-          await app.cleanup(tab, workspace)
-        }
-      }
-
-      if (workspace.parentId) {
-        set((state) => {
-          const parent = state.workspaces[workspace.parentId!]
-          if (parent) {
-            return {
-              workspaces: {
-                ...state.workspaces,
-                [workspace.parentId!]: {
-                  ...parent,
-                  children: parent.children.filter((cid) => cid !== id)
-                }
-              }
-            }
-          }
-          return state
-        })
-      }
-
-      set((state) => {
-        const { [id]: removed, ...rest } = state.workspaces
-        return {
-          workspaces: rest,
-          activeWorkspaceId: state.activeWorkspaceId === id ? null : state.activeWorkspaceId
-        }
-      })
-
-      const currentState = get()
-      await syncSessionToDaemon(currentState.workspaces, currentState.isRestoring)
+      await removeWorkspaceInternal(id, { keepBranch: true, keepWorktree: true })
     },
 
     setActiveWorkspace: (id: string | null) => {
@@ -1003,4 +782,6 @@ export function createWorkspaceStore(
       await syncSessionToDaemon(state.workspaces, state.isRestoring)
     }
   }))
+
+  return store
 }

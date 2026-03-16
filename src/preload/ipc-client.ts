@@ -26,8 +26,6 @@ const CHANNELS = {
   gitCreateWorktreeFromRemote: 'git:createWorktreeFromRemote',
   gitGetDiff: 'git:getDiff',
   gitGetFileDiff: 'git:getFileDiff',
-  gitGetDiffAgainstHead: 'git:getDiffAgainstHead',
-  gitGetFileDiffAgainstHead: 'git:getFileDiffAgainstHead',
   gitMerge: 'git:merge',
   gitCheckMergeConflicts: 'git:checkMergeConflicts',
   gitHasUncommittedChanges: 'git:hasUncommittedChanges',
@@ -41,7 +39,6 @@ const CHANNELS = {
   gitUnstageAll: 'git:unstageAll',
   gitCommitStaged: 'git:commitStaged',
   gitGetFileContentsForDiff: 'git:getFileContentsForDiff',
-  gitGetFileContentsForDiffAgainstHead: 'git:getFileContentsForDiffAgainstHead',
   gitGetUncommittedFileContentsForDiff: 'git:getUncommittedFileContentsForDiff',
   gitGetHeadCommitHash: 'git:getHeadCommitHash',
   reviewsLoad: 'reviews:load',
@@ -186,18 +183,6 @@ export class IpcClient {
     return ipcRenderer.invoke(CHANNELS.gitGetFileDiff, ...args)
   }
 
-  gitGetDiffAgainstHead(
-    ...args: IpcRequests['gitGetDiffAgainstHead']['params']
-  ): Promise<IpcRequests['gitGetDiffAgainstHead']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitGetDiffAgainstHead, ...args)
-  }
-
-  gitGetFileDiffAgainstHead(
-    ...args: IpcRequests['gitGetFileDiffAgainstHead']['params']
-  ): Promise<IpcRequests['gitGetFileDiffAgainstHead']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitGetFileDiffAgainstHead, ...args)
-  }
-
   gitMerge(...args: IpcRequests['gitMerge']['params']): Promise<IpcRequests['gitMerge']['result']> {
     return ipcRenderer.invoke(CHANNELS.gitMerge, ...args)
   }
@@ -264,12 +249,6 @@ export class IpcClient {
     ...args: IpcRequests['gitGetFileContentsForDiff']['params']
   ): Promise<IpcRequests['gitGetFileContentsForDiff']['result']> {
     return ipcRenderer.invoke(CHANNELS.gitGetFileContentsForDiff, ...args)
-  }
-
-  gitGetFileContentsForDiffAgainstHead(
-    ...args: IpcRequests['gitGetFileContentsForDiffAgainstHead']['params']
-  ): Promise<IpcRequests['gitGetFileContentsForDiffAgainstHead']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitGetFileContentsForDiffAgainstHead, ...args)
   }
 
   gitGetUncommittedFileContentsForDiff(

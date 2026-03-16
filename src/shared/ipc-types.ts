@@ -101,14 +101,6 @@ export interface IpcRequests {
     params: [worktreePath: string, parentBranch: string, filePath: string]
     result: { success: boolean; diff?: string; error?: string }
   }
-  gitGetDiffAgainstHead: {
-    params: [worktreePath: string, parentBranch: string]
-    result: { success: boolean; diff?: DiffResult; error?: string }
-  }
-  gitGetFileDiffAgainstHead: {
-    params: [worktreePath: string, parentBranch: string, filePath: string]
-    result: { success: boolean; diff?: string; error?: string }
-  }
   gitMerge: {
     params: [mainRepoPath: string, worktreeBranch: string, targetBranch: string, squash: boolean]
     result: { success: boolean; error?: string }
@@ -158,10 +150,6 @@ export interface IpcRequests {
     result: { success: boolean; error?: string }
   }
   gitGetFileContentsForDiff: {
-    params: [worktreePath: string, parentBranch: string, filePath: string]
-    result: { success: boolean; contents?: FileDiffContents; error?: string }
-  }
-  gitGetFileContentsForDiffAgainstHead: {
     params: [worktreePath: string, parentBranch: string, filePath: string]
     result: { success: boolean; contents?: FileDiffContents; error?: string }
   }

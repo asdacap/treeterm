@@ -26,8 +26,6 @@ const CHANNELS = {
   gitCreateWorktreeFromRemote: 'git:createWorktreeFromRemote',
   gitGetDiff: 'git:getDiff',
   gitGetFileDiff: 'git:getFileDiff',
-  gitGetDiffAgainstHead: 'git:getDiffAgainstHead',
-  gitGetFileDiffAgainstHead: 'git:getFileDiffAgainstHead',
   gitMerge: 'git:merge',
   gitCheckMergeConflicts: 'git:checkMergeConflicts',
   gitHasUncommittedChanges: 'git:hasUncommittedChanges',
@@ -41,7 +39,6 @@ const CHANNELS = {
   gitUnstageAll: 'git:unstageAll',
   gitCommitStaged: 'git:commitStaged',
   gitGetFileContentsForDiff: 'git:getFileContentsForDiff',
-  gitGetFileContentsForDiffAgainstHead: 'git:getFileContentsForDiffAgainstHead',
   gitGetUncommittedFileContentsForDiff: 'git:getUncommittedFileContentsForDiff',
   gitGetHeadCommitHash: 'git:getHeadCommitHash',
   reviewsLoad: 'reviews:load',
@@ -277,26 +274,6 @@ export class IpcServer {
     )
   }
 
-  onGitGetDiffAgainstHead(
-    handler: (
-      ...args: IpcRequests['gitGetDiffAgainstHead']['params']
-    ) => IpcRequests['gitGetDiffAgainstHead']['result'] | Promise<IpcRequests['gitGetDiffAgainstHead']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.gitGetDiffAgainstHead, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['gitGetDiffAgainstHead']['params']))
-    )
-  }
-
-  onGitGetFileDiffAgainstHead(
-    handler: (
-      ...args: IpcRequests['gitGetFileDiffAgainstHead']['params']
-    ) => IpcRequests['gitGetFileDiffAgainstHead']['result'] | Promise<IpcRequests['gitGetFileDiffAgainstHead']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.gitGetFileDiffAgainstHead, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['gitGetFileDiffAgainstHead']['params']))
-    )
-  }
-
   onGitMerge(
     handler: (
       ...args: IpcRequests['gitMerge']['params']
@@ -424,16 +401,6 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.gitGetFileContentsForDiff, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['gitGetFileContentsForDiff']['params']))
-    )
-  }
-
-  onGitGetFileContentsForDiffAgainstHead(
-    handler: (
-      ...args: IpcRequests['gitGetFileContentsForDiffAgainstHead']['params']
-    ) => IpcRequests['gitGetFileContentsForDiffAgainstHead']['result'] | Promise<IpcRequests['gitGetFileContentsForDiffAgainstHead']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.gitGetFileContentsForDiffAgainstHead, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['gitGetFileContentsForDiffAgainstHead']['params']))
     )
   }
 

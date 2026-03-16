@@ -221,12 +221,6 @@ contextBridge.exposeInMainWorld('electron', {
     getFileDiff: (worktreePath: string, parentBranch: string, filePath: string) => {
       return client.gitGetFileDiff(worktreePath, parentBranch, filePath)
     },
-    getDiffAgainstHead: (worktreePath: string, parentBranch: string) => {
-      return client.gitGetDiffAgainstHead(worktreePath, parentBranch)
-    },
-    getFileDiffAgainstHead: (worktreePath: string, parentBranch: string, filePath: string) => {
-      return client.gitGetFileDiffAgainstHead(worktreePath, parentBranch, filePath)
-    },
     merge: (mainRepoPath: string, worktreeBranch: string, targetBranch: string, squash: boolean = false) => {
       return client.gitMerge(mainRepoPath, worktreeBranch, targetBranch, squash)
     },
@@ -265,9 +259,6 @@ contextBridge.exposeInMainWorld('electron', {
     },
     getFileContentsForDiff: (worktreePath: string, parentBranch: string, filePath: string) => {
       return client.gitGetFileContentsForDiff(worktreePath, parentBranch, filePath)
-    },
-    getFileContentsForDiffAgainstHead: (worktreePath: string, parentBranch: string, filePath: string) => {
-      return client.gitGetFileContentsForDiffAgainstHead(worktreePath, parentBranch, filePath)
     },
     getUncommittedFileContentsForDiff: (repoPath: string, filePath: string, staged: boolean) => {
       return client.gitGetUncommittedFileContentsForDiff(repoPath, filePath, staged)

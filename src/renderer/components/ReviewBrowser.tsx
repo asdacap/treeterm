@@ -164,7 +164,7 @@ export default function ReviewBrowser({
     setLoading(true)
     setError(null)
     try {
-      const result = await git.getDiffAgainstHead(workspacePath, parentWorkspace.gitBranch)
+      const result = await git.getDiff(workspacePath, parentWorkspace.gitBranch)
       if (result.success && result.diff) {
         setDiff(result.diff)
       } else {
@@ -219,7 +219,7 @@ export default function ReviewBrowser({
     setFileDiffContents(null)
     setLoadError(null)
     try {
-      const result = await git.getFileContentsForDiffAgainstHead(workspacePath, parentWorkspace.gitBranch, filePath)
+      const result = await git.getFileContentsForDiff(workspacePath, parentWorkspace.gitBranch, filePath)
       if (result.success && result.contents) {
         setFileDiffContents(result.contents)
       } else {
