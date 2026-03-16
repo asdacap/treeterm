@@ -23,7 +23,7 @@ import { registerSTTHandlers } from './stt'
 
 let mainWindow: BrowserWindow | null = null
 let loadingWindow: BrowserWindow | null = null
-let closeConfirmed = false
+const closeConfirmedWindows: Set<number> = new Set()
 let daemonClient: GrpcDaemonClient | null = null
 let gitClient: GitClient | null = null
 let reviewsClient: ReviewsClient | null = null
@@ -143,7 +143,7 @@ function createWindow(initialSessionId?: string): BrowserWindow {
 
   // Intercept close event to check for unmerged workspaces
   window.on('close', (event) => {
-    if (!closeConfirmed) {
+    if (!closeConfirmedWindows.delete(window.webContents.id)) {
       event.preventDefault()
       window.webContents.send('app:confirm-close')
     }
@@ -904,13 +904,16 @@ server.onAppGetWindowUuid((event) => {
 })
 
 // App close confirmation IPC handlers
-server.onAppCloseConfirmed(() => {
-  closeConfirmed = true
-  mainWindow?.close()
+server.onAppCloseConfirmed((event) => {
+  const windowInfo = windowManager.findWindowByWebContentsId(event.sender.id)
+  if (windowInfo) {
+    closeConfirmedWindows.add(event.sender.id)
+    windowInfo.window.close()
+  }
 })
 
 server.onAppCloseCancelled(() => {
-  closeConfirmed = false
+  // No-op: closeConfirmedWindows only tracks confirmed windows
 })
 
 // App lifecycle
