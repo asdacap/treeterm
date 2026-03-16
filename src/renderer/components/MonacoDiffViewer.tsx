@@ -49,7 +49,7 @@ export function MonacoDiffViewer({
   const [currentChangeIndex, setCurrentChangeIndex] = useState<number>(-1)
   const decorationsRef = useRef<{ original: string[]; modified: string[] }>({ original: [], modified: [] })
   const viewZoneIdRef = useRef<string | null>(null)
-  const commentContainerRef = useRef<HTMLDivElement | null>(null)
+  const [commentContainer, setCommentContainer] = useState<HTMLDivElement | null>(null)
 
   // Reset when content changes
   useEffect(() => {
@@ -257,7 +257,7 @@ export function MonacoDiffViewer({
         })
 
         viewZoneIdRef.current = null
-        commentContainerRef.current = null
+        setCommentContainer(null)
       }
       return
     }
@@ -270,7 +270,7 @@ export function MonacoDiffViewer({
     // Create DOM container for inline comment
     const container = document.createElement('div')
     container.className = 'inline-comment-zone'
-    commentContainerRef.current = container
+    setCommentContainer(container)
 
     editor.changeViewZones((accessor) => {
       // Remove previous zone if exists
@@ -363,14 +363,14 @@ export function MonacoDiffViewer({
           }}
         />
       </div>
-      {commentContainerRef.current && inlineCommentInput && onCommentSubmit && onCommentCancel && createPortal(
+      {commentContainer && inlineCommentInput && onCommentSubmit && onCommentCancel && createPortal(
         <CommentInput
           lineNumber={inlineCommentInput.lineNumber}
           side={inlineCommentInput.side}
           onSubmit={onCommentSubmit}
           onCancel={onCommentCancel}
         />,
-        commentContainerRef.current
+        commentContainer
       )}
     </div>
   )
