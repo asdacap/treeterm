@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   createTerminalApplication,
-  terminalApplication,
   createTerminalVariant
 } from './renderer'
 import type { Tab, Workspace, TerminalInstance, TerminalState } from '../../renderer/types'
@@ -26,15 +25,8 @@ vi.mock('../../renderer/store/activityState', () => ({
   }
 }))
 
-// Mock window.electron
 const mockTerminalKill = vi.fn()
-;(globalThis as unknown as { window: { electron: { terminal: { kill: typeof mockTerminalKill } } } }).window = {
-  electron: {
-    terminal: {
-      kill: mockTerminalKill
-    }
-  }
-}
+const mockDeps = { terminal: { kill: mockTerminalKill } }
 
 describe('Terminal Renderer', () => {
   beforeEach(() => {
@@ -43,7 +35,7 @@ describe('Terminal Renderer', () => {
 
   describe('createTerminalApplication', () => {
     it('creates terminal application with correct properties', () => {
-      const app = createTerminalApplication(true)
+      const app = createTerminalApplication(true, mockDeps)
 
       expect(app.id).toBe('terminal')
       expect(app.name).toBe('Terminal')
@@ -56,16 +48,16 @@ describe('Terminal Renderer', () => {
     })
 
     it('sets isDefault based on parameter', () => {
-      const appWithDefault = createTerminalApplication(true)
+      const appWithDefault = createTerminalApplication(true, mockDeps)
       expect(appWithDefault.isDefault).toBe(true)
 
-      const appWithoutDefault = createTerminalApplication(false)
+      const appWithoutDefault = createTerminalApplication(false, mockDeps)
       expect(appWithoutDefault.isDefault).toBe(false)
     })
 
     describe('createInitialState', () => {
       it('returns terminal state with null ptyId', () => {
-        const app = createTerminalApplication(true)
+        const app = createTerminalApplication(true, mockDeps)
         const state = app.createInitialState()
 
         expect(state).toEqual({ ptyId: null })
@@ -74,7 +66,7 @@ describe('Terminal Renderer', () => {
 
     describe('cleanup', () => {
       it('kills PTY when tab has ptyId', async () => {
-        const app = createTerminalApplication(true)
+        const app = createTerminalApplication(true, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal',
@@ -106,7 +98,7 @@ describe('Terminal Renderer', () => {
       })
 
       it('does not kill PTY when tab has no ptyId', async () => {
-        const app = createTerminalApplication(true)
+        const app = createTerminalApplication(true, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal',
@@ -138,7 +130,7 @@ describe('Terminal Renderer', () => {
       })
 
       it('does not kill PTY when state is not terminal state', async () => {
-        const app = createTerminalApplication(true)
+        const app = createTerminalApplication(true, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal',
@@ -170,7 +162,7 @@ describe('Terminal Renderer', () => {
       })
 
       it('removes activity state regardless of PTY', async () => {
-        const app = createTerminalApplication(true)
+        const app = createTerminalApplication(true, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal',
@@ -204,7 +196,7 @@ describe('Terminal Renderer', () => {
 
     describe('render', () => {
       it('renders Terminal component with correct props', () => {
-        const app = createTerminalApplication(true)
+        const app = createTerminalApplication(true, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal',
@@ -233,19 +225,22 @@ describe('Terminal Renderer', () => {
     })
   })
 
-  describe('terminalApplication', () => {
+  describe('terminalApplication (via createTerminalApplication)', () => {
     it('is a terminal application with isDefault set to true', () => {
-      expect(terminalApplication.id).toBe('terminal')
-      expect(terminalApplication.name).toBe('Terminal')
-      expect(terminalApplication.isDefault).toBe(true)
+      const app = createTerminalApplication(true, mockDeps)
+      expect(app.id).toBe('terminal')
+      expect(app.name).toBe('Terminal')
+      expect(app.isDefault).toBe(true)
     })
 
     it('can create initial state', () => {
-      const state = terminalApplication.createInitialState()
+      const app = createTerminalApplication(true, mockDeps)
+      const state = app.createInitialState()
       expect(state).toEqual({ ptyId: null })
     })
 
     it('can render Terminal component', () => {
+      const app = createTerminalApplication(true, mockDeps)
       const tab: Tab = {
         id: 'tab-1',
         applicationId: 'terminal',
@@ -253,7 +248,7 @@ describe('Terminal Renderer', () => {
         state: { ptyId: null }
       }
 
-      const result = terminalApplication.render({
+      const result = app.render({
         tab,
         workspaceId: 'ws-1',
         workspacePath: '/test',
@@ -266,6 +261,7 @@ describe('Terminal Renderer', () => {
     })
 
     it('can cleanup tabs', async () => {
+      const app = createTerminalApplication(true, mockDeps)
       const tab: Tab = {
         id: 'tab-1',
         applicationId: 'terminal',
@@ -290,7 +286,7 @@ describe('Terminal Renderer', () => {
         attachedClients: 1
       }
 
-      await terminalApplication.cleanup?.(tab, workspace)
+      await app.cleanup?.(tab, workspace)
 
       expect(mockTerminalKill).toHaveBeenCalledWith('pty-123')
       expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
@@ -307,7 +303,7 @@ describe('Terminal Renderer', () => {
     }
 
     it('creates variant with custom id and name', () => {
-      const variant = createTerminalVariant(mockInstance)
+      const variant = createTerminalVariant(mockInstance, mockDeps)
 
       expect(variant.id).toBe('terminal-custom-term')
       expect(variant.name).toBe('Custom Terminal')
@@ -315,7 +311,7 @@ describe('Terminal Renderer', () => {
     })
 
     it('preserves other application properties', () => {
-      const variant = createTerminalVariant(mockInstance)
+      const variant = createTerminalVariant(mockInstance, mockDeps)
 
       expect(variant.canClose).toBe(true)
       expect(variant.canHaveMultiple).toBe(true)
@@ -325,19 +321,19 @@ describe('Terminal Renderer', () => {
     })
 
     it('sets isDefault from instance', () => {
-      const variant = createTerminalVariant(mockInstance)
+      const variant = createTerminalVariant(mockInstance, mockDeps)
       expect(variant.isDefault).toBe(false)
 
       const defaultVariant = createTerminalVariant({
         ...mockInstance,
         isDefault: true
-      })
+      }, mockDeps)
       expect(defaultVariant.isDefault).toBe(true)
     })
 
     describe('createInitialState', () => {
       it('returns terminal state with null ptyId', () => {
-        const variant = createTerminalVariant(mockInstance)
+        const variant = createTerminalVariant(mockInstance, mockDeps)
         const state = variant.createInitialState()
 
         expect(state).toEqual({ ptyId: null })
@@ -346,7 +342,7 @@ describe('Terminal Renderer', () => {
 
     describe('cleanup', () => {
       it('kills PTY when tab has ptyId', async () => {
-        const variant = createTerminalVariant(mockInstance)
+        const variant = createTerminalVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal-custom-term',
@@ -378,7 +374,7 @@ describe('Terminal Renderer', () => {
       })
 
       it('handles invalid state gracefully', async () => {
-        const variant = createTerminalVariant(mockInstance)
+        const variant = createTerminalVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal-custom-term',
@@ -412,7 +408,7 @@ describe('Terminal Renderer', () => {
 
     describe('render', () => {
       it('renders Terminal component with startup command', () => {
-        const variant = createTerminalVariant(mockInstance)
+        const variant = createTerminalVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal-custom-term',
@@ -444,7 +440,7 @@ describe('Terminal Renderer', () => {
         const variantWithoutCommand = createTerminalVariant({
           ...mockInstance,
           startupCommand: ''
-        })
+        }, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal-custom-term',

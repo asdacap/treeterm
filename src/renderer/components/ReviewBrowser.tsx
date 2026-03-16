@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useWorkspaceStore } from '../store/workspace'
+import { useElectron } from '../store/ElectronContext'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, ReviewsData, ReviewComment } from '../types'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
 import { CommentInput } from './CommentInput'
@@ -23,6 +24,7 @@ export default function ReviewBrowser({
   tabId,
   parentWorkspaceId
 }: ReviewBrowserProps) {
+  const { git, reviews: reviewsApi } = useElectron()
   const { workspaces, mergeAndRemoveWorkspace, removeWorkspace, removeWorkspaceKeepBranch, removeWorkspaceKeepWorktree, closeAndCleanWorkspace, removeTab } = useWorkspaceStore()
   const workspace = workspaces[workspaceId]
   const parentWorkspace = parentWorkspaceId ? workspaces[parentWorkspaceId] : undefined
@@ -135,12 +137,12 @@ export default function ReviewBrowser({
   const loadReviews = async () => {
     try {
       // Get current commit hash
-      const hashResult = await window.electron.git.getHeadCommitHash(workspacePath)
+      const hashResult = await git.getHeadCommitHash(workspacePath)
       if (hashResult.success && hashResult.hash) {
         setCurrentCommitHash(hashResult.hash)
 
         // Load reviews and mark outdated
-        const result = await window.electron.reviews.updateOutdated(workspacePath, hashResult.hash)
+        const result = await reviewsApi.updateOutdated(workspacePath, hashResult.hash)
         if (result.success && result.reviews) {
           setReviews(result.reviews)
         }
@@ -156,7 +158,7 @@ export default function ReviewBrowser({
     setLoading(true)
     setError(null)
     try {
-      const result = await window.electron.git.getDiffAgainstHead(workspacePath, parentWorkspace.gitBranch)
+      const result = await git.getDiffAgainstHead(workspacePath, parentWorkspace.gitBranch)
       if (result.success && result.diff) {
         setDiff(result.diff)
       } else {
@@ -171,7 +173,7 @@ export default function ReviewBrowser({
 
   const loadUncommittedChanges = async () => {
     try {
-      const result = await window.electron.git.getUncommittedChanges(workspacePath)
+      const result = await git.getUncommittedChanges(workspacePath)
       if (result.success && result.changes) {
         setUncommitted(result.changes)
       }
@@ -186,7 +188,7 @@ export default function ReviewBrowser({
     setIsCheckingConflicts(true)
     setConflictError(null)
     try {
-      const result = await window.electron.git.checkMergeConflicts(
+      const result = await git.checkMergeConflicts(
         parentWorkspace.gitRootPath,
         workspace.gitBranch,
         parentWorkspace.gitBranch
@@ -211,7 +213,7 @@ export default function ReviewBrowser({
     setFileDiffContents(null)
     setLoadError(null)
     try {
-      const result = await window.electron.git.getFileContentsForDiffAgainstHead(workspacePath, parentWorkspace.gitBranch, filePath)
+      const result = await git.getFileContentsForDiffAgainstHead(workspacePath, parentWorkspace.gitBranch, filePath)
       if (result.success && result.contents) {
         setFileDiffContents(result.contents)
       } else {
@@ -232,7 +234,7 @@ export default function ReviewBrowser({
     setFileDiffContents(null)
     setLoadError(null)
     try {
-      const result = await window.electron.git.getUncommittedFileContentsForDiff(workspacePath, file.path, file.staged)
+      const result = await git.getUncommittedFileContentsForDiff(workspacePath, file.path, file.staged)
       if (result.success && result.contents) {
         setFileDiffContents(result.contents)
       } else {
@@ -247,28 +249,28 @@ export default function ReviewBrowser({
   }
 
   const handleStageFile = async (filePath: string) => {
-    const result = await window.electron.git.stageFile(workspacePath, filePath)
+    const result = await git.stageFile(workspacePath, filePath)
     if (result.success) {
       await loadUncommittedChanges()
     }
   }
 
   const handleUnstageFile = async (filePath: string) => {
-    const result = await window.electron.git.unstageFile(workspacePath, filePath)
+    const result = await git.unstageFile(workspacePath, filePath)
     if (result.success) {
       await loadUncommittedChanges()
     }
   }
 
   const handleStageAll = async () => {
-    const result = await window.electron.git.stageAll(workspacePath)
+    const result = await git.stageAll(workspacePath)
     if (result.success) {
       await loadUncommittedChanges()
     }
   }
 
   const handleUnstageAll = async () => {
-    const result = await window.electron.git.unstageAll(workspacePath)
+    const result = await git.unstageAll(workspacePath)
     if (result.success) {
       await loadUncommittedChanges()
     }
@@ -284,7 +286,7 @@ export default function ReviewBrowser({
     setCommitError(null)
 
     try {
-      const result = await window.electron.git.commitStaged(workspacePath, commitMessage.trim())
+      const result = await git.commitStaged(workspacePath, commitMessage.trim())
       if (result.success) {
         setCommitMessage('')
         await loadUncommittedChanges()
@@ -489,7 +491,7 @@ export default function ReviewBrowser({
         side: commentInput.side
       }
 
-      const result = await window.electron.reviews.addComment(workspacePath, comment)
+      const result = await reviewsApi.addComment(workspacePath, comment)
       if (result.success && result.comment) {
         setReviews(prev => prev ? {
           ...prev,
@@ -505,7 +507,7 @@ export default function ReviewBrowser({
 
   const handleCommentDelete = async (commentId: string) => {
     try {
-      const result = await window.electron.reviews.deleteComment(workspacePath, commentId)
+      const result = await reviewsApi.deleteComment(workspacePath, commentId)
       if (result.success) {
         setReviews(prev => prev ? {
           ...prev,

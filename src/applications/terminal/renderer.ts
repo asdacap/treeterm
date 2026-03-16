@@ -1,11 +1,13 @@
-import type { Application, TerminalState, TerminalInstance, Tab, Workspace } from '../../renderer/types'
+import type { Application, TerminalState, TerminalApi, TerminalInstance, Tab, Workspace } from '../../renderer/types'
 import { isTerminalState } from '../../renderer/types'
 import Terminal from '../../renderer/components/Terminal'
 import { createElement } from 'react'
 import { useActivityStateStore } from '../../renderer/store/activityState'
 
+type TerminalDeps = { terminal: Pick<TerminalApi, 'kill'> }
+
 // Factory function to create the base terminal application with configurable isDefault
-export function createTerminalApplication(startByDefault: boolean): Application<TerminalState> {
+export function createTerminalApplication(startByDefault: boolean, deps: TerminalDeps): Application<TerminalState> {
   return {
     id: 'terminal',
     name: 'Terminal',
@@ -17,7 +19,7 @@ export function createTerminalApplication(startByDefault: boolean): Application<
 
     cleanup: async (tab: Tab, _workspace: Workspace) => {
       if (isTerminalState(tab.state) && tab.state.ptyId) {
-        window.electron.terminal.kill(tab.state.ptyId)
+        deps.terminal.kill(tab.state.ptyId)
       }
       // Remove activity state for this tab
       useActivityStateStore.getState().removeTabState(tab.id)
@@ -42,11 +44,8 @@ export function createTerminalApplication(startByDefault: boolean): Application<
   }
 }
 
-// Default terminal application (starts by default)
-export const terminalApplication = createTerminalApplication(true)
-
 // Factory function to create terminal variant applications
-export function createTerminalVariant(instance: TerminalInstance): Application<TerminalState> {
+export function createTerminalVariant(instance: TerminalInstance, deps: TerminalDeps): Application<TerminalState> {
   return {
     id: `terminal-${instance.id}`,
     name: instance.name,
@@ -58,7 +57,7 @@ export function createTerminalVariant(instance: TerminalInstance): Application<T
 
     cleanup: async (tab: Tab, _workspace: Workspace) => {
       if (isTerminalState(tab.state) && tab.state.ptyId) {
-        window.electron.terminal.kill(tab.state.ptyId)
+        deps.terminal.kill(tab.state.ptyId)
       }
       useActivityStateStore.getState().removeTabState(tab.id)
     },

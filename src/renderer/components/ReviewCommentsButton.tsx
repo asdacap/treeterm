@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { ReviewsData } from '../types'
+import { useElectron } from '../store/ElectronContext'
 
 interface ReviewCommentsButtonProps {
   workspacePath: string
@@ -7,6 +8,7 @@ interface ReviewCommentsButtonProps {
 }
 
 export function ReviewCommentsButton({ workspacePath, ptyId }: ReviewCommentsButtonProps): JSX.Element | null {
+  const { reviews, terminal } = useElectron()
   const [hasComments, setHasComments] = useState(false)
 
   useEffect(() => {
@@ -15,7 +17,7 @@ export function ReviewCommentsButton({ workspacePath, ptyId }: ReviewCommentsBut
 
   const checkForComments = async () => {
     try {
-      const result = await window.electron.reviews.load(workspacePath)
+      const result = await reviews.load(workspacePath)
       if (result.success && result.reviews) {
         const reviews = result.reviews as ReviewsData
         setHasComments(reviews.comments.length > 0)
@@ -33,7 +35,7 @@ export function ReviewCommentsButton({ workspacePath, ptyId }: ReviewCommentsBut
 
     // Submit command to Claude terminal
     const command = 'read .treeterm/reviews.json and address the comments\r'
-    window.electron.terminal.write(ptyId, command)
+    terminal.write(ptyId, command)
   }
 
   if (!hasComments) {

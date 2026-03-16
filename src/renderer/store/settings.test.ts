@@ -8,25 +8,19 @@ vi.mock('../../applications', () => ({
   registerAiHarnessVariants: vi.fn()
 }))
 
-// Mock window.electron
+// Mock settings API
 const mockLoadSettings = vi.fn()
 const mockSaveSettings = vi.fn()
-
-// Define window.electron on global
-;(globalThis as unknown as { window: { electron: { settings: { load: typeof mockLoadSettings; save: typeof mockSaveSettings } } } }).window = {
-  electron: {
-    settings: {
-      load: mockLoadSettings,
-      save: mockSaveSettings
-    }
-  }
-}
+const mockSettingsApi = { load: mockLoadSettings, save: mockSaveSettings, onOpen: vi.fn() }
+const mockTerminalKill = vi.fn()
 
 describe('SettingsStore', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     // Reset store to default state
     useSettingsStore.setState({
+      settingsApi: mockSettingsApi,
+      terminalKill: mockTerminalKill,
       settings: {
         terminal: {
           fontSize: 14,
@@ -86,7 +80,7 @@ describe('SettingsStore', () => {
         recentDirectories: []
       },
       isLoaded: false
-    })
+    } as unknown as Parameters<typeof useSettingsStore.setState>[0])
   })
 
   describe('initial state', () => {

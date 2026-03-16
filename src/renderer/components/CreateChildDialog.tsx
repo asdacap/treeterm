@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import type { Workspace, ChildWorktreeInfo, BranchInfo, WorktreeSettings } from '../types'
 import { applicationRegistry } from '../registry/applicationRegistry'
+import { useElectron } from '../store/ElectronContext'
 
 interface CreateChildDialogProps {
   parentWorkspace: Workspace
@@ -23,6 +24,7 @@ export default function CreateChildDialog({
   onCancel,
   openWorktreePaths
 }: CreateChildDialogProps) {
+  const { git } = useElectron()
   const [mode, setMode] = useState<TabMode>('create')
   const [name, setName] = useState('')
   const [isProcessing, setIsProcessing] = useState(false)
@@ -75,7 +77,7 @@ export default function CreateChildDialog({
         openWorktreePaths
       })
       setIsLoadingWorktrees(true)
-      window.electron.git.getChildWorktrees(
+      git.getChildWorktrees(
         parentWorkspace.gitRootPath,
         parentWorkspace.parentId === null ? null : parentWorkspace.gitBranch
       ).then(worktrees => {
@@ -103,8 +105,8 @@ export default function CreateChildDialog({
     if (mode === 'branch' && parentWorkspace.gitRootPath) {
       setIsLoadingBranches(true)
       Promise.all([
-        window.electron.git.listLocalBranches(parentWorkspace.gitRootPath),
-        window.electron.git.getBranchesInWorktrees(parentWorkspace.gitRootPath)
+        git.listLocalBranches(parentWorkspace.gitRootPath),
+        git.getBranchesInWorktrees(parentWorkspace.gitRootPath)
       ]).then(([allBranches, branchesInWorktrees]) => {
         const branchInfos: BranchInfo[] = allBranches.map(name => ({
           name,
@@ -126,9 +128,9 @@ export default function CreateChildDialog({
     if (mode === 'remote' && parentWorkspace.gitRootPath) {
       setIsLoadingRemoteBranches(true)
       Promise.all([
-        window.electron.git.listRemoteBranches(parentWorkspace.gitRootPath),
-        window.electron.git.getBranchesInWorktrees(parentWorkspace.gitRootPath),
-        window.electron.git.listLocalBranches(parentWorkspace.gitRootPath)
+        git.listRemoteBranches(parentWorkspace.gitRootPath),
+        git.getBranchesInWorktrees(parentWorkspace.gitRootPath),
+        git.listLocalBranches(parentWorkspace.gitRootPath)
       ]).then(([remoteBranchNames, branchesInWorktrees, localBranches]) => {
         const branchInfos: BranchInfo[] = remoteBranchNames.map(name => {
           // Extract local name from remote branch (e.g., origin/feature -> feature)

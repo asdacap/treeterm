@@ -1,3 +1,4 @@
+import type { STTApi } from '../types'
 import type { STTProvider, STTResult } from './types'
 
 export class OpenAIWhisperProvider implements STTProvider {
@@ -5,10 +6,12 @@ export class OpenAIWhisperProvider implements STTProvider {
   private mediaRecorder: MediaRecorder | null = null
   private audioChunks: Blob[] = []
   private stream: MediaStream | null = null
+  private sttApi: STTApi
   private apiKey: string
   private language?: string
 
-  constructor(apiKey: string, language?: string) {
+  constructor(sttApi: STTApi, apiKey: string, language?: string) {
+    this.sttApi = sttApi
     this.apiKey = apiKey
     this.language = language
   }
@@ -58,7 +61,7 @@ export class OpenAIWhisperProvider implements STTProvider {
           const arrayBuffer = await audioBlob.arrayBuffer()
 
           // Send to main process for transcription
-          const result = await window.electron.stt.transcribeOpenAI(
+          const result = await this.sttApi.transcribeOpenAI(
             arrayBuffer,
             this.apiKey,
             this.language

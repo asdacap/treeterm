@@ -18,7 +18,7 @@ export interface WorkspaceDeps {
     update: (sessionId: string, workspaces: Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[], senderUuid?: string) => Promise<{ success: boolean; error?: string }>
     delete: (sessionId: string) => Promise<{ success: boolean }>
   }
-  getSettings: () => { daemon: { enabled: boolean }; globalDefaultApplicationId: string | null }
+  getSettings: () => { daemon: { orphanTimeout: number; scrollbackLimit: number; killOnQuit: boolean }; globalDefaultApplicationId: string | null }
   appRegistry: {
     get: (id: string) => Application | undefined | null
     getDefaultApp: () => Application | undefined | null
@@ -107,7 +107,7 @@ export function createWorkspaceStore(config: {
   ) {
     try {
       const settings = config.deps.getSettings()
-      console.log('[workspace] syncSessionToDaemon called - daemon enabled:', settings.daemon.enabled, 'workspaces:', Object.keys(workspaces).length, 'isRestoring:', isRestoring)
+      console.log('[workspace] syncSessionToDaemon called - workspaces:', Object.keys(workspaces).length, 'isRestoring:', isRestoring)
 
       if (isRestoring) {
         console.log('[workspace] currently restoring, skipping sync')

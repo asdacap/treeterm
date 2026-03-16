@@ -19,7 +19,7 @@ function makeDeps(overrides?: Partial<WorkspaceDeps>): WorkspaceDeps {
       update: vi.fn().mockResolvedValue({ success: true }),
       delete: vi.fn().mockResolvedValue({ success: true }),
     },
-    getSettings: () => ({ daemon: { enabled: false }, globalDefaultApplicationId: null }),
+    getSettings: () => ({ daemon: { orphanTimeout: 30000, scrollbackLimit: 10000, killOnQuit: true }, globalDefaultApplicationId: null }),
     appRegistry: {
       get: vi.fn().mockReturnValue(null),
       getDefaultApp: vi.fn().mockReturnValue(null),

@@ -1,3 +1,4 @@
+import type { STTApi } from '../types'
 import type { STTProvider, STTResult } from './types'
 
 export class LocalWhisperProvider implements STTProvider {
@@ -5,9 +6,11 @@ export class LocalWhisperProvider implements STTProvider {
   private mediaRecorder: MediaRecorder | null = null
   private audioChunks: Blob[] = []
   private stream: MediaStream | null = null
+  private sttApi: STTApi
   private modelPath: string
 
-  constructor(modelPath: string) {
+  constructor(sttApi: STTApi, modelPath: string) {
+    this.sttApi = sttApi
     this.modelPath = modelPath
   }
 
@@ -56,7 +59,7 @@ export class LocalWhisperProvider implements STTProvider {
           const arrayBuffer = await audioBlob.arrayBuffer()
 
           // Send to main process for transcription
-          const result = await window.electron.stt.transcribeLocal(
+          const result = await this.sttApi.transcribeLocal(
             arrayBuffer,
             this.modelPath
           )

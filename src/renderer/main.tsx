@@ -7,7 +7,7 @@ import './styles/index.css'
 
 // Wait for main process ready signal, then initialize and render
 window.electron.app.onReady(() => {
-  initializeApplications()
+  initializeApplications({ terminal: window.electron.terminal })
 
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>

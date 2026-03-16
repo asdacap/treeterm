@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { useWorkspaceStore } from '../store/workspace'
 import { useSettingsStore } from '../store/settings'
 import { useActivityStateStore } from '../store/activityState'
+import { useElectron } from '../store/ElectronContext'
 import { createActivityStateDetector } from '../utils/activityStateDetector'
 import TerminalScrollWrapper from './TerminalScrollWrapper'
 import type { SandboxConfig, TerminalState } from '../types'
@@ -83,6 +84,7 @@ export default function BaseTerminal({
   const rawCharsRef = useRef<string>('')
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
 
+  const { terminal: terminalApi } = useElectron()
   const workspace = useWorkspaceStore((state) => state.workspaces[workspaceId])
   const updateTabState = useWorkspaceStore((state) => state.updateTabState)
   const removeTab = useWorkspaceStore((state) => state.removeTab)
@@ -189,7 +191,7 @@ export default function BaseTerminal({
     // Helper to subscribe to PTY and set up refs
     const connectToPty = (id: string) => {
       ptyIdRef.current = id
-      const unsubscribeData = window.electron.terminal.onData(id, (data) => {
+      const unsubscribeData = terminalApi.onData(id, (data) => {
         terminal.write(data)
         // Process data for activity state detection
         detector.processData(data)
@@ -200,7 +202,7 @@ export default function BaseTerminal({
         }
       })
 
-      const unsubscribeExit = window.electron.terminal.onExit(id, (exitCode) => {
+      const unsubscribeExit = terminalApi.onExit(id, (exitCode) => {
         console.log(`[${config.logPrefix} ${tabId}] PTY exited with code:`, exitCode)
         if (isMountedRef.current) {
           removeTab(workspaceId, tabId)
@@ -217,7 +219,7 @@ export default function BaseTerminal({
         cols: terminal.cols,
         rows: terminal.rows
       })
-      window.electron.terminal.resize(id, terminal.cols, terminal.rows)
+      terminalApi.resize(id, terminal.cols, terminal.rows)
     }
 
     // Try to reconnect to existing PTY, or create a new one
@@ -225,7 +227,7 @@ export default function BaseTerminal({
       // Try to attach to existing session (daemon mode)
       if (existingPtyId) {
         try {
-          const result = await window.electron.terminal.attach(existingPtyId)
+          const result = await terminalApi.attach(existingPtyId)
           if (result.success) {
             console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, existingPtyId)
             if (!isMountedRef.current) return
@@ -246,7 +248,7 @@ export default function BaseTerminal({
         }
 
         // Fallback: check if PTY is alive (legacy mode or attach failed)
-        const isAlive = await window.electron.terminal.isAlive(existingPtyId)
+        const isAlive = await terminalApi.isAlive(existingPtyId)
         if (isAlive) {
           console.log(`[${config.logPrefix} ${tabId}] reconnecting to existing PTY:`, existingPtyId)
           if (!isMountedRef.current) return
@@ -256,13 +258,13 @@ export default function BaseTerminal({
       }
 
       // No existing PTY or it's dead - create a new one
-      const id = await window.electron.terminal.create(cwd, sandbox, config.startupCommand)
+      const id = await terminalApi.create(cwd, sandbox, config.startupCommand)
       if (!id) return
 
       // Check if component is still mounted
       if (!isMountedRef.current) {
         // Component unmounted during PTY creation - kill the orphaned PTY
-        window.electron.terminal.kill(id)
+        terminalApi.kill(id)
         return
       }
 
@@ -279,7 +281,7 @@ export default function BaseTerminal({
     // Forward terminal input to PTY
     const inputDisposable = terminal.onData((data) => {
       if (ptyIdRef.current) {
-        window.electron.terminal.write(ptyIdRef.current, data)
+        terminalApi.write(ptyIdRef.current, data)
       }
     })
 
@@ -362,7 +364,7 @@ export default function BaseTerminal({
         scrollPreserved: { prevViewportY, wasAtBottom, scrollRatio, newScrollLine: Math.round(terminal.buffer.active.baseY * scrollRatio) }
       })
       if (ptyIdRef.current) {
-        window.electron.terminal.resize(ptyIdRef.current, terminal.cols, terminal.rows)
+        terminalApi.resize(ptyIdRef.current, terminal.cols, terminal.rows)
       }
     })
     resizeObserver.observe(containerRef.current)
@@ -459,7 +461,7 @@ export default function BaseTerminal({
     try {
       const text = await navigator.clipboard.readText()
       if (text && ptyIdRef.current) {
-        window.electron.terminal.write(ptyIdRef.current, text)
+        terminalApi.write(ptyIdRef.current, text)
       }
     } catch (error) {
       console.error(`[${config.logPrefix} ${tabId}] Failed to read from clipboard:`, error)
@@ -470,13 +472,13 @@ export default function BaseTerminal({
 
   const handlePushToTalkTranscript = (text: string) => {
     if (ptyIdRef.current) {
-      window.electron.terminal.write(ptyIdRef.current, text)
+      terminalApi.write(ptyIdRef.current, text)
     }
   }
 
   const handlePushToTalkSubmit = () => {
     if (ptyIdRef.current) {
-      window.electron.terminal.write(ptyIdRef.current, '\r')
+      terminalApi.write(ptyIdRef.current, '\r')
     }
   }
 

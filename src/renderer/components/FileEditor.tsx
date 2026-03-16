@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react'
 import Editor, { OnMount, OnChange } from '@monaco-editor/react'
 import { editor, KeyMod, KeyCode } from 'monaco-editor'
 import { useWorkspaceStore } from '../store/workspace'
+import { useElectron } from '../store/ElectronContext'
 import type { EditorState } from '../types'
 import { MarkdownPreview } from './MarkdownPreview'
 
@@ -23,6 +24,7 @@ function getFilename(filePath: string): string {
 }
 
 export function FileEditor({ workspaceId, workspacePath, tabId }: FileEditorProps): JSX.Element {
+  const { filesystem } = useElectron()
   const { workspaces, updateTabState, updateTabTitle } = useWorkspaceStore()
   const workspace = workspaces[workspaceId]
   const tab = workspace?.tabs.find((t) => t.id === tabId)
@@ -43,7 +45,7 @@ export function FileEditor({ workspaceId, workspacePath, tabId }: FileEditorProp
       }))
 
       try {
-        const result = await window.electron.filesystem.readFile(workspacePath, state.filePath)
+        const result = await filesystem.readFile(workspacePath, state.filePath)
 
         if (result.success && result.file) {
           const language = mapLanguageToMonaco(result.file.language)
@@ -94,7 +96,7 @@ export function FileEditor({ workspaceId, workspacePath, tabId }: FileEditorProp
 
     setSaving(true)
     try {
-      const result = await window.electron.filesystem.writeFile(
+      const result = await filesystem.writeFile(
         workspacePath,
         state.filePath,
         state.currentContent

@@ -8,6 +8,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import AppErrorFallback from './components/AppErrorFallback'
 import { useAppStore } from './store/app'
 import { WorkspaceStoreContext } from './store/WorkspaceStoreContext'
+import { ElectronContext } from './store/ElectronContext'
 
 // One-time migration: clear localStorage since daemon is now source of truth
 if (typeof localStorage !== 'undefined') {
@@ -20,6 +21,7 @@ export default function App() {
   const [isResizing, setIsResizing] = useState(false)
 
   const {
+    electron,
     isSettingsOpen,
     showCloseConfirm,
     unmergedWorkspaces,
@@ -41,12 +43,12 @@ export default function App() {
 
   const handleConfirmClose = () => {
     useAppStore.setState({ showCloseConfirm: false })
-    window.electron.app.confirmClose()
+    electron?.app.confirmClose()
   }
 
   const handleCancelClose = () => {
     useAppStore.setState({ showCloseConfirm: false })
-    window.electron.app.cancelClose()
+    electron?.app.cancelClose()
   }
 
   const handleCreateNewFromPicker = () => {
@@ -55,7 +57,7 @@ export default function App() {
 
   const handleOpenInNewWindow = async (session: import('./types').Session) => {
     try {
-      const result = await window.electron.session.openInNewWindow(session.id)
+      const result = await electron!.session.openInNewWindow(session.id)
       if (result.success) {
         useAppStore.setState({ showWorkspacePicker: false })
       } else {
@@ -86,6 +88,7 @@ export default function App() {
 
   return (
     <ErrorBoundary fallback={<AppErrorFallback />}>
+      <ElectronContext.Provider value={electron}>
       <WorkspaceStoreContext.Provider value={activeStore}>
         <div
           className="app"
@@ -131,6 +134,7 @@ export default function App() {
           )}
         </div>
       </WorkspaceStoreContext.Provider>
+      </ElectronContext.Provider>
     </ErrorBoundary>
   )
 }

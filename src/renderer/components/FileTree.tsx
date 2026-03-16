@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import type { FileEntry } from '../types'
+import { useElectron } from '../store/ElectronContext'
 
 interface FileTreeProps {
   workspacePath: string
@@ -29,6 +30,7 @@ export function FileTree({
   onSelectFile,
   onToggleDir
 }: FileTreeProps): JSX.Element {
+  const { filesystem } = useElectron()
   const [dirContents, setDirContents] = useState<Record<string, DirectoryState>>({})
   const [search, setSearch] = useState<SearchState>({
     query: '',
@@ -57,7 +59,7 @@ export function FileTree({
       setSearch((prev) => ({ ...prev, loading: true, error: null }))
 
       try {
-        const result = await window.electron.filesystem.searchFiles(workspacePath, debouncedQuery)
+        const result = await filesystem.searchFiles(workspacePath, debouncedQuery)
 
         if (result.success && result.entries) {
           setSearch((prev) => ({
@@ -98,7 +100,7 @@ export function FileTree({
       }))
 
       try {
-        const result = await window.electron.filesystem.readDirectory(workspacePath, dirPath)
+        const result = await filesystem.readDirectory(workspacePath, dirPath)
 
         if (result.success && result.contents) {
           setDirContents((prev) => ({

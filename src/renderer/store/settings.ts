@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Settings } from '../types'
+import type { Settings, SettingsApi } from '../types'
 import { registerTerminalVariants, registerAiHarnessVariants } from '../../applications'
 
 const defaultSettings: Settings = {
@@ -62,8 +62,11 @@ const defaultSettings: Settings = {
 }
 
 interface SettingsState {
+  settingsApi: SettingsApi | null
+  terminalKill: ((id: string) => void) | null
   settings: Settings
   isLoaded: boolean
+  init: (settingsApi: SettingsApi, terminalKill: (id: string) => void) => void
   loadSettings: () => Promise<void>
   saveSettings: (settings: Settings) => Promise<void>
   updateSetting: <K extends keyof Settings>(
@@ -74,17 +77,24 @@ interface SettingsState {
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
+  settingsApi: null,
+  terminalKill: null,
   settings: defaultSettings,
   isLoaded: false,
 
+  init: (settingsApi: SettingsApi, terminalKill: (id: string) => void) => {
+    set({ settingsApi, terminalKill })
+    get().loadSettings()
+  },
+
   loadSettings: async () => {
     try {
-      const settings = await window.electron.settings.load()
+      const settings = await get().settingsApi!.load()
       set({ settings, isLoaded: true })
       // Register dynamic terminal variants and update base terminal
-      registerTerminalVariants(settings.terminal.instances, settings.terminal)
+      registerTerminalVariants(settings.terminal.instances, settings.terminal, get().terminalKill)
       // Register dynamic AI Harness variants
-      registerAiHarnessVariants(settings.aiHarness.instances)
+      registerAiHarnessVariants(settings.aiHarness.instances, get().terminalKill)
     } catch (error) {
       console.warn('[settings] Failed to load settings, using defaults:', error)
       set({ isLoaded: true })
@@ -93,12 +103,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   saveSettings: async (settings: Settings) => {
     try {
-      await window.electron.settings.save(settings)
+      await get().settingsApi!.save(settings)
       set({ settings })
       // Re-register terminal variants and update base terminal when settings change
-      registerTerminalVariants(settings.terminal.instances, settings.terminal)
+      registerTerminalVariants(settings.terminal.instances, settings.terminal, get().terminalKill)
       // Re-register AI Harness variants when settings change
-      registerAiHarnessVariants(settings.aiHarness.instances)
+      registerAiHarnessVariants(settings.aiHarness.instances, get().terminalKill)
     } catch (error) {
       console.error('Failed to save settings:', error)
       throw error

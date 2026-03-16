@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { usePrefixModeStore } from '../store/prefixMode'
 import { useSettingsStore } from '../store/settings'
+import { useElectron } from '../store/ElectronContext'
 import type { Settings } from '../types'
 
 interface KeybindingItem {
@@ -9,9 +10,9 @@ interface KeybindingItem {
   description?: string
 }
 
-function formatPrefixKey(key: string): string {
+function formatPrefixKey(key: string, platform: string): string {
   return key
-    .replace('CommandOrControl', window.electron.platform === 'darwin' ? 'Cmd' : 'Ctrl')
+    .replace('CommandOrControl', platform === 'darwin' ? 'Cmd' : 'Ctrl')
     .replace('Control', 'Ctrl')
     .replace(/\+/g, ' + ')
 }
@@ -67,6 +68,7 @@ function TimeoutProgress({ timeout, activatedAt }: { timeout: number; activatedA
 }
 
 export default function KeybindingOverlay(): JSX.Element | null {
+  const { platform } = useElectron()
   const { state, activatedAt, focusedWorkspaceIndex, workspaceIds } = usePrefixModeStore()
   const { settings } = useSettingsStore()
 
@@ -110,7 +112,7 @@ export default function KeybindingOverlay(): JSX.Element | null {
     <div className="keybinding-overlay">
       <div className="keybinding-overlay-header">
         <span className="keybinding-overlay-prefix">
-          {formatPrefixKey(settings.prefixMode.prefixKey)}
+          {formatPrefixKey(settings.prefixMode.prefixKey, platform)}
         </span>
         <span className="keybinding-overlay-title">Prefix Mode</span>
         <span className="keybinding-overlay-hint">Press a key or Esc to cancel</span>

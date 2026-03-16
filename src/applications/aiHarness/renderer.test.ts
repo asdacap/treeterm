@@ -25,15 +25,8 @@ vi.mock('../../renderer/store/activityState', () => ({
   }
 }))
 
-// Mock window.electron
 const mockTerminalKill = vi.fn()
-;(globalThis as unknown as { window: { electron: { terminal: { kill: typeof mockTerminalKill } } } }).window = {
-  electron: {
-    terminal: {
-      kill: mockTerminalKill
-    }
-  }
-}
+const mockDeps = { terminal: { kill: mockTerminalKill } }
 
 describe('AI Harness Renderer', () => {
   const mockInstance: AiHarnessInstance = {
@@ -54,7 +47,7 @@ describe('AI Harness Renderer', () => {
 
   describe('createAiHarnessVariant', () => {
     it('creates AI Harness variant with correct properties', () => {
-      const app = createAiHarnessVariant(mockInstance)
+      const app = createAiHarnessVariant(mockInstance, mockDeps)
 
       expect(app.id).toBe('aiharness-claude')
       expect(app.name).toBe('Claude')
@@ -67,19 +60,19 @@ describe('AI Harness Renderer', () => {
     })
 
     it('sets isDefault from instance', () => {
-      const app = createAiHarnessVariant(mockInstance)
+      const app = createAiHarnessVariant(mockInstance, mockDeps)
       expect(app.isDefault).toBe(false)
 
       const defaultApp = createAiHarnessVariant({
         ...mockInstance,
         isDefault: true
-      })
+      }, mockDeps)
       expect(defaultApp.isDefault).toBe(true)
     })
 
     describe('createInitialState', () => {
       it('returns AI Harness state with sandbox configuration', () => {
-        const app = createAiHarnessVariant(mockInstance)
+        const app = createAiHarnessVariant(mockInstance, mockDeps)
         const state = app.createInitialState()
 
         expect(state).toEqual({
@@ -97,7 +90,7 @@ describe('AI Harness Renderer', () => {
           ...mockInstance,
           enableSandbox: false,
           allowNetwork: true
-        })
+        }, mockDeps)
         const state = appWithoutSandbox.createInitialState()
 
         expect(state.sandbox.enabled).toBe(false)
@@ -105,7 +98,7 @@ describe('AI Harness Renderer', () => {
       })
 
       it('always initializes allowedPaths as empty array', () => {
-        const app = createAiHarnessVariant(mockInstance)
+        const app = createAiHarnessVariant(mockInstance, mockDeps)
         const state = app.createInitialState()
 
         expect(state.sandbox.allowedPaths).toEqual([])
@@ -114,7 +107,7 @@ describe('AI Harness Renderer', () => {
 
     describe('cleanup', () => {
       it('kills PTY when tab has ptyId', async () => {
-        const app = createAiHarnessVariant(mockInstance)
+        const app = createAiHarnessVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'aiharness-claude',
@@ -149,7 +142,7 @@ describe('AI Harness Renderer', () => {
       })
 
       it('does not kill PTY when tab has no ptyId', async () => {
-        const app = createAiHarnessVariant(mockInstance)
+        const app = createAiHarnessVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'aiharness-claude',
@@ -184,7 +177,7 @@ describe('AI Harness Renderer', () => {
       })
 
       it('does not kill PTY when state is not AI Harness state', async () => {
-        const app = createAiHarnessVariant(mockInstance)
+        const app = createAiHarnessVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'aiharness-claude',
@@ -216,7 +209,7 @@ describe('AI Harness Renderer', () => {
       })
 
       it('removes activity state regardless of PTY state', async () => {
-        const app = createAiHarnessVariant(mockInstance)
+        const app = createAiHarnessVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'aiharness-claude',
@@ -253,7 +246,7 @@ describe('AI Harness Renderer', () => {
 
     describe('render', () => {
       it('renders AiHarness component with correct props', () => {
-        const app = createAiHarnessVariant(mockInstance)
+        const app = createAiHarnessVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'aiharness-claude',
@@ -288,7 +281,7 @@ describe('AI Harness Renderer', () => {
       })
 
       it('returns null for invalid state', () => {
-        const app = createAiHarnessVariant(mockInstance)
+        const app = createAiHarnessVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'aiharness-claude',
@@ -307,7 +300,7 @@ describe('AI Harness Renderer', () => {
       })
 
       it('passes instance properties to component', () => {
-        const app = createAiHarnessVariant(mockInstance)
+        const app = createAiHarnessVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'aiharness-claude',
@@ -334,7 +327,7 @@ describe('AI Harness Renderer', () => {
         const appWithoutScrollbarOption = createAiHarnessVariant({
           ...mockInstance,
           disableScrollbar: undefined
-        })
+        }, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'aiharness-claude',
@@ -358,7 +351,7 @@ describe('AI Harness Renderer', () => {
 
     describe('getActivityState', () => {
       it('returns idle when no state exists for tab', () => {
-        const app = createAiHarnessVariant(mockInstance)
+        const app = createAiHarnessVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'aiharness-claude',
@@ -381,7 +374,7 @@ describe('AI Harness Renderer', () => {
           states: mockStates
         } as any)
 
-        const app = createAiHarnessVariant(mockInstance)
+        const app = createAiHarnessVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'aiharness-claude',
@@ -404,7 +397,7 @@ describe('AI Harness Renderer', () => {
           states: mockStates
         } as any)
 
-        const app = createAiHarnessVariant(mockInstance)
+        const app = createAiHarnessVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'aiharness-claude',

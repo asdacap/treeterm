@@ -23,7 +23,7 @@ vi.mock('./createWorkspaceStore', () => ({
 vi.mock('./settings', () => ({
   useSettingsStore: {
     getState: vi.fn().mockReturnValue({
-      loadSettings: vi.fn()
+      init: vi.fn()
     })
   }
 }))
@@ -48,7 +48,9 @@ const mockElectron = {
   daemon: { onDisconnected: vi.fn().mockReturnValue(() => {}) },
   terminal: {
     onNewTerminal: vi.fn().mockReturnValue(() => {}),
-    list: vi.fn().mockResolvedValue([])
+    list: vi.fn().mockResolvedValue([]),
+    kill: vi.fn(),
+    bind: vi.fn().mockReturnThis()
   }
 }
 
@@ -58,6 +60,7 @@ describe('useAppStore', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     useAppStore.setState({
+      electron: null,
       windowUuid: null,
       daemonDisconnected: false,
       isSettingsOpen: false,

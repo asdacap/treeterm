@@ -1,17 +1,19 @@
 import { applicationRegistry } from '../renderer/registry/applicationRegistry'
-import { terminalApplication, createTerminalApplication, createTerminalVariant } from './terminal/renderer'
+import { createTerminalApplication, createTerminalVariant } from './terminal/renderer'
 import { filesystemApplication } from './filesystem/renderer'
 import { createAiHarnessVariant } from './aiHarness/renderer'
 import { reviewApplication } from './review/renderer'
 import { editorApplication } from './editor/renderer'
-import type { TerminalInstance, AiHarnessInstance, Settings } from '../renderer/types'
+import type { TerminalInstance, AiHarnessInstance, Settings, TerminalApi } from '../renderer/types'
+
+type TerminalDeps = { terminal: Pick<TerminalApi, 'kill'> }
 
 let initialized = false
 
-export function initializeApplications(): void {
+export function initializeApplications(deps: TerminalDeps): void {
   if (initialized) return
 
-  applicationRegistry.register(terminalApplication)
+  applicationRegistry.register(createTerminalApplication(true, deps))
   applicationRegistry.register(filesystemApplication)
   // NOTE: AI Harness variants are registered dynamically from settings
   applicationRegistry.register(reviewApplication)
@@ -21,10 +23,14 @@ export function initializeApplications(): void {
 }
 
 // Register dynamic terminal variants from settings and update base terminal
-export function registerTerminalVariants(instances: TerminalInstance[], terminalSettings?: Settings['terminal']): void {
+export function registerTerminalVariants(instances: TerminalInstance[], terminalSettings: Settings['terminal'] | undefined, terminalKill: ((id: string) => void) | null): void {
+  if (!terminalKill) return
+
+  const deps: TerminalDeps = { terminal: { kill: terminalKill } }
+
   // Re-register base terminal with updated startByDefault setting
   if (terminalSettings !== undefined) {
-    const updatedTerminal = createTerminalApplication(terminalSettings.startByDefault)
+    const updatedTerminal = createTerminalApplication(terminalSettings.startByDefault, deps)
     applicationRegistry.register(updatedTerminal)
   }
 
@@ -38,13 +44,17 @@ export function registerTerminalVariants(instances: TerminalInstance[], terminal
 
   // Register new variants
   for (const instance of instances) {
-    const variant = createTerminalVariant(instance)
+    const variant = createTerminalVariant(instance, deps)
     applicationRegistry.register(variant)
   }
 }
 
 // Register dynamic AI Harness variants from settings
-export function registerAiHarnessVariants(instances: AiHarnessInstance[]): void {
+export function registerAiHarnessVariants(instances: AiHarnessInstance[], terminalKill: ((id: string) => void) | null): void {
+  if (!terminalKill) return
+
+  const deps: TerminalDeps = { terminal: { kill: terminalKill } }
+
   // First, unregister any existing dynamic AI Harness apps
   const allApps = applicationRegistry.getAll()
   for (const app of allApps) {
@@ -55,9 +65,9 @@ export function registerAiHarnessVariants(instances: AiHarnessInstance[]): void 
 
   // Register new variants
   for (const instance of instances) {
-    const variant = createAiHarnessVariant(instance)
+    const variant = createAiHarnessVariant(instance, deps)
     applicationRegistry.register(variant)
   }
 }
 
-export { terminalApplication, filesystemApplication, reviewApplication, createAiHarnessVariant }
+export { filesystemApplication, reviewApplication, createAiHarnessVariant }

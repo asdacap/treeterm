@@ -1,11 +1,13 @@
-import type { Application, Tab, Workspace, ActivityState, AiHarnessState, AiHarnessInstance } from '../../renderer/types'
+import type { Application, Tab, Workspace, ActivityState, AiHarnessState, AiHarnessInstance, TerminalApi } from '../../renderer/types'
 import { isAiHarnessState } from '../../renderer/types'
 import AiHarness from '../../renderer/components/AiHarness'
 import { createElement } from 'react'
 import { useActivityStateStore } from '../../renderer/store/activityState'
 
+type TerminalDeps = { terminal: Pick<TerminalApi, 'kill'> }
+
 // Factory function to create AI Harness variant applications
-export function createAiHarnessVariant(instance: AiHarnessInstance): Application<AiHarnessState> {
+export function createAiHarnessVariant(instance: AiHarnessInstance, deps: TerminalDeps): Application<AiHarnessState> {
   return {
     id: `aiharness-${instance.id}`,
     name: instance.name,
@@ -24,7 +26,7 @@ export function createAiHarnessVariant(instance: AiHarnessInstance): Application
 
     cleanup: async (tab: Tab, _workspace: Workspace) => {
       if (isAiHarnessState(tab.state) && tab.state.ptyId) {
-        window.electron.terminal.kill(tab.state.ptyId)
+        deps.terminal.kill(tab.state.ptyId)
       }
       useActivityStateStore.getState().removeTabState(tab.id)
     },

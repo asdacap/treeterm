@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useSettingsStore } from '../store/settings'
+import { useElectron } from '../store/ElectronContext'
 import { createSTTProvider } from '../stt'
 import type { STTProvider } from '../stt/types'
 
@@ -25,11 +26,13 @@ export function usePushToTalk({
   const [interimText, setInterimText] = useState('')
   const providerRef = useRef<STTProvider | null>(null)
   const { settings } = useSettingsStore()
+  const { stt } = useElectron()
 
   useEffect(() => {
     // Initialize provider based on settings
     if (settings.stt.enabled) {
       providerRef.current = createSTTProvider(
+        stt,
         settings.stt.provider,
         settings.stt.openaiApiKey,
         settings.stt.localWhisperModelPath,

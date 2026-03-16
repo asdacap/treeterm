@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { Settings } from '../types'
 import { useSettingsStore } from '../store/settings'
+import { useElectron } from '../store/ElectronContext'
 import { applicationRegistry } from '../registry/applicationRegistry'
 
 interface SettingsDialogProps {
@@ -29,6 +30,7 @@ type RecordingState =
   | null
 
 export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
+  const { sandbox, platform } = useElectron()
   const { settings: savedSettings, saveSettings } = useSettingsStore()
   const [localSettings, setLocalSettings] = useState<Settings>(savedSettings)
   const [activeTab, setActiveTab] = useState<TabId>('terminal')
@@ -36,7 +38,7 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
   const [sandboxAvailable, setSandboxAvailable] = useState<boolean | null>(null)
 
   useEffect(() => {
-    window.electron.sandbox.isAvailable().then(setSandboxAvailable).catch((error) => {
+    sandbox.isAvailable().then(setSandboxAvailable).catch((error) => {
       console.error('[SettingsDialog] sandbox availability check failed:', error)
       setSandboxAvailable(false)
     })
@@ -287,8 +289,8 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
                 {sandboxAvailable === false && (
                   <div className="settings-warning">
                     Sandbox not available on this system.
-                    {window.electron.platform === 'linux' && ' Install bubblewrap (bwrap) to enable.'}
-                    {window.electron.platform === 'win32' && ' Sandbox is not supported on Windows.'}
+                    {platform === 'linux' && ' Install bubblewrap (bwrap) to enable.'}
+                    {platform === 'win32' && ' Sandbox is not supported on Windows.'}
                   </div>
                 )}
                 <div className="settings-group">
@@ -582,7 +584,7 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
                   >
                     {recording?.type === 'prefixKey'
                       ? 'Press keys...'
-                      : formatKeybinding(localSettings.prefixMode.prefixKey)}
+                      : formatKeybinding(localSettings.prefixMode.prefixKey, platform)}
                   </button>
                   <p className="settings-hint">
                     Press a prefix key first, then the action key. Like tmux or screen.
@@ -948,10 +950,10 @@ function formatKeybindingLabel(key: string): string {
   return labels[key] || key
 }
 
-function formatKeybinding(keybinding: string): string {
+function formatKeybinding(keybinding: string, platform: string): string {
   if (!keybinding) return '(none)'
   return keybinding
-    .replace('CommandOrControl', window.electron.platform === 'darwin' ? 'Cmd' : 'Ctrl')
+    .replace('CommandOrControl', platform === 'darwin' ? 'Cmd' : 'Ctrl')
     .replace('Control', 'Ctrl')
     .replace(/\+/g, ' + ')
 }

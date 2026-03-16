@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, FileDiffContents } from '../types'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
+import { useElectron } from '../store/ElectronContext'
 
 interface DiffViewProps {
   worktreePath: string
@@ -10,6 +11,7 @@ interface DiffViewProps {
 type ViewMode = 'committed' | 'uncommitted'
 
 export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) {
+  const { git } = useElectron()
   const [diff, setDiff] = useState<DiffResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -42,7 +44,7 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
     setLoading(true)
     setError(null)
     try {
-      const result = await window.electron.git.getDiff(worktreePath, parentBranch)
+      const result = await git.getDiff(worktreePath, parentBranch)
       if (result.success && result.diff) {
         setDiff(result.diff)
       } else {
@@ -58,7 +60,7 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
   const loadUncommittedChanges = async () => {
     setLoadingUncommitted(true)
     try {
-      const result = await window.electron.git.getUncommittedChanges(worktreePath)
+      const result = await git.getUncommittedChanges(worktreePath)
       if (result.success && result.changes) {
         setUncommitted(result.changes)
       }
@@ -75,7 +77,7 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
     setFileDiffContents(null)
     setLoadError(null)
     try {
-      const result = await window.electron.git.getFileContentsForDiff(worktreePath, parentBranch, filePath)
+      const result = await git.getFileContentsForDiff(worktreePath, parentBranch, filePath)
       if (result.success && result.contents) {
         setFileDiffContents(result.contents)
       } else {
@@ -96,7 +98,7 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
     setFileDiffContents(null)
     setLoadError(null)
     try {
-      const result = await window.electron.git.getUncommittedFileContentsForDiff(worktreePath, file.path, file.staged)
+      const result = await git.getUncommittedFileContentsForDiff(worktreePath, file.path, file.staged)
       if (result.success && result.contents) {
         setFileDiffContents(result.contents)
       } else {
@@ -111,28 +113,28 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
   }
 
   const handleStageFile = async (filePath: string) => {
-    const result = await window.electron.git.stageFile(worktreePath, filePath)
+    const result = await git.stageFile(worktreePath, filePath)
     if (result.success) {
       await loadUncommittedChanges()
     }
   }
 
   const handleUnstageFile = async (filePath: string) => {
-    const result = await window.electron.git.unstageFile(worktreePath, filePath)
+    const result = await git.unstageFile(worktreePath, filePath)
     if (result.success) {
       await loadUncommittedChanges()
     }
   }
 
   const handleStageAll = async () => {
-    const result = await window.electron.git.stageAll(worktreePath)
+    const result = await git.stageAll(worktreePath)
     if (result.success) {
       await loadUncommittedChanges()
     }
   }
 
   const handleUnstageAll = async () => {
-    const result = await window.electron.git.unstageAll(worktreePath)
+    const result = await git.unstageAll(worktreePath)
     if (result.success) {
       await loadUncommittedChanges()
     }
@@ -148,7 +150,7 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
     setCommitError(null)
 
     try {
-      const result = await window.electron.git.commitStaged(worktreePath, commitMessage.trim())
+      const result = await git.commitStaged(worktreePath, commitMessage.trim())
       if (result.success) {
         setCommitMessage('')
         await loadUncommittedChanges()

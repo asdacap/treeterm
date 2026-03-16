@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { applicationRegistry } from '../registry/applicationRegistry'
+import { useElectron } from '../store/ElectronContext'
 import type { WorktreeSettings } from '../types'
 
 interface OpenWorkspaceDialogProps {
@@ -8,6 +9,7 @@ interface OpenWorkspaceDialogProps {
 }
 
 export default function OpenWorkspaceDialog({ onOpen, onCancel }: OpenWorkspaceDialogProps) {
+  const { getRecentDirectories, selectFolder } = useElectron()
   const [selectedPath, setSelectedPath] = useState<string>('')
   const [isSelecting, setIsSelecting] = useState(false)
   const [selectedAppId, setSelectedAppId] = useState<string>('')
@@ -19,7 +21,7 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel }: OpenWorkspaceD
     const loadRecentDirectories = async () => {
       setIsLoadingRecent(true)
       try {
-        const recent = await window.electron.getRecentDirectories()
+        const recent = await getRecentDirectories()
         setRecentDirectories(recent)
       } catch (error) {
         console.error('Failed to load recent directories:', error)
@@ -37,7 +39,7 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel }: OpenWorkspaceD
   const handleSelectFolder = async () => {
     setIsSelecting(true)
     try {
-      const path = await window.electron.selectFolder()
+      const path = await selectFolder()
       if (path) {
         setSelectedPath(path)
       }
