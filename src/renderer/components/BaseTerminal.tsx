@@ -248,16 +248,7 @@ export default function BaseTerminal({
             return
           }
         } catch (error) {
-          console.log(`[${config.logPrefix} ${tabId}] failed to attach, trying isAlive:`, error)
-        }
-
-        // Fallback: check if PTY is alive (legacy mode or attach failed)
-        const isAlive = await terminalApi.isAlive(existingPtyId)
-        if (isAlive) {
-          console.log(`[${config.logPrefix} ${tabId}] reconnecting to existing PTY:`, existingPtyId)
-          if (!isMountedRef.current) return
-          connectToPty(existingPtyId)
-          return
+          console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, existingPtyId, error)
         }
       }
 

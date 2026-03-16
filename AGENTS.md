@@ -88,6 +88,9 @@ The zustand store should have all business logic. Coordination between store hap
 ### Dependency injection
 Prefer to inject dependencies rather than using window or electron singleton. An exception is at the very top level where these dependencies are injected. This also means do not use global mutation state where possible.
 
+### Lazy validation
+Prefer to validate data at the last minute. Eg: do not check for valid parent id while loading the session. Instead when rendering the tree, if the parent id is unknow, just put the orphant worktree in a separate section. Similarly with pty id, if tty is missing, show error instead of trying to get the actually tty connectino before even opening the terminal.
+
 ## Testing
 
 - Run `npm run test:coverage` when writing or modifying code

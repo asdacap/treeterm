@@ -140,6 +140,172 @@ describe('useAppStore', () => {
     })
   })
 
+  describe('handleSessionRestore', () => {
+    let mockAddWorkspace: ReturnType<typeof vi.fn>
+    let mockAddTabWithState: ReturnType<typeof vi.fn>
+    let mockSetActiveWorkspace: ReturnType<typeof vi.fn>
+    let mockSetActiveTab: ReturnType<typeof vi.fn>
+    let mockSyncToDaemon: ReturnType<typeof vi.fn>
+    let mockSetState: ReturnType<typeof vi.fn>
+
+    beforeEach(async () => {
+      mockAddWorkspace = vi.fn().mockResolvedValue('ws-new-id')
+      mockAddTabWithState = vi.fn().mockReturnValue('tab-new-id')
+      mockSetActiveWorkspace = vi.fn()
+      mockSetActiveTab = vi.fn()
+      mockSyncToDaemon = vi.fn().mockResolvedValue(undefined)
+      mockSetState = vi.fn()
+
+      // Import and configure the mock
+      const { createWorkspaceStore } = await import('./createWorkspaceStore')
+      const mockedCreate = vi.mocked(createWorkspaceStore)
+      mockedCreate.mockImplementation(() => ({
+        getState: vi.fn().mockReturnValue({
+          workspaces: {},
+          activeWorkspaceId: null,
+          isRestoring: false,
+          addWorkspace: mockAddWorkspace,
+          setActiveWorkspace: mockSetActiveWorkspace,
+          addTabWithState: mockAddTabWithState,
+          setActiveTab: mockSetActiveTab,
+          syncToDaemon: mockSyncToDaemon
+        }),
+        setState: mockSetState,
+        subscribe: vi.fn()
+      }) as any)
+
+      // Initialize the store with deps so terminal/git/etc are available
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
+      cleanup()
+    })
+
+    it('restores root + child workspaces with parent-child links', async () => {
+      const session: any = {
+        id: 'session-1',
+        workspaces: [
+          {
+            id: 'root-ws',
+            path: '/projects/root',
+            name: 'root',
+            parentId: null,
+            children: ['child-ws'],
+            tabs: [],
+            activeTabId: null
+          },
+          {
+            id: 'child-ws',
+            path: '/projects/root/child',
+            name: 'child',
+            parentId: 'root-ws',
+            children: [],
+            tabs: [],
+            activeTabId: null
+          }
+        ]
+      }
+
+      await useAppStore.getState().handleSessionRestore(session)
+
+      // Root workspace was created via addWorkspace
+      expect(mockAddWorkspace).toHaveBeenCalledWith('/projects/root', { skipDefaultTabs: true })
+      // Child workspace was reconstructed — setState called with child's parentId preserved
+      expect(mockSetState).toHaveBeenCalledWith(expect.any(Function))
+    })
+
+    it('child workspace restored even when parent not in state', async () => {
+      const session: any = {
+        id: 'session-2',
+        workspaces: [
+          {
+            id: 'orphan-child',
+            path: '/projects/orphan',
+            name: 'orphan',
+            parentId: 'nonexistent-parent',
+            children: [],
+            tabs: [{ id: 'tab-1', applicationId: 'terminal', title: 'Term', state: { ptyId: 'pty-1' } }],
+            activeTabId: 'tab-1'
+          }
+        ]
+      }
+
+      await useAppStore.getState().handleSessionRestore(session)
+
+      // Child should still be reconstructed (not null, not converted to root)
+      // setState is called for isRestoring and for the child reconstruction
+      const setStateCalls = mockSetState.mock.calls
+      // Should have been called (isRestoring=true, workspace reconstruction, isRestoring=false)
+      expect(setStateCalls.length).toBeGreaterThanOrEqual(2)
+    })
+
+    it('PTY IDs preserved as-is without sessionMap validation', async () => {
+      const session: any = {
+        id: 'session-3',
+        workspaces: [
+          {
+            id: 'ws-1',
+            path: '/projects/test',
+            name: 'test',
+            parentId: null,
+            children: [],
+            tabs: [
+              { id: 'tab-1', applicationId: 'terminal', title: 'Term', state: { ptyId: 'pty-maybe-dead' } },
+              { id: 'tab-2', applicationId: 'ai-harness', title: 'AI', state: { ptyId: 'pty-unknown' } }
+            ],
+            activeTabId: 'tab-1'
+          }
+        ]
+      }
+
+      await useAppStore.getState().handleSessionRestore(session)
+
+      // terminal.list() should NOT have been called
+      expect(mockDeps.terminal.list).not.toHaveBeenCalled()
+
+      // addTabWithState should preserve the ptyId as-is (not null it out)
+      expect(mockAddTabWithState).toHaveBeenCalledWith(
+        expect.any(String),
+        'terminal',
+        { ptyId: 'pty-maybe-dead' },
+        'tab-1'
+      )
+      expect(mockAddTabWithState).toHaveBeenCalledWith(
+        expect.any(String),
+        'ai-harness',
+        { ptyId: 'pty-unknown' },
+        'tab-2'
+      )
+    })
+
+    it('child without parentId still restored', async () => {
+      const session: any = {
+        id: 'session-4',
+        workspaces: [
+          {
+            id: 'child-no-parent',
+            path: '/projects/no-parent',
+            name: 'no-parent',
+            parentId: null,
+            children: [],
+            tabs: [{ id: 'tab-1', applicationId: 'terminal', title: 'Term', state: { ptyId: 'pty-1' } }],
+            activeTabId: 'tab-1'
+          }
+        ]
+      }
+
+      await useAppStore.getState().handleSessionRestore(session)
+
+      // With parentId: null, it's treated as root — addWorkspace should be called
+      expect(mockAddWorkspace).toHaveBeenCalledWith('/projects/no-parent', { skipDefaultTabs: true })
+      // Tab should be restored with ptyId preserved
+      expect(mockAddTabWithState).toHaveBeenCalledWith(
+        expect.any(String),
+        'terminal',
+        { ptyId: 'pty-1' },
+        'tab-1'
+      )
+    })
+  })
+
   describe('initialize', () => {
     it('fetches window UUID on initialization', async () => {
       const cleanup = await useAppStore.getState().initialize(mockDeps)

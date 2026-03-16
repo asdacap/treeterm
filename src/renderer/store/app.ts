@@ -6,12 +6,11 @@ import { useSettingsStore } from './settings'
 import { getUnmergedSubWorkspaces } from './createWorkspaceStore'
 import { applicationRegistry } from '../registry/applicationRegistry'
 import type {
-  Workspace, Session, TerminalState, Tab, SessionInfo,
+  Workspace, Session,
   Platform, TerminalApi, GitApi, SessionApi, AppApi, DaemonApi,
   FilesystemApi, ReviewsApi, STTApi, SandboxApi, SettingsApi
 } from '../types'
 
-type SessionMap = Map<string, SessionInfo>
 type AddTabWithStateFn = <T>(workspaceId: string, applicationId: string, initialState: Partial<T>, existingTabId?: string) => string
 type SetActiveTabFn = (workspaceId: string, tabId: string) => void
 
@@ -221,7 +220,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   handleSessionRestore: async (daemonSession: Session) => {
     console.log('[App] Restoring session', daemonSession.id, 'with', daemonSession.workspaces.length, 'workspaces')
 
-    const { workspaceStores, windowUuid, git, sessionApi, terminal } = get()
+    const { workspaceStores, windowUuid, git, sessionApi } = get()
 
     // Create workspace store for this session if it doesn't exist
     let store = workspaceStores[daemonSession.id]
@@ -249,8 +248,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
     const { workspaces, addWorkspace, addTabWithState, setActiveWorkspace, setActiveTab } = store.getState()
 
-    const sessions = await terminal.list()
-    const sessionMap = new Map(sessions.map(s => [s.id, s]))
     const pathToIdMap = new Map<string, string>()
 
     const rootWorkspaces = daemonSession.workspaces.filter(w => !w.parentId)
@@ -273,33 +270,21 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
       if (workspaceId) {
         pathToIdMap.set(daemonWorkspace.path, workspaceId)
-        await restoreWorkspaceTabs(workspaceId, daemonWorkspace, sessionMap, addTabWithState, setActiveTab)
+        restoreWorkspaceTabs(workspaceId, daemonWorkspace, addTabWithState, setActiveTab)
       }
     }
 
     const currentStoreState = store.getState()
     for (const daemonWorkspace of childWorkspaces) {
-      const parentId = daemonWorkspace.parentId
-
-      if (!parentId) {
-        console.warn('[App] Child workspace missing parentId:', daemonWorkspace.path)
-        const workspaceId = await addWorkspace(daemonWorkspace.path, { skipDefaultTabs: true })
-        if (workspaceId) {
-          pathToIdMap.set(daemonWorkspace.path, workspaceId)
-          await restoreWorkspaceTabs(workspaceId, daemonWorkspace, sessionMap, addTabWithState, setActiveTab)
-        }
-        continue
-      }
-
       const existingWorkspace = Object.values(currentStoreState.workspaces).find(
         (ws) => ws.path === daemonWorkspace.path
       )
 
       if (existingWorkspace) {
         pathToIdMap.set(daemonWorkspace.path, existingWorkspace.id)
-        await restoreWorkspaceTabs(existingWorkspace.id, daemonWorkspace, sessionMap, addTabWithState, setActiveTab)
+        restoreWorkspaceTabs(existingWorkspace.id, daemonWorkspace, addTabWithState, setActiveTab)
       } else {
-        const workspaceId = await reconstructChildWorkspace(store, daemonWorkspace, parentId, addTabWithState, setActiveTab, sessionMap)
+        const workspaceId = reconstructChildWorkspace(store, daemonWorkspace, addTabWithState, setActiveTab)
         if (workspaceId) {
           pathToIdMap.set(daemonWorkspace.path, workspaceId)
         }
@@ -319,7 +304,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   handleExternalSessionUpdate: async (daemonSession: Session) => {
-    const { workspaceStores, windowUuid, git, sessionApi, terminal } = get()
+    const { workspaceStores, windowUuid, git, sessionApi } = get()
 
     let store = workspaceStores[daemonSession.id]
     if (!store) {
@@ -342,8 +327,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const currentState = store.getState()
     const incomingPaths = new Set(daemonSession.workspaces.map(ws => ws.path))
 
-    const sessions = await terminal.list()
-    const sessionMap = new Map(sessions.map(s => [s.id, s]))
     const pathToIdMap = new Map<string, string>()
 
     const rootWorkspaces = daemonSession.workspaces.filter(w => !w.parentId)
@@ -357,7 +340,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         const workspaceId = await addWorkspace(daemonWorkspace.path, { skipDefaultTabs: true })
         if (workspaceId) {
           pathToIdMap.set(daemonWorkspace.path, workspaceId)
-          await restoreWorkspaceTabs(workspaceId, daemonWorkspace, sessionMap, addTabWithState, setActiveTab)
+          restoreWorkspaceTabs(workspaceId, daemonWorkspace, addTabWithState, setActiveTab)
         }
       } else {
         pathToIdMap.set(daemonWorkspace.path, existing.id)
@@ -366,8 +349,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
     for (const daemonWorkspace of childWorkspaces) {
       const existing = Object.values(store.getState().workspaces).find(ws => ws.path === daemonWorkspace.path)
-      if (!existing && daemonWorkspace.parentId) {
-        const workspaceId = await reconstructChildWorkspace(store, daemonWorkspace, daemonWorkspace.parentId, addTabWithState, setActiveTab, sessionMap)
+      if (!existing) {
+        const workspaceId = reconstructChildWorkspace(store, daemonWorkspace, addTabWithState, setActiveTab)
         if (workspaceId) {
           pathToIdMap.set(daemonWorkspace.path, workspaceId)
         }
@@ -398,27 +381,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
   }
 }))
 
-// Helper function to restore workspace tabs
-async function restoreWorkspaceTabs(
+// Helper function to restore workspace tabs — preserves ptyId as-is without validation
+function restoreWorkspaceTabs(
   workspaceId: string,
   daemonWorkspace: Workspace,
-  sessionMap: SessionMap,
   addTabWithState: AddTabWithStateFn,
   setActiveTab: SetActiveTabFn
 ) {
   for (const daemonTab of daemonWorkspace.tabs) {
-    if (daemonTab.applicationId === 'terminal' || daemonTab.applicationId === 'ai-harness') {
-      const terminalState = daemonTab.state as TerminalState
-      const ptyId = terminalState?.ptyId
-
-      if (ptyId && sessionMap.has(ptyId)) {
-        addTabWithState<TerminalState>(workspaceId, daemonTab.applicationId, { ...(daemonTab.state as Record<string, unknown>), ptyId }, daemonTab.id)
-      } else {
-        addTabWithState<TerminalState>(workspaceId, daemonTab.applicationId, { ...(daemonTab.state as Record<string, unknown>), ptyId: null }, daemonTab.id)
-      }
-    } else {
-      addTabWithState(workspaceId, daemonTab.applicationId, daemonTab.state as Record<string, unknown>, daemonTab.id)
-    }
+    addTabWithState(workspaceId, daemonTab.applicationId, daemonTab.state as Record<string, unknown>, daemonTab.id)
   }
 
   if (daemonWorkspace.activeTabId) {
@@ -427,67 +398,40 @@ async function restoreWorkspaceTabs(
 }
 
 // Helper function to reconstruct child workspace with parent link
-async function reconstructChildWorkspace(
+// Uses daemonWorkspace.parentId directly — no parent validation (lazy validation)
+function reconstructChildWorkspace(
   store: StoreApi<WorkspaceState>,
   daemonWorkspace: Workspace,
-  parentId: string,
   addTabWithState: AddTabWithStateFn,
-  setActiveTab: SetActiveTabFn,
-  sessionMap: SessionMap
-): Promise<string | null> {
-  const { workspaces } = store.getState()
-  const parent = workspaces[parentId]
-
-  if (!parent) {
-    console.error('[App] Parent workspace not found:', parentId)
-    return null
-  }
-
+  setActiveTab: SetActiveTabFn
+): string {
   const id = daemonWorkspace.id
-
-  const tabs: Tab[] = []
-  for (const daemonTab of daemonWorkspace.tabs) {
-    if (daemonTab.applicationId === 'terminal' || daemonTab.applicationId === 'ai-harness') {
-      const terminalState = daemonTab.state as TerminalState
-      const ptyId = terminalState?.ptyId
-
-      tabs.push({
-        id: daemonTab.id,
-        applicationId: daemonTab.applicationId,
-        title: daemonTab.title,
-        state: { ...(daemonTab.state as Record<string, unknown>), ptyId: ptyId && sessionMap.has(ptyId) ? ptyId : null }
-      })
-    } else {
-      tabs.push({
-        id: daemonTab.id,
-        applicationId: daemonTab.applicationId,
-        title: daemonTab.title,
-        state: daemonTab.state
-      })
-    }
-  }
+  const parentId = daemonWorkspace.parentId
 
   const workspace: Workspace = {
     ...daemonWorkspace,
     id,
-    parentId,
     children: [],
-    tabs,
-    activeTabId: daemonWorkspace.activeTabId || (tabs.length > 0 ? tabs[0].id : null)
+    activeTabId: daemonWorkspace.activeTabId || (daemonWorkspace.tabs.length > 0 ? daemonWorkspace.tabs[0].id : null)
   }
 
-  store.setState((state) => ({
-    workspaces: {
+  store.setState((state) => {
+    const newWorkspaces = {
       ...state.workspaces,
       [id]: workspace,
-      [parentId]: {
+    }
+
+    // Update parent's children array only if parent exists in state
+    if (parentId && state.workspaces[parentId]) {
+      newWorkspaces[parentId] = {
         ...state.workspaces[parentId],
         children: [...state.workspaces[parentId].children, id]
       }
-    },
-    activeWorkspaceId: id
-  }))
+    }
 
-  console.log('[App] Reconstructed child workspace:', daemonWorkspace.name, 'under parent:', parent.name)
+    return { workspaces: newWorkspaces, activeWorkspaceId: id }
+  })
+
+  console.log('[App] Reconstructed child workspace:', daemonWorkspace.name, 'parentId:', parentId)
   return id
 }
