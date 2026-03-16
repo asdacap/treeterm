@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, FileDiffContents } from '../types'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
-import { useElectron } from '../store/ElectronContext'
+import { useGitApi } from '../contexts/GitApiContext'
 
 interface DiffViewProps {
   worktreePath: string
@@ -11,7 +11,7 @@ interface DiffViewProps {
 type ViewMode = 'committed' | 'uncommitted'
 
 export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) {
-  const { git } = useElectron()
+  const git = useGitApi()
   const [diff, setDiff] = useState<DiffResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

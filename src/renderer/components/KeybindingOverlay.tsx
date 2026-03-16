@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react'
 import { usePrefixModeStore } from '../store/prefixMode'
 import { useSettingsStore } from '../store/settings'
-import { useElectron } from '../store/ElectronContext'
-import type { Settings } from '../types'
+import type { Settings, Platform } from '../types'
 
 interface KeybindingItem {
   key: string
@@ -67,8 +66,7 @@ function TimeoutProgress({ timeout, activatedAt }: { timeout: number; activatedA
   )
 }
 
-export default function KeybindingOverlay(): JSX.Element | null {
-  const { platform } = useElectron()
+export default function KeybindingOverlay({ platform }: { platform: Platform }): JSX.Element | null {
   const { state, activatedAt, focusedWorkspaceIndex, workspaceIds } = usePrefixModeStore()
   const { settings } = useSettingsStore()
 

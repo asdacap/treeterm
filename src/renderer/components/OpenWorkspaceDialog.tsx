@@ -1,15 +1,15 @@
 import { useState, useMemo, useEffect } from 'react'
 import { applicationRegistry } from '../registry/applicationRegistry'
-import { useElectron } from '../store/ElectronContext'
 import type { WorktreeSettings } from '../types'
 
 interface OpenWorkspaceDialogProps {
   onOpen: (path: string, settings?: WorktreeSettings) => void
   onCancel: () => void
+  selectFolder: () => Promise<string | null>
+  getRecentDirectories: () => Promise<string[]>
 }
 
-export default function OpenWorkspaceDialog({ onOpen, onCancel }: OpenWorkspaceDialogProps) {
-  const { getRecentDirectories, selectFolder } = useElectron()
+export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, getRecentDirectories }: OpenWorkspaceDialogProps) {
   const [selectedPath, setSelectedPath] = useState<string>('')
   const [isSelecting, setIsSelecting] = useState(false)
   const [selectedAppId, setSelectedAppId] = useState<string>('')

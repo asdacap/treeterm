@@ -334,27 +334,27 @@ export interface SessionApi {
   onSync: (callback: (session: Session) => void) => () => void
 }
 
-export interface ElectronApi {
-  platform: 'darwin' | 'linux' | 'win32' | 'aix' | 'android' | 'freebsd' | 'haiku' | 'openbsd' | 'sunos' | 'cygwin' | 'netbsd'
-  terminal: TerminalApi
-  selectFolder: () => Promise<string | null>
-  getRecentDirectories: () => Promise<string[]>
-  git: GitApi
-  settings: SettingsApi
-  filesystem: FilesystemApi
-  sandbox: SandboxApi
-  stt: STTApi
-  reviews: ReviewsApi
-  getInitialWorkspace: () => Promise<string | null>
-  app: AppApi
-  daemon: DaemonApi
-  session: SessionApi
-  getWindowUuid: () => Promise<string>
-}
+export type Platform = 'darwin' | 'linux' | 'win32' | 'aix' | 'android' | 'freebsd' | 'haiku' | 'openbsd' | 'sunos' | 'cygwin' | 'netbsd'
 
 declare global {
   interface Window {
-    electron: ElectronApi
+    electron: {
+      platform: Platform
+      terminal: TerminalApi
+      selectFolder: () => Promise<string | null>
+      getRecentDirectories: () => Promise<string[]>
+      git: GitApi
+      settings: SettingsApi
+      filesystem: FilesystemApi
+      sandbox: SandboxApi
+      stt: STTApi
+      reviews: ReviewsApi
+      getInitialWorkspace: () => Promise<string | null>
+      app: AppApi
+      daemon: DaemonApi
+      session: SessionApi
+      getWindowUuid: () => Promise<string>
+    }
   }
 }
 

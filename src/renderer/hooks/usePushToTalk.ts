@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useSettingsStore } from '../store/settings'
-import { useElectron } from '../store/ElectronContext'
+import { useSTTApi } from '../contexts/STTApiContext'
 import { createSTTProvider } from '../stt'
 import type { STTProvider } from '../stt/types'
 
@@ -26,7 +26,7 @@ export function usePushToTalk({
   const [interimText, setInterimText] = useState('')
   const providerRef = useRef<STTProvider | null>(null)
   const { settings } = useSettingsStore()
-  const { stt } = useElectron()
+  const stt = useSTTApi()
 
   useEffect(() => {
     // Initialize provider based on settings

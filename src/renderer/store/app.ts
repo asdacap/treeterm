@@ -5,7 +5,7 @@ import type { WorkspaceState } from './createWorkspaceStore'
 import { useSettingsStore } from './settings'
 import { getUnmergedSubWorkspaces } from './createWorkspaceStore'
 import { applicationRegistry } from '../registry/applicationRegistry'
-import type { ElectronApi, Workspace, Session, TerminalState, Tab, SessionInfo } from '../types'
+import type { Workspace, Session, TerminalState, Tab, SessionInfo } from '../types'
 
 type SessionMap = Map<string, SessionInfo>
 type AddTabWithStateFn = <T>(workspaceId: string, applicationId: string, initialState: Partial<T>, existingTabId?: string) => string
@@ -13,7 +13,6 @@ type SetActiveTabFn = (workspaceId: string, tabId: string) => void
 
 interface AppState {
   // Lifecycle
-  electron: ElectronApi | null
   windowUuid: string | null
   daemonDisconnected: boolean
   isSettingsOpen: boolean
@@ -37,7 +36,6 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>()((set, get) => ({
-  electron: null,
   windowUuid: null,
   daemonDisconnected: false,
   isSettingsOpen: false,
@@ -50,7 +48,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   initialize: async () => {
     const electron = window.electron
-    set({ electron })
 
     useSettingsStore.getState().init(electron.settings, electron.terminal.kill.bind(electron.terminal))
 
@@ -180,7 +177,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
   handleSessionRestore: async (daemonSession: Session) => {
     console.log('[App] Restoring session', daemonSession.id, 'with', daemonSession.workspaces.length, 'workspaces')
 
-    const { workspaceStores, windowUuid, electron } = get()
+    const { workspaceStores, windowUuid } = get()
+    const electron = window.electron
 
     // Create workspace store for this session if it doesn't exist
     let store = workspaceStores[daemonSession.id]
@@ -188,8 +186,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
       store = createWorkspaceStore(
         { sessionId: daemonSession.id, windowUuid },
         {
-          git: electron!.git,
-          session: electron!.session,
+          git: electron.git,
+          session: electron.session,
           getSettings: () => useSettingsStore.getState().settings,
           appRegistry: applicationRegistry,
         }
@@ -208,7 +206,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
     const { workspaces, addWorkspace, addTabWithState, setActiveWorkspace, setActiveTab } = store.getState()
 
-    const sessions = await electron!.terminal.list()
+    const sessions = await electron.terminal.list()
     const sessionMap = new Map(sessions.map(s => [s.id, s]))
     const pathToIdMap = new Map<string, string>()
 
@@ -278,15 +276,16 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   handleExternalSessionUpdate: async (daemonSession: Session) => {
-    const { workspaceStores, windowUuid, electron } = get()
+    const { workspaceStores, windowUuid } = get()
+    const electron = window.electron
 
     let store = workspaceStores[daemonSession.id]
     if (!store) {
       store = createWorkspaceStore(
         { sessionId: daemonSession.id, windowUuid },
         {
-          git: electron!.git,
-          session: electron!.session,
+          git: electron.git,
+          session: electron.session,
           getSettings: () => useSettingsStore.getState().settings,
           appRegistry: applicationRegistry,
         }
@@ -301,7 +300,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const currentState = store.getState()
     const incomingPaths = new Set(daemonSession.workspaces.map(ws => ws.path))
 
-    const sessions = await electron!.terminal.list()
+    const sessions = await electron.terminal.list()
     const sessionMap = new Map(sessions.map(s => [s.id, s]))
     const pathToIdMap = new Map<string, string>()
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import type { FileEntry } from '../types'
-import { useElectron } from '../store/ElectronContext'
+import { useFilesystemApi } from '../contexts/FilesystemApiContext'
 
 interface FileTreeProps {
   workspacePath: string
@@ -30,7 +30,7 @@ export function FileTree({
   onSelectFile,
   onToggleDir
 }: FileTreeProps): JSX.Element {
-  const { filesystem } = useElectron()
+  const filesystem = useFilesystemApi()
   const [dirContents, setDirContents] = useState<Record<string, DirectoryState>>({})
   const [search, setSearch] = useState<SearchState>({
     query: '',

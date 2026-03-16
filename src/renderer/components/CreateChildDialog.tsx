@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import type { Workspace, ChildWorktreeInfo, BranchInfo, WorktreeSettings } from '../types'
 import { applicationRegistry } from '../registry/applicationRegistry'
-import { useElectron } from '../store/ElectronContext'
+import { useGitApi } from '../contexts/GitApiContext'
 
 interface CreateChildDialogProps {
   parentWorkspace: Workspace
@@ -24,7 +24,7 @@ export default function CreateChildDialog({
   onCancel,
   openWorktreePaths
 }: CreateChildDialogProps) {
-  const { git } = useElectron()
+  const git = useGitApi()
   const [mode, setMode] = useState<TabMode>('create')
   const [name, setName] = useState('')
   const [isProcessing, setIsProcessing] = useState(false)

@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { Settings } from '../types'
 import { useSettingsStore } from '../store/settings'
-import { useElectron } from '../store/ElectronContext'
 import { applicationRegistry } from '../registry/applicationRegistry'
+import type { SandboxApi, Platform } from '../types'
 
 interface SettingsDialogProps {
   isOpen: boolean
   onClose: () => void
+  sandbox: SandboxApi
+  platform: Platform
 }
 
 type TabId = 'general' | 'terminal' | 'sandbox' | 'ai-harness' | 'appearance' | 'keybindings' | 'terminal-profiles' | 'speech'
@@ -29,8 +31,7 @@ type RecordingState =
   | { type: 'pttKey' }
   | null
 
-export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
-  const { sandbox, platform } = useElectron()
+export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: SettingsDialogProps) {
   const { settings: savedSettings, saveSettings } = useSettingsStore()
   const [localSettings, setLocalSettings] = useState<Settings>(savedSettings)
   const [activeTab, setActiveTab] = useState<TabId>('terminal')

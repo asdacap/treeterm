@@ -11,13 +11,14 @@ import KeybindingOverlay from './KeybindingOverlay'
 import { ErrorBoundary } from './ErrorBoundary'
 import WorkspaceErrorFallback from './WorkspaceErrorFallback'
 import TabErrorFallback from './TabErrorFallback'
-import type { ReviewState } from '../types'
+import type { ReviewState, Platform } from '../types'
 
 interface WorkspacePaneProps {
   workspaceStore: StoreApi<WorkspaceState>
+  platform: Platform
 }
 
-export default function WorkspacePane({ workspaceStore }: WorkspacePaneProps) {
+export default function WorkspacePane({ workspaceStore, platform }: WorkspacePaneProps) {
   const {
     workspaces,
     activeWorkspaceId,
@@ -349,7 +350,7 @@ export default function WorkspacePane({ workspaceStore }: WorkspacePaneProps) {
         )}
 
         {/* Keybinding Overlay */}
-        <KeybindingOverlay />
+        <KeybindingOverlay platform={platform} />
       </div>
     </ErrorBoundary>
   )

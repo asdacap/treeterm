@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import type { ReviewsData } from '../types'
-import { useElectron } from '../store/ElectronContext'
+import { useReviewsApi } from '../contexts/ReviewsApiContext'
+import { useTerminalApi } from '../contexts/TerminalApiContext'
 
 interface ReviewCommentsButtonProps {
   workspacePath: string
@@ -8,7 +9,8 @@ interface ReviewCommentsButtonProps {
 }
 
 export function ReviewCommentsButton({ workspacePath, ptyId }: ReviewCommentsButtonProps): JSX.Element | null {
-  const { reviews, terminal } = useElectron()
+  const reviews = useReviewsApi()
+  const terminal = useTerminalApi()
   const [hasComments, setHasComments] = useState(false)
 
   useEffect(() => {

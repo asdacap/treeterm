@@ -4,7 +4,7 @@ import { editor, KeyMod, KeyCode } from 'monaco-editor'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
-import { useElectron } from '../store/ElectronContext'
+import { useFilesystemApi } from '../contexts/FilesystemApiContext'
 import type { EditorState } from '../types'
 import { MarkdownPreview } from './MarkdownPreview'
 
@@ -27,7 +27,7 @@ function getFilename(filePath: string): string {
 }
 
 export function FileEditor({ workspaceId, workspacePath, tabId, workspaceStore }: FileEditorProps): JSX.Element {
-  const { filesystem } = useElectron()
+  const filesystem = useFilesystemApi()
   const { workspaces, updateTabState, updateTabTitle } = useStore(workspaceStore)
   const workspace = workspaces[workspaceId]
   const tab = workspace?.tabs.find((t) => t.id === tabId)

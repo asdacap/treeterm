@@ -6,7 +6,7 @@ import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useSettingsStore } from '../store/settings'
 import { useActivityStateStore } from '../store/activityState'
-import { useElectron } from '../store/ElectronContext'
+import { useTerminalApi } from '../contexts/TerminalApiContext'
 import { createActivityStateDetector } from '../utils/activityStateDetector'
 import TerminalScrollWrapper from './TerminalScrollWrapper'
 import type { SandboxConfig, TerminalState } from '../types'
@@ -88,7 +88,7 @@ export default function BaseTerminal({
   const rawCharsRef = useRef<string>('')
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
 
-  const { terminal: terminalApi } = useElectron()
+  const terminalApi = useTerminalApi()
   const workspace = useStore(workspaceStore, (state) => state.workspaces[workspaceId])
   const updateTabState = useStore(workspaceStore, (state) => state.updateTabState)
   const removeTab = useStore(workspaceStore, (state) => state.removeTab)

@@ -39,9 +39,11 @@ function WorkspaceActivityIndicator({ tabIds }: { tabIds: string[] }) {
 
 interface TreePaneProps {
   workspaceStore: StoreApi<WorkspaceState>
+  selectFolder: () => Promise<string | null>
+  getRecentDirectories: () => Promise<string[]>
 }
 
-export default function TreePane({ workspaceStore }: TreePaneProps): JSX.Element {
+export default function TreePane({ workspaceStore, selectFolder, getRecentDirectories }: TreePaneProps): JSX.Element {
   const {
     workspaces,
     activeWorkspaceId,
@@ -303,6 +305,8 @@ export default function TreePane({ workspaceStore }: TreePaneProps): JSX.Element
         <OpenWorkspaceDialog
           onOpen={handleOpenWorkspaceSubmit}
           onCancel={() => setIsOpenWorkspaceDialogOpen(false)}
+          selectFolder={selectFolder}
+          getRecentDirectories={getRecentDirectories}
         />
       )}
     </div>

@@ -7,12 +7,18 @@ import WorkspacePickerDialog from './components/WorkspacePickerDialog'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import AppErrorFallback from './components/AppErrorFallback'
 import { useAppStore } from './store/app'
-import { ElectronContext } from './store/ElectronContext'
+import { TerminalApiContext } from './contexts/TerminalApiContext'
+import { FilesystemApiContext } from './contexts/FilesystemApiContext'
+import { GitApiContext } from './contexts/GitApiContext'
+import { ReviewsApiContext } from './contexts/ReviewsApiContext'
+import { STTApiContext } from './contexts/STTApiContext'
 
 // One-time migration: clear localStorage since daemon is now source of truth
 if (typeof localStorage !== 'undefined') {
   localStorage.removeItem('treeterm-workspaces')
 }
+
+const electron = window.electron
 
 export default function App() {
   console.log('[App] Component rendering')
@@ -20,7 +26,6 @@ export default function App() {
   const [isResizing, setIsResizing] = useState(false)
 
   const {
-    electron,
     isSettingsOpen,
     showCloseConfirm,
     unmergedWorkspaces,
@@ -42,12 +47,12 @@ export default function App() {
 
   const handleConfirmClose = () => {
     useAppStore.setState({ showCloseConfirm: false })
-    electron?.app.confirmClose()
+    electron.app.confirmClose()
   }
 
   const handleCancelClose = () => {
     useAppStore.setState({ showCloseConfirm: false })
-    electron?.app.cancelClose()
+    electron.app.cancelClose()
   }
 
   const handleCreateNewFromPicker = () => {
@@ -56,7 +61,7 @@ export default function App() {
 
   const handleOpenInNewWindow = async (session: import('./types').Session) => {
     try {
-      const result = await electron!.session.openInNewWindow(session.id)
+      const result = await electron.session.openInNewWindow(session.id)
       if (result.success) {
         useAppStore.setState({ showWorkspacePicker: false })
       } else {
@@ -87,7 +92,11 @@ export default function App() {
 
   return (
     <ErrorBoundary fallback={<AppErrorFallback />}>
-      <ElectronContext.Provider value={electron}>
+      <TerminalApiContext.Provider value={electron.terminal}>
+      <FilesystemApiContext.Provider value={electron.filesystem}>
+      <GitApiContext.Provider value={electron.git}>
+      <ReviewsApiContext.Provider value={electron.reviews}>
+      <STTApiContext.Provider value={electron.stt}>
         <div
           className="app"
           onMouseMove={handleMouseMove}
@@ -102,18 +111,27 @@ export default function App() {
           {activeStore && (
             <>
               <div className="tree-pane" style={{ width: treeWidth }}>
-                <TreePane workspaceStore={activeStore} />
+                <TreePane
+                  workspaceStore={activeStore}
+                  selectFolder={electron.selectFolder}
+                  getRecentDirectories={electron.getRecentDirectories}
+                />
               </div>
               <div
                 className={`divider ${isResizing ? 'active' : ''}`}
                 onMouseDown={handleMouseDown}
               />
               <div className="workspace-pane">
-                <WorkspacePane workspaceStore={activeStore} />
+                <WorkspacePane workspaceStore={activeStore} platform={electron.platform} />
               </div>
             </>
           )}
-          <SettingsDialog isOpen={isSettingsOpen} onClose={() => useAppStore.setState({ isSettingsOpen: false })} />
+          <SettingsDialog
+            isOpen={isSettingsOpen}
+            onClose={() => useAppStore.setState({ isSettingsOpen: false })}
+            sandbox={electron.sandbox}
+            platform={electron.platform}
+          />
           {showCloseConfirm && (
             <CloseConfirmDialog
               unmergedWorkspaces={unmergedWorkspaces}
@@ -131,7 +149,11 @@ export default function App() {
             />
           )}
         </div>
-      </ElectronContext.Provider>
+      </STTApiContext.Provider>
+      </ReviewsApiContext.Provider>
+      </GitApiContext.Provider>
+      </FilesystemApiContext.Provider>
+      </TerminalApiContext.Provider>
     </ErrorBoundary>
   )
 }

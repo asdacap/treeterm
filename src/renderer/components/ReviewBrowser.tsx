@@ -3,7 +3,8 @@ import { ChevronDown } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
-import { useElectron } from '../store/ElectronContext'
+import { useGitApi } from '../contexts/GitApiContext'
+import { useReviewsApi } from '../contexts/ReviewsApiContext'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, ReviewsData, ReviewComment } from '../types'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
 import { CommentInput } from './CommentInput'
@@ -28,7 +29,8 @@ export default function ReviewBrowser({
   parentWorkspaceId,
   workspaceStore
 }: ReviewBrowserProps) {
-  const { git, reviews: reviewsApi } = useElectron()
+  const git = useGitApi()
+  const reviewsApi = useReviewsApi()
   const { workspaces, mergeAndRemoveWorkspace, removeWorkspace, removeWorkspaceKeepBranch, removeWorkspaceKeepWorktree, closeAndCleanWorkspace, removeTab } = useStore(workspaceStore)
   const workspace = workspaces[workspaceId]
   const parentWorkspace = parentWorkspaceId ? workspaces[parentWorkspaceId] : undefined
