@@ -28,18 +28,19 @@ vi.mock('./settings', () => ({
   }
 }))
 
-// Mock window.electron
-const mockElectron = {
+// Mock deps for initialize
+const mockDeps = {
+  platform: 'darwin' as const,
   getWindowUuid: vi.fn().mockResolvedValue('test-uuid'),
   getInitialWorkspace: vi.fn().mockResolvedValue(null),
-  settings: { onOpen: vi.fn().mockReturnValue(() => {}) },
-  app: {
+  settingsApi: { onOpen: vi.fn().mockReturnValue(() => {}) },
+  appApi: {
     onCloseConfirm: vi.fn().mockReturnValue(() => {}),
     onReady: vi.fn().mockReturnValue(() => {}),
     confirmClose: vi.fn(),
     cancelClose: vi.fn()
   },
-  session: {
+  sessionApi: {
     onSync: vi.fn().mockReturnValue(() => {}),
     onShowSessions: vi.fn().mockReturnValue(() => {}),
     list: vi.fn().mockResolvedValue({ success: true, sessions: [] }),
@@ -51,16 +52,20 @@ const mockElectron = {
     list: vi.fn().mockResolvedValue([]),
     kill: vi.fn(),
     bind: vi.fn().mockReturnThis()
-  }
-}
-
-;(globalThis as unknown as { window: unknown }).window = { electron: mockElectron }
+  },
+  git: {},
+  filesystem: {},
+  reviews: {},
+  stt: {},
+  sandbox: {},
+  selectFolder: vi.fn(),
+  getRecentDirectories: vi.fn(),
+} as any
 
 describe('useAppStore', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     useAppStore.setState({
-      electron: null,
       windowUuid: null,
       daemonDisconnected: false,
       isSettingsOpen: false,
@@ -137,28 +142,28 @@ describe('useAppStore', () => {
 
   describe('initialize', () => {
     it('fetches window UUID on initialization', async () => {
-      const cleanup = await useAppStore.getState().initialize()
-      expect(mockElectron.getWindowUuid).toHaveBeenCalled()
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
+      expect(mockDeps.getWindowUuid).toHaveBeenCalled()
       expect(useAppStore.getState().windowUuid).toBe('test-uuid')
       cleanup()
     })
 
     it('returns a cleanup function', async () => {
-      const cleanup = await useAppStore.getState().initialize()
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
       expect(typeof cleanup).toBe('function')
       // Should not throw
       cleanup()
     })
 
     it('wires IPC event listeners', async () => {
-      const cleanup = await useAppStore.getState().initialize()
-      expect(mockElectron.settings.onOpen).toHaveBeenCalled()
-      expect(mockElectron.app.onCloseConfirm).toHaveBeenCalled()
-      expect(mockElectron.app.onReady).toHaveBeenCalled()
-      expect(mockElectron.session.onSync).toHaveBeenCalled()
-      expect(mockElectron.daemon.onDisconnected).toHaveBeenCalled()
-      expect(mockElectron.terminal.onNewTerminal).toHaveBeenCalled()
-      expect(mockElectron.session.onShowSessions).toHaveBeenCalled()
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
+      expect(mockDeps.settingsApi.onOpen).toHaveBeenCalled()
+      expect(mockDeps.appApi.onCloseConfirm).toHaveBeenCalled()
+      expect(mockDeps.appApi.onReady).toHaveBeenCalled()
+      expect(mockDeps.sessionApi.onSync).toHaveBeenCalled()
+      expect(mockDeps.daemon.onDisconnected).toHaveBeenCalled()
+      expect(mockDeps.terminal.onNewTerminal).toHaveBeenCalled()
+      expect(mockDeps.sessionApi.onShowSessions).toHaveBeenCalled()
       cleanup()
     })
   })

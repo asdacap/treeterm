@@ -25,5 +25,15 @@ export default [
     rules: {
       '@typescript-eslint/no-explicit-any': 'off'
     }
+  },
+  {
+    files: ['src/renderer/**/*.ts', 'src/renderer/**/*.tsx'],
+    ignores: ['src/renderer/main.tsx'],
+    rules: {
+      'no-restricted-syntax': ['error', {
+        selector: "MemberExpression[object.name='window'][property.name='electron']",
+        message: 'window.electron is only allowed in main.tsx. Use useAppStore() instead.'
+      }]
+    }
   }
 ]

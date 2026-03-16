@@ -2,12 +2,33 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import './monaco-config' // Configure Monaco before any components use it
 import { initializeApplications } from '../applications'
+import { useAppStore } from './store/app'
 import App from './App'
 import './styles/index.css'
 
-// Wait for main process ready signal, then initialize and render
+// Single point of window.electron access — everything else reads from the store
 window.electron.app.onReady(() => {
-  initializeApplications({ terminal: window.electron.terminal })
+  const e = window.electron
+
+  useAppStore.getState().initialize({
+    platform: e.platform,
+    terminal: e.terminal,
+    git: e.git,
+    filesystem: e.filesystem,
+    reviews: e.reviews,
+    stt: e.stt,
+    sandbox: e.sandbox,
+    sessionApi: e.session,
+    settingsApi: e.settings,
+    appApi: e.app,
+    daemon: e.daemon,
+    selectFolder: e.selectFolder,
+    getRecentDirectories: e.getRecentDirectories,
+    getWindowUuid: e.getWindowUuid,
+    getInitialWorkspace: e.getInitialWorkspace,
+  })
+
+  initializeApplications({ terminal: e.terminal })
 
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>

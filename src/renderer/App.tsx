@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import TreePane from './components/TreePane'
 import WorkspacePane from './components/WorkspacePane'
 import SettingsDialog from './components/SettingsDialog'
@@ -18,14 +18,23 @@ if (typeof localStorage !== 'undefined') {
   localStorage.removeItem('treeterm-workspaces')
 }
 
-const electron = window.electron
-
 export default function App() {
   console.log('[App] Component rendering')
   const [treeWidth, setTreeWidth] = useState(250)
   const [isResizing, setIsResizing] = useState(false)
 
   const {
+    platform,
+    terminal,
+    filesystem,
+    git,
+    reviews,
+    stt,
+    sandbox,
+    appApi,
+    sessionApi,
+    selectFolder,
+    getRecentDirectories,
     isSettingsOpen,
     showCloseConfirm,
     unmergedWorkspaces,
@@ -34,25 +43,18 @@ export default function App() {
     daemonDisconnected,
     getActiveWorkspaceStore,
     handleSessionRestore,
-    initialize
   } = useAppStore()
 
   const activeStore = getActiveWorkspaceStore()
 
-  useEffect(() => {
-    let cleanup: (() => void) | null = null
-    initialize().then((fn) => { cleanup = fn })
-    return () => { cleanup?.() }
-  }, [initialize])
-
   const handleConfirmClose = () => {
     useAppStore.setState({ showCloseConfirm: false })
-    electron.app.confirmClose()
+    appApi.confirmClose()
   }
 
   const handleCancelClose = () => {
     useAppStore.setState({ showCloseConfirm: false })
-    electron.app.cancelClose()
+    appApi.cancelClose()
   }
 
   const handleCreateNewFromPicker = () => {
@@ -61,7 +63,7 @@ export default function App() {
 
   const handleOpenInNewWindow = async (session: import('./types').Session) => {
     try {
-      const result = await electron.session.openInNewWindow(session.id)
+      const result = await sessionApi.openInNewWindow(session.id)
       if (result.success) {
         useAppStore.setState({ showWorkspacePicker: false })
       } else {
@@ -92,11 +94,11 @@ export default function App() {
 
   return (
     <ErrorBoundary fallback={<AppErrorFallback />}>
-      <TerminalApiContext.Provider value={electron.terminal}>
-      <FilesystemApiContext.Provider value={electron.filesystem}>
-      <GitApiContext.Provider value={electron.git}>
-      <ReviewsApiContext.Provider value={electron.reviews}>
-      <STTApiContext.Provider value={electron.stt}>
+      <TerminalApiContext.Provider value={terminal}>
+      <FilesystemApiContext.Provider value={filesystem}>
+      <GitApiContext.Provider value={git}>
+      <ReviewsApiContext.Provider value={reviews}>
+      <STTApiContext.Provider value={stt}>
         <div
           className="app"
           onMouseMove={handleMouseMove}
@@ -113,8 +115,8 @@ export default function App() {
               <div className="tree-pane" style={{ width: treeWidth }}>
                 <TreePane
                   workspaceStore={activeStore}
-                  selectFolder={electron.selectFolder}
-                  getRecentDirectories={electron.getRecentDirectories}
+                  selectFolder={selectFolder}
+                  getRecentDirectories={getRecentDirectories}
                 />
               </div>
               <div
@@ -122,15 +124,15 @@ export default function App() {
                 onMouseDown={handleMouseDown}
               />
               <div className="workspace-pane">
-                <WorkspacePane workspaceStore={activeStore} platform={electron.platform} />
+                <WorkspacePane workspaceStore={activeStore} platform={platform} />
               </div>
             </>
           )}
           <SettingsDialog
             isOpen={isSettingsOpen}
             onClose={() => useAppStore.setState({ isSettingsOpen: false })}
-            sandbox={electron.sandbox}
-            platform={electron.platform}
+            sandbox={sandbox}
+            platform={platform}
           />
           {showCloseConfirm && (
             <CloseConfirmDialog
