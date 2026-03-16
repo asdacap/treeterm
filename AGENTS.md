@@ -67,6 +67,17 @@ Never silently swallow errors or return empty/default values on failure. Throw e
 - Use Zod for runtime validation at system boundaries
 - Make invalid states unrepresentable via interface design
 
+### No duplicated state
+- Use the same data as Daemon as much as possible.
+- Use the same id for example.
+- Do not copy the daemon state, rather wrap them if needed. 
+
+### Remove simple code if redundant.
+- Let say you have two function, A and B. 
+- A is on initialize, B is on update, so B have some more code.
+- But if you call B with the same parameter as A, it would have the exact same effect.
+- Then remove A, even if A is simpler as the net impact is reduction in code and complexity.
+
 ### Do not do stupid things
 - Some stupid agent decided to not save a state because its updated too much. How do you know what is too much? Too much that it still works? No, dont do that. 
 - Do no optimize until I say so. Just make the flow as is.
@@ -95,6 +106,7 @@ Prefer to validate data at the last minute. Eg: do not check for valid parent id
 
 - Run `npm run test:coverage` when writing or modifying code
 - AlWAYS run `npm run build` and check coverage and test before committing.
+  - Just install dependencies if needed to run it.
 - Minimum 10% code and branch coverage for new code
 - Daemon: unit tests in isolation; Main/Renderer: integration tests; gRPC: contract tests
 
