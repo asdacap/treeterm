@@ -270,6 +270,8 @@ export function MonacoDiffViewer({
     // Create DOM container for inline comment
     const container = document.createElement('div')
     container.className = 'inline-comment-zone'
+    // Prevent Monaco from stealing focus when clicking inside the comment zone
+    container.addEventListener('mousedown', (e) => e.stopPropagation())
     setCommentContainer(container)
 
     editor.changeViewZones((accessor) => {
@@ -281,9 +283,9 @@ export function MonacoDiffViewer({
       // Add new zone
       viewZoneIdRef.current = accessor.addZone({
         afterLineNumber: lineNumber,
-        heightInPx: 140,
+        heightInPx: 180,
         domNode: container,
-        suppressMouseDown: false
+        suppressMouseDown: true
       })
     })
 
