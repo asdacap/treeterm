@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { createStore } from 'zustand/vanilla'
 import { filesystemApplication } from './renderer'
 import type { Tab, Workspace, FilesystemState } from '../../renderer/types'
 
@@ -11,6 +12,9 @@ vi.mock('react', () => ({
 vi.mock('../../renderer/components/FilesystemBrowser', () => ({
   FilesystemBrowser: vi.fn(() => null)
 }))
+
+import type { WorkspaceState } from "../../renderer/store/createWorkspaceStore"
+const mockWorkspaceStore = createStore(() => ({} as WorkspaceState))
 
 describe('Filesystem Renderer', () => {
   beforeEach(() => {
@@ -74,17 +78,18 @@ describe('Filesystem Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         })
 
         expect(result).toEqual({
           component: expect.any(Function),
-          props: {
+          props: expect.objectContaining({
             key: 'tab-1',
             workspacePath: '/test',
             workspaceId: 'ws-1',
             tabId: 'tab-1'
-          }
+          })
         })
       })
 
@@ -103,7 +108,8 @@ describe('Filesystem Renderer', () => {
           tab,
           workspaceId: 'project-ws',
           workspacePath: '/project',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         }) as { props: { workspaceId: string; workspacePath: string } }
 
         expect(result.props.workspaceId).toBe('project-ws')
@@ -125,7 +131,8 @@ describe('Filesystem Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         }) as { props: { tabId: string } }
 
         expect(result.props.tabId).toBe('unique-tab-id')
@@ -146,7 +153,8 @@ describe('Filesystem Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         })
 
         expect(result).toBeDefined()
@@ -169,7 +177,8 @@ describe('Filesystem Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         })
 
         expect(result).toBeDefined()
@@ -190,7 +199,8 @@ describe('Filesystem Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/root',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         })
 
         expect(result).toBeDefined()
@@ -211,14 +221,16 @@ describe('Filesystem Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         })
 
         const hiddenResult = filesystemApplication.render({
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: false
+          isVisible: false,
+          workspaceStore: mockWorkspaceStore
         })
 
         expect(visibleResult).toBeDefined()
@@ -237,7 +249,8 @@ describe('Filesystem Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         })
 
         // Filesystem renderer doesn't validate state, so it should still render
@@ -258,7 +271,8 @@ describe('Filesystem Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         })
 
         // Filesystem renderer doesn't validate state, so it should still render

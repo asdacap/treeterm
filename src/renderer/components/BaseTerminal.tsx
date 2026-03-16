@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { useWorkspaceStore } from '../store/workspace'
+import { useStore } from 'zustand'
+import type { StoreApi } from 'zustand'
+import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useSettingsStore } from '../store/settings'
 import { useActivityStateStore } from '../store/activityState'
 import { useElectron } from '../store/ElectronContext'
@@ -59,6 +61,7 @@ interface BaseTerminalProps {
   sandbox?: SandboxConfig
   isVisible?: boolean
   config: BaseTerminalConfig
+  workspaceStore: StoreApi<WorkspaceState>
 }
 
 interface ContextMenu {
@@ -72,7 +75,8 @@ export default function BaseTerminal({
   tabId,
   sandbox,
   isVisible,
-  config
+  config,
+  workspaceStore
 }: BaseTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
@@ -85,9 +89,9 @@ export default function BaseTerminal({
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
 
   const { terminal: terminalApi } = useElectron()
-  const workspace = useWorkspaceStore((state) => state.workspaces[workspaceId])
-  const updateTabState = useWorkspaceStore((state) => state.updateTabState)
-  const removeTab = useWorkspaceStore((state) => state.removeTab)
+  const workspace = useStore(workspaceStore, (state) => state.workspaces[workspaceId])
+  const updateTabState = useStore(workspaceStore, (state) => state.updateTabState)
+  const removeTab = useStore(workspaceStore, (state) => state.removeTab)
   const setTabState = useActivityStateStore((state) => state.setTabState)
   const settings = useSettingsStore((state) => state.settings)
 

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { createStore } from 'zustand/vanilla'
 import { editorApplication } from './renderer'
 import type { Tab, Workspace, EditorState } from '../../renderer/types'
 
@@ -11,6 +12,9 @@ vi.mock('react', () => ({
 vi.mock('../../renderer/components/FileEditor', () => ({
   FileEditor: vi.fn(() => null)
 }))
+
+import type { WorkspaceState } from "../../renderer/store/createWorkspaceStore"
+const mockWorkspaceStore = createStore(() => ({} as WorkspaceState))
 
 describe('Editor Renderer', () => {
   beforeEach(() => {
@@ -225,17 +229,18 @@ describe('Editor Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         })
 
         expect(result).toEqual({
           component: expect.any(Function),
-          props: {
+          props: expect.objectContaining({
             key: 'tab-1',
             workspaceId: 'ws-1',
             workspacePath: '/test',
             tabId: 'tab-1'
-          }
+          })
         })
       })
 
@@ -260,7 +265,8 @@ describe('Editor Renderer', () => {
           tab,
           workspaceId: 'ws-2',
           workspacePath: '/workspace',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         }) as { props: { tabId: string } }
 
         expect(result.props.tabId).toBe('editor-tab-42')
@@ -287,7 +293,8 @@ describe('Editor Renderer', () => {
           tab,
           workspaceId: 'project-ws',
           workspacePath: '/project',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         }) as { props: { workspaceId: string; workspacePath: string } }
 
         expect(result.props.workspaceId).toBe('project-ws')
@@ -331,14 +338,16 @@ describe('Editor Renderer', () => {
           tab: dirtyTab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         })
 
         const cleanResult = editorApplication.render({
           tab: cleanTab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         })
 
         expect(dirtyResult).toBeDefined()

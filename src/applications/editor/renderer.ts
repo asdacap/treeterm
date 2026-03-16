@@ -25,12 +25,13 @@ export const editorApplication: Application<EditorState> = {
     }
   },
 
-  render: ({ tab, workspaceId, workspacePath }) => {
+  render: ({ tab, workspaceId, workspacePath, workspaceStore }) => {
     return createElement(FileEditor, {
       key: tab.id,
       workspaceId,
       workspacePath,
-      tabId: tab.id
+      tabId: tab.id,
+      workspaceStore
     })
   },
 

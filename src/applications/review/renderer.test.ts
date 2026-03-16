@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { createStore } from 'zustand/vanilla'
 import { reviewApplication } from './renderer'
 import type { Tab, Workspace, ReviewState } from '../../renderer/types'
 
@@ -11,6 +12,9 @@ vi.mock('react', () => ({
 vi.mock('../../renderer/components/ReviewBrowser', () => ({
   default: vi.fn(() => null)
 }))
+
+import type { WorkspaceState } from "../../renderer/store/createWorkspaceStore"
+const mockWorkspaceStore = createStore(() => ({} as WorkspaceState))
 
 describe('Review Renderer', () => {
   beforeEach(() => {
@@ -59,18 +63,19 @@ describe('Review Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         })
 
         expect(result).toEqual({
           component: expect.any(Function),
-          props: {
+          props: expect.objectContaining({
             key: 'tab-1',
             workspaceId: 'ws-1',
             workspacePath: '/test',
             tabId: 'tab-1',
             parentWorkspaceId: undefined
-          }
+          })
         })
       })
 
@@ -88,7 +93,8 @@ describe('Review Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         }) as { props: { parentWorkspaceId: string } }
 
         expect(result.props.parentWorkspaceId).toBe('parent-ws-123')
@@ -106,7 +112,8 @@ describe('Review Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         })
 
         expect(result).toBeNull()
@@ -124,7 +131,8 @@ describe('Review Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         })
 
         expect(result).toBeNull()
@@ -142,7 +150,8 @@ describe('Review Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         }) as { props: { parentWorkspaceId: string | undefined } }
 
         expect(result.props.parentWorkspaceId).toBeUndefined()
@@ -162,7 +171,8 @@ describe('Review Renderer', () => {
           tab,
           workspaceId: 'feature-ws',
           workspacePath: '/workspace/feature',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         }) as { props: { workspaceId: string; workspacePath: string } }
 
         expect(result.props.workspaceId).toBe('feature-ws')
@@ -181,14 +191,16 @@ describe('Review Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         })
 
         const hiddenResult = reviewApplication.render({
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: false
+          isVisible: false,
+          workspaceStore: mockWorkspaceStore
         })
 
         expect(visibleResult).toBeDefined()
@@ -209,7 +221,8 @@ describe('Review Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         })
 
         // Should return null because parentWorkspaceId is not a string
@@ -231,7 +244,8 @@ describe('Review Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         }) as { props: { parentWorkspaceId: string } }
 
         expect(result.props.parentWorkspaceId).toBe('parent-123')

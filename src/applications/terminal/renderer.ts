@@ -25,13 +25,14 @@ export function createTerminalApplication(startByDefault: boolean, deps: Termina
       useActivityStateStore.getState().removeTabState(tab.id)
     },
 
-    render: ({ tab, workspaceId, workspacePath, isVisible }) => {
+    render: ({ tab, workspaceId, workspacePath, isVisible, workspaceStore }) => {
       return createElement(Terminal, {
         key: tab.id,
         cwd: workspacePath,
         workspaceId,
         tabId: tab.id,
-        isVisible
+        isVisible,
+        workspaceStore
       })
     },
 
@@ -62,14 +63,15 @@ export function createTerminalVariant(instance: TerminalInstance, deps: Terminal
       useActivityStateStore.getState().removeTabState(tab.id)
     },
 
-    render: ({ tab, workspaceId, workspacePath, isVisible }) => {
+    render: ({ tab, workspaceId, workspacePath, isVisible, workspaceStore }) => {
       return createElement(Terminal, {
         key: tab.id,
         cwd: workspacePath,
         workspaceId,
         tabId: tab.id,
         isVisible,
-        startupCommand: instance.startupCommand
+        startupCommand: instance.startupCommand,
+        workspaceStore
       })
     },
 

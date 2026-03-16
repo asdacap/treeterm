@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Editor, { OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
-import { useWorkspaceStore } from '../store/workspace'
+import { useStore } from 'zustand'
+import type { StoreApi } from 'zustand'
+import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useElectron } from '../store/ElectronContext'
 import type { EditorState } from '../types'
 import { MarkdownPreview } from './MarkdownPreview'
@@ -10,6 +12,7 @@ interface FileViewerProps {
   workspacePath: string
   workspaceId: string
   filePath: string | null
+  workspaceStore: StoreApi<WorkspaceState>
 }
 
 interface FileState {
@@ -28,9 +31,9 @@ function mapLanguageToMonaco(language: string): string {
   return languageMap[language] || language
 }
 
-export function FileViewer({ workspacePath, workspaceId, filePath }: FileViewerProps): JSX.Element {
+export function FileViewer({ workspacePath, workspaceId, filePath, workspaceStore }: FileViewerProps): JSX.Element {
   const { filesystem } = useElectron()
-  const { addTabWithState } = useWorkspaceStore()
+  const { addTabWithState } = useStore(workspaceStore)
   const [fileState, setFileState] = useState<FileState>({
     content: '',
     language: 'plaintext',

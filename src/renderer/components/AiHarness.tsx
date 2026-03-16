@@ -1,6 +1,8 @@
 import { useMemo } from 'react'
 import BaseTerminal, { type BaseTerminalConfig } from './BaseTerminal'
 import type { SandboxConfig } from '../types'
+import type { StoreApi } from 'zustand'
+import type { WorkspaceState } from '../store/createWorkspaceStore'
 
 interface AiHarnessProps {
   cwd: string
@@ -11,6 +13,7 @@ interface AiHarnessProps {
   command: string
   backgroundColor: string
   disableScrollbar?: boolean
+  workspaceStore: StoreApi<WorkspaceState>
 }
 
 export default function AiHarness({
@@ -21,7 +24,8 @@ export default function AiHarness({
   isVisible,
   command,
   backgroundColor,
-  disableScrollbar
+  disableScrollbar,
+  workspaceStore
 }: AiHarnessProps) {
   // Memoize config based on props to prevent unnecessary re-renders
   const config = useMemo<BaseTerminalConfig>(() => ({
@@ -41,6 +45,7 @@ export default function AiHarness({
       sandbox={sandbox}
       isVisible={isVisible}
       config={config}
+      workspaceStore={workspaceStore}
     />
   )
 }

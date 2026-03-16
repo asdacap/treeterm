@@ -3,7 +3,6 @@ import { useEffect, useRef, useCallback } from 'react'
 import { parseKeybinding } from 'tinykeys'
 import { useSettingsStore } from '../store/settings'
 import { usePrefixModeStore } from '../store/prefixMode'
-import { useWorkspaceStore } from '../store/workspace'
 import { convertDirectKeybinding } from '../utils/keybindingConverter'
 import type { Settings } from '../types'
 
@@ -14,6 +13,7 @@ export interface KeybindingHandlers {
   prevTab?: () => void
   openSettings?: () => void
   workspaceFocus?: () => void
+  setActiveWorkspace?: (id: string | null) => void
 }
 
 export function usePrefixKeybindings(handlers: KeybindingHandlers): void {
@@ -25,7 +25,6 @@ export function usePrefixKeybindings(handlers: KeybindingHandlers): void {
     navigateWorkspace,
     selectFocusedWorkspace
   } = usePrefixModeStore()
-  const { setActiveWorkspace } = useWorkspaceStore()
   const timeoutRef = useRef<number | null>(null)
 
   // Clear timeout on unmount
@@ -56,8 +55,9 @@ export function usePrefixKeybindings(handlers: KeybindingHandlers): void {
     (e: KeyboardEvent) => {
       const { prefixMode, keybindings } = settings
 
-      // Action map for all keybindings
-      const actionMap: Record<keyof Settings['keybindings'], keyof KeybindingHandlers> = {
+      // Action map for all keybindings (only maps to no-argument handlers)
+      type NoArgHandlerKey = keyof { [K in keyof KeybindingHandlers as KeybindingHandlers[K] extends (() => void) | undefined ? K : never]: KeybindingHandlers[K] }
+      const actionMap: Record<keyof Settings['keybindings'], NoArgHandlerKey> = {
         newTab: 'newTab',
         closeTab: 'closeTab',
         nextTab: 'nextTab',
@@ -136,7 +136,7 @@ export function usePrefixKeybindings(handlers: KeybindingHandlers): void {
           e.stopPropagation()
           const selectedWorkspaceId = selectFocusedWorkspace()
           if (selectedWorkspaceId) {
-            setActiveWorkspace(selectedWorkspaceId)
+            handlers.setActiveWorkspace?.(selectedWorkspaceId)
           }
           deactivate()
           return
@@ -167,7 +167,6 @@ export function usePrefixKeybindings(handlers: KeybindingHandlers): void {
       deactivate,
       navigateWorkspace,
       selectFocusedWorkspace,
-      setActiveWorkspace,
       handlers
     ]
   )

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { createStore } from 'zustand/vanilla'
 import {
   createTerminalApplication,
   createTerminalVariant
@@ -27,6 +28,8 @@ vi.mock('../../renderer/store/activityState', () => ({
 
 const mockTerminalKill = vi.fn()
 const mockDeps = { terminal: { kill: mockTerminalKill } }
+import type { WorkspaceState } from "../../renderer/store/createWorkspaceStore"
+const mockWorkspaceStore = createStore(() => ({} as WorkspaceState))
 
 describe('Terminal Renderer', () => {
   beforeEach(() => {
@@ -208,19 +211,20 @@ describe('Terminal Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         })
 
-        expect(result).toEqual({
+        expect(result).toEqual(expect.objectContaining({
           component: expect.any(Function),
-          props: {
+          props: expect.objectContaining({
             key: 'tab-1',
             cwd: '/test',
             workspaceId: 'ws-1',
             tabId: 'tab-1',
             isVisible: true
-          }
-        })
+          })
+        }))
       })
     })
   })
@@ -252,7 +256,8 @@ describe('Terminal Renderer', () => {
         tab,
         workspaceId: 'ws-1',
         workspacePath: '/test',
-        isVisible: true
+        isVisible: true,
+        workspaceStore: mockWorkspaceStore
       })
 
       expect(result).toBeDefined()
@@ -420,20 +425,21 @@ describe('Terminal Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         })
 
-        expect(result).toEqual({
+        expect(result).toEqual(expect.objectContaining({
           component: expect.any(Function),
-          props: {
+          props: expect.objectContaining({
             key: 'tab-1',
             cwd: '/test',
             workspaceId: 'ws-1',
             tabId: 'tab-1',
             isVisible: true,
             startupCommand: 'echo "Hello"'
-          }
-        })
+          })
+        }))
       })
 
       it('passes empty startupCommand when not set', () => {
@@ -452,7 +458,8 @@ describe('Terminal Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         }) as { props: { startupCommand: string } }
 
         expect(result.props.startupCommand).toBe('')

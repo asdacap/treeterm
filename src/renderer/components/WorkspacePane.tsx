@@ -1,5 +1,7 @@
 import { useEffect, useCallback, useState, useMemo } from 'react'
-import { useWorkspaceStore } from '../store/workspace'
+import { useStore } from 'zustand'
+import type { StoreApi } from 'zustand'
+import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { usePrefixModeStore } from '../store/prefixMode'
 import { applicationRegistry } from '../registry/applicationRegistry'
 import { usePrefixKeybindings } from '../hooks/usePrefixKeybindings'
@@ -11,7 +13,11 @@ import WorkspaceErrorFallback from './WorkspaceErrorFallback'
 import TabErrorFallback from './TabErrorFallback'
 import type { ReviewState } from '../types'
 
-export default function WorkspacePane() {
+interface WorkspacePaneProps {
+  workspaceStore: StoreApi<WorkspaceState>
+}
+
+export default function WorkspacePane({ workspaceStore }: WorkspacePaneProps) {
   const {
     workspaces,
     activeWorkspaceId,
@@ -25,8 +31,9 @@ export default function WorkspacePane() {
     createWorktreeFromRemote,
     removeWorkspace,
     mergeAndRemoveWorkspace,
-    closeAndCleanWorkspace
-  } = useWorkspaceStore()
+    closeAndCleanWorkspace,
+    setActiveWorkspace
+  } = useStore(workspaceStore)
   const { enterWorkspaceFocus } = usePrefixModeStore()
 
   const activeWorkspace = activeWorkspaceId ? workspaces[activeWorkspaceId] : null
@@ -190,7 +197,8 @@ export default function WorkspacePane() {
           ? flattenedWorkspaceIds.indexOf(activeWorkspaceId)
           : 0
         enterWorkspaceFocus(flattenedWorkspaceIds, currentIndex >= 0 ? currentIndex : 0)
-      }
+      },
+      setActiveWorkspace
     }),
     [
       activeWorkspace,
@@ -199,7 +207,8 @@ export default function WorkspacePane() {
       handleNewDefaultTab,
       handleCloseTab,
       handleSelectTab,
-      enterWorkspaceFocus
+      enterWorkspaceFocus,
+      setActiveWorkspace
     ]
   )
 
@@ -316,7 +325,8 @@ export default function WorkspacePane() {
                       tab,
                       workspaceId: workspace.id,
                       workspacePath: workspace.path,
-                      isVisible
+                      isVisible,
+                      workspaceStore
                     })}
                   </ErrorBoundary>
                 </div>

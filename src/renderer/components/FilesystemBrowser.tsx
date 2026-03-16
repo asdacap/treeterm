@@ -1,5 +1,7 @@
 import { useState, useCallback } from 'react'
-import { useWorkspaceStore } from '../store/workspace'
+import { useStore } from 'zustand'
+import type { StoreApi } from 'zustand'
+import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { FileTree } from './FileTree'
 import { FileViewer } from './FileViewer'
 import type { FilesystemState } from '../types'
@@ -8,14 +10,16 @@ interface FilesystemBrowserProps {
   workspacePath: string
   workspaceId: string
   tabId: string
+  workspaceStore: StoreApi<WorkspaceState>
 }
 
 export function FilesystemBrowser({
   workspacePath,
   workspaceId,
-  tabId
+  tabId,
+  workspaceStore
 }: FilesystemBrowserProps): JSX.Element {
-  const { workspaces, updateTabState } = useWorkspaceStore()
+  const { workspaces, updateTabState } = useStore(workspaceStore)
   const workspace = workspaces[workspaceId]
   const tab = workspace?.tabs.find((t) => t.id === tabId)
   const state = tab?.state as FilesystemState | undefined
@@ -79,7 +83,7 @@ export function FilesystemBrowser({
         />
       </div>
       <div className={`divider ${isResizing ? 'active' : ''}`} onMouseDown={handleMouseDown} />
-      <FileViewer workspacePath={workspacePath} workspaceId={workspaceId} filePath={state.selectedPath} />
+      <FileViewer workspacePath={workspacePath} workspaceId={workspaceId} filePath={state.selectedPath} workspaceStore={workspaceStore} />
     </div>
   )
 }

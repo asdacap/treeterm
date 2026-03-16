@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react'
 import { Loader2 } from 'lucide-react'
-import { useWorkspaceStore } from '../store/workspace'
+import { useStore } from 'zustand'
+import type { StoreApi } from 'zustand'
+import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useActivityStateStore } from '../store/activityState'
 import { usePrefixModeStore } from '../store/prefixMode'
 import { useAppStore } from '../store/app'
@@ -35,7 +37,11 @@ function WorkspaceActivityIndicator({ tabIds }: { tabIds: string[] }) {
   )
 }
 
-export default function TreePane(): JSX.Element {
+interface TreePaneProps {
+  workspaceStore: StoreApi<WorkspaceState>
+}
+
+export default function TreePane({ workspaceStore }: TreePaneProps): JSX.Element {
   const {
     workspaces,
     activeWorkspaceId,
@@ -48,7 +54,7 @@ export default function TreePane(): JSX.Element {
     removeWorkspace,
     mergeAndRemoveWorkspace,
     setActiveWorkspace
-  } = useWorkspaceStore()
+  } = useStore(workspaceStore)
 
   const { activeSessionId, workspaceStores, switchSession } = useAppStore()
   const sessionIds = Object.keys(workspaceStores)

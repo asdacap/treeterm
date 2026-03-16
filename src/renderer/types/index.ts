@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react'
+import type { StoreApi } from 'zustand'
+import type { WorkspaceState } from '../store/createWorkspaceStore'
 
 // Import and re-export shared types
 import type {
@@ -60,6 +62,7 @@ export interface ApplicationRenderProps {
   workspaceId: string
   workspacePath: string
   isVisible: boolean
+  workspaceStore: StoreApi<WorkspaceState>
 }
 
 // Type-specific state interfaces (for internal use within applications)

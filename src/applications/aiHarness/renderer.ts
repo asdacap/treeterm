@@ -31,7 +31,7 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
       useActivityStateStore.getState().removeTabState(tab.id)
     },
 
-    render: ({ tab, workspaceId, workspacePath, isVisible }) => {
+    render: ({ tab, workspaceId, workspacePath, isVisible, workspaceStore }) => {
       if (!isAiHarnessState(tab.state)) {
         return null
       }
@@ -44,7 +44,8 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
         isVisible,
         command: instance.command,
         backgroundColor: instance.backgroundColor,
-        disableScrollbar: instance.disableScrollbar
+        disableScrollbar: instance.disableScrollbar,
+        workspaceStore
       })
     },
 

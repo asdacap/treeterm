@@ -7,7 +7,6 @@ import WorkspacePickerDialog from './components/WorkspacePickerDialog'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import AppErrorFallback from './components/AppErrorFallback'
 import { useAppStore } from './store/app'
-import { WorkspaceStoreContext } from './store/WorkspaceStoreContext'
 import { ElectronContext } from './store/ElectronContext'
 
 // One-time migration: clear localStorage since daemon is now source of truth
@@ -89,7 +88,6 @@ export default function App() {
   return (
     <ErrorBoundary fallback={<AppErrorFallback />}>
       <ElectronContext.Provider value={electron}>
-      <WorkspaceStoreContext.Provider value={activeStore}>
         <div
           className="app"
           onMouseMove={handleMouseMove}
@@ -104,14 +102,14 @@ export default function App() {
           {activeStore && (
             <>
               <div className="tree-pane" style={{ width: treeWidth }}>
-                <TreePane />
+                <TreePane workspaceStore={activeStore} />
               </div>
               <div
                 className={`divider ${isResizing ? 'active' : ''}`}
                 onMouseDown={handleMouseDown}
               />
               <div className="workspace-pane">
-                <WorkspacePane />
+                <WorkspacePane workspaceStore={activeStore} />
               </div>
             </>
           )}
@@ -133,7 +131,6 @@ export default function App() {
             />
           )}
         </div>
-      </WorkspaceStoreContext.Provider>
       </ElectronContext.Provider>
     </ErrorBoundary>
   )

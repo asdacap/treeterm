@@ -12,12 +12,13 @@ export const filesystemApplication: Application<FilesystemState> = {
     expandedDirs: []
   }),
 
-  render: ({ tab, workspaceId, workspacePath }) => {
+  render: ({ tab, workspaceId, workspacePath, workspaceStore }) => {
     return createElement(FilesystemBrowser, {
       key: tab.id,
       workspacePath,
       workspaceId,
-      tabId: tab.id
+      tabId: tab.id,
+      workspaceStore
     })
   },
 

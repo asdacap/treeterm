@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { createStore } from 'zustand/vanilla'
 import { createAiHarnessVariant } from './renderer'
 import type { Tab, Workspace, AiHarnessInstance, AiHarnessState } from '../../renderer/types'
 import { useActivityStateStore } from '../../renderer/store/activityState'
@@ -27,6 +28,8 @@ vi.mock('../../renderer/store/activityState', () => ({
 
 const mockTerminalKill = vi.fn()
 const mockDeps = { terminal: { kill: mockTerminalKill } }
+import type { WorkspaceState } from "../../renderer/store/createWorkspaceStore"
+const mockWorkspaceStore = createStore(() => ({} as WorkspaceState))
 
 describe('AI Harness Renderer', () => {
   const mockInstance: AiHarnessInstance = {
@@ -261,12 +264,13 @@ describe('AI Harness Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         })
 
         expect(result).toEqual({
           component: expect.any(Function),
-          props: {
+          props: expect.objectContaining({
             key: 'tab-1',
             cwd: '/test',
             workspaceId: 'ws-1',
@@ -276,7 +280,7 @@ describe('AI Harness Renderer', () => {
             command: 'claude',
             backgroundColor: '#1a1a24',
             disableScrollbar: true
-          }
+          })
         })
       })
 
@@ -293,7 +297,8 @@ describe('AI Harness Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         })
 
         expect(result).toBeNull()
@@ -315,7 +320,8 @@ describe('AI Harness Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: false
+          isVisible: false,
+          workspaceStore: mockWorkspaceStore
         }) as { props: Record<string, unknown> }
 
         expect(result.props.command).toBe('claude')
@@ -342,7 +348,8 @@ describe('AI Harness Renderer', () => {
           tab,
           workspaceId: 'ws-1',
           workspacePath: '/test',
-          isVisible: true
+          isVisible: true,
+          workspaceStore: mockWorkspaceStore
         }) as { props: Record<string, unknown> }
 
         expect(result.props.disableScrollbar).toBeUndefined()

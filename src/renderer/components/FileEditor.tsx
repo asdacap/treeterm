@@ -1,7 +1,9 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import Editor, { OnMount, OnChange } from '@monaco-editor/react'
 import { editor, KeyMod, KeyCode } from 'monaco-editor'
-import { useWorkspaceStore } from '../store/workspace'
+import { useStore } from 'zustand'
+import type { StoreApi } from 'zustand'
+import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useElectron } from '../store/ElectronContext'
 import type { EditorState } from '../types'
 import { MarkdownPreview } from './MarkdownPreview'
@@ -10,6 +12,7 @@ interface FileEditorProps {
   workspaceId: string
   workspacePath: string
   tabId: string
+  workspaceStore: StoreApi<WorkspaceState>
 }
 
 function mapLanguageToMonaco(language: string): string {
@@ -23,9 +26,9 @@ function getFilename(filePath: string): string {
   return filePath.split('/').pop() || filePath
 }
 
-export function FileEditor({ workspaceId, workspacePath, tabId }: FileEditorProps): JSX.Element {
+export function FileEditor({ workspaceId, workspacePath, tabId, workspaceStore }: FileEditorProps): JSX.Element {
   const { filesystem } = useElectron()
-  const { workspaces, updateTabState, updateTabTitle } = useWorkspaceStore()
+  const { workspaces, updateTabState, updateTabTitle } = useStore(workspaceStore)
   const workspace = workspaces[workspaceId]
   const tab = workspace?.tabs.find((t) => t.id === tabId)
   const state = tab?.state as EditorState | undefined

@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ChevronDown } from 'lucide-react'
-import { useWorkspaceStore } from '../store/workspace'
+import { useStore } from 'zustand'
+import type { StoreApi } from 'zustand'
+import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useElectron } from '../store/ElectronContext'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, ReviewsData, ReviewComment } from '../types'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
@@ -14,6 +16,7 @@ interface ReviewBrowserProps {
   // parentWorkspaceId is optional - if undefined, this is a top-level worktree
   // and only uncommitted changes are shown (no merge functionality)
   parentWorkspaceId?: string
+  workspaceStore: StoreApi<WorkspaceState>
 }
 
 type ViewMode = 'committed' | 'uncommitted'
@@ -22,10 +25,11 @@ export default function ReviewBrowser({
   workspaceId,
   workspacePath,
   tabId,
-  parentWorkspaceId
+  parentWorkspaceId,
+  workspaceStore
 }: ReviewBrowserProps) {
   const { git, reviews: reviewsApi } = useElectron()
-  const { workspaces, mergeAndRemoveWorkspace, removeWorkspace, removeWorkspaceKeepBranch, removeWorkspaceKeepWorktree, closeAndCleanWorkspace, removeTab } = useWorkspaceStore()
+  const { workspaces, mergeAndRemoveWorkspace, removeWorkspace, removeWorkspaceKeepBranch, removeWorkspaceKeepWorktree, closeAndCleanWorkspace, removeTab } = useStore(workspaceStore)
   const workspace = workspaces[workspaceId]
   const parentWorkspace = parentWorkspaceId ? workspaces[parentWorkspaceId] : undefined
   

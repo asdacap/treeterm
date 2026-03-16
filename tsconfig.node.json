@@ -18,6 +18,7 @@
     "src/shared/**/*.ts",
     "src/daemon/**/*.ts",
     "src/generated/**/*.ts",
-    "src/renderer/types/**/*.ts"
+    "src/renderer/types/**/*.ts",
+    "src/renderer/store/createWorkspaceStore.ts"
   ]
 }
