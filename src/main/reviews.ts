@@ -27,7 +27,7 @@ const defaultReviewsData: ReviewsData = {
 }
 
 function getReviewsPath(worktreePath: string): string {
-  return join(TREETERM_DIR, REVIEWS_FILENAME)
+  return join(worktreePath, TREETERM_DIR, REVIEWS_FILENAME)
 }
 
 export class ReviewsClient {

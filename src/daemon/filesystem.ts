@@ -180,6 +180,9 @@ export async function writeFile(
       return { success: false, error: 'Access denied: Path outside workspace' }
     }
 
+    // Ensure parent directory exists
+    await fs.mkdir(path.dirname(filePath), { recursive: true })
+
     // Write file
     await fs.writeFile(filePath, content, 'utf-8')
 
