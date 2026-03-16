@@ -58,7 +58,7 @@ export default function App() {
   }
 
   const handleCreateNewFromPicker = () => {
-    useAppStore.setState({ showWorkspacePicker: false })
+    useAppStore.getState().createNewSession()
   }
 
   const handleOpenInNewWindow = async (session: import('./types').Session) => {

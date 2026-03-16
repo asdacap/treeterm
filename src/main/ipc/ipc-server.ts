@@ -706,16 +706,12 @@ export class IpcServer {
     )
   }
 
-  onAppCloseConfirmed(handler: (...args: IpcSends['appCloseConfirmed']['params']) => void): void {
-    ipcMain.on(CHANNELS.appCloseConfirmed, (_event: IpcMainEvent, ...args: unknown[]) =>
-      handler(...(args as IpcSends['appCloseConfirmed']['params']))
-    )
+  onAppCloseConfirmed(handler: (event: IpcMainEvent) => void): void {
+    ipcMain.on(CHANNELS.appCloseConfirmed, (event: IpcMainEvent) => handler(event))
   }
 
-  onAppCloseCancelled(handler: (...args: IpcSends['appCloseCancelled']['params']) => void): void {
-    ipcMain.on(CHANNELS.appCloseCancelled, (_event: IpcMainEvent, ...args: unknown[]) =>
-      handler(...(args as IpcSends['appCloseCancelled']['params']))
-    )
+  onAppCloseCancelled(handler: (event: IpcMainEvent) => void): void {
+    ipcMain.on(CHANNELS.appCloseCancelled, (event: IpcMainEvent) => handler(event))
   }
 
   // ==================== Event Emitters (main → renderer) ====================
