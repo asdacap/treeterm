@@ -845,6 +845,14 @@ server.onReviewsUpdateOutdated(async (worktreePath, currentCommitHash) => {
   return { success: true, reviews }
 })
 
+server.onReviewsGetFilePath(async (worktreePath) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  initializeReviewsClient()
+  if (!reviewsClient) throw new Error('Reviews client not initialized')
+  const filePath = await reviewsClient.resolveReviewFilePath(worktreePath)
+  return { success: true, filePath }
+})
+
 // Settings IPC Handlers
 server.onSettingsLoad(() => {
   return loadSettings()

@@ -183,6 +183,10 @@ export interface IpcRequests {
     params: [worktreePath: string, currentCommitHash: string]
     result: { success: boolean; reviews?: ReviewsData; error?: string }
   }
+  reviewsGetFilePath: {
+    params: [worktreePath: string]
+    result: { success: boolean; filePath?: string; error?: string }
+  }
 
   // Settings operations
   settingsLoad: {
