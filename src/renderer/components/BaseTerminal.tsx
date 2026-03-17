@@ -76,6 +76,8 @@ export interface BaseTerminalConfig {
   showPushToTalk?: boolean
   // Whether to disable the scrollbar (for tools with own scrolling like opencode)
   disableScrollbar?: boolean
+  // Whether to strip CSI 3J (clear scrollback) from PTY data before writing to xterm
+  stripScrollbackClear?: boolean
 }
 
 interface BaseTerminalProps {
@@ -220,6 +222,10 @@ export default function BaseTerminal({
     const connectToPty = (id: string) => {
       ptyIdRef.current = id
       const unsubscribeData = terminalApi.onData(id, (data) => {
+        // Strip CSI 3J (clear scrollback) if configured
+        const dataToWrite = config.stripScrollbackClear
+          ? data.replace(/\x1b\[3J/g, '')
+          : data
         // Detect ANSI sequences that manipulate scrollback/screen
         const scrollMatches = detectScrollManipulation(data)
         if (scrollMatches.length > 0) {
@@ -228,7 +234,7 @@ export default function BaseTerminal({
             viewportY: terminal.buffer.active.viewportY,
             length: terminal.buffer.active.length,
           }
-          terminal.write(data)
+          terminal.write(dataToWrite)
           const bufAfter = {
             baseY: terminal.buffer.active.baseY,
             viewportY: terminal.buffer.active.viewportY,
@@ -243,7 +249,7 @@ export default function BaseTerminal({
             })
           }
         } else {
-          terminal.write(data)
+          terminal.write(dataToWrite)
         }
         // Process data for activity state detection
         detector.processData(data)
