@@ -151,7 +151,7 @@ export class GitClient {
    */
   private parseStatus(output: string): GitStatusEntry[] {
     const entries: GitStatusEntry[] = []
-    const lines = output.trim().split('\n').filter(Boolean)
+    const lines = output.split('\n').filter(line => line.length > 0)
 
     for (const line of lines) {
       if (line.length < 3) continue

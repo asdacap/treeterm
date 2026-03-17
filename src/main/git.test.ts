@@ -55,17 +55,14 @@ function errorStream(stderr: string, exitCode = 1): any {
 describe('GitClient', () => {
   describe('parseStatus (via getStatus)', () => {
     it('parses modified unstaged file', async () => {
-      // Use two lines so trim() doesn't eat the leading space on the first entry.
-      // When the only output line starts with ' M', trim() removes that space.
-      // Adding a staged file first keeps the unstaged line intact.
-      const client = makeMockClient([resultStream('A  src/staged.ts\n M src/app.ts\n')])
+      const client = makeMockClient([resultStream(' M src/app.ts\n')])
       const git = new GitClient(client)
       const entries = await git.getStatus('/repo')
 
-      expect(entries).toHaveLength(2)
-      const unstaged = entries.find(e => e.path === 'src/app.ts')!
-      expect(unstaged.status).toBe('modified')
-      expect(unstaged.staged).toBe(false)
+      expect(entries).toHaveLength(1)
+      expect(entries[0].path).toBe('src/app.ts')
+      expect(entries[0].status).toBe('modified')
+      expect(entries[0].staged).toBe(false)
     })
 
     it('parses added staged file', async () => {
