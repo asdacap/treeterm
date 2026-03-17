@@ -2008,6 +2008,20 @@ body,
   width: 100%;
 }
 
+.filesystem-browser-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.filesystem-browser-content > .diff-comments-panel {
+  width: auto;
+  border-left: none;
+  border-top: 1px solid var(--border-color);
+}
+
 .filesystem-browser-error {
   padding: 20px;
   color: #f14c4c;

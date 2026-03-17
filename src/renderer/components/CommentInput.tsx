@@ -2,7 +2,7 @@ import { useState } from 'react'
 
 interface CommentInputProps {
   lineNumber: number
-  side: 'original' | 'modified'
+  side?: 'original' | 'modified'
   onSubmit: (text: string) => void
   onCancel: () => void
 }
@@ -35,7 +35,7 @@ export function CommentInput({
   return (
     <div className="comment-input-container">
       <div className="comment-input-header">
-        Comment on line {lineNumber} ({side})
+        Comment on line {lineNumber}{side ? ` (${side})` : ''}
       </div>
       <textarea
         className="comment-input-textarea"
