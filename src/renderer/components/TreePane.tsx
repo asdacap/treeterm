@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, GitFork, GitMerge } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
@@ -253,6 +253,26 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
           <span className="tree-item-icon">{ws.isWorktree ? '🌿' : '📁'}</span>
           <span className="tree-item-name">{ws.name}</span>
           <WorkspaceActivityIndicator tabIds={tabIds} />
+          <span className="tree-item-actions">
+            {ws.isGitRepo && (
+              <button
+                className="tree-item-action"
+                title="New Child Workspace"
+                onClick={(e) => { e.stopPropagation(); handleCreateChild(ws.id) }}
+              >
+                <GitFork size={14} />
+              </button>
+            )}
+            {ws.isWorktree && ws.parentId && (
+              <button
+                className="tree-item-action"
+                title="Close & Merge"
+                onClick={(e) => { e.stopPropagation(); handleRemove(ws.id) }}
+              >
+                <GitMerge size={14} />
+              </button>
+            )}
+          </span>
         </div>
 
         {/* Children */}
