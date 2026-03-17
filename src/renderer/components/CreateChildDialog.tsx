@@ -5,10 +5,10 @@ import { useGitApi } from '../contexts/GitApiContext'
 
 interface CreateChildDialogProps {
   parentWorkspace: Workspace
-  onCreate: (name: string, isDetached: boolean, settings?: WorktreeSettings) => Promise<{ success: boolean; error?: string }>
-  onAdopt: (worktreePath: string, branch: string, name: string, settings?: WorktreeSettings) => Promise<{ success: boolean; error?: string }>
-  onCreateFromBranch: (branch: string, isDetached: boolean, settings?: WorktreeSettings) => Promise<{ success: boolean; error?: string }>
-  onCreateFromRemote: (remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings) => Promise<{ success: boolean; error?: string }>
+  onCreate: (name: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
+  onAdopt: (worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
+  onCreateFromBranch: (branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
+  onCreateFromRemote: (remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
   onCancel: () => void
   openWorktreePaths: string[]
 }
@@ -27,6 +27,7 @@ export default function CreateChildDialog({
   const git = useGitApi()
   const [mode, setMode] = useState<TabMode>('create')
   const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
   const [isProcessing, setIsProcessing] = useState(false)
   const [processingMessage, setProcessingMessage] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
@@ -203,7 +204,8 @@ export default function CreateChildDialog({
 
     console.log('[CreateChildDialog] Creating new worktree:', name.trim())
     const settings = buildSettings()
-    const result = await onCreate(name.trim(), isDetached, settings)
+    const desc = description.trim() || undefined
+    const result = await onCreate(name.trim(), isDetached, settings, desc)
     if (!result.success) {
       console.error('[CreateChildDialog] Failed to create worktree:', result.error)
       setError(result.error || 'Failed to create workspace')
@@ -226,11 +228,13 @@ export default function CreateChildDialog({
 
     console.log('[CreateChildDialog] Adopting existing worktree:', selectedWorktree.path)
     const settings = buildSettings()
+    const desc = description.trim() || undefined
     const result = await onAdopt(
       selectedWorktree.path,
       selectedWorktree.branch,
       selectedWorktree.displayName,
-      settings
+      settings,
+      desc
     )
     if (!result.success) {
       console.error('[CreateChildDialog] Failed to adopt worktree:', result.error)
@@ -254,7 +258,8 @@ export default function CreateChildDialog({
 
     console.log('[CreateChildDialog] Creating worktree from branch:', selectedBranch.name)
     const settings = buildSettings()
-    const result = await onCreateFromBranch(selectedBranch.name, isDetached, settings)
+    const desc = description.trim() || undefined
+    const result = await onCreateFromBranch(selectedBranch.name, isDetached, settings, desc)
     if (!result.success) {
       console.error('[CreateChildDialog] Failed to create worktree from branch:', result.error)
       setError(result.error || 'Failed to create worktree from branch')
@@ -284,7 +289,8 @@ export default function CreateChildDialog({
 
     console.log('[CreateChildDialog] Creating worktree from remote branch:', selectedRemoteBranch.name)
     const settings = buildSettings()
-    const result = await onCreateFromRemote(selectedRemoteBranch.name, isDetached, settings)
+    const desc = description.trim() || undefined
+    const result = await onCreateFromRemote(selectedRemoteBranch.name, isDetached, settings, desc)
     if (!result.success) {
       console.error('[CreateChildDialog] Failed to create worktree:', result.error)
       setError(result.error || 'Failed to create worktree from remote branch')
@@ -499,6 +505,20 @@ export default function CreateChildDialog({
               </div>
             </>
           )}
+
+          {/* Description */}
+          <div className="create-child-dialog-field">
+            <label htmlFor="workspace-description">Description</label>
+            <textarea
+              id="workspace-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Optional description..."
+              disabled={isProcessing}
+              rows={2}
+              className="create-child-description"
+            />
+          </div>
 
           {/* Settings Section */}
           <div className="create-child-settings-section">

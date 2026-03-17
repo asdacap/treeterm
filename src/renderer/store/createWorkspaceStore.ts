@@ -14,10 +14,10 @@ export interface WorkspaceState {
   activeWorkspaceId: string | null
   isRestoring: boolean  // Set externally by appStore during restoration; checked by syncSessionToDaemon
   addWorkspace: (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => Promise<string>
-  addChildWorkspace: (parentId: string, name: string, isDetached?: boolean, settings?: WorktreeSettings) => Promise<{ success: boolean; error?: string }>
-  adoptExistingWorktree: (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings) => Promise<{ success: boolean; error?: string }>
-  createWorktreeFromBranch: (parentId: string, branch: string, isDetached: boolean, settings?: WorktreeSettings) => Promise<{ success: boolean; error?: string }>
-  createWorktreeFromRemote: (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings) => Promise<{ success: boolean; error?: string }>
+  addChildWorkspace: (parentId: string, name: string, isDetached?: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
+  adoptExistingWorktree: (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
+  createWorktreeFromBranch: (parentId: string, branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
+  createWorktreeFromRemote: (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
   removeWorkspace: (id: string) => Promise<void>
   removeWorkspaceKeepBranch: (id: string) => Promise<void>
   removeWorkspaceKeepWorktree: (id: string) => Promise<void>
@@ -140,7 +140,7 @@ export function createWorkspaceStore(
     name: string,
     path: string,
     branch: string,
-    options: { isDetached?: boolean; isWorktree?: boolean; settings?: WorktreeSettings } = {}
+    options: { isDetached?: boolean; isWorktree?: boolean; settings?: WorktreeSettings; metadata?: Record<string, string> } = {}
   ): Promise<string> {
     const parent = store.getState().workspaces[parentId]
 
@@ -175,7 +175,7 @@ export function createWorkspaceStore(
       tabs,
       activeTabId,
       settings: options.settings,
-      metadata: {},
+      metadata: options.metadata ?? {},
       createdAt: Date.now(),
       lastActivity: Date.now(),
       attachedClients: 0
@@ -318,7 +318,7 @@ export function createWorkspaceStore(
       return id
     },
 
-    addChildWorkspace: async (parentId: string, name: string, isDetached: boolean = false, settings?: WorktreeSettings) => {
+    addChildWorkspace: async (parentId: string, name: string, isDetached: boolean = false, settings?: WorktreeSettings, description?: string) => {
       const state = get()
       const parent = state.workspaces[parentId]
 
@@ -347,11 +347,12 @@ export function createWorkspaceStore(
         get().updateGitInfo(parentId, currentGitInfo)
       }
 
-      await addChildWorkspaceFromResult(parentId, name, result.path!, result.branch!, { isDetached, settings })
+      const metadata = description ? { description } : undefined
+      await addChildWorkspaceFromResult(parentId, name, result.path!, result.branch!, { isDetached, settings, metadata })
       return { success: true }
     },
 
-    adoptExistingWorktree: async (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings) => {
+    adoptExistingWorktree: async (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => {
       const state = get()
       const parent = state.workspaces[parentId]
 
@@ -366,11 +367,12 @@ export function createWorkspaceStore(
         return { success: false, error: 'This worktree is already open' }
       }
 
-      await addChildWorkspaceFromResult(parentId, name, worktreePath, branch, { settings })
+      const metadata = description ? { description } : undefined
+      await addChildWorkspaceFromResult(parentId, name, worktreePath, branch, { settings, metadata })
       return { success: true }
     },
 
-    createWorktreeFromBranch: async (parentId: string, branch: string, isDetached: boolean, settings?: WorktreeSettings) => {
+    createWorktreeFromBranch: async (parentId: string, branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => {
       console.log('[workspace] createWorktreeFromBranch called:', { parentId, branch, isDetached })
       const state = get()
       const parent = state.workspaces[parentId]
@@ -394,11 +396,12 @@ export function createWorkspaceStore(
         return { success: false, error: result.error }
       }
 
-      await addChildWorkspaceFromResult(parentId, worktreeName, result.path!, result.branch!, { isDetached, settings })
+      const metadata = description ? { description } : undefined
+      await addChildWorkspaceFromResult(parentId, worktreeName, result.path!, result.branch!, { isDetached, settings, metadata })
       return { success: true }
     },
 
-    createWorktreeFromRemote: async (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings) => {
+    createWorktreeFromRemote: async (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => {
       console.log('[workspace] createWorktreeFromRemote called:', { parentId, remoteBranch, isDetached })
       const state = get()
       const parent = state.workspaces[parentId]
@@ -422,7 +425,8 @@ export function createWorkspaceStore(
         return { success: false, error: result.error }
       }
 
-      await addChildWorkspaceFromResult(parentId, worktreeName, result.path!, result.branch!, { isDetached, settings })
+      const metadata = description ? { description } : undefined
+      await addChildWorkspaceFromResult(parentId, worktreeName, result.path!, result.branch!, { isDetached, settings, metadata })
       return { success: true }
     },
 

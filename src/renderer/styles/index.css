@@ -396,6 +396,15 @@ body,
   font-weight: 500;
 }
 
+.workspace-description {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 300px;
+}
+
 .workspace-path {
   font-size: 11px;
   color: var(--text-secondary);
@@ -1161,6 +1170,23 @@ body,
 }
 
 .create-child-dialog-field input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.create-child-description {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.create-child-description:focus {
   outline: none;
   border-color: var(--accent);
 }

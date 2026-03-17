@@ -87,10 +87,10 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
   }, [workspaces])
 
   // Fork handler - create new worktree
-  const handleCreateChildSubmit = async (name: string, isDetached: boolean) => {
+  const handleCreateChildSubmit = async (name: string, isDetached: boolean, settings?: import('../types').WorktreeSettings, description?: string) => {
     if (!activeWorkspaceId) return { success: false, error: 'No workspace selected' }
 
-    const result = await addChildWorkspace(activeWorkspaceId, name, isDetached)
+    const result = await addChildWorkspace(activeWorkspaceId, name, isDetached, settings, description)
     if (result.success) {
       setShowCreateChildDialog(false)
     }
@@ -98,10 +98,10 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
   }
 
   // Adopt existing worktree handler
-  const handleAdoptWorktreeSubmit = async (worktreePath: string, branch: string, name: string) => {
+  const handleAdoptWorktreeSubmit = async (worktreePath: string, branch: string, name: string, settings?: import('../types').WorktreeSettings, description?: string) => {
     if (!activeWorkspaceId) return { success: false, error: 'No workspace selected' }
 
-    const result = await adoptExistingWorktree(activeWorkspaceId, worktreePath, branch, name)
+    const result = await adoptExistingWorktree(activeWorkspaceId, worktreePath, branch, name, settings, description)
     if (result.success) {
       setShowCreateChildDialog(false)
     }
@@ -109,11 +109,11 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
   }
 
   // Create worktree from existing branch handler
-  const handleCreateFromBranchSubmit = async (branch: string, isDetached: boolean) => {
+  const handleCreateFromBranchSubmit = async (branch: string, isDetached: boolean, settings?: import('../types').WorktreeSettings, description?: string) => {
     console.log('[WorkspacePane] handleCreateFromBranchSubmit called:', { branch, isDetached, activeWorkspaceId })
     if (!activeWorkspaceId) return { success: false, error: 'No workspace selected' }
 
-    const result = await createWorktreeFromBranch(activeWorkspaceId, branch, isDetached)
+    const result = await createWorktreeFromBranch(activeWorkspaceId, branch, isDetached, settings, description)
     console.log('[WorkspacePane] handleCreateFromBranchSubmit result:', result)
     if (result.success) {
       setShowCreateChildDialog(false)
@@ -122,11 +122,11 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
   }
 
   // Create worktree from remote branch handler
-  const handleCreateFromRemoteSubmit = async (remoteBranch: string, isDetached: boolean) => {
+  const handleCreateFromRemoteSubmit = async (remoteBranch: string, isDetached: boolean, settings?: import('../types').WorktreeSettings, description?: string) => {
     console.log('[WorkspacePane] handleCreateFromRemoteSubmit called:', { remoteBranch, isDetached, activeWorkspaceId })
     if (!activeWorkspaceId) return { success: false, error: 'No workspace selected' }
 
-    const result = await createWorktreeFromRemote(activeWorkspaceId, remoteBranch, isDetached)
+    const result = await createWorktreeFromRemote(activeWorkspaceId, remoteBranch, isDetached, settings, description)
     console.log('[WorkspacePane] handleCreateFromRemoteSubmit result:', result)
     if (result.success) {
       setShowCreateChildDialog(false)
@@ -253,6 +253,9 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
           <>
             <div className="workspace-header">
               <span className="workspace-title">{activeWorkspace.name}</span>
+              {activeWorkspace.metadata?.description && (
+                <span className="workspace-description">{activeWorkspace.metadata.description}</span>
+              )}
               <span className="workspace-path">{activeWorkspace.path}</span>
               {activeWorkspace.gitBranch && (
                 <span className="workspace-branch">{activeWorkspace.gitBranch}</span>
