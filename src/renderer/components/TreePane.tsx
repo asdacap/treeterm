@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
@@ -66,9 +66,29 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
     workspaceIds: focusedWorkspaceIds
   } = usePrefixModeStore()
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [expanded, setExpanded] = useState<Set<string>>(() => {
+    return new Set(
+      Object.values(workspaces)
+        .filter((ws) => ws.children.length > 0)
+        .map((ws) => ws.id)
+    )
+  })
   const [createChildDialogParentId, setCreateChildDialogParentId] = useState<string | null>(null)
   const [isOpenWorkspaceDialogOpen, setIsOpenWorkspaceDialogOpen] = useState(false)
+
+  // Expand any workspace that gains children after mount (e.g., async session restore)
+  useEffect(() => {
+    const parentIds = Object.values(workspaces)
+      .filter((ws) => ws.children.length > 0)
+      .map((ws) => ws.id)
+    if (parentIds.length > 0) {
+      setExpanded((prev) => {
+        const next = new Set(prev)
+        for (const id of parentIds) next.add(id)
+        return next
+      })
+    }
+  }, [workspaces])
 
   // Compute paths of already-open worktrees
   const openWorktreePaths = useMemo(() => {
