@@ -1,18 +1,26 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import Editor, { OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useFilesystemApi } from '../contexts/FilesystemApiContext'
-import type { EditorState } from '../types'
+import type { EditorState, ReviewComment } from '../types'
 import { MarkdownPreview } from './MarkdownPreview'
+import { CommentInput } from './CommentInput'
 
 interface FileViewerProps {
   workspacePath: string
   workspaceId: string
   filePath: string | null
   workspaceStore: StoreApi<WorkspaceState>
+  // Comment props
+  comments?: ReviewComment[]
+  onLineClick?: (lineNumber: number) => void
+  inlineCommentInput?: { lineNumber: number } | null
+  onCommentSubmit?: (text: string) => void
+  onCommentCancel?: () => void
 }
 
 interface FileState {
@@ -31,7 +39,17 @@ function mapLanguageToMonaco(language: string): string {
   return languageMap[language] || language
 }
 
-export function FileViewer({ workspacePath, workspaceId, filePath, workspaceStore }: FileViewerProps): JSX.Element {
+export function FileViewer({
+  workspacePath,
+  workspaceId,
+  filePath,
+  workspaceStore,
+  comments = [],
+  onLineClick,
+  inlineCommentInput,
+  onCommentSubmit,
+  onCommentCancel
+}: FileViewerProps): JSX.Element {
   const filesystem = useFilesystemApi()
   const { addTabWithState } = useStore(workspaceStore)
   const [fileState, setFileState] = useState<FileState>({
@@ -41,6 +59,9 @@ export function FileViewer({ workspacePath, workspaceId, filePath, workspaceStor
     error: null
   })
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
+  const decorationsRef = useRef<string[]>([])
+  const viewZoneIdRef = useRef<string | null>(null)
+  const [commentContainer, setCommentContainer] = useState<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (!filePath) {
@@ -82,9 +103,101 @@ export function FileViewer({ workspacePath, workspaceId, filePath, workspaceStor
     loadFile()
   }, [workspacePath, filePath])
 
-  const handleEditorMount: OnMount = useCallback((editor) => {
+  const handleEditorMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor
-  }, [])
+
+    if (onLineClick) {
+      editor.onMouseDown((e) => {
+        if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
+          const lineNumber = e.target.position?.lineNumber
+          if (lineNumber) {
+            onLineClick(lineNumber)
+          }
+        }
+      })
+    }
+  }, [onLineClick])
+
+  // Add decorations for lines with comments
+  useEffect(() => {
+    if (!editorRef.current) return
+
+    // Clear old decorations
+    decorationsRef.current = editorRef.current.deltaDecorations(
+      decorationsRef.current,
+      []
+    )
+
+    if (!comments.length) return
+
+    const decorations = comments.map(comment => ({
+      range: {
+        startLineNumber: comment.lineNumber,
+        startColumn: 1,
+        endLineNumber: comment.lineNumber,
+        endColumn: 1
+      },
+      options: {
+        isWholeLine: true,
+        className: comment.isOutdated ? 'comment-line-outdated' : 'comment-line',
+        glyphMarginClassName: comment.isOutdated ? 'comment-glyph-outdated' : 'comment-glyph'
+      }
+    }))
+
+    decorationsRef.current = editorRef.current.deltaDecorations(
+      [],
+      decorations
+    )
+  }, [comments])
+
+  // Manage inline comment view zone
+  useEffect(() => {
+    if (!editorRef.current) return
+
+    if (!inlineCommentInput) {
+      if (viewZoneIdRef.current) {
+        editorRef.current.changeViewZones((accessor) => {
+          if (viewZoneIdRef.current) {
+            accessor.removeZone(viewZoneIdRef.current)
+          }
+        })
+        viewZoneIdRef.current = null
+        setCommentContainer(null)
+      }
+      return
+    }
+
+    const { lineNumber } = inlineCommentInput
+
+    const container = document.createElement('div')
+    container.className = 'inline-comment-zone'
+    container.addEventListener('mousedown', (e) => e.stopPropagation())
+    setCommentContainer(container)
+
+    editorRef.current.changeViewZones((accessor) => {
+      if (viewZoneIdRef.current) {
+        accessor.removeZone(viewZoneIdRef.current)
+      }
+
+      viewZoneIdRef.current = accessor.addZone({
+        afterLineNumber: lineNumber,
+        heightInPx: 180,
+        domNode: container,
+        suppressMouseDown: true
+      })
+    })
+
+    return () => {
+      if (viewZoneIdRef.current && editorRef.current) {
+        editorRef.current.changeViewZones((accessor) => {
+          if (viewZoneIdRef.current) {
+            accessor.removeZone(viewZoneIdRef.current)
+          }
+        })
+        viewZoneIdRef.current = null
+      }
+    }
+  }, [inlineCommentInput])
 
   const handleOpenInTab = useCallback(() => {
     if (!filePath) return
@@ -138,7 +251,7 @@ export function FileViewer({ workspacePath, workspaceId, filePath, workspaceStor
             onClick={handleOpenInTab}
             title="Open in new tab for editing"
           >
-            \u21D7 Open in Tab
+            ⇗ Open in Tab
           </button>
           <span className="file-viewer-language">{fileState.language}</span>
         </div>
@@ -166,11 +279,20 @@ export function FileViewer({ workspacePath, workspaceId, filePath, workspaceStor
                 vertical: 'auto',
                 horizontal: 'auto'
               },
-              padding: { top: 8 }
+              padding: { top: 8 },
+              glyphMargin: !!onLineClick
             }}
           />
         )}
       </div>
+      {commentContainer && inlineCommentInput && onCommentSubmit && onCommentCancel && createPortal(
+        <CommentInput
+          lineNumber={inlineCommentInput.lineNumber}
+          onSubmit={onCommentSubmit}
+          onCancel={onCommentCancel}
+        />,
+        commentContainer
+      )}
     </div>
   )
 }
