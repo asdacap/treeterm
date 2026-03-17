@@ -382,6 +382,7 @@ describe('GrpcServer', () => {
           state: { ptyId: 'pty-1' }
         }],
         activeTabId: 'tab-1',
+        metadata: {},
         createdAt: 1000,
         lastActivity: 2000,
         attachedClients: 1

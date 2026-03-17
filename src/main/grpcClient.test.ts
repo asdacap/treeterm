@@ -331,6 +331,7 @@ describe('GrpcDaemonClient', () => {
           state: Buffer.from(JSON.stringify({ ptyId: 'pty-1' }), 'utf-8')
         }],
         activeTabId: 'tab-1',
+        metadata: Buffer.from('{}'),
         createdAt: 1000,
         lastActivity: 2000,
         attachedClients: 1
@@ -355,7 +356,8 @@ describe('GrpcDaemonClient', () => {
         isWorktree: false,
         isDetached: false,
         tabs: [],
-        activeTabId: null
+        activeTabId: null,
+        metadata: {}
       }])
       expect(result.id).toBe('session-1')
       expect(result.workspaces[0].path).toBe('/test')
@@ -463,6 +465,7 @@ describe('GrpcDaemonClient', () => {
             state: Buffer.from(JSON.stringify({ ptyId: 'pty-1' }), 'utf-8')
           }],
           activeTabId: 'tab-1',
+          metadata: Buffer.from('{}'),
           createdAt: 1000,
           lastActivity: 2000,
           attachedClients: 2

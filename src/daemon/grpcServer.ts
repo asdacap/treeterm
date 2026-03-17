@@ -758,7 +758,8 @@ export class GrpcServer {
         title: tab.title,
         state: JSON.parse(tab.state.toString('utf-8'))
       })),
-      activeTabId: input.activeTabId || null
+      activeTabId: input.activeTabId || null,
+      metadata: input.metadata?.length ? JSON.parse(input.metadata.toString('utf-8')) : {}
     }))
   }
 
@@ -784,6 +785,7 @@ export class GrpcServer {
           state: Buffer.from(JSON.stringify(t.state), 'utf-8')
         })),
         activeTabId: w.activeTabId || undefined,
+        metadata: Buffer.from(JSON.stringify(w.metadata ?? {}), 'utf-8'),
         createdAt: w.createdAt,
         lastActivity: w.lastActivity,
         attachedClients: w.attachedClients

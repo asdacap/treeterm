@@ -89,6 +89,7 @@ describe('Terminal Renderer', () => {
           isWorktree: false,
           tabs: [],
           activeTabId: null,
+          metadata: {},
           createdAt: Date.now(),
           lastActivity: Date.now(),
           attachedClients: 1
@@ -121,6 +122,7 @@ describe('Terminal Renderer', () => {
           isWorktree: false,
           tabs: [],
           activeTabId: null,
+          metadata: {},
           createdAt: Date.now(),
           lastActivity: Date.now(),
           attachedClients: 1
@@ -153,6 +155,7 @@ describe('Terminal Renderer', () => {
           isWorktree: false,
           tabs: [],
           activeTabId: null,
+          metadata: {},
           createdAt: Date.now(),
           lastActivity: Date.now(),
           attachedClients: 1
@@ -185,6 +188,7 @@ describe('Terminal Renderer', () => {
           isWorktree: false,
           tabs: [],
           activeTabId: null,
+          metadata: {},
           createdAt: Date.now(),
           lastActivity: Date.now(),
           attachedClients: 1
@@ -286,6 +290,7 @@ describe('Terminal Renderer', () => {
         isWorktree: false,
         tabs: [],
         activeTabId: null,
+        metadata: {},
         createdAt: Date.now(),
         lastActivity: Date.now(),
         attachedClients: 1
@@ -367,6 +372,7 @@ describe('Terminal Renderer', () => {
           isWorktree: false,
           tabs: [],
           activeTabId: null,
+          metadata: {},
           createdAt: Date.now(),
           lastActivity: Date.now(),
           attachedClients: 1
@@ -399,6 +405,7 @@ describe('Terminal Renderer', () => {
           isWorktree: false,
           tabs: [],
           activeTabId: null,
+          metadata: {},
           createdAt: Date.now(),
           lastActivity: Date.now(),
           attachedClients: 1

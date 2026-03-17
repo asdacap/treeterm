@@ -28,6 +28,7 @@ function makeWorkspace(overrides: Partial<WorkspaceInput> & { path: string }): W
     isWorktree: false,
     tabs: [],
     activeTabId: null,
+    metadata: {},
   }
   return { ...defaults, ...overrides }
 }

@@ -78,6 +78,7 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     isWorktree: false,
     tabs: [],
     activeTabId: null,
+    metadata: {},
     createdAt: Date.now(),
     lastActivity: Date.now(),
     attachedClients: 0,

@@ -133,6 +133,7 @@ describe('AI Harness Renderer', () => {
           isWorktree: false,
           tabs: [],
           activeTabId: null,
+          metadata: {},
           createdAt: Date.now(),
           lastActivity: Date.now(),
           attachedClients: 1
@@ -168,6 +169,7 @@ describe('AI Harness Renderer', () => {
           isWorktree: false,
           tabs: [],
           activeTabId: null,
+          metadata: {},
           createdAt: Date.now(),
           lastActivity: Date.now(),
           attachedClients: 1
@@ -200,6 +202,7 @@ describe('AI Harness Renderer', () => {
           isWorktree: false,
           tabs: [],
           activeTabId: null,
+          metadata: {},
           createdAt: Date.now(),
           lastActivity: Date.now(),
           attachedClients: 1
@@ -235,6 +238,7 @@ describe('AI Harness Renderer', () => {
           isWorktree: false,
           tabs: [],
           activeTabId: null,
+          metadata: {},
           createdAt: Date.now(),
           lastActivity: Date.now(),
           attachedClients: 1

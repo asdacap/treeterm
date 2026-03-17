@@ -662,7 +662,8 @@ export class GrpcDaemonClient {
         title: t.title,
         state: Buffer.from(JSON.stringify(t.state), 'utf-8')
       })),
-      activeTabId: w.activeTabId || undefined
+      activeTabId: w.activeTabId || undefined,
+      metadata: Buffer.from(JSON.stringify(w.metadata ?? {}), 'utf-8')
     }))
   }
 
@@ -696,6 +697,7 @@ export class GrpcDaemonClient {
         state: JSON.parse(t.state.toString('utf-8'))
       })),
       activeTabId: protoWorkspace.activeTabId || null,
+      metadata: protoWorkspace.metadata?.length ? JSON.parse(protoWorkspace.metadata.toString('utf-8')) : {},
       createdAt: protoWorkspace.createdAt,
       lastActivity: protoWorkspace.lastActivity,
       attachedClients: protoWorkspace.attachedClients
