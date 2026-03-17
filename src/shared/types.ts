@@ -42,6 +42,7 @@ export interface Workspace {
   tabs: Tab[]
   activeTabId: string | null
   settings?: WorktreeSettings
+  metadata: Record<string, string>
   createdAt: number
   lastActivity: number
   attachedClients: number

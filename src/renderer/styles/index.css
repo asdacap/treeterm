@@ -149,6 +149,37 @@ body,
   flex: 1;
 }
 
+.tree-item-name-input {
+  font-size: 13px;
+  font-family: inherit;
+  flex: 1;
+  min-width: 0;
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.tree-item-description-input {
+  width: 100%;
+  font-size: 13px;
+  font-family: inherit;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  outline: none;
+  resize: vertical;
+  margin-bottom: 12px;
+}
+
+.tree-item-description-input:focus {
+  border-color: var(--accent);
+}
+
 .tree-item-branch {
   font-size: 11px;
   color: var(--accent);

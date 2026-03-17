@@ -64,6 +64,8 @@ export interface Workspace {
   attachedClients: number;
   id: string;
   children: string[];
+  /** JSON-encoded arbitrary dictionary */
+  metadata: Buffer;
 }
 
 export interface Session {
@@ -88,6 +90,8 @@ export interface WorkspaceInput {
   activeTabId?: string | undefined;
   id: string;
   children: string[];
+  /** JSON-encoded arbitrary dictionary */
+  metadata: Buffer;
 }
 
 export interface PtySessionInfo {
@@ -987,6 +991,7 @@ function createBaseWorkspace(): Workspace {
     attachedClients: 0,
     id: "",
     children: [],
+    metadata: Buffer.alloc(0),
   };
 }
 
@@ -1039,6 +1044,9 @@ export const Workspace: MessageFns<Workspace> = {
     }
     for (const v of message.children) {
       writer.uint32(130).string(v!);
+    }
+    if (message.metadata.length !== 0) {
+      writer.uint32(138).bytes(message.metadata);
     }
     return writer;
   },
@@ -1178,6 +1186,14 @@ export const Workspace: MessageFns<Workspace> = {
           message.children.push(reader.string());
           continue;
         }
+        case 17: {
+          if (tag !== 138) {
+            break;
+          }
+
+          message.metadata = Buffer.from(reader.bytes());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1249,6 +1265,7 @@ export const Workspace: MessageFns<Workspace> = {
       children: globalThis.Array.isArray(object?.children)
         ? object.children.map((e: any) => globalThis.String(e))
         : [],
+      metadata: isSet(object.metadata) ? Buffer.from(bytesFromBase64(object.metadata)) : Buffer.alloc(0),
     };
   },
 
@@ -1302,6 +1319,9 @@ export const Workspace: MessageFns<Workspace> = {
     if (message.children?.length) {
       obj.children = message.children;
     }
+    if (message.metadata.length !== 0) {
+      obj.metadata = base64FromBytes(message.metadata);
+    }
     return obj;
   },
 
@@ -1326,6 +1346,7 @@ export const Workspace: MessageFns<Workspace> = {
     message.attachedClients = object.attachedClients ?? 0;
     message.id = object.id ?? "";
     message.children = object.children?.map((e) => e) || [];
+    message.metadata = object.metadata ?? Buffer.alloc(0);
     return message;
   },
 };
@@ -1483,6 +1504,7 @@ function createBaseWorkspaceInput(): WorkspaceInput {
     activeTabId: undefined,
     id: "",
     children: [],
+    metadata: Buffer.alloc(0),
   };
 }
 
@@ -1526,6 +1548,9 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
     }
     for (const v of message.children) {
       writer.uint32(106).string(v!);
+    }
+    if (message.metadata.length !== 0) {
+      writer.uint32(114).bytes(message.metadata);
     }
     return writer;
   },
@@ -1641,6 +1666,14 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
           message.children.push(reader.string());
           continue;
         }
+        case 14: {
+          if (tag !== 114) {
+            break;
+          }
+
+          message.metadata = Buffer.from(reader.bytes());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1697,6 +1730,7 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
       children: globalThis.Array.isArray(object?.children)
         ? object.children.map((e: any) => globalThis.String(e))
         : [],
+      metadata: isSet(object.metadata) ? Buffer.from(bytesFromBase64(object.metadata)) : Buffer.alloc(0),
     };
   },
 
@@ -1741,6 +1775,9 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
     if (message.children?.length) {
       obj.children = message.children;
     }
+    if (message.metadata.length !== 0) {
+      obj.metadata = base64FromBytes(message.metadata);
+    }
     return obj;
   },
 
@@ -1762,6 +1799,7 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
     message.activeTabId = object.activeTabId ?? undefined;
     message.id = object.id ?? "";
     message.children = object.children?.map((e) => e) || [];
+    message.metadata = object.metadata ?? Buffer.alloc(0);
     return message;
   },
 };

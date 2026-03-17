@@ -38,6 +38,7 @@ message Workspace {
   int32 attached_clients = 14;
   string id = 15;
   repeated string children = 16;
+  bytes metadata = 17;  // JSON-encoded arbitrary dictionary
 }
 
 message Session {
@@ -62,6 +63,7 @@ message WorkspaceInput {
   optional string active_tab_id = 11;
   string id = 12;
   repeated string children = 13;
+  bytes metadata = 14;  // JSON-encoded arbitrary dictionary
 }
 
 message PtySessionInfo {

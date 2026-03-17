@@ -33,6 +33,7 @@ export interface WorkspaceState {
   setActiveTab: (workspaceId: string, tabId: string) => void
   updateTabTitle: (workspaceId: string, tabId: string, title: string) => void
   updateTabState: <T>(workspaceId: string, tabId: string, updater: (state: T) => T) => void
+  updateWorkspaceMetadata: (id: string, key: string, value: string) => void
   syncToDaemon: () => Promise<void>
 }
 
@@ -174,6 +175,7 @@ export function createWorkspaceStore(
       tabs,
       activeTabId,
       settings: options.settings,
+      metadata: {},
       createdAt: Date.now(),
       lastActivity: Date.now(),
       attachedClients: 0
@@ -299,6 +301,7 @@ export function createWorkspaceStore(
         tabs,
         activeTabId,
         settings: options?.settings,
+        metadata: {},
         createdAt: Date.now(),
         lastActivity: Date.now(),
         attachedClients: 0
@@ -775,6 +778,24 @@ export function createWorkspaceStore(
       if (tab?.state && (tab.state as { ptyId?: string }).ptyId) {
         syncSessionToDaemon(updated.workspaces, updated.isRestoring).catch(console.error)
       }
+    },
+
+    updateWorkspaceMetadata: (id: string, key: string, value: string) => {
+      set((state) => {
+        const workspace = state.workspaces[id]
+        if (!workspace) return state
+        return {
+          workspaces: {
+            ...state.workspaces,
+            [id]: {
+              ...workspace,
+              metadata: { ...workspace.metadata, [key]: value }
+            }
+          }
+        }
+      })
+      const state = get()
+      syncSessionToDaemon(state.workspaces, state.isRestoring).catch(console.error)
     },
 
     syncToDaemon: async () => {
