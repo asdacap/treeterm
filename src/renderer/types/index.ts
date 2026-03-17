@@ -287,6 +287,7 @@ export interface ReviewsApi {
   addComment: (worktreePath: string, comment: Omit<ReviewComment, 'id' | 'createdAt'>) => Promise<{ success: boolean; comment?: ReviewComment; error?: string }>
   deleteComment: (worktreePath: string, commentId: string) => Promise<{ success: boolean; error?: string }>
   updateOutdated: (worktreePath: string, currentCommitHash: string) => Promise<{ success: boolean; reviews?: ReviewsData; error?: string }>
+  getFilePath: (worktreePath: string) => Promise<{ success: boolean; filePath?: string; error?: string }>
 }
 
 export interface AppRegistryApi {

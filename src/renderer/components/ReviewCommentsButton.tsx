@@ -35,8 +35,9 @@ export function ReviewCommentsButton({ workspacePath, ptyId }: ReviewCommentsBut
   const handleClick = async () => {
     if (!ptyId) return
 
-    // Submit command to Claude terminal
-    const command = 'read .treeterm/reviews.json and address the comments\r'
+    const result = await reviews.getFilePath(workspacePath)
+    const filePath = result.success && result.filePath ? result.filePath : '.treeterm/reviews.json'
+    const command = `read ${filePath} and address the comments\r`
     terminal.write(ptyId, command)
   }
 

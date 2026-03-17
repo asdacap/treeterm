@@ -282,6 +282,9 @@ contextBridge.exposeInMainWorld('electron', {
     },
     updateOutdated: (worktreePath: string, commitHash: string) => {
       return client.reviewsUpdateOutdated(worktreePath, commitHash)
+    },
+    getFilePath: (worktreePath: string) => {
+      return client.reviewsGetFilePath(worktreePath)
     }
   },
   settings: {

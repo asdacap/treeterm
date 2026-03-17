@@ -46,6 +46,7 @@ const CHANNELS = {
   reviewsAddComment: 'reviews:addComment',
   reviewsDeleteComment: 'reviews:deleteComment',
   reviewsUpdateOutdated: 'reviews:updateOutdated',
+  reviewsGetFilePath: 'reviews:getFilePath',
   settingsLoad: 'settings:load',
   settingsSave: 'settings:save',
   fsReadDirectory: 'fs:readDirectory',
@@ -472,6 +473,16 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.reviewsUpdateOutdated, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['reviewsUpdateOutdated']['params']))
+    )
+  }
+
+  onReviewsGetFilePath(
+    handler: (
+      ...args: IpcRequests['reviewsGetFilePath']['params']
+    ) => IpcRequests['reviewsGetFilePath']['result'] | Promise<IpcRequests['reviewsGetFilePath']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.reviewsGetFilePath, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['reviewsGetFilePath']['params']))
     )
   }
 
