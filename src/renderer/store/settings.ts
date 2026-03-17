@@ -25,7 +25,8 @@ const defaultSettings: Settings = {
       isDefault: false,
       enableSandbox: false,
       allowNetwork: true,
-      backgroundColor: '#1a1a24'
+      backgroundColor: '#1a1a24',
+      stripScrollbackClear: true
     }]
   },
   appearance: {

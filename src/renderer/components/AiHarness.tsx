@@ -13,6 +13,7 @@ interface AiHarnessProps {
   command: string
   backgroundColor: string
   disableScrollbar?: boolean
+  stripScrollbackClear?: boolean
   workspaceStore: StoreApi<WorkspaceState>
 }
 
@@ -25,6 +26,7 @@ export default function AiHarness({
   command,
   backgroundColor,
   disableScrollbar,
+  stripScrollbackClear,
   workspaceStore
 }: AiHarnessProps) {
   // Memoize config based on props to prevent unnecessary re-renders
@@ -34,8 +36,9 @@ export default function AiHarness({
     startupCommand: command,
     logPrefix: 'AiHarness',
     showPushToTalk: true,
-    disableScrollbar
-  }), [backgroundColor, command, disableScrollbar])
+    disableScrollbar,
+    stripScrollbackClear
+  }), [backgroundColor, command, disableScrollbar, stripScrollbackClear])
 
   return (
     <BaseTerminal

@@ -91,6 +91,7 @@ export interface AiHarnessInstance {
   allowNetwork: boolean
   backgroundColor: string
   disableScrollbar?: boolean
+  stripScrollbackClear?: boolean
 }
 
 export interface PrefixModeConfig {
