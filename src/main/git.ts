@@ -10,6 +10,7 @@ import { GrpcDaemonClient } from './grpcClient'
 import type { ExecInput, ExecOutput } from '../generated/treeterm'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
+import { homedir } from 'os'
 
 export interface GitStatusEntry {
   path: string
@@ -393,9 +394,9 @@ export class GitClient {
       const worktreesDir = `${rootPath}/.worktrees`
       worktreePath = `${worktreesDir}/${worktreeName}`
     } else {
-      const parentDir = rootPath.substring(0, rootPath.lastIndexOf('/'))
       const repoName = rootPath.substring(rootPath.lastIndexOf('/') + 1)
-      worktreePath = `${parentDir}/${repoName}-${worktreeName}`
+      const worktreesDir = join(homedir(), '.treeterm', 'worktrees', repoName)
+      worktreePath = join(worktreesDir, worktreeName)
     }
 
     // Determine branch name (hierarchical if base has '/')
@@ -441,9 +442,9 @@ export class GitClient {
       const worktreesDir = `${rootPath}/.worktrees`
       worktreePath = `${worktreesDir}/${worktreeName}`
     } else {
-      const parentDir = rootPath.substring(0, rootPath.lastIndexOf('/'))
       const repoName = rootPath.substring(rootPath.lastIndexOf('/') + 1)
-      worktreePath = `${parentDir}/${repoName}-${worktreeName}`
+      const worktreesDir = join(homedir(), '.treeterm', 'worktrees', repoName)
+      worktreePath = join(worktreesDir, worktreeName)
     }
 
     // Create worktree from existing branch
@@ -479,9 +480,9 @@ export class GitClient {
       const worktreesDir = `${rootPath}/.worktrees`
       worktreePath = `${worktreesDir}/${worktreeName}`
     } else {
-      const parentDir = rootPath.substring(0, rootPath.lastIndexOf('/'))
       const repoName = rootPath.substring(rootPath.lastIndexOf('/') + 1)
-      worktreePath = `${parentDir}/${repoName}-${worktreeName}`
+      const worktreesDir = join(homedir(), '.treeterm', 'worktrees', repoName)
+      worktreePath = join(worktreesDir, worktreeName)
     }
 
     // Create worktree with new branch tracking remote
