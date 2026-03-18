@@ -287,6 +287,28 @@ function getOrCreateSessionStore(
   return store
 }
 
+// Helper: sync metadata and name from daemon workspace to existing workspace
+function updateWorkspaceFields(
+  store: StoreApi<WorkspaceState>,
+  existingId: string,
+  daemonWorkspace: Workspace
+): void {
+  store.setState((state) => {
+    const existing = state.workspaces[existingId]
+    if (!existing) return state
+    return {
+      workspaces: {
+        ...state.workspaces,
+        [existingId]: {
+          ...existing,
+          metadata: daemonWorkspace.metadata,
+          name: daemonWorkspace.name,
+        }
+      }
+    }
+  })
+}
+
 // Helper: apply daemon workspaces to a store
 // restoreExisting: true = restore tabs on existing workspaces (session restore)
 // restoreExisting: false = skip existing workspaces (external sync)
@@ -309,6 +331,8 @@ function applySessionWorkspaces(
       if (options.restoreExisting) {
         setActiveWorkspace(existing.id)
         restoreWorkspaceTabs(existing.id, daemonWorkspace, addTabWithState, setActiveTab)
+      } else {
+        updateWorkspaceFields(store, existing.id, daemonWorkspace)
       }
     } else {
       reconstructWorkspace(store, daemonWorkspace)
@@ -323,6 +347,8 @@ function applySessionWorkspaces(
     if (existing) {
       if (options.restoreExisting) {
         restoreWorkspaceTabs(existing.id, daemonWorkspace, addTabWithState, setActiveTab)
+      } else {
+        updateWorkspaceFields(store, existing.id, daemonWorkspace)
       }
     } else {
       reconstructWorkspace(store, daemonWorkspace)
