@@ -12,6 +12,7 @@ interface TerminalScrollWrapperProps {
   showReviewComments?: boolean
   workspacePath?: string
   ptyId?: string
+  reviewId?: string
 }
 
 export default function TerminalScrollWrapper({
@@ -22,7 +23,8 @@ export default function TerminalScrollWrapper({
   onPushToTalkSubmit,
   showReviewComments = false,
   workspacePath,
-  ptyId
+  ptyId,
+  reviewId
 }: TerminalScrollWrapperProps) {
   const handleScrollDown = useCallback(() => {
     if (terminalRef.current) {
@@ -43,6 +45,7 @@ export default function TerminalScrollWrapper({
         <ReviewCommentsButton
           workspacePath={workspacePath}
           ptyId={ptyId}
+          reviewId={reviewId}
         />
       )}
       <button className="scroll-down-btn" onClick={handleScrollDown} title="Scroll to bottom">

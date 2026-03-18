@@ -6,20 +6,21 @@ import { useTerminalApi } from '../contexts/TerminalApiContext'
 interface ReviewCommentsButtonProps {
   workspacePath: string
   ptyId: string | undefined
+  reviewId: string | undefined
 }
 
-export function ReviewCommentsButton({ workspacePath, ptyId }: ReviewCommentsButtonProps): JSX.Element | null {
+export function ReviewCommentsButton({ workspacePath, ptyId, reviewId }: ReviewCommentsButtonProps): JSX.Element | null {
   const reviews = useReviewsApi()
   const terminal = useTerminalApi()
   const [hasComments, setHasComments] = useState(false)
 
   useEffect(() => {
     checkForComments()
-  }, [workspacePath])
+  }, [workspacePath, reviewId])
 
   const checkForComments = async () => {
     try {
-      const result = await reviews.load(workspacePath)
+      const result = await reviews.load(workspacePath, reviewId)
       if (result.success && result.reviews) {
         const reviews = result.reviews as ReviewsData
         setHasComments(reviews.comments.length > 0)
@@ -35,7 +36,7 @@ export function ReviewCommentsButton({ workspacePath, ptyId }: ReviewCommentsBut
   const handleClick = async () => {
     if (!ptyId) return
 
-    const result = await reviews.getFilePath(workspacePath)
+    const result = await reviews.getFilePath(workspacePath, reviewId)
     const filePath = result.success && result.filePath ? result.filePath : '.treeterm/reviews.json'
     const command = `read ${filePath} and address the comments\r`
     terminal.write(ptyId, command)

@@ -282,26 +282,29 @@ contextBridge.exposeInMainWorld('electron', {
     }
   },
   reviews: {
-    load: (worktreePath: string) => {
-      return client.reviewsLoad(worktreePath)
+    load: (worktreePath: string, reviewId?: string) => {
+      return client.reviewsLoad(worktreePath, reviewId)
     },
-    save: (worktreePath: string, reviews: ReviewsData) => {
-      return client.reviewsSave(worktreePath, reviews)
+    save: (reviewId: string, reviews: ReviewsData) => {
+      return client.reviewsSave(reviewId, reviews)
     },
-    addComment: (worktreePath: string, comment: Omit<ReviewComment, 'id' | 'createdAt'>) => {
-      return client.reviewsAddComment(worktreePath, comment)
+    addComment: (worktreePath: string, comment: Omit<ReviewComment, 'id' | 'createdAt'>, reviewId?: string) => {
+      return client.reviewsAddComment(worktreePath, comment, reviewId)
     },
-    deleteComment: (worktreePath: string, commentId: string) => {
-      return client.reviewsDeleteComment(worktreePath, commentId)
+    deleteComment: (reviewId: string, commentId: string) => {
+      return client.reviewsDeleteComment(reviewId, commentId)
     },
-    updateOutdated: (worktreePath: string, commitHash: string) => {
-      return client.reviewsUpdateOutdated(worktreePath, commitHash)
+    updateOutdated: (worktreePath: string, commitHash: string, reviewId?: string) => {
+      return client.reviewsUpdateOutdated(worktreePath, commitHash, reviewId)
     },
-    getFilePath: (worktreePath: string) => {
-      return client.reviewsGetFilePath(worktreePath)
+    getFilePath: (worktreePath: string, reviewId?: string) => {
+      return client.reviewsGetFilePath(worktreePath, reviewId)
     },
-    toggleAddressed: (worktreePath: string, commentId: string) => {
-      return client.reviewsToggleAddressed(worktreePath, commentId)
+    toggleAddressed: (reviewId: string, commentId: string) => {
+      return client.reviewsToggleAddressed(reviewId, commentId)
+    },
+    cleanup: (reviewId: string) => {
+      return client.reviewsCleanup(reviewId)
     }
   },
   settings: {

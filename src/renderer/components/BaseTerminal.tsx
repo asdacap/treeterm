@@ -542,6 +542,7 @@ export default function BaseTerminal({
       showReviewComments={config.showReviewComments}
       workspacePath={cwd}
       ptyId={ptyIdRef.current || undefined}
+      reviewId={workspace?.metadata.reviewId}
     >
       <div
         ref={containerRef}

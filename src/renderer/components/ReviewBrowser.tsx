@@ -34,7 +34,7 @@ export default function ReviewBrowser({
   const git = useGitApi()
   const terminalApi = useTerminalApi()
   const reviewsApi = useReviewsApi()
-  const { workspaces, mergeAndRemoveWorkspace, removeWorkspace, removeWorkspaceKeepBranch, removeWorkspaceKeepWorktree, removeWorkspaceKeepBoth, closeAndCleanWorkspace, removeTab, setActiveTab } = useStore(workspaceStore)
+  const { workspaces, mergeAndRemoveWorkspace, removeWorkspace, removeWorkspaceKeepBranch, removeWorkspaceKeepWorktree, removeWorkspaceKeepBoth, closeAndCleanWorkspace, removeTab, setActiveTab, updateWorkspaceMetadata } = useStore(workspaceStore)
   const workspace = workspaces[workspaceId]
   const parentWorkspace = parentWorkspaceId ? workspaces[parentWorkspaceId] : undefined
   
@@ -168,9 +168,12 @@ export default function ReviewBrowser({
         setCurrentCommitHash(hashResult.hash)
 
         // Load reviews and mark outdated
-        const result = await reviewsApi.updateOutdated(workspacePath, hashResult.hash)
+        const result = await reviewsApi.updateOutdated(workspacePath, hashResult.hash, workspace?.metadata.reviewId)
         if (result.success && result.reviews) {
           setReviews(result.reviews)
+        }
+        if (result.reviewId && result.reviewId !== workspace?.metadata.reviewId) {
+          updateWorkspaceMetadata(workspaceId, 'reviewId', result.reviewId)
         }
       }
     } catch (error) {
@@ -538,12 +541,15 @@ export default function ReviewBrowser({
         side: commentInput.side
       }
 
-      const result = await reviewsApi.addComment(workspacePath, comment)
+      const result = await reviewsApi.addComment(workspacePath, comment, workspace?.metadata.reviewId)
       if (result.success && result.comment) {
         setReviews(prev => prev ? {
           ...prev,
           comments: [...prev.comments, result.comment!]
         } : { version: 1, comments: [result.comment!] })
+      }
+      if (result.reviewId && result.reviewId !== workspace?.metadata.reviewId) {
+        updateWorkspaceMetadata(workspaceId, 'reviewId', result.reviewId)
       }
       setCommentInput(null)
     } catch (error) {
@@ -553,8 +559,9 @@ export default function ReviewBrowser({
   }
 
   const handleCommentDelete = async (commentId: string) => {
+    if (!workspace?.metadata.reviewId) return
     try {
-      const result = await reviewsApi.deleteComment(workspacePath, commentId)
+      const result = await reviewsApi.deleteComment(workspace.metadata.reviewId, commentId)
       if (result.success) {
         setReviews(prev => prev ? {
           ...prev,

@@ -289,13 +289,14 @@ export interface SettingsApi {
 }
 
 export interface ReviewsApi {
-  load: (worktreePath: string) => Promise<{ success: boolean; reviews?: ReviewsData; error?: string }>
-  save: (worktreePath: string, reviews: ReviewsData) => Promise<{ success: boolean; error?: string }>
-  addComment: (worktreePath: string, comment: Omit<ReviewComment, 'id' | 'createdAt'>) => Promise<{ success: boolean; comment?: ReviewComment; error?: string }>
-  deleteComment: (worktreePath: string, commentId: string) => Promise<{ success: boolean; error?: string }>
-  updateOutdated: (worktreePath: string, currentCommitHash: string) => Promise<{ success: boolean; reviews?: ReviewsData; error?: string }>
-  getFilePath: (worktreePath: string) => Promise<{ success: boolean; filePath?: string; error?: string }>
-  toggleAddressed: (worktreePath: string, commentId: string) => Promise<{ success: boolean; error?: string }>
+  load: (worktreePath: string, reviewId?: string) => Promise<{ success: boolean; reviews?: ReviewsData; reviewId?: string; error?: string }>
+  save: (reviewId: string, reviews: ReviewsData) => Promise<{ success: boolean; error?: string }>
+  addComment: (worktreePath: string, comment: Omit<ReviewComment, 'id' | 'createdAt'>, reviewId?: string) => Promise<{ success: boolean; comment?: ReviewComment; reviewId?: string; error?: string }>
+  deleteComment: (reviewId: string, commentId: string) => Promise<{ success: boolean; error?: string }>
+  updateOutdated: (worktreePath: string, currentCommitHash: string, reviewId?: string) => Promise<{ success: boolean; reviews?: ReviewsData; reviewId?: string; error?: string }>
+  getFilePath: (worktreePath: string, reviewId?: string) => Promise<{ success: boolean; filePath?: string; reviewId?: string; error?: string }>
+  toggleAddressed: (reviewId: string, commentId: string) => Promise<{ success: boolean; error?: string }>
+  cleanup: (reviewId: string) => Promise<{ success: boolean; error?: string }>
 }
 
 export interface AppRegistryApi {

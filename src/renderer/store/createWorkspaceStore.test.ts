@@ -60,6 +60,7 @@ function makeDeps(overrides?: Partial<WorkspaceDeps>): WorkspaceDeps {
       get: vi.fn().mockReturnValue(null),
       getDefaultApp: vi.fn().mockReturnValue(null),
     },
+    reviewsCleanup: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }

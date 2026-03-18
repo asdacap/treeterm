@@ -35,72 +35,80 @@ const defaultReviewsData: ReviewsData = {
   comments: []
 }
 
-const defaultIndex: ReviewIndex = {
-  version: 1,
-  mappings: {}
-}
-
 export class ReviewsClient {
-  private cachedIndex: ReviewIndex | null = null
-
   constructor(private daemonClient: GrpcDaemonClient) {}
 
-  private async loadIndex(): Promise<ReviewIndex> {
-    if (this.cachedIndex) return this.cachedIndex
-
-    try {
-      const result = await this.daemonClient.readFile(TREETERM_HOME, INDEX_FILE)
-      if (result.success && result.file) {
-        this.cachedIndex = JSON.parse(result.file.content)
-        return this.cachedIndex!
-      }
-    } catch {
-      // Index doesn't exist yet
-    }
-
-    this.cachedIndex = { ...defaultIndex, mappings: {} }
-    return this.cachedIndex
-  }
-
-  private async saveIndex(index: ReviewIndex): Promise<void> {
-    const content = JSON.stringify(index, null, 2)
-    const result = await this.daemonClient.writeFile(TREETERM_HOME, INDEX_FILE, content)
-    if (!result.success) {
-      throw new Error(result.error || 'Failed to save review index')
-    }
-    this.cachedIndex = index
-  }
-
-  private async getOrCreateReviewId(worktreePath: string): Promise<string> {
-    const index = await this.loadIndex()
-
-    if (index.mappings[worktreePath]) {
-      return index.mappings[worktreePath]
-    }
-
-    const id = humanId({ separator: '-', capitalize: false })
-    index.mappings[worktreePath] = id
-    await this.saveIndex(index)
-    return id
+  private generateReviewId(): string {
+    return humanId({ separator: '-', capitalize: false })
   }
 
   private getReviewFilePath(reviewId: string): string {
     return join(REVIEWS_DIR, reviewId + '.json')
   }
 
-  async resolveReviewFilePath(worktreePath: string): Promise<string> {
-    const id = await this.getOrCreateReviewId(worktreePath)
-    return this.getReviewFilePath(id)
+  /**
+   * One-time migration: if reviewId is undefined, check the old index file
+   * for a mapping from worktreePath to reviewId.
+   */
+  private async migrateFromIndex(worktreePath: string): Promise<string | undefined> {
+    try {
+      const result = await this.daemonClient.readFile(TREETERM_HOME, INDEX_FILE)
+      if (result.success && result.file) {
+        const index: ReviewIndex = JSON.parse(result.file.content)
+        return index.mappings[worktreePath]
+      }
+    } catch {
+      // Index doesn't exist
+    }
+    return undefined
   }
 
-  async loadReviews(worktreePath: string): Promise<ReviewsData> {
-    const id = await this.getOrCreateReviewId(worktreePath)
-    const reviewFilePath = this.getReviewFilePath(id)
+  /**
+   * Resolve or generate a reviewId. If reviewId is provided, use it.
+   * Otherwise, try to migrate from the old index file, then generate a new one.
+   */
+  private async resolveReviewId(
+    reviewId: string | undefined,
+    worktreePath: string
+  ): Promise<{ reviewId: string; isNew: boolean }> {
+    if (reviewId) {
+      return { reviewId, isNew: false }
+    }
+
+    // Try migration from old index
+    const migratedId = await this.migrateFromIndex(worktreePath)
+    if (migratedId) {
+      return { reviewId: migratedId, isNew: true }
+    }
+
+    return { reviewId: this.generateReviewId(), isNew: true }
+  }
+
+  async resolveReviewFilePath(
+    reviewId: string | undefined,
+    worktreePath: string
+  ): Promise<{ filePath: string; reviewId: string }> {
+    const resolved = await this.resolveReviewId(reviewId, worktreePath)
+    return {
+      filePath: this.getReviewFilePath(resolved.reviewId),
+      reviewId: resolved.reviewId
+    }
+  }
+
+  async loadReviews(
+    reviewId: string | undefined,
+    worktreePath: string
+  ): Promise<{ reviews: ReviewsData; reviewId: string }> {
+    const resolved = await this.resolveReviewId(reviewId, worktreePath)
+    const reviewFilePath = this.getReviewFilePath(resolved.reviewId)
 
     try {
       const result = await this.daemonClient.readFile(TREETERM_HOME, reviewFilePath)
       if (result.success && result.file) {
-        return JSON.parse(result.file.content)
+        return {
+          reviews: JSON.parse(result.file.content),
+          reviewId: resolved.reviewId
+        }
       }
     } catch {
       // Review file doesn't exist at new location
@@ -113,19 +121,18 @@ export class ReviewsClient {
       if (oldResult.success && oldResult.file) {
         const data: ReviewsData = JSON.parse(oldResult.file.content)
         // Save to new location
-        await this.saveReviews(worktreePath, data)
-        return data
+        await this.saveReviews(resolved.reviewId, data)
+        return { reviews: data, reviewId: resolved.reviewId }
       }
     } catch {
       // Old file doesn't exist either
     }
 
-    return { ...defaultReviewsData }
+    return { reviews: { ...defaultReviewsData }, reviewId: resolved.reviewId }
   }
 
-  async saveReviews(worktreePath: string, reviews: ReviewsData): Promise<void> {
-    const id = await this.getOrCreateReviewId(worktreePath)
-    const reviewFilePath = this.getReviewFilePath(id)
+  async saveReviews(reviewId: string, reviews: ReviewsData): Promise<void> {
+    const reviewFilePath = this.getReviewFilePath(reviewId)
     const content = JSON.stringify(reviews, null, 2)
 
     const result = await this.daemonClient.writeFile(TREETERM_HOME, reviewFilePath, content)
@@ -135,10 +142,11 @@ export class ReviewsClient {
   }
 
   async addComment(
+    reviewId: string | undefined,
     worktreePath: string,
     comment: Omit<ReviewComment, 'id' | 'createdAt'>
-  ): Promise<ReviewComment> {
-    const reviews = await this.loadReviews(worktreePath)
+  ): Promise<{ comment: ReviewComment; reviewId: string }> {
+    const { reviews, reviewId: resolvedId } = await this.loadReviews(reviewId, worktreePath)
 
     const newComment: ReviewComment = {
       ...comment,
@@ -148,40 +156,66 @@ export class ReviewsClient {
     }
 
     reviews.comments.push(newComment)
-    await this.saveReviews(worktreePath, reviews)
+    await this.saveReviews(resolvedId, reviews)
 
-    return newComment
+    return { comment: newComment, reviewId: resolvedId }
   }
 
-  async deleteComment(worktreePath: string, commentId: string): Promise<boolean> {
-    const reviews = await this.loadReviews(worktreePath)
-    const initialLength = reviews.comments.length
+  async deleteComment(reviewId: string, commentId: string): Promise<boolean> {
+    const reviewFilePath = this.getReviewFilePath(reviewId)
 
+    let reviews: ReviewsData
+    try {
+      const result = await this.daemonClient.readFile(TREETERM_HOME, reviewFilePath)
+      if (result.success && result.file) {
+        reviews = JSON.parse(result.file.content)
+      } else {
+        return false
+      }
+    } catch {
+      return false
+    }
+
+    const initialLength = reviews.comments.length
     reviews.comments = reviews.comments.filter(c => c.id !== commentId)
 
     if (reviews.comments.length < initialLength) {
-      await this.saveReviews(worktreePath, reviews)
+      await this.saveReviews(reviewId, reviews)
       return true
     }
 
     return false
   }
 
-  async toggleAddressed(worktreePath: string, commentId: string): Promise<boolean> {
-    const reviews = await this.loadReviews(worktreePath)
+  async toggleAddressed(reviewId: string, commentId: string): Promise<boolean> {
+    const reviewFilePath = this.getReviewFilePath(reviewId)
+
+    let reviews: ReviewsData
+    try {
+      const result = await this.daemonClient.readFile(TREETERM_HOME, reviewFilePath)
+      if (result.success && result.file) {
+        reviews = JSON.parse(result.file.content)
+      } else {
+        return false
+      }
+    } catch {
+      return false
+    }
+
     const comment = reviews.comments.find(c => c.id === commentId)
     if (!comment) return false
 
     comment.addressed = !comment.addressed
-    await this.saveReviews(worktreePath, reviews)
+    await this.saveReviews(reviewId, reviews)
     return true
   }
 
   async updateOutdatedComments(
+    reviewId: string | undefined,
     worktreePath: string,
     currentCommitHash: string
-  ): Promise<ReviewsData> {
-    const reviews = await this.loadReviews(worktreePath)
+  ): Promise<{ reviews: ReviewsData; reviewId: string }> {
+    const { reviews, reviewId: resolvedId } = await this.loadReviews(reviewId, worktreePath)
 
     let modified = false
     reviews.comments = reviews.comments.map(comment => {
@@ -194,9 +228,13 @@ export class ReviewsClient {
     })
 
     if (modified) {
-      await this.saveReviews(worktreePath, reviews)
+      await this.saveReviews(resolvedId, reviews)
     }
 
-    return reviews
+    return { reviews, reviewId: resolvedId }
+  }
+
+  async cleanupReviews(reviewId: string): Promise<void> {
+    await this.saveReviews(reviewId, { version: 1, comments: [] })
   }
 }

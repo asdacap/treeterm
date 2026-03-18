@@ -164,32 +164,36 @@ export interface IpcRequests {
 
   // Reviews operations
   reviewsLoad: {
-    params: [worktreePath: string]
-    result: { success: boolean; reviews?: ReviewsData; error?: string }
+    params: [worktreePath: string, reviewId?: string]
+    result: { success: boolean; reviews?: ReviewsData; reviewId?: string; error?: string }
   }
   reviewsSave: {
-    params: [worktreePath: string, reviews: ReviewsData]
+    params: [reviewId: string, reviews: ReviewsData]
     result: { success: boolean; error?: string }
   }
   reviewsAddComment: {
-    params: [worktreePath: string, comment: Omit<ReviewComment, 'id' | 'createdAt'>]
-    result: { success: boolean; comment?: ReviewComment; error?: string }
+    params: [worktreePath: string, comment: Omit<ReviewComment, 'id' | 'createdAt'>, reviewId?: string]
+    result: { success: boolean; comment?: ReviewComment; reviewId?: string; error?: string }
   }
   reviewsDeleteComment: {
-    params: [worktreePath: string, commentId: string]
+    params: [reviewId: string, commentId: string]
     result: { success: boolean; error?: string }
   }
   reviewsUpdateOutdated: {
-    params: [worktreePath: string, currentCommitHash: string]
-    result: { success: boolean; reviews?: ReviewsData; error?: string }
+    params: [worktreePath: string, currentCommitHash: string, reviewId?: string]
+    result: { success: boolean; reviews?: ReviewsData; reviewId?: string; error?: string }
   }
   reviewsToggleAddressed: {
-    params: [worktreePath: string, commentId: string]
+    params: [reviewId: string, commentId: string]
     result: { success: boolean; error?: string }
   }
   reviewsGetFilePath: {
-    params: [worktreePath: string]
-    result: { success: boolean; filePath?: string; error?: string }
+    params: [worktreePath: string, reviewId?: string]
+    result: { success: boolean; filePath?: string; reviewId?: string; error?: string }
+  }
+  reviewsCleanup: {
+    params: [reviewId: string]
+    result: { success: boolean; error?: string }
   }
 
   // Settings operations

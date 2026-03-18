@@ -805,60 +805,68 @@ server.onGitGetHeadCommitHash(async (repoPath) => {
 })
 
 // Reviews IPC Handlers - Now handled in main process via daemon filesystem gRPC
-server.onReviewsLoad(async (worktreePath) => {
+server.onReviewsLoad(async (worktreePath, reviewId) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
   initializeReviewsClient()
   if (!reviewsClient) throw new Error('Reviews client not initialized')
-  const reviews = await reviewsClient.loadReviews(worktreePath)
-  return { success: true, reviews }
+  const result = await reviewsClient.loadReviews(reviewId, worktreePath)
+  return { success: true, reviews: result.reviews, reviewId: result.reviewId }
 })
 
-server.onReviewsSave(async (worktreePath, reviews) => {
+server.onReviewsSave(async (reviewId, reviews) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
   initializeReviewsClient()
   if (!reviewsClient) throw new Error('Reviews client not initialized')
-  await reviewsClient.saveReviews(worktreePath, reviews)
+  await reviewsClient.saveReviews(reviewId, reviews)
   return { success: true }
 })
 
-server.onReviewsAddComment(async (worktreePath, comment) => {
+server.onReviewsAddComment(async (worktreePath, comment, reviewId) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
   initializeReviewsClient()
   if (!reviewsClient) throw new Error('Reviews client not initialized')
-  const newComment = await reviewsClient.addComment(worktreePath, comment)
-  return { success: true, comment: newComment }
+  const result = await reviewsClient.addComment(reviewId, worktreePath, comment)
+  return { success: true, comment: result.comment, reviewId: result.reviewId }
 })
 
-server.onReviewsDeleteComment(async (worktreePath, commentId) => {
+server.onReviewsDeleteComment(async (reviewId, commentId) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
   initializeReviewsClient()
   if (!reviewsClient) throw new Error('Reviews client not initialized')
-  const success = await reviewsClient.deleteComment(worktreePath, commentId)
+  const success = await reviewsClient.deleteComment(reviewId, commentId)
   return { success }
 })
 
-server.onReviewsUpdateOutdated(async (worktreePath, currentCommitHash) => {
+server.onReviewsUpdateOutdated(async (worktreePath, currentCommitHash, reviewId) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
   initializeReviewsClient()
   if (!reviewsClient) throw new Error('Reviews client not initialized')
-  const reviews = await reviewsClient.updateOutdatedComments(worktreePath, currentCommitHash)
-  return { success: true, reviews }
+  const result = await reviewsClient.updateOutdatedComments(reviewId, worktreePath, currentCommitHash)
+  return { success: true, reviews: result.reviews, reviewId: result.reviewId }
 })
 
-server.onReviewsToggleAddressed(async (worktreePath, commentId) => {
+server.onReviewsToggleAddressed(async (reviewId, commentId) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
   initializeReviewsClient()
   if (!reviewsClient) throw new Error('Reviews client not initialized')
-  const success = await reviewsClient.toggleAddressed(worktreePath, commentId)
+  const success = await reviewsClient.toggleAddressed(reviewId, commentId)
   return { success }
 })
 
-server.onReviewsGetFilePath(async (worktreePath) => {
+server.onReviewsGetFilePath(async (worktreePath, reviewId) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
   initializeReviewsClient()
   if (!reviewsClient) throw new Error('Reviews client not initialized')
-  const filePath = await reviewsClient.resolveReviewFilePath(worktreePath)
-  return { success: true, filePath }
+  const result = await reviewsClient.resolveReviewFilePath(reviewId, worktreePath)
+  return { success: true, filePath: result.filePath, reviewId: result.reviewId }
+})
+
+server.onReviewsCleanup(async (reviewId) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  initializeReviewsClient()
+  if (!reviewsClient) throw new Error('Reviews client not initialized')
+  await reviewsClient.cleanupReviews(reviewId)
+  return { success: true }
 })
 
 // Settings IPC Handlers

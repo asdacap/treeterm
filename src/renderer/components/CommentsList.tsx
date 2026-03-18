@@ -40,7 +40,8 @@ export default function CommentsList({
   const git = useGitApi()
   const reviewsApi = useReviewsApi()
   const filesystem = useFilesystemApi()
-  const { addTabWithState } = useStore(workspaceStore)
+  const { workspaces, addTabWithState, updateWorkspaceMetadata } = useStore(workspaceStore)
+  const workspace = workspaces[workspaceId]
   const [comments, setComments] = useState<ReviewComment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -52,25 +53,31 @@ export default function CommentsList({
     try {
       const hashResult = await git.getHeadCommitHash(workspacePath)
       if (hashResult.success && hashResult.hash) {
-        const result = await reviewsApi.updateOutdated(workspacePath, hashResult.hash)
+        const result = await reviewsApi.updateOutdated(workspacePath, hashResult.hash, workspace?.metadata.reviewId)
         if (result.success && result.reviews) {
           setComments(result.reviews.comments)
         } else {
           setError(result.error || 'Failed to load reviews')
         }
+        if (result.reviewId && result.reviewId !== workspace?.metadata.reviewId) {
+          updateWorkspaceMetadata(workspaceId, 'reviewId', result.reviewId)
+        }
       } else {
-        const result = await reviewsApi.load(workspacePath)
+        const result = await reviewsApi.load(workspacePath, workspace?.metadata.reviewId)
         if (result.success && result.reviews) {
           setComments(result.reviews.comments)
         } else {
           setError(result.error || 'Failed to load reviews')
+        }
+        if (result.reviewId && result.reviewId !== workspace?.metadata.reviewId) {
+          updateWorkspaceMetadata(workspaceId, 'reviewId', result.reviewId)
         }
       }
     } catch (err) {
       setError(`Failed to load comments: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
     setLoading(false)
-  }, [workspacePath, git, reviewsApi])
+  }, [workspacePath, workspace?.metadata.reviewId, git, reviewsApi])
 
   useEffect(() => {
     loadComments()
@@ -105,7 +112,8 @@ export default function CommentsList({
   }, [comments, workspacePath, filesystem])
 
   const handleToggleAddressed = async (commentId: string) => {
-    const result = await reviewsApi.toggleAddressed(workspacePath, commentId)
+    if (!workspace?.metadata.reviewId) return
+    const result = await reviewsApi.toggleAddressed(workspace.metadata.reviewId, commentId)
     if (result.success) {
       setComments(prev => prev.map(c =>
         c.id === commentId ? { ...c, addressed: !c.addressed } : c
@@ -114,7 +122,8 @@ export default function CommentsList({
   }
 
   const handleDelete = async (commentId: string) => {
-    const result = await reviewsApi.deleteComment(workspacePath, commentId)
+    if (!workspace?.metadata.reviewId) return
+    const result = await reviewsApi.deleteComment(workspace.metadata.reviewId, commentId)
     if (result.success) {
       setComments(prev => prev.filter(c => c.id !== commentId))
     }

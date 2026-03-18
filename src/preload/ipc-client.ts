@@ -48,6 +48,7 @@ const CHANNELS = {
   reviewsUpdateOutdated: 'reviews:updateOutdated',
   reviewsToggleAddressed: 'reviews:toggleAddressed',
   reviewsGetFilePath: 'reviews:getFilePath',
+  reviewsCleanup: 'reviews:cleanup',
   settingsLoad: 'settings:load',
   settingsSave: 'settings:save',
   fsReadDirectory: 'fs:readDirectory',
@@ -303,6 +304,12 @@ export class IpcClient {
     ...args: IpcRequests['reviewsGetFilePath']['params']
   ): Promise<IpcRequests['reviewsGetFilePath']['result']> {
     return ipcRenderer.invoke(CHANNELS.reviewsGetFilePath, ...args)
+  }
+
+  reviewsCleanup(
+    ...args: IpcRequests['reviewsCleanup']['params']
+  ): Promise<IpcRequests['reviewsCleanup']['result']> {
+    return ipcRenderer.invoke(CHANNELS.reviewsCleanup, ...args)
   }
 
   // Settings requests

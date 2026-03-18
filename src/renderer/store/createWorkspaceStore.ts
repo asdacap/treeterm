@@ -1,12 +1,13 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, GitInfo, Tab, WorktreeSettings, GitApi, SessionApi, Settings, AppRegistryApi, Application } from '../types'
+import type { Workspace, GitInfo, Tab, WorktreeSettings, GitApi, SessionApi, Settings, AppRegistryApi, Application, ReviewsApi } from '../types'
 
 export interface WorkspaceDeps {
   git: GitApi
   session: SessionApi
   getSettings: () => Settings
   appRegistry: AppRegistryApi
+  reviewsCleanup: (reviewId: string) => Promise<void>
 }
 
 export interface WorkspaceState {
@@ -218,6 +219,15 @@ export function createWorkspaceStore(
       const app = deps.appRegistry.get(tab.applicationId)
       if (app?.cleanup) {
         await app.cleanup(tab, workspace)
+      }
+    }
+
+    // Clean up review comments when workspace is removed
+    if (workspace.metadata.reviewId) {
+      try {
+        await deps.reviewsCleanup(workspace.metadata.reviewId)
+      } catch (error) {
+        console.error('[workspace] failed to cleanup reviews:', error)
       }
     }
 

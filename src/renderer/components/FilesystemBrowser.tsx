@@ -22,7 +22,7 @@ export function FilesystemBrowser({
   tabId,
   workspaceStore
 }: FilesystemBrowserProps): JSX.Element {
-  const { workspaces, updateTabState } = useStore(workspaceStore)
+  const { workspaces, updateTabState, updateWorkspaceMetadata } = useStore(workspaceStore)
   const git = useGitApi()
   const reviewsApi = useReviewsApi()
   const workspace = workspaces[workspaceId]
@@ -77,9 +77,12 @@ export function FilesystemBrowser({
       if (hashResult.success && hashResult.hash) {
         setCurrentCommitHash(hashResult.hash)
 
-        const result = await reviewsApi.updateOutdated(workspacePath, hashResult.hash)
+        const result = await reviewsApi.updateOutdated(workspacePath, hashResult.hash, workspace?.metadata.reviewId)
         if (result.success && result.reviews) {
           setReviews(result.reviews)
+        }
+        if (result.reviewId && result.reviewId !== workspace?.metadata.reviewId) {
+          updateWorkspaceMetadata(workspaceId, 'reviewId', result.reviewId)
         }
       }
     } catch (error) {
@@ -103,12 +106,15 @@ export function FilesystemBrowser({
         isOutdated: false,
         addressed: false,
         side: 'modified'
-      })
+      }, workspace?.metadata.reviewId)
       if (result.success && result.comment) {
         setReviews(prev => prev ? {
           ...prev,
           comments: [...prev.comments, result.comment!]
         } : { version: 1, comments: [result.comment!] })
+      }
+      if (result.reviewId && result.reviewId !== workspace?.metadata.reviewId) {
+        updateWorkspaceMetadata(workspaceId, 'reviewId', result.reviewId)
       }
       setCommentInput(null)
     } catch (error) {
@@ -118,8 +124,9 @@ export function FilesystemBrowser({
   }
 
   const handleCommentDelete = async (commentId: string) => {
+    if (!workspace?.metadata.reviewId) return
     try {
-      const result = await reviewsApi.deleteComment(workspacePath, commentId)
+      const result = await reviewsApi.deleteComment(workspace.metadata.reviewId, commentId)
       if (result.success) {
         setReviews(prev => prev ? {
           ...prev,

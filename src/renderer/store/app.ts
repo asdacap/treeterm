@@ -266,7 +266,7 @@ function getOrCreateSessionStore(
   get: () => AppState,
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void
 ): StoreApi<WorkspaceState> {
-  const { workspaceStores, windowUuid, git, sessionApi } = get()
+  const { workspaceStores, windowUuid, git, sessionApi, reviews } = get()
   let store = workspaceStores[sessionId]
   if (!store) {
     store = createWorkspaceStore(
@@ -276,6 +276,9 @@ function getOrCreateSessionStore(
         session: sessionApi,
         getSettings: () => useSettingsStore.getState().settings,
         appRegistry: applicationRegistry,
+        reviewsCleanup: async (reviewId: string) => {
+          await reviews.cleanup(reviewId)
+        },
       }
     )
     set((state) => ({

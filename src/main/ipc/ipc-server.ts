@@ -48,6 +48,7 @@ const CHANNELS = {
   reviewsUpdateOutdated: 'reviews:updateOutdated',
   reviewsToggleAddressed: 'reviews:toggleAddressed',
   reviewsGetFilePath: 'reviews:getFilePath',
+  reviewsCleanup: 'reviews:cleanup',
   settingsLoad: 'settings:load',
   settingsSave: 'settings:save',
   fsReadDirectory: 'fs:readDirectory',
@@ -495,6 +496,16 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.reviewsGetFilePath, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['reviewsGetFilePath']['params']))
+    )
+  }
+
+  onReviewsCleanup(
+    handler: (
+      ...args: IpcRequests['reviewsCleanup']['params']
+    ) => IpcRequests['reviewsCleanup']['result'] | Promise<IpcRequests['reviewsCleanup']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.reviewsCleanup, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['reviewsCleanup']['params']))
     )
   }
 
