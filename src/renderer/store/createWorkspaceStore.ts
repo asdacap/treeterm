@@ -23,6 +23,7 @@ export interface WorkspaceState {
   removeWorkspaceKeepBranch: (id: string) => Promise<void>
   removeWorkspaceKeepWorktree: (id: string) => Promise<void>
   removeWorkspaceKeepBoth: (id: string) => Promise<void>
+  removeOrphanWorkspace: (id: string) => void
   mergeAndRemoveWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
   closeAndCleanWorkspace: (id: string) => Promise<{ success: boolean; error?: string }>
   setActiveWorkspace: (id: string | null) => void
@@ -459,6 +460,37 @@ export function createWorkspaceStore(
 
     removeWorkspaceKeepBoth: async (id: string) => {
       await removeWorkspaceInternal(id, { keepBranch: true, keepWorktree: true })
+    },
+
+    // Remove workspace from local state only — no git ops, no daemon sync.
+    // Called when receiving a daemon update (e.g. another window merged/abandoned this worktree).
+    removeOrphanWorkspace: (id: string) => {
+      const state = get()
+      const workspace = state.workspaces[id]
+      if (!workspace) return
+
+      if (workspace.parentId) {
+        const parent = state.workspaces[workspace.parentId]
+        if (parent) {
+          set({
+            workspaces: {
+              ...state.workspaces,
+              [workspace.parentId]: {
+                ...parent,
+                children: parent.children.filter((cid) => cid !== id)
+              }
+            }
+          })
+        }
+      }
+
+      set((state) => {
+        const { [id]: removed, ...rest } = state.workspaces
+        return {
+          workspaces: rest,
+          activeWorkspaceId: state.activeWorkspaceId === id ? null : state.activeWorkspaceId
+        }
+      })
     },
 
     setActiveWorkspace: (id: string | null) => {

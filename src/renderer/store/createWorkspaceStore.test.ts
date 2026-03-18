@@ -653,6 +653,36 @@ describe('createWorkspaceStore', () => {
     })
   })
 
+  describe('removeOrphanWorkspace', () => {
+    it('removes workspace from local state without any git operations or daemon sync', () => {
+      const deps = makeDeps()
+      const store = createWorkspaceStore({ sessionId: 's1', windowUuid: null }, deps)
+      store.setState({
+        workspaces: {
+          'parent': makeWorkspace({ id: 'parent', children: ['wt-1'] }),
+          'wt-1': makeWorkspace({ id: 'wt-1', parentId: 'parent', isWorktree: true, gitRootPath: '/repo', path: '/repo/.wt/feat', gitBranch: 'feat' }),
+        }
+      })
+
+      store.getState().removeOrphanWorkspace('wt-1')
+
+      expect(deps.git.removeWorktree).not.toHaveBeenCalled()
+      expect(deps.git.deleteBranch).not.toHaveBeenCalled()
+      expect(store.getState().workspaces['wt-1']).toBeUndefined()
+      expect(store.getState().workspaces['parent'].children).toEqual([])
+    })
+
+    it('is a no-op for non-existent workspace', () => {
+      const deps = makeDeps()
+      const store = createWorkspaceStore({ sessionId: 's1', windowUuid: null }, deps)
+
+      store.getState().removeOrphanWorkspace('non-existent')
+
+      expect(deps.git.removeWorktree).not.toHaveBeenCalled()
+      expect(deps.git.deleteBranch).not.toHaveBeenCalled()
+    })
+  })
+
   describe('mergeAndRemoveWorkspace', () => {
     function setupMergeScenario(depsOverrides?: Partial<WorkspaceDeps>) {
       const deps = makeDeps(depsOverrides)
