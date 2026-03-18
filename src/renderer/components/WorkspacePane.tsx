@@ -13,6 +13,8 @@ import { ErrorBoundary } from './ErrorBoundary'
 import WorkspaceErrorFallback from './WorkspaceErrorFallback'
 import TabErrorFallback from './TabErrorFallback'
 import type { ReviewState, Platform } from '../types'
+import { isTerminalState } from '../types'
+import { PromptDescriptionButton } from './PromptDescriptionButton'
 
 interface WorkspacePaneProps {
   workspaceStore: StoreApi<WorkspaceState>
@@ -352,6 +354,20 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
   const tabs = activeWorkspace?.tabs || []
   const activeTabId = activeWorkspace?.activeTabId || tabs[0]?.id
 
+  // Prompt description: show button next to description for AI harness tabs that haven't been prompted yet
+  const activeTab = tabs.find((t) => t.id === activeTabId)
+  const activeTabPtyId = activeTab && isTerminalState(activeTab.state) ? activeTab.state.ptyId : null
+  const showPromptDescriptionButton = activeTab?.applicationId.startsWith('aiharness-')
+    && activeWorkspace?.metadata?.description
+    && !activeWorkspace?.metadata?.descriptionPrompted
+    && activeTabPtyId
+
+  const handlePromptDescriptionDismiss = useCallback(() => {
+    if (activeWorkspaceId) {
+      updateWorkspaceMetadata(activeWorkspaceId, 'descriptionPrompted', 'true')
+    }
+  }, [activeWorkspaceId, updateWorkspaceMetadata])
+
   return (
     <ErrorBoundary fallback={(error, reset) => <WorkspaceErrorFallback error={error} onReset={reset} />}>
       <div className="workspace-content">
@@ -472,8 +488,15 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                     rows={1}
                   />
                 ) : activeWorkspace.metadata?.description ? (
-                  <>
-                    <span className="workspace-description">{activeWorkspace.metadata.description}</span>
+                  <span className="workspace-description">
+                    {activeWorkspace.metadata.description}
+                    {showPromptDescriptionButton && activeTabPtyId && (
+                      <PromptDescriptionButton
+                        description={activeWorkspace.metadata.description}
+                        ptyId={activeTabPtyId}
+                        onDismiss={handlePromptDescriptionDismiss}
+                      />
+                    )}
                     <button
                       className="workspace-edit-btn"
                       onClick={handleStartEditDescription}
@@ -481,7 +504,7 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                     >
                       ✎
                     </button>
-                  </>
+                  </span>
                 ) : (
                   <>
                     <span className="workspace-description workspace-description-placeholder">no description</span>

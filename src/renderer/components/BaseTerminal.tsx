@@ -78,8 +78,6 @@ export interface BaseTerminalConfig {
   disableScrollbar?: boolean
   // Whether to strip CSI 3J (clear scrollback) from PTY data before writing to xterm
   stripScrollbackClear?: boolean
-  // Whether to show prompt description button (for AI harnesses)
-  showPromptDescription?: boolean
 }
 
 interface BaseTerminalProps {
@@ -120,19 +118,8 @@ export default function BaseTerminal({
   const workspace = useStore(workspaceStore, (state) => state.workspaces[workspaceId])
   const updateTabState = useStore(workspaceStore, (state) => state.updateTabState)
   const removeTab = useStore(workspaceStore, (state) => state.removeTab)
-  const updateWorkspaceMetadata = useStore(workspaceStore, (state) => state.updateWorkspaceMetadata)
   const setTabState = useActivityStateStore((state) => state.setTabState)
   const settings = useSettingsStore((state) => state.settings)
-
-  // Prompt description: show only for AI harnesses with a description that hasn't been prompted yet
-  const metadata = workspace?.metadata
-  const promptDescription = config.showPromptDescription && metadata?.description && !metadata?.descriptionPrompted
-    ? metadata.description
-    : undefined
-
-  const handlePromptDescriptionDismiss = useCallback(() => {
-    updateWorkspaceMetadata(workspaceId, 'descriptionPrompted', 'true')
-  }, [workspaceId, updateWorkspaceMetadata])
 
   // Get existing ptyId from store for reconnection
   const tab = workspace?.tabs.find((t) => t.id === tabId)
@@ -552,8 +539,6 @@ export default function BaseTerminal({
       onPushToTalkSubmit={handlePushToTalkSubmit}
       workspacePath={cwd}
       ptyId={ptyIdRef.current || undefined}
-      promptDescription={promptDescription}
-      onPromptDescriptionDismiss={handlePromptDescriptionDismiss}
     >
       <div
         ref={containerRef}

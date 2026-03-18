@@ -17,13 +17,13 @@ export function PromptDescriptionButton({ description, ptyId, onDismiss }: Promp
   }
 
   return (
-    <div className="prompt-description-button">
+    <span className="prompt-description-button">
       <button onClick={handlePrompt} title="Send description to AI agent">
         Prompt Description
       </button>
       <button onClick={onDismiss} title="Skip sending description">
         Skip
       </button>
-    </div>
+    </span>
   )
 }
