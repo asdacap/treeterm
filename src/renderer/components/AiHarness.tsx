@@ -36,6 +36,7 @@ export default function AiHarness({
     startupCommand: command,
     logPrefix: 'AiHarness',
     showPushToTalk: true,
+    showReviewComments: true,
     disableScrollbar,
     stripScrollbackClear
   }), [backgroundColor, command, disableScrollbar, stripScrollbackClear])

@@ -9,6 +9,7 @@ interface TerminalScrollWrapperProps {
   showPushToTalk?: boolean
   onPushToTalkTranscript?: (text: string) => void
   onPushToTalkSubmit?: () => void
+  showReviewComments?: boolean
   workspacePath?: string
   ptyId?: string
 }
@@ -19,6 +20,7 @@ export default function TerminalScrollWrapper({
   showPushToTalk = false,
   onPushToTalkTranscript,
   onPushToTalkSubmit,
+  showReviewComments = false,
   workspacePath,
   ptyId
 }: TerminalScrollWrapperProps) {
@@ -37,7 +39,7 @@ export default function TerminalScrollWrapper({
           onSubmit={onPushToTalkSubmit}
         />
       )}
-      {workspacePath && ptyId && (
+      {showReviewComments && workspacePath && ptyId && (
         <ReviewCommentsButton
           workspacePath={workspacePath}
           ptyId={ptyId}
