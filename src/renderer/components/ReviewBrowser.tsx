@@ -4,7 +4,9 @@ import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useGitApi } from '../contexts/GitApiContext'
+import { useTerminalApi } from '../contexts/TerminalApiContext'
 import { useReviewsApi } from '../contexts/ReviewsApiContext'
+import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, ReviewsData, ReviewComment } from '../types'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
 import { CommentInput } from './CommentInput'
@@ -30,8 +32,9 @@ export default function ReviewBrowser({
   workspaceStore
 }: ReviewBrowserProps) {
   const git = useGitApi()
+  const terminalApi = useTerminalApi()
   const reviewsApi = useReviewsApi()
-  const { workspaces, mergeAndRemoveWorkspace, removeWorkspace, removeWorkspaceKeepBranch, removeWorkspaceKeepWorktree, closeAndCleanWorkspace, removeTab } = useStore(workspaceStore)
+  const { workspaces, mergeAndRemoveWorkspace, removeWorkspace, removeWorkspaceKeepBranch, removeWorkspaceKeepWorktree, closeAndCleanWorkspace, removeTab, setActiveTab } = useStore(workspaceStore)
   const workspace = workspaces[workspaceId]
   const parentWorkspace = parentWorkspaceId ? workspaces[parentWorkspaceId] : undefined
   
@@ -84,6 +87,23 @@ export default function ReviewBrowser({
   const [abandonMenuOpen, setAbandonMenuOpen] = useState(false)
   const abandonMenuRef = useRef<HTMLDivElement>(null)
   const abandonButtonRef = useRef<HTMLButtonElement>(null)
+
+  // AI harness prompt support
+  const runningHarness = workspace ? findRunningHarness(workspace.tabs) : null
+
+  const handlePromptCommit = useCallback(() => {
+    if (runningHarness) {
+      terminalApi.write(runningHarness.ptyId, 'commit\r')
+      setActiveTab(workspaceId, runningHarness.tabId)
+    }
+  }, [runningHarness, terminalApi, setActiveTab, workspaceId])
+
+  const handlePromptRebase = useCallback(() => {
+    if (runningHarness && parentWorkspace?.gitBranch) {
+      terminalApi.write(runningHarness.ptyId, `rebase with ${parentWorkspace.gitBranch}\r`)
+      setActiveTab(workspaceId, runningHarness.tabId)
+    }
+  }, [runningHarness, parentWorkspace?.gitBranch, terminalApi, setActiveTab, workspaceId])
 
   // Resize handlers (must be defined before any early returns)
   const handleResizeMouseDown = useCallback(() => {
@@ -881,6 +901,16 @@ export default function ReviewBrowser({
           </>
         ) : workspace?.isDetached ? (
           <>
+            {hasUncommitted && runningHarness && (
+              <button
+                className="review-action-btn review-prompt-commit-btn"
+                onClick={handlePromptCommit}
+                disabled={isProcessing}
+                title="Send commit command to the AI harness"
+              >
+                Prompt Commit
+              </button>
+            )}
             <button
               className="review-action-btn review-close-and-clean-btn"
               onClick={handleCloseAndClean}
@@ -943,6 +973,26 @@ export default function ReviewBrowser({
           </>
         ) : (
           <>
+            {hasUncommitted && runningHarness && (
+              <button
+                className="review-action-btn review-prompt-commit-btn"
+                onClick={handlePromptCommit}
+                disabled={isProcessing}
+                title="Send commit command to the AI harness"
+              >
+                Prompt Commit
+              </button>
+            )}
+            {hasConflicts && runningHarness && parentWorkspace?.gitBranch && (
+              <button
+                className="review-action-btn review-prompt-rebase-btn"
+                onClick={handlePromptRebase}
+                disabled={isProcessing}
+                title="Send rebase command to the AI harness"
+              >
+                Prompt Rebase
+              </button>
+            )}
             <button
               className="review-action-btn review-merge-btn"
               onClick={() => handleMerge(false)}
