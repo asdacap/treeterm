@@ -101,6 +101,7 @@ export function FilesystemBrowser({
         text,
         commitHash: currentCommitHash,
         isOutdated: false,
+        addressed: false,
         side: 'modified'
       })
       if (result.success && result.comment) {
@@ -179,6 +180,13 @@ export function FilesystemBrowser({
           inlineCommentInput={commentInput}
           onCommentSubmit={handleCommentSubmit}
           onCommentCancel={() => setCommentInput(null)}
+          scrollToLine={state.scrollToLine}
+          onScrollToLineUsed={() => {
+            updateTabState<FilesystemState>(workspaceId, tabId, (s) => ({
+              ...s,
+              scrollToLine: undefined
+            }))
+          }}
         />
         {state.selectedPath && fileComments.length > 0 && (
           <div className="diff-comments-panel">

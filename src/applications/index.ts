@@ -4,6 +4,7 @@ import { filesystemApplication } from './filesystem/renderer'
 import { createAiHarnessVariant } from './aiHarness/renderer'
 import { reviewApplication } from './review/renderer'
 import { editorApplication } from './editor/renderer'
+import { commentsApplication } from './comments/renderer'
 import type { TerminalInstance, AiHarnessInstance, Settings, TerminalApi } from '../renderer/types'
 
 type TerminalDeps = { terminal: Pick<TerminalApi, 'kill'> }
@@ -18,6 +19,7 @@ export function initializeApplications(deps: TerminalDeps): void {
   // NOTE: AI Harness variants are registered dynamically from settings
   applicationRegistry.register(reviewApplication)
   applicationRegistry.register(editorApplication)
+  applicationRegistry.register(commentsApplication)
 
   initialized = true
 }
@@ -70,4 +72,4 @@ export function registerAiHarnessVariants(instances: AiHarnessInstance[], termin
   }
 }
 
-export { filesystemApplication, reviewApplication, createAiHarnessVariant }
+export { filesystemApplication, reviewApplication, commentsApplication, createAiHarnessVariant }

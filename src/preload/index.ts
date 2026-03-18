@@ -285,6 +285,9 @@ contextBridge.exposeInMainWorld('electron', {
     },
     getFilePath: (worktreePath: string) => {
       return client.reviewsGetFilePath(worktreePath)
+    },
+    toggleAddressed: (worktreePath: string, commentId: string) => {
+      return client.reviewsToggleAddressed(worktreePath, commentId)
     }
   },
   settings: {

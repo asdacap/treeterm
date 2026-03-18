@@ -77,12 +77,17 @@ export interface AiHarnessState extends TerminalState {
 export interface FilesystemState {
   selectedPath: string | null
   expandedDirs: string[]
+  scrollToLine?: number
 }
 
 export interface ReviewState {
   // parentWorkspaceId identifies the target branch for merging.
   // If undefined/null, this is a top-level worktree - review shows only uncommitted changes
   parentWorkspaceId?: string
+}
+
+export interface CommentsState {
+  // empty - no persisted state needed
 }
 
 export interface EditorState {
@@ -216,6 +221,7 @@ export interface ReviewComment {
   commitHash: string
   createdAt: number
   isOutdated: boolean
+  addressed: boolean
   side: 'original' | 'modified'
 }
 
@@ -288,6 +294,7 @@ export interface ReviewsApi {
   deleteComment: (worktreePath: string, commentId: string) => Promise<{ success: boolean; error?: string }>
   updateOutdated: (worktreePath: string, currentCommitHash: string) => Promise<{ success: boolean; reviews?: ReviewsData; error?: string }>
   getFilePath: (worktreePath: string) => Promise<{ success: boolean; filePath?: string; error?: string }>
+  toggleAddressed: (worktreePath: string, commentId: string) => Promise<{ success: boolean; error?: string }>
 }
 
 export interface AppRegistryApi {
@@ -398,4 +405,8 @@ export function isEditorState(state: unknown): state is EditorState {
     'isLoading' in state &&
     typeof (state as EditorState).filePath === 'string'
   )
+}
+
+export function isCommentsState(state: unknown): state is CommentsState {
+  return state !== null && typeof state === 'object'
 }

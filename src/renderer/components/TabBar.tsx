@@ -83,7 +83,10 @@ export default function TabBar({
     // Apps that can have multiple instances can always be closed
     if (app.canHaveMultiple) return true
 
-    // For single-instance apps, require more than one tab of this type
+    // Non-default single-instance apps can always be closed (opened on demand)
+    if (!app.isDefault) return true
+
+    // For default single-instance apps, require more than one tab of this type
     const sameTypeTabs = tabs.filter((t) => t.applicationId === tab.applicationId)
     return sameTypeTabs.length > 1
   }

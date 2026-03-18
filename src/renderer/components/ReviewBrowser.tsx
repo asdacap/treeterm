@@ -534,6 +534,7 @@ export default function ReviewBrowser({
         text,
         commitHash: currentCommitHash,
         isOutdated: false,
+        addressed: false,
         side: commentInput.side
       }
 

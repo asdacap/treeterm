@@ -16,6 +16,7 @@ export interface ReviewComment {
   commitHash: string
   createdAt: number
   isOutdated: boolean
+  addressed: boolean
   side: 'original' | 'modified'
 }
 
@@ -142,7 +143,8 @@ export class ReviewsClient {
     const newComment: ReviewComment = {
       ...comment,
       id: randomUUID(),
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      addressed: comment.addressed ?? false
     }
 
     reviews.comments.push(newComment)
@@ -163,6 +165,16 @@ export class ReviewsClient {
     }
 
     return false
+  }
+
+  async toggleAddressed(worktreePath: string, commentId: string): Promise<boolean> {
+    const reviews = await this.loadReviews(worktreePath)
+    const comment = reviews.comments.find(c => c.id === commentId)
+    if (!comment) return false
+
+    comment.addressed = !comment.addressed
+    await this.saveReviews(worktreePath, reviews)
+    return true
   }
 
   async updateOutdatedComments(

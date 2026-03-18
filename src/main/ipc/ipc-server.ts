@@ -46,6 +46,7 @@ const CHANNELS = {
   reviewsAddComment: 'reviews:addComment',
   reviewsDeleteComment: 'reviews:deleteComment',
   reviewsUpdateOutdated: 'reviews:updateOutdated',
+  reviewsToggleAddressed: 'reviews:toggleAddressed',
   reviewsGetFilePath: 'reviews:getFilePath',
   settingsLoad: 'settings:load',
   settingsSave: 'settings:save',
@@ -473,6 +474,16 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.reviewsUpdateOutdated, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['reviewsUpdateOutdated']['params']))
+    )
+  }
+
+  onReviewsToggleAddressed(
+    handler: (
+      ...args: IpcRequests['reviewsToggleAddressed']['params']
+    ) => IpcRequests['reviewsToggleAddressed']['result'] | Promise<IpcRequests['reviewsToggleAddressed']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.reviewsToggleAddressed, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['reviewsToggleAddressed']['params']))
     )
   }
 

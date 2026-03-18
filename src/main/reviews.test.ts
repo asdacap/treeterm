@@ -237,6 +237,7 @@ describe('ReviewsClient', () => {
         text: 'Looks good',
         commitHash: 'def456',
         isOutdated: false,
+        addressed: false,
         side: 'modified',
       })
 
