@@ -411,14 +411,8 @@ body,
   font-size: 13px;
   padding: 2px 4px;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s;
-  -webkit-app-region: no-drag;
-}
-
-.workspace-header-top:hover .workspace-edit-btn,
-.workspace-header-description-row:hover .workspace-edit-btn {
   opacity: 1;
+  -webkit-app-region: no-drag;
 }
 
 .workspace-edit-btn:hover {
