@@ -185,6 +185,75 @@ describe('createActivityStateDetector', () => {
     })
   })
 
+  it('detects root # prompt as waiting_for_input', () => {
+    const onStateChange = vi.fn()
+    const { processData } = createActivityStateDetector(onStateChange, { idleTimeout: 100, debounceMs: 0 })
+
+    processData('root@host:~# ')
+    vi.advanceTimersByTime(200)
+
+    const calls = onStateChange.mock.calls.map(c => c[0])
+    expect(calls).toContain('waiting_for_input')
+  })
+
+  it('detects fancy \u276f prompt as waiting_for_input', () => {
+    const onStateChange = vi.fn()
+    const { processData } = createActivityStateDetector(onStateChange, { idleTimeout: 100, debounceMs: 0 })
+
+    processData('~/project \u276f ')
+    vi.advanceTimersByTime(200)
+
+    const calls = onStateChange.mock.calls.map(c => c[0])
+    expect(calls).toContain('waiting_for_input')
+  })
+
+  it('rapid data during debounce cancels pending idle transition', () => {
+    const onStateChange = vi.fn()
+    const { processData } = createActivityStateDetector(onStateChange, { idleTimeout: 100, debounceMs: 50 })
+
+    processData('user@host:~$ ')
+    vi.advanceTimersByTime(150) // past idle timeout, debounce starts
+
+    // New data arrives during debounce period — should cancel it
+    processData('more output')
+    vi.advanceTimersByTime(10)
+
+    // Should have gone back to 'working', not 'waiting_for_input'
+    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1][0]
+    expect(lastCall).toBe('working')
+  })
+
+  it('working state clears pending debounce', () => {
+    const onStateChange = vi.fn()
+    const { processData } = createActivityStateDetector(onStateChange, { idleTimeout: 100, debounceMs: 200 })
+
+    processData('user@host:~$ ')
+    vi.advanceTimersByTime(150) // idle timer fires, debounce for waiting_for_input starts
+
+    processData('new data') // working should cancel debounce
+
+    // Advance past the original debounce period
+    vi.advanceTimersByTime(250)
+
+    // The last state should not be waiting_for_input since working cleared it
+    const waitingCalls = onStateChange.mock.calls.filter(c => c[0] === 'waiting_for_input')
+    expect(waitingCalls).toHaveLength(0)
+  })
+
+  it('detects all braille spinner chars as working', () => {
+    const spinners = ['\u280b', '\u2819', '\u2839', '\u2838', '\u283c', '\u2834', '\u2826', '\u2827', '\u2807', '\u280f']
+    for (const spinner of spinners) {
+      const onStateChange = vi.fn()
+      const { processData } = createActivityStateDetector(onStateChange, {
+        workingPatterns: [/[\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f]/],
+        idleTimeout: 1000,
+        debounceMs: 0,
+      })
+      processData(`${spinner} loading...`)
+      expect(onStateChange).toHaveBeenCalledWith('working')
+    }
+  })
+
   it('uses custom prompt patterns when provided', () => {
     const onStateChange = vi.fn()
     const { processData } = createActivityStateDetector(onStateChange, {

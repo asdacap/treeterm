@@ -181,7 +181,7 @@ export function usePrefixKeybindings(handlers: KeybindingHandlers): void {
 // Helper function to match a keybinding event
 // modifiers is an array of modifier keys like ["Meta", "Shift"]
 // key is the main key like "t"
-function matchesKeybinding(event: KeyboardEvent, modifiers: string[], key: string): boolean {
+export function matchesKeybinding(event: KeyboardEvent, modifiers: string[], key: string): boolean {
   const hasControl = modifiers.includes('Control')
   const hasShift = modifiers.includes('Shift')
   const hasAlt = modifiers.includes('Alt')

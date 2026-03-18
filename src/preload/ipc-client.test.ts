@@ -76,6 +76,66 @@ describe('IpcClient', () => {
       expect(mockInvoke).toHaveBeenCalledWith('session:list')
       expect(result).toEqual([{ id: 'session-1' }])
     })
+
+    it.each([
+      ['ptyAttach', 'pty:attach'],
+      ['ptyDetach', 'pty:detach'],
+      ['ptyList', 'pty:list'],
+      ['ptyIsAlive', 'pty:isAlive'],
+      ['gitCreateWorktree', 'git:createWorktree'],
+      ['gitRemoveWorktree', 'git:removeWorktree'],
+      ['gitListWorktrees', 'git:listWorktrees'],
+      ['gitGetChildWorktrees', 'git:getChildWorktrees'],
+      ['gitListLocalBranches', 'git:listLocalBranches'],
+      ['gitListRemoteBranches', 'git:listRemoteBranches'],
+      ['gitGetBranchesInWorktrees', 'git:getBranchesInWorktrees'],
+      ['gitCreateWorktreeFromBranch', 'git:createWorktreeFromBranch'],
+      ['gitCreateWorktreeFromRemote', 'git:createWorktreeFromRemote'],
+      ['gitGetDiff', 'git:getDiff'],
+      ['gitGetFileDiff', 'git:getFileDiff'],
+      ['gitMerge', 'git:merge'],
+      ['gitCheckMergeConflicts', 'git:checkMergeConflicts'],
+      ['gitHasUncommittedChanges', 'git:hasUncommittedChanges'],
+      ['gitCommitAll', 'git:commitAll'],
+      ['gitDeleteBranch', 'git:deleteBranch'],
+      ['gitGetUncommittedChanges', 'git:getUncommittedChanges'],
+      ['gitGetUncommittedFileDiff', 'git:getUncommittedFileDiff'],
+      ['gitStageFile', 'git:stageFile'],
+      ['gitUnstageFile', 'git:unstageFile'],
+      ['gitStageAll', 'git:stageAll'],
+      ['gitUnstageAll', 'git:unstageAll'],
+      ['gitCommitStaged', 'git:commitStaged'],
+      ['gitGetFileContentsForDiff', 'git:getFileContentsForDiff'],
+      ['gitGetUncommittedFileContentsForDiff', 'git:getUncommittedFileContentsForDiff'],
+      ['gitGetHeadCommitHash', 'git:getHeadCommitHash'],
+      ['reviewsLoad', 'reviews:load'],
+      ['reviewsSave', 'reviews:save'],
+      ['reviewsAddComment', 'reviews:addComment'],
+      ['reviewsDeleteComment', 'reviews:deleteComment'],
+      ['reviewsUpdateOutdated', 'reviews:updateOutdated'],
+      ['reviewsGetFilePath', 'reviews:getFilePath'],
+      ['settingsSave', 'settings:save'],
+      ['fsReadDirectory', 'fs:readDirectory'],
+      ['fsWriteFile', 'fs:writeFile'],
+      ['fsSearchFiles', 'fs:searchFiles'],
+      ['sttTranscribeOpenai', 'stt:transcribe-openai'],
+      ['sttTranscribeLocal', 'stt:transcribe-local'],
+      ['sttCheckMicPermission', 'stt:check-mic-permission'],
+      ['sessionUpdate', 'session:update'],
+      ['sessionGet', 'session:get'],
+      ['sessionDelete', 'session:delete'],
+      ['sessionOpenInNewWindow', 'session:open-in-new-window'],
+      ['daemonShutdown', 'daemon:shutdown'],
+      ['dialogSelectFolder', 'dialog:selectFolder'],
+      ['dialogGetRecentDirectories', 'dialog:getRecentDirectories'],
+      ['sandboxIsAvailable', 'sandbox:isAvailable'],
+      ['appGetInitialWorkspace', 'app:getInitialWorkspace'],
+    ] as const)('%s calls ipcRenderer.invoke with %s channel', async (method, channel) => {
+      mockInvoke.mockResolvedValue('test-result')
+      const result = await (client as any)[method]('arg1', 'arg2')
+      expect(mockInvoke).toHaveBeenCalledWith(channel, 'arg1', 'arg2')
+      expect(result).toBe('test-result')
+    })
   })
 
   describe('send pattern (fire-and-forget methods)', () => {
@@ -182,6 +242,22 @@ describe('IpcClient', () => {
       const handler = mockOn.mock.calls[0][1]
       handler()
       expect(callback).toHaveBeenCalled()
+    })
+
+    it.each([
+      ['onAppReady', 'app:ready'],
+      ['onCapsLockEvent', 'capslock-event'],
+      ['onDaemonSessions', 'daemon:sessions'],
+      ['onTerminalNew', 'terminal:new'],
+      ['onTerminalShowSessions', 'terminal:show-sessions'],
+      ['onSessionShowSessions', 'session:show-sessions'],
+    ] as const)('%s registers listener on %s and unsubscribe works', (method, channel) => {
+      const callback = vi.fn()
+      const unsub = (client as any)[method](callback)
+      expect(mockOn).toHaveBeenCalledWith(channel, expect.any(Function))
+      const handler = mockOn.mock.calls[0][1]
+      unsub()
+      expect(mockRemoveListener).toHaveBeenCalledWith(channel, handler)
     })
   })
 })
