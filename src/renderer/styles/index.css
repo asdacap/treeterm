@@ -185,15 +185,6 @@ body,
   border-color: var(--accent);
 }
 
-.tree-item-branch {
-  font-size: 11px;
-  color: var(--accent);
-  margin-left: 8px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 80px;
-}
 
 .tree-new-child {
   padding: 4px 8px;

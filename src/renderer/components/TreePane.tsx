@@ -282,7 +282,7 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
           <span className="tree-item-name">
             {ws.metadata?.displayName || ws.name}
           </span>
-          {ws.isWorktree && ws.gitBranch && <span className="tree-item-branch" title={ws.gitBranch}>{ws.gitBranch}</span>}
+
           <WorkspaceActivityIndicator tabIds={tabIds} />
           <span className="tree-item-actions">
             {ws.isGitRepo && (
