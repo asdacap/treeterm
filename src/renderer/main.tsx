@@ -1,7 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import './monaco-config' // Configure Monaco before any components use it
-import { initializeApplications } from '../applications'
 import { useAppStore } from './store/app'
 import App from './App'
 import './styles/index.css'
@@ -26,8 +25,6 @@ window.electron.app.onReady(() => {
     getWindowUuid: e.getWindowUuid,
     getInitialWorkspace: e.getInitialWorkspace,
   })
-
-  initializeApplications({ terminal: e.terminal })
 
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>

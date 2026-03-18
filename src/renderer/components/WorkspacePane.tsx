@@ -4,7 +4,7 @@ import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { usePrefixModeStore } from '../store/prefixMode'
-import { applicationRegistry } from '../registry/applicationRegistry'
+import { useAppStore } from '../store/app'
 import { usePrefixKeybindings } from '../hooks/usePrefixKeybindings'
 import TabBar from './TabBar'
 import CreateChildDialog from './CreateChildDialog'
@@ -43,6 +43,9 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
     updateWorkspaceMetadata
   } = useStore(workspaceStore)
   const { enterWorkspaceFocus } = usePrefixModeStore()
+  const applications = useAppStore((s) => s.applications)
+  const getApplication = useCallback((id: string) => applications[id], [applications])
+  const menuApplications = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
 
   const activeWorkspace = activeWorkspaceId ? workspaces[activeWorkspaceId] : null
 
@@ -119,12 +122,11 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
   // Create new tab using the first available application
   const handleNewDefaultTab = useCallback(() => {
     // Find the first app that allows new tabs
-    const menuApps = applicationRegistry.getMenuItems()
-    const defaultApp = menuApps.find((app) => app.canHaveMultiple)
+    const defaultApp = menuApplications.find((app) => app.canHaveMultiple)
     if (activeWorkspaceId && defaultApp) {
       addTab(activeWorkspaceId, defaultApp.id)
     }
-  }, [activeWorkspaceId, addTab])
+  }, [activeWorkspaceId, addTab, menuApplications])
 
   const handleCloseTab = useCallback(
     (tabId: string) => {
@@ -537,7 +539,7 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
 
             return wsTabs.map((tab) => {
               const isVisible = isActiveWorkspace && tab.id === wsActiveTabId
-              const app = applicationRegistry.get(tab.applicationId)
+              const app = getApplication(tab.applicationId)
 
               if (!app) return null
 

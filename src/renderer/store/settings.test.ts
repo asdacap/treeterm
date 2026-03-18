@@ -1,12 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+// Mock app store used by settings store
+vi.mock('./app', () => ({
+  useAppStore: {
+    getState: vi.fn().mockReturnValue({
+      registerTerminalVariants: vi.fn(),
+      registerAiHarnessVariants: vi.fn()
+    })
+  }
+}))
+
 import { useSettingsStore } from './settings'
 import type { Settings } from '../types'
-
-// Mock the applications module
-vi.mock('../../applications', () => ({
-  registerTerminalVariants: vi.fn(),
-  registerAiHarnessVariants: vi.fn()
-}))
 
 // Mock settings API
 const mockLoadSettings = vi.fn()

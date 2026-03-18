@@ -4,11 +4,17 @@ import { createWorkspaceStore } from './createWorkspaceStore'
 import type { WorkspaceState } from './createWorkspaceStore'
 import { useSettingsStore } from './settings'
 import { getUnmergedSubWorkspaces } from './createWorkspaceStore'
-import { applicationRegistry } from '../registry/applicationRegistry'
+import { createTerminalApplication, createTerminalVariant } from '../../applications/terminal/renderer'
+import { filesystemApplication } from '../../applications/filesystem/renderer'
+import { createAiHarnessVariant } from '../../applications/aiHarness/renderer'
+import { reviewApplication } from '../../applications/review/renderer'
+import { editorApplication } from '../../applications/editor/renderer'
+import { commentsApplication } from '../../applications/comments/renderer'
 import type {
-  Workspace, Session,
+  Workspace, Session, Application,
   Platform, TerminalApi, GitApi, SessionApi, AppApi, DaemonApi,
-  FilesystemApi, STTApi, SandboxApi, SettingsApi
+  FilesystemApi, STTApi, SandboxApi, SettingsApi,
+  TerminalInstance, AiHarnessInstance, Settings
 } from '../types'
 
 type AddTabWithStateFn = <T>(workspaceId: string, applicationId: string, initialState: Partial<T>, existingTabId?: string) => string
@@ -41,6 +47,19 @@ interface AppState extends AppDeps {
   unmergedWorkspaces: Workspace[]
   showWorkspacePicker: boolean
   daemonSessions: Session[]
+
+  // Application registry
+  applications: Record<string, Application>
+  registerApplication: (app: Application) => void
+  unregisterApplication: (id: string) => void
+  getApplication: (id: string) => Application | undefined
+  getAllApplications: () => Application[]
+  getMenuApplications: () => Application[]
+  getDefaultApplications: () => Application[]
+  getDefaultApplication: (appId?: string) => Application | null
+  initializeApplications: () => void
+  registerTerminalVariants: (instances: TerminalInstance[], terminalSettings: Settings['terminal'] | undefined) => void
+  registerAiHarnessVariants: (instances: AiHarnessInstance[]) => void
 
   // Session management
   activeSessionId: string | null
@@ -89,10 +108,104 @@ export const useAppStore = create<AppState>()((set, get) => ({
   activeSessionId: null,
   workspaceStores: {},
 
+  // Application registry
+  applications: {},
+
+  registerApplication: (app: Application) => {
+    set((state) => ({
+      applications: { ...state.applications, [app.id]: app }
+    }))
+  },
+
+  unregisterApplication: (id: string) => {
+    set((state) => {
+      const { [id]: _, ...rest } = state.applications
+      return { applications: rest }
+    })
+  },
+
+  getApplication: (id: string) => {
+    return get().applications[id]
+  },
+
+  getAllApplications: () => {
+    return Object.values(get().applications)
+  },
+
+  getMenuApplications: () => {
+    return Object.values(get().applications).filter((app) => app.showInNewTabMenu)
+  },
+
+  getDefaultApplications: () => {
+    return Object.values(get().applications).filter((app) => app.isDefault)
+  },
+
+  getDefaultApplication: (appId?: string) => {
+    const apps = get().applications
+    if (appId) {
+      const app = apps[appId]
+      if (app) return app
+    }
+    const allApps = Object.values(apps)
+    return allApps.length > 0 ? allApps[0] : null
+  },
+
+  initializeApplications: () => {
+    const { terminal } = get()
+    const deps = { terminal: { kill: terminal.kill.bind(terminal) } }
+    get().registerApplication(createTerminalApplication(true, deps))
+    get().registerApplication(filesystemApplication)
+    get().registerApplication(reviewApplication)
+    get().registerApplication(editorApplication)
+    get().registerApplication(commentsApplication)
+  },
+
+  registerTerminalVariants: (instances: TerminalInstance[], terminalSettings: Settings['terminal'] | undefined) => {
+    const { terminal } = get()
+    const deps = { terminal: { kill: terminal.kill.bind(terminal) } }
+
+    // Re-register base terminal with updated startByDefault setting
+    if (terminalSettings !== undefined) {
+      get().registerApplication(createTerminalApplication(terminalSettings.startByDefault, deps))
+    }
+
+    // Unregister existing dynamic terminals
+    const allApps = Object.values(get().applications)
+    for (const app of allApps) {
+      if (app.id.startsWith('terminal-')) {
+        get().unregisterApplication(app.id)
+      }
+    }
+
+    // Register new variants
+    for (const instance of instances) {
+      get().registerApplication(createTerminalVariant(instance, deps))
+    }
+  },
+
+  registerAiHarnessVariants: (instances: AiHarnessInstance[]) => {
+    const { terminal } = get()
+    const deps = { terminal: { kill: terminal.kill.bind(terminal) } }
+
+    // Unregister existing dynamic AI Harness apps
+    const allApps = Object.values(get().applications)
+    for (const app of allApps) {
+      if (app.id.startsWith('aiharness-')) {
+        get().unregisterApplication(app.id)
+      }
+    }
+
+    // Register new variants
+    for (const instance of instances) {
+      get().registerApplication(createAiHarnessVariant(instance, deps))
+    }
+  },
+
   initialize: async (deps: AppDeps) => {
     set(deps)
     const { terminal, git, sessionApi, settingsApi, appApi, daemon, getWindowUuid, getInitialWorkspace } = deps
 
+    get().initializeApplications()
     useSettingsStore.getState().init(settingsApi, terminal.kill.bind(terminal))
 
     // Fetch this window's UUID
@@ -279,7 +392,10 @@ function getOrCreateSessionStore(
         git,
         session: sessionApi,
         getSettings: () => useSettingsStore.getState().settings,
-        appRegistry: applicationRegistry,
+        appRegistry: {
+          get: (id: string) => get().applications[id],
+          getDefaultApp: (appId?: string) => get().getDefaultApplication(appId),
+        },
       }
     )
     set((state) => ({

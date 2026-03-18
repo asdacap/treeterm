@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { Settings, SettingsApi } from '../types'
-import { registerTerminalVariants, registerAiHarnessVariants } from '../../applications'
+import { useAppStore } from './app'
 
 const defaultSettings: Settings = {
   terminal: {
@@ -93,9 +93,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const settings = await get().settingsApi!.load()
       set({ settings, isLoaded: true })
       // Register dynamic terminal variants and update base terminal
-      registerTerminalVariants(settings.terminal.instances, settings.terminal, get().terminalKill)
+      useAppStore.getState().registerTerminalVariants(settings.terminal.instances, settings.terminal)
       // Register dynamic AI Harness variants
-      registerAiHarnessVariants(settings.aiHarness.instances, get().terminalKill)
+      useAppStore.getState().registerAiHarnessVariants(settings.aiHarness.instances)
     } catch (error) {
       console.warn('[settings] Failed to load settings, using defaults:', error)
       set({ isLoaded: true })
@@ -107,9 +107,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await get().settingsApi!.save(settings)
       set({ settings })
       // Re-register terminal variants and update base terminal when settings change
-      registerTerminalVariants(settings.terminal.instances, settings.terminal, get().terminalKill)
+      useAppStore.getState().registerTerminalVariants(settings.terminal.instances, settings.terminal)
       // Re-register AI Harness variants when settings change
-      registerAiHarnessVariants(settings.aiHarness.instances, get().terminalKill)
+      useAppStore.getState().registerAiHarnessVariants(settings.aiHarness.instances)
     } catch (error) {
       console.error('Failed to save settings:', error)
       throw error
