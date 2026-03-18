@@ -382,8 +382,8 @@ body,
 
 .workspace-header {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  gap: 4px;
   padding: 8px 16px;
   padding-top: 46px; /* Account for traffic light buttons on macOS */
   background: var(--bg-secondary);
@@ -391,9 +391,66 @@ body,
   -webkit-app-region: drag;
 }
 
+.workspace-header-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .workspace-title {
   font-size: 13px;
   font-weight: 500;
+}
+
+.workspace-edit-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  padding: 2px 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  -webkit-app-region: no-drag;
+}
+
+.workspace-header-top:hover .workspace-edit-btn,
+.workspace-header-description-row:hover .workspace-edit-btn {
+  opacity: 1;
+}
+
+.workspace-edit-btn:hover {
+  color: var(--text-primary);
+}
+
+.workspace-edit-input {
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--bg-primary);
+  border: 1px solid var(--accent);
+  color: var(--text-primary);
+  padding: 2px 6px;
+  border-radius: 4px;
+  outline: none;
+  -webkit-app-region: no-drag;
+}
+
+.workspace-edit-textarea {
+  font-size: 11px;
+  font-family: inherit;
+  background: var(--bg-primary);
+  border: 1px solid var(--accent);
+  color: var(--text-secondary);
+  padding: 2px 6px;
+  border-radius: 4px;
+  outline: none;
+  resize: none;
+  width: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.workspace-header-description-row {
+  display: flex;
 }
 
 .workspace-description {
@@ -402,16 +459,16 @@ body,
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 300px;
 }
 
-.workspace-path {
+.workspace-description-placeholder {
+  font-style: italic;
+  opacity: 0.5;
+}
+
+.workspace-add-description-btn {
   font-size: 11px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex: 1;
+  opacity: 0;
 }
 
 .workspace-branch {

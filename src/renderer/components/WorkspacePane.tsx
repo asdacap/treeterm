@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState, useMemo } from 'react'
+import { useEffect, useCallback, useState, useRef, useMemo } from 'react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
@@ -33,7 +33,8 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
     removeWorkspace,
     mergeAndRemoveWorkspace,
     closeAndCleanWorkspace,
-    setActiveWorkspace
+    setActiveWorkspace,
+    updateWorkspaceMetadata
   } = useStore(workspaceStore)
   const { enterWorkspaceFocus } = usePrefixModeStore()
 
@@ -41,6 +42,62 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
 
   // Dialog state
   const [showCreateChildDialog, setShowCreateChildDialog] = useState(false)
+
+  // Inline header edit state — independent for name and description
+  const [isEditingName, setIsEditingName] = useState(false)
+  const [isEditingDescription, setIsEditingDescription] = useState(false)
+  const [editName, setEditName] = useState('')
+  const [editDescription, setEditDescription] = useState('')
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  const descriptionRef = useRef<HTMLTextAreaElement>(null)
+
+  const handleStartEditName = useCallback(() => {
+    if (!activeWorkspace) return
+    setEditName(activeWorkspace.metadata?.displayName || activeWorkspace.name)
+    setIsEditingName(true)
+  }, [activeWorkspace])
+
+  const handleSaveName = useCallback(() => {
+    if (!activeWorkspaceId) return
+    const trimmedName = editName.trim()
+    if (trimmedName) {
+      updateWorkspaceMetadata(activeWorkspaceId, 'displayName', trimmedName)
+    }
+    setIsEditingName(false)
+  }, [activeWorkspaceId, editName, updateWorkspaceMetadata])
+
+  const handleStartEditDescription = useCallback(() => {
+    if (!activeWorkspace) return
+    setEditDescription(activeWorkspace.metadata?.description || '')
+    setIsEditingDescription(true)
+  }, [activeWorkspace])
+
+  const handleSaveDescription = useCallback(() => {
+    if (!activeWorkspaceId) return
+    updateWorkspaceMetadata(activeWorkspaceId, 'description', editDescription.trim())
+    setIsEditingDescription(false)
+  }, [activeWorkspaceId, editDescription, updateWorkspaceMetadata])
+
+  // Focus name input when entering edit mode
+  useEffect(() => {
+    if (isEditingName && nameInputRef.current) {
+      nameInputRef.current.focus()
+      nameInputRef.current.select()
+    }
+  }, [isEditingName])
+
+  // Focus description textarea when entering edit mode
+  useEffect(() => {
+    if (isEditingDescription && descriptionRef.current) {
+      descriptionRef.current.focus()
+    }
+  }, [isEditingDescription])
+
+  // Cancel edit mode when switching workspaces
+  useEffect(() => {
+    setIsEditingName(false)
+    setIsEditingDescription(false)
+  }, [activeWorkspaceId])
 
   const handleNewTab = useCallback(
     (applicationId: string) => {
@@ -252,32 +309,94 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
         ) : (
           <>
             <div className="workspace-header">
-              <span className="workspace-title">{activeWorkspace.name}</span>
-              {activeWorkspace.metadata?.description && (
-                <span className="workspace-description">{activeWorkspace.metadata.description}</span>
-              )}
-              <span className="workspace-path">{activeWorkspace.path}</span>
-              {activeWorkspace.gitBranch && (
-                <span className="workspace-branch">{activeWorkspace.gitBranch}</span>
-              )}
-              <div className="workspace-actions">
-                {activeWorkspace.isGitRepo && (
-                  <button
-                    className="workspace-action-btn"
-                    onClick={() => setShowCreateChildDialog(true)}
-                    title="Fork: Create new child workspace"
-                  >
-                    Fork
-                  </button>
-                )}
-                {activeWorkspace.isWorktree && activeWorkspace.parentId && (
+              <div className="workspace-header-top">
+                {isEditingName ? (
+                  <input
+                    ref={nameInputRef}
+                    className="workspace-edit-input"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSaveName()
+                      else if (e.key === 'Escape') setIsEditingName(false)
+                    }}
+                    onBlur={handleSaveName}
+                  />
+                ) : (
                   <>
+                    <span className="workspace-title">{activeWorkspace.metadata?.displayName || activeWorkspace.name}</span>
+                    <button
+                      className="workspace-edit-btn"
+                      onClick={handleStartEditName}
+                      title="Edit name"
+                    >
+                      ✎
+                    </button>
+                  </>
+                )}
+                <div className="workspace-actions">
+                  {activeWorkspace.isGitRepo && (
+                    <button
+                      className="workspace-action-btn"
+                      onClick={() => setShowCreateChildDialog(true)}
+                      title="Fork: Create new child workspace"
+                    >
+                      Fork
+                    </button>
+                  )}
+                  {activeWorkspace.isWorktree && activeWorkspace.parentId && (
                     <button
                       className="workspace-action-btn workspace-action-btn-merge"
                       onClick={handleOpenReview}
                       title="Review & Merge: Review changes and merge this workspace"
                     >
                       Review & Merge
+                    </button>
+                  )}
+                </div>
+                {activeWorkspace.gitBranch && (
+                  <span className="workspace-branch">{activeWorkspace.gitBranch}</span>
+                )}
+              </div>
+              <div className="workspace-header-description-row">
+                {isEditingDescription ? (
+                  <textarea
+                    ref={descriptionRef}
+                    className="workspace-edit-textarea"
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        handleSaveDescription()
+                      } else if (e.key === 'Escape') {
+                        setIsEditingDescription(false)
+                      }
+                    }}
+                    onBlur={handleSaveDescription}
+                    placeholder="Add a description..."
+                    rows={1}
+                  />
+                ) : activeWorkspace.metadata?.description ? (
+                  <>
+                    <span className="workspace-description">{activeWorkspace.metadata.description}</span>
+                    <button
+                      className="workspace-edit-btn"
+                      onClick={handleStartEditDescription}
+                      title="Edit description"
+                    >
+                      ✎
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="workspace-description workspace-description-placeholder">no description</span>
+                    <button
+                      className="workspace-edit-btn workspace-add-description-btn"
+                      onClick={handleStartEditDescription}
+                      title="Add description"
+                    >
+                      ✎
                     </button>
                   </>
                 )}

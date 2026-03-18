@@ -55,8 +55,7 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
     createWorktreeFromRemote,
     removeWorkspace,
     mergeAndRemoveWorkspace,
-    setActiveWorkspace,
-    updateWorkspaceMetadata
+    setActiveWorkspace
   } = useStore(workspaceStore)
 
   const { activeSessionId, workspaceStores, switchSession } = useAppStore()
@@ -76,10 +75,6 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
   })
   const [createChildDialogParentId, setCreateChildDialogParentId] = useState<string | null>(null)
   const [isOpenWorkspaceDialogOpen, setIsOpenWorkspaceDialogOpen] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editValue, setEditValue] = useState('')
-  const [editDescriptionId, setEditDescriptionId] = useState<string | null>(null)
-  const [editDescriptionValue, setEditDescriptionValue] = useState('')
 
   // Expand any workspace that gains children after mount (e.g., async session restore)
   useEffect(() => {
@@ -256,42 +251,9 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
             <span className="tree-item-expand-placeholder" />
           )}
           <span className="tree-item-icon">{ws.isWorktree ? '🌿' : '📁'}</span>
-          {editingId === ws.id ? (
-            <input
-              className="tree-item-name-input"
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onBlur={() => {
-                if (editValue.trim()) {
-                  updateWorkspaceMetadata(ws.id, 'displayName', editValue.trim())
-                }
-                setEditingId(null)
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  if (editValue.trim()) {
-                    updateWorkspaceMetadata(ws.id, 'displayName', editValue.trim())
-                  }
-                  setEditingId(null)
-                } else if (e.key === 'Escape') {
-                  setEditingId(null)
-                }
-              }}
-              onClick={(e) => e.stopPropagation()}
-              autoFocus
-            />
-          ) : (
-            <span
-              className="tree-item-name"
-              onDoubleClick={(e) => {
-                e.stopPropagation()
-                setEditingId(ws.id)
-                setEditValue(ws.metadata?.displayName || ws.name)
-              }}
-            >
-              {ws.metadata?.displayName || ws.name}
-            </span>
-          )}
+          <span className="tree-item-name">
+            {ws.metadata?.displayName || ws.name}
+          </span>
           <WorkspaceActivityIndicator tabIds={tabIds} />
           <span className="tree-item-actions">
             {ws.isGitRepo && (
@@ -356,26 +318,6 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="context-menu-item" onClick={() => {
-            const ws = workspaces[contextMenu.workspaceId]
-            if (ws) {
-              setEditingId(ws.id)
-              setEditValue(ws.metadata?.displayName || ws.name)
-            }
-            closeContextMenu()
-          }}>
-            Rename
-          </div>
-          <div className="context-menu-item" onClick={() => {
-            const ws = workspaces[contextMenu.workspaceId]
-            if (ws) {
-              setEditDescriptionId(ws.id)
-              setEditDescriptionValue(ws.metadata?.description || '')
-            }
-            closeContextMenu()
-          }}>
-            Edit Description
-          </div>
           {workspaces[contextMenu.workspaceId]?.isGitRepo && (
             <div className="context-menu-item" onClick={() => handleCreateChild(contextMenu.workspaceId)}>
               New Child Workspace
@@ -410,31 +352,6 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
         />
       )}
 
-      {/* Edit Description Dialog */}
-      {editDescriptionId && (
-        <div className="dialog-overlay" onClick={() => setEditDescriptionId(null)}>
-          <div className="dialog" onClick={(e) => e.stopPropagation()}>
-            <h3>Edit Description</h3>
-            <textarea
-              className="tree-item-description-input"
-              value={editDescriptionValue}
-              onChange={(e) => setEditDescriptionValue(e.target.value)}
-              placeholder="Enter a description..."
-              rows={3}
-              autoFocus
-            />
-            <div className="dialog-actions">
-              <button onClick={() => setEditDescriptionId(null)}>Cancel</button>
-              <button onClick={() => {
-                updateWorkspaceMetadata(editDescriptionId, 'description', editDescriptionValue.trim())
-                setEditDescriptionId(null)
-              }}>
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
