@@ -88,6 +88,89 @@ describe('IpcServer', () => {
       server.onAppGetWindowUuid(handler)
       expect(mockHandle).toHaveBeenCalledWith('app:getWindowUuid', expect.any(Function))
     })
+
+    it.each([
+      ['onPtyAttach', 'pty:attach'],
+      ['onPtyDetach', 'pty:detach'],
+      ['onPtyList', 'pty:list'],
+      ['onPtyIsAlive', 'pty:isAlive'],
+      ['onGitCreateWorktree', 'git:createWorktree'],
+      ['onGitRemoveWorktree', 'git:removeWorktree'],
+      ['onGitListWorktrees', 'git:listWorktrees'],
+      ['onGitGetChildWorktrees', 'git:getChildWorktrees'],
+      ['onGitListLocalBranches', 'git:listLocalBranches'],
+      ['onGitListRemoteBranches', 'git:listRemoteBranches'],
+      ['onGitGetBranchesInWorktrees', 'git:getBranchesInWorktrees'],
+      ['onGitCreateWorktreeFromBranch', 'git:createWorktreeFromBranch'],
+      ['onGitCreateWorktreeFromRemote', 'git:createWorktreeFromRemote'],
+      ['onGitGetDiff', 'git:getDiff'],
+      ['onGitGetFileDiff', 'git:getFileDiff'],
+      ['onGitMerge', 'git:merge'],
+      ['onGitCheckMergeConflicts', 'git:checkMergeConflicts'],
+      ['onGitHasUncommittedChanges', 'git:hasUncommittedChanges'],
+      ['onGitCommitAll', 'git:commitAll'],
+      ['onGitDeleteBranch', 'git:deleteBranch'],
+      ['onGitGetUncommittedChanges', 'git:getUncommittedChanges'],
+      ['onGitGetUncommittedFileDiff', 'git:getUncommittedFileDiff'],
+      ['onGitStageFile', 'git:stageFile'],
+      ['onGitUnstageFile', 'git:unstageFile'],
+      ['onGitStageAll', 'git:stageAll'],
+      ['onGitUnstageAll', 'git:unstageAll'],
+      ['onGitCommitStaged', 'git:commitStaged'],
+      ['onGitGetFileContentsForDiff', 'git:getFileContentsForDiff'],
+      ['onGitGetUncommittedFileContentsForDiff', 'git:getUncommittedFileContentsForDiff'],
+      ['onGitGetHeadCommitHash', 'git:getHeadCommitHash'],
+      ['onReviewsLoad', 'reviews:load'],
+      ['onReviewsSave', 'reviews:save'],
+      ['onReviewsAddComment', 'reviews:addComment'],
+      ['onReviewsDeleteComment', 'reviews:deleteComment'],
+      ['onReviewsUpdateOutdated', 'reviews:updateOutdated'],
+      ['onReviewsGetFilePath', 'reviews:getFilePath'],
+      ['onSettingsSave', 'settings:save'],
+      ['onFsReadDirectory', 'fs:readDirectory'],
+      ['onFsWriteFile', 'fs:writeFile'],
+      ['onFsSearchFiles', 'fs:searchFiles'],
+      ['onSttTranscribeOpenai', 'stt:transcribe-openai'],
+      ['onSttTranscribeLocal', 'stt:transcribe-local'],
+      ['onSttCheckMicPermission', 'stt:check-mic-permission'],
+      ['onSessionUpdate', 'session:update'],
+      ['onSessionList', 'session:list'],
+      ['onSessionGet', 'session:get'],
+      ['onSessionDelete', 'session:delete'],
+      ['onSessionOpenInNewWindow', 'session:open-in-new-window'],
+      ['onDaemonShutdown', 'daemon:shutdown'],
+      ['onDialogSelectFolder', 'dialog:selectFolder'],
+      ['onDialogGetRecentDirectories', 'dialog:getRecentDirectories'],
+      ['onSandboxIsAvailable', 'sandbox:isAvailable'],
+      ['onAppGetInitialWorkspace', 'app:getInitialWorkspace'],
+    ] as const)('%s registers handler on %s channel', (method, channel) => {
+      const handler = vi.fn()
+      ;(server as any)[method](handler)
+      expect(mockHandle).toHaveBeenCalledWith(channel, expect.any(Function))
+    })
+
+    it.each([
+      ['onPtyAttach', 'pty:attach'],
+      ['onPtyDetach', 'pty:detach'],
+      ['onPtyList', 'pty:list'],
+      ['onPtyIsAlive', 'pty:isAlive'],
+      ['onGitCreateWorktree', 'git:createWorktree'],
+      ['onReviewsLoad', 'reviews:load'],
+      ['onSettingsSave', 'settings:save'],
+      ['onFsReadDirectory', 'fs:readDirectory'],
+      ['onSessionUpdate', 'session:update'],
+      ['onDaemonShutdown', 'daemon:shutdown'],
+      ['onDialogSelectFolder', 'dialog:selectFolder'],
+      ['onSandboxIsAvailable', 'sandbox:isAvailable'],
+      ['onAppGetInitialWorkspace', 'app:getInitialWorkspace'],
+    ] as const)('%s wrapper forwards args to handler and returns result', async (method, _channel) => {
+      const handler = vi.fn().mockResolvedValue('result')
+      ;(server as any)[method](handler)
+      const wrapper = mockHandle.mock.calls[0][1]
+      const result = await wrapper({}, 'arg1', 'arg2')
+      expect(handler).toHaveBeenCalledWith('arg1', 'arg2')
+      expect(result).toBe('result')
+    })
   })
 
   describe('on registration (send pattern)', () => {
@@ -193,6 +276,52 @@ describe('IpcServer', () => {
 
       server.terminalNew()
       expect(mockSend).toHaveBeenCalledWith('terminal:new')
+    })
+
+    it('appReady sends to window webContents', () => {
+      const mockSend = vi.fn()
+      const mockWindow = { webContents: { send: mockSend } } as any
+      server.setWindow(mockWindow)
+
+      server.appReady('uuid-1' as any)
+      expect(mockSend).toHaveBeenCalledWith('app:ready', 'uuid-1')
+    })
+
+    it('capsLockEvent sends to window webContents', () => {
+      const mockSend = vi.fn()
+      const mockWindow = { webContents: { send: mockSend } } as any
+      server.setWindow(mockWindow)
+
+      server.capsLockEvent(true as any)
+      expect(mockSend).toHaveBeenCalledWith('capslock-event', true)
+    })
+
+    it('daemonSessions sends to window webContents', () => {
+      const mockSend = vi.fn()
+      const mockWindow = { webContents: { send: mockSend } } as any
+      server.setWindow(mockWindow)
+
+      const sessions = [{ id: 's1' }] as any
+      server.daemonSessions(sessions)
+      expect(mockSend).toHaveBeenCalledWith('daemon:sessions', sessions)
+    })
+
+    it('terminalShowSessions sends to window webContents', () => {
+      const mockSend = vi.fn()
+      const mockWindow = { webContents: { send: mockSend } } as any
+      server.setWindow(mockWindow)
+
+      server.terminalShowSessions()
+      expect(mockSend).toHaveBeenCalledWith('terminal:show-sessions')
+    })
+
+    it('sessionShowSessions sends to window webContents', () => {
+      const mockSend = vi.fn()
+      const mockWindow = { webContents: { send: mockSend } } as any
+      server.setWindow(mockWindow)
+
+      server.sessionShowSessions()
+      expect(mockSend).toHaveBeenCalledWith('session:show-sessions')
     })
   })
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import * as pty from 'node-pty'
 
 vi.mock('node-pty', () => ({
@@ -13,6 +13,16 @@ vi.mock('node-pty', () => ({
 
 vi.mock('electron', () => ({
   BrowserWindow: vi.fn()
+}))
+
+vi.mock('fs', () => ({
+  statSync: vi.fn(() => null),
+  readFileSync: vi.fn(() => ''),
+  existsSync: vi.fn(() => true)
+}))
+
+vi.mock('child_process', () => ({
+  execSync: vi.fn(() => '/usr/bin/bwrap')
 }))
 
 describe('PtyManager', () => {
@@ -165,6 +175,249 @@ describe('PtyManager', () => {
       const id = ptyManager.create('/test/cwd', mockWindow as any)
       ptyManager.kill(id)
       expect(ptyManager.isAlive(id)).toBe(false)
+    })
+  })
+
+  describe('sandbox', () => {
+    it('macOS sandbox uses sandbox-exec', async () => {
+      const originalPlatform = process.platform
+      Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+
+      vi.resetModules()
+      const ptyModule = await import('./pty')
+      const mgr = ptyModule.ptyManager
+
+      const mockWindow = {
+        isDestroyed: vi.fn().mockReturnValue(false),
+        webContents: { isDestroyed: vi.fn().mockReturnValue(false), send: vi.fn() }
+      }
+
+      const id = mgr.create('/test/cwd', mockWindow as any, {
+        enabled: true,
+        allowNetwork: false,
+        allowedPaths: []
+      })
+
+      expect(pty.spawn).toHaveBeenCalledWith(
+        '/usr/bin/sandbox-exec',
+        expect.arrayContaining(['-p']),
+        expect.any(Object)
+      )
+      expect(mgr.isSandboxed(id)).toBe(true)
+
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
+    })
+
+    it('macOS sandbox profile contains workspace path and deny network', async () => {
+      const originalPlatform = process.platform
+      Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+
+      vi.resetModules()
+      const ptyModule = await import('./pty')
+      const mgr = ptyModule.ptyManager
+
+      const mockWindow = {
+        isDestroyed: vi.fn().mockReturnValue(false),
+        webContents: { isDestroyed: vi.fn().mockReturnValue(false), send: vi.fn() }
+      }
+
+      mgr.create('/my/workspace', mockWindow as any, {
+        enabled: true,
+        allowNetwork: false,
+        allowedPaths: []
+      })
+
+      const spawnCall = vi.mocked(pty.spawn).mock.calls[0]
+      const profileArg = spawnCall[1][1] // -p <profile>
+      expect(profileArg).toContain('/my/workspace')
+      expect(profileArg).toContain('(deny network*)')
+
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
+    })
+
+    it('macOS sandbox with allowNetwork includes allow network', async () => {
+      const originalPlatform = process.platform
+      Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+
+      vi.resetModules()
+      const ptyModule = await import('./pty')
+      const mgr = ptyModule.ptyManager
+
+      const mockWindow = {
+        isDestroyed: vi.fn().mockReturnValue(false),
+        webContents: { isDestroyed: vi.fn().mockReturnValue(false), send: vi.fn() }
+      }
+
+      mgr.create('/my/workspace', mockWindow as any, {
+        enabled: true,
+        allowNetwork: true,
+        allowedPaths: []
+      })
+
+      const spawnCall = vi.mocked(pty.spawn).mock.calls[0]
+      const profileArg = spawnCall[1][1]
+      expect(profileArg).toContain('(allow network*)')
+
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
+    })
+
+    it('Linux with bwrap uses bwrap for sandboxing', async () => {
+      const originalPlatform = process.platform
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+
+      vi.resetModules()
+      const ptyModule = await import('./pty')
+      const mgr = ptyModule.ptyManager
+
+      const mockWindow = {
+        isDestroyed: vi.fn().mockReturnValue(false),
+        webContents: { isDestroyed: vi.fn().mockReturnValue(false), send: vi.fn() }
+      }
+
+      const id = mgr.create('/test/cwd', mockWindow as any, {
+        enabled: true,
+        allowNetwork: false,
+        allowedPaths: []
+      })
+
+      expect(pty.spawn).toHaveBeenCalledWith(
+        'bwrap',
+        expect.arrayContaining(['--die-with-parent']),
+        expect.any(Object)
+      )
+      expect(mgr.isSandboxed(id)).toBe(true)
+
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
+    })
+
+    it('Linux without bwrap falls back to default shell', async () => {
+      const originalPlatform = process.platform
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+
+      vi.resetModules()
+      const { execSync } = await import('child_process')
+      vi.mocked(execSync).mockImplementation(() => { throw new Error('not found') })
+
+      const ptyModule = await import('./pty')
+      const mgr = ptyModule.ptyManager
+
+      const mockWindow = {
+        isDestroyed: vi.fn().mockReturnValue(false),
+        webContents: { isDestroyed: vi.fn().mockReturnValue(false), send: vi.fn() }
+      }
+
+      const id = mgr.create('/test/cwd', mockWindow as any, {
+        enabled: true,
+        allowNetwork: false,
+        allowedPaths: []
+      })
+
+      // Should not use bwrap
+      const spawnCall = vi.mocked(pty.spawn).mock.calls[0]
+      expect(spawnCall[0]).not.toBe('bwrap')
+
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
+    })
+
+    it('unsupported platform sandbox falls back to default shell', async () => {
+      const originalPlatform = process.platform
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
+
+      vi.resetModules()
+      const ptyModule = await import('./pty')
+      const mgr = ptyModule.ptyManager
+
+      const mockWindow = {
+        isDestroyed: vi.fn().mockReturnValue(false),
+        webContents: { isDestroyed: vi.fn().mockReturnValue(false), send: vi.fn() }
+      }
+
+      mgr.create('/test/cwd', mockWindow as any, {
+        enabled: true,
+        allowNetwork: false,
+        allowedPaths: []
+      })
+
+      const spawnCall = vi.mocked(pty.spawn).mock.calls[0]
+      expect(spawnCall[0]).toBe('powershell.exe')
+
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
+    })
+  })
+
+  describe('callbacks', () => {
+    it('onData sends data to window webContents', () => {
+      const mockSend = vi.fn()
+      const mockWindow = {
+        isDestroyed: vi.fn().mockReturnValue(false),
+        webContents: { isDestroyed: vi.fn().mockReturnValue(false), send: mockSend }
+      }
+      const id = ptyManager.create('/test/cwd', mockWindow as any)
+      const spawnedPty = vi.mocked(pty.spawn).mock.results[0].value
+
+      // Trigger onData callback
+      const onDataHandler = spawnedPty.onData.mock.calls[0][0]
+      onDataHandler('test output')
+
+      expect(mockSend).toHaveBeenCalledWith('pty:data', id, 'test output')
+    })
+
+    it('onData skips destroyed window', () => {
+      const mockSend = vi.fn()
+      const mockWindow = {
+        isDestroyed: vi.fn().mockReturnValue(true),
+        webContents: { isDestroyed: vi.fn().mockReturnValue(false), send: mockSend }
+      }
+      ptyManager.create('/test/cwd', mockWindow as any)
+      const spawnedPty = vi.mocked(pty.spawn).mock.results[0].value
+
+      const onDataHandler = spawnedPty.onData.mock.calls[0][0]
+      onDataHandler('test output')
+
+      expect(mockSend).not.toHaveBeenCalled()
+    })
+
+    it('onExit cleans up PTY and sends exit event', () => {
+      const mockSend = vi.fn()
+      const mockWindow = {
+        isDestroyed: vi.fn().mockReturnValue(false),
+        webContents: { isDestroyed: vi.fn().mockReturnValue(false), send: mockSend }
+      }
+      const id = ptyManager.create('/test/cwd', mockWindow as any)
+      const spawnedPty = vi.mocked(pty.spawn).mock.results[0].value
+
+      expect(ptyManager.isAlive(id)).toBe(true)
+
+      // Trigger onExit callback
+      const onExitHandler = spawnedPty.onExit.mock.calls[0][0]
+      onExitHandler({ exitCode: 0 })
+
+      expect(mockSend).toHaveBeenCalledWith('pty:exit', id, 0)
+      expect(ptyManager.isAlive(id)).toBe(false)
+    })
+  })
+
+  describe('startup command', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('writes startup command after delay', () => {
+      vi.useFakeTimers()
+
+      const mockWindow = {
+        isDestroyed: vi.fn().mockReturnValue(false),
+        webContents: { isDestroyed: vi.fn().mockReturnValue(false), send: vi.fn() }
+      }
+      ptyManager.create('/test/cwd', mockWindow as any, undefined, 'npm start')
+      const spawnedPty = vi.mocked(pty.spawn).mock.results[0].value
+
+      // Not yet written
+      expect(spawnedPty.write).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(150)
+
+      expect(spawnedPty.write).toHaveBeenCalledWith(expect.stringContaining('npm start'))
     })
   })
 })

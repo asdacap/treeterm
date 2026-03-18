@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { EventEmitter } from 'events'
+import * as pty from 'node-pty'
+import { execSync } from 'child_process'
 
 const mockPtyProcess = {
   write: vi.fn(),
@@ -246,24 +247,178 @@ describe('DaemonPtyManager', () => {
     it('accumulates scrollback data', () => {
       const callback = vi.fn()
       manager.onData(callback)
-      
+
       const sessionId = manager.create({ cwd: '/tmp', env: {} })
-      
+
       const onDataHandler = mockPtyProcess.onData.mock.calls[0][0]
       onDataHandler('line 1')
       onDataHandler('line 2')
-      
+
       const scrollback = manager.getScrollback(sessionId)
       expect(scrollback).toEqual(['line 1', 'line 2'])
     })
 
     it('returns copy of scrollback, not reference', () => {
       const sessionId = manager.create({ cwd: '/tmp', env: {} })
-      
+
       const scrollback1 = manager.getScrollback(sessionId)
       const scrollback2 = manager.getScrollback(sessionId)
-      
+
       expect(scrollback1).not.toBe(scrollback2)
+    })
+
+    it('truncates scrollback at byte limit', () => {
+      // Create manager with small scrollback limit (100 bytes)
+      const smallManager = new DaemonPtyManager(0, 100)
+
+      const sessionId = smallManager.create({ cwd: '/tmp', env: {} })
+
+      const onDataHandler = mockPtyProcess.onData.mock.calls[0][0]
+      // Push data exceeding 100 bytes
+      onDataHandler('a'.repeat(60))
+      onDataHandler('b'.repeat(60))
+
+      const scrollback = smallManager.getScrollback(sessionId)
+      // First chunk should have been removed since total exceeds 100 bytes
+      expect(scrollback).not.toContain('a'.repeat(60))
+      expect(scrollback).toContain('b'.repeat(60))
+
+      smallManager.shutdown()
+    })
+  })
+
+  describe('environment variable merging', () => {
+    it('merges config.env with process.env', () => {
+      manager.create({ cwd: '/tmp', env: { CUSTOM_VAR: 'hello' } })
+
+      const spawnCall = vi.mocked(pty.spawn).mock.calls[0]
+      const envArg = spawnCall[2]?.env
+      expect(envArg!.CUSTOM_VAR).toBe('hello')
+      // process.env vars should also be present
+      expect(envArg!.PATH).toBeDefined()
+    })
+  })
+
+  describe('multiple callbacks', () => {
+    it('multiple onData callbacks all fire', () => {
+      const cb1 = vi.fn()
+      const cb2 = vi.fn()
+      manager.onData(cb1)
+      manager.onData(cb2)
+
+      const sessionId = manager.create({ cwd: '/tmp', env: {} })
+
+      const onDataHandler = mockPtyProcess.onData.mock.calls[0][0]
+      onDataHandler('hello')
+
+      expect(cb1).toHaveBeenCalledWith(sessionId, 'hello')
+      expect(cb2).toHaveBeenCalledWith(sessionId, 'hello')
+    })
+
+    it('onExit callback receives exit code', () => {
+      const cb = vi.fn()
+      manager.onExit(cb)
+
+      const sessionId = manager.create({ cwd: '/tmp', env: {} })
+
+      const onExitHandler = mockPtyProcess.onExit.mock.calls[0][0]
+      onExitHandler({ exitCode: 42, signal: 15 })
+
+      expect(cb).toHaveBeenCalledWith(sessionId, 42, 15)
+    })
+  })
+
+  describe('activity tracking', () => {
+    it('updates lastActivity on data', () => {
+      const sessionId = manager.create({ cwd: '/tmp', env: {} })
+
+      const sessionsBefore = manager.listSessions()
+      const activityBefore = sessionsBefore[0].lastActivity
+
+      // Small delay then trigger data
+      const onDataHandler = mockPtyProcess.onData.mock.calls[0][0]
+      onDataHandler('output')
+
+      const sessionsAfter = manager.listSessions()
+      expect(sessionsAfter[0].lastActivity).toBeGreaterThanOrEqual(activityBefore)
+    })
+  })
+
+  describe('platform-specific shell defaults', () => {
+    it('uses SHELL env var for unix platforms', () => {
+      const originalShell = process.env.SHELL
+      process.env.SHELL = '/bin/fish'
+
+      manager.create({ cwd: '/tmp', env: {} })
+
+      const spawnCall = vi.mocked(pty.spawn).mock.calls[0]
+      expect(spawnCall[0]).toBe('/bin/fish')
+
+      if (originalShell) {
+        process.env.SHELL = originalShell
+      }
+    })
+  })
+
+  describe('sandbox paths', () => {
+    it('macOS sandbox uses sandbox-exec', () => {
+      const originalPlatform = process.platform
+      Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+
+      const sandboxManager = new DaemonPtyManager(0, 1024 * 1024)
+
+      sandboxManager.create({
+        cwd: '/workspace',
+        env: {},
+        sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] }
+      })
+
+      const spawnCall = vi.mocked(pty.spawn).mock.calls[0]
+      expect(spawnCall[0]).toBe('/usr/bin/sandbox-exec')
+
+      sandboxManager.shutdown()
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
+    })
+
+    it('Linux with bwrap uses bwrap', () => {
+      const originalPlatform = process.platform
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+
+      const sandboxManager = new DaemonPtyManager(0, 1024 * 1024)
+
+      sandboxManager.create({
+        cwd: '/workspace',
+        env: {},
+        sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] }
+      })
+
+      const spawnCall = vi.mocked(pty.spawn).mock.calls[0]
+      expect(spawnCall[0]).toBe('bwrap')
+      expect(spawnCall[1]).toContain('--die-with-parent')
+
+      sandboxManager.shutdown()
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
+    })
+
+    it('Linux without bwrap falls back to default shell', () => {
+      const originalPlatform = process.platform
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+
+      vi.mocked(execSync).mockImplementation(() => { throw new Error('not found') })
+
+      const sandboxManager = new DaemonPtyManager(0, 1024 * 1024)
+
+      sandboxManager.create({
+        cwd: '/workspace',
+        env: {},
+        sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] }
+      })
+
+      const spawnCall = vi.mocked(pty.spawn).mock.calls[0]
+      expect(spawnCall[0]).not.toBe('bwrap')
+
+      sandboxManager.shutdown()
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
     })
   })
 })
