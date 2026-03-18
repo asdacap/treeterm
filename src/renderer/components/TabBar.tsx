@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { Loader2 } from 'lucide-react'
 import type { Tab } from '../types'
 import { useAppStore } from '../store/app'
@@ -45,8 +45,9 @@ export default function TabBar({
   const menuRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
 
-  const menuApps = useAppStore((s) => s.getMenuApplications())
-  const getApplication = useAppStore((s) => s.getApplication)
+  const applications = useAppStore((s) => s.applications)
+  const menuApps = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
+  const getApplication = (id: string) => applications[id]
 
   // Close menu when clicking outside
   useEffect(() => {

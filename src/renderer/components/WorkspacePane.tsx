@@ -43,8 +43,9 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
     updateWorkspaceMetadata
   } = useStore(workspaceStore)
   const { enterWorkspaceFocus } = usePrefixModeStore()
-  const getApplication = useAppStore((s) => s.getApplication)
-  const getMenuApplications = useAppStore((s) => s.getMenuApplications)
+  const applications = useAppStore((s) => s.applications)
+  const getApplication = useCallback((id: string) => applications[id], [applications])
+  const menuApplications = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
 
   const activeWorkspace = activeWorkspaceId ? workspaces[activeWorkspaceId] : null
 
@@ -121,12 +122,11 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
   // Create new tab using the first available application
   const handleNewDefaultTab = useCallback(() => {
     // Find the first app that allows new tabs
-    const menuApps = getMenuApplications()
-    const defaultApp = menuApps.find((app) => app.canHaveMultiple)
+    const defaultApp = menuApplications.find((app) => app.canHaveMultiple)
     if (activeWorkspaceId && defaultApp) {
       addTab(activeWorkspaceId, defaultApp.id)
     }
-  }, [activeWorkspaceId, addTab, getMenuApplications])
+  }, [activeWorkspaceId, addTab, menuApplications])
 
   const handleCloseTab = useCallback(
     (tabId: string) => {

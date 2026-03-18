@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useAppStore } from '../store/app'
 import type { WorktreeSettings } from '../types'
 
@@ -32,7 +32,8 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, ge
     loadRecentDirectories()
   }, [])
 
-  const availableApps = useAppStore((s) => s.getMenuApplications())
+  const applications = useAppStore((s) => s.applications)
+  const availableApps = useMemo(() => Object.values(applications).filter(app => app.showInNewTabMenu), [applications])
 
   const handleSelectFolder = async () => {
     setIsSelecting(true)

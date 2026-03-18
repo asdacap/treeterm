@@ -57,20 +57,19 @@ export default function CreateChildDialog({
   const [useCustomSettings, setUseCustomSettings] = useState(false)
   const [selectedAppId, setSelectedAppId] = useState<string>('')
 
-  const getApplication = useAppStore((s) => s.getApplication)
-  const menuApplications = useAppStore((s) => s.getMenuApplications())
+  const applications = useAppStore((s) => s.applications)
 
   // Get inherited app name
   const inheritedApp = useMemo(() => {
     if (parentWorkspace.settings?.defaultApplicationId) {
-      const app = getApplication(parentWorkspace.settings.defaultApplicationId)
+      const app = applications[parentWorkspace.settings.defaultApplicationId]
       if (app) return app
     }
     return null
-  }, [parentWorkspace.settings, getApplication])
+  }, [parentWorkspace.settings, applications])
 
   // Get available apps
-  const availableApps = menuApplications
+  const availableApps = useMemo(() => Object.values(applications).filter(app => app.showInNewTabMenu), [applications])
 
   // Load existing worktrees when "existing" tab is selected
   useEffect(() => {
