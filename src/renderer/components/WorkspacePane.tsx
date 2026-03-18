@@ -93,6 +93,8 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
   useEffect(() => {
     if (isEditingDescription && descriptionRef.current) {
       descriptionRef.current.focus()
+      descriptionRef.current.style.height = 'auto'
+      descriptionRef.current.style.height = descriptionRef.current.scrollHeight + 'px'
     }
   }, [isEditingDescription])
 
@@ -435,7 +437,11 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                     ref={descriptionRef}
                     className="workspace-edit-textarea"
                     value={editDescription}
-                    onChange={(e) => setEditDescription(e.target.value)}
+                    onChange={(e) => {
+                      setEditDescription(e.target.value)
+                      e.target.style.height = 'auto'
+                      e.target.style.height = e.target.scrollHeight + 'px'
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault()
