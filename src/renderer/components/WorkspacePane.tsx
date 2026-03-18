@@ -471,15 +471,8 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                     rows={1}
                   />
                 ) : activeWorkspace.metadata?.description ? (
-                  <>
-                    <span className="workspace-description">{activeWorkspace.metadata.description}</span>
-                    <button
-                      className="workspace-edit-btn"
-                      onClick={handleStartEditDescription}
-                      title="Edit description"
-                    >
-                      ✎
-                    </button>
+                  <span className="workspace-description">
+                    {activeWorkspace.metadata.description}
                     {showPromptDescriptionButton && activeTabPtyId && (
                       <PromptDescriptionButton
                         description={activeWorkspace.metadata.description}
@@ -487,7 +480,14 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                         onDismiss={handlePromptDescriptionDismiss}
                       />
                     )}
-                  </>
+                    <button
+                      className="workspace-edit-btn"
+                      onClick={handleStartEditDescription}
+                      title="Edit description"
+                    >
+                      ✎
+                    </button>
+                  </span>
                 ) : (
                   <>
                     <span className="workspace-description workspace-description-placeholder">no description</span>

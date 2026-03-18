@@ -3798,24 +3798,23 @@ body,
 
 /* Prompt Description Button */
 .prompt-description-button {
-  position: absolute;
-  bottom: 96px;
-  right: 16px;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-left: 2px;
+  vertical-align: baseline;
 }
 
 .prompt-description-button button {
   background: #2472c8;
   border: 1px solid #1a5a9e;
   color: #ffffff;
-  padding: 4px 10px;
-  border-radius: 4px;
+  padding: 1px 6px;
+  border-radius: 3px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
+  line-height: 1.4;
   transition: background 0.1s, border-color 0.1s, opacity 0.2s;
   opacity: 0.9;
   white-space: nowrap;
