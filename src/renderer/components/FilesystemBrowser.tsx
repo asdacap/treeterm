@@ -3,11 +3,11 @@ import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useGitApi } from '../contexts/GitApiContext'
-import { useReviewsApi } from '../contexts/ReviewsApiContext'
+import { parseReviewComments } from '../store/createWorkspaceStore'
 import { FileTree } from './FileTree'
 import { FileViewer } from './FileViewer'
 import { CommentDisplay } from './CommentDisplay'
-import type { FilesystemState, ReviewsData } from '../types'
+import type { FilesystemState } from '../types'
 
 interface FilesystemBrowserProps {
   workspacePath: string
@@ -22,9 +22,8 @@ export function FilesystemBrowser({
   tabId,
   workspaceStore
 }: FilesystemBrowserProps): JSX.Element {
-  const { workspaces, updateTabState, updateWorkspaceMetadata } = useStore(workspaceStore)
+  const { workspaces, updateTabState, addReviewComment, deleteReviewComment, updateOutdatedReviewComments } = useStore(workspaceStore)
   const git = useGitApi()
-  const reviewsApi = useReviewsApi()
   const workspace = workspaces[workspaceId]
   const tab = workspace?.tabs.find((t) => t.id === tabId)
   const state = tab?.state as FilesystemState | undefined
@@ -33,8 +32,8 @@ export function FilesystemBrowser({
   const [treeWidth, setTreeWidth] = useState(250)
   const [isResizing, setIsResizing] = useState(false)
 
-  // Reviews state
-  const [reviews, setReviews] = useState<ReviewsData | null>(null)
+  // Reviews state — read from workspace metadata (reactive)
+  const allComments = workspace ? parseReviewComments(workspace.metadata) : []
   const [commentInput, setCommentInput] = useState<{ lineNumber: number } | null>(null)
   const [currentCommitHash, setCurrentCommitHash] = useState<string | null>(null)
 
@@ -61,9 +60,20 @@ export function FilesystemBrowser({
     })
   }
 
-  // Load reviews on mount
+  // Update outdated comments on mount
   useEffect(() => {
-    loadReviews()
+    const updateOutdated = async () => {
+      try {
+        const hashResult = await git.getHeadCommitHash(workspacePath)
+        if (hashResult.success && hashResult.hash) {
+          setCurrentCommitHash(hashResult.hash)
+          updateOutdatedReviewComments(workspaceId, hashResult.hash)
+        }
+      } catch (error) {
+        console.error('Failed to update outdated comments:', error)
+      }
+    }
+    updateOutdated()
   }, [workspacePath])
 
   // Clear comment input when selected file changes
@@ -71,77 +81,31 @@ export function FilesystemBrowser({
     setCommentInput(null)
   }, [state.selectedPath])
 
-  const loadReviews = async () => {
-    try {
-      const hashResult = await git.getHeadCommitHash(workspacePath)
-      if (hashResult.success && hashResult.hash) {
-        setCurrentCommitHash(hashResult.hash)
-
-        const result = await reviewsApi.updateOutdated(workspacePath, hashResult.hash, workspace?.metadata.reviewId)
-        if (result.success && result.reviews) {
-          setReviews(result.reviews)
-        }
-        if (result.reviewId && result.reviewId !== workspace?.metadata.reviewId) {
-          updateWorkspaceMetadata(workspaceId, 'reviewId', result.reviewId)
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load reviews:', error)
-    }
-  }
-
   const handleLineClick = (lineNumber: number) => {
     setCommentInput({ lineNumber })
   }
 
-  const handleCommentSubmit = async (text: string) => {
+  const handleCommentSubmit = (text: string) => {
     if (!commentInput || !currentCommitHash || !state.selectedPath) return
-
-    try {
-      const result = await reviewsApi.addComment(workspacePath, {
-        filePath: state.selectedPath,
-        lineNumber: commentInput.lineNumber,
-        text,
-        commitHash: currentCommitHash,
-        isOutdated: false,
-        addressed: false,
-        side: 'modified'
-      }, workspace?.metadata.reviewId)
-      if (result.success && result.comment) {
-        setReviews(prev => prev ? {
-          ...prev,
-          comments: [...prev.comments, result.comment!]
-        } : { version: 1, comments: [result.comment!] })
-      }
-      if (result.reviewId && result.reviewId !== workspace?.metadata.reviewId) {
-        updateWorkspaceMetadata(workspaceId, 'reviewId', result.reviewId)
-      }
-      setCommentInput(null)
-    } catch (error) {
-      console.error('Failed to add comment:', error)
-      alert(`Failed to add comment: ${error instanceof Error ? error.message : 'Unknown error'}`)
-    }
+    addReviewComment(workspaceId, {
+      filePath: state.selectedPath,
+      lineNumber: commentInput.lineNumber,
+      text,
+      commitHash: currentCommitHash,
+      isOutdated: false,
+      addressed: false,
+      side: 'modified'
+    })
+    setCommentInput(null)
   }
 
-  const handleCommentDelete = async (commentId: string) => {
-    if (!workspace?.metadata.reviewId) return
-    try {
-      const result = await reviewsApi.deleteComment(workspace.metadata.reviewId, commentId)
-      if (result.success) {
-        setReviews(prev => prev ? {
-          ...prev,
-          comments: prev.comments.filter(c => c.id !== commentId)
-        } : null)
-      }
-    } catch (error) {
-      console.error('Failed to delete comment:', error)
-      alert(`Failed to delete comment: ${error instanceof Error ? error.message : 'Unknown error'}`)
-    }
+  const handleCommentDelete = (commentId: string) => {
+    deleteReviewComment(workspaceId, commentId)
   }
 
   // Filter comments for current file
-  const fileComments = state.selectedPath && reviews
-    ? reviews.comments.filter(c => c.filePath === state.selectedPath)
+  const fileComments = state.selectedPath
+    ? allComments.filter(c => c.filePath === state.selectedPath)
     : []
 
   // Resize handlers

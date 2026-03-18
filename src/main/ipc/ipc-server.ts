@@ -41,14 +41,6 @@ const CHANNELS = {
   gitGetFileContentsForDiff: 'git:getFileContentsForDiff',
   gitGetUncommittedFileContentsForDiff: 'git:getUncommittedFileContentsForDiff',
   gitGetHeadCommitHash: 'git:getHeadCommitHash',
-  reviewsLoad: 'reviews:load',
-  reviewsSave: 'reviews:save',
-  reviewsAddComment: 'reviews:addComment',
-  reviewsDeleteComment: 'reviews:deleteComment',
-  reviewsUpdateOutdated: 'reviews:updateOutdated',
-  reviewsToggleAddressed: 'reviews:toggleAddressed',
-  reviewsGetFilePath: 'reviews:getFilePath',
-  reviewsCleanup: 'reviews:cleanup',
   settingsLoad: 'settings:load',
   settingsSave: 'settings:save',
   fsReadDirectory: 'fs:readDirectory',
@@ -425,87 +417,6 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.gitGetHeadCommitHash, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['gitGetHeadCommitHash']['params']))
-    )
-  }
-
-  // Reviews request handlers
-  onReviewsLoad(
-    handler: (
-      ...args: IpcRequests['reviewsLoad']['params']
-    ) => IpcRequests['reviewsLoad']['result'] | Promise<IpcRequests['reviewsLoad']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.reviewsLoad, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['reviewsLoad']['params']))
-    )
-  }
-
-  onReviewsSave(
-    handler: (
-      ...args: IpcRequests['reviewsSave']['params']
-    ) => IpcRequests['reviewsSave']['result'] | Promise<IpcRequests['reviewsSave']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.reviewsSave, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['reviewsSave']['params']))
-    )
-  }
-
-  onReviewsAddComment(
-    handler: (
-      ...args: IpcRequests['reviewsAddComment']['params']
-    ) => IpcRequests['reviewsAddComment']['result'] | Promise<IpcRequests['reviewsAddComment']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.reviewsAddComment, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['reviewsAddComment']['params']))
-    )
-  }
-
-  onReviewsDeleteComment(
-    handler: (
-      ...args: IpcRequests['reviewsDeleteComment']['params']
-    ) => IpcRequests['reviewsDeleteComment']['result'] | Promise<IpcRequests['reviewsDeleteComment']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.reviewsDeleteComment, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['reviewsDeleteComment']['params']))
-    )
-  }
-
-  onReviewsUpdateOutdated(
-    handler: (
-      ...args: IpcRequests['reviewsUpdateOutdated']['params']
-    ) => IpcRequests['reviewsUpdateOutdated']['result'] | Promise<IpcRequests['reviewsUpdateOutdated']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.reviewsUpdateOutdated, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['reviewsUpdateOutdated']['params']))
-    )
-  }
-
-  onReviewsToggleAddressed(
-    handler: (
-      ...args: IpcRequests['reviewsToggleAddressed']['params']
-    ) => IpcRequests['reviewsToggleAddressed']['result'] | Promise<IpcRequests['reviewsToggleAddressed']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.reviewsToggleAddressed, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['reviewsToggleAddressed']['params']))
-    )
-  }
-
-  onReviewsGetFilePath(
-    handler: (
-      ...args: IpcRequests['reviewsGetFilePath']['params']
-    ) => IpcRequests['reviewsGetFilePath']['result'] | Promise<IpcRequests['reviewsGetFilePath']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.reviewsGetFilePath, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['reviewsGetFilePath']['params']))
-    )
-  }
-
-  onReviewsCleanup(
-    handler: (
-      ...args: IpcRequests['reviewsCleanup']['params']
-    ) => IpcRequests['reviewsCleanup']['result'] | Promise<IpcRequests['reviewsCleanup']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.reviewsCleanup, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['reviewsCleanup']['params']))
     )
   }
 

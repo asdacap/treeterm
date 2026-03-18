@@ -60,7 +60,6 @@ function makeDeps(overrides?: Partial<WorkspaceDeps>): WorkspaceDeps {
       get: vi.fn().mockReturnValue(null),
       getDefaultApp: vi.fn().mockReturnValue(null),
     },
-    reviewsCleanup: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }
@@ -1148,6 +1147,116 @@ describe('createWorkspaceStore', () => {
       expect(ws).not.toHaveProperty('createdAt')
       expect(ws).not.toHaveProperty('lastActivity')
       expect(ws).not.toHaveProperty('attachedClients')
+    })
+  })
+
+  describe('review comments', () => {
+    it('addReviewComment adds a comment to metadata', () => {
+      const deps = makeDeps()
+      const store = createWorkspaceStore({ sessionId: 's1', windowUuid: null }, deps)
+      store.setState({
+        workspaces: {
+          'ws-1': makeWorkspace({ id: 'ws-1', metadata: {} })
+        }
+      })
+
+      store.getState().addReviewComment('ws-1', {
+        filePath: 'test.ts',
+        lineNumber: 10,
+        text: 'Fix this',
+        commitHash: 'abc123',
+        isOutdated: false,
+        addressed: false,
+        side: 'modified'
+      })
+
+      const ws = store.getState().workspaces['ws-1']
+      const comments = JSON.parse(ws.metadata.reviewComments)
+      expect(comments).toHaveLength(1)
+      expect(comments[0].text).toBe('Fix this')
+      expect(comments[0].filePath).toBe('test.ts')
+      expect(comments[0].id).toBeDefined()
+      expect(comments[0].createdAt).toBeDefined()
+    })
+
+    it('deleteReviewComment removes a comment', () => {
+      const deps = makeDeps()
+      const store = createWorkspaceStore({ sessionId: 's1', windowUuid: null }, deps)
+      const existingComments = JSON.stringify([
+        { id: 'c1', filePath: 'a.ts', lineNumber: 1, text: 'A', commitHash: 'h1', createdAt: 1, isOutdated: false, addressed: false, side: 'modified' },
+        { id: 'c2', filePath: 'b.ts', lineNumber: 2, text: 'B', commitHash: 'h1', createdAt: 2, isOutdated: false, addressed: false, side: 'modified' }
+      ])
+      store.setState({
+        workspaces: {
+          'ws-1': makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
+        }
+      })
+
+      store.getState().deleteReviewComment('ws-1', 'c1')
+
+      const ws = store.getState().workspaces['ws-1']
+      const comments = JSON.parse(ws.metadata.reviewComments)
+      expect(comments).toHaveLength(1)
+      expect(comments[0].id).toBe('c2')
+    })
+
+    it('toggleReviewCommentAddressed toggles addressed flag', () => {
+      const deps = makeDeps()
+      const store = createWorkspaceStore({ sessionId: 's1', windowUuid: null }, deps)
+      const existingComments = JSON.stringify([
+        { id: 'c1', filePath: 'a.ts', lineNumber: 1, text: 'A', commitHash: 'h1', createdAt: 1, isOutdated: false, addressed: false, side: 'modified' }
+      ])
+      store.setState({
+        workspaces: {
+          'ws-1': makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
+        }
+      })
+
+      store.getState().toggleReviewCommentAddressed('ws-1', 'c1')
+
+      const ws = store.getState().workspaces['ws-1']
+      const comments = JSON.parse(ws.metadata.reviewComments)
+      expect(comments[0].addressed).toBe(true)
+    })
+
+    it('updateOutdatedReviewComments marks comments with different hash as outdated', () => {
+      const deps = makeDeps()
+      const store = createWorkspaceStore({ sessionId: 's1', windowUuid: null }, deps)
+      const existingComments = JSON.stringify([
+        { id: 'c1', filePath: 'a.ts', lineNumber: 1, text: 'A', commitHash: 'old', createdAt: 1, isOutdated: false, addressed: false, side: 'modified' },
+        { id: 'c2', filePath: 'b.ts', lineNumber: 2, text: 'B', commitHash: 'new', createdAt: 2, isOutdated: false, addressed: false, side: 'modified' }
+      ])
+      store.setState({
+        workspaces: {
+          'ws-1': makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
+        }
+      })
+
+      store.getState().updateOutdatedReviewComments('ws-1', 'new')
+
+      const ws = store.getState().workspaces['ws-1']
+      const comments = JSON.parse(ws.metadata.reviewComments)
+      expect(comments[0].isOutdated).toBe(true)
+      expect(comments[1].isOutdated).toBe(false)
+    })
+
+    it('clearReviewComments empties the comments', () => {
+      const deps = makeDeps()
+      const store = createWorkspaceStore({ sessionId: 's1', windowUuid: null }, deps)
+      const existingComments = JSON.stringify([
+        { id: 'c1', filePath: 'a.ts', lineNumber: 1, text: 'A', commitHash: 'h1', createdAt: 1, isOutdated: false, addressed: false, side: 'modified' }
+      ])
+      store.setState({
+        workspaces: {
+          'ws-1': makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
+        }
+      })
+
+      store.getState().clearReviewComments('ws-1')
+
+      const ws = store.getState().workspaces['ws-1']
+      const comments = JSON.parse(ws.metadata.reviewComments)
+      expect(comments).toHaveLength(0)
     })
   })
 })

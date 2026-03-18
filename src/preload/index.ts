@@ -1,6 +1,5 @@
 import { contextBridge } from 'electron'
 import type { SandboxConfig, Session, SessionInfo, WorkspaceInput, Settings } from '../shared/types'
-import type { ReviewsData, ReviewComment } from '../renderer/types'
 import { IpcClient } from './ipc-client'
 
 type DataCallback = (data: string) => void
@@ -279,32 +278,6 @@ contextBridge.exposeInMainWorld('electron', {
     },
     getHeadCommitHash: (repoPath: string) => {
       return client.gitGetHeadCommitHash(repoPath)
-    }
-  },
-  reviews: {
-    load: (worktreePath: string, reviewId?: string) => {
-      return client.reviewsLoad(worktreePath, reviewId)
-    },
-    save: (reviewId: string, reviews: ReviewsData) => {
-      return client.reviewsSave(reviewId, reviews)
-    },
-    addComment: (worktreePath: string, comment: Omit<ReviewComment, 'id' | 'createdAt'>, reviewId?: string) => {
-      return client.reviewsAddComment(worktreePath, comment, reviewId)
-    },
-    deleteComment: (reviewId: string, commentId: string) => {
-      return client.reviewsDeleteComment(reviewId, commentId)
-    },
-    updateOutdated: (worktreePath: string, commitHash: string, reviewId?: string) => {
-      return client.reviewsUpdateOutdated(worktreePath, commitHash, reviewId)
-    },
-    getFilePath: (worktreePath: string, reviewId?: string) => {
-      return client.reviewsGetFilePath(worktreePath, reviewId)
-    },
-    toggleAddressed: (reviewId: string, commentId: string) => {
-      return client.reviewsToggleAddressed(reviewId, commentId)
-    },
-    cleanup: (reviewId: string) => {
-      return client.reviewsCleanup(reviewId)
     }
   },
   settings: {

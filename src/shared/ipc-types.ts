@@ -22,8 +22,6 @@ import type {
   FileDiffContents,
   DirectoryContents,
   FileContents,
-  ReviewsData,
-  ReviewComment,
   FileEntry
 } from '../renderer/types'
 
@@ -160,40 +158,6 @@ export interface IpcRequests {
   gitGetHeadCommitHash: {
     params: [repoPath: string]
     result: { success: boolean; hash?: string; error?: string }
-  }
-
-  // Reviews operations
-  reviewsLoad: {
-    params: [worktreePath: string, reviewId?: string]
-    result: { success: boolean; reviews?: ReviewsData; reviewId?: string; error?: string }
-  }
-  reviewsSave: {
-    params: [reviewId: string, reviews: ReviewsData]
-    result: { success: boolean; error?: string }
-  }
-  reviewsAddComment: {
-    params: [worktreePath: string, comment: Omit<ReviewComment, 'id' | 'createdAt'>, reviewId?: string]
-    result: { success: boolean; comment?: ReviewComment; reviewId?: string; error?: string }
-  }
-  reviewsDeleteComment: {
-    params: [reviewId: string, commentId: string]
-    result: { success: boolean; error?: string }
-  }
-  reviewsUpdateOutdated: {
-    params: [worktreePath: string, currentCommitHash: string, reviewId?: string]
-    result: { success: boolean; reviews?: ReviewsData; reviewId?: string; error?: string }
-  }
-  reviewsToggleAddressed: {
-    params: [reviewId: string, commentId: string]
-    result: { success: boolean; error?: string }
-  }
-  reviewsGetFilePath: {
-    params: [worktreePath: string, reviewId?: string]
-    result: { success: boolean; filePath?: string; reviewId?: string; error?: string }
-  }
-  reviewsCleanup: {
-    params: [reviewId: string]
-    result: { success: boolean; error?: string }
   }
 
   // Settings operations
