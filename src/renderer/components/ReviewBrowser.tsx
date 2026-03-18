@@ -1,5 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
@@ -33,7 +32,7 @@ export default function ReviewBrowser({
 }: ReviewBrowserProps) {
   const git = useGitApi()
   const terminalApi = useTerminalApi()
-  const { workspaces, mergeAndRemoveWorkspace, removeWorkspace, removeWorkspaceKeepBranch, removeWorkspaceKeepWorktree, removeWorkspaceKeepBoth, closeAndCleanWorkspace, removeTab, setActiveTab, addReviewComment, deleteReviewComment, updateOutdatedReviewComments } = useStore(workspaceStore)
+  const { workspaces, mergeAndRemoveWorkspace, closeAndCleanWorkspace, removeTab, setActiveTab, addReviewComment, deleteReviewComment, updateOutdatedReviewComments } = useStore(workspaceStore)
   const workspace = workspaces[workspaceId]
   const parentWorkspace = parentWorkspaceId ? workspaces[parentWorkspaceId] : undefined
   
@@ -67,7 +66,7 @@ export default function ReviewBrowser({
 
   // Action state
   const [isProcessing, setIsProcessing] = useState(false)
-  const [processingAction, setProcessingAction] = useState<'merge' | 'squash' | 'abandon' | null>(null)
+  const [processingAction, setProcessingAction] = useState<'merge' | 'squash' | null>(null)
 
   // Reviews state — comments are read from workspace metadata (reactive)
   const reviews = workspace ? parseReviewComments(workspace.metadata) : []
@@ -81,11 +80,6 @@ export default function ReviewBrowser({
   // Resize state
   const [fileListWidth, setFileListWidth] = useState(250)
   const [isResizing, setIsResizing] = useState(false)
-
-  // Abandon dropdown state
-  const [abandonMenuOpen, setAbandonMenuOpen] = useState(false)
-  const abandonMenuRef = useRef<HTMLDivElement>(null)
-  const abandonButtonRef = useRef<HTMLButtonElement>(null)
 
   // AI harness prompt support
   const runningHarness = workspace ? findRunningHarness(workspace.tabs) : null
@@ -140,24 +134,6 @@ export default function ReviewBrowser({
       setLoading(false)
     }
   }, [workspaceId, parentWorkspaceId])
-
-  // Close abandon dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        abandonMenuOpen &&
-        abandonMenuRef.current &&
-        !abandonMenuRef.current.contains(e.target as Node) &&
-        abandonButtonRef.current &&
-        !abandonButtonRef.current.contains(e.target as Node)
-      ) {
-        setAbandonMenuOpen(false)
-      }
-    }
-
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [abandonMenuOpen])
 
   const loadReviews = async () => {
     try {
@@ -352,79 +328,6 @@ export default function ReviewBrowser({
     }
   }
 
-  const handleAbandon = async () => {
-    if (!confirm('Are you sure you want to abandon this workspace? All changes will be discarded.')) {
-      return
-    }
-
-    setIsProcessing(true)
-    setProcessingAction('abandon')
-
-    try {
-      await removeWorkspace(workspaceId)
-      // Tab will close automatically when workspace is removed
-    } catch (err) {
-      alert(`Abandon failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
-      setIsProcessing(false)
-      setProcessingAction(null)
-    }
-  }
-
-  const handleAbandonKeepBranch = async () => {
-    if (!confirm('Abandon this workspace but keep the branch? The worktree will be removed but the branch will be kept.')) {
-      return
-    }
-
-    setIsProcessing(true)
-    setProcessingAction('abandon')
-
-    try {
-      await removeWorkspaceKeepBranch(workspaceId)
-      // Tab will close automatically when workspace is removed
-    } catch (err) {
-      alert(`Abandon (Keep Branch) failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
-      setIsProcessing(false)
-      setProcessingAction(null)
-    }
-  }
-
-  const handleAbandonKeepWorktree = async () => {
-    if (!confirm('Abandon this workspace but keep the worktree on disk? The worktree will remain but the branch will be deleted.')) {
-      return
-    }
-
-    setIsProcessing(true)
-    setProcessingAction('abandon')
-    setAbandonMenuOpen(false)
-
-    try {
-      await removeWorkspaceKeepWorktree(workspaceId)
-      // Tab will close automatically when workspace is removed
-    } catch (err) {
-      alert(`Abandon (Keep Worktree) failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
-      setIsProcessing(false)
-      setProcessingAction(null)
-    }
-  }
-
-  const handleAbandonKeepBoth = async () => {
-    if (!confirm('Abandon this workspace but keep both the worktree and branch? They will remain but will no longer be tracked in TreeTerm.')) {
-      return
-    }
-
-    setIsProcessing(true)
-    setProcessingAction('abandon')
-    setAbandonMenuOpen(false)
-
-    try {
-      await removeWorkspaceKeepBoth(workspaceId)
-      // Tab will close automatically when workspace is removed
-    } catch (err) {
-      alert(`Abandon (Keep Both) failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
-      setIsProcessing(false)
-      setProcessingAction(null)
-    }
-  }
 
   const handleCloseAndClean = async () => {
     if (!confirm('Close this workspace? The worktree will be removed but the branch will be kept.')) {
@@ -915,57 +818,6 @@ export default function ReviewBrowser({
             >
               {isProcessing ? 'Closing...' : 'Close and Clean'}
             </button>
-            <div className="abandon-dropdown-container">
-              <button
-                ref={abandonButtonRef}
-                className="review-action-btn review-abandon-btn abandon-split-btn"
-                onClick={handleAbandon}
-                disabled={isProcessing}
-                title="Discard all changes and remove this workspace"
-              >
-                {processingAction === 'abandon' ? 'Abandoning...' : 'Abandon'}
-              </button>
-              <button
-                className="review-action-btn review-abandon-btn abandon-dropdown-btn"
-                onClick={() => setAbandonMenuOpen(!abandonMenuOpen)}
-                disabled={isProcessing}
-                title="More abandon options"
-              >
-                <ChevronDown size={14} />
-              </button>
-              {abandonMenuOpen && (
-                <div className="abandon-menu" ref={abandonMenuRef}>
-                  <div
-                    className="abandon-menu-item"
-                    onClick={handleAbandon}
-                  >
-                    Abandon
-                    <span className="abandon-menu-hint">Delete worktree and branch</span>
-                  </div>
-                  <div
-                    className="abandon-menu-item"
-                    onClick={handleAbandonKeepBranch}
-                  >
-                    Abandon (Keep Branch)
-                    <span className="abandon-menu-hint">Delete worktree, keep branch</span>
-                  </div>
-                  <div
-                    className="abandon-menu-item"
-                    onClick={handleAbandonKeepWorktree}
-                  >
-                    Abandon (Keep Worktree)
-                    <span className="abandon-menu-hint">Keep worktree, delete branch</span>
-                  </div>
-                  <div
-                    className="abandon-menu-item"
-                    onClick={handleAbandonKeepBoth}
-                  >
-                    Abandon (Keep Both)
-                    <span className="abandon-menu-hint">Keep worktree and branch</span>
-                  </div>
-                </div>
-              )}
-            </div>
             <button
               className="review-action-btn review-cancel-btn"
               onClick={handleCancel}
@@ -1014,57 +866,6 @@ export default function ReviewBrowser({
               {processingAction === 'squash' ? 'Squashing...' : 'Squash Merge'}
               {hasConflicts && ' (has conflicts)'}
             </button>
-            <div className="abandon-dropdown-container">
-              <button
-                ref={abandonButtonRef}
-                className="review-action-btn review-abandon-btn abandon-split-btn"
-                onClick={handleAbandon}
-                disabled={isProcessing}
-                title="Discard all changes and remove this workspace"
-              >
-                {processingAction === 'abandon' ? 'Abandoning...' : 'Abandon'}
-              </button>
-              <button
-                className="review-action-btn review-abandon-btn abandon-dropdown-btn"
-                onClick={() => setAbandonMenuOpen(!abandonMenuOpen)}
-                disabled={isProcessing}
-                title="More abandon options"
-              >
-                <ChevronDown size={14} />
-              </button>
-              {abandonMenuOpen && (
-                <div className="abandon-menu" ref={abandonMenuRef}>
-                  <div
-                    className="abandon-menu-item"
-                    onClick={handleAbandon}
-                  >
-                    Abandon
-                    <span className="abandon-menu-hint">Delete worktree and branch</span>
-                  </div>
-                  <div
-                    className="abandon-menu-item"
-                    onClick={handleAbandonKeepBranch}
-                  >
-                    Abandon (Keep Branch)
-                    <span className="abandon-menu-hint">Delete worktree, keep branch</span>
-                  </div>
-                  <div
-                    className="abandon-menu-item"
-                    onClick={handleAbandonKeepWorktree}
-                  >
-                    Abandon (Keep Worktree)
-                    <span className="abandon-menu-hint">Keep worktree, delete branch</span>
-                  </div>
-                  <div
-                    className="abandon-menu-item"
-                    onClick={handleAbandonKeepBoth}
-                  >
-                    Abandon (Keep Both)
-                    <span className="abandon-menu-hint">Keep worktree and branch</span>
-                  </div>
-                </div>
-              )}
-            </div>
             <button
               className="review-action-btn review-cancel-btn"
               onClick={handleCancel}
