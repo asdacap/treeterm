@@ -1,0 +1,184 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Layout, type ITabSetRenderValues, type ITabRenderValues } from '@aptre/flex-layout'
+import { Model, Actions, TabNode, TabSetNode, BorderNode, DockLocation, type Action } from '@aptre/flex-layout'
+import type { IJsonModel } from '@aptre/flex-layout'
+import type { StoreApi } from 'zustand'
+import { useStore } from 'zustand'
+import type { WorkspaceState } from '../store/createWorkspaceStore'
+import { useAppStore } from '../store/app'
+import { createDefaultLayoutModel, tabToFlexNode } from '../utils/layoutModel'
+import { TabActivityIndicator } from './TabActivityIndicator'
+
+interface FlexLayoutPaneProps {
+  workspaceId: string
+  workspaceStore: StoreApi<WorkspaceState>
+  onNewTab: (applicationId: string) => void
+}
+
+export default function FlexLayoutPane({ workspaceId, workspaceStore, onNewTab }: FlexLayoutPaneProps) {
+  const workspace = useStore(workspaceStore, s => s.workspaces[workspaceId])
+  const removeTab = useStore(workspaceStore, s => s.removeTab)
+  const setActiveTab = useStore(workspaceStore, s => s.setActiveTab)
+  const updateWorkspaceMetadata = useStore(workspaceStore, s => s.updateWorkspaceMetadata)
+  const applications = useAppStore((s) => s.applications)
+  const getApplication = useCallback((id: string) => applications[id], [applications])
+  const menuApplications = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
+
+  const tabs = workspace?.tabs ?? []
+  const activeTabId = workspace?.activeTabId ?? null
+
+  const [model, setModel] = useState<Model | null>(null)
+  const layoutRef = useRef<Layout>(null)
+  // Track tab IDs we've synced into the model to detect adds/removes
+  const syncedTabIdsRef = useRef<Set<string>>(new Set())
+  // Suppress model→store sync while we're applying store→model updates
+  const suppressModelChangeRef = useRef(false)
+
+  // Initialize model from metadata or create default
+  useEffect(() => {
+    if (!workspace) return
+
+    let json: IJsonModel
+    const saved = workspace.metadata?.layoutModel
+    if (saved) {
+      try {
+        json = JSON.parse(saved)
+      } catch {
+        json = createDefaultLayoutModel(tabs, activeTabId)
+      }
+    } else {
+      json = createDefaultLayoutModel(tabs, activeTabId)
+    }
+
+    const m = Model.fromJson(json)
+    setModel(m)
+    syncedTabIdsRef.current = new Set(tabs.map(t => t.id))
+    // Only run on mount / workspace ID change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId])
+
+  // Sync store tab changes → model (adds/removes)
+  useEffect(() => {
+    if (!model) return
+
+    const currentIds = new Set(tabs.map(t => t.id))
+    const synced = syncedTabIdsRef.current
+
+    // Detect added tabs
+    const added = tabs.filter(t => !synced.has(t.id))
+    // Detect removed tabs
+    const removed = Array.from(synced).filter(id => !currentIds.has(id))
+
+    if (added.length === 0 && removed.length === 0) return
+
+    suppressModelChangeRef.current = true
+
+    for (const tab of added) {
+      const activeTabset = model.getActiveTabset()
+      if (activeTabset) {
+        const json = tabToFlexNode(tab, getApplication(tab.applicationId))
+        model.doAction(Actions.addNode(json, activeTabset.getId(), DockLocation.CENTER, -1, true))
+      }
+    }
+
+    for (const id of removed) {
+      const node = model.getNodeById(id)
+      if (node) {
+        model.doAction(Actions.deleteTab(id))
+      }
+    }
+
+    syncedTabIdsRef.current = currentIds
+    suppressModelChangeRef.current = false
+
+    // Force re-render after model mutations
+    setModel(model)
+  }, [model, tabs])
+
+  // Sync store active tab → model selected tab
+  useEffect(() => {
+    if (!model || !activeTabId) return
+
+    const node = model.getNodeById(activeTabId)
+    if (node instanceof TabNode && !node.isSelected()) {
+      suppressModelChangeRef.current = true
+      model.doAction(Actions.selectTab(activeTabId))
+      suppressModelChangeRef.current = false
+    }
+  }, [model, activeTabId])
+
+  // Factory: renders a portal target div for each tab
+  const factory = useCallback((node: TabNode) => {
+    const tabId = node.getId()
+    return <div id={`flexlayout-slot-${tabId}`} style={{ height: '100%', width: '100%' }} />
+  }, [])
+
+  // Handle actions from FlexLayout (intercept delete to route through store)
+  const handleAction = useCallback((action: Action): Action | undefined => {
+    if (action.type === Actions.DELETE_TAB) {
+      removeTab(workspaceId, action.data.node)
+      return undefined // Prevent FlexLayout from handling it — store will sync
+    }
+    if (action.type === Actions.SELECT_TAB) {
+      setActiveTab(workspaceId, action.data.tabNode)
+    }
+    return action
+  }, [workspaceId, removeTab, setActiveTab])
+
+  // Serialize model changes to metadata
+  const handleModelChange = useCallback((m: Model, _action: Action) => {
+    if (suppressModelChangeRef.current) return
+    const json = JSON.stringify(m.toJson())
+    updateWorkspaceMetadata(workspaceId, 'layoutModel', json)
+  }, [workspaceId, updateWorkspaceMetadata])
+
+  // Customize tab rendering with icons and activity indicators
+  const handleRenderTab = useCallback((node: TabNode, renderValues: ITabRenderValues) => {
+    const tabId = node.getId()
+    const tab = tabs.find(t => t.id === tabId)
+    if (tab) {
+      const app = getApplication(tab.applicationId)
+      if (app) {
+        renderValues.leading = <span className="tab-icon">{app.icon}</span>
+      }
+      renderValues.buttons.push(
+        <TabActivityIndicator key="activity" tabId={tabId} />
+      )
+    }
+  }, [tabs, getApplication])
+
+  // Add "+" button to each tabset header
+  const handleRenderTabSet = useCallback((node: TabSetNode | BorderNode, renderValues: ITabSetRenderValues) => {
+    if (node instanceof TabSetNode) {
+      renderValues.stickyButtons.push(
+        <button
+          key="new-tab"
+          className="flexlayout-new-tab-btn"
+          onClick={() => {
+            const defaultApp = menuApplications.find(app => app.canHaveMultiple)
+            if (defaultApp) {
+              onNewTab(defaultApp.id)
+            }
+          }}
+          title="New tab"
+        >
+          +
+        </button>
+      )
+    }
+  }, [onNewTab, menuApplications])
+
+  if (!model) return null
+
+  return (
+    <Layout
+      ref={layoutRef}
+      model={model}
+      factory={factory}
+      onAction={handleAction}
+      onModelChange={handleModelChange}
+      onRenderTab={handleRenderTab}
+      onRenderTabSet={handleRenderTabSet}
+    />
+  )
+}

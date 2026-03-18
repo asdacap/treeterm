@@ -50,6 +50,7 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
+    "@aptre/flex-layout": "^0.5.13",
     "@grpc/grpc-js": "^1.14.3",
     "@monaco-editor/react": "^4.7.0",
     "@xterm/addon-fit": "^0.10.0",

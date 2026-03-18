@@ -6,12 +6,12 @@ import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { usePrefixModeStore } from '../store/prefixMode'
 import { useAppStore } from '../store/app'
 import { usePrefixKeybindings } from '../hooks/usePrefixKeybindings'
-import TabBar from './TabBar'
+import FlexLayoutPane from './FlexLayoutPane'
+import TabContentPortals from './TabContentPortals'
 import CreateChildDialog from './CreateChildDialog'
 import KeybindingOverlay from './KeybindingOverlay'
 import { ErrorBoundary } from './ErrorBoundary'
 import WorkspaceErrorFallback from './WorkspaceErrorFallback'
-import TabErrorFallback from './TabErrorFallback'
 import type { ReviewState, Platform } from '../types'
 import { isTerminalState } from '../types'
 import { PromptDescriptionButton } from './PromptDescriptionButton'
@@ -521,60 +521,20 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                 )}
               </div>
             </div>
-            <TabBar
-              tabs={tabs}
-              activeTabId={activeTabId}
-              onSelectTab={handleSelectTab}
-              onCloseTab={handleCloseTab}
-              onNewTab={handleNewTab}
-            />
           </>
         )}
         <div className="workspace-terminal" style={{ display: activeWorkspace ? 'flex' : 'none' }}>
-          {/* Render tabs for ALL workspaces to keep PTYs alive when switching */}
-          {Object.values(workspaces).map((workspace) => {
-            const wsTabs = workspace.tabs || []
-            const wsActiveTabId = workspace.activeTabId || wsTabs[0]?.id
-            const isActiveWorkspace = workspace.id === activeWorkspaceId
-
-            return wsTabs.map((tab) => {
-              const isVisible = isActiveWorkspace && tab.id === wsActiveTabId
-              const app = getApplication(tab.applicationId)
-
-              if (!app) return null
-
-              // Skip rendering if app doesn't need to stay alive and workspace is inactive
-              if (!app.keepAlive && !isActiveWorkspace) return null
-
-              return (
-                <div
-                  key={`${workspace.id}-${tab.id}`}
-                  className={`app-wrapper ${tab.applicationId}-wrapper`}
-                  style={{ display: isVisible ? app.displayStyle : 'none' }}
-                >
-                  <ErrorBoundary
-                    key={`error-${workspace.id}-${tab.id}`}
-                    fallback={(error, reset) => (
-                      <TabErrorFallback
-                        error={error}
-                        tabTitle={tab.title}
-                        onReset={reset}
-                        onClose={() => handleCloseTab(tab.id)}
-                      />
-                    )}
-                  >
-                    {app.render({
-                      tab,
-                      workspaceId: workspace.id,
-                      workspacePath: workspace.path,
-                      isVisible,
-                      workspaceStore
-                    })}
-                  </ErrorBoundary>
-                </div>
-              )
-            })
-          })}
+          {activeWorkspaceId && (
+            <FlexLayoutPane
+              workspaceId={activeWorkspaceId}
+              workspaceStore={workspaceStore}
+              onNewTab={handleNewTab}
+            />
+          )}
+          <TabContentPortals
+            workspaceStore={workspaceStore}
+            activeWorkspaceId={activeWorkspaceId}
+          />
         </div>
 
         {/* Create Child Dialog (Fork) */}

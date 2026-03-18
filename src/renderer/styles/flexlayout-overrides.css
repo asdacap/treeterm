@@ -1,0 +1,160 @@
+/* FlexLayout theme overrides to match TreeTerm palette */
+
+/* Main layout container */
+.flexlayout__layout {
+  --color-text: var(--text-primary);
+  --color-background: var(--bg-primary);
+  --color-base: var(--bg-primary);
+  --color-1: var(--bg-secondary);
+  --color-2: var(--bg-tertiary);
+  --color-3: var(--bg-hover);
+  --color-4: var(--border-color);
+  --color-5: var(--text-secondary);
+  --color-6: var(--accent);
+  --color-drag1: rgba(0, 120, 212, 0.15);
+  --color-drag2: rgba(0, 120, 212, 0.3);
+  background-color: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Tab strip (header area) */
+.flexlayout__tabset_header,
+.flexlayout__tabset-selected,
+.flexlayout__tabset {
+  background-color: var(--bg-secondary) !important;
+}
+
+.flexlayout__tabset_tabbar_outer {
+  background-color: var(--bg-secondary) !important;
+  border-bottom: 1px solid var(--border-color) !important;
+}
+
+.flexlayout__tabset_tabbar_inner {
+  /* gap between tabs in tabbar */
+}
+
+/* Individual tabs */
+.flexlayout__tab_button {
+  font-size: 12px !important;
+  color: var(--text-secondary) !important;
+  background: transparent !important;
+  padding: 4px 10px !important;
+  border-radius: 4px 4px 0 0 !important;
+  font-family: inherit !important;
+}
+
+.flexlayout__tab_button:hover {
+  background: var(--bg-hover) !important;
+  color: var(--text-primary) !important;
+}
+
+.flexlayout__tab_button--selected {
+  background: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Tab content area */
+.flexlayout__tab {
+  background-color: var(--bg-primary) !important;
+  overflow: hidden !important;
+}
+
+/* Splitter */
+.flexlayout__splitter {
+  background-color: var(--border-color) !important;
+}
+
+.flexlayout__splitter:hover {
+  background-color: var(--accent) !important;
+}
+
+.flexlayout__splitter_drag {
+  background-color: var(--accent) !important;
+}
+
+/* Tab close button */
+.flexlayout__tab_button_trailing {
+  color: var(--text-secondary) !important;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.flexlayout__tab_button:hover .flexlayout__tab_button_trailing {
+  opacity: 1;
+}
+
+.flexlayout__tab_button_trailing:hover {
+  color: var(--text-primary) !important;
+}
+
+/* Tabset header buttons (maximize, etc.) */
+.flexlayout__tab_toolbar_button {
+  color: var(--text-secondary) !important;
+}
+
+.flexlayout__tab_toolbar_button:hover {
+  color: var(--text-primary) !important;
+  background: var(--bg-hover) !important;
+}
+
+/* New tab button inside tabset header */
+.flexlayout-new-tab-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 4px;
+  margin-left: 2px;
+}
+
+.flexlayout-new-tab-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Drag rect */
+.flexlayout__outline_rect {
+  border: 2px solid var(--accent) !important;
+  background: rgba(0, 120, 212, 0.1) !important;
+}
+
+/* Edge indicators */
+.flexlayout__edge_rect {
+  background: rgba(0, 120, 212, 0.2) !important;
+  border: 1px solid var(--accent) !important;
+}
+
+/* Overflow menu */
+.flexlayout__popup_menu {
+  background: var(--bg-tertiary) !important;
+  border: 1px solid var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+
+.flexlayout__popup_menu_item {
+  color: var(--text-primary) !important;
+}
+
+.flexlayout__popup_menu_item:hover {
+  background: var(--bg-hover) !important;
+}
+
+/* Tab icon within flexlayout */
+.flexlayout__tab_button .tab-icon {
+  margin-right: 6px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+/* Activity indicator within flexlayout tab buttons */
+.flexlayout__tab_button .tab-activity {
+  font-size: 10px;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
