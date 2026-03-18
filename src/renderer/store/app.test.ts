@@ -647,6 +647,7 @@ describe('useAppStore', () => {
 
     it('removes workspaces not present in daemon session', async () => {
       const { createWorkspaceStore } = await import('./createWorkspaceStore')
+      const mockRemoveWorkspaceKeepWorktree = vi.fn()
       const existingWs = {
         'ws-old': { id: 'ws-old', path: '/old', name: 'old', parentId: null, children: [] }
       }
@@ -659,7 +660,8 @@ describe('useAppStore', () => {
           setActiveWorkspace: vi.fn(),
           addTabWithState: vi.fn(),
           setActiveTab: vi.fn(),
-          syncToDaemon: vi.fn()
+          syncToDaemon: vi.fn(),
+          removeWorkspaceKeepWorktree: mockRemoveWorkspaceKeepWorktree
         }),
         setState: mockSetState,
         subscribe: vi.fn()
@@ -675,12 +677,8 @@ describe('useAppStore', () => {
 
       await useAppStore.getState().handleExternalSessionUpdate(session)
 
-      // setState should be called with a function that removes the old workspace
-      const setStateCalls = mockSetState.mock.calls
-      const removalCalls = setStateCalls.filter(
-        (call: any[]) => typeof call[0] === 'function'
-      )
-      expect(removalCalls.length).toBeGreaterThan(0)
+      // removeWorkspaceKeepWorktree should be called for the old workspace
+      expect(mockRemoveWorkspaceKeepWorktree).toHaveBeenCalledWith('ws-old')
       cleanup2()
     })
   })
