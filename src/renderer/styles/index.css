@@ -461,6 +461,7 @@ body,
   color: var(--text-secondary);
   white-space: pre-wrap;
   word-break: break-word;
+  -webkit-app-region: no-drag;
 }
 
 .workspace-description-placeholder {
