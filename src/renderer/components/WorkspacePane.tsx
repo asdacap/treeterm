@@ -1,4 +1,5 @@
 import { useEffect, useCallback, useState, useRef, useMemo } from 'react'
+import { ChevronDown } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
@@ -31,6 +32,8 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
     createWorktreeFromBranch,
     createWorktreeFromRemote,
     removeWorkspace,
+    removeWorkspaceKeepBranch,
+    removeWorkspaceKeepWorktree,
     mergeAndRemoveWorkspace,
     closeAndCleanWorkspace,
     setActiveWorkspace,
@@ -199,13 +202,55 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
     })
   }
 
-  // Abandon handler (direct)
+  // Abandon dropdown state
+  const [abandonMenuOpen, setAbandonMenuOpen] = useState(false)
+  const abandonMenuRef = useRef<HTMLDivElement>(null)
+  const abandonButtonRef = useRef<HTMLButtonElement>(null)
+
+  // Close abandon dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        abandonMenuOpen &&
+        abandonMenuRef.current &&
+        !abandonMenuRef.current.contains(e.target as Node) &&
+        abandonButtonRef.current &&
+        !abandonButtonRef.current.contains(e.target as Node)
+      ) {
+        setAbandonMenuOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [abandonMenuOpen])
+
+  // Abandon handlers
   const handleAbandon = async () => {
     if (!activeWorkspaceId) return
     if (!confirm('Are you sure you want to abandon this workspace? All changes will be discarded.')) {
       return
     }
+    setAbandonMenuOpen(false)
     await removeWorkspace(activeWorkspaceId)
+  }
+
+  const handleAbandonKeepBranch = async () => {
+    if (!activeWorkspaceId) return
+    if (!confirm('Abandon this workspace but keep the branch? The worktree will be removed but the branch will be kept.')) {
+      return
+    }
+    setAbandonMenuOpen(false)
+    await removeWorkspaceKeepBranch(activeWorkspaceId)
+  }
+
+  const handleAbandonKeepWorktree = async () => {
+    if (!activeWorkspaceId) return
+    if (!confirm('Abandon this workspace but keep the worktree on disk? The worktree will remain but will no longer be tracked in TreeTerm.')) {
+      return
+    }
+    setAbandonMenuOpen(false)
+    await removeWorkspaceKeepWorktree(activeWorkspaceId)
   }
 
   // Compute flattened workspace list for navigation
@@ -338,23 +383,49 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                   {activeWorkspace.gitBranch && (
                     <span className="workspace-branch">{activeWorkspace.gitBranch}</span>
                   )}
-                  {activeWorkspace.isGitRepo && (
-                    <button
-                      className="workspace-action-btn"
-                      onClick={() => setShowCreateChildDialog(true)}
-                      title="Fork: Create new child workspace"
-                    >
-                      Fork
-                    </button>
-                  )}
                   {activeWorkspace.isWorktree && activeWorkspace.parentId && (
-                    <button
-                      className="workspace-action-btn workspace-action-btn-merge"
-                      onClick={handleOpenReview}
-                      title="Review & Merge: Review changes and merge this workspace"
-                    >
-                      Review & Merge
-                    </button>
+                    <div className="abandon-dropdown-container">
+                      <button
+                        className="workspace-action-btn workspace-action-btn-merge abandon-split-btn"
+                        onClick={handleOpenReview}
+                        title="Review & Merge: Review changes and merge this workspace"
+                      >
+                        Review & Merge
+                      </button>
+                      <button
+                        ref={abandonButtonRef}
+                        className="workspace-action-btn workspace-action-btn-merge abandon-dropdown-btn"
+                        onClick={() => setAbandonMenuOpen(!abandonMenuOpen)}
+                        title="More options"
+                      >
+                        <ChevronDown size={14} />
+                      </button>
+                      {abandonMenuOpen && (
+                        <div className="abandon-menu" ref={abandonMenuRef}>
+                          <div
+                            className="abandon-menu-item"
+                            onClick={handleAbandon}
+                          >
+                            Abandon
+                            <span className="abandon-menu-hint">Delete worktree and branch</span>
+                          </div>
+                          <div
+                            className="abandon-menu-item"
+                            onClick={handleAbandonKeepBranch}
+                          >
+                            Abandon (Keep Branch)
+                            <span className="abandon-menu-hint">Delete worktree, keep branch</span>
+                          </div>
+                          <div
+                            className="abandon-menu-item"
+                            onClick={handleAbandonKeepWorktree}
+                          >
+                            Abandon (Keep Worktree)
+                            <span className="abandon-menu-hint">Keep worktree on disk</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>

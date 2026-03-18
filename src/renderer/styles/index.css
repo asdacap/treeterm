@@ -508,13 +508,13 @@ body,
 }
 
 .workspace-action-btn-merge {
-  background: rgba(0, 120, 212, 0.15);
+  background: var(--accent);
   border-color: var(--accent);
-  color: var(--accent);
+  color: #fff;
 }
 
 .workspace-action-btn-merge:hover {
-  background: rgba(0, 120, 212, 0.25);
+  background: rgba(0, 120, 212, 0.85);
 }
 
 .workspace-action-btn-abandon {
@@ -2774,8 +2774,9 @@ body,
   border-radius: 4px 0 0 4px;
 }
 
-.abandon-dropdown-btn {border-radius: 0 4px 4px 0;
-  padding: 8px6px;
+.abandon-dropdown-btn {
+  border-radius: 0 4px 4px 0;
+  padding: 4px 4px;
   margin-left: 1px;
 }
 
