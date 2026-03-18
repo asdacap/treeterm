@@ -343,6 +343,11 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
               Open Existing Branch
             </div>
           )}
+          {workspaces[contextMenu.workspaceId]?.isWorktree && workspaces[contextMenu.workspaceId]?.parentId && (
+            <div className="context-menu-item" onClick={() => handleRemove(contextMenu.workspaceId)}>
+              Review & Merge
+            </div>
+          )}
           {!workspaces[contextMenu.workspaceId]?.isWorktree && (
             <div className="context-menu-item danger" onClick={() => handleRemove(contextMenu.workspaceId)}>
               Remove
