@@ -126,11 +126,11 @@ export default function ReviewBrowser({
 
   useEffect(() => {
     if (!workspace) return
-    
+
     // Always load uncommitted changes
     loadUncommittedChanges()
     loadReviews()
-    
+
     if (parentWorkspace) {
       // For child worktrees: load diff and check conflicts for merge
       loadDiff()
@@ -139,7 +139,7 @@ export default function ReviewBrowser({
       // For top-level worktrees: no diff to show, just clear loading state
       setLoading(false)
     }
-  }, [workspace, parentWorkspace])
+  }, [workspaceId, parentWorkspaceId])
 
   // Close abandon dropdown when clicking outside
   useEffect(() => {
