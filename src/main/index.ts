@@ -204,7 +204,10 @@ function createWindow(initialSessionId?: string): BrowserWindow {
         unwatchSession()
       }
       unwatchSession = daemonClient.watchSession(session.id, windowUuid, (updatedSession) => {
-        console.log('[main] session sync received for window', window.id)
+        console.log('[main] session sync received for window', window.id, {
+          sessionId: updatedSession.id,
+          workspaces: updatedSession.workspaces.map(ws => ({ path: ws.path, metadata: ws.metadata })),
+        })
         windowServer.sessionSync(updatedSession)
       })
 

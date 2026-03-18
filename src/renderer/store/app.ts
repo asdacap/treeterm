@@ -240,18 +240,24 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   handleExternalSessionUpdate: async (daemonSession: Session) => {
+    console.log('[App] External session update received', {
+      sessionId: daemonSession.id,
+      workspaces: daemonSession.workspaces.map(ws => ({ path: ws.path, metadata: ws.metadata })),
+    })
     const store = getOrCreateSessionStore(daemonSession.id, get, set)
 
     store.setState({ isRestoring: true })
     applySessionWorkspaces(store, daemonSession.workspaces, { restoreExisting: false })
 
-    // Remove workspaces not present in daemon session
+    // Remove workspaces not present in daemon session.
+    // This is an update from the daemon, likely due to a merge/abandon from another window.
+    // Only clean up local state — the originating window already handled git operations.
     const incomingPaths = new Set(daemonSession.workspaces.map(ws => ws.path))
-    const { removeWorkspaceKeepWorktree } = store.getState()
+    const { removeOrphanWorkspace } = store.getState()
     const updatedState = store.getState()
     for (const [id, ws] of Object.entries(updatedState.workspaces)) {
       if (!incomingPaths.has(ws.path)) {
-        await removeWorkspaceKeepWorktree(id)
+        removeOrphanWorkspace(id)
       }
     }
 
