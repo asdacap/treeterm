@@ -524,6 +524,14 @@ export class GrpcServer {
       const { sessionId, workspaces, senderId } = call.request
       log.debug({ clientId, sessionId, senderId }, 'updateSession called')
 
+      if (!senderId) {
+        callback({
+          code: grpc.status.INVALID_ARGUMENT,
+          message: 'senderId is required for session updates'
+        })
+        return
+      }
+
       const convertedWorkspaces = this.convertWorkspaceInputs(workspaces)
       const session = this.sessionStore.updateSession(clientId, sessionId, convertedWorkspaces)
 
@@ -539,9 +547,7 @@ export class GrpcServer {
       callback(null, protoSession)
 
       // Broadcast to all watchers of this session except the sender
-      if (senderId) {
-        this.broadcastSessionUpdate(sessionId, protoSession, senderId)
-      }
+      this.broadcastSessionUpdate(sessionId, protoSession, senderId)
     } catch (error) {
       log.error({ err: error }, 'updateSession error')
       callback({
@@ -555,6 +561,12 @@ export class GrpcServer {
     call: grpc.ServerWritableStream<SessionWatchRequest, SessionWatchEvent>
   ): void {
     const { sessionId, listenerId } = call.request
+
+    if (!listenerId) {
+      call.destroy(new Error('listenerId is required for session watch'))
+      return
+    }
+
     log.info({ sessionId, listenerId }, 'sessionWatch registered')
 
     const watcher: SessionWatcher = { listenerId, sessionId, stream: call }

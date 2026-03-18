@@ -240,20 +240,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
     // Remove workspaces not present in daemon session
     const incomingPaths = new Set(daemonSession.workspaces.map(ws => ws.path))
+    const { removeWorkspaceKeepWorktree } = store.getState()
     const updatedState = store.getState()
     for (const [id, ws] of Object.entries(updatedState.workspaces)) {
       if (!incomingPaths.has(ws.path)) {
-        store.setState((state) => {
-          const newWorkspaces = { ...state.workspaces }
-          delete newWorkspaces[id]
-          if (ws.parentId && newWorkspaces[ws.parentId]) {
-            newWorkspaces[ws.parentId] = {
-              ...newWorkspaces[ws.parentId],
-              children: newWorkspaces[ws.parentId].children.filter(c => c !== id)
-            }
-          }
-          return { workspaces: newWorkspaces }
-        })
+        await removeWorkspaceKeepWorktree(id)
       }
     }
 
