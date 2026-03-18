@@ -383,7 +383,7 @@ body,
   flex-direction: column;
   gap: 4px;
   padding: 8px 16px;
-  padding-top: 46px; /* Account for traffic light buttons on macOS */
+  padding-top: 8px; /* Align title row with traffic light buttons on macOS */
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
   -webkit-app-region: drag;
