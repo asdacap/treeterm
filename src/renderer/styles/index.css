@@ -4597,61 +4597,44 @@ body,
   font-size: 13px;
 }
 
-/* === Run Action Panel === */
+/* === Run Action Toolbar Dropdown === */
 
-.run-action-panel {
-  display: flex;
-  height: 100%;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: 13px;
+.run-action-dropdown-container {
+  position: relative;
 }
 
-.run-action-sidebar {
-  width: 260px;
-  min-width: 200px;
-  border-right: 1px solid var(--border-color);
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-}
-
-.run-action-header {
+.run-action-trigger-btn {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  font-weight: 600;
-  border-bottom: 1px solid var(--border-color);
+  gap: 4px;
 }
 
-.run-action-refresh-btn {
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 16px;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.run-action-refresh-btn:hover {
-  color: var(--text-primary);
-  background: var(--bg-hover);
-}
-
-.run-action-detecting,
-.run-action-empty {
-  padding: 12px;
-  color: var(--text-secondary);
-  text-align: center;
-}
-
-.run-action-group {
+.run-action-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  min-width: 200px;
+  max-width: 320px;
+  max-height: 400px;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 100;
   padding: 4px 0;
 }
 
-.run-action-group-header {
+.run-action-menu-group {
+  padding: 2px 0;
+}
+
+.run-action-menu-group + .run-action-menu-group {
+  border-top: 1px solid var(--border-color);
+}
+
+.run-action-menu-group-header {
   padding: 4px 12px;
   font-size: 11px;
   text-transform: uppercase;
@@ -4659,123 +4642,22 @@ body,
   letter-spacing: 0.5px;
 }
 
-.run-action-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 12px;
+.run-action-menu-item {
+  padding: 6px 12px;
   cursor: pointer;
-  gap: 8px;
-}
-
-.run-action-item:hover {
-  background: var(--bg-hover);
-}
-
-.run-action-item.selected {
-  background: var(--bg-active);
-}
-
-.run-action-item-info {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1;
-}
-
-.run-action-item-name {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 13px;
 }
 
-.run-action-item-desc {
-  font-size: 11px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.run-action-run-btn {
-  background: none;
-  border: none;
-  color: var(--accent);
-  cursor: pointer;
-  font-size: 12px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  flex-shrink: 0;
-}
-
-.run-action-run-btn:hover {
+.run-action-menu-item:hover {
   background: var(--bg-hover);
 }
 
-.run-action-status {
-  flex-shrink: 0;
-  font-size: 12px;
-}
-
-.run-action-status-running {
-  color: var(--accent);
-}
-
-.run-action-status-succeeded {
-  color: #4ec9b0;
-}
-
-.run-action-status-failed {
-  color: #f44747;
-}
-
-.run-action-output {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.run-action-output-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.run-action-menu-loading,
+.run-action-menu-empty {
   padding: 8px 12px;
-  border-bottom: 1px solid var(--border-color);
-  font-size: 12px;
-}
-
-.run-action-kill-btn {
-  background: #f44747;
-  border: none;
-  color: white;
-  cursor: pointer;
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-
-.run-action-kill-btn:hover {
-  opacity: 0.9;
-}
-
-.run-action-output-content {
-  flex: 1;
-  overflow: auto;
-  margin: 0;
-  padding: 8px 12px;
-  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-  font-size: 12px;
-  line-height: 1.4;
-  white-space: pre-wrap;
-  word-break: break-all;
-  background: var(--bg-secondary);
-}
-
-.run-action-output-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
   color: var(--text-secondary);
+  font-size: 12px;
 }

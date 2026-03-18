@@ -10,7 +10,6 @@ import { createAiHarnessVariant } from '../../applications/aiHarness/renderer'
 import { reviewApplication } from '../../applications/review/renderer'
 import { editorApplication } from '../../applications/editor/renderer'
 import { commentsApplication } from '../../applications/comments/renderer'
-import { runActionApplication } from '../../applications/runAction/renderer'
 import type {
   Workspace, Session, Application,
   Platform, TerminalApi, GitApi, SessionApi, AppApi, DaemonApi,
@@ -161,7 +160,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
     get().registerApplication(reviewApplication)
     get().registerApplication(editorApplication)
     get().registerApplication(commentsApplication)
-    get().registerApplication(runActionApplication)
   },
 
   registerTerminalVariants: (instances: TerminalInstance[], terminalSettings: Settings['terminal'] | undefined) => {

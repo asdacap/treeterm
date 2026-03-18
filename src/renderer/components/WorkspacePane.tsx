@@ -15,6 +15,7 @@ import WorkspaceErrorFallback from './WorkspaceErrorFallback'
 import type { ReviewState, Platform } from '../types'
 import { isTerminalState } from '../types'
 import { PromptDescriptionButton } from './PromptDescriptionButton'
+import RunActionDropdown from './RunActionDropdown'
 
 interface WorkspacePaneProps {
   workspaceStore: StoreApi<WorkspaceState>
@@ -413,6 +414,14 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                   {activeWorkspace.gitBranch && (
                     <span className="workspace-branch">{activeWorkspace.gitBranch}</span>
                   )}
+                  <RunActionDropdown
+                    workspacePath={activeWorkspace.path}
+                    onRun={async (ptyId) => {
+                      if (activeWorkspaceId) {
+                        addTabWithState(activeWorkspaceId, 'terminal', { ptyId })
+                      }
+                    }}
+                  />
                   {activeWorkspace.isWorktree && activeWorkspace.parentId && (
                     <div className="abandon-dropdown-container">
                       <button

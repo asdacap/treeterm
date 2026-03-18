@@ -5,6 +5,7 @@
  * format (package.json, Makefile, etc.) and run them via a PTY.
  */
 
+import path from 'path'
 import type { RunAction } from '../shared/types'
 import type { GrpcDaemonClient } from './grpcClient'
 
@@ -36,10 +37,9 @@ function createNpmProvider(daemonClient: GrpcDaemonClient): RunActionProvider {
     },
     run: async (_actionId, workspacePath) => {
       const name = _actionId.slice('npm:'.length)
-      return daemonClient.createPtySession({
-        cwd: workspacePath,
-        startupCommand: `npm run ${name}`
-      })
+      const sessionId = await daemonClient.createPtySession({ cwd: workspacePath })
+      daemonClient.writeToPtySession(sessionId, `npm run ${name}\n`)
+      return sessionId
     }
   }
 }
@@ -54,10 +54,9 @@ function createMakeProvider(daemonClient: GrpcDaemonClient): RunActionProvider {
     },
     run: async (actionId, workspacePath) => {
       const name = actionId.slice('make:'.length)
-      return daemonClient.createPtySession({
-        cwd: workspacePath,
-        startupCommand: `make ${name}`
-      })
+      const sessionId = await daemonClient.createPtySession({ cwd: workspacePath })
+      daemonClient.writeToPtySession(sessionId, `make ${name}\n`)
+      return sessionId
     }
   }
 }
@@ -72,10 +71,9 @@ function createJustProvider(daemonClient: GrpcDaemonClient): RunActionProvider {
     },
     run: async (actionId, workspacePath) => {
       const name = actionId.slice('just:'.length)
-      return daemonClient.createPtySession({
-        cwd: workspacePath,
-        startupCommand: `just ${name}`
-      })
+      const sessionId = await daemonClient.createPtySession({ cwd: workspacePath })
+      daemonClient.writeToPtySession(sessionId, `just ${name}\n`)
+      return sessionId
     }
   }
 }
@@ -90,10 +88,9 @@ function createTaskProvider(daemonClient: GrpcDaemonClient): RunActionProvider {
     },
     run: async (actionId, workspacePath) => {
       const name = actionId.slice('task:'.length)
-      return daemonClient.createPtySession({
-        cwd: workspacePath,
-        startupCommand: `task ${name}`
-      })
+      const sessionId = await daemonClient.createPtySession({ cwd: workspacePath })
+      daemonClient.writeToPtySession(sessionId, `task ${name}\n`)
+      return sessionId
     }
   }
 }
@@ -109,10 +106,9 @@ function createVscodeLaunchProvider(daemonClient: GrpcDaemonClient): RunActionPr
     run: async (actionId, workspacePath) => {
       const name = actionId.slice('vscode-launch:'.length)
       // Can't fully replicate VS Code launch — run the resolved command as best-effort
-      return daemonClient.createPtySession({
-        cwd: workspacePath,
-        startupCommand: `echo "Launch config: ${name} (not directly runnable)"`
-      })
+      const sessionId = await daemonClient.createPtySession({ cwd: workspacePath })
+      daemonClient.writeToPtySession(sessionId, `echo "Launch config: ${name} (not directly runnable)"\n`)
+      return sessionId
     }
   }
 }
@@ -129,7 +125,7 @@ function createVscodeTaskProvider(daemonClient: GrpcDaemonClient): RunActionProv
       const name = actionId.slice('vscode-task:'.length)
       // Re-parse to get the command
       const readFileFn: ReadFile = async (p) => {
-        const result = await daemonClient.readFile(workspacePath, p)
+        const result = await daemonClient.readFile(workspacePath, path.join(workspacePath, p))
         if (result.success && result.file) return result.file.content
         return null
       }
@@ -139,10 +135,9 @@ function createVscodeTaskProvider(daemonClient: GrpcDaemonClient): RunActionProv
       const task = (parsed.tasks || []).find((t: { label?: string }) => t.label === name)
       if (!task?.command) throw new Error(`Task "${name}" has no command`)
       const cmd = task.args ? `${task.command} ${(task.args as string[]).join(' ')}` : task.command
-      return daemonClient.createPtySession({
-        cwd: workspacePath,
-        startupCommand: cmd
-      })
+      const sessionId = await daemonClient.createPtySession({ cwd: workspacePath })
+      daemonClient.writeToPtySession(sessionId, `${cmd}\n`)
+      return sessionId
     }
   }
 }
@@ -237,7 +232,8 @@ export class RunActionsClient {
   async detect(workspacePath: string): Promise<RunAction[]> {
     const readFile: ReadFile = async (filePath) => {
       try {
-        const result = await this.daemonClient.readFile(workspacePath, filePath)
+        const absolutePath = path.join(workspacePath, filePath)
+        const result = await this.daemonClient.readFile(workspacePath, absolutePath)
         if (result.success && result.file) return result.file.content
         return null
       } catch {
