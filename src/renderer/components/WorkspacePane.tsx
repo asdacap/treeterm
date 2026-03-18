@@ -334,10 +334,10 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                     </button>
                   </>
                 )}
-                {activeWorkspace.gitBranch && (
-                  <span className="workspace-branch">{activeWorkspace.gitBranch}</span>
-                )}
                 <div className="workspace-actions">
+                  {activeWorkspace.gitBranch && (
+                    <span className="workspace-branch">{activeWorkspace.gitBranch}</span>
+                  )}
                   {activeWorkspace.isGitRepo && (
                     <button
                       className="workspace-action-btn"
@@ -388,7 +388,18 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                       ✎
                     </button>
                   </>
-                ) : null}
+                ) : (
+                  <>
+                    <span className="workspace-description workspace-description-placeholder">no description</span>
+                    <button
+                      className="workspace-edit-btn workspace-add-description-btn"
+                      onClick={handleStartEditDescription}
+                      title="Add description"
+                    >
+                      ✎
+                    </button>
+                  </>
+                )}
               </div>
             </div>
             <TabBar
