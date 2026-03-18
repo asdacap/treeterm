@@ -848,6 +848,7 @@ body,
   width: 100%;
   overflow: hidden;
   position: relative;
+  padding: 8px;
 }
 
 /* Scrollbar */
