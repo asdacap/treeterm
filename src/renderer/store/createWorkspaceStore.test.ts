@@ -615,19 +615,39 @@ describe('createWorkspaceStore', () => {
   })
 
   describe('removeWorkspaceKeepWorktree', () => {
-    it('does NOT call removeWorktree at all', async () => {
+    it('does NOT call removeWorktree but deletes branch', async () => {
       const deps = makeDeps()
       const store = createWorkspaceStore({ sessionId: 's1', windowUuid: null }, deps)
       store.setState({
         workspaces: {
           'parent': makeWorkspace({ id: 'parent', children: ['wt-1'] }),
-          'wt-1': makeWorkspace({ id: 'wt-1', parentId: 'parent', isWorktree: true, gitRootPath: '/repo', path: '/repo/.wt/feat' }),
+          'wt-1': makeWorkspace({ id: 'wt-1', parentId: 'parent', isWorktree: true, gitRootPath: '/repo', path: '/repo/.wt/feat', gitBranch: 'feat' }),
         }
       })
 
       await store.getState().removeWorkspaceKeepWorktree('wt-1')
 
       expect(deps.git.removeWorktree).not.toHaveBeenCalled()
+      expect(deps.git.deleteBranch).toHaveBeenCalledWith('/repo', 'feat')
+      expect(store.getState().workspaces['wt-1']).toBeUndefined()
+    })
+  })
+
+  describe('removeWorkspaceKeepBoth', () => {
+    it('does NOT call removeWorktree or deleteBranch', async () => {
+      const deps = makeDeps()
+      const store = createWorkspaceStore({ sessionId: 's1', windowUuid: null }, deps)
+      store.setState({
+        workspaces: {
+          'parent': makeWorkspace({ id: 'parent', children: ['wt-1'] }),
+          'wt-1': makeWorkspace({ id: 'wt-1', parentId: 'parent', isWorktree: true, gitRootPath: '/repo', path: '/repo/.wt/feat', gitBranch: 'feat' }),
+        }
+      })
+
+      await store.getState().removeWorkspaceKeepBoth('wt-1')
+
+      expect(deps.git.removeWorktree).not.toHaveBeenCalled()
+      expect(deps.git.deleteBranch).not.toHaveBeenCalled()
       expect(store.getState().workspaces['wt-1']).toBeUndefined()
     })
   })
