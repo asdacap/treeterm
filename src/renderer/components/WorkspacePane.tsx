@@ -334,6 +334,9 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                     </button>
                   </>
                 )}
+                {activeWorkspace.gitBranch && (
+                  <span className="workspace-branch">{activeWorkspace.gitBranch}</span>
+                )}
                 <div className="workspace-actions">
                   {activeWorkspace.isGitRepo && (
                     <button
@@ -354,9 +357,6 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                     </button>
                   )}
                 </div>
-                {activeWorkspace.gitBranch && (
-                  <span className="workspace-branch">{activeWorkspace.gitBranch}</span>
-                )}
               </div>
               <div className="workspace-header-description-row">
                 {isEditingDescription ? (
