@@ -249,6 +249,7 @@ export interface TerminalApi {
   onExit: (id: string, callback: (exitCode: number) => void) => () => void
   onNewTerminal: (callback: () => void) => () => void
   onShowSessions: (callback: () => void) => () => void
+  onActiveProcessesOpen: (callback: () => void) => () => void
 }
 
 export interface GitApi {

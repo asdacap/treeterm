@@ -89,7 +89,8 @@ const CHANNELS = {
   terminalShowSessions: 'terminal:show-sessions',
   sessionShowSessions: 'session:show-sessions',
   sessionSync: 'session:sync',
-  daemonDisconnected: 'daemon:disconnected'
+  daemonDisconnected: 'daemon:disconnected',
+  activeProcessesOpen: 'active-processes:open'
 } as const
 
 export class IpcServer {
@@ -784,5 +785,9 @@ export class IpcServer {
 
   daemonDisconnected(): void {
     this.window?.webContents.send(CHANNELS.daemonDisconnected)
+  }
+
+  activeProcessesOpen(): void {
+    this.window?.webContents.send(CHANNELS.activeProcessesOpen)
   }
 }

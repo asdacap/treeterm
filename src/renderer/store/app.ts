@@ -37,6 +37,7 @@ interface AppState extends AppDeps {
   windowUuid: string | null
   daemonDisconnected: boolean
   isSettingsOpen: boolean
+  isActiveProcessesOpen: boolean
   showCloseConfirm: boolean
   unmergedWorkspaces: Workspace[]
   showWorkspacePicker: boolean
@@ -82,6 +83,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   windowUuid: null,
   daemonDisconnected: false,
   isSettingsOpen: false,
+  isActiveProcessesOpen: false,
   showCloseConfirm: false,
   unmergedWorkspaces: [],
   showWorkspacePicker: false,
@@ -156,6 +158,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
       }
     })
 
+    const unsubActiveProcesses = terminal.onActiveProcessesOpen(() => {
+      set({ isActiveProcessesOpen: true })
+    })
+
     const unsubShowSessions = sessionApi.onShowSessions(async () => {
       try {
         const result = await sessionApi.list()
@@ -190,6 +196,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       unsubSync()
       unsubDisconnect()
       unsubNewTerminal()
+      unsubActiveProcesses()
       unsubShowSessions()
     }
   },

@@ -102,6 +102,13 @@ client.onDaemonDisconnected(() => {
   daemonDisconnectedListeners.forEach((cb) => cb())
 })
 
+type ActiveProcessesOpenCallback = () => void
+const activeProcessesOpenListeners: ActiveProcessesOpenCallback[] = []
+
+client.onActiveProcessesOpen(() => {
+  activeProcessesOpenListeners.forEach((cb) => cb())
+})
+
 contextBridge.exposeInMainWorld('electron', {
   platform: process.platform,
   terminal: {
@@ -175,6 +182,13 @@ contextBridge.exposeInMainWorld('electron', {
       return () => {
         const index = terminalShowSessionsListeners.indexOf(callback)
         if (index > -1) terminalShowSessionsListeners.splice(index, 1)
+      }
+    },
+    onActiveProcessesOpen: (callback: ActiveProcessesOpenCallback): (() => void) => {
+      activeProcessesOpenListeners.push(callback)
+      return () => {
+        const index = activeProcessesOpenListeners.indexOf(callback)
+        if (index > -1) activeProcessesOpenListeners.splice(index, 1)
       }
     }
   },

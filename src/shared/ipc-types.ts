@@ -354,6 +354,9 @@ export interface IpcEvents {
   daemonDisconnected: {
     params: []
   }
+  activeProcessesOpen: {
+    params: []
+  }
 }
 
 // === Type Helpers ===

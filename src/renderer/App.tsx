@@ -4,6 +4,7 @@ import WorkspacePane from './components/WorkspacePane'
 import SettingsDialog from './components/SettingsDialog'
 import CloseConfirmDialog from './components/CloseConfirmDialog'
 import WorkspacePickerDialog from './components/WorkspacePickerDialog'
+import ActiveProcessesDialog from './components/ActiveProcessesDialog'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import AppErrorFallback from './components/AppErrorFallback'
 import { useAppStore } from './store/app'
@@ -36,6 +37,7 @@ export default function App() {
     selectFolder,
     getRecentDirectories,
     isSettingsOpen,
+    isActiveProcessesOpen,
     showCloseConfirm,
     unmergedWorkspaces,
     showWorkspacePicker,
@@ -139,6 +141,13 @@ export default function App() {
               unmergedWorkspaces={unmergedWorkspaces}
               onConfirm={handleConfirmClose}
               onCancel={handleCancelClose}
+            />
+          )}
+          {isActiveProcessesOpen && (
+            <ActiveProcessesDialog
+              terminalApi={terminal}
+              workspaces={activeStore?.getState().workspaces ?? {}}
+              onClose={() => useAppStore.setState({ isActiveProcessesOpen: false })}
             />
           )}
           {showWorkspacePicker && (

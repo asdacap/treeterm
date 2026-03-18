@@ -132,6 +132,13 @@ export function createApplicationMenu(
       submenu: [
         { role: 'minimize' as const },
         { role: 'zoom' as const },
+        { type: 'separator' as const },
+        {
+          label: 'Active Processes',
+          click: () => {
+            server.activeProcessesOpen()
+          }
+        },
         ...(isMac
           ? [{ type: 'separator' as const }, { role: 'front' as const }, { type: 'separator' as const }, { role: 'window' as const }]
           : [{ role: 'close' as const }])

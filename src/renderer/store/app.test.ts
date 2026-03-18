@@ -49,6 +49,7 @@ const mockDeps = {
   daemon: { onDisconnected: vi.fn().mockReturnValue(() => {}) },
   terminal: {
     onNewTerminal: vi.fn().mockReturnValue(() => {}),
+    onActiveProcessesOpen: vi.fn().mockReturnValue(() => {}),
     list: vi.fn().mockResolvedValue([]),
     kill: vi.fn(),
     bind: vi.fn().mockReturnThis()

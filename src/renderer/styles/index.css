@@ -4433,3 +4433,114 @@ body,
   background: var(--bg-hover);
   color: var(--text-primary);
 }
+
+/* Active Processes Dialog */
+.active-processes-dialog {
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  width: 90%;
+  max-width: 1000px;
+  height: 70vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.active-processes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.active-processes-header h2 {
+  font-size: 16px;
+  font-weight: 500;
+  margin: 0;
+}
+
+.active-processes-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.active-processes-list {
+  width: 260px;
+  min-width: 260px;
+  border-right: 1px solid var(--border-color);
+  overflow-y: auto;
+}
+
+.active-processes-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.active-processes-item:hover {
+  background: var(--bg-hover);
+}
+
+.active-processes-item.selected {
+  background: var(--bg-active);
+}
+
+.active-processes-item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.active-processes-item-meta {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.active-processes-detail {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.active-processes-toolbar {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  gap: 8px;
+}
+
+.active-processes-stop-btn {
+  background: var(--color-danger, #e74c3c);
+  color: #fff;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.active-processes-stop-btn:hover {
+  opacity: 0.9;
+}
+
+.active-processes-pty-viewer {
+  flex: 1;
+  min-height: 0;
+  padding: 4px;
+}
+
+.active-processes-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
