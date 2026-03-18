@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Layout, type ITabSetRenderValues, type ITabRenderValues } from '@aptre/flex-layout'
 import { Model, Actions, TabNode, TabSetNode, BorderNode, DockLocation, type Action } from '@aptre/flex-layout'
 import type { IJsonModel } from '@aptre/flex-layout'
@@ -23,6 +24,22 @@ export default function FlexLayoutPane({ workspaceId, workspaceStore, onNewTab }
   const applications = useAppStore((s) => s.applications)
   const getApplication = useCallback((id: string) => applications[id], [applications])
   const menuApplications = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
+
+  // Menu state: anchor position for the portal-rendered dropdown
+  const [menuAnchor, setMenuAnchor] = useState<{ top: number; left: number; right: number } | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  // Close menu on click outside
+  useEffect(() => {
+    if (!menuAnchor) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuAnchor(null)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [menuAnchor])
 
   const tabs = workspace?.tabs ?? []
   const activeTabId = workspace?.activeTabId ?? null
@@ -147,17 +164,19 @@ export default function FlexLayoutPane({ workspaceId, workspaceStore, onNewTab }
     }
   }, [tabs, getApplication])
 
-  // Add "+" button to each tabset header
+  // Add "+" button to each tabset header; menu renders via portal
   const handleRenderTabSet = useCallback((node: TabSetNode | BorderNode, renderValues: ITabSetRenderValues) => {
     if (node instanceof TabSetNode) {
       renderValues.stickyButtons.push(
         <button
           key="new-tab"
           className="flexlayout-new-tab-btn"
-          onClick={() => {
-            const defaultApp = menuApplications.find(app => app.canHaveMultiple)
-            if (defaultApp) {
-              onNewTab(defaultApp.id)
+          onClick={(e) => {
+            if (menuAnchor) {
+              setMenuAnchor(null)
+            } else {
+              const rect = (e.target as HTMLElement).getBoundingClientRect()
+              setMenuAnchor({ top: rect.bottom + 4, left: rect.left, right: rect.right })
             }
           }}
           title="New tab"
@@ -166,19 +185,51 @@ export default function FlexLayoutPane({ workspaceId, workspaceStore, onNewTab }
         </button>
       )
     }
-  }, [onNewTab, menuApplications])
+  }, [menuAnchor])
 
   if (!model) return null
 
   return (
-    <Layout
-      ref={layoutRef}
-      model={model}
-      factory={factory}
-      onAction={handleAction}
-      onModelChange={handleModelChange}
-      onRenderTab={handleRenderTab}
-      onRenderTabSet={handleRenderTabSet}
-    />
+    <>
+      <Layout
+        ref={layoutRef}
+        model={model}
+        factory={factory}
+        onAction={handleAction}
+        onModelChange={handleModelChange}
+        onRenderTab={handleRenderTab}
+        onRenderTabSet={handleRenderTabSet}
+      />
+      {menuAnchor && createPortal(
+        <div
+          className="app-menu"
+          ref={menuRef}
+          style={{
+            position: 'fixed',
+            top: menuAnchor.top,
+            right: 'auto', // override CSS right: 0 so width is content-based
+            // Right-align to button if there's room (140px min-width), otherwise left-align
+            ...(menuAnchor.right >= 140
+              ? { left: menuAnchor.right, transform: 'translateX(-100%)' }
+              : { left: menuAnchor.left }),
+          }}
+        >
+          {menuApplications.map((app) => (
+            <div
+              key={app.id}
+              className="app-menu-item"
+              onClick={() => {
+                onNewTab(app.id)
+                setMenuAnchor(null)
+              }}
+            >
+              <span className="app-menu-icon">{app.icon}</span>
+              <span className="app-menu-name">{app.name}</span>
+            </div>
+          ))}
+        </div>,
+        document.body
+      )}
+    </>
   )
 }

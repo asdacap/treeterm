@@ -635,6 +635,7 @@ body,
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   z-index: 1000;
   min-width: 140px;
+  color: var(--text-primary);
 }
 
 .app-menu-item {
@@ -839,7 +840,7 @@ body,
 .workspace-terminal {
   flex: 1;
   min-height: 0;
-  padding: 8px;
+  position: relative;
 }
 
 .terminal-container {
