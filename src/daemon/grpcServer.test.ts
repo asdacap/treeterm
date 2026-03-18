@@ -29,6 +29,7 @@ vi.mock('@grpc/grpc-js', () => ({
     set = vi.fn()
   },
   status: {
+    INVALID_ARGUMENT: 3,
     NOT_FOUND: 5,
     INTERNAL: 13
   }
@@ -445,7 +446,7 @@ describe('GrpcServer', () => {
     it('updateSession updates and returns session', () => {
       mockSessionStore.updateSession.mockReturnValue(mockSession)
       const call = makeUnaryCall(
-        { sessionId: 'session-1', workspaces: [], senderId: undefined },
+        { sessionId: 'session-1', workspaces: [], senderId: 'sender-1' },
         { get: vi.fn().mockReturnValue(['client-1']) }
       )
       const callback = makeCallback()
@@ -458,7 +459,7 @@ describe('GrpcServer', () => {
     it('updateSession returns NOT_FOUND when session does not exist', () => {
       mockSessionStore.updateSession.mockReturnValue(null)
       const call = makeUnaryCall(
-        { sessionId: 'nonexistent', workspaces: [], senderId: undefined },
+        { sessionId: 'nonexistent', workspaces: [], senderId: 'sender-1' },
         { get: vi.fn().mockReturnValue([]) }
       )
       const callback = makeCallback()
@@ -467,6 +468,23 @@ describe('GrpcServer', () => {
 
       expect(callback).toHaveBeenCalledWith(
         expect.objectContaining({ code: 5 })
+      )
+    })
+
+    it('updateSession rejects request without senderId', () => {
+      const call = makeUnaryCall(
+        { sessionId: 'session-1', workspaces: [], senderId: undefined },
+        { get: vi.fn().mockReturnValue(['client-1']) }
+      )
+      const callback = makeCallback()
+
+      capturedServiceImpl.updateSession(call, callback)
+
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({
+          code: 3,
+          message: 'senderId is required for session updates'
+        })
       )
     })
 

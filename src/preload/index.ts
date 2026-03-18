@@ -408,8 +408,8 @@ contextBridge.exposeInMainWorld('electron', {
     create: (workspaces: WorkspaceInput[]): Promise<{ success: boolean; session?: Session; error?: string }> => {
       return client.sessionCreate(workspaces)
     },
-    update: (sessionId: string, workspaces: WorkspaceInput[]): Promise<{ success: boolean; session?: Session; error?: string }> => {
-      return client.sessionUpdate(sessionId, workspaces)
+    update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string): Promise<{ success: boolean; session?: Session; error?: string }> => {
+      return client.sessionUpdate(sessionId, workspaces, senderUuid)
     },
     list: (): Promise<{ success: boolean; sessions?: Session[]; error?: string }> => {
       return client.sessionList()
