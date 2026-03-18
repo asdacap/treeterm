@@ -540,9 +540,9 @@ export default function BaseTerminal({
       onPushToTalkTranscript={handlePushToTalkTranscript}
       onPushToTalkSubmit={handlePushToTalkSubmit}
       showReviewComments={config.showReviewComments}
-      workspacePath={cwd}
+      workspaceStore={workspaceStore}
+      workspaceId={workspaceId}
       ptyId={ptyIdRef.current || undefined}
-      reviewId={workspace?.metadata.reviewId}
     >
       <div
         ref={containerRef}

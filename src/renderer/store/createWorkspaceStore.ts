@@ -1,13 +1,12 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, GitInfo, Tab, WorktreeSettings, GitApi, SessionApi, Settings, AppRegistryApi, Application, ReviewsApi } from '../types'
+import type { Workspace, GitInfo, Tab, WorktreeSettings, GitApi, SessionApi, Settings, AppRegistryApi, Application, ReviewComment } from '../types'
 
 export interface WorkspaceDeps {
   git: GitApi
   session: SessionApi
   getSettings: () => Settings
   appRegistry: AppRegistryApi
-  reviewsCleanup: (reviewId: string) => Promise<void>
 }
 
 export interface WorkspaceState {
@@ -37,6 +36,11 @@ export interface WorkspaceState {
   updateTabTitle: (workspaceId: string, tabId: string, title: string) => void
   updateTabState: <T>(workspaceId: string, tabId: string, updater: (state: T) => T) => void
   updateWorkspaceMetadata: (id: string, key: string, value: string) => void
+  addReviewComment: (workspaceId: string, comment: Omit<ReviewComment, 'id' | 'createdAt'>) => void
+  deleteReviewComment: (workspaceId: string, commentId: string) => void
+  toggleReviewCommentAddressed: (workspaceId: string, commentId: string) => void
+  updateOutdatedReviewComments: (workspaceId: string, currentCommitHash: string) => void
+  clearReviewComments: (workspaceId: string) => void
   syncToDaemon: () => Promise<void>
 }
 
@@ -50,6 +54,19 @@ function generateTabId(): string {
 
 function getNameFromPath(path: string): string {
   return path.split('/').pop() || path
+}
+
+export function parseReviewComments(metadata: Record<string, string>): ReviewComment[] {
+  if (!metadata.reviewComments) return []
+  try {
+    return JSON.parse(metadata.reviewComments)
+  } catch {
+    return []
+  }
+}
+
+function serializeReviewComments(comments: ReviewComment[]): string {
+  return JSON.stringify(comments)
 }
 
 function getDefaultAppForWorktree(
@@ -220,15 +237,6 @@ export function createWorkspaceStore(
       const app = deps.appRegistry.get(tab.applicationId)
       if (app?.cleanup) {
         await app.cleanup(tab, workspace)
-      }
-    }
-
-    // Clean up review comments when workspace is removed
-    if (workspace.metadata.reviewId) {
-      try {
-        await deps.reviewsCleanup(workspace.metadata.reviewId)
-      } catch (error) {
-        console.error('[workspace] failed to cleanup reviews:', error)
       }
     }
 
@@ -851,6 +859,56 @@ export function createWorkspaceStore(
       })
       const state = get()
       syncSessionToDaemon(state.workspaces, state.isRestoring).catch(console.error)
+    },
+
+    addReviewComment: (workspaceId: string, comment: Omit<ReviewComment, 'id' | 'createdAt'>) => {
+      const workspace = get().workspaces[workspaceId]
+      if (!workspace) return
+      const comments = parseReviewComments(workspace.metadata)
+      const newComment: ReviewComment = {
+        ...comment,
+        id: crypto.randomUUID(),
+        createdAt: Date.now(),
+      }
+      comments.push(newComment)
+      get().updateWorkspaceMetadata(workspaceId, 'reviewComments', serializeReviewComments(comments))
+    },
+
+    deleteReviewComment: (workspaceId: string, commentId: string) => {
+      const workspace = get().workspaces[workspaceId]
+      if (!workspace) return
+      const comments = parseReviewComments(workspace.metadata)
+      const filtered = comments.filter(c => c.id !== commentId)
+      get().updateWorkspaceMetadata(workspaceId, 'reviewComments', serializeReviewComments(filtered))
+    },
+
+    toggleReviewCommentAddressed: (workspaceId: string, commentId: string) => {
+      const workspace = get().workspaces[workspaceId]
+      if (!workspace) return
+      const comments = parseReviewComments(workspace.metadata)
+      const updated = comments.map(c =>
+        c.id === commentId ? { ...c, addressed: !c.addressed } : c
+      )
+      get().updateWorkspaceMetadata(workspaceId, 'reviewComments', serializeReviewComments(updated))
+    },
+
+    updateOutdatedReviewComments: (workspaceId: string, currentCommitHash: string) => {
+      const workspace = get().workspaces[workspaceId]
+      if (!workspace) return
+      const comments = parseReviewComments(workspace.metadata)
+      if (comments.length === 0) return
+      const updated = comments.map(comment => {
+        const shouldBeOutdated = comment.commitHash !== currentCommitHash
+        if (comment.isOutdated !== shouldBeOutdated) {
+          return { ...comment, isOutdated: shouldBeOutdated }
+        }
+        return comment
+      })
+      get().updateWorkspaceMetadata(workspaceId, 'reviewComments', serializeReviewComments(updated))
+    },
+
+    clearReviewComments: (workspaceId: string) => {
+      get().updateWorkspaceMetadata(workspaceId, 'reviewComments', serializeReviewComments([]))
     },
 
     syncToDaemon: async () => {

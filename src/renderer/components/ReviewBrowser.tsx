@@ -5,9 +5,9 @@ import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useGitApi } from '../contexts/GitApiContext'
 import { useTerminalApi } from '../contexts/TerminalApiContext'
-import { useReviewsApi } from '../contexts/ReviewsApiContext'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
-import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, ReviewsData, ReviewComment } from '../types'
+import { parseReviewComments } from '../store/createWorkspaceStore'
+import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, ReviewComment } from '../types'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
 import { CommentInput } from './CommentInput'
 import { CommentDisplay } from './CommentDisplay'
@@ -33,8 +33,7 @@ export default function ReviewBrowser({
 }: ReviewBrowserProps) {
   const git = useGitApi()
   const terminalApi = useTerminalApi()
-  const reviewsApi = useReviewsApi()
-  const { workspaces, mergeAndRemoveWorkspace, removeWorkspace, removeWorkspaceKeepBranch, removeWorkspaceKeepWorktree, removeWorkspaceKeepBoth, closeAndCleanWorkspace, removeTab, setActiveTab, updateWorkspaceMetadata } = useStore(workspaceStore)
+  const { workspaces, mergeAndRemoveWorkspace, removeWorkspace, removeWorkspaceKeepBranch, removeWorkspaceKeepWorktree, removeWorkspaceKeepBoth, closeAndCleanWorkspace, removeTab, setActiveTab, addReviewComment, deleteReviewComment, updateOutdatedReviewComments } = useStore(workspaceStore)
   const workspace = workspaces[workspaceId]
   const parentWorkspace = parentWorkspaceId ? workspaces[parentWorkspaceId] : undefined
   
@@ -70,8 +69,8 @@ export default function ReviewBrowser({
   const [isProcessing, setIsProcessing] = useState(false)
   const [processingAction, setProcessingAction] = useState<'merge' | 'squash' | 'abandon' | null>(null)
 
-  // Reviews state
-  const [reviews, setReviews] = useState<ReviewsData | null>(null)
+  // Reviews state — comments are read from workspace metadata (reactive)
+  const reviews = workspace ? parseReviewComments(workspace.metadata) : []
   const [commentInput, setCommentInput] = useState<{
     visible: boolean
     lineNumber: number
@@ -127,11 +126,11 @@ export default function ReviewBrowser({
 
   useEffect(() => {
     if (!workspace) return
-    
+
     // Always load uncommitted changes
     loadUncommittedChanges()
     loadReviews()
-    
+
     if (parentWorkspace) {
       // For child worktrees: load diff and check conflicts for merge
       loadDiff()
@@ -140,7 +139,7 @@ export default function ReviewBrowser({
       // For top-level worktrees: no diff to show, just clear loading state
       setLoading(false)
     }
-  }, [workspace, parentWorkspace])
+  }, [workspaceId, parentWorkspaceId])
 
   // Close abandon dropdown when clicking outside
   useEffect(() => {
@@ -162,19 +161,10 @@ export default function ReviewBrowser({
 
   const loadReviews = async () => {
     try {
-      // Get current commit hash
       const hashResult = await git.getHeadCommitHash(workspacePath)
       if (hashResult.success && hashResult.hash) {
         setCurrentCommitHash(hashResult.hash)
-
-        // Load reviews and mark outdated
-        const result = await reviewsApi.updateOutdated(workspacePath, hashResult.hash, workspace?.metadata.reviewId)
-        if (result.success && result.reviews) {
-          setReviews(result.reviews)
-        }
-        if (result.reviewId && result.reviewId !== workspace?.metadata.reviewId) {
-          updateWorkspaceMetadata(workspaceId, 'reviewId', result.reviewId)
-        }
+        updateOutdatedReviewComments(workspaceId, hashResult.hash)
       }
     } catch (error) {
       console.error('Failed to load reviews:', error)
@@ -541,16 +531,7 @@ export default function ReviewBrowser({
         side: commentInput.side
       }
 
-      const result = await reviewsApi.addComment(workspacePath, comment, workspace?.metadata.reviewId)
-      if (result.success && result.comment) {
-        setReviews(prev => prev ? {
-          ...prev,
-          comments: [...prev.comments, result.comment!]
-        } : { version: 1, comments: [result.comment!] })
-      }
-      if (result.reviewId && result.reviewId !== workspace?.metadata.reviewId) {
-        updateWorkspaceMetadata(workspaceId, 'reviewId', result.reviewId)
-      }
+      addReviewComment(workspaceId, comment)
       setCommentInput(null)
     } catch (error) {
       console.error('Failed to add comment:', error)
@@ -558,26 +539,14 @@ export default function ReviewBrowser({
     }
   }
 
-  const handleCommentDelete = async (commentId: string) => {
-    if (!workspace?.metadata.reviewId) return
-    try {
-      const result = await reviewsApi.deleteComment(workspace.metadata.reviewId, commentId)
-      if (result.success) {
-        setReviews(prev => prev ? {
-          ...prev,
-          comments: prev.comments.filter(c => c.id !== commentId)
-        } : null)
-      }
-    } catch (error) {
-      console.error('Failed to delete comment:', error)
-      alert(`Failed to delete comment: ${error instanceof Error ? error.message : 'Unknown error'}`)
-    }
+  const handleCommentDelete = (commentId: string) => {
+    deleteReviewComment(workspaceId, commentId)
   }
 
   // Filter comments for current file
   const currentFilePath = selectedFile || selectedUncommittedFile?.path
-  const fileComments = currentFilePath && reviews
-    ? reviews.comments.filter(c => c.filePath === currentFilePath)
+  const fileComments = currentFilePath
+    ? reviews.filter(c => c.filePath === currentFilePath)
     : []
 
   return (

@@ -8,7 +8,7 @@ import { applicationRegistry } from '../registry/applicationRegistry'
 import type {
   Workspace, Session,
   Platform, TerminalApi, GitApi, SessionApi, AppApi, DaemonApi,
-  FilesystemApi, ReviewsApi, STTApi, SandboxApi, SettingsApi
+  FilesystemApi, STTApi, SandboxApi, SettingsApi
 } from '../types'
 
 type AddTabWithStateFn = <T>(workspaceId: string, applicationId: string, initialState: Partial<T>, existingTabId?: string) => string
@@ -23,7 +23,6 @@ export interface AppDeps {
   appApi: AppApi
   daemon: DaemonApi
   filesystem: FilesystemApi
-  reviews: ReviewsApi
   stt: STTApi
   sandbox: SandboxApi
   selectFolder: () => Promise<string | null>
@@ -72,7 +71,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
   appApi: UNINITIALIZED,
   daemon: UNINITIALIZED,
   filesystem: UNINITIALIZED,
-  reviews: UNINITIALIZED,
   stt: UNINITIALIZED,
   sandbox: UNINITIALIZED,
   selectFolder: UNINITIALIZED,
@@ -272,7 +270,7 @@ function getOrCreateSessionStore(
   get: () => AppState,
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void
 ): StoreApi<WorkspaceState> {
-  const { workspaceStores, windowUuid, git, sessionApi, reviews } = get()
+  const { workspaceStores, windowUuid, git, sessionApi } = get()
   let store = workspaceStores[sessionId]
   if (!store) {
     store = createWorkspaceStore(
@@ -282,9 +280,6 @@ function getOrCreateSessionStore(
         session: sessionApi,
         getSettings: () => useSettingsStore.getState().settings,
         appRegistry: applicationRegistry,
-        reviewsCleanup: async (reviewId: string) => {
-          await reviews.cleanup(reviewId)
-        },
       }
     )
     set((state) => ({

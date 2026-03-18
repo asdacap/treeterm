@@ -4428,6 +4428,64 @@ body,
   color: var(--text-primary);
 }
 
+.comments-prompt-preview {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+
+.comments-prompt-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  user-select: none;
+  border-bottom: 1px solid transparent;
+  transition: color 0.1s;
+}
+
+.comments-prompt-header:hover {
+  color: var(--text-primary);
+}
+
+.comments-prompt-preview:has(.comments-prompt-content) .comments-prompt-header {
+  border-bottom-color: var(--border);
+}
+
+.comments-copy-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.comments-copy-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.comments-prompt-content {
+  margin: 0;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow: auto;
+}
+
 /* Active Processes Dialog */
 .active-processes-dialog {
   background: var(--bg-secondary);

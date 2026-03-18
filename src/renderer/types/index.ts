@@ -288,17 +288,6 @@ export interface SettingsApi {
   onOpen: (callback: () => void) => () => void
 }
 
-export interface ReviewsApi {
-  load: (worktreePath: string, reviewId?: string) => Promise<{ success: boolean; reviews?: ReviewsData; reviewId?: string; error?: string }>
-  save: (reviewId: string, reviews: ReviewsData) => Promise<{ success: boolean; error?: string }>
-  addComment: (worktreePath: string, comment: Omit<ReviewComment, 'id' | 'createdAt'>, reviewId?: string) => Promise<{ success: boolean; comment?: ReviewComment; reviewId?: string; error?: string }>
-  deleteComment: (reviewId: string, commentId: string) => Promise<{ success: boolean; error?: string }>
-  updateOutdated: (worktreePath: string, currentCommitHash: string, reviewId?: string) => Promise<{ success: boolean; reviews?: ReviewsData; reviewId?: string; error?: string }>
-  getFilePath: (worktreePath: string, reviewId?: string) => Promise<{ success: boolean; filePath?: string; reviewId?: string; error?: string }>
-  toggleAddressed: (reviewId: string, commentId: string) => Promise<{ success: boolean; error?: string }>
-  cleanup: (reviewId: string) => Promise<{ success: boolean; error?: string }>
-}
-
 export interface AppRegistryApi {
   get: (id: string) => Application | undefined | null
   getDefaultApp: (appId?: string) => Application | null
@@ -355,7 +344,6 @@ declare global {
       filesystem: FilesystemApi
       sandbox: SandboxApi
       stt: STTApi
-      reviews: ReviewsApi
       getInitialWorkspace: () => Promise<string | null>
       app: AppApi
       daemon: DaemonApi

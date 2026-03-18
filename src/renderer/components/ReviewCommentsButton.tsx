@@ -1,49 +1,29 @@
-import { useState, useEffect } from 'react'
-import type { ReviewsData } from '../types'
-import { useReviewsApi } from '../contexts/ReviewsApiContext'
+import { useStore } from 'zustand'
+import type { StoreApi } from 'zustand'
+import type { WorkspaceState } from '../store/createWorkspaceStore'
+import { parseReviewComments } from '../store/createWorkspaceStore'
 import { useTerminalApi } from '../contexts/TerminalApiContext'
+import { generateReviewPrompt } from '../utils/reviewPrompt'
 
 interface ReviewCommentsButtonProps {
-  workspacePath: string
+  workspaceStore: StoreApi<WorkspaceState>
+  workspaceId: string
   ptyId: string | undefined
-  reviewId: string | undefined
 }
 
-export function ReviewCommentsButton({ workspacePath, ptyId, reviewId }: ReviewCommentsButtonProps): JSX.Element | null {
-  const reviews = useReviewsApi()
+export function ReviewCommentsButton({ workspaceStore, workspaceId, ptyId }: ReviewCommentsButtonProps): JSX.Element | null {
   const terminal = useTerminalApi()
-  const [hasComments, setHasComments] = useState(false)
+  const workspace = useStore(workspaceStore, (state) => state.workspaces[workspaceId])
+  const comments = workspace ? parseReviewComments(workspace.metadata) : []
 
-  useEffect(() => {
-    checkForComments()
-  }, [workspacePath, reviewId])
+  if (comments.length === 0) return null
 
-  const checkForComments = async () => {
-    try {
-      const result = await reviews.load(workspacePath, reviewId)
-      if (result.success && result.reviews) {
-        const reviews = result.reviews as ReviewsData
-        setHasComments(reviews.comments.length > 0)
-      } else {
-        setHasComments(false)
-      }
-    } catch (error) {
-      console.warn('[ReviewCommentsButton] failed to check for comments:', error)
-      setHasComments(false)
-    }
-  }
-
-  const handleClick = async () => {
+  const handleClick = () => {
     if (!ptyId) return
-
-    const result = await reviews.getFilePath(workspacePath, reviewId)
-    const filePath = result.success && result.filePath ? result.filePath : '.treeterm/reviews.json'
-    const command = `read ${filePath} and address the comments\r`
-    terminal.write(ptyId, command)
-  }
-
-  if (!hasComments) {
-    return null
+    const prompt = generateReviewPrompt(comments)
+    if (prompt) {
+      terminal.write(ptyId, prompt + '\r')
+    }
   }
 
   return (

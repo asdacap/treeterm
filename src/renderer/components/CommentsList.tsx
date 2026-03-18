@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
-import { useGitApi } from '../contexts/GitApiContext'
-import { useReviewsApi } from '../contexts/ReviewsApiContext'
+import { parseReviewComments } from '../store/createWorkspaceStore'
 import { useFilesystemApi } from '../contexts/FilesystemApiContext'
+import { generateReviewPrompt } from '../utils/reviewPrompt'
 import type { ReviewComment, FilesystemState } from '../types'
 
 interface CommentsListProps {
@@ -37,51 +37,12 @@ export default function CommentsList({
   workspaceId,
   workspaceStore
 }: CommentsListProps): JSX.Element {
-  const git = useGitApi()
-  const reviewsApi = useReviewsApi()
   const filesystem = useFilesystemApi()
-  const { workspaces, addTabWithState, updateWorkspaceMetadata } = useStore(workspaceStore)
+  const { workspaces, addTabWithState, deleteReviewComment, toggleReviewCommentAddressed } = useStore(workspaceStore)
   const workspace = workspaces[workspaceId]
-  const [comments, setComments] = useState<ReviewComment[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const comments: ReviewComment[] = workspace ? parseReviewComments(workspace.metadata) : []
   const [fileContents, setFileContents] = useState<Map<string, string>>(new Map())
-
-  const loadComments = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const hashResult = await git.getHeadCommitHash(workspacePath)
-      if (hashResult.success && hashResult.hash) {
-        const result = await reviewsApi.updateOutdated(workspacePath, hashResult.hash, workspace?.metadata.reviewId)
-        if (result.success && result.reviews) {
-          setComments(result.reviews.comments)
-        } else {
-          setError(result.error || 'Failed to load reviews')
-        }
-        if (result.reviewId && result.reviewId !== workspace?.metadata.reviewId) {
-          updateWorkspaceMetadata(workspaceId, 'reviewId', result.reviewId)
-        }
-      } else {
-        const result = await reviewsApi.load(workspacePath, workspace?.metadata.reviewId)
-        if (result.success && result.reviews) {
-          setComments(result.reviews.comments)
-        } else {
-          setError(result.error || 'Failed to load reviews')
-        }
-        if (result.reviewId && result.reviewId !== workspace?.metadata.reviewId) {
-          updateWorkspaceMetadata(workspaceId, 'reviewId', result.reviewId)
-        }
-      }
-    } catch (err) {
-      setError(`Failed to load comments: ${err instanceof Error ? err.message : 'Unknown error'}`)
-    }
-    setLoading(false)
-  }, [workspacePath, workspace?.metadata.reviewId, git, reviewsApi])
-
-  useEffect(() => {
-    loadComments()
-  }, [loadComments])
+  const [promptExpanded, setPromptExpanded] = useState(false)
 
   // Batch-fetch file contents for code context
   useEffect(() => {
@@ -111,22 +72,12 @@ export default function CommentsList({
     fetchFiles()
   }, [comments, workspacePath, filesystem])
 
-  const handleToggleAddressed = async (commentId: string) => {
-    if (!workspace?.metadata.reviewId) return
-    const result = await reviewsApi.toggleAddressed(workspace.metadata.reviewId, commentId)
-    if (result.success) {
-      setComments(prev => prev.map(c =>
-        c.id === commentId ? { ...c, addressed: !c.addressed } : c
-      ))
-    }
+  const handleToggleAddressed = (commentId: string) => {
+    toggleReviewCommentAddressed(workspaceId, commentId)
   }
 
-  const handleDelete = async (commentId: string) => {
-    if (!workspace?.metadata.reviewId) return
-    const result = await reviewsApi.deleteComment(workspace.metadata.reviewId, commentId)
-    if (result.success) {
-      setComments(prev => prev.filter(c => c.id !== commentId))
-    }
+  const handleDelete = (commentId: string) => {
+    deleteReviewComment(workspaceId, commentId)
   }
 
   const handleGoToFile = (comment: ReviewComment) => {
@@ -136,17 +87,18 @@ export default function CommentsList({
     })
   }
 
-  if (loading) {
-    return <div className="comments-list"><div className="comments-loading">Loading comments...</div></div>
-  }
-
-  if (error) {
-    return <div className="comments-list"><div className="comments-error">{error}</div></div>
+  const handleCopyPrompt = async () => {
+    const prompt = generateReviewPrompt(comments)
+    if (prompt) {
+      await navigator.clipboard.writeText(prompt)
+    }
   }
 
   if (comments.length === 0) {
     return <div className="comments-list"><div className="comments-empty">No review comments yet</div></div>
   }
+
+  const prompt = generateReviewPrompt(comments)
 
   return (
     <div className="comments-list">
@@ -223,6 +175,30 @@ export default function CommentsList({
           )
         })}
       </div>
+
+      {prompt && (
+        <div className="comments-prompt-preview">
+          <div
+            className="comments-prompt-header"
+            onClick={() => setPromptExpanded(!promptExpanded)}
+          >
+            <span>{promptExpanded ? '▼' : '▶'} Generated Prompt</span>
+            <button
+              className="comments-copy-btn"
+              onClick={(e) => {
+                e.stopPropagation()
+                handleCopyPrompt()
+              }}
+              title="Copy to clipboard"
+            >
+              Copy to Clipboard
+            </button>
+          </div>
+          {promptExpanded && (
+            <pre className="comments-prompt-content">{prompt}</pre>
+          )}
+        </div>
+      )}
     </div>
   )
 }

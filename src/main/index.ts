@@ -5,7 +5,6 @@ import { randomUUID } from 'crypto'
 import { GrpcDaemonClient } from './grpcClient'
 import { IpcServer } from './ipc/ipc-server'
 import { GitClient } from './git'
-import { ReviewsClient } from './reviews'
 import { windowManager } from './windowManager'
 import type { SandboxConfig } from '../shared/types'
 
@@ -26,7 +25,6 @@ let loadingWindow: BrowserWindow | null = null
 const closeConfirmedWindows: Set<number> = new Set()
 let daemonClient: GrpcDaemonClient | null = null
 let gitClient: GitClient | null = null
-let reviewsClient: ReviewsClient | null = null
 let useDaemon = true // Always use daemon mode
 let attachedSessions: Set<string> = new Set()
 
@@ -544,13 +542,6 @@ function initializeGitClient(): void {
   }
 }
 
-// Initialize reviews client when daemon is ready
-function initializeReviewsClient(): void {
-  if (daemonClient && !reviewsClient) {
-    reviewsClient = new ReviewsClient(daemonClient)
-  }
-}
-
 // Git IPC Handlers - Now handled in main process via ExecStream
 server.onGitGetInfo(async (dirPath) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
@@ -805,71 +796,6 @@ server.onGitGetHeadCommitHash(async (repoPath) => {
   if (!gitClient) throw new Error('Git client not initialized')
   const hash = await gitClient.getHeadCommitHash(repoPath)
   return { success: true, hash }
-})
-
-// Reviews IPC Handlers - Now handled in main process via daemon filesystem gRPC
-server.onReviewsLoad(async (worktreePath, reviewId) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeReviewsClient()
-  if (!reviewsClient) throw new Error('Reviews client not initialized')
-  const result = await reviewsClient.loadReviews(reviewId, worktreePath)
-  return { success: true, reviews: result.reviews, reviewId: result.reviewId }
-})
-
-server.onReviewsSave(async (reviewId, reviews) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeReviewsClient()
-  if (!reviewsClient) throw new Error('Reviews client not initialized')
-  await reviewsClient.saveReviews(reviewId, reviews)
-  return { success: true }
-})
-
-server.onReviewsAddComment(async (worktreePath, comment, reviewId) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeReviewsClient()
-  if (!reviewsClient) throw new Error('Reviews client not initialized')
-  const result = await reviewsClient.addComment(reviewId, worktreePath, comment)
-  return { success: true, comment: result.comment, reviewId: result.reviewId }
-})
-
-server.onReviewsDeleteComment(async (reviewId, commentId) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeReviewsClient()
-  if (!reviewsClient) throw new Error('Reviews client not initialized')
-  const success = await reviewsClient.deleteComment(reviewId, commentId)
-  return { success }
-})
-
-server.onReviewsUpdateOutdated(async (worktreePath, currentCommitHash, reviewId) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeReviewsClient()
-  if (!reviewsClient) throw new Error('Reviews client not initialized')
-  const result = await reviewsClient.updateOutdatedComments(reviewId, worktreePath, currentCommitHash)
-  return { success: true, reviews: result.reviews, reviewId: result.reviewId }
-})
-
-server.onReviewsToggleAddressed(async (reviewId, commentId) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeReviewsClient()
-  if (!reviewsClient) throw new Error('Reviews client not initialized')
-  const success = await reviewsClient.toggleAddressed(reviewId, commentId)
-  return { success }
-})
-
-server.onReviewsGetFilePath(async (worktreePath, reviewId) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeReviewsClient()
-  if (!reviewsClient) throw new Error('Reviews client not initialized')
-  const result = await reviewsClient.resolveReviewFilePath(reviewId, worktreePath)
-  return { success: true, filePath: result.filePath, reviewId: result.reviewId }
-})
-
-server.onReviewsCleanup(async (reviewId) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeReviewsClient()
-  if (!reviewsClient) throw new Error('Reviews client not initialized')
-  await reviewsClient.cleanupReviews(reviewId)
-  return { success: true }
 })
 
 // Settings IPC Handlers

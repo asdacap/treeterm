@@ -11,7 +11,6 @@ import { useAppStore } from './store/app'
 import { TerminalApiContext } from './contexts/TerminalApiContext'
 import { FilesystemApiContext } from './contexts/FilesystemApiContext'
 import { GitApiContext } from './contexts/GitApiContext'
-import { ReviewsApiContext } from './contexts/ReviewsApiContext'
 import { STTApiContext } from './contexts/STTApiContext'
 
 // One-time migration: clear localStorage since daemon is now source of truth
@@ -29,7 +28,6 @@ export default function App() {
     terminal,
     filesystem,
     git,
-    reviews,
     stt,
     sandbox,
     appApi,
@@ -99,7 +97,6 @@ export default function App() {
       <TerminalApiContext.Provider value={terminal}>
       <FilesystemApiContext.Provider value={filesystem}>
       <GitApiContext.Provider value={git}>
-      <ReviewsApiContext.Provider value={reviews}>
       <STTApiContext.Provider value={stt}>
         <div
           className="app"
@@ -161,7 +158,6 @@ export default function App() {
           )}
         </div>
       </STTApiContext.Provider>
-      </ReviewsApiContext.Provider>
       </GitApiContext.Provider>
       </FilesystemApiContext.Provider>
       </TerminalApiContext.Provider>
