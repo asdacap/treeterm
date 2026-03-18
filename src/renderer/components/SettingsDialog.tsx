@@ -491,7 +491,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                             />
                             Disable Scrollbar
                           </label>
-                          <label className="checkbox-label">
+                          <label className="settings-checkbox-label">
                             <input
                               type="checkbox"
                               checked={inst.stripScrollbackClear ?? false}
