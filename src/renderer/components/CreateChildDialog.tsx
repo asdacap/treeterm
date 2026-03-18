@@ -382,17 +382,6 @@ export default function CreateChildDialog({
                   <div className="create-child-field-error">{nameValidationError}</div>
                 )}
               </div>
-              <div className="create-child-detached-checkbox">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={isDetached}
-                    onChange={(e) => setIsDetached(e.target.checked)}
-                    disabled={isProcessing}
-                  />
-                  <span>Detached worktree (no merge, only close and clean)</span>
-                </label>
-              </div>
             </>
           ) : mode === 'existing' ? (
             /* Open Existing Tab */
@@ -449,17 +438,6 @@ export default function CreateChildDialog({
                   ))
                 )}
               </div>
-              <div className="create-child-detached-checkbox">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={isDetached}
-                    onChange={(e) => setIsDetached(e.target.checked)}
-                    disabled={isProcessing}
-                  />
-                  <span>Detached worktree (no merge, only close and clean)</span>
-                </label>
-              </div>
             </>
           ) : (
             /* Open Remote Tab */
@@ -494,17 +472,6 @@ export default function CreateChildDialog({
                   ))
                 )}
               </div>
-              <div className="create-child-detached-checkbox">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={isDetached}
-                    onChange={(e) => setIsDetached(e.target.checked)}
-                    disabled={isProcessing}
-                  />
-                  <span>Detached worktree (no merge, only close and clean)</span>
-                </label>
-              </div>
             </>
           )}
 
@@ -521,6 +488,21 @@ export default function CreateChildDialog({
               className="create-child-description"
             />
           </div>
+
+          {/* Detached checkbox - shown for create, branch, and remote tabs */}
+          {mode !== 'existing' && (
+            <div className="create-child-detached-checkbox">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={isDetached}
+                  onChange={(e) => setIsDetached(e.target.checked)}
+                  disabled={isProcessing}
+                />
+                <span>Detached worktree (no merge, only close and clean)</span>
+              </label>
+            </div>
+          )}
 
           {/* Settings Section */}
           <div className="create-child-settings-section">
