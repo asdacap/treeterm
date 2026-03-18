@@ -400,6 +400,11 @@ body,
 .workspace-title {
   font-size: 13px;
   font-weight: 500;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workspace-edit-btn {
@@ -3763,6 +3768,47 @@ body,
 
 .review-abandon-keep-branch-btn:hover:not(:disabled) {
   background: #8b949e;
+}
+
+/* Prompt Description Button */
+.prompt-description-button {
+  position: absolute;
+  bottom: 96px;
+  right: 16px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.prompt-description-button button {
+  background: #2472c8;
+  border: 1px solid #1a5a9e;
+  color: #ffffff;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  transition: background 0.1s, border-color 0.1s, opacity 0.2s;
+  opacity: 0.9;
+  white-space: nowrap;
+}
+
+.prompt-description-button button:hover {
+  background: #3b8eea;
+  border-color: #2472c8;
+  opacity: 1;
+}
+
+.prompt-description-button button:last-child {
+  background: #6e7681;
+  border-color: #565c64;
+}
+
+.prompt-description-button button:last-child:hover {
+  background: #8b949e;
+  border-color: #6e7681;
 }
 
 /* Error Boundary Fallbacks */

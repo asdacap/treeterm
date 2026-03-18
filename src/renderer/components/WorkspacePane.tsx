@@ -388,18 +388,7 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                       ✎
                     </button>
                   </>
-                ) : (
-                  <>
-                    <span className="workspace-description workspace-description-placeholder">no description</span>
-                    <button
-                      className="workspace-edit-btn workspace-add-description-btn"
-                      onClick={handleStartEditDescription}
-                      title="Add description"
-                    >
-                      ✎
-                    </button>
-                  </>
-                )}
+                ) : null}
               </div>
             </div>
             <TabBar
