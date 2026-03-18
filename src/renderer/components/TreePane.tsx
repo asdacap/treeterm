@@ -6,6 +6,8 @@ import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useActivityStateStore } from '../store/activityState'
 import { usePrefixModeStore } from '../store/prefixMode'
 import { useAppStore } from '../store/app'
+import { useGitApi } from '../contexts/GitApiContext'
+import { humanId } from 'human-id'
 import CreateChildDialog from './CreateChildDialog'
 import OpenWorkspaceDialog from './OpenWorkspaceDialog'
 import type { Workspace, ActivityState, ReviewState, WorktreeSettings } from '../types'
@@ -58,6 +60,7 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
     setActiveWorkspace
   } = useStore(workspaceStore)
 
+  const git = useGitApi()
   const { activeSessionId, workspaceStores, switchSession } = useAppStore()
   const sessionIds = Object.keys(workspaceStores)
   const {
@@ -119,6 +122,31 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
   const handleCreateChild = (parentId: string) => {
     closeContextMenu()
     setCreateChildDialogParentId(parentId)
+  }
+
+  const handleQuickFork = async (wsId: string) => {
+    const ws = workspaces[wsId]
+    if (!ws?.gitRootPath) return
+
+    const existingBranches = await git.listLocalBranches(ws.gitRootPath)
+    const parentBranch = ws.gitBranch || ''
+
+    let name: string | null = null
+    for (let i = 0; i < 3; i++) {
+      const candidate = humanId({ separator: '-', capitalize: false })
+      const fullBranch = parentBranch ? `${parentBranch}/${candidate}` : candidate
+      if (!existingBranches.includes(fullBranch)) {
+        name = candidate
+        break
+      }
+    }
+
+    if (!name) throw new Error('Failed to generate unique branch name')
+
+    const result = await addChildWorkspace(wsId, name, false)
+    if (result.success) {
+      setExpanded((prev) => new Set([...Array.from(prev), wsId]))
+    }
   }
 
   const handleCreateChildSubmit = async (name: string, isDetached: boolean, settings?: WorktreeSettings) => {
@@ -259,8 +287,8 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
             {ws.isGitRepo && (
               <button
                 className="tree-item-action"
-                title="New Child Workspace"
-                onClick={(e) => { e.stopPropagation(); handleCreateChild(ws.id) }}
+                title="Fork"
+                onClick={(e) => { e.stopPropagation(); handleQuickFork(ws.id) }}
               >
                 <GitFork size={14} />
               </button>
@@ -312,7 +340,7 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
         >
           {workspaces[contextMenu.workspaceId]?.isGitRepo && (
             <div className="context-menu-item" onClick={() => handleCreateChild(contextMenu.workspaceId)}>
-              New Child Workspace
+              Open Existing Branch
             </div>
           )}
           {!workspaces[contextMenu.workspaceId]?.isWorktree && (
@@ -333,6 +361,7 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
           onCreateFromRemote={handleCreateFromRemoteSubmit}
           onCancel={() => setCreateChildDialogParentId(null)}
           openWorktreePaths={openWorktreePaths}
+          initialMode="branch"
         />
       )}
 

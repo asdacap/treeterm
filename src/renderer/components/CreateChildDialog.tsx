@@ -11,6 +11,7 @@ interface CreateChildDialogProps {
   onCreateFromRemote: (remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
   onCancel: () => void
   openWorktreePaths: string[]
+  initialMode?: TabMode
 }
 
 type TabMode = 'create' | 'existing' | 'branch' | 'remote'
@@ -22,10 +23,11 @@ export default function CreateChildDialog({
   onCreateFromBranch,
   onCreateFromRemote,
   onCancel,
-  openWorktreePaths
+  openWorktreePaths,
+  initialMode
 }: CreateChildDialogProps) {
   const git = useGitApi()
-  const [mode, setMode] = useState<TabMode>('create')
+  const [mode, setMode] = useState<TabMode>(initialMode ?? 'create')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [isProcessing, setIsProcessing] = useState(false)
