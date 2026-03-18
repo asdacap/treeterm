@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { Settings } from '../types'
 import { useSettingsStore } from '../store/settings'
-import { applicationRegistry } from '../registry/applicationRegistry'
+import { useAppStore } from '../store/app'
 import type { SandboxApi, Platform } from '../types'
 
 interface SettingsDialogProps {
@@ -33,6 +33,7 @@ type RecordingState =
 
 export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: SettingsDialogProps) {
   const { settings: savedSettings, saveSettings } = useSettingsStore()
+  const allApplications = useAppStore((s) => s.getAllApplications())
   const [localSettings, setLocalSettings] = useState<Settings>(savedSettings)
   const [activeTab, setActiveTab] = useState<TabId>('terminal')
   const [recording, setRecording] = useState<RecordingState>(null)
@@ -160,7 +161,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                       }))
                     }
                   >
-                    {applicationRegistry.getAll().map((app) => (
+                    {allApplications.map((app) => (
                       <option key={app.id} value={app.id}>
                         {app.name}
                       </option>

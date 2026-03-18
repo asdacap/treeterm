@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import type { Workspace, ChildWorktreeInfo, BranchInfo, WorktreeSettings } from '../types'
-import { applicationRegistry } from '../registry/applicationRegistry'
+import { useAppStore } from '../store/app'
 import { useGitApi } from '../contexts/GitApiContext'
 
 interface CreateChildDialogProps {
@@ -57,19 +57,20 @@ export default function CreateChildDialog({
   const [useCustomSettings, setUseCustomSettings] = useState(false)
   const [selectedAppId, setSelectedAppId] = useState<string>('')
 
+  const getApplication = useAppStore((s) => s.getApplication)
+  const menuApplications = useAppStore((s) => s.getMenuApplications())
+
   // Get inherited app name
   const inheritedApp = useMemo(() => {
     if (parentWorkspace.settings?.defaultApplicationId) {
-      const app = applicationRegistry.get(parentWorkspace.settings.defaultApplicationId)
+      const app = getApplication(parentWorkspace.settings.defaultApplicationId)
       if (app) return app
     }
     return null
-  }, [parentWorkspace.settings])
+  }, [parentWorkspace.settings, getApplication])
 
   // Get available apps
-  const availableApps = useMemo(() => {
-    return applicationRegistry.getAll().filter(app => app.showInNewTabMenu)
-  }, [])
+  const availableApps = menuApplications
 
   // Load existing worktrees when "existing" tab is selected
   useEffect(() => {

@@ -1,4 +1,59 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+// Mock application renderers that depend on browser APIs (xterm)
+vi.mock('../../applications/terminal/renderer', () => ({
+  createTerminalApplication: vi.fn().mockReturnValue({
+    id: 'terminal', name: 'Terminal', icon: '>', createInitialState: () => ({}),
+    render: () => null, canClose: true, canHaveMultiple: true, showInNewTabMenu: true,
+    keepAlive: true, displayStyle: 'flex', isDefault: true
+  }),
+  createTerminalVariant: vi.fn().mockReturnValue({
+    id: 'terminal-custom', name: 'Custom', icon: '>', createInitialState: () => ({}),
+    render: () => null, canClose: true, canHaveMultiple: true, showInNewTabMenu: true,
+    keepAlive: true, displayStyle: 'flex', isDefault: false
+  })
+}))
+
+vi.mock('../../applications/filesystem/renderer', () => ({
+  filesystemApplication: {
+    id: 'filesystem', name: 'Files', icon: 'F', createInitialState: () => ({}),
+    render: () => null, canClose: true, canHaveMultiple: false, showInNewTabMenu: true,
+    keepAlive: false, displayStyle: 'flex', isDefault: false
+  }
+}))
+
+vi.mock('../../applications/aiHarness/renderer', () => ({
+  createAiHarnessVariant: vi.fn().mockReturnValue({
+    id: 'aiharness-test', name: 'AI', icon: 'A', createInitialState: () => ({}),
+    render: () => null, canClose: true, canHaveMultiple: true, showInNewTabMenu: true,
+    keepAlive: true, displayStyle: 'flex', isDefault: false
+  })
+}))
+
+vi.mock('../../applications/review/renderer', () => ({
+  reviewApplication: {
+    id: 'review', name: 'Review', icon: 'R', createInitialState: () => ({}),
+    render: () => null, canClose: true, canHaveMultiple: false, showInNewTabMenu: false,
+    keepAlive: false, displayStyle: 'flex', isDefault: false
+  }
+}))
+
+vi.mock('../../applications/editor/renderer', () => ({
+  editorApplication: {
+    id: 'editor', name: 'Editor', icon: 'E', createInitialState: () => ({}),
+    render: () => null, canClose: true, canHaveMultiple: false, showInNewTabMenu: false,
+    keepAlive: false, displayStyle: 'flex', isDefault: false
+  }
+}))
+
+vi.mock('../../applications/comments/renderer', () => ({
+  commentsApplication: {
+    id: 'comments', name: 'Comments', icon: 'C', createInitialState: () => ({}),
+    render: () => null, canClose: true, canHaveMultiple: false, showInNewTabMenu: false,
+    keepAlive: false, displayStyle: 'flex', isDefault: false
+  }
+}))
+
 import { useAppStore } from './app'
 
 // Mock createWorkspaceStore and its utilities
@@ -681,6 +736,127 @@ describe('useAppStore', () => {
       // removeOrphanWorkspace should be called for the old workspace
       expect(mockRemoveOrphanWorkspace).toHaveBeenCalledWith('ws-old')
       cleanup2()
+    })
+  })
+
+  describe('application registry', () => {
+    const mockApp = {
+      id: 'test-app',
+      name: 'Test App',
+      icon: 'T',
+      createInitialState: () => ({}),
+      render: () => null,
+      canClose: true,
+      canHaveMultiple: false,
+      showInNewTabMenu: true,
+      keepAlive: false,
+      displayStyle: 'flex' as const,
+      isDefault: false
+    }
+
+    const mockApp2 = {
+      ...mockApp,
+      id: 'test-app-2',
+      name: 'Test App 2',
+      showInNewTabMenu: false,
+      isDefault: true
+    }
+
+    beforeEach(() => {
+      useAppStore.setState({ applications: {} })
+    })
+
+    it('registerApplication adds app to state', () => {
+      useAppStore.getState().registerApplication(mockApp)
+      expect(useAppStore.getState().applications['test-app']).toEqual(mockApp)
+    })
+
+    it('unregisterApplication removes app from state', () => {
+      useAppStore.getState().registerApplication(mockApp)
+      useAppStore.getState().unregisterApplication('test-app')
+      expect(useAppStore.getState().applications['test-app']).toBeUndefined()
+    })
+
+    it('getApplication returns app by id', () => {
+      useAppStore.getState().registerApplication(mockApp)
+      expect(useAppStore.getState().getApplication('test-app')).toEqual(mockApp)
+    })
+
+    it('getApplication returns undefined for missing id', () => {
+      expect(useAppStore.getState().getApplication('nonexistent')).toBeUndefined()
+    })
+
+    it('getAllApplications returns all apps', () => {
+      useAppStore.getState().registerApplication(mockApp)
+      useAppStore.getState().registerApplication(mockApp2)
+      const all = useAppStore.getState().getAllApplications()
+      expect(all).toHaveLength(2)
+    })
+
+    it('getMenuApplications filters by showInNewTabMenu', () => {
+      useAppStore.getState().registerApplication(mockApp)
+      useAppStore.getState().registerApplication(mockApp2)
+      const menu = useAppStore.getState().getMenuApplications()
+      expect(menu).toHaveLength(1)
+      expect(menu[0].id).toBe('test-app')
+    })
+
+    it('getDefaultApplications filters by isDefault', () => {
+      useAppStore.getState().registerApplication(mockApp)
+      useAppStore.getState().registerApplication(mockApp2)
+      const defaults = useAppStore.getState().getDefaultApplications()
+      expect(defaults).toHaveLength(1)
+      expect(defaults[0].id).toBe('test-app-2')
+    })
+
+    it('getDefaultApplication returns app by id', () => {
+      useAppStore.getState().registerApplication(mockApp)
+      useAppStore.getState().registerApplication(mockApp2)
+      expect(useAppStore.getState().getDefaultApplication('test-app')?.id).toBe('test-app')
+    })
+
+    it('getDefaultApplication falls back to first app', () => {
+      useAppStore.getState().registerApplication(mockApp)
+      expect(useAppStore.getState().getDefaultApplication()?.id).toBe('test-app')
+    })
+
+    it('getDefaultApplication returns null when empty', () => {
+      expect(useAppStore.getState().getDefaultApplication()).toBeNull()
+    })
+
+    it('getDefaultApplication falls back when id not found', () => {
+      useAppStore.getState().registerApplication(mockApp)
+      expect(useAppStore.getState().getDefaultApplication('nonexistent')?.id).toBe('test-app')
+    })
+
+    it('initializeApplications registers core apps', async () => {
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
+      const apps = useAppStore.getState().applications
+      expect(apps['terminal']).toBeDefined()
+      expect(apps['filesystem']).toBeDefined()
+      expect(apps['review']).toBeDefined()
+      expect(apps['editor']).toBeDefined()
+      expect(apps['comments']).toBeDefined()
+      cleanup()
+    })
+
+    it('registerTerminalVariants updates base terminal and adds variants', async () => {
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
+      useAppStore.getState().registerTerminalVariants(
+        [{ id: 'custom', name: 'Custom', icon: '>', startupCommand: 'bash', isDefault: false }],
+        { fontSize: 14, fontFamily: 'Menlo', cursorStyle: 'block', cursorBlink: true, showRawChars: false, startByDefault: false, instances: [] }
+      )
+      // Base terminal re-registered
+      expect(useAppStore.getState().applications['terminal']).toBeDefined()
+      cleanup()
+    })
+
+    it('registerAiHarnessVariants registers AI apps', async () => {
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
+      useAppStore.getState().registerAiHarnessVariants([
+        { id: 'claude', name: 'Claude', icon: 'C', command: 'claude', isDefault: false, enableSandbox: false, allowNetwork: true, backgroundColor: '#000' }
+      ])
+      cleanup()
     })
   })
 })

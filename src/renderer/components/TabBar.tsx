@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Loader2 } from 'lucide-react'
 import type { Tab } from '../types'
-import { applicationRegistry } from '../registry/applicationRegistry'
+import { useAppStore } from '../store/app'
 import { useActivityStateStore } from '../store/activityState'
 
 // Small component to subscribe to activity state for a single tab
@@ -45,8 +45,8 @@ export default function TabBar({
   const menuRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
 
-  // Get menu items directly from registry
-  const menuApps = applicationRegistry.getMenuItems()
+  const menuApps = useAppStore((s) => s.getMenuApplications())
+  const getApplication = useAppStore((s) => s.getApplication)
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -72,12 +72,12 @@ export default function TabBar({
   }
 
   const getTabIcon = (tab: Tab): string => {
-    const app = applicationRegistry.get(tab.applicationId)
+    const app = getApplication(tab.applicationId)
     return app?.icon || '?'
   }
 
   const canCloseTab = (tab: Tab): boolean => {
-    const app = applicationRegistry.get(tab.applicationId)
+    const app = getApplication(tab.applicationId)
     if (!app?.canClose) return false
 
     // Apps that can have multiple instances can always be closed
