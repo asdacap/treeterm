@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { Loader2, GitFork } from 'lucide-react'
+import { Loader2, GitFork, GitBranch, Folder, ChevronDown, ChevronRight, Circle } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
@@ -34,7 +34,7 @@ function WorkspaceActivityIndicator({ tabIds }: { tabIds: string[] }) {
       className={`tree-item-activity tree-item-activity-${activityState}`}
       title={activityState === 'working' ? 'Working...' : 'Waiting for input'}
     >
-      {activityState === 'working' ? <Loader2 size={10} /> : '●'}
+      {activityState === 'working' ? <Loader2 size={10} /> : <Circle size={8} fill="currentColor" />}
     </span>
   )
 }
@@ -273,15 +273,16 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
                 toggleExpand(ws.id)
               }}
             >
-              {isExpanded ? '▼' : '▶'}
+              {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             </span>
           ) : (
             <span className="tree-item-expand-placeholder" />
           )}
-          <span className="tree-item-icon">{ws.isWorktree ? '🌿' : '📁'}</span>
+          <span className="tree-item-icon">{ws.isWorktree ? <GitBranch size={16} /> : <Folder size={16} />}</span>
           <span className="tree-item-name">
             {ws.metadata?.displayName || ws.name}
           </span>
+          {ws.isWorktree && ws.gitBranch && <span className="tree-item-branch" title={ws.gitBranch}>{ws.gitBranch}</span>}
           <WorkspaceActivityIndicator tabIds={tabIds} />
           <span className="tree-item-actions">
             {ws.isGitRepo && (

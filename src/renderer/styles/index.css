@@ -122,11 +122,16 @@ body,
 .tree-item-icon {
   margin-right: 8px;
   font-size: 14px;
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
 }
 
 .tree-item-expand {
   width: 16px;
-  font-size: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-secondary);
   cursor: pointer;
   flex-shrink: 0;
@@ -234,6 +239,8 @@ body,
   font-size: 10px;
   margin-left: 4px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
 }
 
 .tree-item-activity-working {
