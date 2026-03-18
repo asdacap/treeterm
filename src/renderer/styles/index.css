@@ -4291,3 +4291,145 @@ body,
   text-overflow: ellipsis;
   max-width: 100%;
 }
+
+/* ============================
+   Comments List
+   ============================ */
+
+.comments-list {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: auto;
+  padding: 8px;
+}
+
+.comments-header {
+  padding: 8px 4px;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+.comments-loading,
+.comments-error,
+.comments-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.comments-error {
+  color: var(--error);
+}
+
+.comments-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.comments-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 12px;
+}
+
+.comments-card.outdated {
+  border-color: #f0a000;
+  background: rgba(240, 160, 0, 0.05);
+}
+
+.comments-card.addressed {
+  opacity: 0.7;
+}
+
+.comments-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.comments-card-file {
+  font-family: monospace;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.comments-addressed {
+  cursor: pointer;
+}
+
+.comments-code-context {
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  padding: 4px 0;
+  margin: 0 0 8px 0;
+  overflow-x: auto;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.comments-code-line {
+  display: flex;
+  padding: 0 8px;
+}
+
+.comments-code-line.highlight {
+  background: rgba(255, 255, 0, 0.1);
+}
+
+.comments-code-line-number {
+  color: var(--text-secondary);
+  min-width: 40px;
+  text-align: right;
+  padding-right: 12px;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.comments-card-text {
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+}
+
+.comments-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+.comments-card-time {
+  color: var(--text-secondary);
+}
+
+.comments-goto-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.comments-goto-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}

@@ -46,6 +46,7 @@ const CHANNELS = {
   reviewsAddComment: 'reviews:addComment',
   reviewsDeleteComment: 'reviews:deleteComment',
   reviewsUpdateOutdated: 'reviews:updateOutdated',
+  reviewsToggleAddressed: 'reviews:toggleAddressed',
   reviewsGetFilePath: 'reviews:getFilePath',
   settingsLoad: 'settings:load',
   settingsSave: 'settings:save',
@@ -289,6 +290,12 @@ export class IpcClient {
     ...args: IpcRequests['reviewsUpdateOutdated']['params']
   ): Promise<IpcRequests['reviewsUpdateOutdated']['result']> {
     return ipcRenderer.invoke(CHANNELS.reviewsUpdateOutdated, ...args)
+  }
+
+  reviewsToggleAddressed(
+    ...args: IpcRequests['reviewsToggleAddressed']['params']
+  ): Promise<IpcRequests['reviewsToggleAddressed']['result']> {
+    return ipcRenderer.invoke(CHANNELS.reviewsToggleAddressed, ...args)
   }
 
   reviewsGetFilePath(

@@ -21,6 +21,9 @@ interface FileViewerProps {
   inlineCommentInput?: { lineNumber: number } | null
   onCommentSubmit?: (text: string) => void
   onCommentCancel?: () => void
+  // Scroll to a specific line after file loads
+  scrollToLine?: number
+  onScrollToLineUsed?: () => void
 }
 
 interface FileState {
@@ -48,7 +51,9 @@ export function FileViewer({
   onLineClick,
   inlineCommentInput,
   onCommentSubmit,
-  onCommentCancel
+  onCommentCancel,
+  scrollToLine,
+  onScrollToLineUsed
 }: FileViewerProps): JSX.Element {
   const filesystem = useFilesystemApi()
   const { addTabWithState } = useStore(workspaceStore)
@@ -117,6 +122,13 @@ export function FileViewer({
       })
     }
   }, [onLineClick])
+
+  // Scroll to a specific line when requested
+  useEffect(() => {
+    if (!editorRef.current || !scrollToLine || fileState.loading) return
+    editorRef.current.revealLineInCenter(scrollToLine)
+    onScrollToLineUsed?.()
+  }, [scrollToLine, fileState.loading])
 
   // Add decorations for lines with comments
   useEffect(() => {

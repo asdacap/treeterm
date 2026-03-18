@@ -1,0 +1,219 @@
+import { useState, useEffect, useCallback } from 'react'
+import { useStore } from 'zustand'
+import type { StoreApi } from 'zustand'
+import type { WorkspaceState } from '../store/createWorkspaceStore'
+import { useGitApi } from '../contexts/GitApiContext'
+import { useReviewsApi } from '../contexts/ReviewsApiContext'
+import { useFilesystemApi } from '../contexts/FilesystemApiContext'
+import type { ReviewComment, FilesystemState } from '../types'
+
+interface CommentsListProps {
+  workspacePath: string
+  workspaceId: string
+  workspaceStore: StoreApi<WorkspaceState>
+}
+
+const CONTEXT_LINES = 3
+
+function extractCodeContext(
+  fileContent: string,
+  lineNumber: number
+): { lines: { num: number; text: string }[]; targetLine: number } | null {
+  const allLines = fileContent.split('\n')
+  if (lineNumber < 1 || lineNumber > allLines.length) return null
+
+  const start = Math.max(0, lineNumber - 1 - CONTEXT_LINES)
+  const end = Math.min(allLines.length, lineNumber + CONTEXT_LINES)
+  const lines = allLines.slice(start, end).map((text, i) => ({
+    num: start + i + 1,
+    text
+  }))
+
+  return { lines, targetLine: lineNumber }
+}
+
+export default function CommentsList({
+  workspacePath,
+  workspaceId,
+  workspaceStore
+}: CommentsListProps): JSX.Element {
+  const git = useGitApi()
+  const reviewsApi = useReviewsApi()
+  const filesystem = useFilesystemApi()
+  const { addTabWithState } = useStore(workspaceStore)
+  const [comments, setComments] = useState<ReviewComment[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [fileContents, setFileContents] = useState<Map<string, string>>(new Map())
+
+  const loadComments = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const hashResult = await git.getHeadCommitHash(workspacePath)
+      if (hashResult.success && hashResult.hash) {
+        const result = await reviewsApi.updateOutdated(workspacePath, hashResult.hash)
+        if (result.success && result.reviews) {
+          setComments(result.reviews.comments)
+        } else {
+          setError(result.error || 'Failed to load reviews')
+        }
+      } else {
+        const result = await reviewsApi.load(workspacePath)
+        if (result.success && result.reviews) {
+          setComments(result.reviews.comments)
+        } else {
+          setError(result.error || 'Failed to load reviews')
+        }
+      }
+    } catch (err) {
+      setError(`Failed to load comments: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    }
+    setLoading(false)
+  }, [workspacePath, git, reviewsApi])
+
+  useEffect(() => {
+    loadComments()
+  }, [loadComments])
+
+  // Batch-fetch file contents for code context
+  useEffect(() => {
+    if (comments.length === 0) return
+
+    const uniquePaths = Array.from(new Set(comments.map(c => c.filePath)))
+    const missing = uniquePaths.filter(p => !fileContents.has(p))
+    if (missing.length === 0) return
+
+    const fetchFiles = async () => {
+      const newContents = new Map(fileContents)
+      await Promise.all(
+        missing.map(async (filePath) => {
+          try {
+            const result = await filesystem.readFile(workspacePath, filePath)
+            if (result.success && result.file) {
+              newContents.set(filePath, result.file.content)
+            }
+          } catch {
+            // Skip files that fail to load
+          }
+        })
+      )
+      setFileContents(newContents)
+    }
+
+    fetchFiles()
+  }, [comments, workspacePath, filesystem])
+
+  const handleToggleAddressed = async (commentId: string) => {
+    const result = await reviewsApi.toggleAddressed(workspacePath, commentId)
+    if (result.success) {
+      setComments(prev => prev.map(c =>
+        c.id === commentId ? { ...c, addressed: !c.addressed } : c
+      ))
+    }
+  }
+
+  const handleDelete = async (commentId: string) => {
+    const result = await reviewsApi.deleteComment(workspacePath, commentId)
+    if (result.success) {
+      setComments(prev => prev.filter(c => c.id !== commentId))
+    }
+  }
+
+  const handleGoToFile = (comment: ReviewComment) => {
+    addTabWithState<FilesystemState>(workspaceId, 'filesystem', {
+      selectedPath: comment.filePath,
+      scrollToLine: comment.lineNumber
+    })
+  }
+
+  if (loading) {
+    return <div className="comments-list"><div className="comments-loading">Loading comments...</div></div>
+  }
+
+  if (error) {
+    return <div className="comments-list"><div className="comments-error">{error}</div></div>
+  }
+
+  if (comments.length === 0) {
+    return <div className="comments-list"><div className="comments-empty">No review comments yet</div></div>
+  }
+
+  return (
+    <div className="comments-list">
+      <div className="comments-header">
+        <span>Comments ({comments.length})</span>
+      </div>
+      <div className="comments-cards">
+        {comments.map(comment => {
+          const content = fileContents.get(comment.filePath)
+          const codeContext = content ? extractCodeContext(content, comment.lineNumber) : null
+
+          return (
+            <div
+              key={comment.id}
+              className={`comments-card ${comment.isOutdated ? 'outdated' : ''} ${comment.addressed ? 'addressed' : ''}`}
+            >
+              <div className="comments-card-header">
+                <span className="comments-card-file" title={comment.filePath}>
+                  {comment.filePath}
+                </span>
+                <span className="comment-line-ref">
+                  L{comment.lineNumber} ({comment.side})
+                </span>
+                {comment.isOutdated && (
+                  <span className="comment-outdated-badge" title="This comment may be outdated">
+                    Outdated
+                  </span>
+                )}
+                <input
+                  type="checkbox"
+                  className="comments-addressed"
+                  checked={comment.addressed}
+                  onChange={() => handleToggleAddressed(comment.id)}
+                  title="Mark as addressed"
+                />
+                <button
+                  className="comment-delete-btn"
+                  onClick={() => handleDelete(comment.id)}
+                  title="Delete comment"
+                >
+                  ×
+                </button>
+              </div>
+
+              {codeContext && (
+                <pre className="comments-code-context">
+                  {codeContext.lines.map(line => (
+                    <div
+                      key={line.num}
+                      className={`comments-code-line ${line.num === codeContext.targetLine ? 'highlight' : ''}`}
+                    >
+                      <span className="comments-code-line-number">{line.num}</span>
+                      <span>{line.text}</span>
+                    </div>
+                  ))}
+                </pre>
+              )}
+
+              <div className="comments-card-text">{comment.text}</div>
+
+              <div className="comments-card-footer">
+                <span className="comments-card-time">
+                  {new Date(comment.createdAt).toLocaleString()}
+                </span>
+                <button
+                  className="comments-goto-btn"
+                  onClick={() => handleGoToFile(comment)}
+                  title="Open file at this line"
+                >
+                  Go to file
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}

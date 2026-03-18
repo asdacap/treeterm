@@ -845,6 +845,14 @@ server.onReviewsUpdateOutdated(async (worktreePath, currentCommitHash) => {
   return { success: true, reviews }
 })
 
+server.onReviewsToggleAddressed(async (worktreePath, commentId) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  initializeReviewsClient()
+  if (!reviewsClient) throw new Error('Reviews client not initialized')
+  const success = await reviewsClient.toggleAddressed(worktreePath, commentId)
+  return { success }
+})
+
 server.onReviewsGetFilePath(async (worktreePath) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
   initializeReviewsClient()
