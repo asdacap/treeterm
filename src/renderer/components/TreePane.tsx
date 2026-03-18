@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { Loader2, GitFork, GitMerge } from 'lucide-react'
+import { Loader2, GitFork } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
@@ -303,15 +303,7 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
                 <GitFork size={14} />
               </button>
             )}
-            {ws.isWorktree && ws.parentId && (
-              <button
-                className="tree-item-action"
-                title="Close & Merge"
-                onClick={(e) => { e.stopPropagation(); handleRemove(ws.id) }}
-              >
-                <GitMerge size={14} />
-              </button>
-            )}
+
           </span>
         </div>
 
@@ -381,9 +373,11 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
               New Child Workspace
             </div>
           )}
-          <div className="context-menu-item danger" onClick={() => handleRemove(contextMenu.workspaceId)}>
-            {workspaces[contextMenu.workspaceId]?.isWorktree ? 'Close & Merge...' : 'Remove'}
-          </div>
+          {!workspaces[contextMenu.workspaceId]?.isWorktree && (
+            <div className="context-menu-item danger" onClick={() => handleRemove(contextMenu.workspaceId)}>
+              Remove
+            </div>
+          )}
         </div>
       )}
 
