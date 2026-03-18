@@ -2754,6 +2754,24 @@ body,
   background: #cc2626;
 }
 
+.review-prompt-commit-btn {
+  background: #6366f1;
+  color: white;
+}
+
+.review-prompt-commit-btn:hover:not(:disabled) {
+  background: #7c7ff7;
+}
+
+.review-prompt-rebase-btn {
+  background: #8b5cf6;
+  color: white;
+}
+
+.review-prompt-rebase-btn:hover:not(:disabled) {
+  background: #a78bfa;
+}
+
 .review-cancel-btn {
   background: var(--bg-tertiary);
   color: var(--text-primary);
