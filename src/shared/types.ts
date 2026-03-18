@@ -102,6 +102,15 @@ export interface PrefixModeConfig {
 
 export type STTProvider = 'openaiWhisper' | 'localWhisper'
 
+// === Run Action Types ===
+
+export interface RunAction {
+  id: string                    // deterministic: `${source}:${name}`
+  name: string                  // display name
+  source: string                // provider name for UI grouping (e.g., "npm", "make")
+  description: string
+}
+
 export interface Settings {
   terminal: {
     fontSize: number

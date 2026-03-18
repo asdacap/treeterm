@@ -10,10 +10,11 @@ import { createAiHarnessVariant } from '../../applications/aiHarness/renderer'
 import { reviewApplication } from '../../applications/review/renderer'
 import { editorApplication } from '../../applications/editor/renderer'
 import { commentsApplication } from '../../applications/comments/renderer'
+import { runActionApplication } from '../../applications/runAction/renderer'
 import type {
   Workspace, Session, Application,
   Platform, TerminalApi, GitApi, SessionApi, AppApi, DaemonApi,
-  FilesystemApi, STTApi, SandboxApi, SettingsApi,
+  FilesystemApi, STTApi, SandboxApi, SettingsApi, RunActionsApi,
   TerminalInstance, AiHarnessInstance, Settings
 } from '../types'
 
@@ -30,6 +31,7 @@ export interface AppDeps {
   daemon: DaemonApi
   filesystem: FilesystemApi
   stt: STTApi
+  runActions: RunActionsApi
   sandbox: SandboxApi
   selectFolder: () => Promise<string | null>
   getRecentDirectories: () => Promise<string[]>
@@ -91,6 +93,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   daemon: UNINITIALIZED,
   filesystem: UNINITIALIZED,
   stt: UNINITIALIZED,
+  runActions: UNINITIALIZED,
   sandbox: UNINITIALIZED,
   selectFolder: UNINITIALIZED,
   getRecentDirectories: UNINITIALIZED,
@@ -158,6 +161,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     get().registerApplication(reviewApplication)
     get().registerApplication(editorApplication)
     get().registerApplication(commentsApplication)
+    get().registerApplication(runActionApplication)
   },
 
   registerTerminalVariants: (instances: TerminalInstance[], terminalSettings: Settings['terminal'] | undefined) => {

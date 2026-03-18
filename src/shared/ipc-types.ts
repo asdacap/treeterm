@@ -8,7 +8,8 @@ import type {
   Settings,
   Session,
   SessionInfo,
-  WorkspaceInput
+  WorkspaceInput,
+  RunAction
 } from './types'
 
 import type {
@@ -248,6 +249,16 @@ export interface IpcRequests {
   sandboxIsAvailable: {
     params: []
     result: boolean
+  }
+
+  // Run Actions operations
+  runActionsDetect: {
+    params: [workspacePath: string]
+    result: RunAction[]
+  }
+  runActionsRun: {
+    params: [workspacePath: string, actionId: string]
+    result: string | null  // returns ptyId
   }
 
   // App operations

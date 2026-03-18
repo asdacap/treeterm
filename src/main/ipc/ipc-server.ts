@@ -47,6 +47,8 @@ const CHANNELS = {
   fsReadFile: 'fs:readFile',
   fsWriteFile: 'fs:writeFile',
   fsSearchFiles: 'fs:searchFiles',
+  runActionsDetect: 'runActions:detect',
+  runActionsRun: 'runActions:run',
   sttTranscribeOpenai: 'stt:transcribe-openai',
   sttTranscribeLocal: 'stt:transcribe-local',
   sttCheckMicPermission: 'stt:check-mic-permission',
@@ -571,6 +573,27 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.sessionOpenInNewWindow, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['sessionOpenInNewWindow']['params']))
+    )
+  }
+
+  // Run Actions request handlers
+  onRunActionsDetect(
+    handler: (
+      ...args: IpcRequests['runActionsDetect']['params']
+    ) => IpcRequests['runActionsDetect']['result'] | Promise<IpcRequests['runActionsDetect']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.runActionsDetect, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['runActionsDetect']['params']))
+    )
+  }
+
+  onRunActionsRun(
+    handler: (
+      ...args: IpcRequests['runActionsRun']['params']
+    ) => IpcRequests['runActionsRun']['result'] | Promise<IpcRequests['runActionsRun']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.runActionsRun, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['runActionsRun']['params']))
     )
   }
 

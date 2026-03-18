@@ -15,7 +15,8 @@ import type {
   PrefixModeConfig,
   STTProvider,
   Settings,
-  WorktreeSettings
+  WorktreeSettings,
+  RunAction
 } from '../../shared/types'
 
 export type {
@@ -30,7 +31,8 @@ export type {
   PrefixModeConfig,
   STTProvider,
   Settings,
-  WorktreeSettings
+  WorktreeSettings,
+  RunAction
 }
 
 // Activity state for applications that can report their state
@@ -293,6 +295,11 @@ export interface AppRegistryApi {
   getDefaultApp: (appId?: string) => Application | null
 }
 
+export interface RunActionsApi {
+  detect: (workspacePath: string) => Promise<RunAction[]>
+  run: (workspacePath: string, actionId: string) => Promise<string | null>
+}
+
 export interface SandboxApi {
   isAvailable: () => Promise<boolean>
 }
@@ -342,6 +349,7 @@ declare global {
       git: GitApi
       settings: SettingsApi
       filesystem: FilesystemApi
+      runActions: RunActionsApi
       sandbox: SandboxApi
       stt: STTApi
       getInitialWorkspace: () => Promise<string | null>

@@ -54,6 +54,14 @@ vi.mock('../../applications/comments/renderer', () => ({
   }
 }))
 
+vi.mock('../../applications/runAction/renderer', () => ({
+  runActionApplication: {
+    id: 'run-action', name: 'Run Actions', icon: '▶', createInitialState: () => ({}),
+    render: () => null, canClose: true, canHaveMultiple: false, showInNewTabMenu: true,
+    keepAlive: false, displayStyle: 'flex', isDefault: false
+  }
+}))
+
 import { useAppStore } from './app'
 
 // Mock createWorkspaceStore and its utilities
@@ -113,6 +121,7 @@ const mockDeps = {
   filesystem: {},
   reviews: {},
   stt: {},
+  runActions: { detect: vi.fn().mockResolvedValue([]), run: vi.fn().mockResolvedValue(null) },
   sandbox: {},
   selectFolder: vi.fn(),
   getRecentDirectories: vi.fn(),

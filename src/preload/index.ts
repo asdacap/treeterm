@@ -311,6 +311,14 @@ contextBridge.exposeInMainWorld('electron', {
       return client.fsSearchFiles(workspacePath, query)
     }
   },
+  runActions: {
+    detect: (workspacePath: string) => {
+      return client.runActionsDetect(workspacePath)
+    },
+    run: (workspacePath: string, actionId: string) => {
+      return client.runActionsRun(workspacePath, actionId)
+    }
+  },
   sandbox: {
     isAvailable: (): Promise<boolean> => {
       return client.sandboxIsAvailable()
