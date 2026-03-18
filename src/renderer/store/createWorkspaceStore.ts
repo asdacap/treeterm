@@ -21,6 +21,7 @@ export interface WorkspaceState {
   removeWorkspace: (id: string) => Promise<void>
   removeWorkspaceKeepBranch: (id: string) => Promise<void>
   removeWorkspaceKeepWorktree: (id: string) => Promise<void>
+  removeWorkspaceKeepBoth: (id: string) => Promise<void>
   mergeAndRemoveWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
   closeAndCleanWorkspace: (id: string) => Promise<{ success: boolean; error?: string }>
   setActiveWorkspace: (id: string | null) => void
@@ -220,13 +221,17 @@ export function createWorkspaceStore(
       }
     }
 
-    if (!options.keepWorktree && workspace.isWorktree && workspace.gitRootPath) {
-      const deleteBranch = !options.keepBranch && !workspace.isDetached
-      await deps.git.removeWorktree(
-        workspace.gitRootPath,
-        workspace.path,
-        deleteBranch
-      )
+    if (workspace.isWorktree && workspace.gitRootPath) {
+      if (!options.keepWorktree) {
+        const deleteBranch = !options.keepBranch && !workspace.isDetached
+        await deps.git.removeWorktree(
+          workspace.gitRootPath,
+          workspace.path,
+          deleteBranch
+        )
+      } else if (!options.keepBranch && !workspace.isDetached && workspace.gitBranch) {
+        await deps.git.deleteBranch(workspace.gitRootPath, workspace.gitBranch)
+      }
     }
 
     if (workspace.parentId) {
@@ -439,6 +444,10 @@ export function createWorkspaceStore(
     },
 
     removeWorkspaceKeepWorktree: async (id: string) => {
+      await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: true })
+    },
+
+    removeWorkspaceKeepBoth: async (id: string) => {
       await removeWorkspaceInternal(id, { keepBranch: true, keepWorktree: true })
     },
 

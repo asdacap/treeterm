@@ -34,7 +34,7 @@ export default function ReviewBrowser({
   const git = useGitApi()
   const terminalApi = useTerminalApi()
   const reviewsApi = useReviewsApi()
-  const { workspaces, mergeAndRemoveWorkspace, removeWorkspace, removeWorkspaceKeepBranch, removeWorkspaceKeepWorktree, closeAndCleanWorkspace, removeTab, setActiveTab } = useStore(workspaceStore)
+  const { workspaces, mergeAndRemoveWorkspace, removeWorkspace, removeWorkspaceKeepBranch, removeWorkspaceKeepWorktree, removeWorkspaceKeepBoth, closeAndCleanWorkspace, removeTab, setActiveTab } = useStore(workspaceStore)
   const workspace = workspaces[workspaceId]
   const parentWorkspace = parentWorkspaceId ? workspaces[parentWorkspaceId] : undefined
   
@@ -396,7 +396,7 @@ export default function ReviewBrowser({
   }
 
   const handleAbandonKeepWorktree = async () => {
-    if (!confirm('Abandon this workspace but keep the worktree on disk? The worktree will remain but will no longer be tracked in TreeTerm.')) {
+    if (!confirm('Abandon this workspace but keep the worktree on disk? The worktree will remain but the branch will be deleted.')) {
       return
     }
 
@@ -409,6 +409,25 @@ export default function ReviewBrowser({
       // Tab will close automatically when workspace is removed
     } catch (err) {
       alert(`Abandon (Keep Worktree) failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      setIsProcessing(false)
+      setProcessingAction(null)
+    }
+  }
+
+  const handleAbandonKeepBoth = async () => {
+    if (!confirm('Abandon this workspace but keep both the worktree and branch? They will remain but will no longer be tracked in TreeTerm.')) {
+      return
+    }
+
+    setIsProcessing(true)
+    setProcessingAction('abandon')
+    setAbandonMenuOpen(false)
+
+    try {
+      await removeWorkspaceKeepBoth(workspaceId)
+      // Tab will close automatically when workspace is removed
+    } catch (err) {
+      alert(`Abandon (Keep Both) failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
       setIsProcessing(false)
       setProcessingAction(null)
     }
@@ -958,7 +977,14 @@ export default function ReviewBrowser({
                     onClick={handleAbandonKeepWorktree}
                   >
                     Abandon (Keep Worktree)
-                    <span className="abandon-menu-hint">Keep worktree on disk</span>
+                    <span className="abandon-menu-hint">Keep worktree, delete branch</span>
+                  </div>
+                  <div
+                    className="abandon-menu-item"
+                    onClick={handleAbandonKeepBoth}
+                  >
+                    Abandon (Keep Both)
+                    <span className="abandon-menu-hint">Keep worktree and branch</span>
                   </div>
                 </div>
               )}
@@ -1050,7 +1076,14 @@ export default function ReviewBrowser({
                     onClick={handleAbandonKeepWorktree}
                   >
                     Abandon (Keep Worktree)
-                    <span className="abandon-menu-hint">Keep worktree on disk</span>
+                    <span className="abandon-menu-hint">Keep worktree, delete branch</span>
+                  </div>
+                  <div
+                    className="abandon-menu-item"
+                    onClick={handleAbandonKeepBoth}
+                  >
+                    Abandon (Keep Both)
+                    <span className="abandon-menu-hint">Keep worktree and branch</span>
                   </div>
                 </div>
               )}

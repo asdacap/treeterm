@@ -34,6 +34,7 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
     removeWorkspace,
     removeWorkspaceKeepBranch,
     removeWorkspaceKeepWorktree,
+    removeWorkspaceKeepBoth,
     mergeAndRemoveWorkspace,
     closeAndCleanWorkspace,
     setActiveWorkspace,
@@ -248,11 +249,20 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
 
   const handleAbandonKeepWorktree = async () => {
     if (!activeWorkspaceId) return
-    if (!confirm('Abandon this workspace but keep the worktree on disk? The worktree will remain but will no longer be tracked in TreeTerm.')) {
+    if (!confirm('Abandon this workspace but keep the worktree on disk? The worktree will remain but the branch will be deleted.')) {
       return
     }
     setAbandonMenuOpen(false)
     await removeWorkspaceKeepWorktree(activeWorkspaceId)
+  }
+
+  const handleAbandonKeepBoth = async () => {
+    if (!activeWorkspaceId) return
+    if (!confirm('Abandon this workspace but keep both the worktree and branch? They will remain but will no longer be tracked in TreeTerm.')) {
+      return
+    }
+    setAbandonMenuOpen(false)
+    await removeWorkspaceKeepBoth(activeWorkspaceId)
   }
 
   // Compute flattened workspace list for navigation
@@ -423,7 +433,14 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                             onClick={handleAbandonKeepWorktree}
                           >
                             Abandon (Keep Worktree)
-                            <span className="abandon-menu-hint">Keep worktree on disk</span>
+                            <span className="abandon-menu-hint">Keep worktree, delete branch</span>
+                          </div>
+                          <div
+                            className="abandon-menu-item"
+                            onClick={handleAbandonKeepBoth}
+                          >
+                            Abandon (Keep Both)
+                            <span className="abandon-menu-hint">Keep worktree and branch</span>
                           </div>
                         </div>
                       )}
