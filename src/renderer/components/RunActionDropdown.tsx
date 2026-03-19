@@ -7,7 +7,7 @@ import type { RunAction } from '../types'
 
 interface RunActionDropdownProps {
   workspacePath: string
-  onRun: (ptyId: string) => void
+  onRun: (ptyId: string, actionId: string) => void
 }
 
 export default function RunActionDropdown({ workspacePath, onRun }: RunActionDropdownProps) {
@@ -57,7 +57,7 @@ export default function RunActionDropdown({ workspacePath, onRun }: RunActionDro
     setMenuOpen(false)
     const ptyId = await runActionsApi.run(workspacePath, actionId)
     if (ptyId) {
-      onRun(ptyId)
+      onRun(ptyId, actionId)
     }
   }, [runActionsApi, workspacePath, onRun])
 

@@ -41,7 +41,8 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
     mergeAndRemoveWorkspace,
     closeAndCleanWorkspace,
     setActiveWorkspace,
-    updateWorkspaceMetadata
+    updateWorkspaceMetadata,
+    updateTabTitle
   } = useStore(workspaceStore)
   const { enterWorkspaceFocus } = usePrefixModeStore()
   const applications = useAppStore((s) => s.applications)
@@ -416,9 +417,10 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                   )}
                   <RunActionDropdown
                     workspacePath={activeWorkspace.path}
-                    onRun={async (ptyId) => {
+                    onRun={async (ptyId, actionId) => {
                       if (activeWorkspaceId) {
-                        addTabWithState(activeWorkspaceId, 'terminal', { ptyId, keepOnExit: true })
+                        const tabId = addTabWithState(activeWorkspaceId, 'terminal', { ptyId, keepOnExit: true })
+                        updateTabTitle(activeWorkspaceId, tabId, actionId)
                       }
                     }}
                   />
