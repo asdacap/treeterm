@@ -85,6 +85,21 @@ export default function ReviewBrowser({
   // AI harness prompt support
   const runningHarness = workspace ? findRunningHarness(getTabs(workspace)) : null
 
+  const [refreshing, setRefreshing] = useState(false)
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      await Promise.all([
+        loadUncommittedChanges(),
+        loadReviews(),
+        ...(parentWorkspace ? [loadDiff(), checkConflicts()] : []),
+      ])
+    } finally {
+      setRefreshing(false)
+    }
+  }, [workspacePath, parentWorkspace])
+
   const handlePromptCommit = useCallback(() => {
     if (runningHarness) {
       terminalApi.write(runningHarness.ptyId, 'commit\r')
@@ -469,9 +484,19 @@ export default function ReviewBrowser({
             )}
           </span>
         </div>
-        {isCheckingConflicts && (
-          <span className="review-checking">Checking for conflicts...</span>
-        )}
+        <div className="review-header-actions">
+          {isCheckingConflicts && (
+            <span className="review-checking">Checking for conflicts...</span>
+          )}
+          <button
+            className="review-refresh-btn"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            title="Refresh changes"
+          >
+            {refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {/* Load Error */}

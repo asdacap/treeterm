@@ -2612,10 +2612,35 @@ body,
   color: var(--text-secondary);
 }
 
+.review-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .review-checking {
   font-size: 12px;
   color: var(--text-secondary);
   font-style: italic;
+}
+
+.review-refresh-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.review-refresh-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.review-refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .review-conflict-banner {
