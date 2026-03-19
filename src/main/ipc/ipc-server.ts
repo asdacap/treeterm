@@ -55,7 +55,6 @@ const CHANNELS = {
   sessionCreate: 'session:create',
   sessionUpdate: 'session:update',
   sessionList: 'session:list',
-  sessionGet: 'session:get',
   sessionDelete: 'session:delete',
   sessionOpenInNewWindow: 'session:open-in-new-window',
   daemonShutdown: 'daemon:shutdown',
@@ -552,16 +551,6 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.sessionList, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['sessionList']['params']))
-    )
-  }
-
-  onSessionGet(
-    handler: (
-      ...args: IpcRequests['sessionGet']['params']
-    ) => IpcRequests['sessionGet']['result'] | Promise<IpcRequests['sessionGet']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.sessionGet, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['sessionGet']['params']))
     )
   }
 

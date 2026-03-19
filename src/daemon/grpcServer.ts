@@ -28,9 +28,9 @@ import {
   type PtyOutput,
   type CreateSessionRequest,
   type UpdateSessionRequest,
-  type GetSessionRequest,
   type DeleteSessionRequest,
   type ListSessionsResponse,
+  type GetDefaultSessionIdResponse,
   type Empty,
   type Session as ProtoSession,
   type WorkspaceInput,
@@ -179,10 +179,9 @@ export class GrpcServer {
       execStream: this.handleExecStream.bind(this),
       createSession: this.handleCreateSession.bind(this),
       updateSession: this.handleUpdateSession.bind(this),
-      getSession: this.handleGetSession.bind(this),
       deleteSession: this.handleDeleteSession.bind(this),
       listSessions: this.handleListSessions.bind(this),
-      getDefaultSession: this.handleGetDefaultSession.bind(this),
+      getDefaultSessionId: this.handleGetDefaultSessionId.bind(this),
       sessionWatch: this.handleSessionWatch.bind(this),
       shutdown: this.handleShutdown.bind(this),
       // Filesystem operations
@@ -566,6 +565,23 @@ export class GrpcServer {
 
     log.info({ sessionId, listenerId }, 'sessionWatch registered')
 
+    // Emit initial session state as first event
+    const session = this.sessionStore.getSession(sessionId)
+    if (!session) {
+      call.destroy({
+        code: grpc.status.NOT_FOUND,
+        message: `Session not found: ${sessionId}`
+      } as any)
+      return
+    }
+
+    const protoSession = this.convertToProtoSession(session)
+    call.write({
+      sessionId,
+      session: protoSession,
+      senderId: ''
+    })
+
     const watcher: SessionWatcher = { listenerId, sessionId, stream: call }
     this.sessionWatchers.set(listenerId, watcher)
 
@@ -596,34 +612,6 @@ export class GrpcServer {
           this.sessionWatchers.delete(watcher.listenerId)
         }
       }
-    }
-  }
-
-  private handleGetSession(
-    call: grpc.ServerUnaryCall<GetSessionRequest, ProtoSession>,
-    callback: grpc.sendUnaryData<ProtoSession>
-  ): void {
-    try {
-      const { sessionId } = call.request
-      log.debug({ sessionId }, 'getSession called')
-
-      const session = this.sessionStore.getSession(sessionId)
-      if (!session) {
-        callback({
-          code: grpc.status.NOT_FOUND,
-          message: `Session not found: ${sessionId}`
-        })
-        return
-      }
-
-      const protoSession = this.convertToProtoSession(session)
-      callback(null, protoSession)
-    } catch (error) {
-      log.error({ err: error }, 'getSession error')
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
     }
   }
 
@@ -665,19 +653,19 @@ export class GrpcServer {
     }
   }
 
-  private handleGetDefaultSession(
-    call: grpc.ServerUnaryCall<Empty, ProtoSession>,
-    callback: grpc.sendUnaryData<ProtoSession>
+  private handleGetDefaultSessionId(
+    call: grpc.ServerUnaryCall<Empty, GetDefaultSessionIdResponse>,
+    callback: grpc.sendUnaryData<GetDefaultSessionIdResponse>
   ): void {
     try {
       // Get or create the default session for this client
       const clientId = call.metadata.get('client-id')[0]?.toString() || 'unknown'
       const session = this.sessionStore.getOrCreateDefaultSession(clientId)
-      log.debug({ sessionId: session.id, clientId }, 'getDefaultSession called')
+      log.debug({ sessionId: session.id, clientId }, 'getDefaultSessionId called')
 
-      callback(null, this.convertToProtoSession(session))
+      callback(null, { sessionId: session.id })
     } catch (error) {
-      log.error({ err: error }, 'getDefaultSession error')
+      log.error({ err: error }, 'getDefaultSessionId error')
       callback({
         code: grpc.status.INTERNAL,
         message: error instanceof Error ? error.message : 'Unknown error'

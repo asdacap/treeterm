@@ -276,7 +276,7 @@ export interface SessionWatchEvent {
   senderId: string;
 }
 
-export interface GetSessionRequest {
+export interface GetDefaultSessionIdResponse {
   sessionId: string;
 }
 
@@ -4676,22 +4676,22 @@ export const SessionWatchEvent: MessageFns<SessionWatchEvent> = {
   },
 };
 
-function createBaseGetSessionRequest(): GetSessionRequest {
+function createBaseGetDefaultSessionIdResponse(): GetDefaultSessionIdResponse {
   return { sessionId: "" };
 }
 
-export const GetSessionRequest: MessageFns<GetSessionRequest> = {
-  encode(message: GetSessionRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+export const GetDefaultSessionIdResponse: MessageFns<GetDefaultSessionIdResponse> = {
+  encode(message: GetDefaultSessionIdResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.sessionId !== "") {
       writer.uint32(10).string(message.sessionId);
     }
     return writer;
   },
 
-  decode(input: BinaryReader | Uint8Array, length?: number): GetSessionRequest {
+  decode(input: BinaryReader | Uint8Array, length?: number): GetDefaultSessionIdResponse {
     const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
     const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetSessionRequest();
+    const message = createBaseGetDefaultSessionIdResponse();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -4712,7 +4712,7 @@ export const GetSessionRequest: MessageFns<GetSessionRequest> = {
     return message;
   },
 
-  fromJSON(object: any): GetSessionRequest {
+  fromJSON(object: any): GetDefaultSessionIdResponse {
     return {
       sessionId: isSet(object.sessionId)
         ? globalThis.String(object.sessionId)
@@ -4722,7 +4722,7 @@ export const GetSessionRequest: MessageFns<GetSessionRequest> = {
     };
   },
 
-  toJSON(message: GetSessionRequest): unknown {
+  toJSON(message: GetDefaultSessionIdResponse): unknown {
     const obj: any = {};
     if (message.sessionId !== "") {
       obj.sessionId = message.sessionId;
@@ -4730,11 +4730,11 @@ export const GetSessionRequest: MessageFns<GetSessionRequest> = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<GetSessionRequest>, I>>(base?: I): GetSessionRequest {
-    return GetSessionRequest.fromPartial(base ?? ({} as any));
+  create<I extends Exact<DeepPartial<GetDefaultSessionIdResponse>, I>>(base?: I): GetDefaultSessionIdResponse {
+    return GetDefaultSessionIdResponse.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<GetSessionRequest>, I>>(object: I): GetSessionRequest {
-    const message = createBaseGetSessionRequest();
+  fromPartial<I extends Exact<DeepPartial<GetDefaultSessionIdResponse>, I>>(object: I): GetDefaultSessionIdResponse {
+    const message = createBaseGetDefaultSessionIdResponse();
     message.sessionId = object.sessionId ?? "";
     return message;
   },
@@ -11776,15 +11776,6 @@ export const TreeTermDaemonService = {
     responseSerialize: (value: Session): Buffer => Buffer.from(Session.encode(value).finish()),
     responseDeserialize: (value: Buffer): Session => Session.decode(value),
   },
-  getSession: {
-    path: "/treeterm.TreeTermDaemon/GetSession" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: GetSessionRequest): Buffer => Buffer.from(GetSessionRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): GetSessionRequest => GetSessionRequest.decode(value),
-    responseSerialize: (value: Session): Buffer => Buffer.from(Session.encode(value).finish()),
-    responseDeserialize: (value: Buffer): Session => Session.decode(value),
-  },
   deleteSession: {
     path: "/treeterm.TreeTermDaemon/DeleteSession" as const,
     requestStream: false as const,
@@ -11804,14 +11795,15 @@ export const TreeTermDaemonService = {
       Buffer.from(ListSessionsResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): ListSessionsResponse => ListSessionsResponse.decode(value),
   },
-  getDefaultSession: {
-    path: "/treeterm.TreeTermDaemon/GetDefaultSession" as const,
+  getDefaultSessionId: {
+    path: "/treeterm.TreeTermDaemon/GetDefaultSessionId" as const,
     requestStream: false as const,
     responseStream: false as const,
     requestSerialize: (value: Empty): Buffer => Buffer.from(Empty.encode(value).finish()),
     requestDeserialize: (value: Buffer): Empty => Empty.decode(value),
-    responseSerialize: (value: Session): Buffer => Buffer.from(Session.encode(value).finish()),
-    responseDeserialize: (value: Buffer): Session => Session.decode(value),
+    responseSerialize: (value: GetDefaultSessionIdResponse): Buffer =>
+      Buffer.from(GetDefaultSessionIdResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): GetDefaultSessionIdResponse => GetDefaultSessionIdResponse.decode(value),
   },
   sessionWatch: {
     path: "/treeterm.TreeTermDaemon/SessionWatch" as const,
@@ -11894,10 +11886,9 @@ export interface TreeTermDaemonServer extends UntypedServiceImplementation {
   /** Workspace Session Management */
   createSession: handleUnaryCall<CreateSessionRequest, Session>;
   updateSession: handleUnaryCall<UpdateSessionRequest, Session>;
-  getSession: handleUnaryCall<GetSessionRequest, Session>;
   deleteSession: handleUnaryCall<DeleteSessionRequest, Empty>;
   listSessions: handleUnaryCall<Empty, ListSessionsResponse>;
-  getDefaultSession: handleUnaryCall<Empty, Session>;
+  getDefaultSessionId: handleUnaryCall<Empty, GetDefaultSessionIdResponse>;
   sessionWatch: handleServerStreamingCall<SessionWatchRequest, SessionWatchEvent>;
   /** Daemon Control */
   shutdown: handleUnaryCall<Empty, Empty>;
@@ -12057,21 +12048,6 @@ export interface TreeTermDaemonClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: Session) => void,
   ): ClientUnaryCall;
-  getSession(
-    request: GetSessionRequest,
-    callback: (error: ServiceError | null, response: Session) => void,
-  ): ClientUnaryCall;
-  getSession(
-    request: GetSessionRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: Session) => void,
-  ): ClientUnaryCall;
-  getSession(
-    request: GetSessionRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: Session) => void,
-  ): ClientUnaryCall;
   deleteSession(
     request: DeleteSessionRequest,
     callback: (error: ServiceError | null, response: Empty) => void,
@@ -12102,17 +12078,20 @@ export interface TreeTermDaemonClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: ListSessionsResponse) => void,
   ): ClientUnaryCall;
-  getDefaultSession(request: Empty, callback: (error: ServiceError | null, response: Session) => void): ClientUnaryCall;
-  getDefaultSession(
+  getDefaultSessionId(
+    request: Empty,
+    callback: (error: ServiceError | null, response: GetDefaultSessionIdResponse) => void,
+  ): ClientUnaryCall;
+  getDefaultSessionId(
     request: Empty,
     metadata: Metadata,
-    callback: (error: ServiceError | null, response: Session) => void,
+    callback: (error: ServiceError | null, response: GetDefaultSessionIdResponse) => void,
   ): ClientUnaryCall;
-  getDefaultSession(
+  getDefaultSessionId(
     request: Empty,
     metadata: Metadata,
     options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: Session) => void,
+    callback: (error: ServiceError | null, response: GetDefaultSessionIdResponse) => void,
   ): ClientUnaryCall;
   sessionWatch(request: SessionWatchRequest, options?: Partial<CallOptions>): ClientReadableStream<SessionWatchEvent>;
   sessionWatch(

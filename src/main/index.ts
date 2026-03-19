@@ -192,39 +192,45 @@ function createWindow(initialSessionId?: string): BrowserWindow {
     try {
       await daemonClient.ensureDaemonRunning()
 
-      let session
-      if (initialSessionId) {
-        // Get the specific session from daemon
-        session = await daemonClient.getSession(initialSessionId)
-        if (session) {
-          console.log('[main] loaded session:', session.id)
-        } else {
-          // Session not found, fall back to default
-          session = await daemonClient.getDefaultSession()
-          console.log('[main] session not found, using default:', session.id)
-        }
-      } else {
-        // Get the default session from daemon (creates one if doesn't exist)
-        session = await daemonClient.getDefaultSession()
-        console.log('[main] got default session:', session.id)
+      let sessionId = initialSessionId
+      if (!sessionId) {
+        sessionId = await daemonClient.getDefaultSessionId()
+        console.log('[main] got default session id:', sessionId)
       }
 
-      // Update window manager with the actual session ID
-      windowManager.updateSessionId(window.id, session.id)
+      // Update window manager with the session ID
+      windowManager.updateSessionId(window.id, sessionId)
 
       // Start watching this session for changes from other windows (cancel previous if HMR reload)
       if (unwatchSession) {
         unwatchSession()
       }
-      unwatchSession = daemonClient.watchSession(session.id, windowUuid, (updatedSession) => {
+      const watch = daemonClient.watchSession(sessionId, windowUuid, (updatedSession) => {
         console.log('[main] session sync received for window', window.id, {
           sessionId: updatedSession.id,
           workspaces: updatedSession.workspaces.map(ws => ({ path: ws.path, metadata: ws.metadata })),
         })
         windowServer.sessionSync(updatedSession)
       })
+      unwatchSession = watch.unsubscribe
 
-      windowServer.appReady(session)
+      try {
+        const session = await watch.initial
+        console.log('[main] loaded session:', session.id)
+        windowServer.appReady(session)
+      } catch {
+        // Session not found (e.g. stale initialSessionId), fall back to default
+        unwatchSession()
+        const defaultId = await daemonClient.getDefaultSessionId()
+        windowManager.updateSessionId(window.id, defaultId)
+        const fallbackWatch = daemonClient.watchSession(defaultId, windowUuid, (updatedSession) => {
+          windowServer.sessionSync(updatedSession)
+        })
+        unwatchSession = fallbackWatch.unsubscribe
+        const session = await fallbackWatch.initial
+        console.log('[main] session not found, using default:', session.id)
+        windowServer.appReady(session)
+      }
     } catch (error) {
       console.error('[main] failed to get session:', error)
       windowServer.appReady(null)
@@ -459,22 +465,6 @@ server.onSessionList(async () => {
   }
 })
 
-server.onSessionGet(async (sessionId) => {
-  if (!useDaemon || !daemonClient) {
-    return { success: false, error: 'Daemon not enabled' }
-  }
-
-  try {
-    await daemonClient.ensureDaemonRunning()
-    const session = await daemonClient.getSession(sessionId)
-    return { success: true, session: session || undefined }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-    console.error('[main] failed to get session:', errorMessage)
-    return { success: false, error: errorMessage }
-  }
-})
-
 server.onSessionDelete(async (sessionId) => {
   if (!useDaemon || !daemonClient) {
     return { success: false, error: 'Daemon not enabled' }
@@ -504,8 +494,8 @@ server.onSessionOpenInNewWindow(async (sessionId) => {
     }
 
     // Verify the session exists
-    const session = await daemonClient.getSession(sessionId)
-    if (!session) {
+    const sessions = await daemonClient.listSessions()
+    if (!sessions.some(s => s.id === sessionId)) {
       return { success: false, error: 'Session not found' }
     }
 
@@ -914,8 +904,15 @@ server.onSshConnect(async (event, config) => {
       // Load session from remote daemon and re-initialize the renderer
       const remoteClient = connectionManager.getClient(config.id)
       try {
-        const session = await remoteClient.getDefaultSession()
-        windowManager.updateSessionId(senderWindow.id, session.id)
+        const remoteSessionId = await remoteClient.getDefaultSessionId()
+        windowManager.updateSessionId(senderWindow.id, remoteSessionId)
+        const remoteWatch = remoteClient.watchSession(remoteSessionId, randomUUID(), (updatedSession) => {
+          const windowInfo = windowManager.getWindow(senderWindow.id)
+          if (windowInfo) {
+            windowInfo.ipcServer.sessionSync(updatedSession)
+          }
+        })
+        const session = await remoteWatch.initial
         const windowInfo = windowManager.getWindow(senderWindow.id)
         if (windowInfo) {
           windowInfo.ipcServer.appReady(session)
@@ -1035,9 +1032,17 @@ app.whenReady().then(async () => {
             // Load session from remote daemon and re-initialize the renderer
             try {
               const remoteClient = connectionManager!.getClient(parsed.id)
-              const session = await remoteClient.getDefaultSession()
-              windowManager.updateSessionId(mainWindow.id, session.id)
-              const windowInfo = windowManager.getWindow(mainWindow.id)
+              const remoteSessionId = await remoteClient.getDefaultSessionId()
+              windowManager.updateSessionId(mainWindow.id, remoteSessionId)
+              const windowId = mainWindow.id
+              const remoteWatch = remoteClient.watchSession(remoteSessionId, randomUUID(), (updatedSession) => {
+                const windowInfo = windowManager.getWindow(windowId)
+                if (windowInfo) {
+                  windowInfo.ipcServer.sessionSync(updatedSession)
+                }
+              })
+              const session = await remoteWatch.initial
+              const windowInfo = windowManager.getWindow(windowId)
               if (windowInfo) {
                 windowInfo.ipcServer.appReady(session)
               }

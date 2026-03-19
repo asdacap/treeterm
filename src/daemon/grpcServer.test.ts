@@ -490,28 +490,6 @@ describe('GrpcServer', () => {
       )
     })
 
-    it('getSession returns session when found', () => {
-      mockSessionStore.getSession.mockReturnValue(mockSession)
-      const call = makeUnaryCall({ sessionId: 'session-1' })
-      const callback = makeCallback()
-
-      capturedServiceImpl.getSession(call, callback)
-
-      expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ id: 'session-1' }))
-    })
-
-    it('getSession returns NOT_FOUND when not found', () => {
-      mockSessionStore.getSession.mockReturnValue(null)
-      const call = makeUnaryCall({ sessionId: 'nonexistent' })
-      const callback = makeCallback()
-
-      capturedServiceImpl.getSession(call, callback)
-
-      expect(callback).toHaveBeenCalledWith(
-        expect.objectContaining({ code: 5 })
-      )
-    })
-
     it('deleteSession deletes and returns empty', () => {
       const call = makeUnaryCall({ sessionId: 'session-1' })
       const callback = makeCallback()
@@ -534,42 +512,76 @@ describe('GrpcServer', () => {
       })
     })
 
-    it('getDefaultSession returns default session', () => {
+    it('getDefaultSessionId returns session id', () => {
       mockSessionStore.getOrCreateDefaultSession.mockReturnValue(mockSession)
       const call = makeUnaryCall({})
       call.metadata = { get: vi.fn().mockReturnValue(['client-1']) }
       const callback = makeCallback()
 
-      capturedServiceImpl.getDefaultSession(call, callback)
+      capturedServiceImpl.getDefaultSessionId(call, callback)
 
       expect(mockSessionStore.getOrCreateDefaultSession).toHaveBeenCalledWith('client-1')
-      expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ id: 'session-1' }))
+      expect(callback).toHaveBeenCalledWith(null, { sessionId: 'session-1' })
     })
   })
 
   describe('session watch', () => {
-    it('registers watcher on sessionWatch', () => {
+    const mockSession = {
+      id: 'session-1',
+      workspaces: [],
+      createdAt: 1000,
+      lastActivity: 2000,
+      attachedClients: 1
+    }
+
+    it('registers watcher on sessionWatch and emits initial state', () => {
+      mockSessionStore.getSession.mockReturnValue(mockSession)
       const mockStream = {
         request: { sessionId: 'session-1', listenerId: 'listener-1' },
         on: vi.fn(),
-        write: vi.fn()
+        write: vi.fn(),
+        destroy: vi.fn()
       }
 
       capturedServiceImpl.sessionWatch(mockStream)
 
+      // Should have emitted initial session state
+      expect(mockStream.write).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'session-1',
+          senderId: ''
+        })
+      )
       // Should have registered on 'cancelled' and 'error' events
       expect(mockStream.on).toHaveBeenCalledWith('cancelled', expect.any(Function))
       expect(mockStream.on).toHaveBeenCalledWith('error', expect.any(Function))
     })
 
+    it('sessionWatch destroys stream when session not found', () => {
+      mockSessionStore.getSession.mockReturnValue(null)
+      const mockStream = {
+        request: { sessionId: 'nonexistent', listenerId: 'listener-1' },
+        on: vi.fn(),
+        write: vi.fn(),
+        destroy: vi.fn()
+      }
+
+      capturedServiceImpl.sessionWatch(mockStream)
+
+      expect(mockStream.destroy).toHaveBeenCalled()
+    })
+
     it('updateSession with senderId broadcasts to watchers', () => {
       // First register a watcher
+      mockSessionStore.getSession.mockReturnValue(mockSession)
       const mockWatchStream = {
         request: { sessionId: 'session-1', listenerId: 'listener-A' },
         on: vi.fn(),
-        write: vi.fn()
+        write: vi.fn(),
+        destroy: vi.fn()
       }
       capturedServiceImpl.sessionWatch(mockWatchStream)
+      mockWatchStream.write.mockClear() // Clear the initial write
 
       // Now update session with a senderId
       const mockSessionResult = {
@@ -600,12 +612,15 @@ describe('GrpcServer', () => {
 
     it('updateSession does not broadcast to sender', () => {
       // Register a watcher with same listenerId as senderId
+      mockSessionStore.getSession.mockReturnValue(mockSession)
       const mockWatchStream = {
         request: { sessionId: 'session-1', listenerId: 'same-id' },
         on: vi.fn(),
-        write: vi.fn()
+        write: vi.fn(),
+        destroy: vi.fn()
       }
       capturedServiceImpl.sessionWatch(mockWatchStream)
+      mockWatchStream.write.mockClear() // Clear the initial write
 
       const mockSessionResult = {
         id: 'session-1',
@@ -629,12 +644,15 @@ describe('GrpcServer', () => {
     })
 
     it('cancelled event cleans up watcher', () => {
+      mockSessionStore.getSession.mockReturnValue(mockSession)
       const mockWatchStream = {
         request: { sessionId: 'session-1', listenerId: 'listener-1' },
         on: vi.fn(),
-        write: vi.fn()
+        write: vi.fn(),
+        destroy: vi.fn()
       }
       capturedServiceImpl.sessionWatch(mockWatchStream)
+      mockWatchStream.write.mockClear() // Clear the initial write
 
       // Trigger cancelled
       const cancelledHandler = mockWatchStream.on.mock.calls.find((c: any[]) => c[0] === 'cancelled')?.[1]
@@ -1000,13 +1018,18 @@ describe('GrpcServer', () => {
         attachedClients: 1
       }
 
+      // Use sessionWatch to test proto conversion (initial event emits converted session)
       mockSessionStore.getSession.mockReturnValue(session)
-      const call = makeUnaryCall({ sessionId: 'session-1' })
-      const callback = makeCallback()
+      const mockStream = {
+        request: { sessionId: 'session-1', listenerId: 'listener-1' },
+        on: vi.fn(),
+        write: vi.fn(),
+        destroy: vi.fn()
+      }
 
-      capturedServiceImpl.getSession(call, callback)
+      capturedServiceImpl.sessionWatch(mockStream)
 
-      const result = callback.mock.calls[0][1]
+      const result = mockStream.write.mock.calls[0][0].session
       expect(result.workspaces[0].appStates['tab-1'].state).toBeInstanceOf(Buffer)
       const parsed = JSON.parse(result.workspaces[0].appStates['tab-1'].state.toString('utf-8'))
       expect(parsed).toEqual({ ptyId: 'pty-1' })

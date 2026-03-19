@@ -13,10 +13,9 @@ const mocks = vi.hoisted(() => {
     execStream: vi.fn(),
     createSession: vi.fn(),
     updateSession: vi.fn(),
-    getSession: vi.fn(),
     deleteSession: vi.fn(),
     listSessions: vi.fn(),
-    getDefaultSession: vi.fn(),
+    getDefaultSessionId: vi.fn(),
     sessionWatch: vi.fn(),
     readDirectory: vi.fn(),
     readFile: vi.fn(),
@@ -375,27 +374,6 @@ describe('GrpcDaemonClient', () => {
       expect(result.id).toBe('session-1')
     })
 
-    it('getSession resolves with session on success', async () => {
-      mockClientInstance.getSession.mockImplementation((req: any, cb: any) => cb(null, mockProtoSession))
-      const result = await client.getSession('session-1')
-      expect(result?.id).toBe('session-1')
-    })
-
-    it('getSession returns null on NOT_FOUND', async () => {
-      mockClientInstance.getSession.mockImplementation((req: any, cb: any) =>
-        cb({ code: 5, message: 'not found' })
-      )
-      const result = await client.getSession('nonexistent')
-      expect(result).toBeNull()
-    })
-
-    it('getSession rejects on other errors', async () => {
-      mockClientInstance.getSession.mockImplementation((req: any, cb: any) =>
-        cb({ code: 13, message: 'internal error' })
-      )
-      await expect(client.getSession('session-1')).rejects.toThrow('internal error')
-    })
-
     it('deleteSession resolves on success', async () => {
       mockClientInstance.deleteSession.mockImplementation((req: any, cb: any) => cb(null))
       await expect(client.deleteSession('session-1')).resolves.toBeUndefined()
@@ -416,25 +394,24 @@ describe('GrpcDaemonClient', () => {
       expect(result).toEqual([])
     })
 
-    it('getDefaultSession resolves with session', async () => {
-      mockClientInstance.getDefaultSession.mockImplementation((req: any, cb: any) => cb(null, mockProtoSession))
-      const result = await client.getDefaultSession()
-      expect(result.id).toBe('session-1')
+    it('getDefaultSessionId resolves with session id', async () => {
+      mockClientInstance.getDefaultSessionId.mockImplementation((req: any, cb: any) => cb(null, { sessionId: 'session-1' }))
+      const result = await client.getDefaultSessionId()
+      expect(result).toBe('session-1')
     })
 
-    it('getDefaultSession rejects on error', async () => {
-      mockClientInstance.getDefaultSession.mockImplementation((req: any, cb: any) => cb({ message: 'fail' }))
-      await expect(client.getDefaultSession()).rejects.toThrow('fail')
+    it('getDefaultSessionId rejects on error', async () => {
+      mockClientInstance.getDefaultSessionId.mockImplementation((req: any, cb: any) => cb({ message: 'fail' }))
+      await expect(client.getDefaultSessionId()).rejects.toThrow('fail')
     })
 
     it('not connected throws for session methods', async () => {
       client.disconnect()
       await expect(client.createSession([])).rejects.toThrow('Not connected')
       await expect(client.updateSession('s', [])).rejects.toThrow('Not connected')
-      await expect(client.getSession('s')).rejects.toThrow('Not connected')
       await expect(client.deleteSession('s')).rejects.toThrow('Not connected')
       await expect(client.listSessions()).rejects.toThrow('Not connected')
-      await expect(client.getDefaultSession()).rejects.toThrow('Not connected')
+      await expect(client.getDefaultSessionId()).rejects.toThrow('Not connected')
     })
   })
 
@@ -477,12 +454,12 @@ describe('GrpcDaemonClient', () => {
         attachedClients: 2
       }
 
-      mockClientInstance.getSession.mockImplementation((req: any, cb: any) => cb(null, protoSession))
-      const session = await client.getSession('session-1')
+      mockClientInstance.createSession.mockImplementation((req: any, cb: any) => cb(null, protoSession))
+      const session = await client.createSession([])
       expect(session).not.toBeNull()
-      expect(session!.workspaces[0].appStates['tab-1'].state).toEqual({ ptyId: 'pty-1' })
-      expect(session!.workspaces[0].parentId).toBe('parent-1')
-      expect(session!.workspaces[0].gitBranch).toBe('main')
+      expect(session.workspaces[0].appStates['tab-1'].state).toEqual({ ptyId: 'pty-1' })
+      expect(session.workspaces[0].parentId).toBe('parent-1')
+      expect(session.workspaces[0].gitBranch).toBe('main')
     })
 
     it('convertFromProtoWorkspace handles null/undefined optional fields', async () => {
@@ -511,12 +488,12 @@ describe('GrpcDaemonClient', () => {
         attachedClients: 0
       }
 
-      mockClientInstance.getSession.mockImplementation((req: any, cb: any) => cb(null, protoSession))
-      const session = await client.getSession('session-1')
-      expect(session!.workspaces[0].parentId).toBeNull()
-      expect(session!.workspaces[0].gitBranch).toBeNull()
-      expect(session!.workspaces[0].gitRootPath).toBeNull()
-      expect(session!.workspaces[0].activeTabId).toBeNull()
+      mockClientInstance.createSession.mockImplementation((req: any, cb: any) => cb(null, protoSession))
+      const session = await client.createSession([])
+      expect(session.workspaces[0].parentId).toBeNull()
+      expect(session.workspaces[0].gitBranch).toBeNull()
+      expect(session.workspaces[0].gitRootPath).toBeNull()
+      expect(session.workspaces[0].activeTabId).toBeNull()
     })
   })
 
@@ -602,25 +579,26 @@ describe('GrpcDaemonClient', () => {
       await client.connect()
     })
 
-    it('returns unsubscribe function', () => {
+    it('returns initial promise and unsubscribe', () => {
       const mockStream = { on: vi.fn(), cancel: vi.fn() }
       mockClientInstance.sessionWatch.mockReturnValue(mockStream)
-      const unsub = client.watchSession('session-1', 'listener-1', vi.fn())
-      expect(typeof unsub).toBe('function')
+      const result = client.watchSession('session-1', 'listener-1', vi.fn())
+      expect(result.initial).toBeInstanceOf(Promise)
+      expect(typeof result.unsubscribe).toBe('function')
     })
 
     it('unsubscribe cancels stream', () => {
       const mockStream = { on: vi.fn(), cancel: vi.fn() }
       mockClientInstance.sessionWatch.mockReturnValue(mockStream)
-      const unsub = client.watchSession('session-1', 'listener-1', vi.fn())
-      unsub()
+      const result = client.watchSession('session-1', 'listener-1', vi.fn())
+      result.unsubscribe()
       expect(mockStream.cancel).toHaveBeenCalled()
     })
 
-    it('returns noop when not connected', () => {
+    it('returns rejected initial when not connected', async () => {
       client.disconnect()
-      const unsub = client.watchSession('session-1', 'listener-1', vi.fn())
-      expect(() => unsub()).not.toThrow()
+      const result = client.watchSession('session-1', 'listener-1', vi.fn())
+      await expect(result.initial).rejects.toThrow('Not connected')
     })
   })
 
