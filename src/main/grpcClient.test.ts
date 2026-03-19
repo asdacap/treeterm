@@ -162,63 +162,53 @@ describe('GrpcDaemonClient', () => {
       await expect(client.createPtySession({ cwd: '/home' })).rejects.toThrow('Not connected')
     })
 
-    it('attachPtySession opens stream and resolves with scrollback', async () => {
-      const mockStream = makeMockSessionStream()
-      mockClientInstance.ptyStream.mockReturnValue(mockStream)
-
-      // Simulate the stream emitting scrollback data on the 'data' event
-      mockStream.on.mockImplementation((event: string, handler: Function) => {
-        if (event === 'data') {
-          // Send scrollback immediately (server sends before live data)
-          queueMicrotask(() => {
-            handler({ data: { data: Buffer.from('line1') } })
-          })
-        }
-        return mockStream
-      })
-
-      const result = await client.attachPtySession('pty-1')
-      expect(result.scrollback).toEqual(['line1'])
-      // Should have sent a start message
-      expect(mockStream.write).toHaveBeenCalledWith({ start: { sessionId: 'pty-1' } })
-    })
-
-    it('writeToPtySession writes to session stream', async () => {
-      // First attach to create a session stream
+    it('openPtyStream creates a PtyStream with handle and sessionId', () => {
       const mockStream = makeMockSessionStream()
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
       mockStream.on.mockReturnValue(mockStream)
 
-      await client.attachPtySession('pty-1')
+      const ptyStream = client.openPtyStream('pty-1')
+      expect(ptyStream.handle).toBeDefined()
+      expect(ptyStream.sessionId).toBe('pty-1')
+      // Should have sent a start message
+      expect(mockStream.write).toHaveBeenCalledWith({ start: { sessionId: 'pty-1' } })
+    })
 
-      client.writeToPtySession('pty-1', 'hello')
+    it('PtyStream.write sends write message to stream', () => {
+      const mockStream = makeMockSessionStream()
+      mockClientInstance.ptyStream.mockReturnValue(mockStream)
+      mockStream.on.mockReturnValue(mockStream)
+
+      const ptyStream = client.openPtyStream('pty-1')
+      ptyStream.write('hello')
       expect(mockStream.write).toHaveBeenCalledWith({
         write: { data: Buffer.from('hello', 'utf-8') }
       })
     })
 
-    it('writeToPtySession does not throw when no session stream', () => {
-      expect(() => client.writeToPtySession('pty-1', 'hello')).not.toThrow()
-    })
-
-    it('resizePtySession writes resize to session stream', async () => {
+    it('PtyStream.resize sends resize message to stream', () => {
       const mockStream = makeMockSessionStream()
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
       mockStream.on.mockReturnValue(mockStream)
 
-      await client.attachPtySession('pty-1')
-
-      client.resizePtySession('pty-1', 120, 40)
+      const ptyStream = client.openPtyStream('pty-1')
+      ptyStream.resize(120, 40)
       expect(mockStream.write).toHaveBeenCalledWith({
         resize: { cols: 120, rows: 40 }
       })
     })
 
-    it('resizePtySession does not throw when no session stream', () => {
-      expect(() => client.resizePtySession('pty-1', 80, 24)).not.toThrow()
+    it('PtyStream.close ends the stream', () => {
+      const mockStream = makeMockSessionStream()
+      mockClientInstance.ptyStream.mockReturnValue(mockStream)
+      mockStream.on.mockReturnValue(mockStream)
+
+      const ptyStream = client.openPtyStream('pty-1')
+      ptyStream.close()
+      expect(mockStream.end).toHaveBeenCalled()
     })
 
-    it('killPtySession resolves and cleans up listeners', async () => {
+    it('killPtySession resolves on success', async () => {
       mockClientInstance.killPty.mockImplementation((req: any, cb: any) => cb(null))
       await client.killPtySession('pty-1')
     })
@@ -243,43 +233,10 @@ describe('GrpcDaemonClient', () => {
     })
   })
 
-  describe('listener management', () => {
+  describe('PtyStream callbacks', () => {
     beforeEach(async () => {
       connectClient(client)
       await client.connect()
-    })
-
-    it('onPtySessionData registers listener on session stream', async () => {
-      const mockStream = makeMockSessionStream()
-      mockClientInstance.ptyStream.mockReturnValue(mockStream)
-      mockStream.on.mockReturnValue(mockStream)
-
-      await client.attachPtySession('pty-1')
-
-      const cb = vi.fn()
-      const unsub = client.onPtySessionData('pty-1', cb)
-      expect(typeof unsub).toBe('function')
-      unsub()
-    })
-
-    it('onPtySessionData returns noop when no session stream', () => {
-      const cb = vi.fn()
-      const unsub = client.onPtySessionData('nonexistent', cb)
-      expect(typeof unsub).toBe('function')
-      unsub() // should not throw
-    })
-
-    it('onPtySessionExit registers listener on session stream', async () => {
-      const mockStream = makeMockSessionStream()
-      mockClientInstance.ptyStream.mockReturnValue(mockStream)
-      mockStream.on.mockReturnValue(mockStream)
-
-      await client.attachPtySession('pty-1')
-
-      const cb = vi.fn()
-      const unsub = client.onPtySessionExit('pty-1', cb)
-      expect(typeof unsub).toBe('function')
-      unsub()
     })
 
     it('onDisconnect registers listener and returns unsubscribe', () => {
@@ -289,7 +246,7 @@ describe('GrpcDaemonClient', () => {
       unsub()
     })
 
-    it('session stream data dispatches to data listeners', async () => {
+    it('PtyStream.onData receives data from stream', () => {
       const mockStream = makeMockSessionStream()
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
 
@@ -299,17 +256,16 @@ describe('GrpcDaemonClient', () => {
         return mockStream
       })
 
-      await client.attachPtySession('pty-1')
-
+      const ptyStream = client.openPtyStream('pty-1')
       const cb = vi.fn()
-      client.onPtySessionData('pty-1', cb)
+      ptyStream.onData(cb)
 
-      // The first data handler is from openSessionStream (dispatches to listeners)
+      // Simulate stream data event
       dataHandlers[0]?.({ data: { data: Buffer.from('hello') } })
       expect(cb).toHaveBeenCalledWith('hello')
     })
 
-    it('session stream exit dispatches to exit listeners', async () => {
+    it('PtyStream.onExit receives exit from stream', () => {
       const mockStream = makeMockSessionStream()
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
 
@@ -319,12 +275,11 @@ describe('GrpcDaemonClient', () => {
         return mockStream
       })
 
-      await client.attachPtySession('pty-1')
-
+      const ptyStream = client.openPtyStream('pty-1')
       const cb = vi.fn()
-      client.onPtySessionExit('pty-1', cb)
+      ptyStream.onExit(cb)
 
-      // The first data handler is from openSessionStream (dispatches to listeners)
+      // Simulate stream exit event
       dataHandlers[0]?.({ exit: { exitCode: 0, signal: undefined } })
       expect(cb).toHaveBeenCalledWith(0, undefined)
     })

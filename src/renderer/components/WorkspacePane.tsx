@@ -419,7 +419,7 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                     workspacePath={activeWorkspace.path}
                     onRun={async (ptyId, actionId) => {
                       if (activeWorkspaceId) {
-                        const tabId = addTabWithState(activeWorkspaceId, 'terminal', { ptyId, keepOnExit: true })
+                        const tabId = addTabWithState(activeWorkspaceId, 'terminal', { ptyId, ptyHandle: null, keepOnExit: true })
                         updateTabTitle(activeWorkspaceId, tabId, actionId)
                       }
                     }}

@@ -14,7 +14,8 @@ export function createTerminalApplication(startByDefault: boolean, deps: Termina
     icon: '>',
 
     createInitialState: () => ({
-      ptyId: null
+      ptyId: null,
+      ptyHandle: null
     }),
 
     cleanup: async (tab: Tab, _workspace: Workspace) => {
@@ -53,7 +54,8 @@ export function createTerminalVariant(instance: TerminalInstance, deps: Terminal
     icon: instance.icon,
 
     createInitialState: () => ({
-      ptyId: null
+      ptyId: null,
+      ptyHandle: null
     }),
 
     cleanup: async (tab: Tab, _workspace: Workspace) => {

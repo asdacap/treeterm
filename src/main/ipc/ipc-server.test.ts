@@ -164,32 +164,6 @@ describe('IpcServer', () => {
   })
 
   describe('on registration (send pattern)', () => {
-    it('onPtyWrite registers handler on pty:write channel', () => {
-      const handler = vi.fn()
-      server.onPtyWrite(handler)
-      expect(mockOn).toHaveBeenCalledWith('pty:write', expect.any(Function))
-    })
-
-    it('onPtyWrite wrapper forwards args to handler', () => {
-      const handler = vi.fn()
-      server.onPtyWrite(handler)
-      const wrapper = mockOn.mock.calls[0][1]
-      wrapper({}, 'pty-123', 'data')
-      expect(handler).toHaveBeenCalledWith('pty-123', 'data')
-    })
-
-    it('onPtyResize registers handler on pty:resize channel', () => {
-      const handler = vi.fn()
-      server.onPtyResize(handler)
-      expect(mockOn).toHaveBeenCalledWith('pty:resize', expect.any(Function))
-    })
-
-    it('onPtyKill registers handler on pty:kill channel', () => {
-      const handler = vi.fn()
-      server.onPtyKill(handler)
-      expect(mockOn).toHaveBeenCalledWith('pty:kill', expect.any(Function))
-    })
-
     it('onAppCloseConfirmed registers handler on app:close-confirmed channel', () => {
       const handler = vi.fn()
       server.onAppCloseConfirmed(handler)

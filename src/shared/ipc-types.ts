@@ -34,11 +34,11 @@ export interface IpcRequests {
   // PTY operations
   ptyCreate: {
     params: [cwd: string, sandbox?: SandboxConfig, startupCommand?: string]
-    result: string | null
+    result: { sessionId: string; handle: string } | null
   }
   ptyAttach: {
     params: [sessionId: string]
-    result: { success: boolean; scrollback?: string[]; exitCode?: number; error?: string }
+    result: { success: boolean; handle?: string; scrollback?: string[]; exitCode?: number; error?: string }
   }
   ptyList: {
     params: []
@@ -302,13 +302,13 @@ export interface IpcRequests {
 
 export interface IpcSends {
   ptyWrite: {
-    params: [id: string, data: string]
+    params: [handle: string, data: string]
   }
   ptyResize: {
-    params: [id: string, cols: number, rows: number]
+    params: [handle: string, cols: number, rows: number]
   }
   ptyKill: {
-    params: [id: string]
+    params: [sessionId: string]
   }
   appCloseConfirmed: {
     params: []
@@ -322,10 +322,10 @@ export interface IpcSends {
 
 export interface IpcEvents {
   ptyData: {
-    params: [id: string, data: string]
+    params: [handle: string, data: string]
   }
   ptyExit: {
-    params: [id: string, exitCode: number]
+    params: [handle: string, exitCode: number]
   }
   settingsOpen: {
     params: []

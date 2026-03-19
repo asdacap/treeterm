@@ -41,11 +41,11 @@ describe('findRunningHarness', () => {
 
   it('returns ptyId and tabId for running harness', () => {
     const tabs = [makeTab(), makeHarnessTab('pty-123', 'my-harness-tab')]
-    expect(findRunningHarness(tabs)).toEqual({ ptyId: 'pty-123', tabId: 'my-harness-tab' })
+    expect(findRunningHarness(tabs)).toEqual({ ptyId: 'pty-123', ptyHandle: null, tabId: 'my-harness-tab' })
   })
 
   it('returns first when multiple running harnesses exist', () => {
     const tabs = [makeHarnessTab('pty-first', 'tab-first'), makeHarnessTab('pty-second', 'tab-second')]
-    expect(findRunningHarness(tabs)).toEqual({ ptyId: 'pty-first', tabId: 'tab-first' })
+    expect(findRunningHarness(tabs)).toEqual({ ptyId: 'pty-first', ptyHandle: null, tabId: 'tab-first' })
   })
 })

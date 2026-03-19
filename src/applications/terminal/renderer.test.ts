@@ -63,7 +63,7 @@ describe('Terminal Renderer', () => {
         const app = createTerminalApplication(true, mockDeps)
         const state = app.createInitialState()
 
-        expect(state).toEqual({ ptyId: null })
+        expect(state).toEqual({ ptyId: null, ptyHandle: null })
       })
     })
 
@@ -240,7 +240,7 @@ describe('Terminal Renderer', () => {
     it('can create initial state', () => {
       const app = createTerminalApplication(true, mockDeps)
       const state = app.createInitialState()
-      expect(state).toEqual({ ptyId: null })
+      expect(state).toEqual({ ptyId: null, ptyHandle: null })
     })
 
     it('can render Terminal component', () => {
@@ -341,7 +341,7 @@ describe('Terminal Renderer', () => {
         const variant = createTerminalVariant(mockInstance, mockDeps)
         const state = variant.createInitialState()
 
-        expect(state).toEqual({ ptyId: null })
+        expect(state).toEqual({ ptyId: null, ptyHandle: null })
       })
     })
 

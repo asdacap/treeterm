@@ -76,7 +76,8 @@ export interface ApplicationRenderProps {
 
 // Type-specific state interfaces (for internal use within applications)
 export interface TerminalState {
-  ptyId: string | null
+  ptyId: string | null       // daemon sessionId — persisted for reconnection
+  ptyHandle: string | null   // ephemeral stream handle — used for write/resize/onData/onExit
   keepOnExit?: boolean
 }
 
@@ -247,15 +248,15 @@ export interface ConflictCheckResult {
 }
 
 export interface TerminalApi {
-  create: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
-  attach: (sessionId: string) => Promise<{ success: boolean; scrollback?: string[]; exitCode?: number; error?: string }>
+  create: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<{ sessionId: string; handle: string } | null>
+  attach: (sessionId: string) => Promise<{ success: boolean; handle?: string; scrollback?: string[]; exitCode?: number; error?: string }>
   list: () => Promise<SessionInfo[]>
-  write: (id: string, data: string) => void
-  resize: (id: string, cols: number, rows: number) => void
-  kill: (id: string) => void
+  write: (handle: string, data: string) => void
+  resize: (handle: string, cols: number, rows: number) => void
+  kill: (sessionId: string) => void
   isAlive: (id: string) => Promise<boolean>
-  onData: (id: string, callback: (data: string) => void) => () => void
-  onExit: (id: string, callback: (exitCode: number) => void) => () => void
+  onData: (handle: string, callback: (data: string) => void) => () => void
+  onExit: (handle: string, callback: (exitCode: number) => void) => () => void
   onNewTerminal: (callback: () => void) => () => void
   onShowSessions: (callback: () => void) => () => void
   onActiveProcessesOpen: (callback: () => void) => () => void

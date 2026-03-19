@@ -715,24 +715,6 @@ export class IpcServer {
 
   // ==================== Fire-and-Forget Handlers (send/on pattern) ====================
 
-  onPtyWrite(handler: (...args: IpcSends['ptyWrite']['params']) => void): void {
-    ipcMain.on(CHANNELS.ptyWrite, (_event: IpcMainEvent, ...args: unknown[]) =>
-      handler(...(args as IpcSends['ptyWrite']['params']))
-    )
-  }
-
-  onPtyResize(handler: (...args: IpcSends['ptyResize']['params']) => void): void {
-    ipcMain.on(CHANNELS.ptyResize, (_event: IpcMainEvent, ...args: unknown[]) =>
-      handler(...(args as IpcSends['ptyResize']['params']))
-    )
-  }
-
-  onPtyKill(handler: (...args: IpcSends['ptyKill']['params']) => void): void {
-    ipcMain.on(CHANNELS.ptyKill, (_event: IpcMainEvent, ...args: unknown[]) =>
-      handler(...(args as IpcSends['ptyKill']['params']))
-    )
-  }
-
   onAppCloseConfirmed(handler: (event: IpcMainEvent) => void): void {
     ipcMain.on(CHANNELS.appCloseConfirmed, (event: IpcMainEvent) => handler(event))
   }

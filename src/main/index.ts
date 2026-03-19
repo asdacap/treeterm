@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, shell, ipcMain } from 'electron'
 import { execSync } from 'child_process'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
-import { GrpcDaemonClient } from './grpcClient'
+import { GrpcDaemonClient, PtyStream } from './grpcClient'
 import { IpcServer } from './ipc/ipc-server'
 import { GitClient } from './git'
 import { createRunActionsClient, RunActionsClient } from './runActions'
@@ -33,6 +33,9 @@ let connectionManager: ConnectionManager | null = null
 let gitClient: GitClient | null = null
 let runActionsClient: RunActionsClient | null = null
 let useDaemon = true // Always use daemon mode
+
+// Simple object storage — each entry is an independent terminal's stream.
+const ptyStreams = new Map<string, PtyStream>()
 
 // Helper: get the daemon client for a given window (based on its connectionId)
 function getClientForWindow(webContentsId: number): GrpcDaemonClient {
@@ -253,31 +256,19 @@ ipcMain.handle('pty:create', async (event, cwd: string, sandbox?: unknown, start
   if (!daemonClient) throw new Error('Daemon not initialized')
 
   try {
-    await daemonClient.ensureDaemonRunning()
-    const ptySessionId = await daemonClient.createPtySession({ cwd, sandbox: sandbox as SandboxConfig | undefined, startupCommand })
+    const client = getClientForWindow(event.sender.id)
+    await client.ensureDaemonRunning()
+    const sessionId = await client.createPtySession({ cwd, sandbox: sandbox as SandboxConfig | undefined, startupCommand })
+    const ptyStream = client.openPtyStream(sessionId)
+    ptyStreams.set(ptyStream.handle, ptyStream)
 
-    // Capture the sender window ID in the closure so listeners always route
-    // to the window that created this PTY session (prevents double output
-    // when a different window re-attaches and overwrites a shared map).
-    const senderWindow = BrowserWindow.fromWebContents(event.sender)
-    const windowId = senderWindow?.id
-
-    // Route PTY data to the owning window
-    daemonClient.onPtySessionData(ptySessionId, (data) => {
-      if (windowId) {
-        const windowInfo = windowManager.getWindow(windowId)
-        windowInfo?.ipcServer.ptyData(ptySessionId, data)
-      }
+    ptyStream.onData(data => event.sender.send('pty:data', ptyStream.handle, data))
+    ptyStream.onExit(exitCode => {
+      event.sender.send('pty:exit', ptyStream.handle, exitCode)
+      ptyStreams.delete(ptyStream.handle)
     })
 
-    daemonClient.onPtySessionExit(ptySessionId, (exitCode) => {
-      if (windowId) {
-        const windowInfo = windowManager.getWindow(windowId)
-        windowInfo?.ipcServer.ptyExit(ptySessionId, exitCode)
-      }
-    })
-
-    return ptySessionId
+    return { sessionId, handle: ptyStream.handle }
   } catch (error) {
     console.error('[main] failed to create PTY session via daemon:', error)
     return null
@@ -290,29 +281,20 @@ ipcMain.handle('pty:attach', async (event, sessionId: string) => {
   }
 
   try {
-    await daemonClient.ensureDaemonRunning()
-    const result = await daemonClient.attachPtySession(sessionId)
+    const client = getClientForWindow(event.sender.id)
+    await client.ensureDaemonRunning()
+    const ptyStream = client.openPtyStream(sessionId)
+    ptyStreams.set(ptyStream.handle, ptyStream)
 
-    // Capture the sender window ID in the closure (same pattern as pty:create)
-    const senderWindow = BrowserWindow.fromWebContents(event.sender)
-    const windowId = senderWindow?.id
+    const { scrollback, exitCode } = await ptyStream.collectScrollback()
 
-    // Set up data forwarding for this session
-    daemonClient.onPtySessionData(sessionId, (data) => {
-      if (windowId) {
-        const windowInfo = windowManager.getWindow(windowId)
-        windowInfo?.ipcServer.ptyData(sessionId, data)
-      }
+    ptyStream.onData(data => event.sender.send('pty:data', ptyStream.handle, data))
+    ptyStream.onExit(exitCode => {
+      event.sender.send('pty:exit', ptyStream.handle, exitCode)
+      ptyStreams.delete(ptyStream.handle)
     })
 
-    daemonClient.onPtySessionExit(sessionId, (exitCode) => {
-      if (windowId) {
-        const windowInfo = windowManager.getWindow(windowId)
-        windowInfo?.ipcServer.ptyExit(sessionId, exitCode)
-      }
-    })
-
-    return { success: true, scrollback: result.scrollback, exitCode: result.exitCode }
+    return { success: true, handle: ptyStream.handle, scrollback, exitCode }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     console.error('[main] failed to attach to PTY session:', errorMessage)
@@ -332,19 +314,26 @@ server.onPtyList(async () => {
   }
 })
 
-server.onPtyWrite((id, data) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  daemonClient.writeToPtySession(id, data)
+ipcMain.on('pty:write', (_event, handle: string, data: string) => {
+  ptyStreams.get(handle)?.write(data)
 })
 
-server.onPtyResize((id, cols, rows) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  daemonClient.resizePtySession(id, cols, rows)
+ipcMain.on('pty:resize', (_event, handle: string, cols: number, rows: number) => {
+  ptyStreams.get(handle)?.resize(cols, rows)
 })
 
-server.onPtyKill(async (id) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  await daemonClient.killPtySession(id)
+ipcMain.on('pty:kill', (_event, sessionId: string) => {
+  if (!daemonClient) return
+  // Close any PtyStreams for this session
+  for (const [handle, stream] of ptyStreams) {
+    if (stream.sessionId === sessionId) {
+      stream.close()
+      ptyStreams.delete(handle)
+    }
+  }
+  daemonClient.killPtySession(sessionId).catch(error => {
+    console.error('[main] failed to kill PTY:', error)
+  })
 })
 
 server.onPtyIsAlive(async (id) => {
@@ -974,7 +963,7 @@ app.whenReady().then(async () => {
 
   registerSTTHandlers(server)
   mainWindow = createWindow()
-  server.setWindow(mainWindow)  // Set window on global server for PTY data forwarding
+  server.setWindow(mainWindow)
   createApplicationMenu(mainWindow, server, quitAndKillDaemon)
 
   // Handle --ssh startup argument
@@ -1022,7 +1011,7 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       mainWindow = createWindow()
-      server.setWindow(mainWindow)  // Set window on global server for PTY data forwarding
+      server.setWindow(mainWindow)
       createApplicationMenu(mainWindow, server, quitAndKillDaemon)
     }
   })

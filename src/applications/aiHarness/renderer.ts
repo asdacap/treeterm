@@ -16,6 +16,7 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
     createInitialState: () => {
       return {
         ptyId: null,
+        ptyHandle: null,
         sandbox: {
           enabled: instance.enableSandbox,
           allowNetwork: instance.allowNetwork,

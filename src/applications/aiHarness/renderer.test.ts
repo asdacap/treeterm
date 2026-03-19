@@ -80,6 +80,7 @@ describe('AI Harness Renderer', () => {
 
         expect(state).toEqual({
           ptyId: null,
+          ptyHandle: null,
           sandbox: {
             enabled: true,
             allowNetwork: false,

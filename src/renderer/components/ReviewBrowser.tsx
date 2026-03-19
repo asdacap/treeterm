@@ -104,15 +104,15 @@ export default function ReviewBrowser({
   }, [workspacePath, parentWorkspace])
 
   const handlePromptCommit = useCallback(() => {
-    if (runningHarness) {
-      terminalApi.write(runningHarness.ptyId, 'commit\r')
+    if (runningHarness?.ptyHandle) {
+      terminalApi.write(runningHarness.ptyHandle, 'commit\r')
       setActiveTab(workspaceId, runningHarness.tabId)
     }
   }, [runningHarness, terminalApi, setActiveTab, workspaceId])
 
   const handlePromptRebase = useCallback(() => {
-    if (runningHarness && parentWorkspace?.gitBranch) {
-      terminalApi.write(runningHarness.ptyId, `rebase with ${parentWorkspace.gitBranch}\r`)
+    if (runningHarness?.ptyHandle && parentWorkspace?.gitBranch) {
+      terminalApi.write(runningHarness.ptyHandle, `rebase with ${parentWorkspace.gitBranch}\r`)
       setActiveTab(workspaceId, runningHarness.tabId)
     }
   }, [runningHarness, parentWorkspace?.gitBranch, terminalApi, setActiveTab, workspaceId])

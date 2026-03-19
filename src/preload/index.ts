@@ -125,10 +125,10 @@ client.onSshOutput((connectionId, line) => {
 contextBridge.exposeInMainWorld('electron', {
   platform: process.platform,
   terminal: {
-    create: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string): Promise<string | null> => {
+    create: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string): Promise<{ sessionId: string; handle: string } | null> => {
       return client.ptyCreate(cwd, sandbox, startupCommand)
     },
-    attach: (sessionId: string): Promise<{ success: boolean; scrollback?: string[]; error?: string }> => {
+    attach: (sessionId: string): Promise<{ success: boolean; handle?: string; scrollback?: string[]; exitCode?: number; error?: string }> => {
       return client.ptyAttach(sessionId)
     },
     list: (): Promise<SessionInfo[]> => {
