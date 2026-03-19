@@ -71,7 +71,7 @@ export class ConnectionManager {
     }
   }
 
-  async connectRemote(config: SSHConnectionConfig): Promise<ConnectionInfo> {
+  async connectRemote(config: SSHConnectionConfig, onOutput?: (line: string) => void): Promise<ConnectionInfo> {
     // Check if already connected
     const existing = this.connections.get(config.id)
     if (existing && existing.status === 'connected') {
@@ -84,6 +84,11 @@ export class ConnectionManager {
 
     const tunnel = new SSHTunnel(config)
     const target: ConnectionTarget = { type: 'remote', config }
+
+    // Register output listener before connect so bootstrap output is forwarded live
+    if (onOutput) {
+      tunnel.onOutput(onOutput)
+    }
 
     // Set initial connecting state
     this.connections.set(config.id, {

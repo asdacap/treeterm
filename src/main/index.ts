@@ -896,19 +896,14 @@ server.onAppGetWindowUuid((event) => {
 // SSH IPC Handlers
 server.onSshConnect(async (config) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
-  const info = await connectionManager.connectRemote(config)
 
-  // Set up output forwarding to all windows
-  const tunnel = connectionManager.getSSHTunnel(config.id)
-  if (tunnel) {
-    tunnel.onOutput((line) => {
-      for (const win of windowManager.getAllWindows()) {
-        win.ipcServer.sshOutput(config.id, line)
-      }
-    })
+  const forwardOutput = (line: string) => {
+    for (const win of windowManager.getAllWindows()) {
+      win.ipcServer.sshOutput(config.id, line)
+    }
   }
 
-  return info
+  return connectionManager.connectRemote(config, forwardOutput)
 })
 
 server.onSshDisconnect(async (connectionId) => {

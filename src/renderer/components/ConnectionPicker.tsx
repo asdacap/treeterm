@@ -44,6 +44,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
 
     setConnecting(true)
     setError(null)
+    setSelectedOutputId(config.id)
     try {
       await connectRemote(config)
       // Save connection for future use
@@ -65,6 +66,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
   const handleConnectSaved = async (config: SSHConnectionConfig) => {
     setConnecting(true)
     setError(null)
+    setSelectedOutputId(config.id)
     try {
       await connectRemote(config)
     } catch (err) {
@@ -149,9 +151,17 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
                 </div>
               </div>
             ))}
-            {selectedOutputId && (
+            {selectedOutputId && remoteConnections.some(c => c.id === selectedOutputId) && (
               <SSHOutputInline connectionId={selectedOutputId} />
             )}
+          </div>
+        )}
+
+        {/* Output for connection in progress (not yet in active connections) */}
+        {selectedOutputId && !remoteConnections.some(c => c.id === selectedOutputId) && (
+          <div style={{ marginBottom: 16 }}>
+            <h3 style={{ fontSize: 14, color: '#a6adc8', marginBottom: 8 }}>Connection Output</h3>
+            <SSHOutputInline connectionId={selectedOutputId} />
           </div>
         )}
 
@@ -247,8 +257,24 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
   )
 }
 
+const EMPTY_OUTPUT: string[] = []
+
 function SSHOutputInline({ connectionId }: { connectionId: string }) {
-  const sshOutput = useAppStore(s => s.sshOutput[connectionId] || [])
+  const sshOutput = useAppStore(s => s.sshOutput[connectionId] ?? EMPTY_OUTPUT)
+  const ssh = useAppStore(s => s.ssh)
+
+  // Fetch buffered output on mount in case push events were missed
+  useEffect(() => {
+    ssh.getOutput(connectionId).then((lines) => {
+      if (lines.length > 0) {
+        useAppStore.setState((state) => {
+          const existing = state.sshOutput[connectionId] || []
+          if (existing.length >= lines.length) return state
+          return { sshOutput: { ...state.sshOutput, [connectionId]: lines } }
+        })
+      }
+    }).catch(() => {})
+  }, [connectionId, ssh])
 
   return (
     <div style={{

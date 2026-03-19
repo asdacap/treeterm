@@ -85,6 +85,7 @@ export class SSHTunnel {
   }
 
   private appendOutput(line: string): void {
+    console.log(line)
     this.outputBuffer.push(line)
     // Keep buffer bounded
     if (this.outputBuffer.length > 1000) {
@@ -120,6 +121,7 @@ export class SSHTunnel {
       sshArgs.push(bootstrapScript)
 
       this.appendOutput(`[ssh] Bootstrapping remote daemon on ${this.config.user}@${this.config.host}...`)
+      this.appendOutput(`[ssh] $ ssh ${sshArgs.join(' ')}`)
 
       const proc = spawn('ssh', sshArgs, { stdio: ['pipe', 'pipe', 'pipe'] })
       let stdout = ''
@@ -179,6 +181,7 @@ export class SSHTunnel {
     )
 
     this.appendOutput(`[ssh] Starting tunnel: ${this.localSocketPath} -> ${remoteSocketPath}`)
+    this.appendOutput(`[ssh] $ ssh ${sshArgs.join(' ')}`)
 
     this.sshProcess = spawn('ssh', sshArgs, { stdio: ['pipe', 'pipe', 'pipe'] })
 

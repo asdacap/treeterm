@@ -6,9 +6,6 @@ const fs = require('fs')
 const os = require('os')
 const grpc = require('@grpc/grpc-js')
 
-// Get the path to the electron executable
-const electronPath = require('electron')
-
 // Get the path to the app's main entry point
 const appPath = path.join(__dirname, '..')
 
@@ -213,7 +210,7 @@ if (command === 'ssh') {
     process.exit(1)
   }
 
-  const child = spawn(electronPath, [appPath, `--ssh=${sshTarget}`], {
+  const child = spawn(require('electron'), [appPath, `--ssh=${sshTarget}`], {
     stdio: 'inherit',
     windowsHide: false
   })
@@ -253,7 +250,7 @@ if (workspacePath) {
 }
 
 // Spawn electron with the app
-const child = spawn(electronPath, electronArgs, {
+const child = spawn(require('electron'), electronArgs, {
   stdio: 'inherit',
   windowsHide: false
 })
