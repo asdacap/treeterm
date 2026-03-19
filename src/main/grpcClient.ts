@@ -24,7 +24,6 @@ import {
   type DeleteSessionRequest,
   type Session as ProtoSession,
   type Workspace as ProtoWorkspace,
-  type WorkspaceInput,
   type SessionWatchRequest,
   type DirectoryContents,
   type FileEntry
@@ -623,7 +622,7 @@ export class GrpcDaemonClient {
 
   private convertToProtoWorkspaceInputs(
     workspaces: Omit<Workspace, 'createdAt' | 'lastActivity'>[]
-  ): WorkspaceInput[] {
+  ): ProtoWorkspace[] {
     return workspaces.map(w => {
       const protoAppStates: { [key: string]: { applicationId: string; title: string; state: Buffer } } = {}
       for (const [key, s] of Object.entries(w.appStates)) {
@@ -647,6 +646,8 @@ export class GrpcDaemonClient {
         isDetached: w.isDetached,
         appStates: protoAppStates,
         activeTabId: w.activeTabId || undefined,
+        createdAt: 0,
+        lastActivity: 0,
         metadata: Buffer.from(JSON.stringify(w.metadata ?? {}), 'utf-8')
       }
     })

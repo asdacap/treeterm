@@ -46,23 +46,6 @@ message Session {
   int64 last_activity = 4;
 }
 
-message WorkspaceInput {
-  string path = 1;
-  string name = 2;
-  optional string parent_id = 3;
-  string status = 4;
-  bool is_git_repo = 5;
-  optional string git_branch = 6;
-  optional string git_root_path = 7;
-  bool is_worktree = 8;
-  optional bool is_detached = 9;
-  map<string, AppState> app_states = 10;
-  optional string active_tab_id = 11;
-  string id = 12;
-  repeated string children = 13;
-  bytes metadata = 14;  // JSON-encoded arbitrary dictionary
-}
-
 message PtySessionInfo {
   string id = 1;
   string cwd = 2;
@@ -202,12 +185,12 @@ message ExecResult {
 // ============================================
 
 message CreateSessionRequest {
-  repeated WorkspaceInput workspaces = 1;
+  repeated Workspace workspaces = 1;
 }
 
 message UpdateSessionRequest {
   string session_id = 1;
-  repeated WorkspaceInput workspaces = 2;
+  repeated Workspace workspaces = 2;
   optional string sender_id = 3;  // Window UUID to exclude from broadcast
 }
 

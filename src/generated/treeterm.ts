@@ -78,29 +78,6 @@ export interface Session {
   lastActivity: number;
 }
 
-export interface WorkspaceInput {
-  path: string;
-  name: string;
-  parentId?: string | undefined;
-  status: string;
-  isGitRepo: boolean;
-  gitBranch?: string | undefined;
-  gitRootPath?: string | undefined;
-  isWorktree: boolean;
-  isDetached?: boolean | undefined;
-  appStates: { [key: string]: AppState };
-  activeTabId?: string | undefined;
-  id: string;
-  children: string[];
-  /** JSON-encoded arbitrary dictionary */
-  metadata: Buffer;
-}
-
-export interface WorkspaceInput_AppStatesEntry {
-  key: string;
-  value?: AppState | undefined;
-}
-
 export interface PtySessionInfo {
   id: string;
   cwd: string;
@@ -231,12 +208,12 @@ export interface ExecResult {
 }
 
 export interface CreateSessionRequest {
-  workspaces: WorkspaceInput[];
+  workspaces: Workspace[];
 }
 
 export interface UpdateSessionRequest {
   sessionId: string;
-  workspaces: WorkspaceInput[];
+  workspaces: Workspace[];
   /** Window UUID to exclude from broadcast */
   senderId?: string | undefined;
 }
@@ -1527,432 +1504,6 @@ export const Session: MessageFns<Session> = {
     message.workspaces = object.workspaces?.map((e) => Workspace.fromPartial(e)) || [];
     message.createdAt = object.createdAt ?? 0;
     message.lastActivity = object.lastActivity ?? 0;
-    return message;
-  },
-};
-
-function createBaseWorkspaceInput(): WorkspaceInput {
-  return {
-    path: "",
-    name: "",
-    parentId: undefined,
-    status: "",
-    isGitRepo: false,
-    gitBranch: undefined,
-    gitRootPath: undefined,
-    isWorktree: false,
-    isDetached: undefined,
-    appStates: {},
-    activeTabId: undefined,
-    id: "",
-    children: [],
-    metadata: Buffer.alloc(0),
-  };
-}
-
-export const WorkspaceInput: MessageFns<WorkspaceInput> = {
-  encode(message: WorkspaceInput, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.path !== "") {
-      writer.uint32(10).string(message.path);
-    }
-    if (message.name !== "") {
-      writer.uint32(18).string(message.name);
-    }
-    if (message.parentId !== undefined) {
-      writer.uint32(26).string(message.parentId);
-    }
-    if (message.status !== "") {
-      writer.uint32(34).string(message.status);
-    }
-    if (message.isGitRepo !== false) {
-      writer.uint32(40).bool(message.isGitRepo);
-    }
-    if (message.gitBranch !== undefined) {
-      writer.uint32(50).string(message.gitBranch);
-    }
-    if (message.gitRootPath !== undefined) {
-      writer.uint32(58).string(message.gitRootPath);
-    }
-    if (message.isWorktree !== false) {
-      writer.uint32(64).bool(message.isWorktree);
-    }
-    if (message.isDetached !== undefined) {
-      writer.uint32(72).bool(message.isDetached);
-    }
-    globalThis.Object.entries(message.appStates).forEach(([key, value]: [string, AppState]) => {
-      WorkspaceInput_AppStatesEntry.encode({ key: key as any, value }, writer.uint32(82).fork()).join();
-    });
-    if (message.activeTabId !== undefined) {
-      writer.uint32(90).string(message.activeTabId);
-    }
-    if (message.id !== "") {
-      writer.uint32(98).string(message.id);
-    }
-    for (const v of message.children) {
-      writer.uint32(106).string(v!);
-    }
-    if (message.metadata.length !== 0) {
-      writer.uint32(114).bytes(message.metadata);
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): WorkspaceInput {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseWorkspaceInput();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.path = reader.string();
-          continue;
-        }
-        case 2: {
-          if (tag !== 18) {
-            break;
-          }
-
-          message.name = reader.string();
-          continue;
-        }
-        case 3: {
-          if (tag !== 26) {
-            break;
-          }
-
-          message.parentId = reader.string();
-          continue;
-        }
-        case 4: {
-          if (tag !== 34) {
-            break;
-          }
-
-          message.status = reader.string();
-          continue;
-        }
-        case 5: {
-          if (tag !== 40) {
-            break;
-          }
-
-          message.isGitRepo = reader.bool();
-          continue;
-        }
-        case 6: {
-          if (tag !== 50) {
-            break;
-          }
-
-          message.gitBranch = reader.string();
-          continue;
-        }
-        case 7: {
-          if (tag !== 58) {
-            break;
-          }
-
-          message.gitRootPath = reader.string();
-          continue;
-        }
-        case 8: {
-          if (tag !== 64) {
-            break;
-          }
-
-          message.isWorktree = reader.bool();
-          continue;
-        }
-        case 9: {
-          if (tag !== 72) {
-            break;
-          }
-
-          message.isDetached = reader.bool();
-          continue;
-        }
-        case 10: {
-          if (tag !== 82) {
-            break;
-          }
-
-          const entry10 = WorkspaceInput_AppStatesEntry.decode(reader, reader.uint32());
-          if (entry10.value !== undefined) {
-            message.appStates[entry10.key] = entry10.value;
-          }
-          continue;
-        }
-        case 11: {
-          if (tag !== 90) {
-            break;
-          }
-
-          message.activeTabId = reader.string();
-          continue;
-        }
-        case 12: {
-          if (tag !== 98) {
-            break;
-          }
-
-          message.id = reader.string();
-          continue;
-        }
-        case 13: {
-          if (tag !== 106) {
-            break;
-          }
-
-          message.children.push(reader.string());
-          continue;
-        }
-        case 14: {
-          if (tag !== 114) {
-            break;
-          }
-
-          message.metadata = Buffer.from(reader.bytes());
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): WorkspaceInput {
-    return {
-      path: isSet(object.path) ? globalThis.String(object.path) : "",
-      name: isSet(object.name) ? globalThis.String(object.name) : "",
-      parentId: isSet(object.parentId)
-        ? globalThis.String(object.parentId)
-        : isSet(object.parent_id)
-        ? globalThis.String(object.parent_id)
-        : undefined,
-      status: isSet(object.status) ? globalThis.String(object.status) : "",
-      isGitRepo: isSet(object.isGitRepo)
-        ? globalThis.Boolean(object.isGitRepo)
-        : isSet(object.is_git_repo)
-        ? globalThis.Boolean(object.is_git_repo)
-        : false,
-      gitBranch: isSet(object.gitBranch)
-        ? globalThis.String(object.gitBranch)
-        : isSet(object.git_branch)
-        ? globalThis.String(object.git_branch)
-        : undefined,
-      gitRootPath: isSet(object.gitRootPath)
-        ? globalThis.String(object.gitRootPath)
-        : isSet(object.git_root_path)
-        ? globalThis.String(object.git_root_path)
-        : undefined,
-      isWorktree: isSet(object.isWorktree)
-        ? globalThis.Boolean(object.isWorktree)
-        : isSet(object.is_worktree)
-        ? globalThis.Boolean(object.is_worktree)
-        : false,
-      isDetached: isSet(object.isDetached)
-        ? globalThis.Boolean(object.isDetached)
-        : isSet(object.is_detached)
-        ? globalThis.Boolean(object.is_detached)
-        : undefined,
-      appStates: isObject(object.appStates)
-        ? (globalThis.Object.entries(object.appStates) as [string, any][]).reduce(
-          (acc: { [key: string]: AppState }, [key, value]: [string, any]) => {
-            acc[key] = AppState.fromJSON(value);
-            return acc;
-          },
-          {},
-        )
-        : isObject(object.app_states)
-        ? (globalThis.Object.entries(object.app_states) as [string, any][]).reduce(
-          (acc: { [key: string]: AppState }, [key, value]: [string, any]) => {
-            acc[key] = AppState.fromJSON(value);
-            return acc;
-          },
-          {},
-        )
-        : {},
-      activeTabId: isSet(object.activeTabId)
-        ? globalThis.String(object.activeTabId)
-        : isSet(object.active_tab_id)
-        ? globalThis.String(object.active_tab_id)
-        : undefined,
-      id: isSet(object.id) ? globalThis.String(object.id) : "",
-      children: globalThis.Array.isArray(object?.children)
-        ? object.children.map((e: any) => globalThis.String(e))
-        : [],
-      metadata: isSet(object.metadata) ? Buffer.from(bytesFromBase64(object.metadata)) : Buffer.alloc(0),
-    };
-  },
-
-  toJSON(message: WorkspaceInput): unknown {
-    const obj: any = {};
-    if (message.path !== "") {
-      obj.path = message.path;
-    }
-    if (message.name !== "") {
-      obj.name = message.name;
-    }
-    if (message.parentId !== undefined) {
-      obj.parentId = message.parentId;
-    }
-    if (message.status !== "") {
-      obj.status = message.status;
-    }
-    if (message.isGitRepo !== false) {
-      obj.isGitRepo = message.isGitRepo;
-    }
-    if (message.gitBranch !== undefined) {
-      obj.gitBranch = message.gitBranch;
-    }
-    if (message.gitRootPath !== undefined) {
-      obj.gitRootPath = message.gitRootPath;
-    }
-    if (message.isWorktree !== false) {
-      obj.isWorktree = message.isWorktree;
-    }
-    if (message.isDetached !== undefined) {
-      obj.isDetached = message.isDetached;
-    }
-    if (message.appStates) {
-      const entries = globalThis.Object.entries(message.appStates) as [string, AppState][];
-      if (entries.length > 0) {
-        obj.appStates = {};
-        entries.forEach(([k, v]) => {
-          obj.appStates[k] = AppState.toJSON(v);
-        });
-      }
-    }
-    if (message.activeTabId !== undefined) {
-      obj.activeTabId = message.activeTabId;
-    }
-    if (message.id !== "") {
-      obj.id = message.id;
-    }
-    if (message.children?.length) {
-      obj.children = message.children;
-    }
-    if (message.metadata.length !== 0) {
-      obj.metadata = base64FromBytes(message.metadata);
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<WorkspaceInput>, I>>(base?: I): WorkspaceInput {
-    return WorkspaceInput.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<WorkspaceInput>, I>>(object: I): WorkspaceInput {
-    const message = createBaseWorkspaceInput();
-    message.path = object.path ?? "";
-    message.name = object.name ?? "";
-    message.parentId = object.parentId ?? undefined;
-    message.status = object.status ?? "";
-    message.isGitRepo = object.isGitRepo ?? false;
-    message.gitBranch = object.gitBranch ?? undefined;
-    message.gitRootPath = object.gitRootPath ?? undefined;
-    message.isWorktree = object.isWorktree ?? false;
-    message.isDetached = object.isDetached ?? undefined;
-    message.appStates = (globalThis.Object.entries(object.appStates ?? {}) as [string, AppState][]).reduce(
-      (acc: { [key: string]: AppState }, [key, value]: [string, AppState]) => {
-        if (value !== undefined) {
-          acc[key] = AppState.fromPartial(value);
-        }
-        return acc;
-      },
-      {},
-    );
-    message.activeTabId = object.activeTabId ?? undefined;
-    message.id = object.id ?? "";
-    message.children = object.children?.map((e) => e) || [];
-    message.metadata = object.metadata ?? Buffer.alloc(0);
-    return message;
-  },
-};
-
-function createBaseWorkspaceInput_AppStatesEntry(): WorkspaceInput_AppStatesEntry {
-  return { key: "", value: undefined };
-}
-
-export const WorkspaceInput_AppStatesEntry: MessageFns<WorkspaceInput_AppStatesEntry> = {
-  encode(message: WorkspaceInput_AppStatesEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.key !== "") {
-      writer.uint32(10).string(message.key);
-    }
-    if (message.value !== undefined) {
-      AppState.encode(message.value, writer.uint32(18).fork()).join();
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): WorkspaceInput_AppStatesEntry {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseWorkspaceInput_AppStatesEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.key = reader.string();
-          continue;
-        }
-        case 2: {
-          if (tag !== 18) {
-            break;
-          }
-
-          message.value = AppState.decode(reader, reader.uint32());
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): WorkspaceInput_AppStatesEntry {
-    return {
-      key: isSet(object.key) ? globalThis.String(object.key) : "",
-      value: isSet(object.value) ? AppState.fromJSON(object.value) : undefined,
-    };
-  },
-
-  toJSON(message: WorkspaceInput_AppStatesEntry): unknown {
-    const obj: any = {};
-    if (message.key !== "") {
-      obj.key = message.key;
-    }
-    if (message.value !== undefined) {
-      obj.value = AppState.toJSON(message.value);
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<WorkspaceInput_AppStatesEntry>, I>>(base?: I): WorkspaceInput_AppStatesEntry {
-    return WorkspaceInput_AppStatesEntry.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<WorkspaceInput_AppStatesEntry>, I>>(
-    object: I,
-  ): WorkspaceInput_AppStatesEntry {
-    const message = createBaseWorkspaceInput_AppStatesEntry();
-    message.key = object.key ?? "";
-    message.value = (object.value !== undefined && object.value !== null)
-      ? AppState.fromPartial(object.value)
-      : undefined;
     return message;
   },
 };
@@ -3980,7 +3531,7 @@ function createBaseCreateSessionRequest(): CreateSessionRequest {
 export const CreateSessionRequest: MessageFns<CreateSessionRequest> = {
   encode(message: CreateSessionRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     for (const v of message.workspaces) {
-      WorkspaceInput.encode(v!, writer.uint32(10).fork()).join();
+      Workspace.encode(v!, writer.uint32(10).fork()).join();
     }
     return writer;
   },
@@ -3997,7 +3548,7 @@ export const CreateSessionRequest: MessageFns<CreateSessionRequest> = {
             break;
           }
 
-          message.workspaces.push(WorkspaceInput.decode(reader, reader.uint32()));
+          message.workspaces.push(Workspace.decode(reader, reader.uint32()));
           continue;
         }
       }
@@ -4012,7 +3563,7 @@ export const CreateSessionRequest: MessageFns<CreateSessionRequest> = {
   fromJSON(object: any): CreateSessionRequest {
     return {
       workspaces: globalThis.Array.isArray(object?.workspaces)
-        ? object.workspaces.map((e: any) => WorkspaceInput.fromJSON(e))
+        ? object.workspaces.map((e: any) => Workspace.fromJSON(e))
         : [],
     };
   },
@@ -4020,7 +3571,7 @@ export const CreateSessionRequest: MessageFns<CreateSessionRequest> = {
   toJSON(message: CreateSessionRequest): unknown {
     const obj: any = {};
     if (message.workspaces?.length) {
-      obj.workspaces = message.workspaces.map((e) => WorkspaceInput.toJSON(e));
+      obj.workspaces = message.workspaces.map((e) => Workspace.toJSON(e));
     }
     return obj;
   },
@@ -4030,7 +3581,7 @@ export const CreateSessionRequest: MessageFns<CreateSessionRequest> = {
   },
   fromPartial<I extends Exact<DeepPartial<CreateSessionRequest>, I>>(object: I): CreateSessionRequest {
     const message = createBaseCreateSessionRequest();
-    message.workspaces = object.workspaces?.map((e) => WorkspaceInput.fromPartial(e)) || [];
+    message.workspaces = object.workspaces?.map((e) => Workspace.fromPartial(e)) || [];
     return message;
   },
 };
@@ -4045,7 +3596,7 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
       writer.uint32(10).string(message.sessionId);
     }
     for (const v of message.workspaces) {
-      WorkspaceInput.encode(v!, writer.uint32(18).fork()).join();
+      Workspace.encode(v!, writer.uint32(18).fork()).join();
     }
     if (message.senderId !== undefined) {
       writer.uint32(26).string(message.senderId);
@@ -4073,7 +3624,7 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
             break;
           }
 
-          message.workspaces.push(WorkspaceInput.decode(reader, reader.uint32()));
+          message.workspaces.push(Workspace.decode(reader, reader.uint32()));
           continue;
         }
         case 3: {
@@ -4101,7 +3652,7 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
         ? globalThis.String(object.session_id)
         : "",
       workspaces: globalThis.Array.isArray(object?.workspaces)
-        ? object.workspaces.map((e: any) => WorkspaceInput.fromJSON(e))
+        ? object.workspaces.map((e: any) => Workspace.fromJSON(e))
         : [],
       senderId: isSet(object.senderId)
         ? globalThis.String(object.senderId)
@@ -4117,7 +3668,7 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
       obj.sessionId = message.sessionId;
     }
     if (message.workspaces?.length) {
-      obj.workspaces = message.workspaces.map((e) => WorkspaceInput.toJSON(e));
+      obj.workspaces = message.workspaces.map((e) => Workspace.toJSON(e));
     }
     if (message.senderId !== undefined) {
       obj.senderId = message.senderId;
@@ -4131,7 +3682,7 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
   fromPartial<I extends Exact<DeepPartial<UpdateSessionRequest>, I>>(object: I): UpdateSessionRequest {
     const message = createBaseUpdateSessionRequest();
     message.sessionId = object.sessionId ?? "";
-    message.workspaces = object.workspaces?.map((e) => WorkspaceInput.fromPartial(e)) || [];
+    message.workspaces = object.workspaces?.map((e) => Workspace.fromPartial(e)) || [];
     message.senderId = object.senderId ?? undefined;
     return message;
   },
