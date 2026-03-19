@@ -537,6 +537,7 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
         <div className="workspace-terminal" style={{ display: activeWorkspace ? 'flex' : 'none' }}>
           {activeWorkspaceId && (
             <FlexLayoutPane
+              key={activeWorkspaceId}
               workspaceId={activeWorkspaceId}
               workspaceStore={workspaceStore}
               onNewTab={handleNewTab}
