@@ -87,17 +87,19 @@ export async function readDirectory(
   dirPath: string
 ): Promise<{ success: boolean; contents?: DirectoryContents; error?: string }> {
   try {
+    const resolvedDir = path.resolve(workspacePath, dirPath)
+
     // Security check
-    if (!isPathWithinWorkspace(workspacePath, dirPath)) {
+    if (!isPathWithinWorkspace(workspacePath, resolvedDir)) {
       return { success: false, error: 'Access denied: Path outside workspace' }
     }
 
-    const entries = await fs.readdir(dirPath, { withFileTypes: true })
+    const entries = await fs.readdir(resolvedDir, { withFileTypes: true })
     const fileEntries = await Promise.all(
       entries
         .filter((entry) => !entry.name.startsWith('.')) // Hide hidden files by default
         .map(async (entry) => {
-          const fullPath = path.join(dirPath, entry.name)
+          const fullPath = path.join(resolvedDir, entry.name)
           const relativePath = path.relative(workspacePath, fullPath)
           let stats = null
           try {
@@ -127,7 +129,7 @@ export async function readDirectory(
 
     return {
       success: true,
-      contents: { path: dirPath, entries: fileEntries }
+      contents: { path: resolvedDir, entries: fileEntries }
     }
   } catch (error) {
     return { success: false, error: String(error) }
@@ -139,12 +141,14 @@ export async function readFile(
   filePath: string
 ): Promise<{ success: boolean; file?: FileContents; error?: string }> {
   try {
+    const resolvedFile = path.resolve(workspacePath, filePath)
+
     // Security check
-    if (!isPathWithinWorkspace(workspacePath, filePath)) {
+    if (!isPathWithinWorkspace(workspacePath, resolvedFile)) {
       return { success: false, error: 'Access denied: Path outside workspace' }
     }
 
-    const stats = await fs.stat(filePath)
+    const stats = await fs.stat(resolvedFile)
 
     // Limit file size (1MB)
     const MAX_SIZE = 1024 * 1024
@@ -152,13 +156,13 @@ export async function readFile(
       return { success: false, error: 'File too large to preview (max 1MB)' }
     }
 
-    const content = await fs.readFile(filePath, 'utf-8')
-    const language = detectLanguage(filePath)
+    const content = await fs.readFile(resolvedFile, 'utf-8')
+    const language = detectLanguage(resolvedFile)
 
     return {
       success: true,
       file: {
-        path: filePath,
+        path: resolvedFile,
         content,
         size: stats.size,
         language
@@ -175,16 +179,18 @@ export async function writeFile(
   content: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    const resolvedFile = path.resolve(workspacePath, filePath)
+
     // Security check
-    if (!isPathWithinWorkspace(workspacePath, filePath)) {
+    if (!isPathWithinWorkspace(workspacePath, resolvedFile)) {
       return { success: false, error: 'Access denied: Path outside workspace' }
     }
 
     // Ensure parent directory exists
-    await fs.mkdir(path.dirname(filePath), { recursive: true })
+    await fs.mkdir(path.dirname(resolvedFile), { recursive: true })
 
     // Write file
-    await fs.writeFile(filePath, content, 'utf-8')
+    await fs.writeFile(resolvedFile, content, 'utf-8')
 
     return { success: true }
   } catch (error) {

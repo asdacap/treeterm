@@ -60,6 +60,19 @@ describe('readDirectory', () => {
     expect(result.contents!.entries[0].isDirectory).toBe(true)
   })
 
+  it('resolves relative path against workspace', async () => {
+    const mockEntries = [
+      { name: 'file.ts', isDirectory: () => false, isFile: () => true },
+    ]
+    vi.mocked(fs.readdir).mockResolvedValue(mockEntries as any)
+    vi.mocked(fs.stat).mockResolvedValue({ size: 100, mtimeMs: 1000 } as any)
+
+    const result = await readDirectory(workspace, 'src')
+    expect(result.success).toBe(true)
+    expect(result.contents!.path).toBe(`${workspace}/src`)
+    expect(fs.readdir).toHaveBeenCalledWith(`${workspace}/src`, { withFileTypes: true })
+  })
+
   it('returns error on readdir failure', async () => {
     vi.mocked(fs.readdir).mockRejectedValue(new Error('ENOENT'))
 
@@ -126,6 +139,17 @@ describe('readFile', () => {
     expect(result.file!.language).toBe('plaintext')
   })
 
+  it('resolves relative path against workspace', async () => {
+    vi.mocked(fs.stat).mockResolvedValue({ size: 100 } as any)
+    vi.mocked(fs.readFile).mockResolvedValue('const x = 1' as any)
+
+    const result = await readFile(workspace, 'src/app.ts')
+    expect(result.success).toBe(true)
+    expect(result.file!.path).toBe(`${workspace}/src/app.ts`)
+    expect(fs.stat).toHaveBeenCalledWith(`${workspace}/src/app.ts`)
+    expect(fs.readFile).toHaveBeenCalledWith(`${workspace}/src/app.ts`, 'utf-8')
+  })
+
   it('returns error on stat failure', async () => {
     vi.mocked(fs.stat).mockRejectedValue(new Error('ENOENT'))
 
@@ -151,6 +175,15 @@ describe('writeFile', () => {
     const result = await writeFile(workspace, `${workspace}/out.ts`, 'hello')
     expect(result.success).toBe(true)
     expect(fs.writeFile).toHaveBeenCalledWith(`${workspace}/out.ts`, 'hello', 'utf-8')
+  })
+
+  it('resolves relative path against workspace', async () => {
+    vi.mocked(fs.writeFile).mockResolvedValue(undefined)
+
+    const result = await writeFile(workspace, 'out.ts', 'hello')
+    expect(result.success).toBe(true)
+    expect(fs.writeFile).toHaveBeenCalledWith(`${workspace}/out.ts`, 'hello', 'utf-8')
+    expect(fs.mkdir).toHaveBeenCalledWith(workspace, { recursive: true })
   })
 
   it('returns error on write failure', async () => {
