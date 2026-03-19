@@ -12,7 +12,7 @@ vi.mock('./logger', () => ({
 
 import { SessionStore } from './sessionStore'
 
-type WorkspaceInput = Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>
+type WorkspaceInput = Omit<Workspace, 'createdAt' | 'lastActivity'>
 
 function makeWorkspace(overrides: Partial<WorkspaceInput> & { path: string }): WorkspaceInput {
   const defaults: WorkspaceInput = {
@@ -45,7 +45,6 @@ describe('SessionStore', () => {
       const session = store.createSession('client-1', [])
       expect(session.id).toMatch(/^session-/)
       expect(session.workspaces).toHaveLength(0)
-      expect(session.attachedClients).toBe(1)
     })
 
     it('creates session with workspaces', () => {
@@ -139,19 +138,6 @@ describe('SessionStore', () => {
       expect(updated!.workspaces[0].createdAt).toBe(originalCreatedAt)
     })
 
-    it('does not increment attachedClients for already-attached client', () => {
-      const session = store.createSession('client-1', [])
-      const initialClients = session.attachedClients
-
-      const updated = store.updateSession('client-1', session.id, [])
-      expect(updated!.attachedClients).toBe(initialClients)
-    })
-
-    it('increments attachedClients for a new client', () => {
-      const session = store.createSession('client-1', [])
-      const updated = store.updateSession('client-2', session.id, [])
-      expect(updated!.attachedClients).toBe(session.attachedClients + 1)
-    })
   })
 
   describe('initializeDefaultSession', () => {
@@ -183,19 +169,7 @@ describe('SessionStore', () => {
 
   describe('detachClient', () => {
     it('does nothing for unknown client', () => {
-      // Should not throw
       expect(() => store.detachClient('unknown-client')).not.toThrow()
-    })
-
-    it('decrements attachedClients when client detaches', () => {
-      const session = store.createSession('client-1', [])
-      store.updateSession('client-2', session.id, []) // attach second client
-      const beforeDetach = store.getSession(session.id)!.attachedClients
-
-      store.detachClient('client-2')
-
-      const afterDetach = store.getSession(session.id)!.attachedClients
-      expect(afterDetach).toBe(beforeDetach - 1)
     })
 
     it('removes client from attachment map after detach', () => {
@@ -203,16 +177,6 @@ describe('SessionStore', () => {
       store.detachClient('client-1')
       // Should not throw on second detach (no attachments)
       expect(() => store.detachClient('client-1')).not.toThrow()
-    })
-
-    it('does not decrement below 0', () => {
-      const session = store.createSession('client-1', [])
-      // Force the session to have 0 clients by direct manipulation is not possible,
-      // but we can detach twice; second should be a no-op
-      store.detachClient('client-1')
-      const afterFirst = store.getSession(session.id)
-      // Session still exists with decremented count (0 now)
-      expect(afterFirst).not.toBeNull()
     })
   })
 })

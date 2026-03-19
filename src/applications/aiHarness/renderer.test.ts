@@ -135,8 +135,7 @@ describe('AI Harness Renderer', () => {
           activeTabId: null,
           metadata: {},
           createdAt: Date.now(),
-          lastActivity: Date.now(),
-          attachedClients: 1
+          lastActivity: Date.now()
         }
 
         await app.cleanup?.(tab, workspace)
@@ -171,8 +170,7 @@ describe('AI Harness Renderer', () => {
           activeTabId: null,
           metadata: {},
           createdAt: Date.now(),
-          lastActivity: Date.now(),
-          attachedClients: 1
+          lastActivity: Date.now()
         }
 
         await app.cleanup?.(tab, workspace)
@@ -204,8 +202,7 @@ describe('AI Harness Renderer', () => {
           activeTabId: null,
           metadata: {},
           createdAt: Date.now(),
-          lastActivity: Date.now(),
-          attachedClients: 1
+          lastActivity: Date.now()
         }
 
         await app.cleanup?.(tab, workspace)
@@ -240,8 +237,7 @@ describe('AI Harness Renderer', () => {
           activeTabId: null,
           metadata: {},
           createdAt: Date.now(),
-          lastActivity: Date.now(),
-          attachedClients: 1
+          lastActivity: Date.now()
         }
 
         await app.cleanup?.(tab, workspace)

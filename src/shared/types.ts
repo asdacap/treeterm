@@ -68,7 +68,6 @@ export interface Workspace {
   metadata: Record<string, string>
   createdAt: number
   lastActivity: number
-  attachedClients: number
 }
 
 export interface Session {
@@ -76,7 +75,6 @@ export interface Session {
   workspaces: Workspace[]
   createdAt: number
   lastActivity: number
-  attachedClients: number
 }
 
 // Helper type for workspace input (without daemon-managed fields)
@@ -91,7 +89,6 @@ export interface SessionInfo {
   rows: number
   createdAt: number
   lastActivity: number
-  attachedClients: number
 }
 
 // === Settings Types ===
@@ -172,9 +169,7 @@ export interface Settings {
     language: string // ISO-639-1 code (e.g., 'en', 'ms', 'zh')
   }
   daemon: {
-    orphanTimeout: number
     scrollbackLimit: number
-    killOnQuit: boolean
   }
   // SSH saved connections
   ssh: {

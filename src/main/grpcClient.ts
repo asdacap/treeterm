@@ -12,7 +12,6 @@ import {
   TreeTermDaemonClient,
   type CreatePtyRequest,
   type AttachPtyRequest,
-  type DetachPtyRequest,
   type ResizePtyRequest,
   type KillPtyRequest,
   type GetScrollbackRequest,
@@ -220,24 +219,6 @@ export class GrpcDaemonClient {
     })
   }
 
-  async detachPtySession(sessionId: string): Promise<void> {
-    if (!this.client) {
-      throw new Error('Not connected to daemon')
-    }
-
-    return new Promise((resolve, reject) => {
-      const request: DetachPtyRequest = { sessionId }
-
-      this.client!.detachPty(request, (error) => {
-        if (error) {
-          reject(new Error(error.message))
-        } else {
-          resolve()
-        }
-      })
-    })
-  }
-
   writeToPtySession(sessionId: string, data: string): void {
     if (!this.stream) {
       console.error('[grpcDaemonClient] cannot write: stream not established')
@@ -337,7 +318,7 @@ export class GrpcDaemonClient {
     })
   }
 
-  async createSession(workspaces: Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]): Promise<Session> {
+  async createSession(workspaces: Omit<Workspace, 'createdAt' | 'lastActivity'>[]): Promise<Session> {
     if (!this.client) {
       throw new Error('Not connected to daemon')
     }
@@ -361,7 +342,7 @@ export class GrpcDaemonClient {
 
   async updateSession(
     sessionId: string,
-    workspaces: Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[],
+    workspaces: Omit<Workspace, 'createdAt' | 'lastActivity'>[],
     senderId?: string
   ): Promise<Session> {
     if (!this.client) {
@@ -642,7 +623,7 @@ export class GrpcDaemonClient {
   // Helper methods for proto conversion
 
   private convertToProtoWorkspaceInputs(
-    workspaces: Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]
+    workspaces: Omit<Workspace, 'createdAt' | 'lastActivity'>[]
   ): WorkspaceInput[] {
     return workspaces.map(w => {
       const protoAppStates: { [key: string]: { applicationId: string; title: string; state: Buffer } } = {}
@@ -677,8 +658,7 @@ export class GrpcDaemonClient {
       id: protoSession.id,
       workspaces: protoSession.workspaces.map(w => this.convertFromProtoWorkspace(w)),
       createdAt: protoSession.createdAt,
-      lastActivity: protoSession.lastActivity,
-      attachedClients: protoSession.attachedClients
+      lastActivity: protoSession.lastActivity
     }
   }
 
@@ -707,8 +687,7 @@ export class GrpcDaemonClient {
       activeTabId: protoWorkspace.activeTabId || null,
       metadata: protoWorkspace.metadata?.length ? JSON.parse(protoWorkspace.metadata.toString('utf-8')) : {},
       createdAt: protoWorkspace.createdAt,
-      lastActivity: protoWorkspace.lastActivity,
-      attachedClients: protoWorkspace.attachedClients
+      lastActivity: protoWorkspace.lastActivity
     }
   }
 

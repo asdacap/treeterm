@@ -40,10 +40,6 @@ export interface IpcRequests {
     params: [sessionId: string]
     result: { success: boolean; scrollback?: string[]; exitCode?: number; error?: string }
   }
-  ptyDetach: {
-    params: [sessionId: string]
-    result: void
-  }
   ptyList: {
     params: []
     result: SessionInfo[]

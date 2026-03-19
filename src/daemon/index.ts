@@ -18,7 +18,6 @@ const DAEMON_LOG_FILE = path.join(TREETERM_DATA_DIR, 'daemon.log')
 interface DaemonConfig {
   socketPath: string
   pidFile: string
-  orphanTimeout: number // minutes
   scrollbackLimit: number
   logFile: string
   logLevel: string
@@ -29,7 +28,6 @@ function getConfig(): DaemonConfig {
   return {
     socketPath: process.env.TREETERM_SOCKET_PATH || getDefaultSocketPath(),
     pidFile: process.env.TREETERM_PID_FILE || DEFAULT_DAEMON_PID_FILE,
-    orphanTimeout: parseInt(process.env.TREETERM_ORPHAN_TIMEOUT || '0', 10),
     scrollbackLimit: parseInt(process.env.TREETERM_SCROLLBACK_LIMIT || '50000', 10),
     logFile: process.env.TREETERM_LOG_FILE || DAEMON_LOG_FILE,
     logLevel: process.env.TREETERM_LOG_LEVEL || 'info',
@@ -69,7 +67,6 @@ async function main(): Promise<void> {
   log.info('TreeTerm Daemon Starting')
   log.info('========================================')
   log.info({ socketPath: config.socketPath }, 'socket path')
-  log.info({ orphanTimeout: config.orphanTimeout }, 'orphan timeout (minutes)')
   log.info({ scrollbackLimit: config.scrollbackLimit }, 'scrollback limit (lines)')
   log.info({ logFile: config.logFile }, 'log file')
   log.info({ logLevel: config.logLevel }, 'log level')
@@ -84,20 +81,13 @@ async function main(): Promise<void> {
   const { SessionStore } = await import('./sessionStore')
 
   // Initialize components
-  const ptyManager = new DaemonPtyManager(config.orphanTimeout, config.scrollbackLimit)
+  const ptyManager = new DaemonPtyManager(config.scrollbackLimit)
   const sessionStore = new SessionStore()
 
   // Initialize default session on daemon startup
   // This ensures there's always a session available for clients
   const defaultSession = sessionStore.initializeDefaultSession('daemon-init')
   log.info({ defaultSessionId: defaultSession.id }, 'default session created at startup')
-
-  // Wire orphan cleanup: a PTY is referenced if any workspace's appStates contains its ptyId
-  ptyManager.setIsReferenced((sessionId) =>
-    sessionStore.getAllWorkspaces().some(ws =>
-      Object.values(ws.appStates).some(s => (s.state as { ptyId?: string })?.ptyId === sessionId)
-    )
-  )
 
   const grpcServer = new GrpcServer(config.socketPath, ptyManager, sessionStore)
 

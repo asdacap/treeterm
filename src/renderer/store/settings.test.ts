@@ -77,9 +77,7 @@ describe('SettingsStore', () => {
           language: 'en'
         },
         daemon: {
-          orphanTimeout: 30000,
-          scrollbackLimit: 10000,
-          killOnQuit: true
+          scrollbackLimit: 10000
         },
         globalDefaultApplicationId: 'terminal',
         recentDirectories: []
@@ -132,9 +130,7 @@ describe('SettingsStore', () => {
           language: 'en'
         },
         daemon: {
-          orphanTimeout: 30000,
-          scrollbackLimit: 10000,
-          killOnQuit: true
+          scrollbackLimit: 10000
         },
         globalDefaultApplicationId: 'terminal',
         recentDirectories: []

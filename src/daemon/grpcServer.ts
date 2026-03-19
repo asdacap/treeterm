@@ -18,7 +18,6 @@ import {
   type CreatePtyResponse,
   type AttachPtyRequest,
   type AttachPtyResponse,
-  type DetachPtyRequest,
   type ResizePtyRequest,
   type KillPtyRequest,
   type GetScrollbackRequest,
@@ -170,7 +169,6 @@ export class GrpcServer {
     return {
       createPty: this.handleCreatePty.bind(this),
       attachPty: this.handleAttachPty.bind(this),
-      detachPty: this.handleDetachPty.bind(this),
       resizePty: this.handleResizePty.bind(this),
       killPty: this.handleKillPty.bind(this),
       listPtySessions: this.handleListPtySessions.bind(this),
@@ -227,37 +225,15 @@ export class GrpcServer {
   ): void {
     try {
       const { sessionId } = call.request
-      const clientId = this.getClientId(call.metadata)
-      log.info({ sessionId, clientId }, 'attachPty called')
+      log.info({ sessionId }, 'attachPty called')
 
-      // Attach client to PTY session
-      const result = this.ptyManager.attach(sessionId, clientId)
+      const result = this.ptyManager.attach(sessionId)
 
       callback(null, { scrollback: result.scrollback, exitCode: result.exitCode })
     } catch (error) {
       log.error({ err: error, sessionId: call.request.sessionId }, 'attachPty error')
       callback({
         code: grpc.status.NOT_FOUND,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private handleDetachPty(
-    call: grpc.ServerUnaryCall<DetachPtyRequest, Empty>,
-    callback: grpc.sendUnaryData<Empty>
-  ): void {
-    try {
-      const { sessionId } = call.request
-      const clientId = this.getClientId(call.metadata)
-      log.info({ sessionId, clientId }, 'detachPty called')
-
-      this.ptyManager.detach(sessionId, clientId)
-      callback(null, {})
-    } catch (error) {
-      log.error({ err: error, sessionId: call.request.sessionId }, 'detachPty error')
-      callback({
-        code: grpc.status.INTERNAL,
         message: error instanceof Error ? error.message : 'Unknown error'
       })
     }
@@ -316,8 +292,7 @@ export class GrpcServer {
         cols: s.cols,
         rows: s.rows,
         createdAt: s.createdAt,
-        lastActivity: s.lastActivity,
-        attachedClients: s.attachedClients
+        lastActivity: s.lastActivity
       }))
 
       callback(null, { sessions: protoSessions })
@@ -374,10 +349,6 @@ export class GrpcServer {
         } else if (input.resize) {
           const { sessionId, cols, rows } = input.resize
           this.ptyManager.resize(sessionId, cols, rows)
-        } else if (input.detach) {
-          const { sessionId } = input.detach
-          this.ptyManager.detach(sessionId, clientId)
-          clientStream.attachedSessions.delete(sessionId)
         }
       } catch (error) {
         log.error({ err: error, clientId }, 'error processing client input')
@@ -398,12 +369,6 @@ export class GrpcServer {
   private handleClientDisconnect(clientId: string): void {
     const clientStream = this.clientStreams.get(clientId)
     if (!clientStream) return
-
-    // Detach client from all PTY sessions
-    const sessions = this.ptyManager.listSessions()
-    for (const session of sessions) {
-      this.ptyManager.detach(session.id, clientId)
-    }
 
     // Detach client from all workspace sessions
     this.sessionStore.detachClient(clientId)
@@ -748,7 +713,7 @@ export class GrpcServer {
     }
   }
 
-  private convertWorkspaceInputs(inputs: WorkspaceInput[]): Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[] {
+  private convertWorkspaceInputs(inputs: WorkspaceInput[]): Omit<Workspace, 'createdAt' | 'lastActivity'>[] {
     return inputs.map(input => {
       const appStates: Record<string, AppState> = {}
       for (const [key, value] of Object.entries(input.appStates || {})) {
@@ -805,13 +770,11 @@ export class GrpcServer {
           activeTabId: w.activeTabId || undefined,
           metadata: Buffer.from(JSON.stringify(w.metadata ?? {}), 'utf-8'),
           createdAt: w.createdAt,
-          lastActivity: w.lastActivity,
-          attachedClients: w.attachedClients
+          lastActivity: w.lastActivity
         }
       }),
       createdAt: session.createdAt,
-      lastActivity: session.lastActivity,
-      attachedClients: session.attachedClients
+      lastActivity: session.lastActivity
     }
   }
 

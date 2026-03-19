@@ -41,7 +41,7 @@ describe('DaemonPtyManager', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    manager = new DaemonPtyManager(0, 1024 * 1024)
+    manager = new DaemonPtyManager(1024 * 1024)
   })
 
   afterEach(() => {
@@ -88,30 +88,17 @@ describe('DaemonPtyManager', () => {
   })
 
   describe('attach', () => {
-    it('attaches client to existing session', () => {
+    it('attaches to existing session', () => {
       const sessionId = manager.create({ cwd: '/tmp', env: {} })
-      
-      const result = manager.attach(sessionId, 'client-1')
-      
+
+      const result = manager.attach(sessionId)
+
       expect(result.scrollback).toEqual([])
       expect(result.session.id).toBe(sessionId)
     })
 
     it('throws error for non-existent session', () => {
-      expect(() => manager.attach('pty-nonexistent', 'client-1')).toThrow('Session pty-nonexistent not found')
-    })
-  })
-
-  describe('detach', () => {
-    it('detaches client from session', () => {
-      const sessionId = manager.create({ cwd: '/tmp', env: {} })
-      manager.attach(sessionId, 'client-1')
-      
-      expect(() => manager.detach(sessionId, 'client-1')).not.toThrow()
-    })
-
-    it('handles detach from non-existent session gracefully', () => {
-      expect(() => manager.detach('pty-nonexistent', 'client-1')).not.toThrow()
+      expect(() => manager.attach('pty-nonexistent')).toThrow('Session pty-nonexistent not found')
     })
   })
 
@@ -234,13 +221,6 @@ describe('DaemonPtyManager', () => {
       expect(mockPtyProcess.kill).toHaveBeenCalledTimes(2)
     })
 
-    it('clears orphan cleanup interval if set', () => {
-      const managerWithOrphan = new DaemonPtyManager(5, 1024 * 1024)
-      managerWithOrphan.shutdown()
-      
-      // Should not throw
-      expect(true).toBe(true)
-    })
   })
 
   describe('scrollback management', () => {
@@ -269,7 +249,7 @@ describe('DaemonPtyManager', () => {
 
     it('truncates scrollback at byte limit', () => {
       // Create manager with small scrollback limit (100 bytes)
-      const smallManager = new DaemonPtyManager(0, 100)
+      const smallManager = new DaemonPtyManager(100)
 
       const sessionId = smallManager.create({ cwd: '/tmp', env: {} })
 
@@ -365,7 +345,7 @@ describe('DaemonPtyManager', () => {
       const originalPlatform = process.platform
       Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
 
-      const sandboxManager = new DaemonPtyManager(0, 1024 * 1024)
+      const sandboxManager = new DaemonPtyManager(1024 * 1024)
 
       sandboxManager.create({
         cwd: '/workspace',
@@ -384,7 +364,7 @@ describe('DaemonPtyManager', () => {
       const originalPlatform = process.platform
       Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
 
-      const sandboxManager = new DaemonPtyManager(0, 1024 * 1024)
+      const sandboxManager = new DaemonPtyManager(1024 * 1024)
 
       sandboxManager.create({
         cwd: '/workspace',
@@ -406,7 +386,7 @@ describe('DaemonPtyManager', () => {
 
       vi.mocked(execSync).mockImplementation(() => { throw new Error('not found') })
 
-      const sandboxManager = new DaemonPtyManager(0, 1024 * 1024)
+      const sandboxManager = new DaemonPtyManager(1024 * 1024)
 
       sandboxManager.create({
         cwd: '/workspace',

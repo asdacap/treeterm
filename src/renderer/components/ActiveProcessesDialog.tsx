@@ -94,7 +94,6 @@ function PtyViewer({ ptyId, terminalApi }: { ptyId: string; terminalApi: Termina
       onResizeDisposable.dispose()
       unsubData()
       unsubExit()
-      terminalApi.detach(ptyId)
       term.dispose()
       termRef.current = null
       fitAddonRef.current = null
@@ -170,9 +169,6 @@ export default function ActiveProcessesDialog({ terminalApi, workspaces, onClose
                   <span className="active-processes-item-id">{session.id.slice(0, 8)}</span>
                   <span className="active-processes-item-time">
                     {formatRelativeTime(session.createdAt)}
-                  </span>
-                  <span className="active-processes-item-clients">
-                    {session.attachedClients} client{session.attachedClients !== 1 ? 's' : ''}
                   </span>
                 </div>
               </div>

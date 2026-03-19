@@ -79,7 +79,6 @@ describe('IpcClient', () => {
 
     it.each([
       ['ptyAttach', 'pty:attach'],
-      ['ptyDetach', 'pty:detach'],
       ['ptyList', 'pty:list'],
       ['ptyIsAlive', 'pty:isAlive'],
       ['gitCreateWorktree', 'git:createWorktree'],

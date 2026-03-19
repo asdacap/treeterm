@@ -25,7 +25,6 @@ export type {
 export type MessageType =
   | 'create'
   | 'attach'
-  | 'detach'
   | 'write'
   | 'resize'
   | 'kill'
@@ -65,11 +64,6 @@ export interface CreateMessage extends DaemonMessage {
 
 export interface AttachMessage extends DaemonMessage {
   type: 'attach'
-  sessionId: string
-}
-
-export interface DetachMessage extends DaemonMessage {
-  type: 'detach'
   sessionId: string
 }
 

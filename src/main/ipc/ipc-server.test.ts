@@ -91,7 +91,6 @@ describe('IpcServer', () => {
 
     it.each([
       ['onPtyAttach', 'pty:attach'],
-      ['onPtyDetach', 'pty:detach'],
       ['onPtyList', 'pty:list'],
       ['onPtyIsAlive', 'pty:isAlive'],
       ['onGitCreateWorktree', 'git:createWorktree'],
@@ -145,7 +144,6 @@ describe('IpcServer', () => {
 
     it.each([
       ['onPtyAttach', 'pty:attach'],
-      ['onPtyDetach', 'pty:detach'],
       ['onPtyList', 'pty:list'],
       ['onPtyIsAlive', 'pty:isAlive'],
       ['onGitCreateWorktree', 'git:createWorktree'],

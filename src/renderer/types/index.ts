@@ -249,7 +249,6 @@ export interface ConflictCheckResult {
 export interface TerminalApi {
   create: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
   attach: (sessionId: string) => Promise<{ success: boolean; scrollback?: string[]; exitCode?: number; error?: string }>
-  detach: (sessionId: string) => Promise<void>
   list: () => Promise<SessionInfo[]>
   write: (id: string, data: string) => void
   resize: (id: string, cols: number, rows: number) => void
