@@ -87,15 +87,26 @@ export default function FlexLayoutPane({ workspaceId, workspaceStore, onNewTab }
     // Detect removed tabs
     const removed = Array.from(synced).filter(id => !currentIds.has(id))
 
-    if (added.length === 0 && removed.length === 0) return
-
     suppressModelChangeRef.current = true
 
+    const findTabset = (): TabSetNode | null => {
+      const active = model.getActiveTabset()
+      if (active) return active
+      // Fallback: find any tabset in the model
+      let tabset: TabSetNode | null = null
+      model.visitNodes(node => {
+        if (!tabset && node instanceof TabSetNode) {
+          tabset = node
+        }
+      })
+      return tabset
+    }
+
     for (const tab of added) {
-      const activeTabset = model.getActiveTabset()
-      if (activeTabset) {
+      const tabset = findTabset()
+      if (tabset) {
         const json = tabToFlexNode(tab, getApplication(tab.applicationId))
-        model.doAction(Actions.addNode(json, activeTabset.getId(), DockLocation.CENTER, -1, true))
+        model.doAction(Actions.addNode(json, tabset.getId(), DockLocation.CENTER, -1, true))
       }
     }
 
@@ -106,11 +117,28 @@ export default function FlexLayoutPane({ workspaceId, workspaceStore, onNewTab }
       }
     }
 
+    // Reconcile: ensure all store tabs exist in the model
+    // Handles tabs that exist in syncedTabIdsRef but were never added to the model
+    // (e.g. canHaveMultiple:false reuse, or initial add failed)
+    let reconciled = false
+    for (const tab of tabs) {
+      if (!model.getNodeById(tab.id)) {
+        const tabset = findTabset()
+        if (tabset) {
+          const json = tabToFlexNode(tab, getApplication(tab.applicationId))
+          model.doAction(Actions.addNode(json, tabset.getId(), DockLocation.CENTER, -1, true))
+          reconciled = true
+        }
+      }
+    }
+
     syncedTabIdsRef.current = currentIds
     suppressModelChangeRef.current = false
 
     // Force re-render after model mutations
-    setModel(model)
+    if (added.length > 0 || removed.length > 0 || reconciled) {
+      setModel(model)
+    }
   }, [model, tabs])
 
   // Sync store active tab → model selected tab
