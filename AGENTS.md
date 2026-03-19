@@ -67,6 +67,16 @@ Never silently swallow errors or return empty/default values on failure. Throw e
 - Use Zod for runtime validation at system boundaries
 - Make invalid states unrepresentable via interface design
 
+### Reactivity
+- A lot the time we will an actively changing resource such as the worktree.
+- Usually, there is two rpc, getResource and watchResoure. When this happen, remove getResource and just make watchResource return initial value as first event.
+
+### Interactivity
+- ANY async calls should show a loading screen to the user. Even if its very quick, its not necessarily the case in all condition.
+- Similarly, this async call should have a clear error UI where the user will be notified if there are any error.
+- An exception to this is if the async call itself is called by an upper level async call, then the upper level one must handle
+the error UI.
+
 ### No duplicated state
 - Use the same data as Daemon as much as possible.
 - Use the same id for example.
@@ -101,6 +111,11 @@ Prefer to inject dependencies rather than using window or electron singleton. An
 
 ### Lazy validation
 Prefer to validate data at the last minute. Eg: do not check for valid parent id while loading the session. Instead when rendering the tree, if the parent id is unknow, just put the orphant worktree in a separate section. Similarly with pty id, if tty is missing, show error instead of trying to get the actually tty connectino before even opening the terminal.
+
+### State
+- It is expected that the same session can be opened by multiple window.
+- Therefore high level window state need to be synced. 
+- This is generally handled through the workspace metadata.
 
 ## Testing
 
