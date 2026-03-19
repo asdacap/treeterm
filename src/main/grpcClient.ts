@@ -184,6 +184,7 @@ export class GrpcDaemonClient {
         if (error) {
           reject(new Error(error.message))
         } else if (response) {
+          this.openSessionStream(response.sessionId)
           resolve(response.sessionId)
         } else {
           reject(new Error('No response from server'))
