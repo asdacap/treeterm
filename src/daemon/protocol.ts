@@ -5,7 +5,7 @@
 // Import shared types
 import type {
   SandboxConfig,
-  Tab,
+  AppState,
   Workspace,
   Session,
   SessionInfo,
@@ -15,7 +15,7 @@ import type {
 // Re-export for backward compatibility
 export type {
   SandboxConfig,
-  Tab,
+  AppState,
   Workspace,
   Session,
   SessionInfo,

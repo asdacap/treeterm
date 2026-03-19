@@ -7,7 +7,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import type { DaemonPtyManager } from './ptyManager'
 import type { SessionStore } from './sessionStore'
-import type { Session, Workspace, Tab } from '../shared/types'
+import type { Session, Workspace, AppState } from '../shared/types'
 import { createModuleLogger } from './logger'
 import { getDefaultSocketPath } from './socketPath'
 import * as filesystem from './filesystem'
@@ -231,12 +231,9 @@ export class GrpcServer {
       log.info({ sessionId, clientId }, 'attachPty called')
 
       // Attach client to PTY session
-      this.ptyManager.attach(sessionId, clientId)
+      const result = this.ptyManager.attach(sessionId, clientId)
 
-      // Get scrollback history
-      const scrollback = this.ptyManager.getScrollback(sessionId)
-
-      callback(null, { scrollback })
+      callback(null, { scrollback: result.scrollback, exitCode: result.exitCode })
     } catch (error) {
       log.error({ err: error, sessionId: call.request.sessionId }, 'attachPty error')
       callback({
@@ -752,56 +749,66 @@ export class GrpcServer {
   }
 
   private convertWorkspaceInputs(inputs: WorkspaceInput[]): Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[] {
-    return inputs.map(input => ({
-      id: input.id,
-      path: input.path,
-      name: input.name,
-      parentId: input.parentId || null,
-      children: input.children || [],
-      status: input.status as 'active' | 'merged' | 'abandoned',
-      isGitRepo: input.isGitRepo,
-      gitBranch: input.gitBranch || null,
-      gitRootPath: input.gitRootPath || null,
-      isWorktree: input.isWorktree,
-      isDetached: input.isDetached,
-      tabs: input.tabs.map(tab => ({
-        id: tab.id,
-        applicationId: tab.applicationId,
-        title: tab.title,
-        state: JSON.parse(tab.state.toString('utf-8'))
-      })),
-      activeTabId: input.activeTabId || null,
-      metadata: input.metadata?.length ? JSON.parse(input.metadata.toString('utf-8')) : {}
-    }))
+    return inputs.map(input => {
+      const appStates: Record<string, AppState> = {}
+      for (const [key, value] of Object.entries(input.appStates || {})) {
+        appStates[key] = {
+          applicationId: value.applicationId,
+          title: value.title,
+          state: JSON.parse(value.state.toString('utf-8'))
+        }
+      }
+      return {
+        id: input.id,
+        path: input.path,
+        name: input.name,
+        parentId: input.parentId || null,
+        children: input.children || [],
+        status: input.status as 'active' | 'merged' | 'abandoned',
+        isGitRepo: input.isGitRepo,
+        gitBranch: input.gitBranch || null,
+        gitRootPath: input.gitRootPath || null,
+        isWorktree: input.isWorktree,
+        isDetached: input.isDetached,
+        appStates,
+        activeTabId: input.activeTabId || null,
+        metadata: input.metadata?.length ? JSON.parse(input.metadata.toString('utf-8')) : {}
+      }
+    })
   }
 
   private convertToProtoSession(session: Session): ProtoSession {
     return {
       id: session.id,
-      workspaces: session.workspaces.map((w: Workspace) => ({
-        id: w.id,
-        path: w.path,
-        name: w.name,
-        parentId: w.parentId || undefined,
-        children: w.children || [],
-        status: w.status,
-        isGitRepo: w.isGitRepo,
-        gitBranch: w.gitBranch || undefined,
-        gitRootPath: w.gitRootPath || undefined,
-        isWorktree: w.isWorktree,
-        isDetached: w.isDetached,
-        tabs: w.tabs.map((t: Tab) => ({
-          id: t.id,
-          applicationId: t.applicationId,
-          title: t.title,
-          state: Buffer.from(JSON.stringify(t.state), 'utf-8')
-        })),
-        activeTabId: w.activeTabId || undefined,
-        metadata: Buffer.from(JSON.stringify(w.metadata ?? {}), 'utf-8'),
-        createdAt: w.createdAt,
-        lastActivity: w.lastActivity,
-        attachedClients: w.attachedClients
-      })),
+      workspaces: session.workspaces.map((w: Workspace) => {
+        const protoAppStates: { [key: string]: { applicationId: string; title: string; state: Buffer } } = {}
+        for (const [key, s] of Object.entries(w.appStates)) {
+          protoAppStates[key] = {
+            applicationId: s.applicationId,
+            title: s.title,
+            state: Buffer.from(JSON.stringify(s.state), 'utf-8')
+          }
+        }
+        return {
+          id: w.id,
+          path: w.path,
+          name: w.name,
+          parentId: w.parentId || undefined,
+          children: w.children || [],
+          status: w.status,
+          isGitRepo: w.isGitRepo,
+          gitBranch: w.gitBranch || undefined,
+          gitRootPath: w.gitRootPath || undefined,
+          isWorktree: w.isWorktree,
+          isDetached: w.isDetached,
+          appStates: protoAppStates,
+          activeTabId: w.activeTabId || undefined,
+          metadata: Buffer.from(JSON.stringify(w.metadata ?? {}), 'utf-8'),
+          createdAt: w.createdAt,
+          lastActivity: w.lastActivity,
+          attachedClients: w.attachedClients
+        }
+      }),
       createdAt: session.createdAt,
       lastActivity: session.lastActivity,
       attachedClients: session.attachedClients

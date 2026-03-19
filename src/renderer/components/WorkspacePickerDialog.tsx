@@ -91,7 +91,7 @@ export default function WorkspacePickerDialog({
             <span className="workspace-branch">({workspace.gitBranch})</span>
           )}
           <span className="workspace-tabs">
-            {workspace.tabs.length} tab{workspace.tabs.length !== 1 ? 's' : ''}
+            {Object.keys(workspace.appStates).length} tab{Object.keys(workspace.appStates).length !== 1 ? 's' : ''}
           </span>
         </div>
         {children.length > 0 && (
@@ -105,7 +105,7 @@ export default function WorkspacePickerDialog({
 
   const renderSession = (session: Session) => {
     const { rootWorkspaces, childWorkspaces } = buildWorkspaceHierarchy(session.workspaces)
-    const totalTabs = session.workspaces.reduce((sum, w) => sum + w.tabs.length, 0)
+    const totalTabs = session.workspaces.reduce((sum, w) => sum + Object.keys(w.appStates).length, 0)
 
     return (
       <div

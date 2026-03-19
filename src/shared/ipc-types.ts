@@ -8,7 +8,8 @@ import type {
   Settings,
   Session,
   SessionInfo,
-  WorkspaceInput
+  WorkspaceInput,
+  RunAction
 } from './types'
 
 import type {
@@ -35,7 +36,7 @@ export interface IpcRequests {
   }
   ptyAttach: {
     params: [sessionId: string]
-    result: { success: boolean; scrollback?: string[]; error?: string }
+    result: { success: boolean; scrollback?: string[]; exitCode?: number; error?: string }
   }
   ptyDetach: {
     params: [sessionId: string]
@@ -248,6 +249,16 @@ export interface IpcRequests {
   sandboxIsAvailable: {
     params: []
     result: boolean
+  }
+
+  // Run Actions operations
+  runActionsDetect: {
+    params: [workspacePath: string]
+    result: RunAction[]
+  }
+  runActionsRun: {
+    params: [workspacePath: string, actionId: string]
+    result: string | null  // returns ptyId
   }
 
   // App operations

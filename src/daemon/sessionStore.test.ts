@@ -26,7 +26,7 @@ function makeWorkspace(overrides: Partial<WorkspaceInput> & { path: string }): W
     gitBranch: null,
     gitRootPath: null,
     isWorktree: false,
-    tabs: [],
+    appStates: {},
     activeTabId: null,
     metadata: {},
   }

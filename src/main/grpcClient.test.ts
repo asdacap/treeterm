@@ -324,12 +324,13 @@ describe('GrpcDaemonClient', () => {
         gitRootPath: undefined,
         isWorktree: false,
         isDetached: false,
-        tabs: [{
-          id: 'tab-1',
-          applicationId: 'terminal',
-          title: 'Terminal',
-          state: Buffer.from(JSON.stringify({ ptyId: 'pty-1' }), 'utf-8')
-        }],
+        appStates: {
+          'tab-1': {
+            applicationId: 'terminal',
+            title: 'Terminal',
+            state: Buffer.from(JSON.stringify({ ptyId: 'pty-1' }), 'utf-8')
+          }
+        },
         activeTabId: 'tab-1',
         metadata: Buffer.from('{}'),
         createdAt: 1000,
@@ -355,7 +356,7 @@ describe('GrpcDaemonClient', () => {
         gitRootPath: null,
         isWorktree: false,
         isDetached: false,
-        tabs: [],
+        appStates: {},
         activeTabId: null,
         metadata: {}
       }])
@@ -458,12 +459,13 @@ describe('GrpcDaemonClient', () => {
           gitRootPath: '/test',
           isWorktree: true,
           isDetached: false,
-          tabs: [{
-            id: 'tab-1',
-            applicationId: 'terminal',
-            title: 'Terminal',
-            state: Buffer.from(JSON.stringify({ ptyId: 'pty-1' }), 'utf-8')
-          }],
+          appStates: {
+            'tab-1': {
+              applicationId: 'terminal',
+              title: 'Terminal',
+              state: Buffer.from(JSON.stringify({ ptyId: 'pty-1' }), 'utf-8')
+            }
+          },
           activeTabId: 'tab-1',
           metadata: Buffer.from('{}'),
           createdAt: 1000,
@@ -478,7 +480,7 @@ describe('GrpcDaemonClient', () => {
       mockClientInstance.getSession.mockImplementation((req: any, cb: any) => cb(null, protoSession))
       const session = await client.getSession('session-1')
       expect(session).not.toBeNull()
-      expect(session!.workspaces[0].tabs[0].state).toEqual({ ptyId: 'pty-1' })
+      expect(session!.workspaces[0].appStates['tab-1'].state).toEqual({ ptyId: 'pty-1' })
       expect(session!.workspaces[0].parentId).toBe('parent-1')
       expect(session!.workspaces[0].gitBranch).toBe('main')
     })
@@ -498,7 +500,7 @@ describe('GrpcDaemonClient', () => {
           gitRootPath: undefined,
           isWorktree: false,
           isDetached: false,
-          tabs: [],
+          appStates: {},
           activeTabId: undefined,
           createdAt: 1000,
           lastActivity: 2000,

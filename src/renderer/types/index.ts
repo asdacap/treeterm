@@ -5,7 +5,7 @@ import type { WorkspaceState } from '../store/createWorkspaceStore'
 // Import and re-export shared types
 import type {
   SandboxConfig,
-  Tab,
+  AppState,
   Workspace,
   Session,
   SessionInfo,
@@ -15,12 +15,13 @@ import type {
   PrefixModeConfig,
   STTProvider,
   Settings,
-  WorktreeSettings
+  WorktreeSettings,
+  RunAction
 } from '../../shared/types'
 
 export type {
   SandboxConfig,
-  Tab,
+  AppState,
   Workspace,
   Session,
   SessionInfo,
@@ -30,8 +31,12 @@ export type {
   PrefixModeConfig,
   STTProvider,
   Settings,
-  WorktreeSettings
+  WorktreeSettings,
+  RunAction
 }
+
+/** Convenience type: AppState with its id (the map key) */
+export type Tab = AppState & { id: string }
 
 // Activity state for applications that can report their state
 export type ActivityState = 'idle' | 'working' | 'waiting_for_input'
@@ -68,6 +73,7 @@ export interface ApplicationRenderProps {
 // Type-specific state interfaces (for internal use within applications)
 export interface TerminalState {
   ptyId: string | null
+  keepOnExit?: boolean
 }
 
 export interface AiHarnessState extends TerminalState {
@@ -238,7 +244,7 @@ export interface ConflictCheckResult {
 
 export interface TerminalApi {
   create: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
-  attach: (sessionId: string) => Promise<{ success: boolean; scrollback?: string[]; error?: string }>
+  attach: (sessionId: string) => Promise<{ success: boolean; scrollback?: string[]; exitCode?: number; error?: string }>
   detach: (sessionId: string) => Promise<void>
   list: () => Promise<SessionInfo[]>
   write: (id: string, data: string) => void
@@ -293,6 +299,11 @@ export interface AppRegistryApi {
   getDefaultApp: (appId?: string) => Application | null
 }
 
+export interface RunActionsApi {
+  detect: (workspacePath: string) => Promise<RunAction[]>
+  run: (workspacePath: string, actionId: string) => Promise<string | null>
+}
+
 export interface SandboxApi {
   isAvailable: () => Promise<boolean>
 }
@@ -342,6 +353,7 @@ declare global {
       git: GitApi
       settings: SettingsApi
       filesystem: FilesystemApi
+      runActions: RunActionsApi
       sandbox: SandboxApi
       stt: STTApi
       getInitialWorkspace: () => Promise<string | null>
@@ -351,6 +363,11 @@ declare global {
       getWindowUuid: () => Promise<string>
     }
   }
+}
+
+// Helper to derive a Tab array from appStates Record
+export function getTabs(workspace: Workspace): Tab[] {
+  return Object.entries(workspace.appStates).map(([id, state]) => ({ ...state, id }))
 }
 
 // Type guard functions for application states

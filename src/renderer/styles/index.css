@@ -4597,3 +4597,68 @@ body,
   color: var(--text-secondary);
   font-size: 13px;
 }
+
+/* === Run Action Toolbar Dropdown === */
+
+.run-action-dropdown-container {
+  position: relative;
+}
+
+.run-action-trigger-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.run-action-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  min-width: 200px;
+  max-width: 320px;
+  max-height: 400px;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+  padding: 4px 0;
+}
+
+.run-action-menu-group {
+  padding: 2px 0;
+}
+
+.run-action-menu-group + .run-action-menu-group {
+  border-top: 1px solid var(--border-color);
+}
+
+.run-action-menu-group-header {
+  padding: 4px 12px;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+}
+
+.run-action-menu-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+
+.run-action-menu-item:hover {
+  background: var(--bg-hover);
+}
+
+.run-action-menu-loading,
+.run-action-menu-empty {
+  padding: 8px 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}

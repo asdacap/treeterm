@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createDefaultLayoutModel, tabToFlexNode } from './layoutModel'
-import type { Tab } from '../../shared/types'
+import type { Tab } from '../types'
 import type { Application } from '../types'
 
 const testApp: Application = {

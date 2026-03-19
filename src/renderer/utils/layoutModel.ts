@@ -1,5 +1,5 @@
 import type { IJsonModel, IJsonTabNode } from '@aptre/flex-layout'
-import type { Tab } from '../../shared/types'
+import type { Tab } from '../types'
 import type { Application } from '../types'
 
 /**

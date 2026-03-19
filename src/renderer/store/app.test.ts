@@ -54,6 +54,7 @@ vi.mock('../../applications/comments/renderer', () => ({
   }
 }))
 
+
 import { useAppStore } from './app'
 
 // Mock createWorkspaceStore and its utilities
@@ -113,6 +114,7 @@ const mockDeps = {
   filesystem: {},
   reviews: {},
   stt: {},
+  runActions: { detect: vi.fn().mockResolvedValue([]), run: vi.fn().mockResolvedValue(null) },
   sandbox: {},
   selectFolder: vi.fn(),
   getRecentDirectories: vi.fn(),
@@ -245,7 +247,7 @@ describe('useAppStore', () => {
             name: 'root',
             parentId: null,
             children: ['child-ws'],
-            tabs: [],
+            appStates: {},
             activeTabId: null
           },
           {
@@ -254,7 +256,7 @@ describe('useAppStore', () => {
             name: 'child',
             parentId: 'root-ws',
             children: [],
-            tabs: [],
+            appStates: {},
             activeTabId: null
           }
         ]
@@ -278,7 +280,7 @@ describe('useAppStore', () => {
             name: 'orphan',
             parentId: 'nonexistent-parent',
             children: [],
-            tabs: [{ id: 'tab-1', applicationId: 'terminal', title: 'Term', state: { ptyId: 'pty-1' } }],
+            appStates: { 'tab-1': { applicationId: 'terminal', title: 'Term', state: { ptyId: 'pty-1' } } },
             activeTabId: 'tab-1'
           }
         ]
@@ -303,10 +305,10 @@ describe('useAppStore', () => {
             name: 'test',
             parentId: null,
             children: [],
-            tabs: [
-              { id: 'tab-1', applicationId: 'terminal', title: 'Term', state: { ptyId: 'pty-maybe-dead' } },
-              { id: 'tab-2', applicationId: 'ai-harness', title: 'AI', state: { ptyId: 'pty-unknown' } }
-            ],
+            appStates: {
+              'tab-1': { applicationId: 'terminal', title: 'Term', state: { ptyId: 'pty-maybe-dead' } },
+              'tab-2': { applicationId: 'ai-harness', title: 'AI', state: { ptyId: 'pty-unknown' } }
+            },
             activeTabId: 'tab-1'
           }
         ]
@@ -317,8 +319,8 @@ describe('useAppStore', () => {
       // terminal.list() should NOT have been called
       expect(mockDeps.terminal.list).not.toHaveBeenCalled()
 
-      // Workspace reconstructed via setState — tabs are preserved in the workspace object
-      // (reconstructWorkspace spreads daemonWorkspace which includes tabs with ptyIds)
+      // Workspace reconstructed via setState — appStates are preserved in the workspace object
+      // (reconstructWorkspace spreads daemonWorkspace which includes appStates with ptyIds)
       expect(mockSetState).toHaveBeenCalledWith(expect.any(Function))
     })
 
@@ -332,7 +334,7 @@ describe('useAppStore', () => {
             name: 'no-parent',
             parentId: null,
             children: [],
-            tabs: [{ id: 'tab-1', applicationId: 'terminal', title: 'Term', state: { ptyId: 'pty-1' } }],
+            appStates: { 'tab-1': { applicationId: 'terminal', title: 'Term', state: { ptyId: 'pty-1' } } },
             activeTabId: 'tab-1'
           }
         ]
@@ -342,7 +344,7 @@ describe('useAppStore', () => {
 
       // With parentId: null, it's treated as root — reconstructed via setState (not addWorkspace)
       expect(mockAddWorkspace).not.toHaveBeenCalled()
-      // Workspace reconstructed with tabs preserved in the workspace object
+      // Workspace reconstructed with appStates preserved in the workspace object
       expect(mockSetState).toHaveBeenCalledWith(expect.any(Function))
     })
 
@@ -356,7 +358,7 @@ describe('useAppStore', () => {
             name: 'test',
             parentId: null,
             children: [],
-            tabs: [],
+            appStates: {},
             activeTabId: null
           }
         ]
@@ -423,7 +425,7 @@ describe('useAppStore', () => {
 
     it('onCloseConfirm shows confirm dialog when unmerged workspaces exist', async () => {
       const { createWorkspaceStore, getUnmergedSubWorkspaces } = await import('./createWorkspaceStore')
-      const mockWs = { id: 'ws-1', name: 'unmerged', path: '/test', parentId: 'p', children: [], tabs: [], activeTabId: null, metadata: {} }
+      const mockWs = { id: 'ws-1', name: 'unmerged', path: '/test', parentId: 'p', children: [], appStates: {}, activeTabId: null, metadata: {} }
       vi.mocked(getUnmergedSubWorkspaces).mockReturnValue([mockWs as any])
 
       const mockStore = {
@@ -472,7 +474,7 @@ describe('useAppStore', () => {
         id: 'session-ready',
         workspaces: [{
           id: 'ws-1', path: '/test', name: 'test',
-          parentId: null, children: [], tabs: [], activeTabId: null
+          parentId: null, children: [], appStates: {}, activeTabId: null
         }]
       }
       readyCallback(session)
@@ -691,7 +693,7 @@ describe('useAppStore', () => {
         id: 'sync-session',
         workspaces: [{
           id: 'ws-new', path: '/new', name: 'new',
-          parentId: null, children: [], tabs: [], activeTabId: null
+          parentId: null, children: [], appStates: {}, activeTabId: null
         }]
       }
 

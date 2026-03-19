@@ -9,6 +9,7 @@ import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useAppStore } from '../store/app'
 import { createDefaultLayoutModel, tabToFlexNode } from '../utils/layoutModel'
 import { TabActivityIndicator } from './TabActivityIndicator'
+import { getTabs } from '../types'
 
 interface FlexLayoutPaneProps {
   workspaceId: string
@@ -41,7 +42,7 @@ export default function FlexLayoutPane({ workspaceId, workspaceStore, onNewTab }
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [menuAnchor])
 
-  const tabs = workspace?.tabs ?? []
+  const tabs = workspace ? getTabs(workspace) : []
   const activeTabId = workspace?.activeTabId ?? null
 
   const [model, setModel] = useState<Model | null>(null)

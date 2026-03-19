@@ -13,8 +13,9 @@ import KeybindingOverlay from './KeybindingOverlay'
 import { ErrorBoundary } from './ErrorBoundary'
 import WorkspaceErrorFallback from './WorkspaceErrorFallback'
 import type { ReviewState, Platform } from '../types'
-import { isTerminalState } from '../types'
+import { isTerminalState, getTabs } from '../types'
 import { PromptDescriptionButton } from './PromptDescriptionButton'
+import RunActionDropdown from './RunActionDropdown'
 
 interface WorkspacePaneProps {
   workspaceStore: StoreApi<WorkspaceState>
@@ -291,25 +292,25 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
     () => ({
       newTab: handleNewDefaultTab,
       closeTab: () => {
-        if (activeWorkspace?.activeTabId && activeWorkspace.tabs.length > 1) {
+        if (activeWorkspace?.activeTabId && tabs.length > 1) {
           handleCloseTab(activeWorkspace.activeTabId)
         }
       },
       nextTab: () => {
         if (!activeWorkspace) return
-        const currentIndex = activeWorkspace.tabs.findIndex(
+        const currentIndex = tabs.findIndex(
           (t) => t.id === activeWorkspace.activeTabId
         )
-        const newIndex = currentIndex < activeWorkspace.tabs.length - 1 ? currentIndex + 1 : 0
-        handleSelectTab(activeWorkspace.tabs[newIndex].id)
+        const newIndex = currentIndex < tabs.length - 1 ? currentIndex + 1 : 0
+        handleSelectTab(tabs[newIndex].id)
       },
       prevTab: () => {
         if (!activeWorkspace) return
-        const currentIndex = activeWorkspace.tabs.findIndex(
+        const currentIndex = tabs.findIndex(
           (t) => t.id === activeWorkspace.activeTabId
         )
-        const newIndex = currentIndex > 0 ? currentIndex - 1 : activeWorkspace.tabs.length - 1
-        handleSelectTab(activeWorkspace.tabs[newIndex].id)
+        const newIndex = currentIndex > 0 ? currentIndex - 1 : tabs.length - 1
+        handleSelectTab(tabs[newIndex].id)
       },
       workspaceFocus: () => {
         const currentIndex = activeWorkspaceId
@@ -342,8 +343,8 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
       if ((e.metaKey || e.ctrlKey) && e.key >= '1' && e.key <= '9') {
         e.preventDefault()
         const index = parseInt(e.key) - 1
-        if (index < activeWorkspace.tabs.length) {
-          handleSelectTab(activeWorkspace.tabs[index].id)
+        if (index < tabs.length) {
+          handleSelectTab(tabs[index].id)
         }
       }
     }
@@ -353,7 +354,7 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
   }, [activeWorkspace, handleSelectTab])
 
   // Handle legacy workspaces - migrate terminals to tabs format
-  const tabs = activeWorkspace?.tabs || []
+  const tabs = activeWorkspace ? getTabs(activeWorkspace) : []
   const activeTabId = activeWorkspace?.activeTabId || tabs[0]?.id
 
   // Prompt description: show button next to description for AI harness tabs that haven't been prompted yet
@@ -413,6 +414,14 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                   {activeWorkspace.gitBranch && (
                     <span className="workspace-branch">{activeWorkspace.gitBranch}</span>
                   )}
+                  <RunActionDropdown
+                    workspacePath={activeWorkspace.path}
+                    onRun={async (ptyId) => {
+                      if (activeWorkspaceId) {
+                        addTabWithState(activeWorkspaceId, 'terminal', { ptyId, keepOnExit: true })
+                      }
+                    }}
+                  />
                   {activeWorkspace.isWorktree && activeWorkspace.parentId && (
                     <div className="abandon-dropdown-container">
                       <button

@@ -6,6 +6,7 @@ import { useGitApi } from '../contexts/GitApiContext'
 import { useTerminalApi } from '../contexts/TerminalApiContext'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
 import { parseReviewComments } from '../store/createWorkspaceStore'
+import { getTabs } from '../types'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, ReviewComment } from '../types'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
 import { CommentInput } from './CommentInput'
@@ -82,7 +83,7 @@ export default function ReviewBrowser({
   const [isResizing, setIsResizing] = useState(false)
 
   // AI harness prompt support
-  const runningHarness = workspace ? findRunningHarness(workspace.tabs) : null
+  const runningHarness = workspace ? findRunningHarness(getTabs(workspace)) : null
 
   const handlePromptCommit = useCallback(() => {
     if (runningHarness) {

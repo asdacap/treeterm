@@ -92,6 +92,13 @@ async function main(): Promise<void> {
   const defaultSession = sessionStore.initializeDefaultSession('daemon-init')
   log.info({ defaultSessionId: defaultSession.id }, 'default session created at startup')
 
+  // Wire orphan cleanup: a PTY is referenced if any workspace's appStates contains its ptyId
+  ptyManager.setIsReferenced((sessionId) =>
+    sessionStore.getAllWorkspaces().some(ws =>
+      Object.values(ws.appStates).some(s => (s.state as { ptyId?: string })?.ptyId === sessionId)
+    )
+  )
+
   const grpcServer = new GrpcServer(config.socketPath, ptyManager, sessionStore)
 
   // Load persisted sessions (future enhancement)

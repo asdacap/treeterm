@@ -249,7 +249,7 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
     const hasChildren = ws.children.length > 0
     const isExpanded = expanded.has(ws.id)
     const children = ws.children.map((id) => workspaces[id]).filter(Boolean)
-    const tabIds = ws.tabs.map((t) => t.id)
+    const tabIds = Object.keys(ws.appStates)
 
     // Check if this workspace is focused in workspace_focus mode
     const isFocused =

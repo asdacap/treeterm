@@ -25,8 +25,8 @@ export function FilesystemBrowser({
   const { workspaces, updateTabState, addReviewComment, deleteReviewComment, updateOutdatedReviewComments } = useStore(workspaceStore)
   const git = useGitApi()
   const workspace = workspaces[workspaceId]
-  const tab = workspace?.tabs.find((t) => t.id === tabId)
-  const state = tab?.state as FilesystemState | undefined
+  const appState = workspace?.appStates[tabId]
+  const state = appState?.state as FilesystemState | undefined
 
   // Resize state
   const [treeWidth, setTreeWidth] = useState(250)
@@ -37,7 +37,7 @@ export function FilesystemBrowser({
   const [commentInput, setCommentInput] = useState<{ lineNumber: number } | null>(null)
   const [currentCommitHash, setCurrentCommitHash] = useState<string | null>(null)
 
-  if (!tab || !state) {
+  if (!appState || !state) {
     return <div className="filesystem-browser-error">Invalid tab</div>
   }
 

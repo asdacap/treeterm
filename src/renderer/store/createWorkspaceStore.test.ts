@@ -76,7 +76,7 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     gitBranch: null,
     gitRootPath: null,
     isWorktree: false,
-    tabs: [],
+    appStates: {},
     activeTabId: null,
     metadata: {},
     createdAt: Date.now(),
@@ -217,13 +217,13 @@ describe('createWorkspaceStore', () => {
       workspaces: {
         'ws-1': makeWorkspace({
           id: 'ws-1',
-          tabs: [{ id: 'tab-1', applicationId: 'terminal', title: 'Terminal 1', state: { ptyId: null } }],
+          appStates: { 'tab-1': { applicationId: 'terminal', title: 'Terminal 1', state: { ptyId: null } } },
           activeTabId: 'tab-1'
         })
       }
     })
     store.getState().updateTabTitle('ws-1', 'tab-1', 'my shell')
-    expect(store.getState().workspaces['ws-1'].tabs[0].title).toBe('my shell')
+    expect(store.getState().workspaces['ws-1'].appStates['tab-1'].title).toBe('my shell')
   })
 
   it('setActiveTab updates the workspace activeTabId', () => {
@@ -232,10 +232,10 @@ describe('createWorkspaceStore', () => {
       workspaces: {
         'ws-1': makeWorkspace({
           id: 'ws-1',
-          tabs: [
-            { id: 'tab-1', applicationId: 'terminal', title: 'T1', state: {} },
-            { id: 'tab-2', applicationId: 'terminal', title: 'T2', state: {} }
-          ],
+          appStates: {
+            'tab-1': { applicationId: 'terminal', title: 'T1', state: {} },
+            'tab-2': { applicationId: 'terminal', title: 'T2', state: {} }
+          },
           activeTabId: 'tab-1'
         })
       }
@@ -287,10 +287,10 @@ describe('createWorkspaceStore', () => {
       const id = await store.getState().addWorkspace('/project')
 
       const ws = store.getState().workspaces[id]
-      expect(ws.tabs).toHaveLength(1)
-      expect(ws.tabs[0].applicationId).toBe('terminal')
-      expect(ws.tabs[0].title).toBe('Terminal')
-      expect(ws.activeTabId).toBe(ws.tabs[0].id)
+      expect(Object.keys(ws.appStates)).toHaveLength(1)
+      expect(Object.values(ws.appStates)[0].applicationId).toBe('terminal')
+      expect(Object.values(ws.appStates)[0].title).toBe('Terminal')
+      expect(ws.activeTabId).toBe(Object.keys(ws.appStates)[0])
     })
 
     it('skips default tabs when skipDefaultTabs is true', async () => {
@@ -306,7 +306,7 @@ describe('createWorkspaceStore', () => {
       const id = await store.getState().addWorkspace('/project', { skipDefaultTabs: true })
 
       const ws = store.getState().workspaces[id]
-      expect(ws.tabs).toHaveLength(0)
+      expect(Object.keys(ws.appStates)).toHaveLength(0)
       expect(ws.activeTabId).toBeNull()
     })
 
@@ -568,10 +568,10 @@ describe('createWorkspaceStore', () => {
       const store = createWorkspaceStore({ sessionId: 's1', windowUuid: null }, deps)
       const ws = makeWorkspace({
         id: 'ws-1',
-        tabs: [
-          { id: 'tab-1', applicationId: 'terminal', title: 'T1', state: {} },
-          { id: 'tab-2', applicationId: 'terminal', title: 'T2', state: {} },
-        ],
+        appStates: {
+          'tab-1': { applicationId: 'terminal', title: 'T1', state: {} },
+          'tab-2': { applicationId: 'terminal', title: 'T2', state: {} },
+        },
       })
       store.setState({ workspaces: { 'ws-1': ws } })
 
@@ -827,7 +827,7 @@ describe('createWorkspaceStore', () => {
         workspaces: {
           'ws-1': makeWorkspace({
             id: 'ws-1',
-            tabs: [{ id: 'tab-existing', applicationId: 'terminal', title: 'Terminal 1', state: {} }],
+            appStates: { 'tab-existing': { applicationId: 'terminal', title: 'Terminal 1', state: {} } },
           })
         }
       })
@@ -835,7 +835,7 @@ describe('createWorkspaceStore', () => {
       const tabId = store.getState().addTab('ws-1', 'terminal')
 
       const ws = store.getState().workspaces['ws-1']
-      const newTab = ws.tabs.find(t => t.id === tabId)
+      const newTab = ws.appStates[tabId]
       expect(newTab).toBeDefined()
       expect(newTab!.title).toBe('Terminal 2')
       expect(ws.activeTabId).toBe(tabId)
@@ -854,7 +854,7 @@ describe('createWorkspaceStore', () => {
         workspaces: {
           'ws-1': makeWorkspace({
             id: 'ws-1',
-            tabs: [{ id: 'tab-1', applicationId: 'terminal', title: 'Terminal 1', state: {} }],
+            appStates: { 'tab-1': { applicationId: 'terminal', title: 'Terminal 1', state: {} } },
           })
         }
       })
@@ -862,7 +862,7 @@ describe('createWorkspaceStore', () => {
       store.getState().addTab('ws-1', 'terminal')
 
       const ws = store.getState().workspaces['ws-1']
-      expect(ws.tabs).toHaveLength(1)
+      expect(Object.keys(ws.appStates)).toHaveLength(1)
     })
 
     it('returns tabId even when app not found (no-op on state)', () => {
@@ -875,7 +875,7 @@ describe('createWorkspaceStore', () => {
       const tabId = store.getState().addTab('ws-1', 'nonexistent')
 
       expect(typeof tabId).toBe('string')
-      expect(store.getState().workspaces['ws-1'].tabs).toHaveLength(0)
+      expect(Object.keys(store.getState().workspaces['ws-1'].appStates)).toHaveLength(0)
     })
   })
 
@@ -896,7 +896,7 @@ describe('createWorkspaceStore', () => {
       const tabId = store.getState().addTabWithState('ws-1', 'terminal', { cwd: '/custom' })
 
       const ws = store.getState().workspaces['ws-1']
-      const tab = ws.tabs.find(t => t.id === tabId)
+      const tab = ws.appStates[tabId]
       expect(tab).toBeDefined()
       expect(tab!.state).toEqual({ ptyId: null, cwd: '/custom' })
     })
@@ -914,7 +914,7 @@ describe('createWorkspaceStore', () => {
         workspaces: {
           'ws-1': makeWorkspace({
             id: 'ws-1',
-            tabs: [{ id: 'tab-1', applicationId: 'terminal', title: 'T1', state: { ptyId: 'p1' } }],
+            appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: { ptyId: 'p1' } } },
           })
         }
       })
@@ -923,8 +923,8 @@ describe('createWorkspaceStore', () => {
 
       expect(tabId).toBe('tab-1')
       const ws = store.getState().workspaces['ws-1']
-      expect(ws.tabs).toHaveLength(1)
-      expect(ws.tabs[0].state).toEqual({ ptyId: 'p1', extra: 'data' })
+      expect(Object.keys(ws.appStates)).toHaveLength(1)
+      expect(ws.appStates['tab-1'].state).toEqual({ ptyId: 'p1', extra: 'data' })
       expect(ws.activeTabId).toBe('tab-1')
     })
 
@@ -941,7 +941,7 @@ describe('createWorkspaceStore', () => {
         workspaces: {
           'ws-1': makeWorkspace({
             id: 'ws-1',
-            tabs: [{ id: 'tab-1', applicationId: 'terminal', title: 'T1', state: { ptyId: 'p1' } }],
+            appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: { ptyId: 'p1' } } },
           })
         }
       })
@@ -949,8 +949,8 @@ describe('createWorkspaceStore', () => {
       store.getState().addTabWithState('ws-1', 'terminal', { newField: 'val' })
 
       const ws = store.getState().workspaces['ws-1']
-      expect(ws.tabs).toHaveLength(1)
-      expect(ws.tabs[0].state).toEqual({ ptyId: 'p1', newField: 'val' })
+      expect(Object.keys(ws.appStates)).toHaveLength(1)
+      expect(ws.appStates['tab-1'].state).toEqual({ ptyId: 'p1', newField: 'val' })
       expect(ws.activeTabId).toBe('tab-1')
     })
   })
@@ -969,10 +969,10 @@ describe('createWorkspaceStore', () => {
         workspaces: {
           'ws-1': makeWorkspace({
             id: 'ws-1',
-            tabs: [
-              { id: 'tab-1', applicationId: 'terminal', title: 'T1', state: {} },
-              { id: 'tab-2', applicationId: 'terminal', title: 'T2', state: {} },
-            ],
+            appStates: {
+              'tab-1': { applicationId: 'terminal', title: 'T1', state: {} },
+              'tab-2': { applicationId: 'terminal', title: 'T2', state: {} },
+            },
             activeTabId: 'tab-1',
           })
         }
@@ -981,8 +981,8 @@ describe('createWorkspaceStore', () => {
       await store.getState().removeTab('ws-1', 'tab-1')
 
       const ws = store.getState().workspaces['ws-1']
-      expect(ws.tabs).toHaveLength(1)
-      expect(ws.tabs[0].id).toBe('tab-2')
+      expect(Object.keys(ws.appStates)).toHaveLength(1)
+      expect(Object.keys(ws.appStates)[0]).toBe('tab-2')
       expect(ws.activeTabId).toBe('tab-2')
     })
 
@@ -998,7 +998,7 @@ describe('createWorkspaceStore', () => {
       const store = createWorkspaceStore({ sessionId: 's1', windowUuid: null }, deps)
       const ws = makeWorkspace({
         id: 'ws-1',
-        tabs: [{ id: 'tab-1', applicationId: 'terminal', title: 'T1', state: {} }],
+        appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: {} } },
         activeTabId: 'tab-1',
       })
       store.setState({ workspaces: { 'ws-1': ws } })
@@ -1021,14 +1021,14 @@ describe('createWorkspaceStore', () => {
         workspaces: {
           'ws-1': makeWorkspace({
             id: 'ws-1',
-            tabs: [{ id: 'tab-1', applicationId: 'terminal', title: 'T1', state: {} }],
+            appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: {} } },
           })
         }
       })
 
       await store.getState().removeTab('ws-1', 'tab-1')
 
-      expect(store.getState().workspaces['ws-1'].tabs).toHaveLength(1)
+      expect(Object.keys(store.getState().workspaces['ws-1'].appStates)).toHaveLength(1)
     })
 
     it('no-ops for unknown workspace', async () => {
@@ -1057,14 +1057,14 @@ describe('createWorkspaceStore', () => {
         workspaces: {
           'ws-1': makeWorkspace({
             id: 'ws-1',
-            tabs: [{ id: 'tab-1', applicationId: 'terminal', title: 'T1', state: { count: 0 } }],
+            appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: { count: 0 } } },
           })
         }
       })
 
       store.getState().updateTabState<{ count: number }>('ws-1', 'tab-1', (s) => ({ ...s, count: s.count + 1 }))
 
-      const tab = store.getState().workspaces['ws-1'].tabs[0]
+      const tab = store.getState().workspaces['ws-1'].appStates['tab-1']
       expect(tab.state).toEqual({ count: 1 })
     })
 
@@ -1075,7 +1075,7 @@ describe('createWorkspaceStore', () => {
         workspaces: {
           'ws-1': makeWorkspace({
             id: 'ws-1',
-            tabs: [{ id: 'tab-1', applicationId: 'terminal', title: 'T1', state: { count: 0 } }],
+            appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: { count: 0 } } },
           })
         }
       })

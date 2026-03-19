@@ -36,8 +36,7 @@ export interface SandboxConfig {
   allowedPaths: string[];
 }
 
-export interface Tab {
-  id: string;
+export interface AppState {
   applicationId: string;
   title: string;
   /** JSON-encoded arbitrary state */
@@ -57,7 +56,7 @@ export interface Workspace {
   gitRootPath?: string | undefined;
   isWorktree: boolean;
   isDetached?: boolean | undefined;
-  tabs: Tab[];
+  appStates: { [key: string]: AppState };
   activeTabId?: string | undefined;
   createdAt: number;
   lastActivity: number;
@@ -66,6 +65,11 @@ export interface Workspace {
   children: string[];
   /** JSON-encoded arbitrary dictionary */
   metadata: Buffer;
+}
+
+export interface Workspace_AppStatesEntry {
+  key: string;
+  value?: AppState | undefined;
 }
 
 export interface Session {
@@ -86,12 +90,17 @@ export interface WorkspaceInput {
   gitRootPath?: string | undefined;
   isWorktree: boolean;
   isDetached?: boolean | undefined;
-  tabs: Tab[];
+  appStates: { [key: string]: AppState };
   activeTabId?: string | undefined;
   id: string;
   children: string[];
   /** JSON-encoded arbitrary dictionary */
   metadata: Buffer;
+}
+
+export interface WorkspaceInput_AppStatesEntry {
+  key: string;
+  value?: AppState | undefined;
 }
 
 export interface PtySessionInfo {
@@ -128,6 +137,7 @@ export interface AttachPtyRequest {
 
 export interface AttachPtyResponse {
   scrollback: string[];
+  exitCode?: number | undefined;
 }
 
 export interface DetachPtyRequest {
@@ -861,31 +871,28 @@ export const SandboxConfig: MessageFns<SandboxConfig> = {
   },
 };
 
-function createBaseTab(): Tab {
-  return { id: "", applicationId: "", title: "", state: Buffer.alloc(0) };
+function createBaseAppState(): AppState {
+  return { applicationId: "", title: "", state: Buffer.alloc(0) };
 }
 
-export const Tab: MessageFns<Tab> = {
-  encode(message: Tab, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.id !== "") {
-      writer.uint32(10).string(message.id);
-    }
+export const AppState: MessageFns<AppState> = {
+  encode(message: AppState, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.applicationId !== "") {
-      writer.uint32(18).string(message.applicationId);
+      writer.uint32(10).string(message.applicationId);
     }
     if (message.title !== "") {
-      writer.uint32(26).string(message.title);
+      writer.uint32(18).string(message.title);
     }
     if (message.state.length !== 0) {
-      writer.uint32(34).bytes(message.state);
+      writer.uint32(26).bytes(message.state);
     }
     return writer;
   },
 
-  decode(input: BinaryReader | Uint8Array, length?: number): Tab {
+  decode(input: BinaryReader | Uint8Array, length?: number): AppState {
     const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
     const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseTab();
+    const message = createBaseAppState();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -894,7 +901,7 @@ export const Tab: MessageFns<Tab> = {
             break;
           }
 
-          message.id = reader.string();
+          message.applicationId = reader.string();
           continue;
         }
         case 2: {
@@ -902,19 +909,11 @@ export const Tab: MessageFns<Tab> = {
             break;
           }
 
-          message.applicationId = reader.string();
+          message.title = reader.string();
           continue;
         }
         case 3: {
           if (tag !== 26) {
-            break;
-          }
-
-          message.title = reader.string();
-          continue;
-        }
-        case 4: {
-          if (tag !== 34) {
             break;
           }
 
@@ -930,9 +929,8 @@ export const Tab: MessageFns<Tab> = {
     return message;
   },
 
-  fromJSON(object: any): Tab {
+  fromJSON(object: any): AppState {
     return {
-      id: isSet(object.id) ? globalThis.String(object.id) : "",
       applicationId: isSet(object.applicationId)
         ? globalThis.String(object.applicationId)
         : isSet(object.application_id)
@@ -943,11 +941,8 @@ export const Tab: MessageFns<Tab> = {
     };
   },
 
-  toJSON(message: Tab): unknown {
+  toJSON(message: AppState): unknown {
     const obj: any = {};
-    if (message.id !== "") {
-      obj.id = message.id;
-    }
     if (message.applicationId !== "") {
       obj.applicationId = message.applicationId;
     }
@@ -960,12 +955,11 @@ export const Tab: MessageFns<Tab> = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<Tab>, I>>(base?: I): Tab {
-    return Tab.fromPartial(base ?? ({} as any));
+  create<I extends Exact<DeepPartial<AppState>, I>>(base?: I): AppState {
+    return AppState.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<Tab>, I>>(object: I): Tab {
-    const message = createBaseTab();
-    message.id = object.id ?? "";
+  fromPartial<I extends Exact<DeepPartial<AppState>, I>>(object: I): AppState {
+    const message = createBaseAppState();
     message.applicationId = object.applicationId ?? "";
     message.title = object.title ?? "";
     message.state = object.state ?? Buffer.alloc(0);
@@ -984,7 +978,7 @@ function createBaseWorkspace(): Workspace {
     gitRootPath: undefined,
     isWorktree: false,
     isDetached: undefined,
-    tabs: [],
+    appStates: {},
     activeTabId: undefined,
     createdAt: 0,
     lastActivity: 0,
@@ -1024,9 +1018,9 @@ export const Workspace: MessageFns<Workspace> = {
     if (message.isDetached !== undefined) {
       writer.uint32(72).bool(message.isDetached);
     }
-    for (const v of message.tabs) {
-      Tab.encode(v!, writer.uint32(82).fork()).join();
-    }
+    globalThis.Object.entries(message.appStates).forEach(([key, value]: [string, AppState]) => {
+      Workspace_AppStatesEntry.encode({ key: key as any, value }, writer.uint32(82).fork()).join();
+    });
     if (message.activeTabId !== undefined) {
       writer.uint32(90).string(message.activeTabId);
     }
@@ -1135,7 +1129,10 @@ export const Workspace: MessageFns<Workspace> = {
             break;
           }
 
-          message.tabs.push(Tab.decode(reader, reader.uint32()));
+          const entry10 = Workspace_AppStatesEntry.decode(reader, reader.uint32());
+          if (entry10.value !== undefined) {
+            message.appStates[entry10.key] = entry10.value;
+          }
           continue;
         }
         case 11: {
@@ -1238,9 +1235,23 @@ export const Workspace: MessageFns<Workspace> = {
         : isSet(object.is_detached)
         ? globalThis.Boolean(object.is_detached)
         : undefined,
-      tabs: globalThis.Array.isArray(object?.tabs)
-        ? object.tabs.map((e: any) => Tab.fromJSON(e))
-        : [],
+      appStates: isObject(object.appStates)
+        ? (globalThis.Object.entries(object.appStates) as [string, any][]).reduce(
+          (acc: { [key: string]: AppState }, [key, value]: [string, any]) => {
+            acc[key] = AppState.fromJSON(value);
+            return acc;
+          },
+          {},
+        )
+        : isObject(object.app_states)
+        ? (globalThis.Object.entries(object.app_states) as [string, any][]).reduce(
+          (acc: { [key: string]: AppState }, [key, value]: [string, any]) => {
+            acc[key] = AppState.fromJSON(value);
+            return acc;
+          },
+          {},
+        )
+        : {},
       activeTabId: isSet(object.activeTabId)
         ? globalThis.String(object.activeTabId)
         : isSet(object.active_tab_id)
@@ -1298,8 +1309,14 @@ export const Workspace: MessageFns<Workspace> = {
     if (message.isDetached !== undefined) {
       obj.isDetached = message.isDetached;
     }
-    if (message.tabs?.length) {
-      obj.tabs = message.tabs.map((e) => Tab.toJSON(e));
+    if (message.appStates) {
+      const entries = globalThis.Object.entries(message.appStates) as [string, AppState][];
+      if (entries.length > 0) {
+        obj.appStates = {};
+        entries.forEach(([k, v]) => {
+          obj.appStates[k] = AppState.toJSON(v);
+        });
+      }
     }
     if (message.activeTabId !== undefined) {
       obj.activeTabId = message.activeTabId;
@@ -1339,7 +1356,15 @@ export const Workspace: MessageFns<Workspace> = {
     message.gitRootPath = object.gitRootPath ?? undefined;
     message.isWorktree = object.isWorktree ?? false;
     message.isDetached = object.isDetached ?? undefined;
-    message.tabs = object.tabs?.map((e) => Tab.fromPartial(e)) || [];
+    message.appStates = (globalThis.Object.entries(object.appStates ?? {}) as [string, AppState][]).reduce(
+      (acc: { [key: string]: AppState }, [key, value]: [string, AppState]) => {
+        if (value !== undefined) {
+          acc[key] = AppState.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
     message.activeTabId = object.activeTabId ?? undefined;
     message.createdAt = object.createdAt ?? 0;
     message.lastActivity = object.lastActivity ?? 0;
@@ -1347,6 +1372,84 @@ export const Workspace: MessageFns<Workspace> = {
     message.id = object.id ?? "";
     message.children = object.children?.map((e) => e) || [];
     message.metadata = object.metadata ?? Buffer.alloc(0);
+    return message;
+  },
+};
+
+function createBaseWorkspace_AppStatesEntry(): Workspace_AppStatesEntry {
+  return { key: "", value: undefined };
+}
+
+export const Workspace_AppStatesEntry: MessageFns<Workspace_AppStatesEntry> = {
+  encode(message: Workspace_AppStatesEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.key !== "") {
+      writer.uint32(10).string(message.key);
+    }
+    if (message.value !== undefined) {
+      AppState.encode(message.value, writer.uint32(18).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): Workspace_AppStatesEntry {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseWorkspace_AppStatesEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = AppState.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): Workspace_AppStatesEntry {
+    return {
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      value: isSet(object.value) ? AppState.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: Workspace_AppStatesEntry): unknown {
+    const obj: any = {};
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.value !== undefined) {
+      obj.value = AppState.toJSON(message.value);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<Workspace_AppStatesEntry>, I>>(base?: I): Workspace_AppStatesEntry {
+    return Workspace_AppStatesEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<Workspace_AppStatesEntry>, I>>(object: I): Workspace_AppStatesEntry {
+    const message = createBaseWorkspace_AppStatesEntry();
+    message.key = object.key ?? "";
+    message.value = (object.value !== undefined && object.value !== null)
+      ? AppState.fromPartial(object.value)
+      : undefined;
     return message;
   },
 };
@@ -1500,7 +1603,7 @@ function createBaseWorkspaceInput(): WorkspaceInput {
     gitRootPath: undefined,
     isWorktree: false,
     isDetached: undefined,
-    tabs: [],
+    appStates: {},
     activeTabId: undefined,
     id: "",
     children: [],
@@ -1537,9 +1640,9 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
     if (message.isDetached !== undefined) {
       writer.uint32(72).bool(message.isDetached);
     }
-    for (const v of message.tabs) {
-      Tab.encode(v!, writer.uint32(82).fork()).join();
-    }
+    globalThis.Object.entries(message.appStates).forEach(([key, value]: [string, AppState]) => {
+      WorkspaceInput_AppStatesEntry.encode({ key: key as any, value }, writer.uint32(82).fork()).join();
+    });
     if (message.activeTabId !== undefined) {
       writer.uint32(90).string(message.activeTabId);
     }
@@ -1639,7 +1742,10 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
             break;
           }
 
-          message.tabs.push(Tab.decode(reader, reader.uint32()));
+          const entry10 = WorkspaceInput_AppStatesEntry.decode(reader, reader.uint32());
+          if (entry10.value !== undefined) {
+            message.appStates[entry10.key] = entry10.value;
+          }
           continue;
         }
         case 11: {
@@ -1718,9 +1824,23 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
         : isSet(object.is_detached)
         ? globalThis.Boolean(object.is_detached)
         : undefined,
-      tabs: globalThis.Array.isArray(object?.tabs)
-        ? object.tabs.map((e: any) => Tab.fromJSON(e))
-        : [],
+      appStates: isObject(object.appStates)
+        ? (globalThis.Object.entries(object.appStates) as [string, any][]).reduce(
+          (acc: { [key: string]: AppState }, [key, value]: [string, any]) => {
+            acc[key] = AppState.fromJSON(value);
+            return acc;
+          },
+          {},
+        )
+        : isObject(object.app_states)
+        ? (globalThis.Object.entries(object.app_states) as [string, any][]).reduce(
+          (acc: { [key: string]: AppState }, [key, value]: [string, any]) => {
+            acc[key] = AppState.fromJSON(value);
+            return acc;
+          },
+          {},
+        )
+        : {},
       activeTabId: isSet(object.activeTabId)
         ? globalThis.String(object.activeTabId)
         : isSet(object.active_tab_id)
@@ -1763,8 +1883,14 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
     if (message.isDetached !== undefined) {
       obj.isDetached = message.isDetached;
     }
-    if (message.tabs?.length) {
-      obj.tabs = message.tabs.map((e) => Tab.toJSON(e));
+    if (message.appStates) {
+      const entries = globalThis.Object.entries(message.appStates) as [string, AppState][];
+      if (entries.length > 0) {
+        obj.appStates = {};
+        entries.forEach(([k, v]) => {
+          obj.appStates[k] = AppState.toJSON(v);
+        });
+      }
     }
     if (message.activeTabId !== undefined) {
       obj.activeTabId = message.activeTabId;
@@ -1795,11 +1921,99 @@ export const WorkspaceInput: MessageFns<WorkspaceInput> = {
     message.gitRootPath = object.gitRootPath ?? undefined;
     message.isWorktree = object.isWorktree ?? false;
     message.isDetached = object.isDetached ?? undefined;
-    message.tabs = object.tabs?.map((e) => Tab.fromPartial(e)) || [];
+    message.appStates = (globalThis.Object.entries(object.appStates ?? {}) as [string, AppState][]).reduce(
+      (acc: { [key: string]: AppState }, [key, value]: [string, AppState]) => {
+        if (value !== undefined) {
+          acc[key] = AppState.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
     message.activeTabId = object.activeTabId ?? undefined;
     message.id = object.id ?? "";
     message.children = object.children?.map((e) => e) || [];
     message.metadata = object.metadata ?? Buffer.alloc(0);
+    return message;
+  },
+};
+
+function createBaseWorkspaceInput_AppStatesEntry(): WorkspaceInput_AppStatesEntry {
+  return { key: "", value: undefined };
+}
+
+export const WorkspaceInput_AppStatesEntry: MessageFns<WorkspaceInput_AppStatesEntry> = {
+  encode(message: WorkspaceInput_AppStatesEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.key !== "") {
+      writer.uint32(10).string(message.key);
+    }
+    if (message.value !== undefined) {
+      AppState.encode(message.value, writer.uint32(18).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): WorkspaceInput_AppStatesEntry {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseWorkspaceInput_AppStatesEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = AppState.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): WorkspaceInput_AppStatesEntry {
+    return {
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      value: isSet(object.value) ? AppState.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: WorkspaceInput_AppStatesEntry): unknown {
+    const obj: any = {};
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.value !== undefined) {
+      obj.value = AppState.toJSON(message.value);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<WorkspaceInput_AppStatesEntry>, I>>(base?: I): WorkspaceInput_AppStatesEntry {
+    return WorkspaceInput_AppStatesEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<WorkspaceInput_AppStatesEntry>, I>>(
+    object: I,
+  ): WorkspaceInput_AppStatesEntry {
+    const message = createBaseWorkspaceInput_AppStatesEntry();
+    message.key = object.key ?? "";
+    message.value = (object.value !== undefined && object.value !== null)
+      ? AppState.fromPartial(object.value)
+      : undefined;
     return message;
   },
 };
@@ -2348,13 +2562,16 @@ export const AttachPtyRequest: MessageFns<AttachPtyRequest> = {
 };
 
 function createBaseAttachPtyResponse(): AttachPtyResponse {
-  return { scrollback: [] };
+  return { scrollback: [], exitCode: undefined };
 }
 
 export const AttachPtyResponse: MessageFns<AttachPtyResponse> = {
   encode(message: AttachPtyResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     for (const v of message.scrollback) {
       writer.uint32(10).string(v!);
+    }
+    if (message.exitCode !== undefined) {
+      writer.uint32(16).int32(message.exitCode);
     }
     return writer;
   },
@@ -2374,6 +2591,14 @@ export const AttachPtyResponse: MessageFns<AttachPtyResponse> = {
           message.scrollback.push(reader.string());
           continue;
         }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.exitCode = reader.int32();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2388,6 +2613,11 @@ export const AttachPtyResponse: MessageFns<AttachPtyResponse> = {
       scrollback: globalThis.Array.isArray(object?.scrollback)
         ? object.scrollback.map((e: any) => globalThis.String(e))
         : [],
+      exitCode: isSet(object.exitCode)
+        ? globalThis.Number(object.exitCode)
+        : isSet(object.exit_code)
+        ? globalThis.Number(object.exit_code)
+        : undefined,
     };
   },
 
@@ -2395,6 +2625,9 @@ export const AttachPtyResponse: MessageFns<AttachPtyResponse> = {
     const obj: any = {};
     if (message.scrollback?.length) {
       obj.scrollback = message.scrollback;
+    }
+    if (message.exitCode !== undefined) {
+      obj.exitCode = Math.round(message.exitCode);
     }
     return obj;
   },
@@ -2405,6 +2638,7 @@ export const AttachPtyResponse: MessageFns<AttachPtyResponse> = {
   fromPartial<I extends Exact<DeepPartial<AttachPtyResponse>, I>>(object: I): AttachPtyResponse {
     const message = createBaseAttachPtyResponse();
     message.scrollback = object.scrollback?.map((e) => e) || [];
+    message.exitCode = object.exitCode ?? undefined;
     return message;
   },
 };

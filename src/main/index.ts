@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto'
 import { GrpcDaemonClient } from './grpcClient'
 import { IpcServer } from './ipc/ipc-server'
 import { GitClient } from './git'
+import { createRunActionsClient, RunActionsClient } from './runActions'
 import { windowManager } from './windowManager'
 import type { SandboxConfig } from '../shared/types'
 
@@ -25,6 +26,7 @@ let loadingWindow: BrowserWindow | null = null
 const closeConfirmedWindows: Set<number> = new Set()
 let daemonClient: GrpcDaemonClient | null = null
 let gitClient: GitClient | null = null
+let runActionsClient: RunActionsClient | null = null
 let useDaemon = true // Always use daemon mode
 let attachedSessions: Set<string> = new Set()
 
@@ -325,7 +327,7 @@ ipcMain.handle('pty:attach', async (event, sessionId: string) => {
       attachedSessions.add(sessionId)
     }
 
-    return { success: true, scrollback: result.scrollback }
+    return { success: true, scrollback: result.scrollback, exitCode: result.exitCode }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     console.error('[main] failed to attach to PTY session:', errorMessage)
@@ -539,6 +541,13 @@ server.onDialogGetRecentDirectories(async () => {
 function initializeGitClient(): void {
   if (daemonClient && !gitClient) {
     gitClient = new GitClient(daemonClient)
+  }
+}
+
+// Initialize run actions client when daemon is ready
+function initializeRunActionsClient(): void {
+  if (daemonClient && !runActionsClient) {
+    runActionsClient = createRunActionsClient(daemonClient)
   }
 }
 
@@ -796,6 +805,21 @@ server.onGitGetHeadCommitHash(async (repoPath) => {
   if (!gitClient) throw new Error('Git client not initialized')
   const hash = await gitClient.getHeadCommitHash(repoPath)
   return { success: true, hash }
+})
+
+// Run Actions IPC Handlers
+server.onRunActionsDetect(async (workspacePath) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  initializeRunActionsClient()
+  if (!runActionsClient) throw new Error('RunActions client not initialized')
+  return runActionsClient.detect(workspacePath)
+})
+
+server.onRunActionsRun(async (workspacePath, actionId) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  initializeRunActionsClient()
+  if (!runActionsClient) throw new Error('RunActions client not initialized')
+  return runActionsClient.run(workspacePath, actionId)
 })
 
 // Settings IPC Handlers
