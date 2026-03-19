@@ -115,7 +115,7 @@ export class SSHTunnel {
         // Start daemon if not running, get socket path
         '$TREETERM_CMD status >/dev/null 2>&1 || true',
         // Print the socket path (same logic as getDefaultSocketPath)
-        'echo "TREETERM_SOCKET:$(mktemp -u /tmp/treeterm-$(id -u)/daemon.sock | xargs dirname)/daemon.sock"',
+        'echo "TREETERM_SOCKET:/tmp/treeterm-$(id -u)/daemon.sock"',
       ].join('\n')
 
       sshArgs.push(bootstrapScript)
