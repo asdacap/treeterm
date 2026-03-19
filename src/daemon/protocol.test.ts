@@ -18,11 +18,6 @@ describe('isTypedResponse', () => {
     expect(isTypedResponse(response)).toBe(true)
   })
 
-  it('returns true for scrollback type', () => {
-    const response: DaemonResponse = { type: 'scrollback', sessionId: 'abc', payload: [] }
-    expect(isTypedResponse(response)).toBe(true)
-  })
-
   it('returns true for exit type', () => {
     const response: DaemonResponse = { type: 'exit', sessionId: 'abc', payload: { exitCode: 0 } }
     expect(isTypedResponse(response)).toBe(true)

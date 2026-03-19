@@ -126,7 +126,6 @@ function makeMockPtyManager(): any {
     resize: vi.fn(),
     kill: vi.fn(),
     listSessions: vi.fn().mockReturnValue([]),
-    getScrollback: vi.fn().mockReturnValue(['line1']),
     onData: vi.fn(),
     onExit: vi.fn(),
     shutdown: vi.fn()
@@ -339,26 +338,6 @@ describe('GrpcServer', () => {
       })
     })
 
-    it('getScrollback returns scrollback data', () => {
-      const call = makeUnaryCall({ sessionId: 'pty-1' })
-      const callback = makeCallback()
-
-      capturedServiceImpl.getScrollback(call, callback)
-
-      expect(callback).toHaveBeenCalledWith(null, { scrollback: ['line1'] })
-    })
-
-    it('getScrollback returns error for missing session', () => {
-      mockPtyManager.getScrollback.mockImplementation(() => { throw new Error('not found') })
-      const call = makeUnaryCall({ sessionId: 'bad' })
-      const callback = makeCallback()
-
-      capturedServiceImpl.getScrollback(call, callback)
-
-      expect(callback).toHaveBeenCalledWith(
-        expect.objectContaining({ code: 5, message: 'not found' })
-      )
-    })
   })
 
   describe('session handlers', () => {

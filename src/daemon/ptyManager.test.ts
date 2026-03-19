@@ -176,20 +176,6 @@ describe('DaemonPtyManager', () => {
     })
   })
 
-  describe('getScrollback', () => {
-    it('returns scrollback for session', () => {
-      const sessionId = manager.create({ cwd: '/tmp', env: {} })
-      
-      const scrollback = manager.getScrollback(sessionId)
-      
-      expect(scrollback).toEqual([])
-    })
-
-    it('throws error for non-existent session', () => {
-      expect(() => manager.getScrollback('pty-nonexistent')).toThrow('Session pty-nonexistent not found')
-    })
-  })
-
   describe('onData callback', () => {
     it('registers and receives data callbacks', () => {
       const callback = vi.fn()
@@ -254,15 +240,15 @@ describe('DaemonPtyManager', () => {
       onDataHandler('line 1')
       onDataHandler('line 2')
 
-      const scrollback = manager.getScrollback(sessionId)
+      const { scrollback } = manager.attach(sessionId, 'test-client')
       expect(scrollback).toEqual(['line 1', 'line 2'])
     })
 
     it('returns copy of scrollback, not reference', () => {
       const sessionId = manager.create({ cwd: '/tmp', env: {} })
 
-      const scrollback1 = manager.getScrollback(sessionId)
-      const scrollback2 = manager.getScrollback(sessionId)
+      const { scrollback: scrollback1 } = manager.attach(sessionId, 'test-client-1')
+      const { scrollback: scrollback2 } = manager.attach(sessionId, 'test-client-2')
 
       expect(scrollback1).not.toBe(scrollback2)
     })
@@ -278,7 +264,7 @@ describe('DaemonPtyManager', () => {
       onDataHandler('a'.repeat(60))
       onDataHandler('b'.repeat(60))
 
-      const scrollback = smallManager.getScrollback(sessionId)
+      const { scrollback } = smallManager.attach(sessionId, 'test-client')
       // First chunk should have been removed since total exceeds 100 bytes
       expect(scrollback).not.toContain('a'.repeat(60))
       expect(scrollback).toContain('b'.repeat(60))

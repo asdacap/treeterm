@@ -15,7 +15,6 @@ import {
   type DetachPtyRequest,
   type ResizePtyRequest,
   type KillPtyRequest,
-  type GetScrollbackRequest,
   type PtyInput,
   type PtyOutput,
   type ExecInput,

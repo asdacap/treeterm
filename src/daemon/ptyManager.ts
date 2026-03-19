@@ -353,15 +353,6 @@ export class DaemonPtyManager {
     return sessions
   }
 
-  getScrollback(sessionId: string): string[] {
-    const session = this.sessions.get(sessionId)
-    if (!session) {
-      throw new Error(`Session ${sessionId} not found`)
-    }
-
-    return [...session.scrollback]
-  }
-
   onData(callback: DataCallback): () => void {
     this.dataCallbacks.add(callback)
     return () => this.dataCallbacks.delete(callback)
