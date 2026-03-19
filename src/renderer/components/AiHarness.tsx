@@ -35,8 +35,8 @@ export default function AiHarness({
 }: AiHarnessProps) {
   const terminalApi = useTerminalApi()
   const workspace = useStore(workspaceStore, (state) => state.workspaces[workspaceId])
-  const tab = workspace?.tabs.find((t) => t.id === tabId)
-  const ptyId = (tab?.state as BaseTerminalState | undefined)?.ptyId
+  const appState = workspace?.appStates[tabId]
+  const ptyId = (appState?.state as BaseTerminalState | undefined)?.ptyId
 
   const handlePushToTalkTranscript = useCallback((text: string) => {
     if (ptyId) {
