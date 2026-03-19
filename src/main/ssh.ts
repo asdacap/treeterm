@@ -100,22 +100,56 @@ export class SSHTunnel {
     return new Promise<string>((resolve, reject) => {
       const sshArgs = this.buildBaseSSHArgs()
 
-      // Bootstrap script: check for treeterm, install if needed, start daemon, print socket path
+      // Bootstrap script: check for treeterm, clone+build if needed, start daemon, print socket path
       const bootstrapScript = [
         'set -e',
-        // Try to find treeterm
-        'if command -v treeterm >/dev/null 2>&1; then',
-        '  TREETERM_CMD=treeterm',
-        'elif npx --yes github:asdacap/treeterm --help >/dev/null 2>&1; then',
-        '  TREETERM_CMD="npx --yes github:asdacap/treeterm"',
+        'TREETERM_DIR="$HOME/.treeterm/repo"',
+        'DAEMON_SOCKET="/tmp/treeterm-$(id -u)/daemon.sock"',
+        '',
+        '# Clone or update the repo',
+        'NEEDS_BUILD=0',
+        'if [ ! -d "$TREETERM_DIR/.git" ]; then',
+        '  git clone --depth 1 https://github.com/asdacap/treeterm.git "$TREETERM_DIR"',
+        '  NEEDS_BUILD=1',
         'else',
-        '  echo "TREETERM_ERROR: treeterm not found. Install it or ensure npx is available." >&2',
+        '  cd "$TREETERM_DIR"',
+        '  git fetch --depth 1 origin',
+        '  LOCAL=$(git rev-parse HEAD)',
+        '  REMOTE=$(git rev-parse origin/master)',
+        '  if [ "$LOCAL" != "$REMOTE" ]; then',
+        '    git reset --hard origin/master',
+        '    NEEDS_BUILD=1',
+        '  fi',
+        'fi',
+        '',
+        'cd "$TREETERM_DIR"',
+        '',
+        '# Build only if needed (new clone, updated, or out/ missing)',
+        'if [ "$NEEDS_BUILD" = "1" ] || [ ! -f "$TREETERM_DIR/out/daemon/daemon/index.js" ]; then',
+        '  npm install',
+        '  npm run build:daemon',
+        'fi',
+        '',
+        '# Start daemon if not already running',
+        'mkdir -p "$HOME/.treeterm"',
+        'if [ ! -S "$DAEMON_SOCKET" ]; then',
+        '  DAEMON_LOG="$HOME/.treeterm/daemon.log"',
+        '  node "$TREETERM_DIR/out/daemon/daemon/index.js" >> "$DAEMON_LOG" 2>&1 &',
+        'fi',
+        '',
+        '# Wait for socket to appear',
+        'for i in $(seq 1 40); do',
+        '  [ -S "$DAEMON_SOCKET" ] && break',
+        '  sleep 0.25',
+        'done',
+        '',
+        'if [ ! -S "$DAEMON_SOCKET" ]; then',
+        '  echo "TREETERM_ERROR: Daemon failed to start — socket not found at $DAEMON_SOCKET" >&2',
         '  exit 1',
         'fi',
-        // Start daemon if not running, get socket path
-        '$TREETERM_CMD status >/dev/null 2>&1 || true',
-        // Print the socket path (same logic as getDefaultSocketPath)
-        'echo "TREETERM_SOCKET:/tmp/treeterm-$(id -u)/daemon.sock"',
+        '',
+        '# Print socket path',
+        'echo "TREETERM_SOCKET:$DAEMON_SOCKET"',
       ].join('\n')
 
       sshArgs.push(bootstrapScript)

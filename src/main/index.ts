@@ -894,7 +894,7 @@ server.onAppGetWindowUuid((event) => {
 })
 
 // SSH IPC Handlers
-server.onSshConnect(async (config) => {
+server.onSshConnect(async (event, config) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
 
   const forwardOutput = (line: string) => {
@@ -903,7 +903,30 @@ server.onSshConnect(async (config) => {
     }
   }
 
-  return connectionManager.connectRemote(config, forwardOutput)
+  const info = await connectionManager.connectRemote(config, forwardOutput)
+
+  // Switch the calling window to use the remote daemon
+  if (info.status === 'connected') {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender)
+    if (senderWindow) {
+      windowManager.updateConnectionId(senderWindow.id, config.id)
+
+      // Load session from remote daemon and re-initialize the renderer
+      const remoteClient = connectionManager.getClient(config.id)
+      try {
+        const session = await remoteClient.getDefaultSession()
+        windowManager.updateSessionId(senderWindow.id, session.id)
+        const windowInfo = windowManager.getWindow(senderWindow.id)
+        if (windowInfo) {
+          windowInfo.ipcServer.appReady(session)
+        }
+      } catch (error) {
+        console.error('[main] Failed to load remote session:', error)
+      }
+    }
+  }
+
+  return info
 })
 
 server.onSshDisconnect(async (connectionId) => {
@@ -1003,9 +1026,25 @@ app.whenReady().then(async () => {
     const parsed = parseSSHTarget(initialSSHTarget)
     if (parsed) {
       console.log('[main] Auto-connecting SSH:', initialSSHTarget)
-      connectionManager.connectRemote(parsed).then((info) => {
+      connectionManager.connectRemote(parsed).then(async (info) => {
         if (info.status === 'connected') {
           console.log('[main] SSH connected:', info.id)
+          if (mainWindow) {
+            windowManager.updateConnectionId(mainWindow.id, parsed.id)
+
+            // Load session from remote daemon and re-initialize the renderer
+            try {
+              const remoteClient = connectionManager!.getClient(parsed.id)
+              const session = await remoteClient.getDefaultSession()
+              windowManager.updateSessionId(mainWindow.id, session.id)
+              const windowInfo = windowManager.getWindow(mainWindow.id)
+              if (windowInfo) {
+                windowInfo.ipcServer.appReady(session)
+              }
+            } catch (error) {
+              console.error('[main] Failed to load remote session:', error)
+            }
+          }
         } else {
           console.error('[main] SSH connection failed:', info.error)
         }

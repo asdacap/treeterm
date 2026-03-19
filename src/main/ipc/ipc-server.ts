@@ -666,11 +666,12 @@ export class IpcServer {
   // SSH request handlers
   onSshConnect(
     handler: (
+      event: IpcMainInvokeEvent,
       ...args: IpcRequests['sshConnect']['params']
     ) => IpcRequests['sshConnect']['result'] | Promise<IpcRequests['sshConnect']['result']>
   ): void {
-    ipcMain.handle(CHANNELS.sshConnect, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['sshConnect']['params']))
+    ipcMain.handle(CHANNELS.sshConnect, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(event, ...(args as IpcRequests['sshConnect']['params']))
     )
   }
 
