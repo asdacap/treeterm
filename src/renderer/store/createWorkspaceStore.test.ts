@@ -53,6 +53,7 @@ function makeDeps(overrides?: Partial<WorkspaceDeps>): WorkspaceDeps {
       keybindings: { newTab: 'c', closeTab: 'x', nextTab: 'n', prevTab: 'p', openSettings: ',', workspaceFocus: 'w' },
       stt: { enabled: false, provider: 'openaiWhisper', openaiApiKey: '', localWhisperModelPath: '', pushToTalkKey: '', language: 'en' },
       daemon: { orphanTimeout: 30000, scrollbackLimit: 10000, killOnQuit: true },
+      ssh: { savedConnections: [] },
       globalDefaultApplicationId: '',
       recentDirectories: [],
     }),

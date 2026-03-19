@@ -10,3 +10,8 @@ export function getDefaultSocketPath(): string {
   const uid = process.getuid ? process.getuid() : os.userInfo().uid
   return path.join(os.tmpdir(), `treeterm-${uid}`, 'daemon.sock')
 }
+
+export function getRemoteForwardSocketPath(connectionId: string): string {
+  const uid = process.getuid ? process.getuid() : os.userInfo().uid
+  return path.join(os.tmpdir(), `treeterm-${uid}`, `remote-${connectionId}.sock`)
+}

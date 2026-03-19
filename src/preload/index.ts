@@ -1,5 +1,5 @@
 import { contextBridge } from 'electron'
-import type { SandboxConfig, Session, SessionInfo, WorkspaceInput, Settings } from '../shared/types'
+import type { SandboxConfig, Session, SessionInfo, WorkspaceInput, Settings, SSHConnectionConfig, ConnectionInfo } from '../shared/types'
 import { IpcClient } from './ipc-client'
 
 type DataCallback = (data: string) => void
@@ -106,6 +106,20 @@ const activeProcessesOpenListeners: ActiveProcessesOpenCallback[] = []
 
 client.onActiveProcessesOpen(() => {
   activeProcessesOpenListeners.forEach((cb) => cb())
+})
+
+type SshConnectionStatusCallback = (info: ConnectionInfo) => void
+const sshConnectionStatusListeners: SshConnectionStatusCallback[] = []
+
+client.onSshConnectionStatus((info) => {
+  sshConnectionStatusListeners.forEach((cb) => cb(info))
+})
+
+type SshOutputCallback = (connectionId: string, line: string) => void
+const sshOutputListeners: SshOutputCallback[] = []
+
+client.onSshOutput((connectionId, line) => {
+  sshOutputListeners.forEach((cb) => cb(connectionId, line))
 })
 
 contextBridge.exposeInMainWorld('electron', {
@@ -441,5 +455,42 @@ contextBridge.exposeInMainWorld('electron', {
   },
   getWindowUuid: (): Promise<string> => {
     return client.appGetWindowUuid()
+  },
+  ssh: {
+    connect: (config: SSHConnectionConfig): Promise<ConnectionInfo> => {
+      return client.sshConnect(config)
+    },
+    disconnect: (connectionId: string): Promise<void> => {
+      return client.sshDisconnect(connectionId)
+    },
+    listConnections: (): Promise<ConnectionInfo[]> => {
+      return client.sshListConnections()
+    },
+    saveConnection: (config: SSHConnectionConfig): Promise<void> => {
+      return client.sshSaveConnection(config)
+    },
+    getSavedConnections: (): Promise<SSHConnectionConfig[]> => {
+      return client.sshGetSavedConnections()
+    },
+    removeSavedConnection: (id: string): Promise<void> => {
+      return client.sshRemoveSavedConnection(id)
+    },
+    getOutput: (connectionId: string): Promise<string[]> => {
+      return client.sshGetOutput(connectionId)
+    },
+    onConnectionStatus: (callback: SshConnectionStatusCallback): (() => void) => {
+      sshConnectionStatusListeners.push(callback)
+      return () => {
+        const index = sshConnectionStatusListeners.indexOf(callback)
+        if (index > -1) sshConnectionStatusListeners.splice(index, 1)
+      }
+    },
+    onOutput: (callback: SshOutputCallback): (() => void) => {
+      sshOutputListeners.push(callback)
+      return () => {
+        const index = sshOutputListeners.indexOf(callback)
+        if (index > -1) sshOutputListeners.splice(index, 1)
+      }
+    }
   }
 })

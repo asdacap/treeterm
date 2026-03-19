@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { Loader2, GitFork, GitBranch, Folder, ChevronDown, ChevronRight, Circle } from 'lucide-react'
+import { Loader2, GitFork, GitBranch, Folder, ChevronDown, ChevronRight, Circle, Monitor } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
@@ -320,6 +320,13 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
       )}
       <div className="tree-header">
         <span className="tree-title">Workspaces</span>
+        <button
+          className="add-button"
+          onClick={() => useAppStore.setState({ showConnectionPicker: true })}
+          title="Connect to SSH"
+        >
+          <Monitor size={14} />
+        </button>
         <button className="add-button" onClick={handleAddWorkspace} title="Add workspace">
           +
         </button>

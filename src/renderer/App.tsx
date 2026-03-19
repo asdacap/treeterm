@@ -5,6 +5,7 @@ import SettingsDialog from './components/SettingsDialog'
 import CloseConfirmDialog from './components/CloseConfirmDialog'
 import WorkspacePickerDialog from './components/WorkspacePickerDialog'
 import ActiveProcessesDialog from './components/ActiveProcessesDialog'
+import ConnectionPicker from './components/ConnectionPicker'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import AppErrorFallback from './components/AppErrorFallback'
 import { useAppStore } from './store/app'
@@ -41,6 +42,8 @@ export default function App() {
     showWorkspacePicker,
     daemonSessions,
     daemonDisconnected,
+    showConnectionPicker,
+    connections,
     getActiveWorkspaceStore,
     handleSessionRestore,
   } = useAppStore()
@@ -147,6 +150,10 @@ export default function App() {
               onClose={() => useAppStore.setState({ isActiveProcessesOpen: false })}
             />
           )}
+          <ConnectionPicker
+            isOpen={showConnectionPicker}
+            onClose={() => useAppStore.setState({ showConnectionPicker: false })}
+          />
           {showWorkspacePicker && (
             <WorkspacePickerDialog
               sessions={daemonSessions}

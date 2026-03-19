@@ -1,10 +1,10 @@
 import { app } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
-import type { Settings, TerminalInstance, AiHarnessInstance, PrefixModeConfig, STTProvider } from '../shared/types'
+import type { Settings, TerminalInstance, AiHarnessInstance, PrefixModeConfig, STTProvider, SSHConnectionConfig } from '../shared/types'
 
 // Re-export for backward compatibility
-export type { Settings, TerminalInstance, AiHarnessInstance, PrefixModeConfig, STTProvider }
+export type { Settings, TerminalInstance, AiHarnessInstance, PrefixModeConfig, STTProvider, SSHConnectionConfig }
 
 const defaultSettings: Settings = {
   terminal: {
@@ -60,6 +60,9 @@ const defaultSettings: Settings = {
     orphanTimeout: 0,
     scrollbackLimit: 50000,
     killOnQuit: false
+  },
+  ssh: {
+    savedConnections: []
   },
   globalDefaultApplicationId: 'terminal',
   recentDirectories: []
@@ -227,6 +230,10 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
     daemon: {
       ...defaults.daemon,
       ...loaded.daemon
+    },
+    ssh: {
+      ...defaults.ssh,
+      ...loaded.ssh
     },
     globalDefaultApplicationId: loaded.globalDefaultApplicationId || defaults.globalDefaultApplicationId,
     recentDirectories: loaded.recentDirectories || defaults.recentDirectories

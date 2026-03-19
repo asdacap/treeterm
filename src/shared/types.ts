@@ -3,6 +3,30 @@
  * Single source of truth for IPC-related types.
  */
 
+// === SSH Connection Types ===
+
+export interface SSHConnectionConfig {
+  id: string
+  host: string
+  user: string
+  port: number // default 22
+  identityFile?: string
+  label?: string // display name
+}
+
+export type ConnectionTarget =
+  | { type: 'local' }
+  | { type: 'remote'; config: SSHConnectionConfig }
+
+export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
+
+export interface ConnectionInfo {
+  id: string
+  target: ConnectionTarget
+  status: ConnectionStatus
+  error?: string
+}
+
 // === Sandbox Types ===
 
 export interface SandboxConfig {
@@ -151,6 +175,10 @@ export interface Settings {
     orphanTimeout: number
     scrollbackLimit: number
     killOnQuit: boolean
+  }
+  // SSH saved connections
+  ssh: {
+    savedConnections: SSHConnectionConfig[]
   }
   // Global default application for new worktrees
   // If not set, falls back to 'terminal' or first available app

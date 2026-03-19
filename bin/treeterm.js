@@ -6,9 +6,6 @@ const fs = require('fs')
 const os = require('os')
 const grpc = require('@grpc/grpc-js')
 
-// Get the path to the electron executable
-const electronPath = require('electron')
-
 // Get the path to the app's main entry point
 const appPath = path.join(__dirname, '..')
 
@@ -90,6 +87,7 @@ if (command === '--help' || command === '-h') {
   console.log('Commands:')
   console.log('  (no command)          Open TreeTerm GUI')
   console.log('  [directory]           Open TreeTerm GUI with workspace directory')
+  console.log('  ssh user@host[:port]  Connect to remote host via SSH')
   console.log('  list-sessions         List all active daemon sessions')
   console.log('  shutdown-daemon       Shutdown the daemon process')
   console.log('  status                Show daemon status')
@@ -204,6 +202,25 @@ if (command === 'status') {
   return
 }
 
+// Handle SSH command
+if (command === 'ssh') {
+  const sshTarget = args[1]
+  if (!sshTarget) {
+    console.error('Usage: treeterm ssh user@host[:port]')
+    process.exit(1)
+  }
+
+  const child = spawn(require('electron'), [appPath, `--ssh=${sshTarget}`], {
+    stdio: 'inherit',
+    windowsHide: false
+  })
+
+  child.on('close', (code) => {
+    process.exit(code)
+  })
+  return
+}
+
 // Handle workspace argument for GUI mode
 let workspacePath = null
 const electronArgs = [appPath]
@@ -233,7 +250,7 @@ if (workspacePath) {
 }
 
 // Spawn electron with the app
-const child = spawn(electronPath, electronArgs, {
+const child = spawn(require('electron'), electronArgs, {
   stdio: 'inherit',
   windowsHide: false
 })

@@ -64,6 +64,13 @@ const CHANNELS = {
   sandboxIsAvailable: 'sandbox:isAvailable',
   appGetInitialWorkspace: 'app:getInitialWorkspace',
   appGetWindowUuid: 'app:getWindowUuid',
+  sshConnect: 'ssh:connect',
+  sshDisconnect: 'ssh:disconnect',
+  sshListConnections: 'ssh:listConnections',
+  sshSaveConnection: 'ssh:saveConnection',
+  sshGetSavedConnections: 'ssh:getSavedConnections',
+  sshRemoveSavedConnection: 'ssh:removeSavedConnection',
+  sshGetOutput: 'ssh:getOutput',
 
   // Send channels
   ptyWrite: 'pty:write',
@@ -85,7 +92,9 @@ const CHANNELS = {
   sessionShowSessions: 'session:show-sessions',
   sessionSync: 'session:sync',
   daemonDisconnected: 'daemon:disconnected',
-  activeProcessesOpen: 'active-processes:open'
+  activeProcessesOpen: 'active-processes:open',
+  sshConnectionStatus: 'ssh:connectionStatus',
+  sshOutput: 'ssh:output'
 } as const
 
 export class IpcClient {
@@ -381,6 +390,35 @@ export class IpcClient {
     return ipcRenderer.invoke(CHANNELS.appGetWindowUuid)
   }
 
+  // SSH requests
+  sshConnect(...args: IpcRequests['sshConnect']['params']): Promise<IpcRequests['sshConnect']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshConnect, ...args)
+  }
+
+  sshDisconnect(...args: IpcRequests['sshDisconnect']['params']): Promise<IpcRequests['sshDisconnect']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshDisconnect, ...args)
+  }
+
+  sshListConnections(...args: IpcRequests['sshListConnections']['params']): Promise<IpcRequests['sshListConnections']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshListConnections, ...args)
+  }
+
+  sshSaveConnection(...args: IpcRequests['sshSaveConnection']['params']): Promise<IpcRequests['sshSaveConnection']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshSaveConnection, ...args)
+  }
+
+  sshGetSavedConnections(...args: IpcRequests['sshGetSavedConnections']['params']): Promise<IpcRequests['sshGetSavedConnections']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshGetSavedConnections, ...args)
+  }
+
+  sshRemoveSavedConnection(...args: IpcRequests['sshRemoveSavedConnection']['params']): Promise<IpcRequests['sshRemoveSavedConnection']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshRemoveSavedConnection, ...args)
+  }
+
+  sshGetOutput(...args: IpcRequests['sshGetOutput']['params']): Promise<IpcRequests['sshGetOutput']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshGetOutput, ...args)
+  }
+
   // ==================== Fire-and-Forget Methods (send pattern, no return) ====================
 
   ptyWrite(...args: IpcSends['ptyWrite']['params']): void {
@@ -487,5 +525,19 @@ export class IpcClient {
     const handler = () => callback()
     ipcRenderer.on(CHANNELS.activeProcessesOpen, handler)
     return () => ipcRenderer.removeListener(CHANNELS.activeProcessesOpen, handler)
+  }
+
+  onSshConnectionStatus(callback: (...args: IpcEvents['sshConnectionStatus']['params']) => void): () => void {
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
+      callback(...(args as IpcEvents['sshConnectionStatus']['params']))
+    ipcRenderer.on(CHANNELS.sshConnectionStatus, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.sshConnectionStatus, handler)
+  }
+
+  onSshOutput(callback: (...args: IpcEvents['sshOutput']['params']) => void): () => void {
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
+      callback(...(args as IpcEvents['sshOutput']['params']))
+    ipcRenderer.on(CHANNELS.sshOutput, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.sshOutput, handler)
   }
 }

@@ -116,6 +116,17 @@ const mockDeps = {
   stt: {},
   runActions: { detect: vi.fn().mockResolvedValue([]), run: vi.fn().mockResolvedValue(null) },
   sandbox: {},
+  ssh: {
+    connect: vi.fn().mockResolvedValue({ id: 'test', target: { type: 'remote' }, status: 'connected' }),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+    listConnections: vi.fn().mockResolvedValue([]),
+    saveConnection: vi.fn().mockResolvedValue(undefined),
+    getSavedConnections: vi.fn().mockResolvedValue([]),
+    removeSavedConnection: vi.fn().mockResolvedValue(undefined),
+    getOutput: vi.fn().mockResolvedValue([]),
+    onConnectionStatus: vi.fn().mockReturnValue(() => {}),
+    onOutput: vi.fn().mockReturnValue(() => {})
+  },
   selectFolder: vi.fn(),
   getRecentDirectories: vi.fn(),
 } as any

@@ -6,15 +6,19 @@ import { GrpcDaemonClient } from './grpcClient'
 import { IpcServer } from './ipc/ipc-server'
 import { GitClient } from './git'
 import { createRunActionsClient, RunActionsClient } from './runActions'
+import { ConnectionManager } from './connectionManager'
 import { windowManager } from './windowManager'
-import type { SandboxConfig } from '../shared/types'
+import type { SandboxConfig, SSHConnectionConfig } from '../shared/types'
 
-// Parse initial workspace from command line
+// Parse initial workspace and SSH target from command line
 let initialWorkspacePath: string | null = null
+let initialSSHTarget: string | null = null
 for (const arg of process.argv) {
   if (arg.startsWith('--workspace=')) {
     initialWorkspacePath = arg.substring('--workspace='.length)
-    break
+  }
+  if (arg.startsWith('--ssh=')) {
+    initialSSHTarget = arg.substring('--ssh='.length)
   }
 }
 import { loadSettings, saveSettings, Settings, addRecentDirectory } from './settings'
@@ -25,6 +29,7 @@ let mainWindow: BrowserWindow | null = null
 let loadingWindow: BrowserWindow | null = null
 const closeConfirmedWindows: Set<number> = new Set()
 let daemonClient: GrpcDaemonClient | null = null
+let connectionManager: ConnectionManager | null = null
 let gitClient: GitClient | null = null
 let runActionsClient: RunActionsClient | null = null
 let useDaemon = true // Always use daemon mode
@@ -32,6 +37,14 @@ let attachedSessions: Set<string> = new Set()
 
 // Maps PTY session IDs to the BrowserWindow ID that owns them
 const ptyToWindow: Map<string, number> = new Map()
+
+// Helper: get the daemon client for a given window (based on its connectionId)
+function getClientForWindow(webContentsId: number): GrpcDaemonClient {
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
+  const windowInfo = windowManager.findWindowByWebContentsId(webContentsId)
+  if (!windowInfo) throw new Error('Window not found')
+  return connectionManager.getClient(windowInfo.connectionId)
+}
 
 // Initialize IPC server
 const server = new IpcServer()
@@ -880,6 +893,57 @@ server.onAppGetWindowUuid((event) => {
   return windowInfo?.uuid || ''
 })
 
+// SSH IPC Handlers
+server.onSshConnect(async (config) => {
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
+
+  const forwardOutput = (line: string) => {
+    for (const win of windowManager.getAllWindows()) {
+      win.ipcServer.sshOutput(config.id, line)
+    }
+  }
+
+  return connectionManager.connectRemote(config, forwardOutput)
+})
+
+server.onSshDisconnect(async (connectionId) => {
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
+  connectionManager.disconnectRemote(connectionId)
+})
+
+server.onSshListConnections(async () => {
+  if (!connectionManager) return []
+  return connectionManager.listConnections()
+})
+
+server.onSshSaveConnection(async (config) => {
+  const settings = loadSettings()
+  const existing = settings.ssh.savedConnections.findIndex(c => c.id === config.id)
+  if (existing >= 0) {
+    settings.ssh.savedConnections[existing] = config
+  } else {
+    settings.ssh.savedConnections.push(config)
+  }
+  saveSettings(settings)
+})
+
+server.onSshGetSavedConnections(async () => {
+  const settings = loadSettings()
+  return settings.ssh.savedConnections
+})
+
+server.onSshRemoveSavedConnection(async (id) => {
+  const settings = loadSettings()
+  settings.ssh.savedConnections = settings.ssh.savedConnections.filter(c => c.id !== id)
+  saveSettings(settings)
+})
+
+server.onSshGetOutput(async (connectionId) => {
+  if (!connectionManager) return []
+  const tunnel = connectionManager.getSSHTunnel(connectionId)
+  return tunnel?.getOutput() || []
+})
+
 // App close confirmation IPC handlers
 server.onAppCloseConfirmed((event) => {
   const windowInfo = windowManager.findWindowByWebContentsId(event.sender.id)
@@ -913,6 +977,16 @@ app.whenReady().then(async () => {
   // Proactively connect to daemon on startup
   await daemonClient.ensureDaemonRunning()
 
+  // Create ConnectionManager wrapping local daemon client
+  connectionManager = new ConnectionManager(daemonClient)
+
+  // Forward connection status changes to all windows
+  connectionManager.onStatusChange((info) => {
+    for (const win of windowManager.getAllWindows()) {
+      win.ipcServer.sshConnectionStatus(info)
+    }
+  })
+
   // Close loading window and show main window
   if (loadingWindow) {
     loadingWindow.close()
@@ -923,6 +997,24 @@ app.whenReady().then(async () => {
   mainWindow = createWindow()
   server.setWindow(mainWindow)  // Set window on global server for PTY data forwarding
   createApplicationMenu(mainWindow, server, quitAndKillDaemon)
+
+  // Handle --ssh startup argument
+  if (initialSSHTarget && connectionManager) {
+    const parsed = parseSSHTarget(initialSSHTarget)
+    if (parsed) {
+      console.log('[main] Auto-connecting SSH:', initialSSHTarget)
+      connectionManager.connectRemote(parsed).then((info) => {
+        if (info.status === 'connected') {
+          console.log('[main] SSH connected:', info.id)
+        } else {
+          console.error('[main] SSH connection failed:', info.error)
+        }
+      }).catch((error) => {
+        console.error('[main] SSH connection error:', error)
+      })
+    }
+    initialSSHTarget = null
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -941,6 +1033,19 @@ app.whenReady().then(async () => {
   app.quit()
 })
 
+// Parse SSH target string like "user@host" or "user@host:port"
+function parseSSHTarget(target: string): SSHConnectionConfig | null {
+  const match = target.match(/^([^@]+)@([^:]+)(?::(\d+))?$/)
+  if (!match) return null
+  return {
+    id: `ssh-${match[2]}-${Date.now()}`,
+    user: match[1],
+    host: match[2],
+    port: match[3] ? parseInt(match[3], 10) : 22,
+    label: target
+  }
+}
+
 async function quitAndKillDaemon(): Promise<void> {
   if (daemonClient) {
     try {
@@ -955,6 +1060,11 @@ async function quitAndKillDaemon(): Promise<void> {
 }
 
 app.on('before-quit', async () => {
+  // Disconnect all remote SSH connections
+  if (connectionManager) {
+    connectionManager.disconnectAll()
+  }
+
   if (daemonClient && daemonClient.isConnected()) {
     const settings = loadSettings()
     if (settings.daemon.killOnQuit) {

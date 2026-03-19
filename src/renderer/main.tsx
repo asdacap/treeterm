@@ -19,6 +19,7 @@ window.electron.app.onReady(() => {
     stt: e.stt,
     runActions: e.runActions,
     sandbox: e.sandbox,
+    ssh: e.ssh,
     sessionApi: e.session,
     settingsApi: e.settings,
     appApi: e.app,

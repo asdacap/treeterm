@@ -9,7 +9,9 @@ import type {
   Session,
   SessionInfo,
   WorkspaceInput,
-  RunAction
+  RunAction,
+  SSHConnectionConfig,
+  ConnectionInfo
 } from './types'
 
 import type {
@@ -272,6 +274,36 @@ export interface IpcRequests {
     params: []
     result: string
   }
+
+  // SSH operations
+  sshConnect: {
+    params: [config: SSHConnectionConfig]
+    result: ConnectionInfo
+  }
+  sshDisconnect: {
+    params: [connectionId: string]
+    result: void
+  }
+  sshListConnections: {
+    params: []
+    result: ConnectionInfo[]
+  }
+  sshSaveConnection: {
+    params: [config: SSHConnectionConfig]
+    result: void
+  }
+  sshGetSavedConnections: {
+    params: []
+    result: SSHConnectionConfig[]
+  }
+  sshRemoveSavedConnection: {
+    params: [id: string]
+    result: void
+  }
+  sshGetOutput: {
+    params: [connectionId: string]
+    result: string[]
+  }
 }
 
 // === Fire-and-Forget Types (renderer sends, no response) ===
@@ -335,6 +367,12 @@ export interface IpcEvents {
   }
   activeProcessesOpen: {
     params: []
+  }
+  sshConnectionStatus: {
+    params: [info: ConnectionInfo]
+  }
+  sshOutput: {
+    params: [connectionId: string, line: string]
   }
 }
 
