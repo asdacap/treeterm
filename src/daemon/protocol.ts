@@ -29,7 +29,6 @@ export type MessageType =
   | 'resize'
   | 'kill'
   | 'list'
-  | 'getScrollback'
   | 'shutdown'
   // Session message types (workspace sessions, not PTY sessions)
   | 'createSession'
@@ -38,7 +37,7 @@ export type MessageType =
   | 'getSession'
   | 'deleteSession'
 
-export type ResponseType = 'success' | 'error' | 'data' | 'scrollback' | 'exit'
+export type ResponseType = 'success' | 'error' | 'data' | 'exit'
 
 export interface CreateSessionConfig {
   cwd: string
@@ -88,11 +87,6 @@ export interface ListMessage extends DaemonMessage {
   type: 'list'
 }
 
-export interface GetScrollbackMessage extends DaemonMessage {
-  type: 'getScrollback'
-  sessionId: string
-}
-
 export interface ShutdownMessage extends DaemonMessage {
   type: 'shutdown'
 }
@@ -102,7 +96,6 @@ export interface ResponsePayloadMap {
   success: { sessionId?: string } | Session | Session[] | SessionInfo[] | null
   error: never
   data: string
-  scrollback: string[]
   exit: { exitCode: number; signal?: number }
 }
 
@@ -130,12 +123,6 @@ export interface DataResponse extends DaemonResponse {
   payload: ResponsePayloadMap['data']
 }
 
-export interface ScrollbackResponse extends DaemonResponse {
-  type: 'scrollback'
-  sessionId: string
-  payload: ResponsePayloadMap['scrollback']
-}
-
 export interface ExitResponse extends DaemonResponse {
   type: 'exit'
   sessionId: string
@@ -143,7 +130,7 @@ export interface ExitResponse extends DaemonResponse {
 }
 
 // Type-safe discriminated union for responses
-export type TypedDaemonResponse = SuccessResponse | ErrorResponse | DataResponse | ScrollbackResponse | ExitResponse
+export type TypedDaemonResponse = SuccessResponse | ErrorResponse | DataResponse | ExitResponse
 
 // Type guard for typed responses
 export function isTypedResponse(response: DaemonResponse): response is TypedDaemonResponse {
@@ -151,7 +138,6 @@ export function isTypedResponse(response: DaemonResponse): response is TypedDaem
     response.type === 'success' ||
     response.type === 'error' ||
     response.type === 'data' ||
-    response.type === 'scrollback' ||
     response.type === 'exit'
   )
 }

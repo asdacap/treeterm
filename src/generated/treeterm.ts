@@ -147,14 +147,6 @@ export interface KillPtyRequest {
   sessionId: string;
 }
 
-export interface GetScrollbackRequest {
-  sessionId: string;
-}
-
-export interface GetScrollbackResponse {
-  scrollback: string[];
-}
-
 export interface ListPtySessionsResponse {
   sessions: PtySessionInfo[];
 }
@@ -2726,132 +2718,6 @@ export const KillPtyRequest: MessageFns<KillPtyRequest> = {
   fromPartial<I extends Exact<DeepPartial<KillPtyRequest>, I>>(object: I): KillPtyRequest {
     const message = createBaseKillPtyRequest();
     message.sessionId = object.sessionId ?? "";
-    return message;
-  },
-};
-
-function createBaseGetScrollbackRequest(): GetScrollbackRequest {
-  return { sessionId: "" };
-}
-
-export const GetScrollbackRequest: MessageFns<GetScrollbackRequest> = {
-  encode(message: GetScrollbackRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.sessionId !== "") {
-      writer.uint32(10).string(message.sessionId);
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): GetScrollbackRequest {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetScrollbackRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.sessionId = reader.string();
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): GetScrollbackRequest {
-    return {
-      sessionId: isSet(object.sessionId)
-        ? globalThis.String(object.sessionId)
-        : isSet(object.session_id)
-        ? globalThis.String(object.session_id)
-        : "",
-    };
-  },
-
-  toJSON(message: GetScrollbackRequest): unknown {
-    const obj: any = {};
-    if (message.sessionId !== "") {
-      obj.sessionId = message.sessionId;
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<GetScrollbackRequest>, I>>(base?: I): GetScrollbackRequest {
-    return GetScrollbackRequest.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<GetScrollbackRequest>, I>>(object: I): GetScrollbackRequest {
-    const message = createBaseGetScrollbackRequest();
-    message.sessionId = object.sessionId ?? "";
-    return message;
-  },
-};
-
-function createBaseGetScrollbackResponse(): GetScrollbackResponse {
-  return { scrollback: [] };
-}
-
-export const GetScrollbackResponse: MessageFns<GetScrollbackResponse> = {
-  encode(message: GetScrollbackResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    for (const v of message.scrollback) {
-      writer.uint32(10).string(v!);
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): GetScrollbackResponse {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetScrollbackResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.scrollback.push(reader.string());
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): GetScrollbackResponse {
-    return {
-      scrollback: globalThis.Array.isArray(object?.scrollback)
-        ? object.scrollback.map((e: any) => globalThis.String(e))
-        : [],
-    };
-  },
-
-  toJSON(message: GetScrollbackResponse): unknown {
-    const obj: any = {};
-    if (message.scrollback?.length) {
-      obj.scrollback = message.scrollback;
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<GetScrollbackResponse>, I>>(base?: I): GetScrollbackResponse {
-    return GetScrollbackResponse.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<GetScrollbackResponse>, I>>(object: I): GetScrollbackResponse {
-    const message = createBaseGetScrollbackResponse();
-    message.scrollback = object.scrollback?.map((e) => e) || [];
     return message;
   },
 };
@@ -11493,16 +11359,6 @@ export const TreeTermDaemonService = {
       Buffer.from(ListPtySessionsResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): ListPtySessionsResponse => ListPtySessionsResponse.decode(value),
   },
-  getScrollback: {
-    path: "/treeterm.TreeTermDaemon/GetScrollback" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: GetScrollbackRequest): Buffer => Buffer.from(GetScrollbackRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): GetScrollbackRequest => GetScrollbackRequest.decode(value),
-    responseSerialize: (value: GetScrollbackResponse): Buffer =>
-      Buffer.from(GetScrollbackResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): GetScrollbackResponse => GetScrollbackResponse.decode(value),
-  },
   /**
    * PTY Data Streaming (Bidirectional)
    * Client sends input (write/resize), server sends output (data/exit)
@@ -11643,7 +11499,6 @@ export interface TreeTermDaemonServer extends UntypedServiceImplementation {
   resizePty: handleUnaryCall<ResizePtyRequest, Empty>;
   killPty: handleUnaryCall<KillPtyRequest, Empty>;
   listPtySessions: handleUnaryCall<Empty, ListPtySessionsResponse>;
-  getScrollback: handleUnaryCall<GetScrollbackRequest, GetScrollbackResponse>;
   /**
    * PTY Data Streaming (Bidirectional)
    * Client sends input (write/resize), server sends output (data/exit)
@@ -11743,21 +11598,6 @@ export interface TreeTermDaemonClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: ListPtySessionsResponse) => void,
-  ): ClientUnaryCall;
-  getScrollback(
-    request: GetScrollbackRequest,
-    callback: (error: ServiceError | null, response: GetScrollbackResponse) => void,
-  ): ClientUnaryCall;
-  getScrollback(
-    request: GetScrollbackRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: GetScrollbackResponse) => void,
-  ): ClientUnaryCall;
-  getScrollback(
-    request: GetScrollbackRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: GetScrollbackResponse) => void,
   ): ClientUnaryCall;
   /**
    * PTY Data Streaming (Bidirectional)

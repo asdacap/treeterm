@@ -108,14 +108,6 @@ message KillPtyRequest {
   string session_id = 1;
 }
 
-message GetScrollbackRequest {
-  string session_id = 1;
-}
-
-message GetScrollbackResponse {
-  repeated string scrollback = 1;
-}
-
 message ListPtySessionsResponse {
   repeated PtySessionInfo sessions = 1;
 }
@@ -704,7 +696,6 @@ service TreeTermDaemon {
   rpc ResizePty(ResizePtyRequest) returns (Empty);
   rpc KillPty(KillPtyRequest) returns (Empty);
   rpc ListPtySessions(Empty) returns (ListPtySessionsResponse);
-  rpc GetScrollback(GetScrollbackRequest) returns (GetScrollbackResponse);
 
   // PTY Data Streaming (Bidirectional)
   // Client sends input (write/resize), server sends output (data/exit)

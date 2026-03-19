@@ -20,8 +20,6 @@ import {
   type AttachPtyResponse,
   type ResizePtyRequest,
   type KillPtyRequest,
-  type GetScrollbackRequest,
-  type GetScrollbackResponse,
   type ListPtySessionsResponse,
   type PtyInput,
   type PtyOutput,
@@ -172,7 +170,6 @@ export class GrpcServer {
       resizePty: this.handleResizePty.bind(this),
       killPty: this.handleKillPty.bind(this),
       listPtySessions: this.handleListPtySessions.bind(this),
-      getScrollback: this.handleGetScrollback.bind(this),
       ptyStream: this.handlePtyStream.bind(this),
       execStream: this.handleExecStream.bind(this),
       createSession: this.handleCreateSession.bind(this),
@@ -299,25 +296,6 @@ export class GrpcServer {
       log.error({ err: error }, 'listPtySessions error')
       callback({
         code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private handleGetScrollback(
-    call: grpc.ServerUnaryCall<GetScrollbackRequest, GetScrollbackResponse>,
-    callback: grpc.sendUnaryData<GetScrollbackResponse>
-  ): void {
-    try {
-      const { sessionId } = call.request
-      log.debug({ sessionId }, 'getScrollback called')
-
-      const scrollback = this.ptyManager.getScrollback(sessionId)
-      callback(null, { scrollback })
-    } catch (error) {
-      log.error({ err: error }, 'getScrollback error')
-      callback({
-        code: grpc.status.NOT_FOUND,
         message: error instanceof Error ? error.message : 'Unknown error'
       })
     }
