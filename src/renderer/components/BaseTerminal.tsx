@@ -72,10 +72,6 @@ export interface BaseTerminalConfig {
   startupCommand?: string
   // Log prefix for console messages
   logPrefix: string
-  // Whether to show push-to-talk button
-  showPushToTalk?: boolean
-  // Whether to show review comments button
-  showReviewComments?: boolean
   // Whether to disable the scrollbar (for tools with own scrolling like opencode)
   disableScrollbar?: boolean
   // Whether to strip CSI 3J (clear scrollback) from PTY data before writing to xterm
@@ -534,28 +530,9 @@ export default function BaseTerminal({
     }
   }
 
-  const handlePushToTalkTranscript = (text: string) => {
-    if (ptyIdRef.current) {
-      terminalApi.write(ptyIdRef.current, text)
-    }
-  }
-
-  const handlePushToTalkSubmit = () => {
-    if (ptyIdRef.current) {
-      terminalApi.write(ptyIdRef.current, '\r')
-    }
-  }
-
   return (
     <TerminalScrollWrapper
       terminalRef={terminalRef}
-      showPushToTalk={config.showPushToTalk}
-      onPushToTalkTranscript={handlePushToTalkTranscript}
-      onPushToTalkSubmit={handlePushToTalkSubmit}
-      showReviewComments={config.showReviewComments}
-      workspaceStore={workspaceStore}
-      workspaceId={workspaceId}
-      ptyId={ptyIdRef.current || undefined}
     >
       <div
         ref={containerRef}
