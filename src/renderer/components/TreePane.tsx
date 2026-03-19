@@ -6,8 +6,6 @@ import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useActivityStateStore } from '../store/activityState'
 import { usePrefixModeStore } from '../store/prefixMode'
 import { useAppStore } from '../store/app'
-import { useGitApi } from '../contexts/GitApiContext'
-import { humanId } from 'human-id'
 import CreateChildDialog from './CreateChildDialog'
 import OpenWorkspaceDialog from './OpenWorkspaceDialog'
 import type { Workspace, ActivityState, ReviewState, WorktreeSettings } from '../types'
@@ -57,10 +55,9 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
     createWorktreeFromRemote,
     removeWorkspace,
     mergeAndRemoveWorkspace,
+    quickForkWorkspace,
     setActiveWorkspace
   } = useStore(workspaceStore)
-
-  const git = useGitApi()
   const { activeSessionId, workspaceStores, switchSession } = useAppStore()
   const sessionIds = Object.keys(workspaceStores)
   const {
@@ -125,25 +122,7 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
   }
 
   const handleQuickFork = async (wsId: string) => {
-    const ws = workspaces[wsId]
-    if (!ws?.gitRootPath) return
-
-    const existingBranches = await git.listLocalBranches(ws.gitRootPath)
-    const parentBranch = ws.gitBranch || ''
-
-    let name: string | null = null
-    for (let i = 0; i < 3; i++) {
-      const candidate = humanId({ separator: '-', capitalize: false })
-      const fullBranch = parentBranch ? `${parentBranch}/${candidate}` : candidate
-      if (!existingBranches.includes(fullBranch)) {
-        name = candidate
-        break
-      }
-    }
-
-    if (!name) throw new Error('Failed to generate unique branch name')
-
-    const result = await addChildWorkspace(wsId, name, false)
+    const result = await quickForkWorkspace(wsId)
     if (result.success) {
       setExpanded((prev) => new Set([...Array.from(prev), wsId]))
     }

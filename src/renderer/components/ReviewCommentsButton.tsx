@@ -1,7 +1,6 @@
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
-import { parseReviewComments } from '../store/createWorkspaceStore'
 import { useTerminalApi } from '../contexts/TerminalApiContext'
 import { generateReviewPrompt } from '../utils/reviewPrompt'
 
@@ -13,8 +12,8 @@ interface ReviewCommentsButtonProps {
 
 export function ReviewCommentsButton({ workspaceStore, workspaceId, ptyId }: ReviewCommentsButtonProps): JSX.Element | null {
   const terminal = useTerminalApi()
-  const workspace = useStore(workspaceStore, (state) => state.workspaces[workspaceId])
-  const comments = workspace ? parseReviewComments(workspace.metadata) : []
+  const getReviewComments = useStore(workspaceStore, (state) => state.getReviewComments)
+  const comments = getReviewComments(workspaceId)
 
   if (comments.length === 0) return null
 

@@ -45,7 +45,7 @@ export interface WorktreeInfo {
   branch: string
 }
 
-export interface ChildWorktreeInfo extends WorktreeInfo {
+export type ChildWorktreeInfo = WorktreeInfo & {
   displayName: string
 }
 

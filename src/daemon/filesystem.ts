@@ -1,5 +1,8 @@
 import * as fs from 'fs/promises'
 import * as path from 'path'
+import { createModuleLogger } from './logger'
+
+const log = createModuleLogger('filesystem')
 
 // Security: Ensure path is within workspace
 function isPathWithinWorkspace(workspacePath: string, targetPath: string): boolean {
@@ -104,8 +107,8 @@ export async function readDirectory(
           let stats = null
           try {
             stats = await fs.stat(fullPath)
-          } catch {
-            // Ignore stat errors
+          } catch (err) {
+            log.warn({ path: fullPath, err }, 'stat failed for directory entry')
           }
 
           return {
@@ -235,8 +238,8 @@ export async function searchFiles(
           let stats = null
           try {
             stats = await fs.stat(fullPath)
-          } catch {
-            // Ignore stat errors
+          } catch (err) {
+            log.warn({ path: fullPath, err }, 'stat failed during file search')
           }
 
           const fileEntry: FileEntry = {
@@ -257,8 +260,8 @@ export async function searchFiles(
             await walkDir(fullPath)
           }
         }
-      } catch (error) {
-        // Ignore errors for individual directories (e.g., permission denied)
+      } catch (err) {
+        log.warn({ path: dirPath, err }, 'skipping directory during search (permission denied or similar)')
       }
     }
 

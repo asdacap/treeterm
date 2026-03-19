@@ -3,7 +3,6 @@ import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useGitApi } from '../contexts/GitApiContext'
-import { parseReviewComments } from '../store/createWorkspaceStore'
 import { FileTree } from './FileTree'
 import { FileViewer } from './FileViewer'
 import { CommentDisplay } from './CommentDisplay'
@@ -22,7 +21,7 @@ export function FilesystemBrowser({
   tabId,
   workspaceStore
 }: FilesystemBrowserProps): JSX.Element {
-  const { workspaces, updateTabState, addReviewComment, deleteReviewComment, updateOutdatedReviewComments } = useStore(workspaceStore)
+  const { workspaces, updateTabState, addReviewComment, deleteReviewComment, updateOutdatedReviewComments, getReviewComments } = useStore(workspaceStore)
   const git = useGitApi()
   const workspace = workspaces[workspaceId]
   const appState = workspace?.appStates[tabId]
@@ -32,10 +31,11 @@ export function FilesystemBrowser({
   const [treeWidth, setTreeWidth] = useState(250)
   const [isResizing, setIsResizing] = useState(false)
 
-  // Reviews state — read from workspace metadata (reactive)
-  const allComments = workspace ? parseReviewComments(workspace.metadata) : []
+  // Reviews state — derived from store
+  const allComments = getReviewComments(workspaceId)
   const [commentInput, setCommentInput] = useState<{ lineNumber: number } | null>(null)
   const [currentCommitHash, setCurrentCommitHash] = useState<string | null>(null)
+  const [commitHashError, setCommitHashError] = useState<string | null>(null)
 
   if (!appState || !state) {
     return <div className="filesystem-browser-error">Invalid tab</div>
@@ -71,6 +71,7 @@ export function FilesystemBrowser({
         }
       } catch (error) {
         console.error('Failed to update outdated comments:', error)
+        setCommitHashError(`Failed to get commit hash: ${error instanceof Error ? error.message : 'Unknown error'}`)
       }
     }
     updateOutdated()
@@ -130,6 +131,9 @@ export function FilesystemBrowser({
 
   return (
     <div className="filesystem-browser" onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
+      {commitHashError && (
+        <div className="review-load-error">{commitHashError}</div>
+      )}
       <div style={{ width: treeWidth }}>
         <FileTree
           workspacePath={workspacePath}

@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('fs/promises')
+vi.mock('./logger', () => ({
+  createModuleLogger: () => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  })
+}))
 
 import * as fs from 'fs/promises'
 import { readDirectory, readFile, writeFile, searchFiles } from './filesystem'

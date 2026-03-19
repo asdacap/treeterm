@@ -140,14 +140,12 @@ describe('SessionStore', () => {
 
   })
 
-  describe('initializeDefaultSession', () => {
+  describe('getOrCreateDefaultSession', () => {
     it('creates default session and sets defaultSessionId', () => {
-      const session = store.initializeDefaultSession('client-1')
+      const session = store.getOrCreateDefaultSession('client-1')
       expect(store.getDefaultSessionId()).toBe(session.id)
     })
-  })
 
-  describe('getOrCreateDefaultSession', () => {
     it('creates a new session when none exists', () => {
       const session = store.getOrCreateDefaultSession('client-1')
       expect(session.id).toMatch(/^session-/)

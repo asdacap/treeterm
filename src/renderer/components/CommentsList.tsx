@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
-import { parseReviewComments } from '../store/createWorkspaceStore'
 import { useFilesystemApi } from '../contexts/FilesystemApiContext'
 import { generateReviewPrompt } from '../utils/reviewPrompt'
 import type { ReviewComment, FilesystemState } from '../types'
@@ -38,9 +37,9 @@ export default function CommentsList({
   workspaceStore
 }: CommentsListProps): JSX.Element {
   const filesystem = useFilesystemApi()
-  const { workspaces, addTabWithState, deleteReviewComment, toggleReviewCommentAddressed } = useStore(workspaceStore)
+  const { workspaces, addTabWithState, deleteReviewComment, toggleReviewCommentAddressed, getReviewComments } = useStore(workspaceStore)
   const workspace = workspaces[workspaceId]
-  const comments: ReviewComment[] = workspace ? parseReviewComments(workspace.metadata) : []
+  const comments: ReviewComment[] = getReviewComments(workspaceId)
   const [fileContents, setFileContents] = useState<Map<string, string>>(new Map())
   const [promptExpanded, setPromptExpanded] = useState(false)
 

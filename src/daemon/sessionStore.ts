@@ -27,17 +27,6 @@ export class SessionStore {
   private defaultSessionId: string | null = null
 
   /**
-   * Initialize the default session (called once on daemon startup)
-   * Creates a new session with empty workspaces
-   */
-  initializeDefaultSession(clientId: string): Session {
-    const session = this.createSession(clientId, [])
-    this.defaultSessionId = session.id
-    log.info({ sessionId: session.id }, 'default session initialized')
-    return session
-  }
-
-  /**
    * Get the default session, creating it if necessary
    */
   getOrCreateDefaultSession(clientId: string): Session {
@@ -54,7 +43,10 @@ export class SessionStore {
     }
 
     // Create new default session
-    return this.initializeDefaultSession(clientId)
+    const session = this.createSession(clientId, [])
+    this.defaultSessionId = session.id
+    log.info({ sessionId: session.id }, 'default session initialized')
+    return session
   }
 
   /**

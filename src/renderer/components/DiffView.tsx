@@ -26,6 +26,10 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
   const [viewMode, setViewMode] = useState<ViewMode>('committed')
   const [selectedUncommittedFile, setSelectedUncommittedFile] = useState<UncommittedFile | null>(null)
 
+  // Staging state
+  const [stagingInProgress, setStagingInProgress] = useState(false)
+  const [stageError, setStageError] = useState<string | null>(null)
+
   // Commit state
   const [commitMessage, setCommitMessage] = useState('')
   const [committing, setCommitting] = useState(false)
@@ -113,31 +117,67 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
   }
 
   const handleStageFile = async (filePath: string) => {
-    const result = await git.stageFile(worktreePath, filePath)
-    if (result.success) {
-      await loadUncommittedChanges()
+    setStagingInProgress(true)
+    setStageError(null)
+    try {
+      const result = await git.stageFile(worktreePath, filePath)
+      if (result.success) {
+        await loadUncommittedChanges()
+      } else {
+        setStageError(result.error || `Failed to stage ${filePath}`)
+      }
+    } catch (err) {
+      setStageError(`Failed to stage ${filePath}: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
+    setStagingInProgress(false)
   }
 
   const handleUnstageFile = async (filePath: string) => {
-    const result = await git.unstageFile(worktreePath, filePath)
-    if (result.success) {
-      await loadUncommittedChanges()
+    setStagingInProgress(true)
+    setStageError(null)
+    try {
+      const result = await git.unstageFile(worktreePath, filePath)
+      if (result.success) {
+        await loadUncommittedChanges()
+      } else {
+        setStageError(result.error || `Failed to unstage ${filePath}`)
+      }
+    } catch (err) {
+      setStageError(`Failed to unstage ${filePath}: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
+    setStagingInProgress(false)
   }
 
   const handleStageAll = async () => {
-    const result = await git.stageAll(worktreePath)
-    if (result.success) {
-      await loadUncommittedChanges()
+    setStagingInProgress(true)
+    setStageError(null)
+    try {
+      const result = await git.stageAll(worktreePath)
+      if (result.success) {
+        await loadUncommittedChanges()
+      } else {
+        setStageError(result.error || 'Failed to stage all files')
+      }
+    } catch (err) {
+      setStageError(`Failed to stage all files: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
+    setStagingInProgress(false)
   }
 
   const handleUnstageAll = async () => {
-    const result = await git.unstageAll(worktreePath)
-    if (result.success) {
-      await loadUncommittedChanges()
+    setStagingInProgress(true)
+    setStageError(null)
+    try {
+      const result = await git.unstageAll(worktreePath)
+      if (result.success) {
+        await loadUncommittedChanges()
+      } else {
+        setStageError(result.error || 'Failed to unstage all files')
+      }
+    } catch (err) {
+      setStageError(`Failed to unstage all files: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
+    setStagingInProgress(false)
   }
 
   const handleCommit = async () => {
@@ -372,6 +412,7 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
                   </button>
                 </div>
                 {commitError && <div className="commit-error">{commitError}</div>}
+                {stageError && <div className="commit-error">{stageError}</div>}
               </div>
 
               <div className="diff-content" onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
@@ -381,8 +422,8 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
                     <div className="diff-file-group">
                       <div className="diff-file-group-header">
                         <span>Staged Changes</span>
-                        <button className="diff-stage-btn" onClick={handleUnstageAll}>
-                          Unstage All
+                        <button className="diff-stage-btn" onClick={handleUnstageAll} disabled={stagingInProgress}>
+                          {stagingInProgress ? 'Processing...' : 'Unstage All'}
                         </button>
                       </div>
                       {stagedFiles.map((file) => (
@@ -401,6 +442,7 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
                                 handleUnstageFile(file.path)
                               }}
                               title="Unstage"
+                              disabled={stagingInProgress}
                             >
                               -
                             </button>
@@ -415,8 +457,8 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
                     <div className="diff-file-group">
                       <div className="diff-file-group-header">
                         <span>Changes</span>
-                        <button className="diff-stage-btn" onClick={handleStageAll}>
-                          Stage All
+                        <button className="diff-stage-btn" onClick={handleStageAll} disabled={stagingInProgress}>
+                          {stagingInProgress ? 'Processing...' : 'Stage All'}
                         </button>
                       </div>
                       {unstagedFiles.map((file) => (
@@ -435,6 +477,7 @@ export default function DiffView({ worktreePath, parentBranch }: DiffViewProps) 
                                 handleStageFile(file.path)
                               }}
                               title="Stage"
+                              disabled={stagingInProgress}
                             >
                               +
                             </button>

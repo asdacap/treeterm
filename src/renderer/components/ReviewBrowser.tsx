@@ -5,7 +5,6 @@ import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useGitApi } from '../contexts/GitApiContext'
 import { useTerminalApi } from '../contexts/TerminalApiContext'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
-import { parseReviewComments } from '../store/createWorkspaceStore'
 import { getTabs } from '../types'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, ReviewComment } from '../types'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
@@ -33,7 +32,7 @@ export default function ReviewBrowser({
 }: ReviewBrowserProps) {
   const git = useGitApi()
   const terminalApi = useTerminalApi()
-  const { workspaces, mergeAndRemoveWorkspace, closeAndCleanWorkspace, removeTab, setActiveTab, addReviewComment, deleteReviewComment, updateOutdatedReviewComments } = useStore(workspaceStore)
+  const { workspaces, mergeAndRemoveWorkspace, closeAndCleanWorkspace, removeTab, setActiveTab, addReviewComment, deleteReviewComment, updateOutdatedReviewComments, getReviewComments } = useStore(workspaceStore)
   const workspace = workspaces[workspaceId]
   const parentWorkspace = parentWorkspaceId ? workspaces[parentWorkspaceId] : undefined
   
@@ -54,6 +53,10 @@ export default function ReviewBrowser({
   const [viewMode, setViewMode] = useState<ViewMode>('committed')
   const [selectedUncommittedFile, setSelectedUncommittedFile] = useState<UncommittedFile | null>(null)
 
+  // Staging state
+  const [stagingInProgress, setStagingInProgress] = useState(false)
+  const [stageError, setStageError] = useState<string | null>(null)
+
   // Commit state
   const [commitMessage, setCommitMessage] = useState('')
   const [committing, setCommitting] = useState(false)
@@ -69,8 +72,8 @@ export default function ReviewBrowser({
   const [isProcessing, setIsProcessing] = useState(false)
   const [processingAction, setProcessingAction] = useState<'merge' | 'squash' | null>(null)
 
-  // Reviews state — comments are read from workspace metadata (reactive)
-  const reviews = workspace ? parseReviewComments(workspace.metadata) : []
+  // Reviews state — comments are derived from workspace metadata via store
+  const reviews = getReviewComments(workspaceId)
   const [commentInput, setCommentInput] = useState<{
     visible: boolean
     lineNumber: number
@@ -160,6 +163,7 @@ export default function ReviewBrowser({
       }
     } catch (error) {
       console.error('Failed to load reviews:', error)
+      setLoadError(`Failed to load review state: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
@@ -260,31 +264,67 @@ export default function ReviewBrowser({
   }
 
   const handleStageFile = async (filePath: string) => {
-    const result = await git.stageFile(workspacePath, filePath)
-    if (result.success) {
-      await loadUncommittedChanges()
+    setStagingInProgress(true)
+    setStageError(null)
+    try {
+      const result = await git.stageFile(workspacePath, filePath)
+      if (result.success) {
+        await loadUncommittedChanges()
+      } else {
+        setStageError(result.error || `Failed to stage ${filePath}`)
+      }
+    } catch (err) {
+      setStageError(`Failed to stage ${filePath}: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
+    setStagingInProgress(false)
   }
 
   const handleUnstageFile = async (filePath: string) => {
-    const result = await git.unstageFile(workspacePath, filePath)
-    if (result.success) {
-      await loadUncommittedChanges()
+    setStagingInProgress(true)
+    setStageError(null)
+    try {
+      const result = await git.unstageFile(workspacePath, filePath)
+      if (result.success) {
+        await loadUncommittedChanges()
+      } else {
+        setStageError(result.error || `Failed to unstage ${filePath}`)
+      }
+    } catch (err) {
+      setStageError(`Failed to unstage ${filePath}: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
+    setStagingInProgress(false)
   }
 
   const handleStageAll = async () => {
-    const result = await git.stageAll(workspacePath)
-    if (result.success) {
-      await loadUncommittedChanges()
+    setStagingInProgress(true)
+    setStageError(null)
+    try {
+      const result = await git.stageAll(workspacePath)
+      if (result.success) {
+        await loadUncommittedChanges()
+      } else {
+        setStageError(result.error || 'Failed to stage all files')
+      }
+    } catch (err) {
+      setStageError(`Failed to stage all files: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
+    setStagingInProgress(false)
   }
 
   const handleUnstageAll = async () => {
-    const result = await git.unstageAll(workspacePath)
-    if (result.success) {
-      await loadUncommittedChanges()
+    setStagingInProgress(true)
+    setStageError(null)
+    try {
+      const result = await git.unstageAll(workspacePath)
+      if (result.success) {
+        await loadUncommittedChanges()
+      } else {
+        setStageError(result.error || 'Failed to unstage all files')
+      }
+    } catch (err) {
+      setStageError(`Failed to unstage all files: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
+    setStagingInProgress(false)
   }
 
   const handleCommit = async () => {
@@ -671,10 +711,15 @@ export default function ReviewBrowser({
                     <span className="deletions">-{uncommitted.totalDeletions}</span>
                   </span>
                   <div className="diff-actions">
-                    <button onClick={handleStageAll} className="diff-action-btn">Stage All</button>
-                    <button onClick={handleUnstageAll} className="diff-action-btn">Unstage All</button>
+                    <button onClick={handleStageAll} className="diff-action-btn" disabled={stagingInProgress}>
+                      {stagingInProgress ? 'Processing...' : 'Stage All'}
+                    </button>
+                    <button onClick={handleUnstageAll} className="diff-action-btn" disabled={stagingInProgress}>
+                      {stagingInProgress ? 'Processing...' : 'Unstage All'}
+                    </button>
                   </div>
                 </div>
+                {stageError && <div className="review-load-error">{stageError}</div>}
 
                 <div
                   className="diff-content"
@@ -704,6 +749,7 @@ export default function ReviewBrowser({
                                 e.stopPropagation()
                                 handleUnstageFile(file.path)
                               }}
+                              disabled={stagingInProgress}
                             >
                               Unstage
                             </button>
@@ -732,6 +778,7 @@ export default function ReviewBrowser({
                                 e.stopPropagation()
                                 handleStageFile(file.path)
                               }}
+                              disabled={stagingInProgress}
                             >
                               Stage
                             </button>

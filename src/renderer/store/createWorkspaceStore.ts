@@ -1,5 +1,6 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
+import { humanId } from 'human-id'
 import type { Workspace, GitInfo, Tab, AppState, WorktreeSettings, GitApi, SessionApi, Settings, AppRegistryApi, Application, ReviewComment } from '../types'
 
 export interface WorkspaceDeps {
@@ -36,11 +37,13 @@ export interface WorkspaceState {
   updateTabTitle: (workspaceId: string, tabId: string, title: string) => void
   updateTabState: <T>(workspaceId: string, tabId: string, updater: (state: T) => T) => void
   updateWorkspaceMetadata: (id: string, key: string, value: string) => void
+  getReviewComments: (workspaceId: string) => ReviewComment[]
   addReviewComment: (workspaceId: string, comment: Omit<ReviewComment, 'id' | 'createdAt'>) => void
   deleteReviewComment: (workspaceId: string, commentId: string) => void
   toggleReviewCommentAddressed: (workspaceId: string, commentId: string) => void
   updateOutdatedReviewComments: (workspaceId: string, currentCommitHash: string) => void
   clearReviewComments: (workspaceId: string) => void
+  quickForkWorkspace: (workspaceId: string) => Promise<{ success: boolean; error?: string }>
   syncToDaemon: () => Promise<void>
 }
 
@@ -868,6 +871,12 @@ export function createWorkspaceStore(
       syncSessionToDaemon(state.workspaces, state.isRestoring).catch(console.error)
     },
 
+    getReviewComments: (workspaceId: string): ReviewComment[] => {
+      const workspace = get().workspaces[workspaceId]
+      if (!workspace) return []
+      return parseReviewComments(workspace.metadata)
+    },
+
     addReviewComment: (workspaceId: string, comment: Omit<ReviewComment, 'id' | 'createdAt'>) => {
       const workspace = get().workspaces[workspaceId]
       if (!workspace) return
@@ -916,6 +925,38 @@ export function createWorkspaceStore(
 
     clearReviewComments: (workspaceId: string) => {
       get().updateWorkspaceMetadata(workspaceId, 'reviewComments', serializeReviewComments([]))
+    },
+
+    quickForkWorkspace: async (workspaceId: string) => {
+      const state = get()
+      const ws = state.workspaces[workspaceId]
+
+      if (!ws) {
+        return { success: false, error: 'Workspace not found' }
+      }
+
+      if (!ws.gitRootPath) {
+        return { success: false, error: 'Workspace has no git root path' }
+      }
+
+      const existingBranches = await deps.git.listLocalBranches(ws.gitRootPath)
+      const parentBranch = ws.gitBranch || ''
+
+      let name: string | null = null
+      for (let i = 0; i < 3; i++) {
+        const candidate = humanId({ separator: '-', capitalize: false })
+        const fullBranch = parentBranch ? `${parentBranch}/${candidate}` : candidate
+        if (!existingBranches.includes(fullBranch)) {
+          name = candidate
+          break
+        }
+      }
+
+      if (!name) {
+        return { success: false, error: 'Failed to generate unique branch name' }
+      }
+
+      return get().addChildWorkspace(workspaceId, name, false)
     },
 
     syncToDaemon: async () => {

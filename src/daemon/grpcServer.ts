@@ -5,6 +5,7 @@
 import * as grpc from '@grpc/grpc-js'
 import * as fs from 'fs'
 import * as path from 'path'
+import { z } from 'zod'
 import type { DaemonPtyManager } from './ptyManager'
 import type { SessionStore } from './sessionStore'
 import type { Session, Workspace, AppState } from '../shared/types'
@@ -30,7 +31,7 @@ import {
   type GetDefaultSessionIdResponse,
   type Empty,
   type Session as ProtoSession,
-  type WorkspaceInput,
+  type Workspace as ProtoWorkspaceInput,
   type PtySessionInfo,
   type ExecInput,
   type ExecOutput,
@@ -50,6 +51,20 @@ import {
 } from '../generated/treeterm'
 
 const log = createModuleLogger('grpcServer')
+
+// Zod schemas for runtime validation of JSON-encoded proto bytes fields
+const appStateJsonSchema = z.record(z.string(), z.unknown())
+const metadataSchema = z.record(z.string(), z.string())
+
+function parseJsonBuffer(buf: Buffer, schema: z.ZodTypeAny, fieldName: string): unknown {
+  const raw = JSON.parse(buf.toString('utf-8'))
+  const result = schema.safeParse(raw)
+  if (!result.success) {
+    log.warn({ fieldName, error: result.error.message }, 'JSON buffer failed validation, using raw value')
+    return raw
+  }
+  return result.data
+}
 
 export { getDefaultSocketPath }
 
@@ -438,7 +453,7 @@ export class GrpcServer {
       const clientId = this.getClientId(call.metadata)
       log.debug({ clientId, workspaces: call.request.workspaces.length }, 'createSession called')
 
-      // Convert proto WorkspaceInput to internal format
+      // Convert proto Workspace to internal format (timestamps are optional on input)
       const workspaces = this.convertWorkspaceInputs(call.request.workspaces)
       const session = this.sessionStore.createSession(clientId, workspaces)
 
@@ -679,14 +694,14 @@ export class GrpcServer {
     }
   }
 
-  private convertWorkspaceInputs(inputs: WorkspaceInput[]): Omit<Workspace, 'createdAt' | 'lastActivity'>[] {
+  private convertWorkspaceInputs(inputs: ProtoWorkspaceInput[]): Omit<Workspace, 'createdAt' | 'lastActivity'>[] {
     return inputs.map(input => {
       const appStates: Record<string, AppState> = {}
       for (const [key, value] of Object.entries(input.appStates || {})) {
         appStates[key] = {
           applicationId: value.applicationId,
           title: value.title,
-          state: JSON.parse(value.state.toString('utf-8'))
+          state: parseJsonBuffer(value.state, appStateJsonSchema, `appStates[${key}].state`)
         }
       }
       return {
@@ -703,7 +718,9 @@ export class GrpcServer {
         isDetached: input.isDetached,
         appStates,
         activeTabId: input.activeTabId || null,
-        metadata: input.metadata?.length ? JSON.parse(input.metadata.toString('utf-8')) : {}
+        metadata: input.metadata?.length
+          ? parseJsonBuffer(input.metadata, metadataSchema, 'metadata') as Record<string, string>
+          : {}
       }
     })
   }

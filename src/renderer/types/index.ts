@@ -80,7 +80,7 @@ export interface TerminalState {
   keepOnExit?: boolean
 }
 
-export interface AiHarnessState extends TerminalState {
+export type AiHarnessState = TerminalState & {
   sandbox: SandboxConfig
 }
 
@@ -172,7 +172,7 @@ export interface WorktreeInfo {
   branch: string
 }
 
-export interface ChildWorktreeInfo extends WorktreeInfo {
+export type ChildWorktreeInfo = WorktreeInfo & {
   displayName: string
 }
 
