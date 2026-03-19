@@ -54,7 +54,6 @@ const CHANNELS = {
   sessionCreate: 'session:create',
   sessionUpdate: 'session:update',
   sessionList: 'session:list',
-  sessionGet: 'session:get',
   sessionDelete: 'session:delete',
   sessionOpenInNewWindow: 'session:open-in-new-window',
   daemonShutdown: 'daemon:shutdown',
@@ -336,10 +335,6 @@ export class IpcClient {
 
   sessionList(...args: IpcRequests['sessionList']['params']): Promise<IpcRequests['sessionList']['result']> {
     return ipcRenderer.invoke(CHANNELS.sessionList, ...args)
-  }
-
-  sessionGet(...args: IpcRequests['sessionGet']['params']): Promise<IpcRequests['sessionGet']['result']> {
-    return ipcRenderer.invoke(CHANNELS.sessionGet, ...args)
   }
 
   sessionDelete(...args: IpcRequests['sessionDelete']['params']): Promise<IpcRequests['sessionDelete']['result']> {

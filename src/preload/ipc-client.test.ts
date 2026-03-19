@@ -115,7 +115,6 @@ describe('IpcClient', () => {
       ['sttTranscribeLocal', 'stt:transcribe-local'],
       ['sttCheckMicPermission', 'stt:check-mic-permission'],
       ['sessionUpdate', 'session:update'],
-      ['sessionGet', 'session:get'],
       ['sessionDelete', 'session:delete'],
       ['sessionOpenInNewWindow', 'session:open-in-new-window'],
       ['daemonShutdown', 'daemon:shutdown'],

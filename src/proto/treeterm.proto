@@ -230,7 +230,7 @@ message SessionWatchEvent {
   string sender_id = 3;  // Who triggered the update
 }
 
-message GetSessionRequest {
+message GetDefaultSessionIdResponse {
   string session_id = 1;
 }
 
@@ -717,10 +717,9 @@ service TreeTermDaemon {
   // Workspace Session Management
   rpc CreateSession(CreateSessionRequest) returns (Session);
   rpc UpdateSession(UpdateSessionRequest) returns (Session);
-  rpc GetSession(GetSessionRequest) returns (Session);
   rpc DeleteSession(DeleteSessionRequest) returns (Empty);
   rpc ListSessions(Empty) returns (ListSessionsResponse);
-  rpc GetDefaultSession(Empty) returns (Session);
+  rpc GetDefaultSessionId(Empty) returns (GetDefaultSessionIdResponse);
   rpc SessionWatch(SessionWatchRequest) returns (stream SessionWatchEvent);
 
   // Daemon Control

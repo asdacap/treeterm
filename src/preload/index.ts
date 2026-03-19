@@ -426,9 +426,6 @@ contextBridge.exposeInMainWorld('electron', {
     list: (): Promise<{ success: boolean; sessions?: Session[]; error?: string }> => {
       return client.sessionList()
     },
-    get: (sessionId: string): Promise<{ success: boolean; session?: Session; error?: string }> => {
-      return client.sessionGet(sessionId)
-    },
     delete: (sessionId: string): Promise<{ success: boolean; error?: string }> => {
       return client.sessionDelete(sessionId)
     },

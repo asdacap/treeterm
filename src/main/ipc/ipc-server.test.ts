@@ -128,7 +128,6 @@ describe('IpcServer', () => {
       ['onSttCheckMicPermission', 'stt:check-mic-permission'],
       ['onSessionUpdate', 'session:update'],
       ['onSessionList', 'session:list'],
-      ['onSessionGet', 'session:get'],
       ['onSessionDelete', 'session:delete'],
       ['onSessionOpenInNewWindow', 'session:open-in-new-window'],
       ['onDaemonShutdown', 'daemon:shutdown'],

@@ -214,10 +214,6 @@ export interface IpcRequests {
     params: []
     result: { success: boolean; sessions?: Session[]; error?: string }
   }
-  sessionGet: {
-    params: [sessionId: string]
-    result: { success: boolean; session?: Session; error?: string }
-  }
   sessionDelete: {
     params: [sessionId: string]
     result: { success: boolean; error?: string }
