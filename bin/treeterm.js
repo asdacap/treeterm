@@ -90,6 +90,7 @@ if (command === '--help' || command === '-h') {
   console.log('Commands:')
   console.log('  (no command)          Open TreeTerm GUI')
   console.log('  [directory]           Open TreeTerm GUI with workspace directory')
+  console.log('  ssh user@host[:port]  Connect to remote host via SSH')
   console.log('  list-sessions         List all active daemon sessions')
   console.log('  shutdown-daemon       Shutdown the daemon process')
   console.log('  status                Show daemon status')
@@ -201,6 +202,25 @@ if (command === 'status') {
       process.exit(0)
     }
   })()
+  return
+}
+
+// Handle SSH command
+if (command === 'ssh') {
+  const sshTarget = args[1]
+  if (!sshTarget) {
+    console.error('Usage: treeterm ssh user@host[:port]')
+    process.exit(1)
+  }
+
+  const child = spawn(electronPath, [appPath, `--ssh=${sshTarget}`], {
+    stdio: 'inherit',
+    windowsHide: false
+  })
+
+  child.on('close', (code) => {
+    process.exit(code)
+  })
   return
 }
 

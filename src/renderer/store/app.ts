@@ -14,7 +14,8 @@ import type {
   Workspace, Session, Application,
   Platform, TerminalApi, GitApi, SessionApi, AppApi, DaemonApi,
   FilesystemApi, STTApi, SandboxApi, SettingsApi, RunActionsApi,
-  TerminalInstance, AiHarnessInstance, Settings
+  TerminalInstance, AiHarnessInstance, Settings,
+  SSHConnectionConfig, ConnectionInfo, SSHApi
 } from '../types'
 
 type AddTabWithStateFn = <T>(workspaceId: string, applicationId: string, initialState: Partial<T>, existingTabId?: string) => string
@@ -32,6 +33,7 @@ export interface AppDeps {
   stt: STTApi
   runActions: RunActionsApi
   sandbox: SandboxApi
+  ssh: SSHApi
   selectFolder: () => Promise<string | null>
   getRecentDirectories: () => Promise<string[]>
   getWindowUuid: () => Promise<string>
@@ -48,6 +50,14 @@ interface AppState extends AppDeps {
   unmergedWorkspaces: Workspace[]
   showWorkspacePicker: boolean
   daemonSessions: Session[]
+
+  // SSH connections
+  connections: ConnectionInfo[]
+  sshOutput: Record<string, string[]>
+  showConnectionPicker: boolean
+  connectRemote: (config: SSHConnectionConfig) => Promise<void>
+  disconnectRemote: (connectionId: string) => Promise<void>
+  refreshConnections: () => Promise<void>
 
   // Application registry
   applications: Record<string, Application>
@@ -94,6 +104,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   stt: UNINITIALIZED,
   runActions: UNINITIALIZED,
   sandbox: UNINITIALIZED,
+  ssh: UNINITIALIZED,
   selectFolder: UNINITIALIZED,
   getRecentDirectories: UNINITIALIZED,
   getWindowUuid: UNINITIALIZED,
@@ -107,6 +118,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
   unmergedWorkspaces: [],
   showWorkspacePicker: false,
   daemonSessions: [],
+  connections: [],
+  sshOutput: {},
+  showConnectionPicker: false,
   activeSessionId: null,
   workspaceStores: {},
 
@@ -150,6 +164,36 @@ export const useAppStore = create<AppState>()((set, get) => ({
     }
     const allApps = Object.values(apps)
     return allApps.length > 0 ? allApps[0] : null
+  },
+
+  connectRemote: async (config: SSHConnectionConfig) => {
+    const { ssh } = get()
+    try {
+      const info = await ssh.connect(config)
+      get().refreshConnections()
+      if (info.status === 'error') {
+        throw new Error(info.error || 'Connection failed')
+      }
+    } catch (error) {
+      console.error('[App] SSH connect failed:', error)
+      throw error
+    }
+  },
+
+  disconnectRemote: async (connectionId: string) => {
+    const { ssh } = get()
+    await ssh.disconnect(connectionId)
+    get().refreshConnections()
+  },
+
+  refreshConnections: async () => {
+    const { ssh } = get()
+    try {
+      const connections = await ssh.listConnections()
+      set({ connections })
+    } catch (error) {
+      console.error('[App] Failed to refresh connections:', error)
+    }
   },
 
   initializeApplications: () => {
@@ -205,7 +249,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   initialize: async (deps: AppDeps) => {
     set(deps)
-    const { terminal, git, sessionApi, settingsApi, appApi, daemon, getWindowUuid, getInitialWorkspace } = deps
+    const { terminal, git, sessionApi, settingsApi, appApi, daemon, ssh, getWindowUuid, getInitialWorkspace } = deps
 
     get().initializeApplications()
     useSettingsStore.getState().init(settingsApi, terminal.kill.bind(terminal))
@@ -275,6 +319,35 @@ export const useAppStore = create<AppState>()((set, get) => ({
       set({ isActiveProcessesOpen: true })
     })
 
+    // SSH event subscriptions
+    const unsubSshStatus = ssh.onConnectionStatus((info) => {
+      set((state) => {
+        const idx = state.connections.findIndex(c => c.id === info.id)
+        const updated = [...state.connections]
+        if (idx >= 0) {
+          updated[idx] = info
+        } else {
+          updated.push(info)
+        }
+        return { connections: updated }
+      })
+    })
+
+    const unsubSshOutput = ssh.onOutput((connectionId, line) => {
+      set((state) => {
+        const existing = state.sshOutput[connectionId] || []
+        return {
+          sshOutput: {
+            ...state.sshOutput,
+            [connectionId]: [...existing, line]
+          }
+        }
+      })
+    })
+
+    // Initial connection list
+    get().refreshConnections()
+
     const unsubShowSessions = sessionApi.onShowSessions(async () => {
       try {
         const result = await sessionApi.list()
@@ -311,6 +384,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
       unsubNewTerminal()
       unsubActiveProcesses()
       unsubShowSessions()
+      unsubSshStatus()
+      unsubSshOutput()
     }
   },
 

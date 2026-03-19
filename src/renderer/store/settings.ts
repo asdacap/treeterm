@@ -58,6 +58,9 @@ const defaultSettings: Settings = {
     scrollbackLimit: 10000,
     killOnQuit: true
   },
+  ssh: {
+    savedConnections: []
+  },
   globalDefaultApplicationId: 'terminal',
   recentDirectories: []
 }

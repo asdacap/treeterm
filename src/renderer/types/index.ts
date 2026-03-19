@@ -16,7 +16,9 @@ import type {
   STTProvider,
   Settings,
   WorktreeSettings,
-  RunAction
+  RunAction,
+  SSHConnectionConfig,
+  ConnectionInfo
 } from '../../shared/types'
 
 export type {
@@ -32,7 +34,9 @@ export type {
   STTProvider,
   Settings,
   WorktreeSettings,
-  RunAction
+  RunAction,
+  SSHConnectionConfig,
+  ConnectionInfo
 }
 
 /** Convenience type: AppState with its id (the map key) */
@@ -328,6 +332,18 @@ export interface DaemonApi {
   onDisconnected: (callback: () => void) => () => void
 }
 
+export interface SSHApi {
+  connect: (config: SSHConnectionConfig) => Promise<ConnectionInfo>
+  disconnect: (connectionId: string) => Promise<void>
+  listConnections: () => Promise<ConnectionInfo[]>
+  saveConnection: (config: SSHConnectionConfig) => Promise<void>
+  getSavedConnections: () => Promise<SSHConnectionConfig[]>
+  removeSavedConnection: (id: string) => Promise<void>
+  getOutput: (connectionId: string) => Promise<string[]>
+  onConnectionStatus: (callback: (info: ConnectionInfo) => void) => () => void
+  onOutput: (callback: (connectionId: string, line: string) => void) => () => void
+}
+
 export interface SessionApi {
   create: (workspaces: WorkspaceInput[]) =>
     Promise<{ success: boolean; session?: Session; error?: string }>
@@ -361,6 +377,7 @@ declare global {
       daemon: DaemonApi
       session: SessionApi
       getWindowUuid: () => Promise<string>
+      ssh: SSHApi
     }
   }
 }

@@ -64,6 +64,13 @@ const CHANNELS = {
   sandboxIsAvailable: 'sandbox:isAvailable',
   appGetInitialWorkspace: 'app:getInitialWorkspace',
   appGetWindowUuid: 'app:getWindowUuid',
+  sshConnect: 'ssh:connect',
+  sshDisconnect: 'ssh:disconnect',
+  sshListConnections: 'ssh:listConnections',
+  sshSaveConnection: 'ssh:saveConnection',
+  sshGetSavedConnections: 'ssh:getSavedConnections',
+  sshRemoveSavedConnection: 'ssh:removeSavedConnection',
+  sshGetOutput: 'ssh:getOutput',
 
   // Send channels
   ptyWrite: 'pty:write',
@@ -85,7 +92,9 @@ const CHANNELS = {
   sessionShowSessions: 'session:show-sessions',
   sessionSync: 'session:sync',
   daemonDisconnected: 'daemon:disconnected',
-  activeProcessesOpen: 'active-processes:open'
+  activeProcessesOpen: 'active-processes:open',
+  sshConnectionStatus: 'ssh:connectionStatus',
+  sshOutput: 'ssh:output'
 } as const
 
 export class IpcServer {
@@ -654,6 +663,77 @@ export class IpcServer {
     ipcMain.handle(CHANNELS.appGetWindowUuid, (event: IpcMainInvokeEvent) => handler(event))
   }
 
+  // SSH request handlers
+  onSshConnect(
+    handler: (
+      ...args: IpcRequests['sshConnect']['params']
+    ) => IpcRequests['sshConnect']['result'] | Promise<IpcRequests['sshConnect']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshConnect, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshConnect']['params']))
+    )
+  }
+
+  onSshDisconnect(
+    handler: (
+      ...args: IpcRequests['sshDisconnect']['params']
+    ) => IpcRequests['sshDisconnect']['result'] | Promise<IpcRequests['sshDisconnect']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshDisconnect, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshDisconnect']['params']))
+    )
+  }
+
+  onSshListConnections(
+    handler: (
+      ...args: IpcRequests['sshListConnections']['params']
+    ) => IpcRequests['sshListConnections']['result'] | Promise<IpcRequests['sshListConnections']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshListConnections, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshListConnections']['params']))
+    )
+  }
+
+  onSshSaveConnection(
+    handler: (
+      ...args: IpcRequests['sshSaveConnection']['params']
+    ) => IpcRequests['sshSaveConnection']['result'] | Promise<IpcRequests['sshSaveConnection']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshSaveConnection, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshSaveConnection']['params']))
+    )
+  }
+
+  onSshGetSavedConnections(
+    handler: (
+      ...args: IpcRequests['sshGetSavedConnections']['params']
+    ) => IpcRequests['sshGetSavedConnections']['result'] | Promise<IpcRequests['sshGetSavedConnections']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshGetSavedConnections, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshGetSavedConnections']['params']))
+    )
+  }
+
+  onSshRemoveSavedConnection(
+    handler: (
+      ...args: IpcRequests['sshRemoveSavedConnection']['params']
+    ) => IpcRequests['sshRemoveSavedConnection']['result'] | Promise<IpcRequests['sshRemoveSavedConnection']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshRemoveSavedConnection, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshRemoveSavedConnection']['params']))
+    )
+  }
+
+  onSshGetOutput(
+    handler: (
+      ...args: IpcRequests['sshGetOutput']['params']
+    ) => IpcRequests['sshGetOutput']['result'] | Promise<IpcRequests['sshGetOutput']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshGetOutput, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshGetOutput']['params']))
+    )
+  }
+
   // ==================== Fire-and-Forget Handlers (send/on pattern) ====================
 
   onPtyWrite(handler: (...args: IpcSends['ptyWrite']['params']) => void): void {
@@ -734,5 +814,13 @@ export class IpcServer {
 
   activeProcessesOpen(): void {
     this.window?.webContents.send(CHANNELS.activeProcessesOpen)
+  }
+
+  sshConnectionStatus(...args: IpcEvents['sshConnectionStatus']['params']): void {
+    this.window?.webContents.send(CHANNELS.sshConnectionStatus, ...args)
+  }
+
+  sshOutput(...args: IpcEvents['sshOutput']['params']): void {
+    this.window?.webContents.send(CHANNELS.sshOutput, ...args)
   }
 }

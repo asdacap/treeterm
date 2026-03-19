@@ -11,6 +11,7 @@ interface WindowInfo {
   sessionId: string | null
   ipcServer: IpcServer
   uuid: string
+  connectionId: string
 }
 
 class WindowManager {
@@ -27,9 +28,9 @@ class WindowManager {
   /**
    * Register a window with its associated session
    */
-  registerWindow(window: BrowserWindow, sessionId: string | null, ipcServer: IpcServer, uuid?: string): void {
+  registerWindow(window: BrowserWindow, sessionId: string | null, ipcServer: IpcServer, uuid?: string, connectionId: string = 'local'): void {
     const id = window.id
-    this.windows.set(id, { window, sessionId, ipcServer, uuid: uuid || `win-${id}` })
+    this.windows.set(id, { window, sessionId, ipcServer, uuid: uuid || `win-${id}`, connectionId })
 
     // Clean up when window closes
     window.on('closed', () => {
@@ -84,6 +85,16 @@ class WindowManager {
     const info = this.windows.get(windowId)
     if (info) {
       this.windows.set(windowId, { ...info, sessionId })
+    }
+  }
+
+  /**
+   * Update the connection ID for a window
+   */
+  updateConnectionId(windowId: number, connectionId: string): void {
+    const info = this.windows.get(windowId)
+    if (info) {
+      this.windows.set(windowId, { ...info, connectionId })
     }
   }
 
