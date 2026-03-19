@@ -11,8 +11,6 @@ import { app } from 'electron'
 import {
   TreeTermDaemonClient,
   type CreatePtyRequest,
-  type AttachPtyRequest,
-  type ResizePtyRequest,
   type KillPtyRequest,
   type PtyInput,
   type PtyOutput,
@@ -41,12 +39,16 @@ type DataListener = (data: string) => void
 type ExitListener = (exitCode: number, signal?: number) => void
 type DisconnectListener = () => void
 
+interface PtySessionStream {
+  stream: grpc.ClientDuplexStream<PtyInput, PtyOutput>
+  dataListeners: Set<DataListener>
+  exitListeners: Set<ExitListener>
+}
+
 export class GrpcDaemonClient {
   private client: TreeTermDaemonClient | null = null
-  private stream: grpc.ClientDuplexStream<PtyInput, PtyOutput> | null = null
   private connected: boolean = false
-  private dataListeners: Map<string, Set<DataListener>> = new Map()
-  private exitListeners: Map<string, Set<ExitListener>> = new Map()
+  private sessionStreams: Map<string, PtySessionStream> = new Map()
   private disconnectListeners: Set<DisconnectListener> = new Set()
   private clientId: string = `client-${Date.now()}`
 
@@ -85,66 +87,59 @@ export class GrpcDaemonClient {
 
         console.log('[grpcDaemonClient] connected to daemon')
         this.connected = true
-
-        // Establish bidirectional stream for PTY I/O
-        this.setupPtyStream()
         resolve()
       })
     })
   }
 
-  private setupPtyStream(): void {
+  private openSessionStream(sessionId: string): PtySessionStream {
     if (!this.client) {
-      console.error('[grpcDaemonClient] cannot setup stream: client not initialized')
-      return
+      throw new Error('Not connected to daemon')
     }
 
-    // Create metadata with client ID
+    const existing = this.sessionStreams.get(sessionId)
+    if (existing) return existing
+
     const metadata = new grpc.Metadata()
     metadata.set('client-id', this.clientId)
 
-    this.stream = this.client.ptyStream(metadata)
+    const stream = this.client.ptyStream(metadata)
+    const sessionStream: PtySessionStream = {
+      stream,
+      dataListeners: new Set(),
+      exitListeners: new Set()
+    }
 
-    this.stream.on('data', (output: PtyOutput) => {
+    stream.on('data', (output: PtyOutput) => {
       if (output.data) {
-        const { sessionId, data } = output.data
-        const dataStr = data.toString('utf-8')
-        const listeners = this.dataListeners.get(sessionId)
-        if (listeners) {
-          for (const listener of listeners) {
-            listener(dataStr)
-          }
+        const dataStr = output.data.data.toString('utf-8')
+        for (const listener of sessionStream.dataListeners) {
+          listener(dataStr)
         }
       } else if (output.exit) {
-        const { sessionId, exitCode, signal } = output.exit
-        const listeners = this.exitListeners.get(sessionId)
-        if (listeners) {
-          for (const listener of listeners) {
-            listener(exitCode, signal)
-          }
+        const { exitCode, signal } = output.exit
+        for (const listener of sessionStream.exitListeners) {
+          listener(exitCode, signal)
         }
-        // Clean up listeners after exit
-        this.dataListeners.delete(sessionId)
-        this.exitListeners.delete(sessionId)
+        this.sessionStreams.delete(sessionId)
       }
     })
 
-    this.stream.on('error', (error) => {
-      console.error('[grpcDaemonClient] stream error:', error)
-      this.connected = false
-      for (const listener of this.disconnectListeners) {
-        listener()
-      }
+    stream.on('error', (error) => {
+      console.error(`[grpcDaemonClient] pty stream error for ${sessionId}:`, error)
+      this.sessionStreams.delete(sessionId)
     })
 
-    this.stream.on('end', () => {
-      console.log('[grpcDaemonClient] stream ended')
-      this.connected = false
-      this.stream = null
-      for (const listener of this.disconnectListeners) {
-        listener()
-      }
+    stream.on('end', () => {
+      this.sessionStreams.delete(sessionId)
     })
+
+    this.sessionStreams.set(sessionId, sessionStream)
+
+    // Send start message to scope stream to this session
+    stream.write({ start: { sessionId } })
+
+    return sessionStream
   }
 
   onDisconnect(listener: DisconnectListener): () => void {
@@ -202,60 +197,74 @@ export class GrpcDaemonClient {
       throw new Error('Not connected to daemon')
     }
 
-    return new Promise((resolve, reject) => {
-      const request: AttachPtyRequest = { sessionId }
+    const sessionStream = this.openSessionStream(sessionId)
+    const scrollback: string[] = []
 
-      this.client!.attachPty(request, (error, response) => {
-        if (error) {
-          reject(new Error(error.message))
-        } else if (response) {
-          resolve({ scrollback: response.scrollback, exitCode: response.exitCode })
-        } else {
-          reject(new Error('No response from server'))
+    return new Promise((resolve, reject) => {
+      // Collect scrollback from the initial data burst before registering ongoing listeners.
+      // Use a microtask to resolve after the synchronous burst of data events.
+      let resolved = false
+
+      const onData = (output: PtyOutput): void => {
+        if (resolved) return
+        if (output.data) {
+          scrollback.push(output.data.data.toString('utf-8'))
+        } else if (output.exit) {
+          resolved = true
+          sessionStream.stream.removeListener('data', onData)
+          resolve({ scrollback, exitCode: output.exit.exitCode })
+        }
+      }
+
+      sessionStream.stream.on('data', onData)
+
+      // After the current tick, resolve with collected scrollback
+      // (server sends scrollback synchronously then live data follows)
+      queueMicrotask(() => {
+        if (!resolved) {
+          resolved = true
+          sessionStream.stream.removeListener('data', onData)
+          resolve({ scrollback })
+        }
+      })
+
+      sessionStream.stream.on('error', (error) => {
+        if (!resolved) {
+          resolved = true
+          reject(error)
         }
       })
     })
   }
 
   writeToPtySession(sessionId: string, data: string): void {
-    if (!this.stream) {
-      console.error('[grpcDaemonClient] cannot write: stream not established')
+    const sessionStream = this.sessionStreams.get(sessionId)
+    if (!sessionStream) {
+      console.error('[grpcDaemonClient] cannot write: no stream for session', sessionId)
       return
     }
 
     try {
-      const input: PtyInput = {
-        write: {
-          sessionId,
-          data: Buffer.from(data, 'utf-8')
-        }
-      }
-      this.stream.write(input)
+      sessionStream.stream.write({
+        write: { data: Buffer.from(data, 'utf-8') }
+      })
     } catch (error) {
-      // Terminal I/O is best-effort - log but don't block. User will see visual feedback
-      // (missing characters or incorrect size) which is appropriate for this failure mode
       console.error('[grpcDaemonClient] failed to write to session:', error)
     }
   }
 
   resizePtySession(sessionId: string, cols: number, rows: number): void {
-    if (!this.stream) {
-      console.error('[grpcDaemonClient] cannot resize: stream not established')
+    const sessionStream = this.sessionStreams.get(sessionId)
+    if (!sessionStream) {
+      console.error('[grpcDaemonClient] cannot resize: no stream for session', sessionId)
       return
     }
 
     try {
-      const input: PtyInput = {
-        resize: {
-          sessionId,
-          cols,
-          rows
-        }
-      }
-      this.stream.write(input)
+      sessionStream.stream.write({
+        resize: { cols, rows }
+      })
     } catch (error) {
-      // Terminal I/O is best-effort - log but don't block. User will see visual feedback
-      // (missing characters or incorrect size) which is appropriate for this failure mode
       console.error('[grpcDaemonClient] failed to resize session:', error)
     }
   }
@@ -272,9 +281,12 @@ export class GrpcDaemonClient {
         if (error) {
           reject(new Error(error.message))
         } else {
-          // Clean up listeners
-          this.dataListeners.delete(sessionId)
-          this.exitListeners.delete(sessionId)
+          // Clean up session stream
+          const sessionStream = this.sessionStreams.get(sessionId)
+          if (sessionStream) {
+            sessionStream.stream.end()
+            this.sessionStreams.delete(sessionId)
+          }
           resolve()
         }
       })
@@ -477,36 +489,28 @@ export class GrpcDaemonClient {
   }
 
   onPtySessionData(sessionId: string, callback: DataListener): () => void {
-    if (!this.dataListeners.has(sessionId)) {
-      this.dataListeners.set(sessionId, new Set())
+    const sessionStream = this.sessionStreams.get(sessionId)
+    if (!sessionStream) {
+      console.error('[grpcDaemonClient] cannot subscribe to data: no stream for session', sessionId)
+      return () => {}
     }
-    this.dataListeners.get(sessionId)!.add(callback)
+    sessionStream.dataListeners.add(callback)
 
     return () => {
-      const listeners = this.dataListeners.get(sessionId)
-      if (listeners) {
-        listeners.delete(callback)
-        if (listeners.size === 0) {
-          this.dataListeners.delete(sessionId)
-        }
-      }
+      sessionStream.dataListeners.delete(callback)
     }
   }
 
   onPtySessionExit(sessionId: string, callback: ExitListener): () => void {
-    if (!this.exitListeners.has(sessionId)) {
-      this.exitListeners.set(sessionId, new Set())
+    const sessionStream = this.sessionStreams.get(sessionId)
+    if (!sessionStream) {
+      console.error('[grpcDaemonClient] cannot subscribe to exit: no stream for session', sessionId)
+      return () => {}
     }
-    this.exitListeners.get(sessionId)!.add(callback)
+    sessionStream.exitListeners.add(callback)
 
     return () => {
-      const listeners = this.exitListeners.get(sessionId)
-      if (listeners) {
-        listeners.delete(callback)
-        if (listeners.size === 0) {
-          this.exitListeners.delete(sessionId)
-        }
-      }
+      sessionStream.exitListeners.delete(callback)
     }
   }
 
@@ -607,10 +611,12 @@ export class GrpcDaemonClient {
   }
 
   disconnect(): void {
-    if (this.stream) {
-      this.stream.end()
-      this.stream = null
+    // Close all per-session streams
+    for (const [, sessionStream] of this.sessionStreams) {
+      sessionStream.stream.end()
     }
+    this.sessionStreams.clear()
+
     if (this.client) {
       this.client.close()
       this.client = null

@@ -33,7 +33,6 @@ let connectionManager: ConnectionManager | null = null
 let gitClient: GitClient | null = null
 let runActionsClient: RunActionsClient | null = null
 let useDaemon = true // Always use daemon mode
-let attachedSessions: Set<string> = new Set()
 
 // Maps PTY session IDs to the BrowserWindow ID that owns them
 const ptyToWindow: Map<string, number> = new Map()
@@ -247,7 +246,6 @@ function createWindow(initialSessionId?: string): BrowserWindow {
     for (const [ptyId, winId] of ptyToWindow.entries()) {
       if (winId === window.id) {
         ptyToWindow.delete(ptyId)
-        attachedSessions.delete(ptyId)
       }
     }
   })
@@ -289,10 +287,8 @@ ipcMain.handle('pty:create', async (event, cwd: string, sandbox?: unknown, start
         windowInfo?.ipcServer.ptyExit(ptySessionId, exitCode)
       }
       ptyToWindow.delete(ptySessionId)
-      attachedSessions.delete(ptySessionId)
     })
 
-    attachedSessions.add(ptySessionId)
     return ptySessionId
   } catch (error) {
     console.error('[main] failed to create PTY session via daemon:', error)
@@ -315,28 +311,23 @@ ipcMain.handle('pty:attach', async (event, sessionId: string) => {
       ptyToWindow.set(sessionId, senderWindow.id)
     }
 
-    // Set up data forwarding if not already attached
-    if (!attachedSessions.has(sessionId)) {
-      daemonClient.onPtySessionData(sessionId, (data) => {
-        const windowId = ptyToWindow.get(sessionId)
-        if (windowId) {
-          const windowInfo = windowManager.getWindow(windowId)
-          windowInfo?.ipcServer.ptyData(sessionId, data)
-        }
-      })
+    // Set up data forwarding for this session
+    daemonClient.onPtySessionData(sessionId, (data) => {
+      const windowId = ptyToWindow.get(sessionId)
+      if (windowId) {
+        const windowInfo = windowManager.getWindow(windowId)
+        windowInfo?.ipcServer.ptyData(sessionId, data)
+      }
+    })
 
-      daemonClient.onPtySessionExit(sessionId, (exitCode) => {
-        const windowId = ptyToWindow.get(sessionId)
-        if (windowId) {
-          const windowInfo = windowManager.getWindow(windowId)
-          windowInfo?.ipcServer.ptyExit(sessionId, exitCode)
-        }
-        ptyToWindow.delete(sessionId)
-        attachedSessions.delete(sessionId)
-      })
-
-      attachedSessions.add(sessionId)
-    }
+    daemonClient.onPtySessionExit(sessionId, (exitCode) => {
+      const windowId = ptyToWindow.get(sessionId)
+      if (windowId) {
+        const windowInfo = windowManager.getWindow(windowId)
+        windowInfo?.ipcServer.ptyExit(sessionId, exitCode)
+      }
+      ptyToWindow.delete(sessionId)
+    })
 
     return { success: true, scrollback: result.scrollback, exitCode: result.exitCode }
   } catch (error) {
@@ -371,7 +362,6 @@ server.onPtyResize((id, cols, rows) => {
 server.onPtyKill(async (id) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
   await daemonClient.killPtySession(id)
-  attachedSessions.delete(id)
 })
 
 server.onPtyIsAlive(async (id) => {
@@ -1096,7 +1086,6 @@ app.on('before-quit', async () => {
   }
 
   if (daemonClient && daemonClient.isConnected()) {
-    attachedSessions.clear()
     daemonClient.disconnect()
   }
 })

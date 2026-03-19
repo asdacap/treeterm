@@ -125,8 +125,10 @@ function makeMockPtyManager(): any {
     resize: vi.fn(),
     kill: vi.fn(),
     listSessions: vi.fn().mockReturnValue([]),
-    onData: vi.fn(),
-    onExit: vi.fn(),
+    onData: vi.fn().mockReturnValue(() => {}),
+    onExit: vi.fn().mockReturnValue(() => {}),
+    onSessionData: vi.fn().mockReturnValue(() => {}),
+    onSessionExit: vi.fn().mockReturnValue(() => {}),
     shutdown: vi.fn()
   }
 }
@@ -246,44 +248,6 @@ describe('GrpcServer', () => {
       expect(callback).toHaveBeenCalledWith(
         expect.objectContaining({ code: 13, message: 'pty create failed' })
       )
-    })
-
-    it('attachPty succeeds and returns scrollback', () => {
-      const call = makeUnaryCall(
-        { sessionId: 'pty-1' },
-        { get: vi.fn().mockReturnValue(['client-1']) }
-      )
-      const callback = makeCallback()
-
-      capturedServiceImpl.attachPty(call, callback)
-
-      expect(mockPtyManager.attach).toHaveBeenCalledWith('pty-1')
-      expect(callback).toHaveBeenCalledWith(null, { scrollback: ['line1'], exitCode: undefined })
-    })
-
-    it('attachPty returns error on failure', () => {
-      mockPtyManager.attach.mockImplementation(() => { throw new Error('not found') })
-      const call = makeUnaryCall(
-        { sessionId: 'bad-id' },
-        { get: vi.fn().mockReturnValue([]) }
-      )
-      const callback = makeCallback()
-
-      capturedServiceImpl.attachPty(call, callback)
-
-      expect(callback).toHaveBeenCalledWith(
-        expect.objectContaining({ code: 5, message: 'not found' })
-      )
-    })
-
-    it('resizePty succeeds', () => {
-      const call = makeUnaryCall({ sessionId: 'pty-1', cols: 120, rows: 40 })
-      const callback = makeCallback()
-
-      capturedServiceImpl.resizePty(call, callback)
-
-      expect(mockPtyManager.resize).toHaveBeenCalledWith('pty-1', 120, 40)
-      expect(callback).toHaveBeenCalledWith(null, {})
     })
 
     it('killPty succeeds', () => {
@@ -635,7 +599,7 @@ describe('GrpcServer', () => {
   })
 
   describe('ptyStream', () => {
-    it('handles write input', () => {
+    it('sends scrollback on start message', () => {
       const handlers: Record<string, Function> = {}
       const mockStream = {
         metadata: { get: vi.fn().mockReturnValue(['client-1']) },
@@ -648,12 +612,59 @@ describe('GrpcServer', () => {
 
       capturedServiceImpl.ptyStream(mockStream)
 
-      // Simulate write input
-      handlers.data({ write: { sessionId: 'pty-1', data: Buffer.from('hello') } })
+      // Send start message
+      handlers.data({ start: { sessionId: 'pty-1' } })
+
+      expect(mockPtyManager.attach).toHaveBeenCalledWith('pty-1')
+      // Should have written scrollback data
+      expect(mockStream.write).toHaveBeenCalledWith({
+        data: { data: Buffer.from('line1', 'utf-8') }
+      })
+      // Should have subscribed to live data/exit
+      expect(mockPtyManager.onSessionData).toHaveBeenCalledWith('pty-1', expect.any(Function))
+      expect(mockPtyManager.onSessionExit).toHaveBeenCalledWith('pty-1', expect.any(Function))
+    })
+
+    it('sends exit and ends stream when session already exited', () => {
+      mockPtyManager.attach.mockReturnValue({ scrollback: [], session: {}, exitCode: 0 })
+      const handlers: Record<string, Function> = {}
+      const mockStream = {
+        metadata: { get: vi.fn().mockReturnValue(['client-1']) },
+        on: vi.fn().mockImplementation((event: string, handler: Function) => {
+          handlers[event] = handler
+        }),
+        write: vi.fn(),
+        end: vi.fn()
+      }
+
+      capturedServiceImpl.ptyStream(mockStream)
+      handlers.data({ start: { sessionId: 'pty-1' } })
+
+      expect(mockStream.write).toHaveBeenCalledWith({
+        exit: { exitCode: 0 }
+      })
+      expect(mockStream.end).toHaveBeenCalled()
+    })
+
+    it('handles write input after start', () => {
+      const handlers: Record<string, Function> = {}
+      const mockStream = {
+        metadata: { get: vi.fn().mockReturnValue(['client-1']) },
+        on: vi.fn().mockImplementation((event: string, handler: Function) => {
+          handlers[event] = handler
+        }),
+        write: vi.fn(),
+        end: vi.fn()
+      }
+
+      capturedServiceImpl.ptyStream(mockStream)
+      handlers.data({ start: { sessionId: 'pty-1' } })
+
+      handlers.data({ write: { data: Buffer.from('hello') } })
       expect(mockPtyManager.write).toHaveBeenCalledWith('pty-1', 'hello')
     })
 
-    it('handles resize input', () => {
+    it('handles resize input after start', () => {
       const handlers: Record<string, Function> = {}
       const mockStream = {
         metadata: { get: vi.fn().mockReturnValue(['client-1']) },
@@ -665,8 +676,9 @@ describe('GrpcServer', () => {
       }
 
       capturedServiceImpl.ptyStream(mockStream)
+      handlers.data({ start: { sessionId: 'pty-1' } })
 
-      handlers.data({ resize: { sessionId: 'pty-1', cols: 120, rows: 40 } })
+      handlers.data({ resize: { cols: 120, rows: 40 } })
       expect(mockPtyManager.resize).toHaveBeenCalledWith('pty-1', 120, 40)
     })
 
@@ -683,7 +695,6 @@ describe('GrpcServer', () => {
 
       capturedServiceImpl.ptyStream(mockStream)
 
-      // Should not throw on end
       expect(() => handlers.end()).not.toThrow()
     })
   })
@@ -972,17 +983,4 @@ describe('GrpcServer', () => {
     })
   })
 
-  describe('getClientId', () => {
-    it('attaches to session by sessionId', () => {
-      const call = makeUnaryCall(
-        { sessionId: 'pty-1' },
-        { get: vi.fn().mockReturnValue(['my-client']) }
-      )
-      const callback = makeCallback()
-
-      capturedServiceImpl.attachPty(call, callback)
-
-      expect(mockPtyManager.attach).toHaveBeenCalledWith('pty-1')
-    })
-  })
 })

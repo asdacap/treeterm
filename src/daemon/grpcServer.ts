@@ -17,9 +17,6 @@ import {
   TreeTermDaemonService,
   type CreatePtyRequest,
   type CreatePtyResponse,
-  type AttachPtyRequest,
-  type AttachPtyResponse,
-  type ResizePtyRequest,
   type KillPtyRequest,
   type ListPtySessionsResponse,
   type PtyInput,
@@ -68,13 +65,6 @@ function parseJsonBuffer(buf: Buffer, schema: z.ZodTypeAny, fieldName: string): 
 
 export { getDefaultSocketPath }
 
-// Track connected clients and their streams
-interface ClientStream {
-  clientId: string
-  stream: grpc.ServerDuplexStream<PtyInput, PtyOutput>
-  attachedSessions: Set<string>
-}
-
 interface SessionWatcher {
   listenerId: string
   sessionId: string
@@ -85,7 +75,6 @@ export class GrpcServer {
   private server: grpc.Server
   private ptyManager: DaemonPtyManager
   private sessionStore: SessionStore
-  private clientStreams: Map<string, ClientStream> = new Map()
   private sessionWatchers: Map<string, SessionWatcher> = new Map() // listenerId -> watcher
   private clientCounter = 0
 
@@ -142,29 +131,11 @@ export class GrpcServer {
         }
       )
 
-      // Set up PTY event forwarding to all connected client streams
-      this.ptyManager.onData((sessionId, data) => {
-        this.broadcastPtyData(sessionId, data)
-      })
-
-      this.ptyManager.onExit((sessionId, exitCode, signal) => {
-        this.broadcastPtyExit(sessionId, exitCode, signal)
-      })
     })
   }
 
   stop(): void {
     log.info('stopping server')
-
-    // Close all client streams
-    for (const [clientId, clientStream] of this.clientStreams) {
-      try {
-        clientStream.stream.end()
-      } catch (error) {
-        log.error({ err: error, clientId }, 'error closing client stream')
-      }
-      this.clientStreams.delete(clientId)
-    }
 
     // Shutdown exec manager
     execManager.shutdown()
@@ -181,8 +152,6 @@ export class GrpcServer {
   private createServiceImpl(): grpc.UntypedServiceImplementation {
     return {
       createPty: this.handleCreatePty.bind(this),
-      attachPty: this.handleAttachPty.bind(this),
-      resizePty: this.handleResizePty.bind(this),
       killPty: this.handleKillPty.bind(this),
       listPtySessions: this.handleListPtySessions.bind(this),
       ptyStream: this.handlePtyStream.bind(this),
@@ -223,45 +192,6 @@ export class GrpcServer {
       callback(null, { sessionId })
     } catch (error) {
       log.error({ err: error }, 'createPty error')
-      callback({
-        code: grpc.status.INTERNAL,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private handleAttachPty(
-    call: grpc.ServerUnaryCall<AttachPtyRequest, AttachPtyResponse>,
-    callback: grpc.sendUnaryData<AttachPtyResponse>
-  ): void {
-    try {
-      const { sessionId } = call.request
-      log.info({ sessionId }, 'attachPty called')
-
-      const result = this.ptyManager.attach(sessionId)
-
-      callback(null, { scrollback: result.scrollback, exitCode: result.exitCode })
-    } catch (error) {
-      log.error({ err: error, sessionId: call.request.sessionId }, 'attachPty error')
-      callback({
-        code: grpc.status.NOT_FOUND,
-        message: error instanceof Error ? error.message : 'Unknown error'
-      })
-    }
-  }
-
-  private handleResizePty(
-    call: grpc.ServerUnaryCall<ResizePtyRequest, Empty>,
-    callback: grpc.sendUnaryData<Empty>
-  ): void {
-    try {
-      const { sessionId, cols, rows } = call.request
-      log.debug({ sessionId, cols, rows }, 'resizePty called')
-
-      this.ptyManager.resize(sessionId, cols, rows)
-      callback(null, {})
-    } catch (error) {
-      log.error({ err: error }, 'resizePty error')
       callback({
         code: grpc.status.INTERNAL,
         message: error instanceof Error ? error.message : 'Unknown error'
@@ -316,56 +246,69 @@ export class GrpcServer {
     }
   }
 
-  // PTY Streaming Handler (Bidirectional)
+  // PTY Streaming Handler (Bidirectional, per-session)
 
   private handlePtyStream(
     call: grpc.ServerDuplexStream<PtyInput, PtyOutput>
   ): void {
-    const clientId = this.getClientId(call.metadata) || `client-${++this.clientCounter}`
-    log.info({ clientId }, 'client stream connected')
+    let sessionId: string | null = null
+    let dataUnsubscribe: (() => void) | null = null
+    let exitUnsubscribe: (() => void) | null = null
 
-    const clientStream: ClientStream = {
-      clientId,
-      stream: call,
-      attachedSessions: new Set()
+    const cleanup = (): void => {
+      dataUnsubscribe?.()
+      exitUnsubscribe?.()
+      dataUnsubscribe = null
+      exitUnsubscribe = null
     }
-    this.clientStreams.set(clientId, clientStream)
 
-    // Handle incoming messages from client
     call.on('data', (input: PtyInput) => {
       try {
-        if (input.write) {
-          const { sessionId, data } = input.write
-          this.ptyManager.write(sessionId, data.toString('utf-8'))
-          clientStream.attachedSessions.add(sessionId)
-        } else if (input.resize) {
-          const { sessionId, cols, rows } = input.resize
-          this.ptyManager.resize(sessionId, cols, rows)
+        if (input.start && !sessionId) {
+          sessionId = input.start.sessionId
+          log.info({ sessionId }, 'ptyStream started for session')
+
+          // Send scrollback and check if already exited
+          const result = this.ptyManager.attach(sessionId)
+          for (const line of result.scrollback) {
+            call.write({ data: { data: Buffer.from(line, 'utf-8') } })
+          }
+
+          if (result.exitCode !== undefined) {
+            call.write({ exit: { exitCode: result.exitCode } })
+            call.end()
+            return
+          }
+
+          // Subscribe to live data/exit for this session
+          dataUnsubscribe = this.ptyManager.onSessionData(sessionId, (data) => {
+            call.write({ data: { data: Buffer.from(data, 'utf-8') } })
+          })
+
+          exitUnsubscribe = this.ptyManager.onSessionExit(sessionId, (exitCode, signal) => {
+            call.write({ exit: { exitCode, signal } })
+            call.end()
+            cleanup()
+          })
+        } else if (sessionId && input.write) {
+          this.ptyManager.write(sessionId, input.write.data.toString('utf-8'))
+        } else if (sessionId && input.resize) {
+          this.ptyManager.resize(sessionId, input.resize.cols, input.resize.rows)
         }
       } catch (error) {
-        log.error({ err: error, clientId }, 'error processing client input')
+        log.error({ err: error, sessionId }, 'error processing pty stream input')
       }
     })
 
     call.on('end', () => {
-      log.info({ clientId }, 'client stream ended')
-      this.handleClientDisconnect(clientId)
+      log.info({ sessionId }, 'pty stream ended')
+      cleanup()
     })
 
     call.on('error', (error) => {
-      log.error({ err: error, clientId }, 'client stream error')
-      this.handleClientDisconnect(clientId)
+      log.error({ err: error, sessionId }, 'pty stream error')
+      cleanup()
     })
-  }
-
-  private handleClientDisconnect(clientId: string): void {
-    const clientStream = this.clientStreams.get(clientId)
-    if (!clientStream) return
-
-    // Detach client from all workspace sessions
-    this.sessionStore.detachClient(clientId)
-
-    this.clientStreams.delete(clientId)
   }
 
   // Exec Streaming Handler (Bidirectional)
@@ -657,41 +600,6 @@ export class GrpcServer {
       return clientIds[0].toString()
     }
     return `client-${++this.clientCounter}`
-  }
-
-  private broadcastPtyData(sessionId: string, data: string): void {
-    const output: PtyOutput = {
-      data: {
-        sessionId,
-        data: Buffer.from(data, 'utf-8')
-      }
-    }
-
-    for (const clientStream of this.clientStreams.values()) {
-      try {
-        clientStream.stream.write(output)
-      } catch (error) {
-        log.error({ err: error, clientId: clientStream.clientId }, 'error broadcasting PTY data')
-      }
-    }
-  }
-
-  private broadcastPtyExit(sessionId: string, exitCode: number, signal?: number): void {
-    const output: PtyOutput = {
-      exit: {
-        sessionId,
-        exitCode,
-        signal
-      }
-    }
-
-    for (const clientStream of this.clientStreams.values()) {
-      try {
-        clientStream.stream.write(output)
-      } catch (error) {
-        log.error({ err: error, clientId: clientStream.clientId }, 'error broadcasting PTY exit')
-      }
-    }
   }
 
   private convertWorkspaceInputs(inputs: ProtoWorkspaceInput[]): Omit<Workspace, 'createdAt' | 'lastActivity'>[] {

@@ -105,21 +105,6 @@ export interface CreatePtyResponse {
   sessionId: string;
 }
 
-export interface AttachPtyRequest {
-  sessionId: string;
-}
-
-export interface AttachPtyResponse {
-  scrollback: string[];
-  exitCode?: number | undefined;
-}
-
-export interface ResizePtyRequest {
-  sessionId: string;
-  cols: number;
-  rows: number;
-}
-
 export interface KillPtyRequest {
   sessionId: string;
 }
@@ -129,18 +114,22 @@ export interface ListPtySessionsResponse {
 }
 
 export interface PtyInput {
+  /** First message, scopes stream to a session */
+  start?: PtyStartData | undefined;
   write?: PtyWriteData | undefined;
   resize?: PtyResizeData | undefined;
 }
 
-export interface PtyWriteData {
+export interface PtyStartData {
   sessionId: string;
+}
+
+export interface PtyWriteData {
   /** Use bytes for terminal data (may contain non-UTF8) */
   data: Buffer;
 }
 
 export interface PtyResizeData {
-  sessionId: string;
   cols: number;
   rows: number;
 }
@@ -151,13 +140,11 @@ export interface PtyOutput {
 }
 
 export interface PtyData {
-  sessionId: string;
   /** Terminal output data */
   data: Buffer;
 }
 
 export interface PtyExit {
-  sessionId: string;
   exitCode: number;
   signal?: number | undefined;
 }
@@ -1967,248 +1954,6 @@ export const CreatePtyResponse: MessageFns<CreatePtyResponse> = {
   },
 };
 
-function createBaseAttachPtyRequest(): AttachPtyRequest {
-  return { sessionId: "" };
-}
-
-export const AttachPtyRequest: MessageFns<AttachPtyRequest> = {
-  encode(message: AttachPtyRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.sessionId !== "") {
-      writer.uint32(10).string(message.sessionId);
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): AttachPtyRequest {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseAttachPtyRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.sessionId = reader.string();
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): AttachPtyRequest {
-    return {
-      sessionId: isSet(object.sessionId)
-        ? globalThis.String(object.sessionId)
-        : isSet(object.session_id)
-        ? globalThis.String(object.session_id)
-        : "",
-    };
-  },
-
-  toJSON(message: AttachPtyRequest): unknown {
-    const obj: any = {};
-    if (message.sessionId !== "") {
-      obj.sessionId = message.sessionId;
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<AttachPtyRequest>, I>>(base?: I): AttachPtyRequest {
-    return AttachPtyRequest.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<AttachPtyRequest>, I>>(object: I): AttachPtyRequest {
-    const message = createBaseAttachPtyRequest();
-    message.sessionId = object.sessionId ?? "";
-    return message;
-  },
-};
-
-function createBaseAttachPtyResponse(): AttachPtyResponse {
-  return { scrollback: [], exitCode: undefined };
-}
-
-export const AttachPtyResponse: MessageFns<AttachPtyResponse> = {
-  encode(message: AttachPtyResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    for (const v of message.scrollback) {
-      writer.uint32(10).string(v!);
-    }
-    if (message.exitCode !== undefined) {
-      writer.uint32(16).int32(message.exitCode);
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): AttachPtyResponse {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseAttachPtyResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.scrollback.push(reader.string());
-          continue;
-        }
-        case 2: {
-          if (tag !== 16) {
-            break;
-          }
-
-          message.exitCode = reader.int32();
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): AttachPtyResponse {
-    return {
-      scrollback: globalThis.Array.isArray(object?.scrollback)
-        ? object.scrollback.map((e: any) => globalThis.String(e))
-        : [],
-      exitCode: isSet(object.exitCode)
-        ? globalThis.Number(object.exitCode)
-        : isSet(object.exit_code)
-        ? globalThis.Number(object.exit_code)
-        : undefined,
-    };
-  },
-
-  toJSON(message: AttachPtyResponse): unknown {
-    const obj: any = {};
-    if (message.scrollback?.length) {
-      obj.scrollback = message.scrollback;
-    }
-    if (message.exitCode !== undefined) {
-      obj.exitCode = Math.round(message.exitCode);
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<AttachPtyResponse>, I>>(base?: I): AttachPtyResponse {
-    return AttachPtyResponse.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<AttachPtyResponse>, I>>(object: I): AttachPtyResponse {
-    const message = createBaseAttachPtyResponse();
-    message.scrollback = object.scrollback?.map((e) => e) || [];
-    message.exitCode = object.exitCode ?? undefined;
-    return message;
-  },
-};
-
-function createBaseResizePtyRequest(): ResizePtyRequest {
-  return { sessionId: "", cols: 0, rows: 0 };
-}
-
-export const ResizePtyRequest: MessageFns<ResizePtyRequest> = {
-  encode(message: ResizePtyRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.sessionId !== "") {
-      writer.uint32(10).string(message.sessionId);
-    }
-    if (message.cols !== 0) {
-      writer.uint32(16).int32(message.cols);
-    }
-    if (message.rows !== 0) {
-      writer.uint32(24).int32(message.rows);
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): ResizePtyRequest {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseResizePtyRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.sessionId = reader.string();
-          continue;
-        }
-        case 2: {
-          if (tag !== 16) {
-            break;
-          }
-
-          message.cols = reader.int32();
-          continue;
-        }
-        case 3: {
-          if (tag !== 24) {
-            break;
-          }
-
-          message.rows = reader.int32();
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): ResizePtyRequest {
-    return {
-      sessionId: isSet(object.sessionId)
-        ? globalThis.String(object.sessionId)
-        : isSet(object.session_id)
-        ? globalThis.String(object.session_id)
-        : "",
-      cols: isSet(object.cols) ? globalThis.Number(object.cols) : 0,
-      rows: isSet(object.rows) ? globalThis.Number(object.rows) : 0,
-    };
-  },
-
-  toJSON(message: ResizePtyRequest): unknown {
-    const obj: any = {};
-    if (message.sessionId !== "") {
-      obj.sessionId = message.sessionId;
-    }
-    if (message.cols !== 0) {
-      obj.cols = Math.round(message.cols);
-    }
-    if (message.rows !== 0) {
-      obj.rows = Math.round(message.rows);
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<ResizePtyRequest>, I>>(base?: I): ResizePtyRequest {
-    return ResizePtyRequest.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<ResizePtyRequest>, I>>(object: I): ResizePtyRequest {
-    const message = createBaseResizePtyRequest();
-    message.sessionId = object.sessionId ?? "";
-    message.cols = object.cols ?? 0;
-    message.rows = object.rows ?? 0;
-    return message;
-  },
-};
-
 function createBaseKillPtyRequest(): KillPtyRequest {
   return { sessionId: "" };
 }
@@ -2336,16 +2081,19 @@ export const ListPtySessionsResponse: MessageFns<ListPtySessionsResponse> = {
 };
 
 function createBasePtyInput(): PtyInput {
-  return { write: undefined, resize: undefined };
+  return { start: undefined, write: undefined, resize: undefined };
 }
 
 export const PtyInput: MessageFns<PtyInput> = {
   encode(message: PtyInput, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.start !== undefined) {
+      PtyStartData.encode(message.start, writer.uint32(10).fork()).join();
+    }
     if (message.write !== undefined) {
-      PtyWriteData.encode(message.write, writer.uint32(10).fork()).join();
+      PtyWriteData.encode(message.write, writer.uint32(18).fork()).join();
     }
     if (message.resize !== undefined) {
-      PtyResizeData.encode(message.resize, writer.uint32(18).fork()).join();
+      PtyResizeData.encode(message.resize, writer.uint32(26).fork()).join();
     }
     return writer;
   },
@@ -2362,11 +2110,19 @@ export const PtyInput: MessageFns<PtyInput> = {
             break;
           }
 
-          message.write = PtyWriteData.decode(reader, reader.uint32());
+          message.start = PtyStartData.decode(reader, reader.uint32());
           continue;
         }
         case 2: {
           if (tag !== 18) {
+            break;
+          }
+
+          message.write = PtyWriteData.decode(reader, reader.uint32());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
             break;
           }
 
@@ -2384,6 +2140,7 @@ export const PtyInput: MessageFns<PtyInput> = {
 
   fromJSON(object: any): PtyInput {
     return {
+      start: isSet(object.start) ? PtyStartData.fromJSON(object.start) : undefined,
       write: isSet(object.write) ? PtyWriteData.fromJSON(object.write) : undefined,
       resize: isSet(object.resize) ? PtyResizeData.fromJSON(object.resize) : undefined,
     };
@@ -2391,6 +2148,9 @@ export const PtyInput: MessageFns<PtyInput> = {
 
   toJSON(message: PtyInput): unknown {
     const obj: any = {};
+    if (message.start !== undefined) {
+      obj.start = PtyStartData.toJSON(message.start);
+    }
     if (message.write !== undefined) {
       obj.write = PtyWriteData.toJSON(message.write);
     }
@@ -2405,6 +2165,9 @@ export const PtyInput: MessageFns<PtyInput> = {
   },
   fromPartial<I extends Exact<DeepPartial<PtyInput>, I>>(object: I): PtyInput {
     const message = createBasePtyInput();
+    message.start = (object.start !== undefined && object.start !== null)
+      ? PtyStartData.fromPartial(object.start)
+      : undefined;
     message.write = (object.write !== undefined && object.write !== null)
       ? PtyWriteData.fromPartial(object.write)
       : undefined;
@@ -2415,17 +2178,78 @@ export const PtyInput: MessageFns<PtyInput> = {
   },
 };
 
+function createBasePtyStartData(): PtyStartData {
+  return { sessionId: "" };
+}
+
+export const PtyStartData: MessageFns<PtyStartData> = {
+  encode(message: PtyStartData, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sessionId !== "") {
+      writer.uint32(10).string(message.sessionId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): PtyStartData {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBasePtyStartData();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sessionId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): PtyStartData {
+    return {
+      sessionId: isSet(object.sessionId)
+        ? globalThis.String(object.sessionId)
+        : isSet(object.session_id)
+        ? globalThis.String(object.session_id)
+        : "",
+    };
+  },
+
+  toJSON(message: PtyStartData): unknown {
+    const obj: any = {};
+    if (message.sessionId !== "") {
+      obj.sessionId = message.sessionId;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<PtyStartData>, I>>(base?: I): PtyStartData {
+    return PtyStartData.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<PtyStartData>, I>>(object: I): PtyStartData {
+    const message = createBasePtyStartData();
+    message.sessionId = object.sessionId ?? "";
+    return message;
+  },
+};
+
 function createBasePtyWriteData(): PtyWriteData {
-  return { sessionId: "", data: Buffer.alloc(0) };
+  return { data: Buffer.alloc(0) };
 }
 
 export const PtyWriteData: MessageFns<PtyWriteData> = {
   encode(message: PtyWriteData, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.sessionId !== "") {
-      writer.uint32(10).string(message.sessionId);
-    }
     if (message.data.length !== 0) {
-      writer.uint32(18).bytes(message.data);
+      writer.uint32(10).bytes(message.data);
     }
     return writer;
   },
@@ -2442,14 +2266,6 @@ export const PtyWriteData: MessageFns<PtyWriteData> = {
             break;
           }
 
-          message.sessionId = reader.string();
-          continue;
-        }
-        case 2: {
-          if (tag !== 18) {
-            break;
-          }
-
           message.data = Buffer.from(reader.bytes());
           continue;
         }
@@ -2463,21 +2279,11 @@ export const PtyWriteData: MessageFns<PtyWriteData> = {
   },
 
   fromJSON(object: any): PtyWriteData {
-    return {
-      sessionId: isSet(object.sessionId)
-        ? globalThis.String(object.sessionId)
-        : isSet(object.session_id)
-        ? globalThis.String(object.session_id)
-        : "",
-      data: isSet(object.data) ? Buffer.from(bytesFromBase64(object.data)) : Buffer.alloc(0),
-    };
+    return { data: isSet(object.data) ? Buffer.from(bytesFromBase64(object.data)) : Buffer.alloc(0) };
   },
 
   toJSON(message: PtyWriteData): unknown {
     const obj: any = {};
-    if (message.sessionId !== "") {
-      obj.sessionId = message.sessionId;
-    }
     if (message.data.length !== 0) {
       obj.data = base64FromBytes(message.data);
     }
@@ -2489,26 +2295,22 @@ export const PtyWriteData: MessageFns<PtyWriteData> = {
   },
   fromPartial<I extends Exact<DeepPartial<PtyWriteData>, I>>(object: I): PtyWriteData {
     const message = createBasePtyWriteData();
-    message.sessionId = object.sessionId ?? "";
     message.data = object.data ?? Buffer.alloc(0);
     return message;
   },
 };
 
 function createBasePtyResizeData(): PtyResizeData {
-  return { sessionId: "", cols: 0, rows: 0 };
+  return { cols: 0, rows: 0 };
 }
 
 export const PtyResizeData: MessageFns<PtyResizeData> = {
   encode(message: PtyResizeData, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.sessionId !== "") {
-      writer.uint32(10).string(message.sessionId);
-    }
     if (message.cols !== 0) {
-      writer.uint32(16).int32(message.cols);
+      writer.uint32(8).int32(message.cols);
     }
     if (message.rows !== 0) {
-      writer.uint32(24).int32(message.rows);
+      writer.uint32(16).int32(message.rows);
     }
     return writer;
   },
@@ -2521,23 +2323,15 @@ export const PtyResizeData: MessageFns<PtyResizeData> = {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.sessionId = reader.string();
-          continue;
-        }
-        case 2: {
-          if (tag !== 16) {
+          if (tag !== 8) {
             break;
           }
 
           message.cols = reader.int32();
           continue;
         }
-        case 3: {
-          if (tag !== 24) {
+        case 2: {
+          if (tag !== 16) {
             break;
           }
 
@@ -2555,11 +2349,6 @@ export const PtyResizeData: MessageFns<PtyResizeData> = {
 
   fromJSON(object: any): PtyResizeData {
     return {
-      sessionId: isSet(object.sessionId)
-        ? globalThis.String(object.sessionId)
-        : isSet(object.session_id)
-        ? globalThis.String(object.session_id)
-        : "",
       cols: isSet(object.cols) ? globalThis.Number(object.cols) : 0,
       rows: isSet(object.rows) ? globalThis.Number(object.rows) : 0,
     };
@@ -2567,9 +2356,6 @@ export const PtyResizeData: MessageFns<PtyResizeData> = {
 
   toJSON(message: PtyResizeData): unknown {
     const obj: any = {};
-    if (message.sessionId !== "") {
-      obj.sessionId = message.sessionId;
-    }
     if (message.cols !== 0) {
       obj.cols = Math.round(message.cols);
     }
@@ -2584,7 +2370,6 @@ export const PtyResizeData: MessageFns<PtyResizeData> = {
   },
   fromPartial<I extends Exact<DeepPartial<PtyResizeData>, I>>(object: I): PtyResizeData {
     const message = createBasePtyResizeData();
-    message.sessionId = object.sessionId ?? "";
     message.cols = object.cols ?? 0;
     message.rows = object.rows ?? 0;
     return message;
@@ -2668,16 +2453,13 @@ export const PtyOutput: MessageFns<PtyOutput> = {
 };
 
 function createBasePtyData(): PtyData {
-  return { sessionId: "", data: Buffer.alloc(0) };
+  return { data: Buffer.alloc(0) };
 }
 
 export const PtyData: MessageFns<PtyData> = {
   encode(message: PtyData, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.sessionId !== "") {
-      writer.uint32(10).string(message.sessionId);
-    }
     if (message.data.length !== 0) {
-      writer.uint32(18).bytes(message.data);
+      writer.uint32(10).bytes(message.data);
     }
     return writer;
   },
@@ -2694,14 +2476,6 @@ export const PtyData: MessageFns<PtyData> = {
             break;
           }
 
-          message.sessionId = reader.string();
-          continue;
-        }
-        case 2: {
-          if (tag !== 18) {
-            break;
-          }
-
           message.data = Buffer.from(reader.bytes());
           continue;
         }
@@ -2715,21 +2489,11 @@ export const PtyData: MessageFns<PtyData> = {
   },
 
   fromJSON(object: any): PtyData {
-    return {
-      sessionId: isSet(object.sessionId)
-        ? globalThis.String(object.sessionId)
-        : isSet(object.session_id)
-        ? globalThis.String(object.session_id)
-        : "",
-      data: isSet(object.data) ? Buffer.from(bytesFromBase64(object.data)) : Buffer.alloc(0),
-    };
+    return { data: isSet(object.data) ? Buffer.from(bytesFromBase64(object.data)) : Buffer.alloc(0) };
   },
 
   toJSON(message: PtyData): unknown {
     const obj: any = {};
-    if (message.sessionId !== "") {
-      obj.sessionId = message.sessionId;
-    }
     if (message.data.length !== 0) {
       obj.data = base64FromBytes(message.data);
     }
@@ -2741,26 +2505,22 @@ export const PtyData: MessageFns<PtyData> = {
   },
   fromPartial<I extends Exact<DeepPartial<PtyData>, I>>(object: I): PtyData {
     const message = createBasePtyData();
-    message.sessionId = object.sessionId ?? "";
     message.data = object.data ?? Buffer.alloc(0);
     return message;
   },
 };
 
 function createBasePtyExit(): PtyExit {
-  return { sessionId: "", exitCode: 0, signal: undefined };
+  return { exitCode: 0, signal: undefined };
 }
 
 export const PtyExit: MessageFns<PtyExit> = {
   encode(message: PtyExit, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.sessionId !== "") {
-      writer.uint32(10).string(message.sessionId);
-    }
     if (message.exitCode !== 0) {
-      writer.uint32(16).int32(message.exitCode);
+      writer.uint32(8).int32(message.exitCode);
     }
     if (message.signal !== undefined) {
-      writer.uint32(24).int32(message.signal);
+      writer.uint32(16).int32(message.signal);
     }
     return writer;
   },
@@ -2773,23 +2533,15 @@ export const PtyExit: MessageFns<PtyExit> = {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.sessionId = reader.string();
-          continue;
-        }
-        case 2: {
-          if (tag !== 16) {
+          if (tag !== 8) {
             break;
           }
 
           message.exitCode = reader.int32();
           continue;
         }
-        case 3: {
-          if (tag !== 24) {
+        case 2: {
+          if (tag !== 16) {
             break;
           }
 
@@ -2807,11 +2559,6 @@ export const PtyExit: MessageFns<PtyExit> = {
 
   fromJSON(object: any): PtyExit {
     return {
-      sessionId: isSet(object.sessionId)
-        ? globalThis.String(object.sessionId)
-        : isSet(object.session_id)
-        ? globalThis.String(object.session_id)
-        : "",
       exitCode: isSet(object.exitCode)
         ? globalThis.Number(object.exitCode)
         : isSet(object.exit_code)
@@ -2823,9 +2570,6 @@ export const PtyExit: MessageFns<PtyExit> = {
 
   toJSON(message: PtyExit): unknown {
     const obj: any = {};
-    if (message.sessionId !== "") {
-      obj.sessionId = message.sessionId;
-    }
     if (message.exitCode !== 0) {
       obj.exitCode = Math.round(message.exitCode);
     }
@@ -2840,7 +2584,6 @@ export const PtyExit: MessageFns<PtyExit> = {
   },
   fromPartial<I extends Exact<DeepPartial<PtyExit>, I>>(object: I): PtyExit {
     const message = createBasePtyExit();
-    message.sessionId = object.sessionId ?? "";
     message.exitCode = object.exitCode ?? 0;
     message.signal = object.signal ?? undefined;
     return message;
@@ -10873,24 +10616,6 @@ export const TreeTermDaemonService = {
     responseSerialize: (value: CreatePtyResponse): Buffer => Buffer.from(CreatePtyResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): CreatePtyResponse => CreatePtyResponse.decode(value),
   },
-  attachPty: {
-    path: "/treeterm.TreeTermDaemon/AttachPty" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: AttachPtyRequest): Buffer => Buffer.from(AttachPtyRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): AttachPtyRequest => AttachPtyRequest.decode(value),
-    responseSerialize: (value: AttachPtyResponse): Buffer => Buffer.from(AttachPtyResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): AttachPtyResponse => AttachPtyResponse.decode(value),
-  },
-  resizePty: {
-    path: "/treeterm.TreeTermDaemon/ResizePty" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: ResizePtyRequest): Buffer => Buffer.from(ResizePtyRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): ResizePtyRequest => ResizePtyRequest.decode(value),
-    responseSerialize: (value: Empty): Buffer => Buffer.from(Empty.encode(value).finish()),
-    responseDeserialize: (value: Buffer): Empty => Empty.decode(value),
-  },
   killPty: {
     path: "/treeterm.TreeTermDaemon/KillPty" as const,
     requestStream: false as const,
@@ -11046,8 +10771,6 @@ export const TreeTermDaemonService = {
 export interface TreeTermDaemonServer extends UntypedServiceImplementation {
   /** PTY Session Management (Unary RPCs) */
   createPty: handleUnaryCall<CreatePtyRequest, CreatePtyResponse>;
-  attachPty: handleUnaryCall<AttachPtyRequest, AttachPtyResponse>;
-  resizePty: handleUnaryCall<ResizePtyRequest, Empty>;
   killPty: handleUnaryCall<KillPtyRequest, Empty>;
   listPtySessions: handleUnaryCall<Empty, ListPtySessionsResponse>;
   /**
@@ -11092,36 +10815,6 @@ export interface TreeTermDaemonClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: CreatePtyResponse) => void,
-  ): ClientUnaryCall;
-  attachPty(
-    request: AttachPtyRequest,
-    callback: (error: ServiceError | null, response: AttachPtyResponse) => void,
-  ): ClientUnaryCall;
-  attachPty(
-    request: AttachPtyRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: AttachPtyResponse) => void,
-  ): ClientUnaryCall;
-  attachPty(
-    request: AttachPtyRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: AttachPtyResponse) => void,
-  ): ClientUnaryCall;
-  resizePty(
-    request: ResizePtyRequest,
-    callback: (error: ServiceError | null, response: Empty) => void,
-  ): ClientUnaryCall;
-  resizePty(
-    request: ResizePtyRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: Empty) => void,
-  ): ClientUnaryCall;
-  resizePty(
-    request: ResizePtyRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: Empty) => void,
   ): ClientUnaryCall;
   killPty(request: KillPtyRequest, callback: (error: ServiceError | null, response: Empty) => void): ClientUnaryCall;
   killPty(

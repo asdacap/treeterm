@@ -169,6 +169,8 @@ export class DaemonPtyManager {
   private counter = 0
   private dataCallbacks: Set<DataCallback> = new Set()
   private exitCallbacks: Set<ExitCallback> = new Set()
+  private sessionDataCallbacks: Map<string, Set<(data: string) => void>> = new Map()
+  private sessionExitCallbacks: Map<string, Set<(exitCode: number, signal?: number) => void>> = new Map()
   constructor(private scrollbackLimit: number = 1024 * 1024) {
     // scrollbackLimit is now in bytes (default 1 MB)
   }
@@ -333,6 +335,34 @@ export class DaemonPtyManager {
     return () => this.exitCallbacks.delete(callback)
   }
 
+  onSessionData(sessionId: string, callback: (data: string) => void): () => void {
+    if (!this.sessionDataCallbacks.has(sessionId)) {
+      this.sessionDataCallbacks.set(sessionId, new Set())
+    }
+    this.sessionDataCallbacks.get(sessionId)!.add(callback)
+    return () => {
+      const cbs = this.sessionDataCallbacks.get(sessionId)
+      if (cbs) {
+        cbs.delete(callback)
+        if (cbs.size === 0) this.sessionDataCallbacks.delete(sessionId)
+      }
+    }
+  }
+
+  onSessionExit(sessionId: string, callback: (exitCode: number, signal?: number) => void): () => void {
+    if (!this.sessionExitCallbacks.has(sessionId)) {
+      this.sessionExitCallbacks.set(sessionId, new Set())
+    }
+    this.sessionExitCallbacks.get(sessionId)!.add(callback)
+    return () => {
+      const cbs = this.sessionExitCallbacks.get(sessionId)
+      if (cbs) {
+        cbs.delete(callback)
+        if (cbs.size === 0) this.sessionExitCallbacks.delete(sessionId)
+      }
+    }
+  }
+
   private appendScrollback(session: PtySession, data: string): void {
     session.scrollback.push(data)
     session.scrollbackSize += Buffer.byteLength(data, 'utf-8')
@@ -348,11 +378,23 @@ export class DaemonPtyManager {
     for (const callback of this.dataCallbacks) {
       callback(sessionId, data)
     }
+    const sessionCbs = this.sessionDataCallbacks.get(sessionId)
+    if (sessionCbs) {
+      for (const callback of sessionCbs) {
+        callback(data)
+      }
+    }
   }
 
   private broadcastExit(sessionId: string, exitCode: number, signal?: number): void {
     for (const callback of this.exitCallbacks) {
       callback(sessionId, exitCode, signal)
+    }
+    const sessionCbs = this.sessionExitCallbacks.get(sessionId)
+    if (sessionCbs) {
+      for (const callback of sessionCbs) {
+        callback(exitCode, signal)
+      }
     }
   }
 

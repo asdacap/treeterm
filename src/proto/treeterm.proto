@@ -72,21 +72,6 @@ message CreatePtyResponse {
   string session_id = 1;
 }
 
-message AttachPtyRequest {
-  string session_id = 1;
-}
-
-message AttachPtyResponse {
-  repeated string scrollback = 1;
-  optional int32 exit_code = 2;
-}
-
-message ResizePtyRequest {
-  string session_id = 1;
-  int32 cols = 2;
-  int32 rows = 3;
-}
-
 message KillPtyRequest {
   string session_id = 1;
 }
@@ -101,20 +86,23 @@ message ListPtySessionsResponse {
 
 message PtyInput {
   oneof input {
-    PtyWriteData write = 1;
-    PtyResizeData resize = 2;
+    PtyStartData start = 1;    // First message, scopes stream to a session
+    PtyWriteData write = 2;
+    PtyResizeData resize = 3;
   }
 }
 
-message PtyWriteData {
+message PtyStartData {
   string session_id = 1;
-  bytes data = 2;  // Use bytes for terminal data (may contain non-UTF8)
+}
+
+message PtyWriteData {
+  bytes data = 1;  // Use bytes for terminal data (may contain non-UTF8)
 }
 
 message PtyResizeData {
-  string session_id = 1;
-  int32 cols = 2;
-  int32 rows = 3;
+  int32 cols = 1;
+  int32 rows = 2;
 }
 
 message PtyOutput {
@@ -125,14 +113,12 @@ message PtyOutput {
 }
 
 message PtyData {
-  string session_id = 1;
-  bytes data = 2;  // Terminal output data
+  bytes data = 1;  // Terminal output data
 }
 
 message PtyExit {
-  string session_id = 1;
-  int32 exit_code = 2;
-  optional int32 signal = 3;
+  int32 exit_code = 1;
+  optional int32 signal = 2;
 }
 
 // ============================================
@@ -675,8 +661,6 @@ message WriteFileResponse {
 service TreeTermDaemon {
   // PTY Session Management (Unary RPCs)
   rpc CreatePty(CreatePtyRequest) returns (CreatePtyResponse);
-  rpc AttachPty(AttachPtyRequest) returns (AttachPtyResponse);
-  rpc ResizePty(ResizePtyRequest) returns (Empty);
   rpc KillPty(KillPtyRequest) returns (Empty);
   rpc ListPtySessions(Empty) returns (ListPtySessionsResponse);
 
