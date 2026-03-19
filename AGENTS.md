@@ -29,9 +29,9 @@ The daemon survives app restarts; terminal sessions and state persist when Elect
 
 ## Layer Responsibilities
 
-**Daemon exposes stable primitives:** `ExecStream`, `PtyStream`, `ReadFile`/`WriteFile`, session persistence.
+**Daemon exposes stable primitives:** `ExecStream`, `PtyStream`, `ReadFile`/`WriteFile`, session persistence and multiplexin.
 
-**Main handles high-level logic:** Git orchestration via `ExecStream`, output parsing, error interpretation, workflow composition (stage → commit → push).
+**Main handles high-level logic:** Git orchestration via `ExecStream`, output parsing, error interpretation, workflow composition (stage → commit → push). Crucually, it should not do multiplexing, each of the window or application is self contained, and for pty, each terminal should have a new connection to the daemon.
 
 **Never add business logic to the daemon.** Never do direct filesystem ops in Main — use daemon's `WriteFile` gRPC.
 

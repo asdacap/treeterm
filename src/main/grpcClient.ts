@@ -199,6 +199,12 @@ export class GrpcDaemonClient {
     }
 
     const sessionStream = this.openSessionStream(sessionId)
+
+    // Clear stale listeners from the previous window so they don't
+    // accumulate and cause duplicate output on each re-attach.
+    sessionStream.dataListeners.clear()
+    sessionStream.exitListeners.clear()
+
     const scrollback: string[] = []
 
     return new Promise((resolve, reject) => {

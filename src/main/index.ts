@@ -34,9 +34,6 @@ let gitClient: GitClient | null = null
 let runActionsClient: RunActionsClient | null = null
 let useDaemon = true // Always use daemon mode
 
-// Maps PTY session IDs to the BrowserWindow ID that owns them
-const ptyToWindow: Map<string, number> = new Map()
-
 // Helper: get the daemon client for a given window (based on its connectionId)
 function getClientForWindow(webContentsId: number): GrpcDaemonClient {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
@@ -242,12 +239,6 @@ function createWindow(initialSessionId?: string): BrowserWindow {
       unwatchSession()
       unwatchSession = null
     }
-    // Clean up PTY ownership for this window
-    for (const [ptyId, winId] of ptyToWindow.entries()) {
-      if (winId === window.id) {
-        ptyToWindow.delete(ptyId)
-      }
-    }
   })
 
   // Register with window manager (session ID updated later in did-finish-load)
@@ -265,15 +256,14 @@ ipcMain.handle('pty:create', async (event, cwd: string, sandbox?: unknown, start
     await daemonClient.ensureDaemonRunning()
     const ptySessionId = await daemonClient.createPtySession({ cwd, sandbox: sandbox as SandboxConfig | undefined, startupCommand })
 
-    // Track which window owns this PTY session
+    // Capture the sender window ID in the closure so listeners always route
+    // to the window that created this PTY session (prevents double output
+    // when a different window re-attaches and overwrites a shared map).
     const senderWindow = BrowserWindow.fromWebContents(event.sender)
-    if (senderWindow) {
-      ptyToWindow.set(ptySessionId, senderWindow.id)
-    }
+    const windowId = senderWindow?.id
 
     // Route PTY data to the owning window
     daemonClient.onPtySessionData(ptySessionId, (data) => {
-      const windowId = ptyToWindow.get(ptySessionId)
       if (windowId) {
         const windowInfo = windowManager.getWindow(windowId)
         windowInfo?.ipcServer.ptyData(ptySessionId, data)
@@ -281,12 +271,10 @@ ipcMain.handle('pty:create', async (event, cwd: string, sandbox?: unknown, start
     })
 
     daemonClient.onPtySessionExit(ptySessionId, (exitCode) => {
-      const windowId = ptyToWindow.get(ptySessionId)
       if (windowId) {
         const windowInfo = windowManager.getWindow(windowId)
         windowInfo?.ipcServer.ptyExit(ptySessionId, exitCode)
       }
-      ptyToWindow.delete(ptySessionId)
     })
 
     return ptySessionId
@@ -305,15 +293,12 @@ ipcMain.handle('pty:attach', async (event, sessionId: string) => {
     await daemonClient.ensureDaemonRunning()
     const result = await daemonClient.attachPtySession(sessionId)
 
-    // Track which window owns this PTY session
+    // Capture the sender window ID in the closure (same pattern as pty:create)
     const senderWindow = BrowserWindow.fromWebContents(event.sender)
-    if (senderWindow) {
-      ptyToWindow.set(sessionId, senderWindow.id)
-    }
+    const windowId = senderWindow?.id
 
     // Set up data forwarding for this session
     daemonClient.onPtySessionData(sessionId, (data) => {
-      const windowId = ptyToWindow.get(sessionId)
       if (windowId) {
         const windowInfo = windowManager.getWindow(windowId)
         windowInfo?.ipcServer.ptyData(sessionId, data)
@@ -321,12 +306,10 @@ ipcMain.handle('pty:attach', async (event, sessionId: string) => {
     })
 
     daemonClient.onPtySessionExit(sessionId, (exitCode) => {
-      const windowId = ptyToWindow.get(sessionId)
       if (windowId) {
         const windowInfo = windowManager.getWindow(windowId)
         windowInfo?.ipcServer.ptyExit(sessionId, exitCode)
       }
-      ptyToWindow.delete(sessionId)
     })
 
     return { success: true, scrollback: result.scrollback, exitCode: result.exitCode }
