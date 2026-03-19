@@ -5,7 +5,6 @@ const mocks = vi.hoisted(() => {
     waitForReady: vi.fn(),
     createPty: vi.fn(),
     attachPty: vi.fn(),
-    detachPty: vi.fn(),
     killPty: vi.fn(),
     listPtySessions: vi.fn(),
     shutdown: vi.fn(),
@@ -173,16 +172,6 @@ describe('GrpcDaemonClient', () => {
       await expect(client.attachPtySession('pty-1')).rejects.toThrow('not found')
     })
 
-    it('detachPtySession resolves on success', async () => {
-      mockClientInstance.detachPty.mockImplementation((req: any, cb: any) => cb(null))
-      await expect(client.detachPtySession('pty-1')).resolves.toBeUndefined()
-    })
-
-    it('detachPtySession rejects on error', async () => {
-      mockClientInstance.detachPty.mockImplementation((req: any, cb: any) => cb({ message: 'fail' }))
-      await expect(client.detachPtySession('pty-1')).rejects.toThrow('fail')
-    })
-
     it('writeToPtySession writes to stream', async () => {
       const streamMock = mockClientInstance.ptyStream.mock.results[0]?.value
       client.writeToPtySession('pty-1', 'hello')
@@ -334,12 +323,10 @@ describe('GrpcDaemonClient', () => {
         activeTabId: 'tab-1',
         metadata: Buffer.from('{}'),
         createdAt: 1000,
-        lastActivity: 2000,
-        attachedClients: 1
+        lastActivity: 2000
       }],
       createdAt: 1000,
-      lastActivity: 2000,
-      attachedClients: 1
+      lastActivity: 2000
     }
 
     it('createSession resolves with converted session', async () => {
@@ -469,12 +456,10 @@ describe('GrpcDaemonClient', () => {
           activeTabId: 'tab-1',
           metadata: Buffer.from('{}'),
           createdAt: 1000,
-          lastActivity: 2000,
-          attachedClients: 2
+          lastActivity: 2000
         }],
         createdAt: 1000,
-        lastActivity: 2000,
-        attachedClients: 2
+        lastActivity: 2000
       }
 
       mockClientInstance.getSession.mockImplementation((req: any, cb: any) => cb(null, protoSession))
@@ -503,12 +488,10 @@ describe('GrpcDaemonClient', () => {
           appStates: {},
           activeTabId: undefined,
           createdAt: 1000,
-          lastActivity: 2000,
-          attachedClients: 0
+          lastActivity: 2000
         }],
         createdAt: 1000,
-        lastActivity: 2000,
-        attachedClients: 0
+        lastActivity: 2000
       }
 
       mockClientInstance.getSession.mockImplementation((req: any, cb: any) => cb(null, protoSession))

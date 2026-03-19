@@ -118,7 +118,7 @@ export function createWorkspaceStore(
         return
       }
 
-      const daemonWorkspaces = Object.values(workspaces).map(({ createdAt, lastActivity, attachedClients, ...ws }) => ws)
+      const daemonWorkspaces = Object.values(workspaces).map(({ createdAt, lastActivity, ...ws }) => ws)
 
       console.log('[workspace] syncing to daemon:', daemonWorkspaces.length, 'workspaces')
 
@@ -197,7 +197,6 @@ export function createWorkspaceStore(
       metadata: options.metadata ?? {},
       createdAt: Date.now(),
       lastActivity: Date.now(),
-      attachedClients: 0
     }
 
     store.setState((state) => ({
@@ -327,8 +326,7 @@ export function createWorkspaceStore(
         metadata: {},
         createdAt: Date.now(),
         lastActivity: Date.now(),
-        attachedClients: 0
-      }
+        }
 
       set((state) => ({
         workspaces: { ...state.workspaces, [id]: workspace },

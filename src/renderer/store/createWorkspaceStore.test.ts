@@ -52,7 +52,7 @@ function makeDeps(overrides?: Partial<WorkspaceDeps>): WorkspaceDeps {
       prefixMode: { enabled: false, prefixKey: 'Control+B', timeout: 1500 },
       keybindings: { newTab: 'c', closeTab: 'x', nextTab: 'n', prevTab: 'p', openSettings: ',', workspaceFocus: 'w' },
       stt: { enabled: false, provider: 'openaiWhisper', openaiApiKey: '', localWhisperModelPath: '', pushToTalkKey: '', language: 'en' },
-      daemon: { orphanTimeout: 30000, scrollbackLimit: 10000, killOnQuit: true },
+      daemon: { scrollbackLimit: 10000 },
       ssh: { savedConnections: [] },
       globalDefaultApplicationId: '',
       recentDirectories: [],
@@ -82,7 +82,6 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     metadata: {},
     createdAt: Date.now(),
     lastActivity: Date.now(),
-    attachedClients: 0,
     ...overrides
   }
 }
@@ -1147,7 +1146,7 @@ describe('createWorkspaceStore', () => {
       expect(deps.session.update).not.toHaveBeenCalled()
     })
 
-    it('calls session.update with stripped workspaces (no createdAt/lastActivity/attachedClients)', async () => {
+    it('calls session.update with stripped workspaces (no createdAt/lastActivity)', async () => {
       const deps = makeDeps()
       const store = createWorkspaceStore({ sessionId: 's1', windowUuid: 'uuid-1' }, deps)
       store.setState({
@@ -1158,7 +1157,6 @@ describe('createWorkspaceStore', () => {
             path: '/test',
             createdAt: 123456,
             lastActivity: 789012,
-            attachedClients: 3,
           })
         }
       })
@@ -1177,7 +1175,6 @@ describe('createWorkspaceStore', () => {
       const ws = calledWith[0]
       expect(ws).not.toHaveProperty('createdAt')
       expect(ws).not.toHaveProperty('lastActivity')
-      expect(ws).not.toHaveProperty('attachedClients')
     })
   })
 

@@ -34,7 +34,6 @@ message Workspace {
   optional string active_tab_id = 11;
   int64 created_at = 12;
   int64 last_activity = 13;
-  int32 attached_clients = 14;
   string id = 15;
   repeated string children = 16;
   bytes metadata = 17;  // JSON-encoded arbitrary dictionary
@@ -45,7 +44,6 @@ message Session {
   repeated Workspace workspaces = 2;
   int64 created_at = 3;
   int64 last_activity = 4;
-  int32 attached_clients = 5;
 }
 
 message WorkspaceInput {
@@ -72,7 +70,6 @@ message PtySessionInfo {
   int32 rows = 4;
   int64 created_at = 5;
   int64 last_activity = 6;
-  int32 attached_clients = 7;
 }
 
 // ============================================
@@ -99,10 +96,6 @@ message AttachPtyRequest {
 message AttachPtyResponse {
   repeated string scrollback = 1;
   optional int32 exit_code = 2;
-}
-
-message DetachPtyRequest {
-  string session_id = 1;
 }
 
 message ResizePtyRequest {
@@ -135,7 +128,6 @@ message PtyInput {
   oneof input {
     PtyWriteData write = 1;
     PtyResizeData resize = 2;
-    PtyDetachData detach = 3;
   }
 }
 
@@ -148,10 +140,6 @@ message PtyResizeData {
   string session_id = 1;
   int32 cols = 2;
   int32 rows = 3;
-}
-
-message PtyDetachData {
-  string session_id = 1;
 }
 
 message PtyOutput {
@@ -713,7 +701,6 @@ service TreeTermDaemon {
   // PTY Session Management (Unary RPCs)
   rpc CreatePty(CreatePtyRequest) returns (CreatePtyResponse);
   rpc AttachPty(AttachPtyRequest) returns (AttachPtyResponse);
-  rpc DetachPty(DetachPtyRequest) returns (Empty);
   rpc ResizePty(ResizePtyRequest) returns (Empty);
   rpc KillPty(KillPtyRequest) returns (Empty);
   rpc ListPtySessions(Empty) returns (ListPtySessionsResponse);

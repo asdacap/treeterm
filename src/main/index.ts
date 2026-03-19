@@ -237,19 +237,11 @@ function createWindow(initialSessionId?: string): BrowserWindow {
       unwatchSession()
       unwatchSession = null
     }
-    // Collect PTY sessions owned by this window, clean up ownership
-    const windowPtySessions: string[] = []
+    // Clean up PTY ownership for this window
     for (const [ptyId, winId] of ptyToWindow.entries()) {
       if (winId === window.id) {
-        windowPtySessions.push(ptyId)
         ptyToWindow.delete(ptyId)
-      }
-    }
-    // Detach only this window's PTY sessions
-    if (daemonClient) {
-      for (const sessionId of windowPtySessions) {
-        daemonClient.detachPtySession(sessionId).catch(console.error)
-        attachedSessions.delete(sessionId)
+        attachedSessions.delete(ptyId)
       }
     }
   })
@@ -346,12 +338,6 @@ ipcMain.handle('pty:attach', async (event, sessionId: string) => {
     console.error('[main] failed to attach to PTY session:', errorMessage)
     return { success: false, error: errorMessage }
   }
-})
-
-server.onPtyDetach(async (sessionId) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  await daemonClient.detachPtySession(sessionId)
-  attachedSessions.delete(sessionId)
 })
 
 server.onPtyList(async () => {
@@ -1105,18 +1091,6 @@ app.on('before-quit', async () => {
   }
 
   if (daemonClient && daemonClient.isConnected()) {
-    const settings = loadSettings()
-    if (settings.daemon.killOnQuit) {
-      console.log('[main] killing all sessions before quit')
-      for (const sessionId of attachedSessions) {
-        await daemonClient.killPtySession(sessionId)
-      }
-    } else {
-      console.log('[main] detaching from sessions before quit')
-      for (const sessionId of attachedSessions) {
-        await daemonClient.detachPtySession(sessionId)
-      }
-    }
     attachedSessions.clear()
     daemonClient.disconnect()
   }

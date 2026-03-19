@@ -121,7 +121,6 @@ function makeMockPtyManager(): any {
   return {
     create: vi.fn().mockReturnValue('pty-1'),
     attach: vi.fn().mockReturnValue({ scrollback: ['line1'], session: {}, exitCode: undefined }),
-    detach: vi.fn(),
     write: vi.fn(),
     resize: vi.fn(),
     kill: vi.fn(),
@@ -259,7 +258,7 @@ describe('GrpcServer', () => {
 
       capturedServiceImpl.attachPty(call, callback)
 
-      expect(mockPtyManager.attach).toHaveBeenCalledWith('pty-1', 'client-1')
+      expect(mockPtyManager.attach).toHaveBeenCalledWith('pty-1')
       expect(callback).toHaveBeenCalledWith(null, { scrollback: ['line1'], exitCode: undefined })
     })
 
@@ -276,19 +275,6 @@ describe('GrpcServer', () => {
       expect(callback).toHaveBeenCalledWith(
         expect.objectContaining({ code: 5, message: 'not found' })
       )
-    })
-
-    it('detachPty succeeds', () => {
-      const call = makeUnaryCall(
-        { sessionId: 'pty-1' },
-        { get: vi.fn().mockReturnValue(['client-1']) }
-      )
-      const callback = makeCallback()
-
-      capturedServiceImpl.detachPty(call, callback)
-
-      expect(mockPtyManager.detach).toHaveBeenCalledWith('pty-1', 'client-1')
-      expect(callback).toHaveBeenCalledWith(null, {})
     })
 
     it('resizePty succeeds', () => {
@@ -318,8 +304,7 @@ describe('GrpcServer', () => {
         cols: 80,
         rows: 24,
         createdAt: 1000,
-        lastActivity: 2000,
-        attachedClients: 1
+        lastActivity: 2000
       }])
       const call = makeUnaryCall({})
       const callback = makeCallback()
@@ -333,8 +318,7 @@ describe('GrpcServer', () => {
           cols: 80,
           rows: 24,
           createdAt: 1000,
-          lastActivity: 2000,
-          attachedClients: 1
+          lastActivity: 2000
         }]
       })
     })
@@ -386,12 +370,10 @@ describe('GrpcServer', () => {
         activeTabId: 'tab-1',
         metadata: {},
         createdAt: 1000,
-        lastActivity: 2000,
-        attachedClients: 1
+        lastActivity: 2000
       }],
       createdAt: 1000,
-      lastActivity: 2000,
-      attachedClients: 1
+      lastActivity: 2000
     }
 
     it('createSession creates and returns proto session', () => {
@@ -576,8 +558,7 @@ describe('GrpcServer', () => {
         id: 'session-1',
         workspaces: [],
         createdAt: 1000,
-        lastActivity: 2000,
-        attachedClients: 1
+        lastActivity: 2000
       }
       mockSessionStore.updateSession.mockReturnValue(mockSessionResult)
 
@@ -611,8 +592,7 @@ describe('GrpcServer', () => {
         id: 'session-1',
         workspaces: [],
         createdAt: 1000,
-        lastActivity: 2000,
-        attachedClients: 1
+        lastActivity: 2000
       }
       mockSessionStore.updateSession.mockReturnValue(mockSessionResult)
 
@@ -645,8 +625,7 @@ describe('GrpcServer', () => {
         id: 'session-1',
         workspaces: [],
         createdAt: 1000,
-        lastActivity: 2000,
-        attachedClients: 1
+        lastActivity: 2000
       }
       mockSessionStore.updateSession.mockReturnValue(mockSessionResult)
       const call = makeUnaryCall(
@@ -694,23 +673,6 @@ describe('GrpcServer', () => {
       expect(mockPtyManager.resize).toHaveBeenCalledWith('pty-1', 120, 40)
     })
 
-    it('handles detach input', () => {
-      const handlers: Record<string, Function> = {}
-      const mockStream = {
-        metadata: { get: vi.fn().mockReturnValue(['client-1']) },
-        on: vi.fn().mockImplementation((event: string, handler: Function) => {
-          handlers[event] = handler
-        }),
-        write: vi.fn(),
-        end: vi.fn()
-      }
-
-      capturedServiceImpl.ptyStream(mockStream)
-
-      handlers.data({ detach: { sessionId: 'pty-1' } })
-      expect(mockPtyManager.detach).toHaveBeenCalledWith('pty-1', 'client-1')
-    })
-
     it('handles end event', () => {
       const handlers: Record<string, Function> = {}
       const mockStream = {
@@ -723,10 +685,9 @@ describe('GrpcServer', () => {
       }
 
       capturedServiceImpl.ptyStream(mockStream)
-      handlers.end()
 
-      // Should detach from all sessions and clean up
-      expect(mockSessionStore.detachClient).toHaveBeenCalledWith('client-1')
+      // Should not throw on end
+      expect(() => handlers.end()).not.toThrow()
     })
   })
 
@@ -948,12 +909,10 @@ describe('GrpcServer', () => {
           workspaces: [{
             ...workspaces[0],
             createdAt: 1000,
-            lastActivity: 2000,
-            attachedClients: 1
+            lastActivity: 2000
           }],
           createdAt: 1000,
-          lastActivity: 2000,
-          attachedClients: 1
+          lastActivity: 2000
         }
       })
 
@@ -992,12 +951,10 @@ describe('GrpcServer', () => {
           },
           activeTabId: 'tab-1',
           createdAt: 1000,
-          lastActivity: 2000,
-          attachedClients: 1
+          lastActivity: 2000
         }],
         createdAt: 1000,
-        lastActivity: 2000,
-        attachedClients: 1
+        lastActivity: 2000
       }
 
       mockSessionStore.getSession.mockReturnValue(session)
@@ -1014,7 +971,7 @@ describe('GrpcServer', () => {
   })
 
   describe('getClientId', () => {
-    it('uses client-id from metadata when available', () => {
+    it('attaches to session by sessionId', () => {
       const call = makeUnaryCall(
         { sessionId: 'pty-1' },
         { get: vi.fn().mockReturnValue(['my-client']) }
@@ -1023,19 +980,7 @@ describe('GrpcServer', () => {
 
       capturedServiceImpl.attachPty(call, callback)
 
-      expect(mockPtyManager.attach).toHaveBeenCalledWith('pty-1', 'my-client')
-    })
-
-    it('falls back to generated client id when metadata is empty', () => {
-      const call = makeUnaryCall(
-        { sessionId: 'pty-1' },
-        { get: vi.fn().mockReturnValue([]) }
-      )
-      const callback = makeCallback()
-
-      capturedServiceImpl.attachPty(call, callback)
-
-      expect(mockPtyManager.attach).toHaveBeenCalledWith('pty-1', expect.stringMatching(/^client-\d+$/))
+      expect(mockPtyManager.attach).toHaveBeenCalledWith('pty-1')
     })
   })
 })

@@ -92,8 +92,7 @@ describe('Editor Renderer', () => {
           activeTabId: null,
           metadata: {},
           createdAt: Date.now(),
-          lastActivity: Date.now(),
-          attachedClients: 1
+          lastActivity: Date.now()
         }
 
         await editorApplication.cleanup?.(tab, workspace)
@@ -134,8 +133,7 @@ describe('Editor Renderer', () => {
           activeTabId: null,
           metadata: {},
           createdAt: Date.now(),
-          lastActivity: Date.now(),
-          attachedClients: 1
+          lastActivity: Date.now()
         }
 
         await editorApplication.cleanup?.(tab, workspace)
@@ -167,8 +165,7 @@ describe('Editor Renderer', () => {
           activeTabId: null,
           metadata: {},
           createdAt: Date.now(),
-          lastActivity: Date.now(),
-          attachedClients: 1
+          lastActivity: Date.now()
         }
 
         await editorApplication.cleanup?.(tab, workspace)
@@ -200,8 +197,7 @@ describe('Editor Renderer', () => {
           activeTabId: null,
           metadata: {},
           createdAt: Date.now(),
-          lastActivity: Date.now(),
-          attachedClients: 1
+          lastActivity: Date.now()
         }
 
         await editorApplication.cleanup?.(tab, workspace)

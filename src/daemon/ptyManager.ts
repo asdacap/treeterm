@@ -27,7 +27,6 @@ export interface PtySession {
   createdAt: number
   lastActivity: number
   sandbox?: SandboxConfig
-  attachedClients: Set<string>
   exitCode?: number
 }
 
@@ -170,16 +169,8 @@ export class DaemonPtyManager {
   private counter = 0
   private dataCallbacks: Set<DataCallback> = new Set()
   private exitCallbacks: Set<ExitCallback> = new Set()
-  private orphanCleanupInterval: NodeJS.Timeout | null = null
-  private orphanTimeout: number
-  private isReferencedFn: ((id: string) => boolean) | null = null
-
-  constructor(orphanTimeout: number = 0, private scrollbackLimit: number = 1024 * 1024) {
+  constructor(private scrollbackLimit: number = 1024 * 1024) {
     // scrollbackLimit is now in bytes (default 1 MB)
-    this.orphanTimeout = orphanTimeout
-    if (orphanTimeout > 0) {
-      this.startOrphanCleanup()
-    }
   }
 
   create(config: CreateSessionConfig): string {
@@ -238,8 +229,7 @@ export class DaemonPtyManager {
       scrollbackSize: 0,
       createdAt: Date.now(),
       lastActivity: Date.now(),
-      sandbox: config.sandbox,
-      attachedClients: new Set()
+      sandbox: config.sandbox
     }
 
     ptyProcess.onData((data) => {
@@ -272,39 +262,19 @@ export class DaemonPtyManager {
     return id
   }
 
-  attach(sessionId: string, clientId: string): { scrollback: string[]; session: SessionInfo; exitCode?: number } {
+  attach(sessionId: string): { scrollback: string[]; session: SessionInfo; exitCode?: number } {
     const session = this.sessions.get(sessionId)
     if (!session) {
       throw new Error(`Session ${sessionId} not found`)
     }
 
-    session.attachedClients.add(clientId)
     session.lastActivity = Date.now()
-
-    log.info(
-      { clientId, sessionId, clientCount: session.attachedClients.size },
-      'client attached to session'
-    )
 
     return {
       scrollback: [...session.scrollback],
       session: this.getSessionInfo(session),
       exitCode: session.exitCode
     }
-  }
-
-  detach(sessionId: string, clientId: string): void {
-    const session = this.sessions.get(sessionId)
-    if (!session) {
-      log.warn({ sessionId }, 'detach: session not found')
-      return
-    }
-
-    session.attachedClients.delete(clientId)
-    log.info(
-      { clientId, sessionId, clientsRemaining: session.attachedClients.size },
-      'client detached from session'
-    )
   }
 
   write(sessionId: string, data: string): void {
@@ -372,10 +342,6 @@ export class DaemonPtyManager {
     return () => this.exitCallbacks.delete(callback)
   }
 
-  setIsReferenced(fn: (id: string) => boolean): void {
-    this.isReferencedFn = fn
-  }
-
   private appendScrollback(session: PtySession, data: string): void {
     session.scrollback.push(data)
     session.scrollbackSize += Buffer.byteLength(data, 'utf-8')
@@ -406,44 +372,12 @@ export class DaemonPtyManager {
       cols: session.cols,
       rows: session.rows,
       createdAt: session.createdAt,
-      lastActivity: session.lastActivity,
-      attachedClients: session.attachedClients.size
-    }
-  }
-
-  private startOrphanCleanup(): void {
-    // Run cleanup check every minute
-    this.orphanCleanupInterval = setInterval(() => {
-      this.cleanupOrphanedSessions()
-    }, 60000)
-  }
-
-  private cleanupOrphanedSessions(): void {
-    if (this.orphanTimeout === 0) return
-
-    const now = Date.now()
-    const timeoutMs = this.orphanTimeout * 60 * 1000 // Convert minutes to ms
-
-    for (const [id, session] of this.sessions) {
-      const isReferenced = this.isReferencedFn ? this.isReferencedFn(id) : false
-      const isOrphan = !isReferenced && session.attachedClients.size === 0
-      const idleTime = now - session.lastActivity
-
-      if (isOrphan && idleTime > timeoutMs) {
-        log.info(
-          { sessionId: id, idleSeconds: Math.round(idleTime / 1000) },
-          'cleaning up orphaned session'
-        )
-        this.kill(id)
-      }
+      lastActivity: session.lastActivity
     }
   }
 
   shutdown(): void {
     log.info('shutting down PTY manager')
-    if (this.orphanCleanupInterval) {
-      clearInterval(this.orphanCleanupInterval)
-    }
 
     // Kill all sessions
     for (const [id] of this.sessions) {

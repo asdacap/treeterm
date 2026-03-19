@@ -11,7 +11,6 @@ const CHANNELS = {
   // Request channels
   ptyCreate: 'pty:create',
   ptyAttach: 'pty:attach',
-  ptyDetach: 'pty:detach',
   ptyList: 'pty:list',
   ptyIsAlive: 'pty:isAlive',
   gitGetInfo: 'git:getInfo',
@@ -107,10 +106,6 @@ export class IpcClient {
 
   ptyAttach(...args: IpcRequests['ptyAttach']['params']): Promise<IpcRequests['ptyAttach']['result']> {
     return ipcRenderer.invoke(CHANNELS.ptyAttach, ...args)
-  }
-
-  ptyDetach(...args: IpcRequests['ptyDetach']['params']): Promise<IpcRequests['ptyDetach']['result']> {
-    return ipcRenderer.invoke(CHANNELS.ptyDetach, ...args)
   }
 
   ptyList(...args: IpcRequests['ptyList']['params']): Promise<IpcRequests['ptyList']['result']> {

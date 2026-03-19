@@ -131,10 +131,7 @@ contextBridge.exposeInMainWorld('electron', {
     attach: (sessionId: string): Promise<{ success: boolean; scrollback?: string[]; error?: string }> => {
       return client.ptyAttach(sessionId)
     },
-    detach: (sessionId: string): Promise<void> => {
-      return client.ptyDetach(sessionId)
-    },
-    list: (): Promise<Array<{ id: string; cwd: string; createdAt: number; attachedClients: number }>> => {
+    list: (): Promise<SessionInfo[]> => {
       return client.ptyList()
     },
     write: (id: string, data: string): void => {

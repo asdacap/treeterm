@@ -160,9 +160,7 @@ Settings are stored in the Electron userData directory:
 | STT | pushToTalkKey | Shift+Space |
 | STT | language | en |
 | Daemon | enabled | true |
-| Daemon | orphanTimeout | 0 |
 | Daemon | scrollbackLimit | 50000 |
-| Daemon | killOnQuit | false |
 | Global | globalDefaultApplicationId | terminal |
 | Global | recentDirectories | [] |
 

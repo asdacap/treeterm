@@ -60,7 +60,6 @@ export interface Workspace {
   activeTabId?: string | undefined;
   createdAt: number;
   lastActivity: number;
-  attachedClients: number;
   id: string;
   children: string[];
   /** JSON-encoded arbitrary dictionary */
@@ -77,7 +76,6 @@ export interface Session {
   workspaces: Workspace[];
   createdAt: number;
   lastActivity: number;
-  attachedClients: number;
 }
 
 export interface WorkspaceInput {
@@ -110,7 +108,6 @@ export interface PtySessionInfo {
   rows: number;
   createdAt: number;
   lastActivity: number;
-  attachedClients: number;
 }
 
 export interface CreatePtyRequest {
@@ -140,10 +137,6 @@ export interface AttachPtyResponse {
   exitCode?: number | undefined;
 }
 
-export interface DetachPtyRequest {
-  sessionId: string;
-}
-
 export interface ResizePtyRequest {
   sessionId: string;
   cols: number;
@@ -169,7 +162,6 @@ export interface ListPtySessionsResponse {
 export interface PtyInput {
   write?: PtyWriteData | undefined;
   resize?: PtyResizeData | undefined;
-  detach?: PtyDetachData | undefined;
 }
 
 export interface PtyWriteData {
@@ -182,10 +174,6 @@ export interface PtyResizeData {
   sessionId: string;
   cols: number;
   rows: number;
-}
-
-export interface PtyDetachData {
-  sessionId: string;
 }
 
 export interface PtyOutput {
@@ -982,7 +970,6 @@ function createBaseWorkspace(): Workspace {
     activeTabId: undefined,
     createdAt: 0,
     lastActivity: 0,
-    attachedClients: 0,
     id: "",
     children: [],
     metadata: Buffer.alloc(0),
@@ -1029,9 +1016,6 @@ export const Workspace: MessageFns<Workspace> = {
     }
     if (message.lastActivity !== 0) {
       writer.uint32(104).int64(message.lastActivity);
-    }
-    if (message.attachedClients !== 0) {
-      writer.uint32(112).int32(message.attachedClients);
     }
     if (message.id !== "") {
       writer.uint32(122).string(message.id);
@@ -1159,14 +1143,6 @@ export const Workspace: MessageFns<Workspace> = {
           message.lastActivity = longToNumber(reader.int64());
           continue;
         }
-        case 14: {
-          if (tag !== 112) {
-            break;
-          }
-
-          message.attachedClients = reader.int32();
-          continue;
-        }
         case 15: {
           if (tag !== 122) {
             break;
@@ -1267,11 +1243,6 @@ export const Workspace: MessageFns<Workspace> = {
         : isSet(object.last_activity)
         ? globalThis.Number(object.last_activity)
         : 0,
-      attachedClients: isSet(object.attachedClients)
-        ? globalThis.Number(object.attachedClients)
-        : isSet(object.attached_clients)
-        ? globalThis.Number(object.attached_clients)
-        : 0,
       id: isSet(object.id) ? globalThis.String(object.id) : "",
       children: globalThis.Array.isArray(object?.children)
         ? object.children.map((e: any) => globalThis.String(e))
@@ -1327,9 +1298,6 @@ export const Workspace: MessageFns<Workspace> = {
     if (message.lastActivity !== 0) {
       obj.lastActivity = Math.round(message.lastActivity);
     }
-    if (message.attachedClients !== 0) {
-      obj.attachedClients = Math.round(message.attachedClients);
-    }
     if (message.id !== "") {
       obj.id = message.id;
     }
@@ -1368,7 +1336,6 @@ export const Workspace: MessageFns<Workspace> = {
     message.activeTabId = object.activeTabId ?? undefined;
     message.createdAt = object.createdAt ?? 0;
     message.lastActivity = object.lastActivity ?? 0;
-    message.attachedClients = object.attachedClients ?? 0;
     message.id = object.id ?? "";
     message.children = object.children?.map((e) => e) || [];
     message.metadata = object.metadata ?? Buffer.alloc(0);
@@ -1455,7 +1422,7 @@ export const Workspace_AppStatesEntry: MessageFns<Workspace_AppStatesEntry> = {
 };
 
 function createBaseSession(): Session {
-  return { id: "", workspaces: [], createdAt: 0, lastActivity: 0, attachedClients: 0 };
+  return { id: "", workspaces: [], createdAt: 0, lastActivity: 0 };
 }
 
 export const Session: MessageFns<Session> = {
@@ -1471,9 +1438,6 @@ export const Session: MessageFns<Session> = {
     }
     if (message.lastActivity !== 0) {
       writer.uint32(32).int64(message.lastActivity);
-    }
-    if (message.attachedClients !== 0) {
-      writer.uint32(40).int32(message.attachedClients);
     }
     return writer;
   },
@@ -1517,14 +1481,6 @@ export const Session: MessageFns<Session> = {
           message.lastActivity = longToNumber(reader.int64());
           continue;
         }
-        case 5: {
-          if (tag !== 40) {
-            break;
-          }
-
-          message.attachedClients = reader.int32();
-          continue;
-        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1550,11 +1506,6 @@ export const Session: MessageFns<Session> = {
         : isSet(object.last_activity)
         ? globalThis.Number(object.last_activity)
         : 0,
-      attachedClients: isSet(object.attachedClients)
-        ? globalThis.Number(object.attachedClients)
-        : isSet(object.attached_clients)
-        ? globalThis.Number(object.attached_clients)
-        : 0,
     };
   },
 
@@ -1572,9 +1523,6 @@ export const Session: MessageFns<Session> = {
     if (message.lastActivity !== 0) {
       obj.lastActivity = Math.round(message.lastActivity);
     }
-    if (message.attachedClients !== 0) {
-      obj.attachedClients = Math.round(message.attachedClients);
-    }
     return obj;
   },
 
@@ -1587,7 +1535,6 @@ export const Session: MessageFns<Session> = {
     message.workspaces = object.workspaces?.map((e) => Workspace.fromPartial(e)) || [];
     message.createdAt = object.createdAt ?? 0;
     message.lastActivity = object.lastActivity ?? 0;
-    message.attachedClients = object.attachedClients ?? 0;
     return message;
   },
 };
@@ -2019,7 +1966,7 @@ export const WorkspaceInput_AppStatesEntry: MessageFns<WorkspaceInput_AppStatesE
 };
 
 function createBasePtySessionInfo(): PtySessionInfo {
-  return { id: "", cwd: "", cols: 0, rows: 0, createdAt: 0, lastActivity: 0, attachedClients: 0 };
+  return { id: "", cwd: "", cols: 0, rows: 0, createdAt: 0, lastActivity: 0 };
 }
 
 export const PtySessionInfo: MessageFns<PtySessionInfo> = {
@@ -2041,9 +1988,6 @@ export const PtySessionInfo: MessageFns<PtySessionInfo> = {
     }
     if (message.lastActivity !== 0) {
       writer.uint32(48).int64(message.lastActivity);
-    }
-    if (message.attachedClients !== 0) {
-      writer.uint32(56).int32(message.attachedClients);
     }
     return writer;
   },
@@ -2103,14 +2047,6 @@ export const PtySessionInfo: MessageFns<PtySessionInfo> = {
           message.lastActivity = longToNumber(reader.int64());
           continue;
         }
-        case 7: {
-          if (tag !== 56) {
-            break;
-          }
-
-          message.attachedClients = reader.int32();
-          continue;
-        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2136,11 +2072,6 @@ export const PtySessionInfo: MessageFns<PtySessionInfo> = {
         : isSet(object.last_activity)
         ? globalThis.Number(object.last_activity)
         : 0,
-      attachedClients: isSet(object.attachedClients)
-        ? globalThis.Number(object.attachedClients)
-        : isSet(object.attached_clients)
-        ? globalThis.Number(object.attached_clients)
-        : 0,
     };
   },
 
@@ -2164,9 +2095,6 @@ export const PtySessionInfo: MessageFns<PtySessionInfo> = {
     if (message.lastActivity !== 0) {
       obj.lastActivity = Math.round(message.lastActivity);
     }
-    if (message.attachedClients !== 0) {
-      obj.attachedClients = Math.round(message.attachedClients);
-    }
     return obj;
   },
 
@@ -2181,7 +2109,6 @@ export const PtySessionInfo: MessageFns<PtySessionInfo> = {
     message.rows = object.rows ?? 0;
     message.createdAt = object.createdAt ?? 0;
     message.lastActivity = object.lastActivity ?? 0;
-    message.attachedClients = object.attachedClients ?? 0;
     return message;
   },
 };
@@ -2643,70 +2570,6 @@ export const AttachPtyResponse: MessageFns<AttachPtyResponse> = {
   },
 };
 
-function createBaseDetachPtyRequest(): DetachPtyRequest {
-  return { sessionId: "" };
-}
-
-export const DetachPtyRequest: MessageFns<DetachPtyRequest> = {
-  encode(message: DetachPtyRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.sessionId !== "") {
-      writer.uint32(10).string(message.sessionId);
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): DetachPtyRequest {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDetachPtyRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.sessionId = reader.string();
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): DetachPtyRequest {
-    return {
-      sessionId: isSet(object.sessionId)
-        ? globalThis.String(object.sessionId)
-        : isSet(object.session_id)
-        ? globalThis.String(object.session_id)
-        : "",
-    };
-  },
-
-  toJSON(message: DetachPtyRequest): unknown {
-    const obj: any = {};
-    if (message.sessionId !== "") {
-      obj.sessionId = message.sessionId;
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<DetachPtyRequest>, I>>(base?: I): DetachPtyRequest {
-    return DetachPtyRequest.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<DetachPtyRequest>, I>>(object: I): DetachPtyRequest {
-    const message = createBaseDetachPtyRequest();
-    message.sessionId = object.sessionId ?? "";
-    return message;
-  },
-};
-
 function createBaseResizePtyRequest(): ResizePtyRequest {
   return { sessionId: "", cols: 0, rows: 0 };
 }
@@ -3056,7 +2919,7 @@ export const ListPtySessionsResponse: MessageFns<ListPtySessionsResponse> = {
 };
 
 function createBasePtyInput(): PtyInput {
-  return { write: undefined, resize: undefined, detach: undefined };
+  return { write: undefined, resize: undefined };
 }
 
 export const PtyInput: MessageFns<PtyInput> = {
@@ -3066,9 +2929,6 @@ export const PtyInput: MessageFns<PtyInput> = {
     }
     if (message.resize !== undefined) {
       PtyResizeData.encode(message.resize, writer.uint32(18).fork()).join();
-    }
-    if (message.detach !== undefined) {
-      PtyDetachData.encode(message.detach, writer.uint32(26).fork()).join();
     }
     return writer;
   },
@@ -3096,14 +2956,6 @@ export const PtyInput: MessageFns<PtyInput> = {
           message.resize = PtyResizeData.decode(reader, reader.uint32());
           continue;
         }
-        case 3: {
-          if (tag !== 26) {
-            break;
-          }
-
-          message.detach = PtyDetachData.decode(reader, reader.uint32());
-          continue;
-        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3117,7 +2969,6 @@ export const PtyInput: MessageFns<PtyInput> = {
     return {
       write: isSet(object.write) ? PtyWriteData.fromJSON(object.write) : undefined,
       resize: isSet(object.resize) ? PtyResizeData.fromJSON(object.resize) : undefined,
-      detach: isSet(object.detach) ? PtyDetachData.fromJSON(object.detach) : undefined,
     };
   },
 
@@ -3128,9 +2979,6 @@ export const PtyInput: MessageFns<PtyInput> = {
     }
     if (message.resize !== undefined) {
       obj.resize = PtyResizeData.toJSON(message.resize);
-    }
-    if (message.detach !== undefined) {
-      obj.detach = PtyDetachData.toJSON(message.detach);
     }
     return obj;
   },
@@ -3145,9 +2993,6 @@ export const PtyInput: MessageFns<PtyInput> = {
       : undefined;
     message.resize = (object.resize !== undefined && object.resize !== null)
       ? PtyResizeData.fromPartial(object.resize)
-      : undefined;
-    message.detach = (object.detach !== undefined && object.detach !== null)
-      ? PtyDetachData.fromPartial(object.detach)
       : undefined;
     return message;
   },
@@ -3325,70 +3170,6 @@ export const PtyResizeData: MessageFns<PtyResizeData> = {
     message.sessionId = object.sessionId ?? "";
     message.cols = object.cols ?? 0;
     message.rows = object.rows ?? 0;
-    return message;
-  },
-};
-
-function createBasePtyDetachData(): PtyDetachData {
-  return { sessionId: "" };
-}
-
-export const PtyDetachData: MessageFns<PtyDetachData> = {
-  encode(message: PtyDetachData, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.sessionId !== "") {
-      writer.uint32(10).string(message.sessionId);
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): PtyDetachData {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBasePtyDetachData();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.sessionId = reader.string();
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): PtyDetachData {
-    return {
-      sessionId: isSet(object.sessionId)
-        ? globalThis.String(object.sessionId)
-        : isSet(object.session_id)
-        ? globalThis.String(object.session_id)
-        : "",
-    };
-  },
-
-  toJSON(message: PtyDetachData): unknown {
-    const obj: any = {};
-    if (message.sessionId !== "") {
-      obj.sessionId = message.sessionId;
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<PtyDetachData>, I>>(base?: I): PtyDetachData {
-    return PtyDetachData.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<PtyDetachData>, I>>(object: I): PtyDetachData {
-    const message = createBasePtyDetachData();
-    message.sessionId = object.sessionId ?? "";
     return message;
   },
 };
@@ -11684,15 +11465,6 @@ export const TreeTermDaemonService = {
     responseSerialize: (value: AttachPtyResponse): Buffer => Buffer.from(AttachPtyResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): AttachPtyResponse => AttachPtyResponse.decode(value),
   },
-  detachPty: {
-    path: "/treeterm.TreeTermDaemon/DetachPty" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: DetachPtyRequest): Buffer => Buffer.from(DetachPtyRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): DetachPtyRequest => DetachPtyRequest.decode(value),
-    responseSerialize: (value: Empty): Buffer => Buffer.from(Empty.encode(value).finish()),
-    responseDeserialize: (value: Buffer): Empty => Empty.decode(value),
-  },
   resizePty: {
     path: "/treeterm.TreeTermDaemon/ResizePty" as const,
     requestStream: false as const,
@@ -11876,7 +11648,6 @@ export interface TreeTermDaemonServer extends UntypedServiceImplementation {
   /** PTY Session Management (Unary RPCs) */
   createPty: handleUnaryCall<CreatePtyRequest, CreatePtyResponse>;
   attachPty: handleUnaryCall<AttachPtyRequest, AttachPtyResponse>;
-  detachPty: handleUnaryCall<DetachPtyRequest, Empty>;
   resizePty: handleUnaryCall<ResizePtyRequest, Empty>;
   killPty: handleUnaryCall<KillPtyRequest, Empty>;
   listPtySessions: handleUnaryCall<Empty, ListPtySessionsResponse>;
@@ -11939,21 +11710,6 @@ export interface TreeTermDaemonClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: AttachPtyResponse) => void,
-  ): ClientUnaryCall;
-  detachPty(
-    request: DetachPtyRequest,
-    callback: (error: ServiceError | null, response: Empty) => void,
-  ): ClientUnaryCall;
-  detachPty(
-    request: DetachPtyRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: Empty) => void,
-  ): ClientUnaryCall;
-  detachPty(
-    request: DetachPtyRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: Empty) => void,
   ): ClientUnaryCall;
   resizePty(
     request: ResizePtyRequest,

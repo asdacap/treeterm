@@ -57,9 +57,7 @@ const defaultSettings: Settings = {
     language: 'en'
   },
   daemon: {
-    orphanTimeout: 0,
-    scrollbackLimit: 50000,
-    killOnQuit: false
+    scrollbackLimit: 50000
   },
   ssh: {
     savedConnections: []

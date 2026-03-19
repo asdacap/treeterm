@@ -70,7 +70,7 @@ export class SessionStore {
    */
   createSession(
     clientId: string,
-    workspaces: Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]
+    workspaces: Omit<Workspace, 'createdAt' | 'lastActivity'>[]
   ): Session {
     const sessionId = generateSessionId()
     const now = Date.now()
@@ -80,16 +80,14 @@ export class SessionStore {
       ...ws,
       id: ws.id || generateWorkspaceId(),
       createdAt: now,
-      lastActivity: now,
-      attachedClients: 1
+      lastActivity: now
     }))
 
     const session: Session = {
       id: sessionId,
       workspaces: fullWorkspaces,
       createdAt: now,
-      lastActivity: now,
-      attachedClients: 1
+      lastActivity: now
     }
 
     this.sessions.set(sessionId, session)
@@ -106,7 +104,7 @@ export class SessionStore {
   updateSession(
     clientId: string,
     sessionId: string,
-    workspaces: Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]
+    workspaces: Omit<Workspace, 'createdAt' | 'lastActivity'>[]
   ): Session | null {
     const session = this.sessions.get(sessionId)
     if (!session) return null
@@ -120,19 +118,14 @@ export class SessionStore {
         ...ws,
         id: ws.id || existing?.id || generateWorkspaceId(),
         createdAt: existing?.createdAt || now,
-        lastActivity: now,
-        attachedClients: existing?.attachedClients || 1
+        lastActivity: now
       }
     })
 
     const updated: Session = {
       ...session,
       workspaces: fullWorkspaces,
-      lastActivity: now,
-      // Increment attachedClients if this is a new client
-      attachedClients: this.isClientAttached(clientId, sessionId)
-        ? session.attachedClients
-        : session.attachedClients + 1
+      lastActivity: now
     }
 
     this.sessions.set(sessionId, updated)
@@ -204,18 +197,6 @@ export class SessionStore {
     if (!sessionIds) {
       log.debug({ clientId }, 'detachClient: no attachments')
       return
-    }
-
-    for (const sessionId of sessionIds) {
-      const session = this.sessions.get(sessionId)
-      if (session && session.attachedClients > 0) {
-        session.attachedClients--
-        session.lastActivity = Date.now()
-        log.debug(
-          { sessionId, clientsRemaining: session.attachedClients },
-          'client detached from session'
-        )
-      }
     }
 
     this.clientAttachments.delete(clientId)
