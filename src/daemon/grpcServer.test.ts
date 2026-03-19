@@ -120,7 +120,7 @@ function makeCallback(): any {
 function makeMockPtyManager(): any {
   return {
     create: vi.fn().mockReturnValue('pty-1'),
-    attach: vi.fn(),
+    attach: vi.fn().mockReturnValue({ scrollback: ['line1'], session: {}, exitCode: undefined }),
     detach: vi.fn(),
     write: vi.fn(),
     resize: vi.fn(),
@@ -260,7 +260,7 @@ describe('GrpcServer', () => {
       capturedServiceImpl.attachPty(call, callback)
 
       expect(mockPtyManager.attach).toHaveBeenCalledWith('pty-1', 'client-1')
-      expect(callback).toHaveBeenCalledWith(null, { scrollback: ['line1'] })
+      expect(callback).toHaveBeenCalledWith(null, { scrollback: ['line1'], exitCode: undefined })
     })
 
     it('attachPty returns error on failure', () => {
@@ -376,12 +376,13 @@ describe('GrpcServer', () => {
         gitRootPath: null,
         isWorktree: false,
         isDetached: false,
-        tabs: [{
-          id: 'tab-1',
-          applicationId: 'terminal',
-          title: 'Terminal',
-          state: { ptyId: 'pty-1' }
-        }],
+        appStates: {
+          'tab-1': {
+            applicationId: 'terminal',
+            title: 'Terminal',
+            state: { ptyId: 'pty-1' }
+          }
+        },
         activeTabId: 'tab-1',
         metadata: {},
         createdAt: 1000,
@@ -409,12 +410,13 @@ describe('GrpcServer', () => {
             gitRootPath: undefined,
             isWorktree: false,
             isDetached: false,
-            tabs: [{
-              id: 'tab-1',
-              applicationId: 'terminal',
-              title: 'Terminal',
-              state: Buffer.from('{"ptyId":"pty-1"}')
-            }],
+            appStates: {
+              'tab-1': {
+                applicationId: 'terminal',
+                title: 'Terminal',
+                state: Buffer.from('{"ptyId":"pty-1"}')
+              }
+            },
             activeTabId: 'tab-1'
           }]
         },
@@ -914,7 +916,7 @@ describe('GrpcServer', () => {
   })
 
   describe('proto conversion', () => {
-    it('convertWorkspaceInputs correctly parses tab state from JSON buffer', () => {
+    it('convertWorkspaceInputs correctly parses app state from JSON buffer', () => {
       const input = [{
         id: 'ws-1',
         path: '/test',
@@ -927,18 +929,19 @@ describe('GrpcServer', () => {
         gitRootPath: undefined,
         isWorktree: false,
         isDetached: false,
-        tabs: [{
-          id: 'tab-1',
-          applicationId: 'terminal',
-          title: 'Terminal',
-          state: Buffer.from(JSON.stringify({ ptyId: 'pty-1' }), 'utf-8')
-        }],
+        appStates: {
+          'tab-1': {
+            applicationId: 'terminal',
+            title: 'Terminal',
+            state: Buffer.from(JSON.stringify({ ptyId: 'pty-1' }), 'utf-8')
+          }
+        },
         activeTabId: 'tab-1'
       }]
 
       mockSessionStore.createSession.mockImplementation((clientId: string, workspaces: any[]) => {
         // Verify the conversion happened
-        expect(workspaces[0].tabs[0].state).toEqual({ ptyId: 'pty-1' })
+        expect(workspaces[0].appStates['tab-1'].state).toEqual({ ptyId: 'pty-1' })
         expect(workspaces[0].parentId).toBeNull()
         return {
           id: 'session-1',
@@ -965,7 +968,7 @@ describe('GrpcServer', () => {
       expect(callback).toHaveBeenCalledWith(null, expect.anything())
     })
 
-    it('convertToProtoSession serializes tab state to JSON buffer', () => {
+    it('convertToProtoSession serializes app state to JSON buffer', () => {
       const session = {
         id: 'session-1',
         workspaces: [{
@@ -980,12 +983,13 @@ describe('GrpcServer', () => {
           gitRootPath: null,
           isWorktree: false,
           isDetached: false,
-          tabs: [{
-            id: 'tab-1',
-            applicationId: 'terminal',
-            title: 'Terminal',
-            state: { ptyId: 'pty-1' }
-          }],
+          appStates: {
+            'tab-1': {
+              applicationId: 'terminal',
+              title: 'Terminal',
+              state: { ptyId: 'pty-1' }
+            }
+          },
           activeTabId: 'tab-1',
           createdAt: 1000,
           lastActivity: 2000,
@@ -1003,8 +1007,8 @@ describe('GrpcServer', () => {
       capturedServiceImpl.getSession(call, callback)
 
       const result = callback.mock.calls[0][1]
-      expect(result.workspaces[0].tabs[0].state).toBeInstanceOf(Buffer)
-      const parsed = JSON.parse(result.workspaces[0].tabs[0].state.toString('utf-8'))
+      expect(result.workspaces[0].appStates['tab-1'].state).toBeInstanceOf(Buffer)
+      const parsed = JSON.parse(result.workspaces[0].appStates['tab-1'].state.toString('utf-8'))
       expect(parsed).toEqual({ ptyId: 'pty-1' })
     })
   })

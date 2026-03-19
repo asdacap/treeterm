@@ -30,8 +30,8 @@ export function FileEditor({ workspaceId, workspacePath, tabId, workspaceStore }
   const filesystem = useFilesystemApi()
   const { workspaces, updateTabState, updateTabTitle } = useStore(workspaceStore)
   const workspace = workspaces[workspaceId]
-  const tab = workspace?.tabs.find((t) => t.id === tabId)
-  const state = tab?.state as EditorState | undefined
+  const appState = workspace?.appStates[tabId]
+  const state = appState?.state as EditorState | undefined
 
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const [saving, setSaving] = useState(false)

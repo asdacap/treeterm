@@ -483,8 +483,8 @@ function restoreWorkspaceTabs(
   addTabWithState: AddTabWithStateFn,
   setActiveTab: SetActiveTabFn
 ): void {
-  for (const daemonTab of daemonWorkspace.tabs) {
-    addTabWithState(workspaceId, daemonTab.applicationId, daemonTab.state as Record<string, unknown>, daemonTab.id)
+  for (const [tabId, appState] of Object.entries(daemonWorkspace.appStates)) {
+    addTabWithState(workspaceId, appState.applicationId, appState.state as Record<string, unknown>, tabId)
   }
 
   if (daemonWorkspace.activeTabId) {
@@ -505,7 +505,7 @@ function reconstructWorkspace(
     ...daemonWorkspace,
     id,
     children: [],
-    activeTabId: daemonWorkspace.activeTabId || (daemonWorkspace.tabs.length > 0 ? daemonWorkspace.tabs[0].id : null)
+    activeTabId: daemonWorkspace.activeTabId || (Object.keys(daemonWorkspace.appStates).length > 0 ? Object.keys(daemonWorkspace.appStates)[0] : null)
   }
 
   store.setState((state) => {

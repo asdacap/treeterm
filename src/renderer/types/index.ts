@@ -5,7 +5,7 @@ import type { WorkspaceState } from '../store/createWorkspaceStore'
 // Import and re-export shared types
 import type {
   SandboxConfig,
-  Tab,
+  AppState,
   Workspace,
   Session,
   SessionInfo,
@@ -21,7 +21,7 @@ import type {
 
 export type {
   SandboxConfig,
-  Tab,
+  AppState,
   Workspace,
   Session,
   SessionInfo,
@@ -34,6 +34,9 @@ export type {
   WorktreeSettings,
   RunAction
 }
+
+/** Convenience type: AppState with its id (the map key) */
+export type Tab = AppState & { id: string }
 
 // Activity state for applications that can report their state
 export type ActivityState = 'idle' | 'working' | 'waiting_for_input'
@@ -70,6 +73,7 @@ export interface ApplicationRenderProps {
 // Type-specific state interfaces (for internal use within applications)
 export interface TerminalState {
   ptyId: string | null
+  keepOnExit?: boolean
 }
 
 export interface AiHarnessState extends TerminalState {
@@ -240,7 +244,7 @@ export interface ConflictCheckResult {
 
 export interface TerminalApi {
   create: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
-  attach: (sessionId: string) => Promise<{ success: boolean; scrollback?: string[]; error?: string }>
+  attach: (sessionId: string) => Promise<{ success: boolean; scrollback?: string[]; exitCode?: number; error?: string }>
   detach: (sessionId: string) => Promise<void>
   list: () => Promise<SessionInfo[]>
   write: (id: string, data: string) => void
@@ -359,6 +363,11 @@ declare global {
       getWindowUuid: () => Promise<string>
     }
   }
+}
+
+// Helper to derive a Tab array from appStates Record
+export function getTabs(workspace: Workspace): Tab[] {
+  return Object.entries(workspace.appStates).map(([id, state]) => ({ ...state, id }))
 }
 
 // Type guard functions for application states

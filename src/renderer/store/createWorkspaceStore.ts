@@ -1,6 +1,6 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, GitInfo, Tab, WorktreeSettings, GitApi, SessionApi, Settings, AppRegistryApi, Application, ReviewComment } from '../types'
+import type { Workspace, GitInfo, Tab, AppState, WorktreeSettings, GitApi, SessionApi, Settings, AppRegistryApi, Application, ReviewComment } from '../types'
 
 export interface WorkspaceDeps {
   git: GitApi
@@ -165,18 +165,17 @@ export function createWorkspaceStore(
     const parent = store.getState().workspaces[parentId]
 
     const id = generateId()
-    const tabs: Tab[] = []
+    const appStates: Record<string, AppState> = {}
     let activeTabId: string | null = null
 
     const defaultApp = getDefaultAppForWorktree(deps, options.settings, parent?.settings)
     if (defaultApp) {
       const tabId = generateTabId()
-      tabs.push({
-        id: tabId,
+      appStates[tabId] = {
         applicationId: defaultApp.id,
         title: defaultApp.name,
         state: defaultApp.createInitialState()
-      })
+      }
       activeTabId = tabId
     }
 
@@ -192,7 +191,7 @@ export function createWorkspaceStore(
       gitRootPath: parent?.gitRootPath ?? null,
       isWorktree: options.isWorktree ?? true,
       isDetached: options.isDetached,
-      tabs,
+      appStates,
       activeTabId,
       settings: options.settings,
       metadata: options.metadata ?? {},
@@ -233,7 +232,8 @@ export function createWorkspaceStore(
       await removeWorkspaceInternal(childId, options)
     }
 
-    for (const tab of workspace.tabs) {
+    for (const [tabId, appState] of Object.entries(workspace.appStates)) {
+      const tab: Tab = { ...appState, id: tabId }
       const app = deps.appRegistry.get(tab.applicationId)
       if (app?.cleanup) {
         await app.cleanup(tab, workspace)
@@ -294,19 +294,18 @@ export function createWorkspaceStore(
 
       const gitInfo = await deps.git.getInfo(path)
 
-      const tabs: Tab[] = []
+      const appStates: Record<string, AppState> = {}
       let activeTabId: string | null = null
 
       if (!options?.skipDefaultTabs) {
         const defaultApp = getDefaultAppForWorktree(deps, options?.settings, undefined)
         if (defaultApp) {
           const tabId = generateTabId()
-          tabs.push({
-            id: tabId,
+          appStates[tabId] = {
             applicationId: defaultApp.id,
             title: defaultApp.name,
             state: defaultApp.createInitialState()
-          })
+          }
           activeTabId = tabId
         }
       }
@@ -322,7 +321,7 @@ export function createWorkspaceStore(
         gitBranch: gitInfo.branch,
         gitRootPath: gitInfo.rootPath,
         isWorktree: false,
-        tabs,
+        appStates,
         activeTabId,
         settings: options?.settings,
         metadata: {},
@@ -628,27 +627,27 @@ export function createWorkspaceStore(
         if (!workspace) return state
 
         if (!app.canHaveMultiple) {
-          const existing = workspace.tabs.find((t) => t.applicationId === applicationId)
+          const existing = Object.values(workspace.appStates).find((s) => s.applicationId === applicationId)
           if (existing) return state
         }
 
-        const existingCount = workspace.tabs.filter(
-          (t) => t.applicationId === applicationId
+        const existingCount = Object.values(workspace.appStates).filter(
+          (s) => s.applicationId === applicationId
         ).length
-
-        const newTab: Tab = {
-          id: tabId,
-          applicationId,
-          title: `${app.name} ${existingCount + 1}`,
-          state: app.createInitialState()
-        }
 
         return {
           workspaces: {
             ...state.workspaces,
             [workspaceId]: {
               ...workspace,
-              tabs: [...workspace.tabs, newTab],
+              appStates: {
+                ...workspace.appStates,
+                [tabId]: {
+                  applicationId,
+                  title: `${app.name} ${existingCount + 1}`,
+                  state: app.createInitialState()
+                }
+              },
               activeTabId: tabId
             }
           }
@@ -671,16 +670,17 @@ export function createWorkspaceStore(
         const workspace = state.workspaces[workspaceId]
         if (!workspace) return state
 
-        if (existingTabId && workspace.tabs.some((t) => t.id === existingTabId)) {
-          const updatedTabs = workspace.tabs.map((t) =>
-            t.id === existingTabId ? { ...t, state: { ...(t.state || {}), ...(initialState || {}) } } : t
-          )
+        if (existingTabId && workspace.appStates[existingTabId]) {
+          const existing = workspace.appStates[existingTabId]
           return {
             workspaces: {
               ...state.workspaces,
               [workspaceId]: {
                 ...workspace,
-                tabs: updatedTabs,
+                appStates: {
+                  ...workspace.appStates,
+                  [existingTabId]: { ...existing, state: { ...(existing.state || {}), ...(initialState || {}) } }
+                },
                 activeTabId: existingTabId
               }
             }
@@ -688,41 +688,42 @@ export function createWorkspaceStore(
         }
 
         if (!app.canHaveMultiple) {
-          const existing = workspace.tabs.find((t) => t.applicationId === applicationId)
-          if (existing) {
-            const updatedTabs = workspace.tabs.map((t) =>
-              t.id === existing.id ? { ...t, state: { ...(t.state || {}), ...(initialState || {}) } } : t
-            )
+          const existingEntry = Object.entries(workspace.appStates).find(([, s]) => s.applicationId === applicationId)
+          if (existingEntry) {
+            const [existingId, existingState] = existingEntry
             return {
               workspaces: {
                 ...state.workspaces,
                 [workspaceId]: {
                   ...workspace,
-                  tabs: updatedTabs,
-                  activeTabId: existing.id
+                  appStates: {
+                    ...workspace.appStates,
+                    [existingId]: { ...existingState, state: { ...(existingState.state || {}), ...(initialState || {}) } }
+                  },
+                  activeTabId: existingId
                 }
               }
             }
           }
         }
 
-        const existingCount = workspace.tabs.filter(
-          (t) => t.applicationId === applicationId
+        const existingCount = Object.values(workspace.appStates).filter(
+          (s) => s.applicationId === applicationId
         ).length
-
-        const newTab: Tab = {
-          id: tabId,
-          applicationId,
-          title: `${app.name} ${existingCount + 1}`,
-          state: { ...(app.createInitialState() || {}), ...(initialState || {}) }
-        }
 
         return {
           workspaces: {
             ...state.workspaces,
             [workspaceId]: {
               ...workspace,
-              tabs: [...workspace.tabs, newTab],
+              appStates: {
+                ...workspace.appStates,
+                [tabId]: {
+                  applicationId,
+                  title: `${app.name} ${existingCount + 1}`,
+                  state: { ...(app.createInitialState() || {}), ...(initialState || {}) }
+                }
+              },
               activeTabId: tabId
             }
           }
@@ -739,15 +740,16 @@ export function createWorkspaceStore(
       const workspace = get().workspaces[workspaceId]
       if (!workspace) return
 
-      const tab = workspace.tabs.find((t) => t.id === tabId)
-      if (!tab) return
+      const appState = workspace.appStates[tabId]
+      if (!appState) return
 
-      const app = deps.appRegistry.get(tab.applicationId)
+      const app = deps.appRegistry.get(appState.applicationId)
       if (!app) return
 
       if (!app.canClose) return
 
       if (app.cleanup) {
+        const tab: Tab = { ...appState, id: tabId }
         await app.cleanup(tab, workspace)
       }
 
@@ -755,13 +757,15 @@ export function createWorkspaceStore(
         const workspace = state.workspaces[workspaceId]
         if (!workspace) return state
 
-        const newTabs = workspace.tabs.filter((t) => t.id !== tabId)
+        const { [tabId]: removed, ...remainingStates } = workspace.appStates
+        const remainingIds = Object.keys(remainingStates)
         let newActiveTabId = workspace.activeTabId
 
         if (workspace.activeTabId === tabId) {
-          const removedIndex = workspace.tabs.findIndex((t) => t.id === tabId)
-          const newIndex = Math.min(removedIndex, newTabs.length - 1)
-          newActiveTabId = newTabs[newIndex]?.id || null
+          const allIds = Object.keys(workspace.appStates)
+          const removedIndex = allIds.indexOf(tabId)
+          const newIndex = Math.min(removedIndex, remainingIds.length - 1)
+          newActiveTabId = remainingIds[newIndex] || null
         }
 
         return {
@@ -769,7 +773,7 @@ export function createWorkspaceStore(
             ...state.workspaces,
             [workspaceId]: {
               ...workspace,
-              tabs: newTabs,
+              appStates: remainingStates,
               activeTabId: newActiveTabId
             }
           }
@@ -803,14 +807,17 @@ export function createWorkspaceStore(
     updateTabTitle: (workspaceId: string, tabId: string, title: string) => {
       set((state) => {
         const workspace = state.workspaces[workspaceId]
-        if (!workspace) return state
+        if (!workspace || !workspace.appStates[tabId]) return state
 
         return {
           workspaces: {
             ...state.workspaces,
             [workspaceId]: {
               ...workspace,
-              tabs: workspace.tabs.map((t) => (t.id === tabId ? { ...t, title } : t))
+              appStates: {
+                ...workspace.appStates,
+                [tabId]: { ...workspace.appStates[tabId], title }
+              }
             }
           }
         }
@@ -822,23 +829,25 @@ export function createWorkspaceStore(
     updateTabState: <T>(workspaceId: string, tabId: string, updater: (state: T) => T) => {
       set((state) => {
         const workspace = state.workspaces[workspaceId]
-        if (!workspace) return state
+        if (!workspace || !workspace.appStates[tabId]) return state
 
+        const appState = workspace.appStates[tabId]
         return {
           workspaces: {
             ...state.workspaces,
             [workspaceId]: {
               ...workspace,
-              tabs: workspace.tabs.map((t) =>
-                t.id === tabId ? { ...t, state: updater(t.state as T) } : t
-              )
+              appStates: {
+                ...workspace.appStates,
+                [tabId]: { ...appState, state: updater(appState.state as T) }
+              }
             }
           }
         }
       })
       const updated = get()
-      const tab = updated.workspaces[workspaceId]?.tabs.find((t) => t.id === tabId)
-      if (tab?.state && (tab.state as { ptyId?: string }).ptyId) {
+      const appState = updated.workspaces[workspaceId]?.appStates[tabId]
+      if (appState?.state && (appState.state as { ptyId?: string }).ptyId) {
         syncSessionToDaemon(updated.workspaces, updated.isRestoring).catch(console.error)
       }
     },

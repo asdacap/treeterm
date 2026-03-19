@@ -6,6 +6,7 @@ import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useAppStore } from '../store/app'
 import { ErrorBoundary } from './ErrorBoundary'
 import TabErrorFallback from './TabErrorFallback'
+import { getTabs } from '../types'
 
 interface TabContentPortalsProps {
   workspaceStore: StoreApi<WorkspaceState>
@@ -58,7 +59,7 @@ export default function TabContentPortals({ workspaceStore, activeWorkspaceId }:
   return (
     <>
       {Object.values(workspaces).map(workspace => {
-        const wsTabs = workspace.tabs || []
+        const wsTabs = getTabs(workspace)
         const isActiveWorkspace = workspace.id === activeWorkspaceId
 
         return wsTabs.map(tab => {

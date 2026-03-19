@@ -28,6 +28,7 @@ export interface PtySession {
   lastActivity: number
   sandbox?: SandboxConfig
   attachedClients: Set<string>
+  exitCode?: number
 }
 
 type DataCallback = (sessionId: string, data: string) => void
@@ -171,6 +172,7 @@ export class DaemonPtyManager {
   private exitCallbacks: Set<ExitCallback> = new Set()
   private orphanCleanupInterval: NodeJS.Timeout | null = null
   private orphanTimeout: number
+  private isReferencedFn: ((id: string) => boolean) | null = null
 
   constructor(orphanTimeout: number = 0, private scrollbackLimit: number = 1024 * 1024) {
     // scrollbackLimit is now in bytes (default 1 MB)
@@ -247,9 +249,9 @@ export class DaemonPtyManager {
     })
 
     ptyProcess.onExit(({ exitCode, signal }) => {
+      session.exitCode = exitCode
       this.broadcastExit(id, exitCode, signal)
       log.info({ sessionId: id, exitCode, signal, cwd }, 'session exited')
-      this.sessions.delete(id)
     })
 
     this.sessions.set(id, session)
@@ -270,7 +272,7 @@ export class DaemonPtyManager {
     return id
   }
 
-  attach(sessionId: string, clientId: string): { scrollback: string[]; session: SessionInfo } {
+  attach(sessionId: string, clientId: string): { scrollback: string[]; session: SessionInfo; exitCode?: number } {
     const session = this.sessions.get(sessionId)
     if (!session) {
       throw new Error(`Session ${sessionId} not found`)
@@ -286,7 +288,8 @@ export class DaemonPtyManager {
 
     return {
       scrollback: [...session.scrollback],
-      session: this.getSessionInfo(session)
+      session: this.getSessionInfo(session),
+      exitCode: session.exitCode
     }
   }
 
@@ -310,6 +313,9 @@ export class DaemonPtyManager {
       throw new Error(`Session ${sessionId} not found`)
     }
 
+    // No-op if session has exited
+    if (session.exitCode !== undefined) return
+
     session.pty.write(data)
     session.lastActivity = Date.now()
   }
@@ -319,6 +325,9 @@ export class DaemonPtyManager {
     if (!session) {
       throw new Error(`Session ${sessionId} not found`)
     }
+
+    // No-op if session has exited
+    if (session.exitCode !== undefined) return
 
     session.pty.resize(cols, rows)
     session.cols = cols
@@ -361,6 +370,10 @@ export class DaemonPtyManager {
   onExit(callback: ExitCallback): () => void {
     this.exitCallbacks.add(callback)
     return () => this.exitCallbacks.delete(callback)
+  }
+
+  setIsReferenced(fn: (id: string) => boolean): void {
+    this.isReferencedFn = fn
   }
 
   private appendScrollback(session: PtySession, data: string): void {
@@ -412,7 +425,8 @@ export class DaemonPtyManager {
     const timeoutMs = this.orphanTimeout * 60 * 1000 // Convert minutes to ms
 
     for (const [id, session] of this.sessions) {
-      const isOrphan = session.attachedClients.size === 0
+      const isReferenced = this.isReferencedFn ? this.isReferencedFn(id) : false
+      const isOrphan = !isReferenced && session.attachedClients.size === 0
       const idleTime = now - session.lastActivity
 
       if (isOrphan && idleTime > timeoutMs) {

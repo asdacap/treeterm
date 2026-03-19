@@ -13,8 +13,7 @@ export interface SandboxConfig {
 
 // === Daemon Session Types ===
 
-export interface Tab {
-  id: string
+export interface AppState {
   applicationId: string
   title: string
   state: unknown
@@ -39,7 +38,7 @@ export interface Workspace {
   gitRootPath: string | null
   isWorktree: boolean
   isDetached?: boolean
-  tabs: Tab[]
+  appStates: Record<string, AppState>
   activeTabId: string | null
   settings?: WorktreeSettings
   metadata: Record<string, string>

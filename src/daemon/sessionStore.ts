@@ -157,6 +157,17 @@ export class SessionStore {
   }
 
   /**
+   * Get all workspaces across all sessions
+   */
+  getAllWorkspaces(): Workspace[] {
+    const workspaces: Workspace[] = []
+    for (const session of this.sessions.values()) {
+      workspaces.push(...session.workspaces)
+    }
+    return workspaces
+  }
+
+  /**
    * Delete a session
    */
   deleteSession(sessionId: string): boolean {

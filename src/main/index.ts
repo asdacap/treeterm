@@ -327,7 +327,7 @@ ipcMain.handle('pty:attach', async (event, sessionId: string) => {
       attachedSessions.add(sessionId)
     }
 
-    return { success: true, scrollback: result.scrollback }
+    return { success: true, scrollback: result.scrollback, exitCode: result.exitCode }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     console.error('[main] failed to attach to PTY session:', errorMessage)

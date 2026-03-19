@@ -1,4 +1,4 @@
-import type { Tab } from '../../shared/types'
+import type { Tab } from '../types'
 import { isAiHarnessState } from '../types'
 
 export interface RunningHarness {

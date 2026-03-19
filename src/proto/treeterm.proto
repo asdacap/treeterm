@@ -14,11 +14,10 @@ message SandboxConfig {
   repeated string allowed_paths = 3;
 }
 
-message Tab {
-  string id = 1;
-  string application_id = 2;
-  string title = 3;
-  bytes state = 4;  // JSON-encoded arbitrary state
+message AppState {
+  string application_id = 1;
+  string title = 2;
+  bytes state = 3;  // JSON-encoded arbitrary state
 }
 
 message Workspace {
@@ -31,7 +30,7 @@ message Workspace {
   optional string git_root_path = 7;
   bool is_worktree = 8;
   optional bool is_detached = 9;
-  repeated Tab tabs = 10;
+  map<string, AppState> app_states = 10;
   optional string active_tab_id = 11;
   int64 created_at = 12;
   int64 last_activity = 13;
@@ -59,7 +58,7 @@ message WorkspaceInput {
   optional string git_root_path = 7;
   bool is_worktree = 8;
   optional bool is_detached = 9;
-  repeated Tab tabs = 10;
+  map<string, AppState> app_states = 10;
   optional string active_tab_id = 11;
   string id = 12;
   repeated string children = 13;
@@ -99,6 +98,7 @@ message AttachPtyRequest {
 
 message AttachPtyResponse {
   repeated string scrollback = 1;
+  optional int32 exit_code = 2;
 }
 
 message DetachPtyRequest {

@@ -124,8 +124,8 @@ export default function BaseTerminal({
   const settings = useSettingsStore((state) => state.settings)
 
   // Get existing ptyId from store for reconnection
-  const tab = workspace?.tabs.find((t) => t.id === tabId)
-  const existingPtyId = (tab?.state as BaseTerminalState | undefined)?.ptyId
+  const appState = workspace?.appStates[tabId]
+  const existingPtyId = (appState?.state as BaseTerminalState | undefined)?.ptyId
 
   useEffect(() => {
     console.log(`[${config.logPrefix} ${tabId}] useEffect running`, {
@@ -265,7 +265,13 @@ export default function BaseTerminal({
       const unsubscribeExit = terminalApi.onExit(id, (exitCode) => {
         console.log(`[${config.logPrefix} ${tabId}] PTY exited with code:`, exitCode)
         if (isMountedRef.current) {
-          removeTab(workspaceId, tabId)
+          const currentTab = workspaceStore.getState().workspaces[workspaceId]?.appStates[tabId]
+          const keepOnExit = (currentTab?.state as BaseTerminalState | undefined)?.keepOnExit
+          if (keepOnExit) {
+            terminal.write(`\r\n\x1b[2mProcess exited with exit code ${exitCode}\x1b[0m\r\n`)
+          } else {
+            removeTab(workspaceId, tabId)
+          }
         }
       })
 
@@ -298,6 +304,13 @@ export default function BaseTerminal({
               for (const chunk of result.scrollback) {
                 terminal.write(chunk)
               }
+            }
+
+            // If session already exited, show exit message and don't subscribe for live data
+            if (result.exitCode !== undefined) {
+              terminal.write(`\r\n\x1b[2mProcess exited with exit code ${result.exitCode}\x1b[0m\r\n`)
+              ptyIdRef.current = existingPtyId
+              return
             }
 
             connectToPty(existingPtyId)

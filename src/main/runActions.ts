@@ -37,9 +37,7 @@ function createNpmProvider(daemonClient: GrpcDaemonClient): RunActionProvider {
     },
     run: async (_actionId, workspacePath) => {
       const name = _actionId.slice('npm:'.length)
-      const sessionId = await daemonClient.createPtySession({ cwd: workspacePath })
-      daemonClient.writeToPtySession(sessionId, `npm run ${name}\n`)
-      return sessionId
+      return daemonClient.createPtySession({ cwd: workspacePath, startupCommand: `npm run ${name}` })
     }
   }
 }
@@ -54,9 +52,7 @@ function createMakeProvider(daemonClient: GrpcDaemonClient): RunActionProvider {
     },
     run: async (actionId, workspacePath) => {
       const name = actionId.slice('make:'.length)
-      const sessionId = await daemonClient.createPtySession({ cwd: workspacePath })
-      daemonClient.writeToPtySession(sessionId, `make ${name}\n`)
-      return sessionId
+      return daemonClient.createPtySession({ cwd: workspacePath, startupCommand: `make ${name}` })
     }
   }
 }
@@ -71,9 +67,7 @@ function createJustProvider(daemonClient: GrpcDaemonClient): RunActionProvider {
     },
     run: async (actionId, workspacePath) => {
       const name = actionId.slice('just:'.length)
-      const sessionId = await daemonClient.createPtySession({ cwd: workspacePath })
-      daemonClient.writeToPtySession(sessionId, `just ${name}\n`)
-      return sessionId
+      return daemonClient.createPtySession({ cwd: workspacePath, startupCommand: `just ${name}` })
     }
   }
 }
@@ -88,9 +82,7 @@ function createTaskProvider(daemonClient: GrpcDaemonClient): RunActionProvider {
     },
     run: async (actionId, workspacePath) => {
       const name = actionId.slice('task:'.length)
-      const sessionId = await daemonClient.createPtySession({ cwd: workspacePath })
-      daemonClient.writeToPtySession(sessionId, `task ${name}\n`)
-      return sessionId
+      return daemonClient.createPtySession({ cwd: workspacePath, startupCommand: `task ${name}` })
     }
   }
 }
@@ -106,9 +98,7 @@ function createVscodeLaunchProvider(daemonClient: GrpcDaemonClient): RunActionPr
     run: async (actionId, workspacePath) => {
       const name = actionId.slice('vscode-launch:'.length)
       // Can't fully replicate VS Code launch — run the resolved command as best-effort
-      const sessionId = await daemonClient.createPtySession({ cwd: workspacePath })
-      daemonClient.writeToPtySession(sessionId, `echo "Launch config: ${name} (not directly runnable)"\n`)
-      return sessionId
+      return daemonClient.createPtySession({ cwd: workspacePath, startupCommand: `echo "Launch config: ${name} (not directly runnable)"` })
     }
   }
 }
@@ -135,9 +125,7 @@ function createVscodeTaskProvider(daemonClient: GrpcDaemonClient): RunActionProv
       const task = (parsed.tasks || []).find((t: { label?: string }) => t.label === name)
       if (!task?.command) throw new Error(`Task "${name}" has no command`)
       const cmd = task.args ? `${task.command} ${(task.args as string[]).join(' ')}` : task.command
-      const sessionId = await daemonClient.createPtySession({ cwd: workspacePath })
-      daemonClient.writeToPtySession(sessionId, `${cmd}\n`)
-      return sessionId
+      return daemonClient.createPtySession({ cwd: workspacePath, startupCommand: cmd })
     }
   }
 }

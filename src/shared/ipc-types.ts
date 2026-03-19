@@ -36,7 +36,7 @@ export interface IpcRequests {
   }
   ptyAttach: {
     params: [sessionId: string]
-    result: { success: boolean; scrollback?: string[]; error?: string }
+    result: { success: boolean; scrollback?: string[]; exitCode?: number; error?: string }
   }
   ptyDetach: {
     params: [sessionId: string]

@@ -37,7 +37,7 @@ import type {
   SessionInfo,
   Workspace,
   Session,
-  Tab
+  AppState
 } from '../daemon/protocol'
 
 type DataListener = (data: string) => void
@@ -200,7 +200,7 @@ export class GrpcDaemonClient {
     })
   }
 
-  async attachPtySession(sessionId: string): Promise<{ scrollback: string[] }> {
+  async attachPtySession(sessionId: string): Promise<{ scrollback: string[]; exitCode?: number }> {
     if (!this.client) {
       throw new Error('Not connected to daemon')
     }
@@ -212,7 +212,7 @@ export class GrpcDaemonClient {
         if (error) {
           reject(new Error(error.message))
         } else if (response) {
-          resolve({ scrollback: response.scrollback })
+          resolve({ scrollback: response.scrollback, exitCode: response.exitCode })
         } else {
           reject(new Error('No response from server'))
         }
@@ -644,27 +644,32 @@ export class GrpcDaemonClient {
   private convertToProtoWorkspaceInputs(
     workspaces: Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>[]
   ): WorkspaceInput[] {
-    return workspaces.map(w => ({
-      id: w.id,
-      path: w.path,
-      name: w.name,
-      parentId: w.parentId || undefined,
-      children: w.children || [],
-      status: w.status,
-      isGitRepo: w.isGitRepo,
-      gitBranch: w.gitBranch || undefined,
-      gitRootPath: w.gitRootPath || undefined,
-      isWorktree: w.isWorktree,
-      isDetached: w.isDetached,
-      tabs: w.tabs.map((t: Tab) => ({
-        id: t.id,
-        applicationId: t.applicationId,
-        title: t.title,
-        state: Buffer.from(JSON.stringify(t.state), 'utf-8')
-      })),
-      activeTabId: w.activeTabId || undefined,
-      metadata: Buffer.from(JSON.stringify(w.metadata ?? {}), 'utf-8')
-    }))
+    return workspaces.map(w => {
+      const protoAppStates: { [key: string]: { applicationId: string; title: string; state: Buffer } } = {}
+      for (const [key, s] of Object.entries(w.appStates)) {
+        protoAppStates[key] = {
+          applicationId: s.applicationId,
+          title: s.title,
+          state: Buffer.from(JSON.stringify(s.state), 'utf-8')
+        }
+      }
+      return {
+        id: w.id,
+        path: w.path,
+        name: w.name,
+        parentId: w.parentId || undefined,
+        children: w.children || [],
+        status: w.status,
+        isGitRepo: w.isGitRepo,
+        gitBranch: w.gitBranch || undefined,
+        gitRootPath: w.gitRootPath || undefined,
+        isWorktree: w.isWorktree,
+        isDetached: w.isDetached,
+        appStates: protoAppStates,
+        activeTabId: w.activeTabId || undefined,
+        metadata: Buffer.from(JSON.stringify(w.metadata ?? {}), 'utf-8')
+      }
+    })
   }
 
   private convertFromProtoSession(protoSession: ProtoSession): Session {
@@ -678,6 +683,14 @@ export class GrpcDaemonClient {
   }
 
   private convertFromProtoWorkspace(protoWorkspace: ProtoWorkspace): Workspace {
+    const appStates: Record<string, AppState> = {}
+    for (const [key, value] of Object.entries(protoWorkspace.appStates || {})) {
+      appStates[key] = {
+        applicationId: value.applicationId,
+        title: value.title,
+        state: JSON.parse(value.state.toString('utf-8'))
+      }
+    }
     return {
       id: protoWorkspace.id,
       path: protoWorkspace.path,
@@ -690,12 +703,7 @@ export class GrpcDaemonClient {
       gitRootPath: protoWorkspace.gitRootPath || null,
       isWorktree: protoWorkspace.isWorktree,
       isDetached: protoWorkspace.isDetached,
-      tabs: protoWorkspace.tabs.map(t => ({
-        id: t.id,
-        applicationId: t.applicationId,
-        title: t.title,
-        state: JSON.parse(t.state.toString('utf-8'))
-      })),
+      appStates,
       activeTabId: protoWorkspace.activeTabId || null,
       metadata: protoWorkspace.metadata?.length ? JSON.parse(protoWorkspace.metadata.toString('utf-8')) : {},
       createdAt: protoWorkspace.createdAt,
