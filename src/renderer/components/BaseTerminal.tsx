@@ -300,6 +300,8 @@ export default function BaseTerminal({
               for (const chunk of result.scrollback) {
                 terminal.write(chunk)
               }
+            } else {
+              terminal.write('\x1b[2mno buffer\x1b[0m\r\n')
             }
 
             // If session already exited, show exit message and don't subscribe for live data
@@ -314,6 +316,7 @@ export default function BaseTerminal({
           }
         } catch (error) {
           console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, existingPtyId, error)
+          terminal.write(`\x1b[2merror attaching to tty: ${error instanceof Error ? error.message : 'Unknown error'}\x1b[0m\r\n`)
         }
       }
 
