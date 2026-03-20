@@ -319,32 +319,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
       set({ isActiveProcessesOpen: true })
     })
 
-    // SSH event subscriptions
-    const unsubSshStatus = ssh.onConnectionStatus((info) => {
-      set((state) => {
-        const idx = state.connections.findIndex(c => c.id === info.id)
-        const updated = [...state.connections]
-        if (idx >= 0) {
-          updated[idx] = info
-        } else {
-          updated.push(info)
-        }
-        return { connections: updated }
-      })
-    })
-
-    const unsubSshOutput = ssh.onOutput((connectionId, line) => {
-      set((state) => {
-        const existing = state.sshOutput[connectionId] || []
-        return {
-          sshOutput: {
-            ...state.sshOutput,
-            [connectionId]: [...existing, line]
-          }
-        }
-      })
-    })
-
     // Initial connection list
     get().refreshConnections()
 
@@ -384,8 +358,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
       unsubNewTerminal()
       unsubActiveProcesses()
       unsubShowSessions()
-      unsubSshStatus()
-      unsubSshOutput()
     }
   },
 

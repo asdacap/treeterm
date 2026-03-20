@@ -122,6 +122,23 @@ client.onSshOutput((connectionId, line) => {
   sshOutputListeners.forEach((cb) => cb(connectionId, line))
 })
 
+type SshOutputWatchCallback = (line: string) => void
+const sshOutputWatchCallbacks = new Map<string, SshOutputWatchCallback>()
+
+// Route pushed ssh:output events to per-connection watch callbacks
+client.onSshOutput((connectionId, line) => {
+  const cb = sshOutputWatchCallbacks.get(connectionId)
+  if (cb) cb(line)
+})
+
+type SshStatusWatchCallback = (info: ConnectionInfo) => void
+const sshStatusWatchCallbacks = new Map<string, SshStatusWatchCallback>()
+
+client.onSshConnectionStatus((info) => {
+  const cb = sshStatusWatchCallbacks.get(info.id)
+  if (cb) cb(info)
+})
+
 contextBridge.exposeInMainWorld('electron', {
   platform: process.platform,
   terminal: {
@@ -484,6 +501,28 @@ contextBridge.exposeInMainWorld('electron', {
       return () => {
         const index = sshOutputListeners.indexOf(callback)
         if (index > -1) sshOutputListeners.splice(index, 1)
+      }
+    },
+    watchOutput: async (connectionId: string, cb: (line: string) => void): Promise<{ scrollback: string[], unsubscribe: () => void }> => {
+      sshOutputWatchCallbacks.set(connectionId, cb)
+      const result = await client.sshWatchOutput(connectionId)
+      return {
+        scrollback: result.scrollback,
+        unsubscribe: () => {
+          sshOutputWatchCallbacks.delete(connectionId)
+          client.sshUnwatchOutput(connectionId).catch(() => {})
+        }
+      }
+    },
+    watchConnectionStatus: async (connectionId: string, cb: (info: ConnectionInfo) => void): Promise<{ initial: ConnectionInfo | undefined, unsubscribe: () => void }> => {
+      sshStatusWatchCallbacks.set(connectionId, cb)
+      const result = await client.sshWatchConnectionStatus(connectionId)
+      return {
+        initial: result.initial,
+        unsubscribe: () => {
+          sshStatusWatchCallbacks.delete(connectionId)
+          client.sshUnwatchConnectionStatus(connectionId).catch(() => {})
+        }
       }
     }
   }

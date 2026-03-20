@@ -824,13 +824,7 @@ server.onAppGetWindowUuid((event) => {
 server.onSshConnect(async (event, config) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
 
-  const forwardOutput = (line: string) => {
-    for (const win of windowManager.getAllWindows()) {
-      win.ipcServer.sshOutput(config.id, line)
-    }
-  }
-
-  const info = await connectionManager.connectRemote(config, forwardOutput)
+  const info = await connectionManager.connectRemote(config)
 
   // Switch the calling window to use the remote daemon
   if (info.status === 'connected') {
@@ -900,6 +894,78 @@ server.onSshGetOutput(async (connectionId) => {
   return tunnel?.getOutput() || []
 })
 
+// Per-window watch subscriptions
+const outputWatchUnsubscribers = new Map<number, Map<string, () => void>>()
+const statusWatchUnsubscribers = new Map<number, Map<string, () => void>>()
+
+server.onSshWatchOutput(async (event, connectionId) => {
+  if (!connectionManager) return { scrollback: [] }
+
+  const senderWindow = BrowserWindow.fromWebContents(event.sender)
+  if (!senderWindow) return { scrollback: [] }
+  const winId = senderWindow.id
+
+  // Clean up any existing watch for this window+connection
+  outputWatchUnsubscribers.get(winId)?.get(connectionId)?.()
+
+  const windowInfo = windowManager.getWindow(winId)
+  const { scrollback, unsubscribe } = connectionManager.watchOutput(connectionId, (line) => {
+    if (windowInfo) {
+      windowInfo.ipcServer.sshOutput(connectionId, line)
+    }
+  })
+
+  if (!outputWatchUnsubscribers.has(winId)) {
+    outputWatchUnsubscribers.set(winId, new Map())
+  }
+  outputWatchUnsubscribers.get(winId)!.set(connectionId, unsubscribe)
+
+  return { scrollback }
+})
+
+server.onSshUnwatchOutput(async (event, connectionId) => {
+  const senderWindow = BrowserWindow.fromWebContents(event.sender)
+  if (!senderWindow) return
+
+  const winId = senderWindow.id
+  outputWatchUnsubscribers.get(winId)?.get(connectionId)?.()
+  outputWatchUnsubscribers.get(winId)?.delete(connectionId)
+})
+
+server.onSshWatchConnectionStatus(async (event, connectionId) => {
+  if (!connectionManager) return { initial: undefined }
+
+  const senderWindow = BrowserWindow.fromWebContents(event.sender)
+  if (!senderWindow) return { initial: undefined }
+  const winId = senderWindow.id
+
+  // Clean up any existing watch for this window+connection
+  statusWatchUnsubscribers.get(winId)?.get(connectionId)?.()
+
+  const windowInfo = windowManager.getWindow(winId)
+  const { initial, unsubscribe } = connectionManager.watchConnectionStatus(connectionId, (info) => {
+    if (windowInfo) {
+      windowInfo.ipcServer.sshConnectionStatus(info)
+    }
+  })
+
+  if (!statusWatchUnsubscribers.has(winId)) {
+    statusWatchUnsubscribers.set(winId, new Map())
+  }
+  statusWatchUnsubscribers.get(winId)!.set(connectionId, unsubscribe)
+
+  return { initial }
+})
+
+server.onSshUnwatchConnectionStatus(async (event, connectionId) => {
+  const senderWindow = BrowserWindow.fromWebContents(event.sender)
+  if (!senderWindow) return
+
+  const winId = senderWindow.id
+  statusWatchUnsubscribers.get(winId)?.get(connectionId)?.()
+  statusWatchUnsubscribers.get(winId)?.delete(connectionId)
+})
+
 // App close confirmation IPC handlers
 server.onAppCloseConfirmed((event) => {
   const windowInfo = windowManager.findWindowByWebContentsId(event.sender.id)
@@ -935,13 +1001,6 @@ app.whenReady().then(async () => {
 
   // Create ConnectionManager wrapping local daemon client
   connectionManager = new ConnectionManager(daemonClient)
-
-  // Forward connection status changes to all windows
-  connectionManager.onStatusChange((info) => {
-    for (const win of windowManager.getAllWindows()) {
-      win.ipcServer.sshConnectionStatus(info)
-    }
-  })
 
   // Close loading window and show main window
   if (loadingWindow) {

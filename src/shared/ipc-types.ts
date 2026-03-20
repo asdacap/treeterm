@@ -296,6 +296,22 @@ export interface IpcRequests {
     params: [connectionId: string]
     result: string[]
   }
+  sshWatchOutput: {
+    params: [connectionId: string]
+    result: { scrollback: string[] }
+  }
+  sshUnwatchOutput: {
+    params: [connectionId: string]
+    result: void
+  }
+  sshWatchConnectionStatus: {
+    params: [connectionId: string]
+    result: { initial: ConnectionInfo | undefined }
+  }
+  sshUnwatchConnectionStatus: {
+    params: [connectionId: string]
+    result: void
+  }
 }
 
 // === Fire-and-Forget Types (renderer sends, no response) ===

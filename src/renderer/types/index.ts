@@ -342,6 +342,8 @@ export interface SSHApi {
   getOutput: (connectionId: string) => Promise<string[]>
   onConnectionStatus: (callback: (info: ConnectionInfo) => void) => () => void
   onOutput: (callback: (connectionId: string, line: string) => void) => () => void
+  watchOutput: (connectionId: string, cb: (line: string) => void) => Promise<{ scrollback: string[], unsubscribe: () => void }>
+  watchConnectionStatus: (connectionId: string, cb: (info: ConnectionInfo) => void) => Promise<{ initial: ConnectionInfo | undefined, unsubscribe: () => void }>
 }
 
 export interface SessionApi {

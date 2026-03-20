@@ -21,10 +21,13 @@ interface Connection {
 }
 
 type StatusChangeCallback = (info: ConnectionInfo) => void
+type OutputCallback = (line: string) => void
 
 export class ConnectionManager {
   private connections: Map<string, Connection> = new Map()
   private statusListeners: Set<StatusChangeCallback> = new Set()
+  private outputWatchers: Map<string, Set<OutputCallback>> = new Map()
+  private statusWatchers: Map<string, Set<StatusChangeCallback>> = new Map()
 
   constructor(localClient: GrpcDaemonClient) {
     // Register the local connection
@@ -71,7 +74,47 @@ export class ConnectionManager {
     }
   }
 
-  async connectRemote(config: SSHConnectionConfig, onOutput?: (line: string) => void): Promise<ConnectionInfo> {
+  watchOutput(connectionId: string, cb: OutputCallback): { scrollback: string[], unsubscribe: () => void } {
+    const conn = this.connections.get(connectionId)
+    const scrollback = conn?.tunnel?.getOutput() || []
+
+    if (!this.outputWatchers.has(connectionId)) {
+      this.outputWatchers.set(connectionId, new Set())
+    }
+    this.outputWatchers.get(connectionId)!.add(cb)
+
+    // Subscribe to tunnel output if available
+    let tunnelUnsub: (() => void) | undefined
+    if (conn?.tunnel) {
+      tunnelUnsub = conn.tunnel.onOutput(cb)
+    }
+
+    return {
+      scrollback,
+      unsubscribe: () => {
+        this.outputWatchers.get(connectionId)?.delete(cb)
+        tunnelUnsub?.()
+      }
+    }
+  }
+
+  watchConnectionStatus(connectionId: string, cb: StatusChangeCallback): { initial: ConnectionInfo | undefined, unsubscribe: () => void } {
+    const initial = this.getConnection(connectionId)
+
+    if (!this.statusWatchers.has(connectionId)) {
+      this.statusWatchers.set(connectionId, new Set())
+    }
+    this.statusWatchers.get(connectionId)!.add(cb)
+
+    return {
+      initial,
+      unsubscribe: () => {
+        this.statusWatchers.get(connectionId)?.delete(cb)
+      }
+    }
+  }
+
+  async connectRemote(config: SSHConnectionConfig): Promise<ConnectionInfo> {
     // Check if already connected
     const existing = this.connections.get(config.id)
     if (existing && existing.status === 'connected') {
@@ -85,10 +128,15 @@ export class ConnectionManager {
     const tunnel = new SSHTunnel(config)
     const target: ConnectionTarget = { type: 'remote', config }
 
-    // Register output listener before connect so bootstrap output is forwarded live
-    if (onOutput) {
-      tunnel.onOutput(onOutput)
-    }
+    // Forward tunnel output to any active watchers for this connection
+    tunnel.onOutput((line: string) => {
+      const watchers = this.outputWatchers.get(config.id)
+      if (watchers) {
+        for (const cb of watchers) {
+          cb(line)
+        }
+      }
+    })
 
     // Set initial connecting state
     this.connections.set(config.id, {
@@ -200,6 +248,13 @@ export class ConnectionManager {
     if (!info) return
     for (const cb of this.statusListeners) {
       cb(info)
+    }
+    // Notify per-connection watchers
+    const watchers = this.statusWatchers.get(connectionId)
+    if (watchers) {
+      for (const cb of watchers) {
+        cb(info)
+      }
     }
   }
 }

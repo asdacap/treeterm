@@ -69,6 +69,10 @@ const CHANNELS = {
   sshGetSavedConnections: 'ssh:getSavedConnections',
   sshRemoveSavedConnection: 'ssh:removeSavedConnection',
   sshGetOutput: 'ssh:getOutput',
+  sshWatchOutput: 'ssh:watchOutput',
+  sshUnwatchOutput: 'ssh:unwatchOutput',
+  sshWatchConnectionStatus: 'ssh:watchConnectionStatus',
+  sshUnwatchConnectionStatus: 'ssh:unwatchConnectionStatus',
 
   // Send channels
   ptyWrite: 'pty:write',
@@ -710,6 +714,50 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.sshGetOutput, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['sshGetOutput']['params']))
+    )
+  }
+
+  onSshWatchOutput(
+    handler: (
+      event: IpcMainInvokeEvent,
+      ...args: IpcRequests['sshWatchOutput']['params']
+    ) => IpcRequests['sshWatchOutput']['result'] | Promise<IpcRequests['sshWatchOutput']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshWatchOutput, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(event, ...(args as IpcRequests['sshWatchOutput']['params']))
+    )
+  }
+
+  onSshUnwatchOutput(
+    handler: (
+      event: IpcMainInvokeEvent,
+      ...args: IpcRequests['sshUnwatchOutput']['params']
+    ) => IpcRequests['sshUnwatchOutput']['result'] | Promise<IpcRequests['sshUnwatchOutput']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshUnwatchOutput, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(event, ...(args as IpcRequests['sshUnwatchOutput']['params']))
+    )
+  }
+
+  onSshWatchConnectionStatus(
+    handler: (
+      event: IpcMainInvokeEvent,
+      ...args: IpcRequests['sshWatchConnectionStatus']['params']
+    ) => IpcRequests['sshWatchConnectionStatus']['result'] | Promise<IpcRequests['sshWatchConnectionStatus']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshWatchConnectionStatus, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(event, ...(args as IpcRequests['sshWatchConnectionStatus']['params']))
+    )
+  }
+
+  onSshUnwatchConnectionStatus(
+    handler: (
+      event: IpcMainInvokeEvent,
+      ...args: IpcRequests['sshUnwatchConnectionStatus']['params']
+    ) => IpcRequests['sshUnwatchConnectionStatus']['result'] | Promise<IpcRequests['sshUnwatchConnectionStatus']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshUnwatchConnectionStatus, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(event, ...(args as IpcRequests['sshUnwatchConnectionStatus']['params']))
     )
   }
 
