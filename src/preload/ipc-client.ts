@@ -69,6 +69,10 @@ const CHANNELS = {
   sshGetSavedConnections: 'ssh:getSavedConnections',
   sshRemoveSavedConnection: 'ssh:removeSavedConnection',
   sshGetOutput: 'ssh:getOutput',
+  sshWatchOutput: 'ssh:watchOutput',
+  sshUnwatchOutput: 'ssh:unwatchOutput',
+  sshWatchConnectionStatus: 'ssh:watchConnectionStatus',
+  sshUnwatchConnectionStatus: 'ssh:unwatchConnectionStatus',
 
   // Send channels
   ptyWrite: 'pty:write',
@@ -407,6 +411,22 @@ export class IpcClient {
 
   sshGetOutput(...args: IpcRequests['sshGetOutput']['params']): Promise<IpcRequests['sshGetOutput']['result']> {
     return ipcRenderer.invoke(CHANNELS.sshGetOutput, ...args)
+  }
+
+  sshWatchOutput(...args: IpcRequests['sshWatchOutput']['params']): Promise<IpcRequests['sshWatchOutput']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshWatchOutput, ...args)
+  }
+
+  sshUnwatchOutput(...args: IpcRequests['sshUnwatchOutput']['params']): Promise<IpcRequests['sshUnwatchOutput']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshUnwatchOutput, ...args)
+  }
+
+  sshWatchConnectionStatus(...args: IpcRequests['sshWatchConnectionStatus']['params']): Promise<IpcRequests['sshWatchConnectionStatus']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshWatchConnectionStatus, ...args)
+  }
+
+  sshUnwatchConnectionStatus(...args: IpcRequests['sshUnwatchConnectionStatus']['params']): Promise<IpcRequests['sshUnwatchConnectionStatus']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshUnwatchConnectionStatus, ...args)
   }
 
   // ==================== Fire-and-Forget Methods (send pattern, no return) ====================

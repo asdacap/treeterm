@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAppStore } from '../store/app'
 import type { SSHConnectionConfig, ConnectionInfo } from '../types'
 
@@ -257,33 +257,41 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
   )
 }
 
-const EMPTY_OUTPUT: string[] = []
-
 function SSHOutputInline({ connectionId }: { connectionId: string }) {
-  const sshOutput = useAppStore(s => s.sshOutput[connectionId] ?? EMPTY_OUTPUT)
+  const [output, setOutput] = useState<string[]>([])
   const ssh = useAppStore(s => s.ssh)
+  const scrollRef = useRef<HTMLDivElement>(null)
 
-  // Fetch buffered output on mount in case push events were missed
   useEffect(() => {
-    ssh.getOutput(connectionId).then((lines) => {
-      if (lines.length > 0) {
-        useAppStore.setState((state) => {
-          const existing = state.sshOutput[connectionId] || []
-          if (existing.length >= lines.length) return state
-          return { sshOutput: { ...state.sshOutput, [connectionId]: lines } }
-        })
-      }
+    let unsubscribe: (() => void) | undefined
+
+    ssh.watchOutput(connectionId, (line) => {
+      setOutput(prev => [...prev, line])
+    }).then(({ scrollback, unsubscribe: unsub }) => {
+      setOutput(scrollback)
+      unsubscribe = unsub
     }).catch(() => {})
+
+    return () => {
+      unsubscribe?.()
+    }
   }, [connectionId, ssh])
 
+  // Auto-scroll
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [output.length])
+
   return (
-    <div style={{
+    <div ref={scrollRef} style={{
       backgroundColor: '#11111b', border: '1px solid #333', borderRadius: 4,
       padding: 8, marginTop: 4, maxHeight: 200, overflow: 'auto',
       fontFamily: 'monospace', fontSize: 12, color: '#a6adc8'
     }}>
-      {sshOutput.length === 0 && <div style={{ color: '#666' }}>No output yet</div>}
-      {sshOutput.map((line, i) => (
+      {output.length === 0 && <div style={{ color: '#666' }}>No output yet</div>}
+      {output.map((line, i) => (
         <div key={i} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{line}</div>
       ))}
     </div>

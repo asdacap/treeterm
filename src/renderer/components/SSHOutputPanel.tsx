@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store/app'
 
 interface SSHOutputPanelProps {
@@ -6,8 +6,9 @@ interface SSHOutputPanelProps {
 }
 
 export default function SSHOutputPanel({ connectionId }: SSHOutputPanelProps) {
-  const output = useAppStore(s => s.sshOutput[connectionId] || [])
+  const [output, setOutput] = useState<string[]>([])
   const connections = useAppStore(s => s.connections)
+  const ssh = useAppStore(s => s.ssh)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const connection = connections.find(c => c.id === connectionId)
@@ -22,20 +23,21 @@ export default function SSHOutputPanel({ connectionId }: SSHOutputPanelProps) {
     }
   }, [output.length])
 
-  // Load buffered output on mount
+  // Watch output for this connection
   useEffect(() => {
-    const { ssh } = useAppStore.getState()
-    ssh.getOutput(connectionId).then((lines) => {
-      if (lines.length > 0) {
-        useAppStore.setState((state) => ({
-          sshOutput: {
-            ...state.sshOutput,
-            [connectionId]: lines
-          }
-        }))
-      }
+    let unsubscribe: (() => void) | undefined
+
+    ssh.watchOutput(connectionId, (line) => {
+      setOutput(prev => [...prev, line])
+    }).then(({ scrollback, unsubscribe: unsub }) => {
+      setOutput(scrollback)
+      unsubscribe = unsub
     }).catch(console.error)
-  }, [connectionId])
+
+    return () => {
+      unsubscribe?.()
+    }
+  }, [connectionId, ssh])
 
   const getStatusColor = (status: string | undefined) => {
     switch (status) {
