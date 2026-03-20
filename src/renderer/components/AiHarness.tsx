@@ -36,19 +36,19 @@ export default function AiHarness({
   const terminalApi = useTerminalApi()
   const workspace = useStore(workspaceStore, (state) => state.workspaces[workspaceId])
   const appState = workspace?.appStates[tabId]
-  const ptyId = (appState?.state as BaseTerminalState | undefined)?.ptyId
+  const ptyHandle = (appState?.state as BaseTerminalState | undefined)?.ptyHandle
 
   const handlePushToTalkTranscript = useCallback((text: string) => {
-    if (ptyId) {
-      terminalApi.write(ptyId, text)
+    if (ptyHandle) {
+      terminalApi.write(ptyHandle, text)
     }
-  }, [ptyId, terminalApi])
+  }, [ptyHandle, terminalApi])
 
   const handlePushToTalkSubmit = useCallback(() => {
-    if (ptyId) {
-      terminalApi.write(ptyId, '\r')
+    if (ptyHandle) {
+      terminalApi.write(ptyHandle, '\r')
     }
-  }, [ptyId, terminalApi])
+  }, [ptyHandle, terminalApi])
 
   // Memoize config based on props to prevent unnecessary re-renders
   const config = useMemo<BaseTerminalConfig>(() => ({
@@ -75,13 +75,10 @@ export default function AiHarness({
         onTranscript={handlePushToTalkTranscript}
         onSubmit={handlePushToTalkSubmit}
       />
-      {ptyId && (
-        <ReviewCommentsButton
-          workspaceStore={workspaceStore}
-          workspaceId={workspaceId}
-          ptyId={ptyId}
-        />
-      )}
+      <ReviewCommentsButton
+        workspaceStore={workspaceStore}
+        workspaceId={workspaceId}
+      />
     </div>
   )
 }

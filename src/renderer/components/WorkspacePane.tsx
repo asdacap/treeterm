@@ -13,7 +13,7 @@ import KeybindingOverlay from './KeybindingOverlay'
 import { ErrorBoundary } from './ErrorBoundary'
 import WorkspaceErrorFallback from './WorkspaceErrorFallback'
 import type { ReviewState, Platform } from '../types'
-import { isTerminalState, getTabs } from '../types'
+import { getTabs } from '../types'
 import { PromptDescriptionButton } from './PromptDescriptionButton'
 import RunActionDropdown from './RunActionDropdown'
 
@@ -360,11 +360,9 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
 
   // Prompt description: show button next to description for AI harness tabs that haven't been prompted yet
   const activeTab = tabs.find((t) => t.id === activeTabId)
-  const activeTabPtyId = activeTab && isTerminalState(activeTab.state) ? activeTab.state.ptyId : null
   const showPromptDescriptionButton = activeTab?.applicationId.startsWith('aiharness-')
     && activeWorkspace?.metadata?.description
     && !activeWorkspace?.metadata?.descriptionPrompted
-    && activeTabPtyId
 
   const handlePromptDescriptionDismiss = useCallback(() => {
     if (activeWorkspaceId) {
@@ -503,10 +501,11 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                 ) : activeWorkspace.metadata?.description ? (
                   <span className="workspace-description">
                     {activeWorkspace.metadata.description}
-                    {showPromptDescriptionButton && activeTabPtyId && (
+                    {showPromptDescriptionButton && (
                       <PromptDescriptionButton
                         description={activeWorkspace.metadata.description}
-                        ptyId={activeTabPtyId}
+                        workspaceStore={workspaceStore}
+                        workspaceId={activeWorkspaceId!}
                         onDismiss={handlePromptDescriptionDismiss}
                       />
                     )}

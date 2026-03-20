@@ -3,7 +3,6 @@ import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useGitApi } from '../contexts/GitApiContext'
-import { useTerminalApi } from '../contexts/TerminalApiContext'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
 import { getTabs } from '../types'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, ReviewComment } from '../types'
@@ -31,8 +30,7 @@ export default function ReviewBrowser({
   workspaceStore
 }: ReviewBrowserProps) {
   const git = useGitApi()
-  const terminalApi = useTerminalApi()
-  const { workspaces, mergeAndRemoveWorkspace, closeAndCleanWorkspace, removeTab, setActiveTab, addReviewComment, deleteReviewComment, updateOutdatedReviewComments, getReviewComments } = useStore(workspaceStore)
+  const { workspaces, mergeAndRemoveWorkspace, closeAndCleanWorkspace, removeTab, setActiveTab, promptHarness, addReviewComment, deleteReviewComment, updateOutdatedReviewComments, getReviewComments } = useStore(workspaceStore)
   const workspace = workspaces[workspaceId]
   const parentWorkspace = parentWorkspaceId ? workspaces[parentWorkspaceId] : undefined
   
@@ -104,18 +102,14 @@ export default function ReviewBrowser({
   }, [workspacePath, parentWorkspace])
 
   const handlePromptCommit = useCallback(() => {
-    if (runningHarness?.ptyHandle) {
-      terminalApi.write(runningHarness.ptyHandle, 'commit\r')
-      setActiveTab(workspaceId, runningHarness.tabId)
-    }
-  }, [runningHarness, terminalApi, setActiveTab, workspaceId])
+    promptHarness(workspaceId, 'commit')
+  }, [promptHarness, workspaceId])
 
   const handlePromptRebase = useCallback(() => {
-    if (runningHarness?.ptyHandle && parentWorkspace?.gitBranch) {
-      terminalApi.write(runningHarness.ptyHandle, `rebase with ${parentWorkspace.gitBranch}\r`)
-      setActiveTab(workspaceId, runningHarness.tabId)
+    if (parentWorkspace?.gitBranch) {
+      promptHarness(workspaceId, `rebase with ${parentWorkspace.gitBranch}`)
     }
-  }, [runningHarness, parentWorkspace?.gitBranch, terminalApi, setActiveTab, workspaceId])
+  }, [promptHarness, workspaceId, parentWorkspace?.gitBranch])
 
   // Resize handlers (must be defined before any early returns)
   const handleResizeMouseDown = useCallback(() => {

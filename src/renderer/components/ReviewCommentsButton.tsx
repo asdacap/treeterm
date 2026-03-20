@@ -1,27 +1,24 @@
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
-import { useTerminalApi } from '../contexts/TerminalApiContext'
 import { generateReviewPrompt } from '../utils/reviewPrompt'
 
 interface ReviewCommentsButtonProps {
   workspaceStore: StoreApi<WorkspaceState>
   workspaceId: string
-  ptyId: string | undefined
 }
 
-export function ReviewCommentsButton({ workspaceStore, workspaceId, ptyId }: ReviewCommentsButtonProps): JSX.Element | null {
-  const terminal = useTerminalApi()
+export function ReviewCommentsButton({ workspaceStore, workspaceId }: ReviewCommentsButtonProps): JSX.Element | null {
   const getReviewComments = useStore(workspaceStore, (state) => state.getReviewComments)
+  const promptHarness = useStore(workspaceStore, (state) => state.promptHarness)
   const comments = getReviewComments(workspaceId)
 
   if (comments.length === 0) return null
 
   const handleClick = () => {
-    if (!ptyId) return
     const prompt = generateReviewPrompt(comments)
     if (prompt) {
-      terminal.write(ptyId, prompt + '\r')
+      promptHarness(workspaceId, prompt)
     }
   }
 

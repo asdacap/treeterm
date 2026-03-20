@@ -460,7 +460,7 @@ function getOrCreateSessionStore(
   get: () => AppState,
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void
 ): StoreApi<WorkspaceState> {
-  const { workspaceStores, windowUuid, git, sessionApi } = get()
+  const { workspaceStores, windowUuid, git, sessionApi, terminal } = get()
   let store = workspaceStores[sessionId]
   if (!store) {
     store = createWorkspaceStore(
@@ -468,6 +468,7 @@ function getOrCreateSessionStore(
       {
         git,
         session: sessionApi,
+        terminal,
         getSettings: () => useSettingsStore.getState().settings,
         appRegistry: {
           get: (id: string) => get().applications[id],
