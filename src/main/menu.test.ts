@@ -70,18 +70,6 @@ describe('menu', () => {
       expect(mockServer.settingsOpen).toHaveBeenCalled()
     })
 
-    it('calls terminalNew when New Terminal clicked', () => {
-      createApplicationMenu(null, mockServer as any)
-      
-      const template = (Menu.buildFromTemplate as any).mock.calls[0][0]
-      const workspaceMenu = template.find((item: any) => item.label === 'Workspace')
-      const newTerminalItem = workspaceMenu.submenu.find((item: any) => item.label === 'New Terminal')
-      
-      newTerminalItem.click()
-      
-      expect(mockServer.terminalNew).toHaveBeenCalled()
-    })
-
     it('calls sessionShowSessions when Browse Sessions clicked', () => {
       createApplicationMenu(null, mockServer as any)
       

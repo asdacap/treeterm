@@ -94,14 +94,6 @@ export function createApplicationMenu(
       label: 'Workspace',
       submenu: [
         {
-          label: 'New Terminal',
-          accelerator: isMac ? 'Cmd+T' : 'Ctrl+T',
-          click: () => {
-            server.terminalNew()
-          }
-        },
-        { type: 'separator' as const },
-        {
           label: 'Browse Sessions...',
           click: () => {
             server.sessionShowSessions()
