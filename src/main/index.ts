@@ -197,9 +197,6 @@ function createWindow(initialSessionId?: string): BrowserWindow {
         console.log('[main] got default session id:', sessionId)
       }
 
-      // Update window manager with the session ID
-      windowManager.updateSessionId(window.id, sessionId)
-
       // Start watching this session for changes from other windows (cancel previous if HMR reload)
       if (unwatchSession) {
         unwatchSession()
@@ -221,7 +218,6 @@ function createWindow(initialSessionId?: string): BrowserWindow {
         // Session not found (e.g. stale initialSessionId), fall back to default
         unwatchSession()
         const defaultId = await daemonClient.getDefaultSessionId()
-        windowManager.updateSessionId(window.id, defaultId)
         const fallbackWatch = daemonClient.watchSession(defaultId, windowUuid, (updatedSession) => {
           windowServer.sessionSync(updatedSession)
         })
@@ -245,7 +241,7 @@ function createWindow(initialSessionId?: string): BrowserWindow {
   })
 
   // Register with window manager (session ID updated later in did-finish-load)
-  windowManager.registerWindow(window, initialSessionId || null, windowServer, windowUuid)
+  windowManager.registerWindow(window, windowServer, windowUuid)
 
   return window
 }
@@ -434,13 +430,6 @@ server.onSessionOpenInNewWindow(async (sessionId) => {
   }
 
   try {
-    // Check if session is already open in another window
-    if (windowManager.isSessionOpen(sessionId)) {
-      // Focus the existing window
-      windowManager.focusWindowBySessionId(sessionId)
-      return { success: true }
-    }
-
     // Verify the session exists
     const sessions = await daemonClient.listSessions()
     if (!sessions.some(s => s.id === sessionId)) {
@@ -853,7 +842,6 @@ server.onSshConnect(async (event, config) => {
       const remoteClient = connectionManager.getClient(config.id)
       try {
         const remoteSessionId = await remoteClient.getDefaultSessionId()
-        windowManager.updateSessionId(senderWindow.id, remoteSessionId)
         const remoteWatch = remoteClient.watchSession(remoteSessionId, randomUUID(), (updatedSession) => {
           const windowInfo = windowManager.getWindow(senderWindow.id)
           if (windowInfo) {
@@ -981,7 +969,6 @@ app.whenReady().then(async () => {
             try {
               const remoteClient = connectionManager!.getClient(parsed.id)
               const remoteSessionId = await remoteClient.getDefaultSessionId()
-              windowManager.updateSessionId(mainWindow.id, remoteSessionId)
               const windowId = mainWindow.id
               const remoteWatch = remoteClient.watchSession(remoteSessionId, randomUUID(), (updatedSession) => {
                 const windowInfo = windowManager.getWindow(windowId)
