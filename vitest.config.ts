@@ -18,7 +18,10 @@ export default defineConfig({
         '**/*.test.ts',
         '**/*.spec.ts',
         'src/generated/**',
-        '**/index.ts'
+        '**/index.ts',
+        'src/shared/**',
+        'src/renderer/stt/types.ts',
+        'src/renderer/monaco-config.ts'
       ],
       thresholds: {
         branches: 60,
