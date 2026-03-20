@@ -124,7 +124,7 @@ export default function ActiveProcessesDialog({ terminalApi, workspaces, onClose
 
   useEffect(() => {
     fetchSessions()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleStop = useCallback(async () => {
     if (!selectedId) return

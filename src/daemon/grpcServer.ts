@@ -469,10 +469,7 @@ export class GrpcServer {
     // Emit initial session state as first event
     const session = this.sessionStore.getSession(sessionId)
     if (!session) {
-      call.destroy({
-        code: grpc.status.NOT_FOUND,
-        message: `Session not found: ${sessionId}`
-      } as any)
+      call.destroy(Object.assign(new Error(`Session not found: ${sessionId}`), { code: grpc.status.NOT_FOUND }))
       return
     }
 

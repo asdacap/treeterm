@@ -72,7 +72,6 @@ export default function FlexLayoutPane({ workspaceId, workspaceStore, onNewTab }
     setModel(m)
     syncedTabIdsRef.current = new Set(tabs.map(t => t.id))
     // Only run on mount / workspace ID change
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId])
 
   // Sync store tab changes → model (adds/removes)
