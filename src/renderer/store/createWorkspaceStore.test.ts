@@ -61,6 +61,20 @@ function makeDeps(overrides?: Partial<WorkspaceDeps>): WorkspaceDeps {
       get: vi.fn().mockReturnValue(null),
       getDefaultApp: vi.fn().mockReturnValue(null),
     },
+    terminal: {
+      create: vi.fn().mockResolvedValue(null),
+      attach: vi.fn().mockResolvedValue({ success: false }),
+      list: vi.fn().mockResolvedValue([]),
+      write: vi.fn(),
+      resize: vi.fn(),
+      kill: vi.fn(),
+      isAlive: vi.fn().mockResolvedValue(false),
+      onData: vi.fn().mockReturnValue(() => {}),
+      onExit: vi.fn().mockReturnValue(() => {}),
+      onNewTerminal: vi.fn().mockReturnValue(() => {}),
+      onShowSessions: vi.fn().mockReturnValue(() => {}),
+      onActiveProcessesOpen: vi.fn().mockReturnValue(() => {}),
+    },
     ...overrides,
   }
 }

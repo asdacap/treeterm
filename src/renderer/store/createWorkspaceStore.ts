@@ -1,13 +1,15 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
 import { humanId } from 'human-id'
-import type { Workspace, GitInfo, Tab, AppState, WorktreeSettings, GitApi, SessionApi, Settings, AppRegistryApi, Application, ReviewComment } from '../types'
+import type { Workspace, GitInfo, Tab, AppState, WorktreeSettings, GitApi, SessionApi, Settings, AppRegistryApi, Application, ReviewComment, TerminalApi } from '../types'
+import { getTabs, isAiHarnessState } from '../types'
 
 export interface WorkspaceDeps {
   git: GitApi
   session: SessionApi
   getSettings: () => Settings
   appRegistry: AppRegistryApi
+  terminal: TerminalApi
 }
 
 export interface WorkspaceState {
@@ -43,6 +45,7 @@ export interface WorkspaceState {
   toggleReviewCommentAddressed: (workspaceId: string, commentId: string) => void
   updateOutdatedReviewComments: (workspaceId: string, currentCommitHash: string) => void
   clearReviewComments: (workspaceId: string) => void
+  promptHarness: (workspaceId: string, text: string) => boolean
   quickForkWorkspace: (workspaceId: string) => Promise<{ success: boolean; error?: string }>
   syncToDaemon: () => Promise<void>
 }
@@ -925,6 +928,28 @@ export function createWorkspaceStore(
 
     clearReviewComments: (workspaceId: string) => {
       get().updateWorkspaceMetadata(workspaceId, 'reviewComments', serializeReviewComments([]))
+    },
+
+    promptHarness: (workspaceId: string, text: string): boolean => {
+      const workspace = get().workspaces[workspaceId]
+      if (!workspace) return false
+
+      const tabs = getTabs(workspace)
+      let ptyHandle: string | null = null
+      let tabId: string | null = null
+      for (const tab of tabs) {
+        if (tab.applicationId.startsWith('aiharness-') && isAiHarnessState(tab.state) && tab.state.ptyId !== null) {
+          ptyHandle = tab.state.ptyHandle ?? null
+          tabId = tab.id
+          break
+        }
+      }
+
+      if (!ptyHandle || !tabId) return false
+
+      deps.terminal.write(ptyHandle, text + '\r')
+      get().setActiveTab(workspaceId, tabId)
+      return true
     },
 
     quickForkWorkspace: async (workspaceId: string) => {

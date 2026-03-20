@@ -1,18 +1,19 @@
-import { useTerminalApi } from '../contexts/TerminalApiContext'
+import type { StoreApi } from 'zustand'
+import { useStore } from 'zustand'
+import type { WorkspaceState } from '../store/createWorkspaceStore'
 
 interface PromptDescriptionButtonProps {
   description: string
-  ptyId: string | undefined
+  workspaceStore: StoreApi<WorkspaceState>
+  workspaceId: string
   onDismiss: () => void
 }
 
-export function PromptDescriptionButton({ description, ptyId, onDismiss }: PromptDescriptionButtonProps): JSX.Element | null {
-  const terminal = useTerminalApi()
-
-  if (!ptyId) return null
+export function PromptDescriptionButton({ description, workspaceStore, workspaceId, onDismiss }: PromptDescriptionButtonProps): JSX.Element | null {
+  const promptHarness = useStore(workspaceStore, (state) => state.promptHarness)
 
   const handlePrompt = () => {
-    terminal.write(ptyId, description + '\r')
+    promptHarness(workspaceId, description)
     onDismiss()
   }
 
