@@ -889,7 +889,7 @@ export default function ReviewBrowser({
               disabled={isProcessing}
               title="Remove worktree but keep the branch"
             >
-              {isProcessing ? 'Closing...' : 'Close and Clean'}
+              {isProcessing ? <><span className="btn-spinner" />Closing...</> : 'Close and Clean'}
             </button>
             <button
               className="review-action-btn review-cancel-btn"
@@ -927,7 +927,7 @@ export default function ReviewBrowser({
               disabled={isProcessing}
               title={hasConflicts ? 'Merge (conflicts will need to be resolved)' : 'Merge changes into parent branch'}
             >
-              {processingAction === 'merge' ? 'Merging...' : 'Merge'}
+              {processingAction === 'merge' ? <><span className="btn-spinner" />Merging...</> : 'Merge'}
               {hasConflicts && ' (has conflicts)'}
             </button>
             <button
@@ -936,7 +936,7 @@ export default function ReviewBrowser({
               disabled={isProcessing}
               title={hasConflicts ? 'Squash merge (conflicts will need to be resolved)' : 'Squash all commits into one'}
             >
-              {processingAction === 'squash' ? 'Squashing...' : 'Squash Merge'}
+              {processingAction === 'squash' ? <><span className="btn-spinner" />Squashing...</> : 'Squash Merge'}
               {hasConflicts && ' (has conflicts)'}
             </button>
             <button
