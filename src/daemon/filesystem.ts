@@ -4,13 +4,22 @@ import { createModuleLogger } from './logger'
 
 const log = createModuleLogger('filesystem')
 
-// Security: Ensure path is within workspace
-function isPathWithinWorkspace(workspacePath: string, targetPath: string): boolean {
-  const resolvedWorkspace = path.resolve(workspacePath)
-  const resolvedTarget = path.resolve(targetPath)
-  return (
-    resolvedTarget.startsWith(resolvedWorkspace + path.sep) || resolvedTarget === resolvedWorkspace
-  )
+// Security: Ensure path is within workspace (resolves symlinks to prevent escape)
+async function isPathWithinWorkspace(workspacePath: string, targetPath: string): Promise<boolean> {
+  try {
+    const resolvedWorkspace = await fs.realpath(workspacePath)
+    const resolvedTarget = await fs.realpath(targetPath)
+    return (
+      resolvedTarget.startsWith(resolvedWorkspace + path.sep) || resolvedTarget === resolvedWorkspace
+    )
+  } catch {
+    // If realpath fails (e.g. target doesn't exist yet), fall back to path.resolve
+    const resolvedWorkspace = path.resolve(workspacePath)
+    const resolvedTarget = path.resolve(targetPath)
+    return (
+      resolvedTarget.startsWith(resolvedWorkspace + path.sep) || resolvedTarget === resolvedWorkspace
+    )
+  }
 }
 
 // Detect language from file extension for syntax highlighting
@@ -93,7 +102,7 @@ export async function readDirectory(
     const resolvedDir = path.resolve(workspacePath, dirPath)
 
     // Security check
-    if (!isPathWithinWorkspace(workspacePath, resolvedDir)) {
+    if (!(await isPathWithinWorkspace(workspacePath, resolvedDir))) {
       return { success: false, error: 'Access denied: Path outside workspace' }
     }
 
@@ -147,7 +156,7 @@ export async function readFile(
     const resolvedFile = path.resolve(workspacePath, filePath)
 
     // Security check
-    if (!isPathWithinWorkspace(workspacePath, resolvedFile)) {
+    if (!(await isPathWithinWorkspace(workspacePath, resolvedFile))) {
       return { success: false, error: 'Access denied: Path outside workspace' }
     }
 
@@ -185,7 +194,7 @@ export async function writeFile(
     const resolvedFile = path.resolve(workspacePath, filePath)
 
     // Security check
-    if (!isPathWithinWorkspace(workspacePath, resolvedFile)) {
+    if (!(await isPathWithinWorkspace(workspacePath, resolvedFile))) {
       return { success: false, error: 'Access denied: Path outside workspace' }
     }
 
@@ -207,7 +216,7 @@ export async function searchFiles(
 ): Promise<{ success: boolean; entries?: FileEntry[]; error?: string }> {
   try {
     // Security check
-    if (!isPathWithinWorkspace(workspacePath, workspacePath)) {
+    if (!(await isPathWithinWorkspace(workspacePath, workspacePath))) {
       return { success: false, error: 'Access denied: Invalid workspace path' }
     }
 

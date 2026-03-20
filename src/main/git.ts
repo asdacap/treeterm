@@ -8,7 +8,6 @@
 
 import { GrpcDaemonClient } from './grpcClient'
 import type { ExecInput, ExecOutput } from '../generated/treeterm'
-import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
 
@@ -901,11 +900,13 @@ export class GitClient {
       const originalResult = await this.exec(repoPath, ['show', `:${filePath}`])
       const originalContent = originalResult.exitCode === 0 ? originalResult.stdout : ''
       
-      // Read working tree file directly
+      // Read working tree file via daemon
       let modifiedContent = ''
       try {
-        const fullPath = join(repoPath, filePath)
-        modifiedContent = await readFile(fullPath, 'utf-8')
+        const result = await this.daemonClient.readFile(repoPath, filePath)
+        if (result.success && result.file) {
+          modifiedContent = result.file.content
+        }
       } catch {
         // File might not exist in working tree (deleted)
         modifiedContent = ''
