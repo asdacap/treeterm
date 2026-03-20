@@ -11,10 +11,11 @@ describe('navigation store', () => {
   })
 
   it('sets workspace view', () => {
-    useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: 'ws-1' })
+    useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: 'ws-1', sessionId: 'sess-1' })
     expect(useNavigationStore.getState().activeView).toEqual({
       type: 'workspace',
       workspaceId: 'ws-1',
+      sessionId: 'sess-1',
     })
   })
 
@@ -28,7 +29,7 @@ describe('navigation store', () => {
 
   it('switches between views', () => {
     const { setActiveView } = useNavigationStore.getState()
-    setActiveView({ type: 'workspace', workspaceId: 'ws-1' })
+    setActiveView({ type: 'workspace', workspaceId: 'ws-1', sessionId: 'sess-1' })
     setActiveView({ type: 'ssh', connectionId: 'conn-1' })
     expect(useNavigationStore.getState().activeView).toEqual({
       type: 'ssh',

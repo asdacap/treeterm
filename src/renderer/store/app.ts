@@ -55,9 +55,11 @@ interface AppState extends AppDeps {
   connections: ConnectionInfo[]
   sshOutput: Record<string, string[]>
   showConnectionPicker: boolean
-  connectRemote: (config: SSHConnectionConfig) => Promise<void>
+  sessionConnectionMap: Record<string, string> // connectionId → sessionId
+  connectRemote: (config: SSHConnectionConfig, sessionId?: string) => Promise<void>
   disconnectRemote: (connectionId: string) => Promise<void>
   refreshConnections: () => Promise<void>
+  getSessionConnections: (sessionId: string) => ConnectionInfo[]
 
   // Application registry
   applications: Record<string, Application>
@@ -121,6 +123,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   connections: [],
   sshOutput: {},
   showConnectionPicker: false,
+  sessionConnectionMap: {},
   activeSessionId: null,
   workspaceStores: {},
 
@@ -166,10 +169,17 @@ export const useAppStore = create<AppState>()((set, get) => ({
     return allApps.length > 0 ? allApps[0] : null
   },
 
-  connectRemote: async (config: SSHConnectionConfig) => {
-    const { ssh } = get()
+  connectRemote: async (config: SSHConnectionConfig, sessionId?: string) => {
+    const { ssh, activeSessionId } = get()
     try {
       const info = await ssh.connect(config)
+      // Record the connection → session mapping
+      const targetSessionId = sessionId || activeSessionId
+      if (targetSessionId) {
+        set((state) => ({
+          sessionConnectionMap: { ...state.sessionConnectionMap, [info.id]: targetSessionId }
+        }))
+      }
       get().refreshConnections()
       if (info.status === 'error') {
         throw new Error(info.error || 'Connection failed')
@@ -194,6 +204,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
     } catch (error) {
       console.error('[App] Failed to refresh connections:', error)
     }
+  },
+
+  getSessionConnections: (sessionId: string): ConnectionInfo[] => {
+    const { connections, sessionConnectionMap } = get()
+    return connections.filter(c =>
+      c.target.type === 'remote' && sessionConnectionMap[c.id] === sessionId
+    )
   },
 
   initializeApplications: () => {

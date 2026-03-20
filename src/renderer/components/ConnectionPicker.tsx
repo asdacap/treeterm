@@ -8,7 +8,7 @@ interface ConnectionPickerProps {
 }
 
 export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerProps) {
-  const { connections, connectRemote, disconnectRemote, ssh } = useAppStore()
+  const { connections, connectRemote, disconnectRemote, ssh, activeSessionId } = useAppStore()
   const [savedConnections, setSavedConnections] = useState<SSHConnectionConfig[]>([])
   const [host, setHost] = useState('')
   const [user, setUser] = useState('')
@@ -46,7 +46,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
     setError(null)
     setSelectedOutputId(config.id)
     try {
-      await connectRemote(config)
+      await connectRemote(config, activeSessionId || undefined)
       // Save connection for future use
       await ssh.saveConnection(config)
       setSavedConnections(await ssh.getSavedConnections())
@@ -68,7 +68,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
     setError(null)
     setSelectedOutputId(config.id)
     try {
-      await connectRemote(config)
+      await connectRemote(config, activeSessionId || undefined)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Connection failed')
     } finally {

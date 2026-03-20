@@ -51,7 +51,12 @@ export default function App() {
   } = useAppStore()
 
   const activeView = useNavigationStore(s => s.activeView)
-  const activeStore = getActiveWorkspaceStore()
+  const workspaceStores = useAppStore(s => s.workspaceStores)
+
+  // Derive active store from activeView.sessionId when viewing a workspace
+  const activeStore = activeView?.type === 'workspace' && activeView.sessionId
+    ? workspaceStores[activeView.sessionId] || null
+    : getActiveWorkspaceStore()
 
   const handleConfirmClose = () => {
     useAppStore.setState({ showCloseConfirm: false })
@@ -115,29 +120,36 @@ export default function App() {
               Daemon disconnected — terminal sessions may be unavailable. Please restart the app.
             </div>
           )}
-          {activeStore && (
-            <>
-              <div className="tree-pane" style={{ width: treeWidth }}>
-                <TreePane
-                  workspaceStore={activeStore}
-                  selectFolder={selectFolder}
-                  getRecentDirectories={getRecentDirectories}
-                />
-              </div>
-              <div
-                className={`divider ${isResizing ? 'active' : ''}`}
-                onMouseDown={handleMouseDown}
-              />
-              <div className="workspace-pane">
+          <div className="tree-pane" style={{ width: treeWidth }}>
+            <TreePane
+              selectFolder={selectFolder}
+              getRecentDirectories={getRecentDirectories}
+            />
+          </div>
+          <div
+            className={`divider ${isResizing ? 'active' : ''}`}
+            onMouseDown={handleMouseDown}
+          />
+          <div className="workspace-pane">
+            {activeStore ? (
+              <>
                 <div style={{ display: activeView?.type !== 'ssh' ? 'contents' : 'none' }}>
                   <WorkspacePane workspaceStore={activeStore} platform={platform} />
                 </div>
                 {activeView?.type === 'ssh' && (
                   <SSHConnectionPane connectionId={activeView.connectionId} />
                 )}
+              </>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>
+                {activeView?.type === 'ssh' ? (
+                  <SSHConnectionPane connectionId={activeView.connectionId} />
+                ) : (
+                  <span>Select a workspace to get started</span>
+                )}
               </div>
-            </>
-          )}
+            )}
+          </div>
           <SettingsDialog
             isOpen={isSettingsOpen}
             onClose={() => useAppStore.setState({ isSettingsOpen: false })}

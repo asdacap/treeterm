@@ -49,6 +49,44 @@ body,
   padding-top: 38px; /* Account for traffic light buttons on macOS */
 }
 
+.tree-sessions-scroll {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.session-panel {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.session-panel-header {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.session-panel-header:hover {
+  background: var(--bg-hover);
+}
+
+.session-panel-header .tree-title {
+  flex: 1;
+}
+
+.session-panel-expand {
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
+}
+
+.session-panel .tree-list {
+  flex: none;
+  overflow-y: visible;
+  padding: 0 0 4px;
+}
+
 .tree-header {
   display: flex;
   align-items: center;
