@@ -100,7 +100,7 @@ body,
 .tree-item {
   display: flex;
   align-items: center;
-  padding: 6px 16px;
+  padding: 6px 4px;
   cursor: pointer;
   transition: background 0.1s;
   user-select: none;

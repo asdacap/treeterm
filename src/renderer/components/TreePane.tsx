@@ -239,7 +239,7 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
       <div key={ws.id}>
         <div
           className={`tree-item ${activeWorkspaceId === ws.id ? 'active' : ''} ${isFocused ? 'focused' : ''}`}
-          style={{ paddingLeft: 16 + depth * 16 }}
+          style={{ paddingLeft: 4 + depth * 4 }}
           onClick={() => setActiveWorkspace(ws.id)}
           onContextMenu={(e) => handleContextMenu(e, ws.id)}
           title={ws.metadata?.description ? `${ws.path}\n\n${ws.metadata.description}` : ws.path}
