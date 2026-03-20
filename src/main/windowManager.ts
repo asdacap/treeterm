@@ -1,6 +1,6 @@
 /**
- * Window Manager for multi-window session support
- * Tracks multiple windows and their associated sessions
+ * Window Manager for multi-window support
+ * Tracks windows and their metadata (ipcServer, connectionId, uuid)
  */
 
 import { BrowserWindow } from 'electron'
@@ -8,7 +8,6 @@ import { IpcServer } from './ipc/ipc-server'
 
 interface WindowInfo {
   window: BrowserWindow
-  sessionId: string | null
   ipcServer: IpcServer
   uuid: string
   connectionId: string
@@ -26,11 +25,11 @@ class WindowManager {
   }
 
   /**
-   * Register a window with its associated session
+   * Register a window
    */
-  registerWindow(window: BrowserWindow, sessionId: string | null, ipcServer: IpcServer, uuid?: string, connectionId: string = 'local'): void {
+  registerWindow(window: BrowserWindow, ipcServer: IpcServer, uuid?: string, connectionId: string = 'local'): void {
     const id = window.id
-    this.windows.set(id, { window, sessionId, ipcServer, uuid: uuid || `win-${id}`, connectionId })
+    this.windows.set(id, { window, ipcServer, uuid: uuid || `win-${id}`, connectionId })
 
     // Clean up when window closes
     window.on('closed', () => {
@@ -60,35 +59,6 @@ class WindowManager {
   }
 
   /**
-   * Find window by session ID
-   */
-  findWindowBySessionId(sessionId: string): WindowInfo | undefined {
-    for (const info of this.windows.values()) {
-      if (info.sessionId === sessionId) {
-        return info
-      }
-    }
-    return undefined
-  }
-
-  /**
-   * Check if a session is already open in any window
-   */
-  isSessionOpen(sessionId: string): boolean {
-    return this.findWindowBySessionId(sessionId) !== undefined
-  }
-
-  /**
-   * Update the session ID for a window (called after session is determined in did-finish-load)
-   */
-  updateSessionId(windowId: number, sessionId: string): void {
-    const info = this.windows.get(windowId)
-    if (info) {
-      this.windows.set(windowId, { ...info, sessionId })
-    }
-  }
-
-  /**
    * Update the connection ID for a window
    */
   updateConnectionId(windowId: number, connectionId: string): void {
@@ -108,28 +78,6 @@ class WindowManager {
       }
     }
     return undefined
-  }
-
-  /**
-   * Get all windows sharing a given session ID
-   */
-  getWindowsBySessionId(sessionId: string): WindowInfo[] {
-    return Array.from(this.windows.values()).filter(info => info.sessionId === sessionId)
-  }
-
-  /**
-   * Focus window by session ID
-   */
-  focusWindowBySessionId(sessionId: string): boolean {
-    const info = this.findWindowBySessionId(sessionId)
-    if (info) {
-      if (info.window.isMinimized()) {
-        info.window.restore()
-      }
-      info.window.focus()
-      return true
-    }
-    return false
   }
 }
 
