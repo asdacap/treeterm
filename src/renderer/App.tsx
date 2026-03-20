@@ -6,9 +6,11 @@ import CloseConfirmDialog from './components/CloseConfirmDialog'
 import WorkspacePickerDialog from './components/WorkspacePickerDialog'
 import ActiveProcessesDialog from './components/ActiveProcessesDialog'
 import ConnectionPicker from './components/ConnectionPicker'
+import SSHConnectionPane from './components/SSHConnectionPane'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import AppErrorFallback from './components/AppErrorFallback'
 import { useAppStore } from './store/app'
+import { useNavigationStore } from './store/navigation'
 import { TerminalApiContext } from './contexts/TerminalApiContext'
 import { FilesystemApiContext } from './contexts/FilesystemApiContext'
 import { GitApiContext } from './contexts/GitApiContext'
@@ -48,6 +50,7 @@ export default function App() {
     handleSessionRestore,
   } = useAppStore()
 
+  const activeView = useNavigationStore(s => s.activeView)
   const activeStore = getActiveWorkspaceStore()
 
   const handleConfirmClose = () => {
@@ -126,7 +129,12 @@ export default function App() {
                 onMouseDown={handleMouseDown}
               />
               <div className="workspace-pane">
-                <WorkspacePane workspaceStore={activeStore} platform={platform} />
+                <div style={{ display: activeView?.type !== 'ssh' ? 'contents' : 'none' }}>
+                  <WorkspacePane workspaceStore={activeStore} platform={platform} />
+                </div>
+                {activeView?.type === 'ssh' && (
+                  <SSHConnectionPane connectionId={activeView.connectionId} />
+                )}
               </div>
             </>
           )}

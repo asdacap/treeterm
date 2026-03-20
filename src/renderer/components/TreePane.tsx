@@ -6,6 +6,7 @@ import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useActivityStateStore } from '../store/activityState'
 import { usePrefixModeStore } from '../store/prefixMode'
 import { useAppStore } from '../store/app'
+import { useNavigationStore } from '../store/navigation'
 import CreateChildDialog from './CreateChildDialog'
 import OpenWorkspaceDialog from './OpenWorkspaceDialog'
 import type { Workspace, ActivityState, ReviewState, WorktreeSettings } from '../types'
@@ -58,7 +59,8 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
     quickForkWorkspace,
     setActiveWorkspace
   } = useStore(workspaceStore)
-  const { activeSessionId, workspaceStores, switchSession } = useAppStore()
+  const { activeSessionId, workspaceStores, switchSession, connections } = useAppStore()
+  const { activeView, setActiveView } = useNavigationStore()
   const sessionIds = Object.keys(workspaceStores)
   const {
     state: prefixState,
@@ -240,7 +242,10 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
         <div
           className={`tree-item ${activeWorkspaceId === ws.id ? 'active' : ''} ${isFocused ? 'focused' : ''}`}
           style={{ paddingLeft: 4 + depth * 4 }}
-          onClick={() => setActiveWorkspace(ws.id)}
+          onClick={() => {
+            setActiveWorkspace(ws.id)
+            setActiveView({ type: 'workspace', workspaceId: ws.id })
+          }}
           onContextMenu={(e) => handleContextMenu(e, ws.id)}
           title={ws.metadata?.description ? `${ws.path}\n\n${ws.metadata.description}` : ws.path}
         >
@@ -317,6 +322,47 @@ export default function TreePane({ workspaceStore, selectFolder, getRecentDirect
           rootWorkspaces.map((ws) => renderWorkspace(ws))
         )}
       </div>
+
+      {/* SSH Connections */}
+      {connections.filter(c => c.target.type === 'remote').length > 0 && (
+        <>
+          <div className="tree-header">
+            <span className="tree-title">SSH Connections</span>
+          </div>
+          <div className="tree-list ssh-connections-list">
+            {connections
+              .filter(c => c.target.type === 'remote')
+              .map(conn => {
+                const config = conn.target.type === 'remote' ? conn.target.config : null
+                const label = config ? `${config.user}@${config.host}` : conn.id
+                const isActive = activeView?.type === 'ssh' && activeView.connectionId === conn.id
+                return (
+                  <div
+                    key={conn.id}
+                    className={`tree-item ${isActive ? 'active' : ''}`}
+                    onClick={() => setActiveView({ type: 'ssh', connectionId: conn.id })}
+                    title={label}
+                  >
+                    <span className="tree-item-expand-placeholder" />
+                    <span className="tree-item-icon">
+                      <span
+                        className="ssh-status-dot"
+                        style={{
+                          backgroundColor:
+                            conn.status === 'connected' ? '#4caf50' :
+                            conn.status === 'connecting' ? '#ff9800' :
+                            conn.status === 'error' ? '#f44336' : '#666'
+                        }}
+                      />
+                    </span>
+                    <span className="tree-item-name">{label}</span>
+                    <span className="ssh-status-text">{conn.status}</span>
+                  </div>
+                )
+              })}
+          </div>
+        </>
+      )}
 
       {/* Context Menu */}
       {contextMenu && (

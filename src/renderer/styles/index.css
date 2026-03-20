@@ -4695,3 +4695,119 @@ body,
   color: var(--text-secondary);
   font-size: 12px;
 }
+
+/* SSH Connections in Tree Pane */
+.ssh-connections-list {
+  flex: none;
+}
+
+.ssh-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.ssh-status-text {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-left: auto;
+  padding-right: 8px;
+}
+
+/* SSH Connection Pane */
+.ssh-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.ssh-pane-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 13px;
+}
+
+.ssh-pane-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ssh-pane-label {
+  font-weight: 600;
+}
+
+.ssh-pane-status-text {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.ssh-pane-error {
+  color: #f44336;
+  font-size: 12px;
+}
+
+.ssh-pane-disconnect {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ssh-pane-disconnect:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.ssh-pane-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.ssh-pane-tab {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 8px 16px;
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.ssh-pane-tab:hover {
+  color: var(--text-primary);
+}
+
+.ssh-pane-tab.active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+}
+
+.ssh-pane-output {
+  flex: 1;
+  overflow: auto;
+  padding: 8px;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ssh-pane-output-empty {
+  color: var(--text-secondary);
+}
+
+.ssh-pane-output-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
