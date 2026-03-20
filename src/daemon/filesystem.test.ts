@@ -16,13 +16,31 @@ import * as path from 'path'
 
 const workspace = '/workspace'
 
+// By default, realpath resolves to the input path (no symlinks)
+function setupRealpath(): void {
+  vi.mocked(fs.realpath).mockImplementation(async (p: any) => path.resolve(String(p)))
+}
+
 describe('readDirectory', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setupRealpath()
   })
 
   it('returns error when path is outside workspace', async () => {
     const result = await readDirectory(workspace, '/etc/passwd')
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('Access denied')
+  })
+
+  it('returns error when symlink resolves outside workspace', async () => {
+    // Symlink inside workspace that resolves to outside
+    vi.mocked(fs.realpath).mockImplementation(async (p: any) => {
+      const s = String(p)
+      if (s === '/workspace/evil-link') return '/etc/shadow'
+      return path.resolve(s)
+    })
+    const result = await readDirectory(workspace, '/workspace/evil-link')
     expect(result.success).toBe(false)
     expect(result.error).toContain('Access denied')
   })
@@ -105,10 +123,22 @@ describe('readDirectory', () => {
 describe('readFile', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setupRealpath()
   })
 
   it('returns error when path is outside workspace', async () => {
     const result = await readFile(workspace, '/etc/passwd')
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('Access denied')
+  })
+
+  it('returns error when symlink resolves outside workspace', async () => {
+    vi.mocked(fs.realpath).mockImplementation(async (p: any) => {
+      const s = String(p)
+      if (s === '/workspace/evil-link.txt') return '/etc/passwd'
+      return path.resolve(s)
+    })
+    const result = await readFile(workspace, '/workspace/evil-link.txt')
     expect(result.success).toBe(false)
     expect(result.error).toContain('Access denied')
   })
@@ -169,6 +199,7 @@ describe('readFile', () => {
 describe('writeFile', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setupRealpath()
   })
 
   it('returns error when path is outside workspace', async () => {
@@ -206,6 +237,7 @@ describe('writeFile', () => {
 describe('searchFiles', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setupRealpath()
   })
 
   it('returns empty array for empty query', async () => {
