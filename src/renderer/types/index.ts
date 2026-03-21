@@ -402,7 +402,6 @@ declare global {
       platform: Platform
       terminal: TerminalApi
       selectFolder: () => Promise<string | null>
-      getRecentDirectories: () => Promise<string[]>
       git: GitApi
       settings: SettingsApi
       filesystem: FilesystemApi

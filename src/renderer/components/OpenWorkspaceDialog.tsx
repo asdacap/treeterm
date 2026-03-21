@@ -1,36 +1,23 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { useAppStore } from '../store/app'
+import { useRecentDirectoriesStore } from '../store/recentDirectories'
 import type { WorktreeSettings } from '../types'
 
 interface OpenWorkspaceDialogProps {
   onOpen: (path: string, settings?: WorktreeSettings) => void
   onCancel: () => void
   selectFolder: () => Promise<string | null>
-  getRecentDirectories: () => Promise<string[]>
+  connectionKey: string
+  isRemote: boolean
 }
 
-export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, getRecentDirectories }: OpenWorkspaceDialogProps) {
+export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, connectionKey, isRemote }: OpenWorkspaceDialogProps) {
   const [selectedPath, setSelectedPath] = useState<string>('')
   const [isSelecting, setIsSelecting] = useState(false)
   const [selectedAppId, setSelectedAppId] = useState<string>('')
-  const [recentDirectories, setRecentDirectories] = useState<string[]>([])
-  const [isLoadingRecent, setIsLoadingRecent] = useState(false)
 
-  // Fetch recent directories on mount
-  useEffect(() => {
-    const loadRecentDirectories = async () => {
-      setIsLoadingRecent(true)
-      try {
-        const recent = await getRecentDirectories()
-        setRecentDirectories(recent)
-      } catch (error) {
-        console.error('Failed to load recent directories:', error)
-      } finally {
-        setIsLoadingRecent(false)
-      }
-    }
-    loadRecentDirectories()
-  }, [])
+  const recentDirectories = useRecentDirectoriesStore(s => s.getRecent(connectionKey))
+  const addRecent = useRecentDirectoriesStore(s => s.addRecent)
 
   const applications = useAppStore((s) => s.applications)
   const availableApps = useMemo(() => Object.values(applications).filter(app => app.showInNewTabMenu), [applications])
@@ -49,11 +36,13 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, ge
 
   const handleOpen = () => {
     if (!selectedPath) return
-    
+
+    addRecent(connectionKey, selectedPath)
+
     const settings: WorktreeSettings | undefined = selectedAppId
       ? { defaultApplicationId: selectedAppId }
       : undefined
-    
+
     onOpen(selectedPath, settings)
   }
 
@@ -111,17 +100,20 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, ge
               <input
                 type="text"
                 value={selectedPath}
-                readOnly
-                placeholder="Select a folder..."
+                onChange={(e) => setSelectedPath(e.target.value)}
+                placeholder={isRemote ? "Enter remote path (e.g. /home/user/project)" : "Enter or browse for a folder..."}
                 className="folder-path-input"
+                autoFocus
               />
-              <button
-                className="dialog-btn browse"
-                onClick={handleSelectFolder}
-                disabled={isSelecting}
-              >
-                {isSelecting ? 'Opening...' : 'Browse...'}
-              </button>
+              {!isRemote && (
+                <button
+                  className="dialog-btn browse"
+                  onClick={handleSelectFolder}
+                  disabled={isSelecting}
+                >
+                  {isSelecting ? 'Opening...' : 'Browse...'}
+                </button>
+              )}
             </div>
           </div>
 
@@ -141,7 +133,7 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, ge
               ))}
             </select>
             <p className="settings-hint">
-              The application to open by default in this workspace. 
+              The application to open by default in this workspace.
               Child worktrees will inherit this setting.
             </p>
           </div>
@@ -151,8 +143,8 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, ge
           <button className="dialog-btn cancel" onClick={onCancel}>
             Cancel
           </button>
-          <button 
-            className="dialog-btn create" 
+          <button
+            className="dialog-btn create"
             onClick={handleOpen}
             disabled={!selectedPath || isSelecting}
           >

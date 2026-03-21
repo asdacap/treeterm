@@ -32,7 +32,6 @@ export interface AppDeps {
   sandbox: SandboxApi
   ssh: SSHApi
   selectFolder: () => Promise<string | null>
-  getRecentDirectories: () => Promise<string[]>
   getWindowUuid: () => Promise<string>
   getInitialWorkspace: () => Promise<string | null>
 }
@@ -95,7 +94,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
   sandbox: UNINITIALIZED,
   ssh: UNINITIALIZED,
   selectFolder: UNINITIALIZED,
-  getRecentDirectories: UNINITIALIZED,
   getWindowUuid: UNINITIALIZED,
   getInitialWorkspace: UNINITIALIZED,
 

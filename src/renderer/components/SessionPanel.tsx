@@ -24,14 +24,12 @@ interface SessionPanelProps {
   sessionId: string
   sessionStore: StoreApi<SessionState>
   selectFolder: () => Promise<string | null>
-  getRecentDirectories: () => Promise<string[]>
 }
 
 export default function SessionPanel({
   sessionId,
   sessionStore,
   selectFolder,
-  getRecentDirectories,
 }: SessionPanelProps): JSX.Element {
   const connection = useStore(sessionStore, s => s.connection)
   const {
@@ -437,7 +435,10 @@ export default function SessionPanel({
           onOpen={handleOpenWorkspaceSubmit}
           onCancel={() => setIsOpenWorkspaceDialogOpen(false)}
           selectFolder={selectFolder}
-          getRecentDirectories={getRecentDirectories}
+          connectionKey={connection?.target.type === 'remote'
+            ? `${connection.target.config.user}@${connection.target.config.host}:${connection.target.config.port}`
+            : 'local'}
+          isRemote={connection?.target.type === 'remote'}
         />
       )}
     </div>
