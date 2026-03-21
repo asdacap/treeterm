@@ -9,6 +9,7 @@ import { useTtyCreation } from '../hooks/useTtyConnection'
 import { useTerminalAnalyzer, type TerminalAiState } from '../hooks/useTerminalAnalyzer'
 import { useSettingsStore } from '../store/settings'
 import type { SandboxConfig, WorkspaceStore } from '../types'
+import { clampContextMenuPosition } from '../utils/contextMenuPosition'
 
 const STATE_COLORS: Record<TerminalAiState, string> = {
   idle: '#666',
@@ -119,7 +120,7 @@ export default function AiHarness({
   const handleBadgeContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    setBadgeContextMenu({ x: e.clientX, y: e.clientY })
+    setBadgeContextMenu(clampContextMenuPosition(e.clientX, e.clientY))
   }
 
   // Close badge context menu on outside click

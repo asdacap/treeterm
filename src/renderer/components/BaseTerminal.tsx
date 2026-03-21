@@ -9,6 +9,7 @@ import { createActivityStateDetector } from '../utils/activityStateDetector'
 import type { Tty } from '../store/createTtyStore'
 import TerminalScrollWrapper from './TerminalScrollWrapper'
 import type { SandboxConfig, TerminalState, WorkspaceStore } from '../types'
+import { clampContextMenuPosition } from '../utils/contextMenuPosition'
 import '@xterm/xterm/css/xterm.css'
 
 // ANSI sequences that manipulate scrollback or clear the screen
@@ -404,7 +405,7 @@ export default function BaseTerminal({
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
-    setContextMenu({ x: e.clientX, y: e.clientY })
+    setContextMenu(clampContextMenuPosition(e.clientX, e.clientY))
   }
 
   const handleCopy = async () => {

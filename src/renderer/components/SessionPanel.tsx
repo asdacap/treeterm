@@ -13,6 +13,7 @@ import type { Workspace, ReviewState, WorktreeSettings } from '../types'
 
 // Import WorkspaceActivityIndicator from TreePane
 import { WorkspaceActivityIndicator } from './TreePane'
+import { clampContextMenuPosition } from '../utils/contextMenuPosition'
 
 interface ContextMenu {
   x: number
@@ -129,7 +130,8 @@ export default function SessionPanel({
   const handleContextMenu = (e: React.MouseEvent, id: string) => {
     e.preventDefault()
     e.stopPropagation()
-    setContextMenu({ x: e.clientX, y: e.clientY, workspaceId: id })
+    const pos = clampContextMenuPosition(e.clientX, e.clientY)
+    setContextMenu({ ...pos, workspaceId: id })
   }
 
   const closeContextMenu = () => {
