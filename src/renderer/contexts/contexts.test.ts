@@ -11,7 +11,6 @@ vi.mock('react', () => ({
 }))
 
 import { useFilesystemApi } from './FilesystemApiContext'
-import { useGitApi } from './GitApiContext'
 import { useSTTApi } from './STTApiContext'
 import { useTerminalApi } from './TerminalApiContext'
 
@@ -32,21 +31,6 @@ describe('Context hooks', () => {
       const api = { readFile: vi.fn() }
       mockUseContext.mockReturnValue(api)
       expect(useFilesystemApi()).toBe(api)
-    })
-  })
-
-  describe('useGitApi', () => {
-    it('throws when context is null', () => {
-      mockUseContext.mockReturnValue(null)
-      expect(() => useGitApi()).toThrow(
-        'useGitApi must be used within a GitApiContext.Provider'
-      )
-    })
-
-    it('returns value when context is provided', () => {
-      const api = { getStatus: vi.fn() }
-      mockUseContext.mockReturnValue(api)
-      expect(useGitApi()).toBe(api)
     })
   })
 

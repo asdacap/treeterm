@@ -290,6 +290,37 @@ export interface GitApi {
   getHeadCommitHash: (repoPath: string) => Promise<{ success: boolean; hash?: string; error?: string }>
 }
 
+/** Workspace-scoped GitApi with path pre-bound */
+export interface WorkspaceGitApi {
+  getInfo: () => Promise<GitInfo>
+  createWorktree: (name: string, baseBranch?: string) => Promise<WorktreeResult>
+  removeWorktree: (worktreePath: string, deleteBranch?: boolean) => Promise<{ success: boolean; error?: string }>
+  listWorktrees: () => Promise<WorktreeInfo[]>
+  getChildWorktrees: (parentBranch: string | null) => Promise<ChildWorktreeInfo[]>
+  listLocalBranches: () => Promise<string[]>
+  listRemoteBranches: () => Promise<string[]>
+  getBranchesInWorktrees: () => Promise<string[]>
+  createWorktreeFromBranch: (branch: string, worktreeName: string) => Promise<WorktreeResult>
+  createWorktreeFromRemote: (remoteBranch: string, worktreeName: string) => Promise<WorktreeResult>
+  getDiff: (parentBranch: string) => Promise<{ success: boolean; diff?: DiffResult; error?: string }>
+  getFileDiff: (parentBranch: string, filePath: string) => Promise<{ success: boolean; diff?: string; error?: string }>
+  checkMergeConflicts: (sourceBranch: string, targetBranch: string) => Promise<ConflictCheckResult>
+  merge: (worktreeBranch: string, targetBranch: string, squash?: boolean) => Promise<{ success: boolean; error?: string }>
+  hasUncommittedChanges: () => Promise<boolean>
+  commitAll: (message: string) => Promise<{ success: boolean; error?: string }>
+  deleteBranch: (branchName: string) => Promise<{ success: boolean; error?: string }>
+  getUncommittedChanges: () => Promise<{ success: boolean; changes?: UncommittedChanges; error?: string }>
+  getUncommittedFileDiff: (filePath: string, staged: boolean) => Promise<{ success: boolean; diff?: string; error?: string }>
+  stageFile: (filePath: string) => Promise<{ success: boolean; error?: string }>
+  unstageFile: (filePath: string) => Promise<{ success: boolean; error?: string }>
+  stageAll: () => Promise<{ success: boolean; error?: string }>
+  unstageAll: () => Promise<{ success: boolean; error?: string }>
+  commitStaged: (message: string) => Promise<{ success: boolean; error?: string }>
+  getFileContentsForDiff: (parentBranch: string, filePath: string) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
+  getUncommittedFileContentsForDiff: (filePath: string, staged: boolean) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
+  getHeadCommitHash: () => Promise<{ success: boolean; hash?: string; error?: string }>
+}
+
 export interface SettingsApi {
   load: () => Promise<Settings>
   save: (settings: Settings) => Promise<{ success: boolean }>

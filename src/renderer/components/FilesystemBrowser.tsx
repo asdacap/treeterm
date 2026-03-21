@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useStore } from 'zustand'
-import { useGitApi } from '../contexts/GitApiContext'
 import { FileTree } from './FileTree'
 import { FileViewer } from './FileViewer'
 import { CommentDisplay } from './CommentDisplay'
@@ -15,8 +14,8 @@ export function FilesystemBrowser({
   workspace,
   tabId,
 }: FilesystemBrowserProps): JSX.Element {
-  const { workspace: wsData, updateTabState, getReviewComments, addReviewComment, deleteReviewComment, updateOutdatedReviewComments } = useStore(workspace)
-  const git = useGitApi()
+  const { workspace: wsData, updateTabState, getReviewComments, addReviewComment, deleteReviewComment, updateOutdatedReviewComments, getGitApi } = useStore(workspace)
+  const git = getGitApi()
   const workspacePath = wsData.path
   const appState = wsData?.appStates[tabId]
   const state = appState?.state as FilesystemState | undefined
@@ -58,7 +57,7 @@ export function FilesystemBrowser({
   useEffect(() => {
     const updateOutdated = async () => {
       try {
-        const hashResult = await git.getHeadCommitHash(workspacePath)
+        const hashResult = await git.getHeadCommitHash()
         if (hashResult.success && hashResult.hash) {
           setCurrentCommitHash(hashResult.hash)
           updateOutdatedReviewComments(hashResult.hash)

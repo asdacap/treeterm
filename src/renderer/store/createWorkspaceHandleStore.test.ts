@@ -24,6 +24,7 @@ function makeHandleDeps(overrides?: Partial<WorkspaceHandleDeps>): WorkspaceHand
       onShowSessions: vi.fn().mockReturnValue(() => {}),
       onActiveProcessesOpen: vi.fn().mockReturnValue(() => {}),
     } as any,
+    git: {} as any,
     syncToDaemon: vi.fn(),
     removeWorkspace: vi.fn().mockResolvedValue(undefined),
     removeWorkspaceKeepBranch: vi.fn().mockResolvedValue(undefined),
