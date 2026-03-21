@@ -133,6 +133,19 @@ describe('IpcServer', () => {
       ['onDialogGetRecentDirectories', 'dialog:getRecentDirectories'],
       ['onSandboxIsAvailable', 'sandbox:isAvailable'],
       ['onAppGetInitialWorkspace', 'app:getInitialWorkspace'],
+      ['onRunActionsDetect', 'runActions:detect'],
+      ['onRunActionsRun', 'runActions:run'],
+      ['onSshConnect', 'ssh:connect'],
+      ['onSshDisconnect', 'ssh:disconnect'],
+      ['onSshListConnections', 'ssh:listConnections'],
+      ['onSshSaveConnection', 'ssh:saveConnection'],
+      ['onSshGetSavedConnections', 'ssh:getSavedConnections'],
+      ['onSshRemoveSavedConnection', 'ssh:removeSavedConnection'],
+      ['onSshGetOutput', 'ssh:getOutput'],
+      ['onSshWatchOutput', 'ssh:watchOutput'],
+      ['onSshUnwatchOutput', 'ssh:unwatchOutput'],
+      ['onSshWatchConnectionStatus', 'ssh:watchConnectionStatus'],
+      ['onSshUnwatchConnectionStatus', 'ssh:unwatchConnectionStatus'],
     ] as const)('%s registers handler on %s channel', (method, channel) => {
       const handler = vi.fn()
       ;(server as any)[method](handler)
@@ -170,6 +183,20 @@ describe('IpcServer', () => {
       const handler = vi.fn()
       server.onAppCloseCancelled(handler)
       expect(mockOn).toHaveBeenCalledWith('app:close-cancelled', expect.any(Function))
+    })
+
+    it('onLlmChatCancel registers handler on llm:chat:cancel channel', () => {
+      const handler = vi.fn()
+      server.onLlmChatCancel(handler)
+      expect(mockOn).toHaveBeenCalledWith('llm:chat:cancel', expect.any(Function))
+    })
+
+    it('onLlmChatCancel wrapper forwards args to handler', () => {
+      const handler = vi.fn()
+      server.onLlmChatCancel(handler)
+      const wrapper = mockOn.mock.calls[0][1]
+      wrapper({}, 'request-123')
+      expect(handler).toHaveBeenCalledWith('request-123')
     })
   })
 
@@ -264,6 +291,34 @@ describe('IpcServer', () => {
 
       server.sessionShowSessions()
       expect(mockSend).toHaveBeenCalledWith('session:show-sessions')
+    })
+
+    it('activeProcessesOpen sends to window webContents', () => {
+      const mockSend = vi.fn()
+      const mockWindow = { webContents: { send: mockSend } } as any
+      server.setWindow(mockWindow)
+
+      server.activeProcessesOpen()
+      expect(mockSend).toHaveBeenCalledWith('active-processes:open')
+    })
+
+    it('sshConnectionStatus sends to window webContents', () => {
+      const mockSend = vi.fn()
+      const mockWindow = { webContents: { send: mockSend } } as any
+      server.setWindow(mockWindow)
+
+      const info = { id: 'conn-1', status: 'connected' } as any
+      server.sshConnectionStatus(info)
+      expect(mockSend).toHaveBeenCalledWith('ssh:connectionStatus', info)
+    })
+
+    it('sshOutput sends to window webContents', () => {
+      const mockSend = vi.fn()
+      const mockWindow = { webContents: { send: mockSend } } as any
+      server.setWindow(mockWindow)
+
+      server.sshOutput('conn-1', 'log line')
+      expect(mockSend).toHaveBeenCalledWith('ssh:output', 'conn-1', 'log line')
     })
   })
 
