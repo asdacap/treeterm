@@ -31,9 +31,13 @@ export const useActivityStateStore = create<ActivityStateStore>((set, get) => ({
 
   getWorkspaceState: (tabIds) => {
     const states = get().states
-    // Priority: working > waiting_for_input > idle
+    // Priority: working > permission_request > safe_permission_requested > user_input_required > error > completed > idle
     if (tabIds.some((id) => states[id] === 'working')) return 'working'
-    if (tabIds.some((id) => states[id] === 'waiting_for_input')) return 'waiting_for_input'
+    if (tabIds.some((id) => states[id] === 'permission_request')) return 'permission_request'
+    if (tabIds.some((id) => states[id] === 'safe_permission_requested')) return 'safe_permission_requested'
+    if (tabIds.some((id) => states[id] === 'user_input_required')) return 'user_input_required'
+    if (tabIds.some((id) => states[id] === 'error')) return 'error'
+    if (tabIds.some((id) => states[id] === 'completed')) return 'completed'
     return 'idle'
   }
 }))

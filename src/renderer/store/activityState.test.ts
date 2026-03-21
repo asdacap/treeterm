@@ -24,13 +24,13 @@ describe('ActivityStateStore', () => {
     it('maintains states for multiple tabs', () => {
       useActivityStateStore.getState().setTabState('tab1', 'working')
       useActivityStateStore.getState().setTabState('tab2', 'idle')
-      useActivityStateStore.getState().setTabState('tab3', 'waiting_for_input')
+      useActivityStateStore.getState().setTabState('tab3', 'user_input_required')
       
       const states = useActivityStateStore.getState().states
       expect(Object.keys(states)).toHaveLength(3)
       expect(states['tab1']).toBe('working')
       expect(states['tab2']).toBe('idle')
-      expect(states['tab3']).toBe('waiting_for_input')
+      expect(states['tab3']).toBe('user_input_required')
     })
   })
 
@@ -76,18 +76,18 @@ describe('ActivityStateStore', () => {
       expect(state).toBe('working')
     })
 
-    it('returns waiting_for_input when no working but some waiting', () => {
+    it('returns user_input_required when no working but some waiting', () => {
       useActivityStateStore.getState().setTabState('tab1', 'idle')
-      useActivityStateStore.getState().setTabState('tab2', 'waiting_for_input')
+      useActivityStateStore.getState().setTabState('tab2', 'user_input_required')
       
       const state = useActivityStateStore.getState().getWorkspaceState(['tab1', 'tab2'])
       
-      expect(state).toBe('waiting_for_input')
+      expect(state).toBe('user_input_required')
     })
 
-    it('returns working over waiting_for_input', () => {
+    it('returns working over user_input_required', () => {
       useActivityStateStore.getState().setTabState('tab1', 'working')
-      useActivityStateStore.getState().setTabState('tab2', 'waiting_for_input')
+      useActivityStateStore.getState().setTabState('tab2', 'user_input_required')
       
       const state = useActivityStateStore.getState().getWorkspaceState(['tab1', 'tab2'])
       

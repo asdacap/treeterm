@@ -278,8 +278,24 @@ body,
   display: inline-block;
 }
 
-.tree-item-activity-waiting_for_input {
+.tree-item-activity-user_input_required {
   color: #0dbc79;
+}
+
+.tree-item-activity-permission_request {
+  color: #cd6600;
+}
+
+.tree-item-activity-safe_permission_requested {
+  color: #0dbc79;
+}
+
+.tree-item-activity-completed {
+  color: #23d18b;
+}
+
+.tree-item-activity-error {
+  color: #f44747;
 }
 
 .tree-item-actions {
@@ -325,8 +341,24 @@ body,
   display: inline-block;
 }
 
-.tab-activity-waiting_for_input {
+.tab-activity-user_input_required {
   color: #0dbc79;
+}
+
+.tab-activity-permission_request {
+  color: #cd6600;
+}
+
+.tab-activity-safe_permission_requested {
+  color: #0dbc79;
+}
+
+.tab-activity-completed {
+  color: #23d18b;
+}
+
+.tab-activity-error {
+  color: #f44747;
 }
 
 /* Context Menu */

@@ -1,8 +1,7 @@
-import type { Application, Tab, Workspace, ActivityState, AiHarnessState, AiHarnessInstance, TerminalApi } from '../../renderer/types'
+import type { Application, Tab, Workspace, AiHarnessState, AiHarnessInstance, TerminalApi } from '../../renderer/types'
 import { isAiHarnessState } from '../../renderer/types'
 import AiHarness from '../../renderer/components/AiHarness'
 import { createElement } from 'react'
-import { useActivityStateStore } from '../../renderer/store/activityState'
 
 type TerminalDeps = { terminal: Pick<TerminalApi, 'kill'> }
 
@@ -21,7 +20,10 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
           enabled: instance.enableSandbox,
           allowNetwork: instance.allowNetwork,
           allowedPaths: []
-        }
+        },
+        aiState: 'idle',
+        analyzing: false,
+        reason: ''
       }
     },
 
@@ -29,7 +31,6 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
       if (isAiHarnessState(tab.state) && tab.state.ptyId) {
         deps.terminal.kill(tab.state.ptyId)
       }
-      useActivityStateStore.getState().removeTabState(tab.id)
     },
 
     render: ({ tab, workspace, isVisible }) => {
@@ -50,8 +51,9 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
       })
     },
 
-    getActivityState: (tab: Tab): ActivityState => {
-      return useActivityStateStore.getState().states[tab.id] || 'idle'
+    getActivityState: (tab: Tab) => {
+      if (!isAiHarnessState(tab.state)) return 'idle'
+      return tab.state.aiState
     },
 
     canClose: true,

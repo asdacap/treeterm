@@ -1,24 +1,15 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import type { Terminal as XTerm } from '@xterm/xterm'
 import { useSettingsStore } from '../store/settings'
-
-export type TerminalAiState =
-  | 'idle'
-  | 'working'
-  | 'user_input_required'
-  | 'permission_request'
-  | 'safe_permission_requested'
-  | 'completed'
-  | 'error'
+import type { ActivityState, AiHarnessState } from '../types'
 
 export function useTerminalAnalyzer(
   terminal: XTerm | null,
   dataVersionRef: React.MutableRefObject<number> | null,
-  cwd: string
-): { aiState: TerminalAiState; analyzing: boolean; reason: string } {
-  const [aiState, setAiState] = useState<TerminalAiState>('idle')
-  const [analyzing, setAnalyzing] = useState(false)
-  const [reason, setReason] = useState('')
+  cwd: string,
+  updateTabState: <T>(tabId: string, updater: (state: T) => T) => void,
+  tabId: string
+): void {
   const lastVersionRef = useRef(0)
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const settings = useSettingsStore((s) => s.settings)
@@ -44,7 +35,7 @@ export function useTerminalAnalyzer(
         if (!buffer.trim()) return
         console.debug('[terminal-analyzer] buffer:', buffer)
 
-        setAnalyzing(true)
+        updateTabState<AiHarnessState>(tabId, (s) => ({ ...s, analyzing: true }))
         const result = await window.electron.llm.analyzeTerminal(buffer, cwd, {
           baseUrl: settings.llm.baseUrl,
           apiKey: settings.llm.apiKey,
@@ -56,25 +47,29 @@ export function useTerminalAnalyzer(
 
         if (dataVersionRef.current !== requestVersion) {
           console.debug('[terminal-analyzer] discarding stale response')
+          updateTabState<AiHarnessState>(tabId, (s) => ({ ...s, analyzing: false }))
           return
         }
 
         console.debug('[terminal-analyzer] result:', result)
         if ('state' in result) {
           console.debug('[terminal-analyzer] state set:', result.state, 'reason:', result.reason)
-          setAiState(result.state as TerminalAiState)
-          setReason(result.reason)
+          updateTabState<AiHarnessState>(tabId, (s) => ({
+            ...s,
+            aiState: result.state as ActivityState,
+            reason: result.reason,
+            analyzing: false
+          }))
         } else if ('error' in result) {
           console.error('[terminal-analyzer] error:', result.error)
-          setAiState('error')
+          updateTabState<AiHarnessState>(tabId, (s) => ({ ...s, aiState: 'error', analyzing: false }))
         } else {
           console.debug('[terminal-analyzer] ignored (no state in result)')
+          updateTabState<AiHarnessState>(tabId, (s) => ({ ...s, analyzing: false }))
         }
       } catch (err) {
         console.error('[terminal-analyzer] LLM call failed:', err)
-        setAiState('error')
-      } finally {
-        setAnalyzing(false)
+        updateTabState<AiHarnessState>(tabId, (s) => ({ ...s, aiState: 'error', analyzing: false }))
       }
     }
 
@@ -82,7 +77,7 @@ export function useTerminalAnalyzer(
       if (dataVersionRef.current === lastVersionRef.current) return
 
       lastVersionRef.current = dataVersionRef.current
-      setAiState('working')
+      updateTabState<AiHarnessState>(tabId, (s) => ({ ...s, aiState: 'working' }))
 
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
       debounceTimerRef.current = setTimeout(analyze, 500)
@@ -92,7 +87,5 @@ export function useTerminalAnalyzer(
       clearInterval(interval)
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
     }
-  }, [terminal, dataVersionRef, cwd, settings.llm.apiKey, settings.llm.baseUrl, settings.terminalAnalyzer.model, settings.terminalAnalyzer.systemPrompt, settings.terminalAnalyzer.disableReasoning, settings.terminalAnalyzer.safePaths, settings.terminalAnalyzer.bufferLines])
-
-  return { aiState, analyzing, reason }
+  }, [terminal, dataVersionRef, cwd, updateTabState, tabId, settings.llm.apiKey, settings.llm.baseUrl, settings.terminalAnalyzer.model, settings.terminalAnalyzer.systemPrompt, settings.terminalAnalyzer.disableReasoning, settings.terminalAnalyzer.safePaths, settings.terminalAnalyzer.bufferLines])
 }

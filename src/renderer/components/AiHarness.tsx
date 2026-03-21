@@ -6,12 +6,12 @@ import PushToTalkButton from './PushToTalkButton'
 import { ReviewCommentsButton } from './ReviewCommentsButton'
 import { useSessionApi } from '../contexts/SessionStoreContext'
 import { useTtyCreation } from '../hooks/useTtyConnection'
-import { useTerminalAnalyzer, type TerminalAiState } from '../hooks/useTerminalAnalyzer'
+import { useTerminalAnalyzer } from '../hooks/useTerminalAnalyzer'
 import { useSettingsStore } from '../store/settings'
-import type { AiHarnessState, SandboxConfig, WorkspaceStore } from '../types'
+import type { ActivityState, AiHarnessState, SandboxConfig, WorkspaceStore } from '../types'
 import { clampContextMenuPosition } from '../utils/contextMenuPosition'
 
-const STATE_COLORS: Record<TerminalAiState, string> = {
+const STATE_COLORS: Record<ActivityState, string> = {
   idle: '#666',
   working: '#2472c8',
   user_input_required: '#e5e510',
@@ -21,7 +21,7 @@ const STATE_COLORS: Record<TerminalAiState, string> = {
   error: '#f44747'
 }
 
-const STATE_LABELS: Record<TerminalAiState, string> = {
+const STATE_LABELS: Record<ActivityState, string> = {
   idle: 'idle',
   working: 'working',
   user_input_required: 'input required',
@@ -57,8 +57,12 @@ export default function AiHarness({
   const sessionStore = useSessionApi()
   const { workspace: wsData, updateTabState } = useStore(workspace)
   const appState = wsData?.appStates[tabId]
-  const ptyId = (appState?.state as BaseTerminalState | undefined)?.ptyId
-  const autoApprove = (appState?.state as AiHarnessState | undefined)?.autoApprove ?? false
+  const state = appState?.state as AiHarnessState | undefined
+  const ptyId = state?.ptyId ?? null
+  const aiState = state?.aiState ?? 'idle'
+  const analyzing = state?.analyzing ?? false
+  const reason = state?.reason ?? ''
+  const autoApprove = state?.autoApprove ?? false
 
   const [terminal, setTerminal] = useState<XTerm | null>(null)
   const dataVersionRefHolder = useRef<React.MutableRefObject<number> | null>(null)
@@ -93,10 +97,12 @@ export default function AiHarness({
     setDataVersionReady(true)
   }, [])
 
-  const { aiState, analyzing, reason } = useTerminalAnalyzer(
+  useTerminalAnalyzer(
     terminal,
     dataVersionReady ? dataVersionRefHolder.current : null,
-    cwd
+    cwd,
+    updateTabState,
+    tabId
   )
 
   const settings = useSettingsStore((s) => s.settings)

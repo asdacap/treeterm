@@ -43,7 +43,14 @@ export type {
 export type Tab = AppState & { id: string }
 
 // Activity state for applications that can report their state
-export type ActivityState = 'idle' | 'working' | 'waiting_for_input'
+export type ActivityState =
+  | 'idle'
+  | 'working'
+  | 'user_input_required'
+  | 'permission_request'
+  | 'safe_permission_requested'
+  | 'completed'
+  | 'error'
 
 // Application - code-defined, registered at runtime
 export interface Application<TState = unknown> {
@@ -81,6 +88,9 @@ export interface TerminalState {
 
 export type AiHarnessState = TerminalState & {
   sandbox: SandboxConfig
+  aiState: ActivityState
+  analyzing: boolean
+  reason: string
   autoApprove?: boolean
 }
 

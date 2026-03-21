@@ -26,7 +26,7 @@ describe('createActivityStateDetector', () => {
     expect(onStateChange).not.toHaveBeenCalled()
   })
 
-  it('emits waiting_for_input after idle timeout when buffer has prompt', () => {
+  it('emits user_input_required after idle timeout when buffer has prompt', () => {
     const onStateChange = vi.fn()
     const { processData } = createActivityStateDetector(onStateChange, { idleTimeout: 500, debounceMs: 0 })
 
@@ -35,7 +35,7 @@ describe('createActivityStateDetector', () => {
     // Fast-forward past idle timeout
     vi.advanceTimersByTime(600)
 
-    expect(onStateChange).toHaveBeenCalledWith('waiting_for_input')
+    expect(onStateChange).toHaveBeenCalledWith('user_input_required')
   })
 
   it('emits idle after idle timeout when no prompt is detected', () => {
@@ -57,7 +57,7 @@ describe('createActivityStateDetector', () => {
     vi.advanceTimersByTime(200)
 
     const calls = onStateChange.mock.calls.map(c => c[0])
-    expect(calls).toContain('waiting_for_input')
+    expect(calls).toContain('user_input_required')
   })
 
   it('detects zsh % prompt', () => {
@@ -68,7 +68,7 @@ describe('createActivityStateDetector', () => {
     vi.advanceTimersByTime(200)
 
     const calls = onStateChange.mock.calls.map(c => c[0])
-    expect(calls).toContain('waiting_for_input')
+    expect(calls).toContain('user_input_required')
   })
 
   it('detects > prompt', () => {
@@ -79,7 +79,7 @@ describe('createActivityStateDetector', () => {
     vi.advanceTimersByTime(200)
 
     const calls = onStateChange.mock.calls.map(c => c[0])
-    expect(calls).toContain('waiting_for_input')
+    expect(calls).toContain('user_input_required')
   })
 
   it('detects braille spinner as working indicator', () => {
@@ -107,7 +107,7 @@ describe('createActivityStateDetector', () => {
     vi.advanceTimersByTime(200)
 
     const calls = onStateChange.mock.calls.map(c => c[0])
-    expect(calls).toContain('waiting_for_input')
+    expect(calls).toContain('user_input_required')
   })
 
   it('strips ANSI escape sequences before prompt matching', () => {
@@ -119,7 +119,7 @@ describe('createActivityStateDetector', () => {
     vi.advanceTimersByTime(200)
 
     const calls = onStateChange.mock.calls.map(c => c[0])
-    expect(calls).toContain('waiting_for_input')
+    expect(calls).toContain('user_input_required')
   })
 
   it('does not emit same state twice in a row', () => {
@@ -144,12 +144,12 @@ describe('createActivityStateDetector', () => {
     processData('output2') // Reset timer
     vi.advanceTimersByTime(300) // Still not idle (300 < 500)
 
-    const idleCalls = onStateChange.mock.calls.filter(c => c[0] === 'idle' || c[0] === 'waiting_for_input')
+    const idleCalls = onStateChange.mock.calls.filter(c => c[0] === 'idle' || c[0] === 'user_input_required')
     expect(idleCalls).toHaveLength(0)
 
     vi.advanceTimersByTime(300) // Now past idle timeout
-    // Should have transitioned to idle or waiting_for_input
-    const finalCalls = onStateChange.mock.calls.filter(c => c[0] === 'idle' || c[0] === 'waiting_for_input')
+    // Should have transitioned to idle or user_input_required
+    const finalCalls = onStateChange.mock.calls.filter(c => c[0] === 'idle' || c[0] === 'user_input_required')
     expect(finalCalls.length).toBeGreaterThan(0)
   })
 
@@ -171,8 +171,8 @@ describe('createActivityStateDetector', () => {
 
       vi.advanceTimersByTime(500)
 
-      // Should not have emitted waiting_for_input after destroy
-      const stateCalls = onStateChange.mock.calls.filter(c => c[0] === 'waiting_for_input')
+      // Should not have emitted user_input_required after destroy
+      const stateCalls = onStateChange.mock.calls.filter(c => c[0] === 'user_input_required')
       expect(stateCalls).toHaveLength(0)
     })
 
@@ -185,7 +185,7 @@ describe('createActivityStateDetector', () => {
     })
   })
 
-  it('detects root # prompt as waiting_for_input', () => {
+  it('detects root # prompt as user_input_required', () => {
     const onStateChange = vi.fn()
     const { processData } = createActivityStateDetector(onStateChange, { idleTimeout: 100, debounceMs: 0 })
 
@@ -193,10 +193,10 @@ describe('createActivityStateDetector', () => {
     vi.advanceTimersByTime(200)
 
     const calls = onStateChange.mock.calls.map(c => c[0])
-    expect(calls).toContain('waiting_for_input')
+    expect(calls).toContain('user_input_required')
   })
 
-  it('detects fancy \u276f prompt as waiting_for_input', () => {
+  it('detects fancy \u276f prompt as user_input_required', () => {
     const onStateChange = vi.fn()
     const { processData } = createActivityStateDetector(onStateChange, { idleTimeout: 100, debounceMs: 0 })
 
@@ -204,7 +204,7 @@ describe('createActivityStateDetector', () => {
     vi.advanceTimersByTime(200)
 
     const calls = onStateChange.mock.calls.map(c => c[0])
-    expect(calls).toContain('waiting_for_input')
+    expect(calls).toContain('user_input_required')
   })
 
   it('rapid data during debounce cancels pending idle transition', () => {
@@ -218,7 +218,7 @@ describe('createActivityStateDetector', () => {
     processData('more output')
     vi.advanceTimersByTime(10)
 
-    // Should have gone back to 'working', not 'waiting_for_input'
+    // Should have gone back to 'working', not 'user_input_required'
     const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1][0]
     expect(lastCall).toBe('working')
   })
@@ -228,15 +228,15 @@ describe('createActivityStateDetector', () => {
     const { processData } = createActivityStateDetector(onStateChange, { idleTimeout: 100, debounceMs: 200 })
 
     processData('user@host:~$ ')
-    vi.advanceTimersByTime(150) // idle timer fires, debounce for waiting_for_input starts
+    vi.advanceTimersByTime(150) // idle timer fires, debounce for user_input_required starts
 
     processData('new data') // working should cancel debounce
 
     // Advance past the original debounce period
     vi.advanceTimersByTime(250)
 
-    // The last state should not be waiting_for_input since working cleared it
-    const waitingCalls = onStateChange.mock.calls.filter(c => c[0] === 'waiting_for_input')
+    // The last state should not be user_input_required since working cleared it
+    const waitingCalls = onStateChange.mock.calls.filter(c => c[0] === 'user_input_required')
     expect(waitingCalls).toHaveLength(0)
   })
 
@@ -266,6 +266,6 @@ describe('createActivityStateDetector', () => {
     vi.advanceTimersByTime(200)
 
     const calls = onStateChange.mock.calls.map(c => c[0])
-    expect(calls).toContain('waiting_for_input')
+    expect(calls).toContain('user_input_required')
   })
 })

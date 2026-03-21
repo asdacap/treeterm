@@ -5,19 +5,16 @@ import SessionPanel from './SessionPanel'
 
 // Exported so SessionPanel can use it
 export function WorkspaceActivityIndicator({ tabIds }: { tabIds: string[] }) {
-  const activityState = useActivityStateStore((state) => {
-    // Priority: working > waiting_for_input > idle
-    if (tabIds.some((id) => state.states[id] === 'working')) return 'working'
-    if (tabIds.some((id) => state.states[id] === 'waiting_for_input')) return 'waiting_for_input'
-    return 'idle'
-  })
+  const activityState = useActivityStateStore((state) =>
+    state.getWorkspaceState(tabIds)
+  )
 
   if (activityState === 'idle') return null
 
   return (
     <span
       className={`tree-item-activity tree-item-activity-${activityState}`}
-      title={activityState === 'working' ? 'Working...' : 'Waiting for input'}
+      title={activityState === 'working' ? 'Working...' : activityState.replace(/_/g, ' ')}
     >
       {activityState === 'working' ? <Loader2 size={10} /> : <Circle size={8} fill="currentColor" />}
     </span>

@@ -3,7 +3,6 @@ import { createAiHarnessVariant } from './renderer'
 import type { Tab, Workspace, AiHarnessInstance, AiHarnessState } from '../../renderer/types'
 import { createStore } from 'zustand/vanilla'
 import type { WorkspaceStoreState } from '../../renderer/store/createWorkspaceStore'
-import { useActivityStateStore } from '../../renderer/store/activityState'
 
 // Mock React
 vi.mock('react', () => ({
@@ -13,18 +12,6 @@ vi.mock('react', () => ({
 // Mock AiHarness component
 vi.mock('../../renderer/components/AiHarness', () => ({
   default: vi.fn(() => null)
-}))
-
-// Mock activity state store
-const mockRemoveTabState = vi.fn()
-const mockGetTabState = vi.fn()
-vi.mock('../../renderer/store/activityState', () => ({
-  useActivityStateStore: {
-    getState: vi.fn(() => ({
-      removeTabState: mockRemoveTabState,
-      states: {}
-    }))
-  }
 }))
 
 const mockTerminalKill = vi.fn()
@@ -104,7 +91,7 @@ describe('AI Harness Renderer', () => {
     })
 
     describe('createInitialState', () => {
-      it('returns AI Harness state with sandbox configuration', () => {
+      it('returns AI Harness state with sandbox configuration and analyzer defaults', () => {
         const app = createAiHarnessVariant(mockInstance, mockDeps)
         const state = app.createInitialState()
 
@@ -115,7 +102,10 @@ describe('AI Harness Renderer', () => {
             enabled: true,
             allowNetwork: false,
             allowedPaths: []
-          }
+          },
+          aiState: 'idle',
+          analyzing: false,
+          reason: ''
         })
       })
 
@@ -172,7 +162,6 @@ describe('AI Harness Renderer', () => {
         await app.cleanup?.(tab, workspace)
 
         expect(mockTerminalKill).toHaveBeenCalledWith('pty-789')
-        expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
       })
 
       it('does not kill PTY when tab has no ptyId', async () => {
@@ -207,7 +196,6 @@ describe('AI Harness Renderer', () => {
         await app.cleanup?.(tab, workspace)
 
         expect(mockTerminalKill).not.toHaveBeenCalled()
-        expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
       })
 
       it('does not kill PTY when state is not AI Harness state', async () => {
@@ -239,42 +227,6 @@ describe('AI Harness Renderer', () => {
         await app.cleanup?.(tab, workspace)
 
         expect(mockTerminalKill).not.toHaveBeenCalled()
-        expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
-      })
-
-      it('removes activity state regardless of PTY state', async () => {
-        const app = createAiHarnessVariant(mockInstance, mockDeps)
-        const tab: Tab = {
-          id: 'tab-1',
-          applicationId: 'aiharness-claude',
-          title: 'Claude',
-          state: {
-            ptyId: null,
-            sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] }
-          }
-        }
-        const workspace: Workspace = {
-          id: 'ws-1',
-          path: '/test',
-          name: 'Test',
-          parentId: null,
-          children: [],
-          status: 'active',
-          isGitRepo: true,
-          gitBranch: 'main',
-          gitRootPath: '/test',
-          isWorktree: false,
-          appStates: {},
-          activeTabId: null,
-          metadata: {},
-          createdAt: Date.now(),
-          lastActivity: Date.now()
-        }
-
-        await app.cleanup?.(tab, workspace)
-
-        expect(mockRemoveTabState).toHaveBeenCalledTimes(1)
-        expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
       })
     })
 
@@ -380,67 +332,40 @@ describe('AI Harness Renderer', () => {
     })
 
     describe('getActivityState', () => {
-      it('returns idle when no state exists for tab', () => {
+      it('returns aiState directly as ActivityState', () => {
+        const app = createAiHarnessVariant(mockInstance, mockDeps)
+        const states = ['idle', 'working', 'user_input_required', 'permission_request', 'safe_permission_requested', 'completed', 'error'] as const
+
+        for (const aiState of states) {
+          const tab: Tab = {
+            id: 'tab-1',
+            applicationId: 'aiharness-claude',
+            title: 'Claude',
+            state: {
+              ptyId: null,
+              sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] },
+              aiState,
+              analyzing: false,
+              reason: ''
+            }
+          }
+
+          expect(app.getActivityState?.(tab)).toBe(aiState)
+        }
+      })
+
+      it('returns idle when state is not AiHarnessState', () => {
         const app = createAiHarnessVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'aiharness-claude',
           title: 'Claude',
-          state: {
-            ptyId: null,
-            sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] }
-          }
+          state: { ptyId: 'pty-789' } // Not a valid AiHarnessState
         }
 
         const activityState = app.getActivityState?.(tab)
 
         expect(activityState).toBe('idle')
-      })
-
-      it('returns correct state from store', () => {
-        const mockStates = { 'tab-1': 'working' }
-        vi.mocked(useActivityStateStore.getState).mockReturnValue({
-          removeTabState: mockRemoveTabState,
-          states: mockStates
-        } as any)
-
-        const app = createAiHarnessVariant(mockInstance, mockDeps)
-        const tab: Tab = {
-          id: 'tab-1',
-          applicationId: 'aiharness-claude',
-          title: 'Claude',
-          state: {
-            ptyId: null,
-            sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] }
-          }
-        }
-
-        const activityState = app.getActivityState?.(tab)
-
-        expect(activityState).toBe('working')
-      })
-
-      it('returns waiting_for_input state from store', () => {
-        const mockStates = { 'tab-1': 'waiting_for_input' }
-        vi.mocked(useActivityStateStore.getState).mockReturnValue({
-          removeTabState: mockRemoveTabState,
-          states: mockStates
-        } as any)
-
-        const app = createAiHarnessVariant(mockInstance, mockDeps)
-        const tab: Tab = {
-          id: 'tab-1',
-          applicationId: 'aiharness-claude',
-          title: 'Claude',
-          state: {
-            ptyId: null,
-            sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] }
-          }
-        }
-
-        const activityState = app.getActivityState?.(tab)
-
-        expect(activityState).toBe('waiting_for_input')
       })
     })
   })

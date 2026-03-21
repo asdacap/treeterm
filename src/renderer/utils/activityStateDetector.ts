@@ -42,7 +42,7 @@ export function createActivityStateDetector(
   const emitState = (state: ActivityState) => {
     // Always clear pending debounce when trying to emit 'working'
     // This prevents a race where data arrives during a debounced transition
-    // to 'waiting_for_input' or 'idle', which would incorrectly fire after the early return
+    // to 'user_input_required' or 'idle', which would incorrectly fire after the early return
     if (state === 'working' && debounceTimerId) {
       clearTimeout(debounceTimerId)
       debounceTimerId = null
@@ -104,7 +104,7 @@ export function createActivityStateDetector(
       // After 1 second of no activity, determine final state
       const hasPrompt = checkForPrompt()
       if (hasPrompt) {
-        emitState('waiting_for_input')
+        emitState('user_input_required')
       } else {
         emitState('idle')
       }
