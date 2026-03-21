@@ -25,6 +25,9 @@ const makeTabs = (count: number): Tab[] =>
     state: {},
   }))
 
+const appLookup = (id: string): Application | undefined =>
+  id === 'test-terminal' ? testApp : undefined
+
 describe('createDefaultLayoutModel', () => {
   it('creates a valid model with a single tabset', () => {
     const tabs = makeTabs(3)
@@ -90,6 +93,28 @@ describe('createDefaultLayoutModel', () => {
   it('disables render-on-demand to support portal pattern', () => {
     const model = createDefaultLayoutModel(makeTabs(1), null)
     expect(model.global?.tabEnableRenderOnDemand).toBe(false)
+  })
+
+  it('sets enableClose true on tabs when appLookup provides a closeable app', () => {
+    const tabs = makeTabs(2)
+    const model = createDefaultLayoutModel(tabs, null, appLookup)
+
+    const tabset = model.layout.children[0]
+    if (tabset.type === 'tabset') {
+      for (const child of tabset.children) {
+        expect((child as { enableClose?: boolean }).enableClose).toBe(true)
+      }
+    }
+  })
+
+  it('sets enableClose false on tabs when no appLookup is provided', () => {
+    const tabs = makeTabs(1)
+    const model = createDefaultLayoutModel(tabs, null)
+
+    const tabset = model.layout.children[0]
+    if (tabset.type === 'tabset') {
+      expect((tabset.children[0] as { enableClose?: boolean }).enableClose).toBe(false)
+    }
   })
 })
 
