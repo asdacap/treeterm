@@ -66,7 +66,7 @@ vi.mock('./createWorkspaceStore', () => ({
       isRestoring: false,
       addWorkspace: vi.fn(),
       setActiveWorkspace: vi.fn(),
-      addTabWithState: vi.fn(),
+      addTab: vi.fn(),
       setActiveTab: vi.fn(),
       syncToDaemon: vi.fn().mockResolvedValue(undefined)
     }),
@@ -237,7 +237,7 @@ describe('useAppStore', () => {
 
   describe('session restore via onReady', () => {
     let mockAddWorkspace: ReturnType<typeof vi.fn>
-    let mockAddTabWithState: ReturnType<typeof vi.fn>
+    let mockAddTab: ReturnType<typeof vi.fn>
     let mockSetActiveWorkspace: ReturnType<typeof vi.fn>
     let mockSetActiveTab: ReturnType<typeof vi.fn>
     let mockSyncToDaemon: ReturnType<typeof vi.fn>
@@ -245,7 +245,7 @@ describe('useAppStore', () => {
 
     beforeEach(async () => {
       mockAddWorkspace = vi.fn().mockResolvedValue('ws-new-id')
-      mockAddTabWithState = vi.fn().mockReturnValue('tab-new-id')
+      mockAddTab = vi.fn().mockReturnValue('tab-new-id')
       mockSetActiveWorkspace = vi.fn()
       mockSetActiveTab = vi.fn()
       mockSyncToDaemon = vi.fn().mockResolvedValue(undefined)
@@ -261,7 +261,7 @@ describe('useAppStore', () => {
           isRestoring: false,
           addWorkspace: mockAddWorkspace,
           setActiveWorkspace: mockSetActiveWorkspace,
-          addTabWithState: mockAddTabWithState,
+          addTab: mockAddTab,
           setActiveTab: mockSetActiveTab,
           syncToDaemon: mockSyncToDaemon
         }),
@@ -488,7 +488,7 @@ describe('useAppStore', () => {
           isRestoring: false,
           addWorkspace: vi.fn(),
           setActiveWorkspace: vi.fn(),
-          addTabWithState: vi.fn(),
+          addTab: vi.fn(),
           setActiveTab: vi.fn(),
           syncToDaemon: vi.fn()
         }),
@@ -534,7 +534,6 @@ describe('useAppStore', () => {
           addWorkspace: vi.fn(),
           addTab: mockAddTab,
           setActiveWorkspace: vi.fn(),
-          addTabWithState: vi.fn(),
           setActiveTab: vi.fn(),
           syncToDaemon: vi.fn()
         }),
@@ -591,7 +590,7 @@ describe('useAppStore', () => {
           isRestoring: false,
           addWorkspace: vi.fn(),
           setActiveWorkspace: mockSetActiveWorkspace,
-          addTabWithState: vi.fn(),
+          addTab: vi.fn(),
           setActiveTab: vi.fn(),
           syncToDaemon: vi.fn()
         }),
@@ -642,7 +641,7 @@ describe('useAppStore', () => {
           isRestoring: false,
           addWorkspace: mockAddWorkspace,
           setActiveWorkspace: vi.fn(),
-          addTabWithState: vi.fn(),
+          addTab: vi.fn(),
           setActiveTab: vi.fn(),
           syncToDaemon: vi.fn()
         }),
@@ -717,7 +716,7 @@ describe('useAppStore', () => {
           isRestoring: false,
           addWorkspace: vi.fn(),
           setActiveWorkspace: vi.fn(),
-          addTabWithState: vi.fn(),
+          addTab: vi.fn(),
           setActiveTab: vi.fn(),
           syncToDaemon: vi.fn()
         }),
@@ -759,7 +758,7 @@ describe('useAppStore', () => {
           isRestoring: false,
           addWorkspace: vi.fn(),
           setActiveWorkspace: vi.fn(),
-          addTabWithState: vi.fn(),
+          addTab: vi.fn(),
           setActiveTab: vi.fn(),
           syncToDaemon: vi.fn(),
           removeOrphanWorkspace: mockRemoveOrphanWorkspace

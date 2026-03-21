@@ -166,7 +166,6 @@ describe('createWorkspaceStore', () => {
     expect(typeof state.removeWorkspace).toBe('function')
     expect(typeof state.setActiveWorkspace).toBe('function')
     expect(typeof state.addTab).toBe('function')
-    expect(typeof state.addTabWithState).toBe('function')
     expect(typeof state.removeTab).toBe('function')
     expect(typeof state.setActiveTab).toBe('function')
     expect(typeof state.updateTabTitle).toBe('function')
@@ -893,7 +892,7 @@ describe('createWorkspaceStore', () => {
     })
   })
 
-  describe('addTabWithState', () => {
+  describe('addTab', () => {
     it('creates new tab with merged initial + provided state', () => {
       const app = makeFakeApp({ createInitialState: () => ({ ptyId: null, cwd: '/default' }) })
       const deps = makeDeps({
@@ -907,39 +906,12 @@ describe('createWorkspaceStore', () => {
         workspaces: { 'ws-1': makeWorkspace({ id: 'ws-1' }) }
       })
 
-      const tabId = store.getState().addTabWithState('ws-1', 'terminal', { cwd: '/custom' })
+      const tabId = store.getState().addTab('ws-1', 'terminal', { cwd: '/custom' })
 
       const ws = store.getState().workspaces['ws-1']
       const tab = ws.appStates[tabId]
       expect(tab).toBeDefined()
       expect(tab!.state).toEqual({ ptyId: null, cwd: '/custom' })
-    })
-
-    it('updates existing tab state when existingTabId matches', () => {
-      const app = makeFakeApp()
-      const deps = makeDeps({
-        appRegistry: {
-          get: vi.fn().mockReturnValue(app),
-          getDefaultApp: vi.fn().mockReturnValue(null),
-        },
-      })
-      const store = createWorkspaceStore({ sessionId: 's1', windowUuid: null }, deps)
-      store.setState({
-        workspaces: {
-          'ws-1': makeWorkspace({
-            id: 'ws-1',
-            appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: { ptyId: 'p1' } } },
-          })
-        }
-      })
-
-      const tabId = store.getState().addTabWithState('ws-1', 'terminal', { extra: 'data' }, 'tab-1')
-
-      expect(tabId).toBe('tab-1')
-      const ws = store.getState().workspaces['ws-1']
-      expect(Object.keys(ws.appStates)).toHaveLength(1)
-      expect(ws.appStates['tab-1'].state).toEqual({ ptyId: 'p1', extra: 'data' })
-      expect(ws.activeTabId).toBe('tab-1')
     })
 
     it('respects canHaveMultiple: false — merges state into existing tab', () => {
@@ -960,7 +932,7 @@ describe('createWorkspaceStore', () => {
         }
       })
 
-      store.getState().addTabWithState('ws-1', 'terminal', { newField: 'val' })
+      store.getState().addTab('ws-1', 'terminal', { newField: 'val' })
 
       const ws = store.getState().workspaces['ws-1']
       expect(Object.keys(ws.appStates)).toHaveLength(1)

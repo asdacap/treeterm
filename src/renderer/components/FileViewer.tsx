@@ -56,7 +56,7 @@ export function FileViewer({
   onScrollToLineUsed
 }: FileViewerProps): JSX.Element {
   const filesystem = useFilesystemApi()
-  const { addTabWithState } = useStore(workspaceStore)
+  const { addTab } = useStore(workspaceStore)
   const [fileState, setFileState] = useState<FileState>({
     content: '',
     language: 'plaintext',
@@ -214,7 +214,7 @@ export function FileViewer({
   const handleOpenInTab = useCallback(() => {
     if (!filePath) return
 
-    addTabWithState<EditorState>(workspaceId, 'editor', {
+    addTab<EditorState>(workspaceId, 'editor', {
       filePath: filePath,
       originalContent: fileState.content,
       currentContent: fileState.content,
@@ -224,7 +224,7 @@ export function FileViewer({
       isLoading: false,
       error: null
     })
-  }, [filePath, fileState, workspaceId, addTabWithState])
+  }, [filePath, fileState, workspaceId, addTab])
 
   if (!filePath) {
     return (

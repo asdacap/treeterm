@@ -32,8 +32,7 @@ export interface WorkspaceState {
   updateGitInfo: (id: string, gitInfo: GitInfo) => void
   refreshGitInfo: (id: string) => Promise<void>
   updateWorkspaceStatus: (id: string, status: Workspace['status']) => void
-  addTab: (workspaceId: string, applicationId: string) => string
-  addTabWithState: <T>(workspaceId: string, applicationId: string, initialState: Partial<T>, existingTabId?: string) => string
+  addTab: <T>(workspaceId: string, applicationId: string, initialState?: Partial<T>) => string
   removeTab: (workspaceId: string, tabId: string) => Promise<void>
   setActiveTab: (workspaceId: string, tabId: string) => void
   updateTabTitle: (workspaceId: string, tabId: string, title: string) => void
@@ -620,7 +619,7 @@ export function createWorkspaceStore(
       return { success: true }
     },
 
-    addTab: (workspaceId: string, applicationId: string) => {
+    addTab: <T>(workspaceId: string, applicationId: string, initialState?: Partial<T>) => {
       const tabId = generateTabId()
       const app = deps.appRegistry.get(applicationId)
 
@@ -631,83 +630,25 @@ export function createWorkspaceStore(
         if (!workspace) return state
 
         if (!app.canHaveMultiple) {
-          const existing = Object.values(workspace.appStates).find((s) => s.applicationId === applicationId)
-          if (existing) return state
-        }
-
-        const existingCount = Object.values(workspace.appStates).filter(
-          (s) => s.applicationId === applicationId
-        ).length
-
-        return {
-          workspaces: {
-            ...state.workspaces,
-            [workspaceId]: {
-              ...workspace,
-              appStates: {
-                ...workspace.appStates,
-                [tabId]: {
-                  applicationId,
-                  title: `${app.name} ${existingCount + 1}`,
-                  state: app.createInitialState()
-                }
-              },
-              activeTabId: tabId
-            }
-          }
-        }
-      })
-
-      const state = get()
-      syncSessionToDaemon(state.workspaces, state.isRestoring).catch(console.error)
-
-      return tabId
-    },
-
-    addTabWithState: <T>(workspaceId: string, applicationId: string, initialState: Partial<T>, existingTabId?: string) => {
-      const tabId = existingTabId || generateTabId()
-      const app = deps.appRegistry.get(applicationId)
-
-      if (!app) return tabId
-
-      set((state) => {
-        const workspace = state.workspaces[workspaceId]
-        if (!workspace) return state
-
-        if (existingTabId && workspace.appStates[existingTabId]) {
-          const existing = workspace.appStates[existingTabId]
-          return {
-            workspaces: {
-              ...state.workspaces,
-              [workspaceId]: {
-                ...workspace,
-                appStates: {
-                  ...workspace.appStates,
-                  [existingTabId]: { ...existing, state: { ...(existing.state || {}), ...(initialState || {}) } }
-                },
-                activeTabId: existingTabId
-              }
-            }
-          }
-        }
-
-        if (!app.canHaveMultiple) {
           const existingEntry = Object.entries(workspace.appStates).find(([, s]) => s.applicationId === applicationId)
           if (existingEntry) {
-            const [existingId, existingState] = existingEntry
-            return {
-              workspaces: {
-                ...state.workspaces,
-                [workspaceId]: {
-                  ...workspace,
-                  appStates: {
-                    ...workspace.appStates,
-                    [existingId]: { ...existingState, state: { ...(existingState.state || {}), ...(initialState || {}) } }
-                  },
-                  activeTabId: existingId
+            if (initialState) {
+              const [existingId, existingState] = existingEntry
+              return {
+                workspaces: {
+                  ...state.workspaces,
+                  [workspaceId]: {
+                    ...workspace,
+                    appStates: {
+                      ...workspace.appStates,
+                      [existingId]: { ...existingState, state: { ...(existingState.state || {}), ...initialState } }
+                    },
+                    activeTabId: existingId
+                  }
                 }
               }
             }
+            return state
           }
         }
 
@@ -725,7 +666,9 @@ export function createWorkspaceStore(
                 [tabId]: {
                   applicationId,
                   title: `${app.name} ${existingCount + 1}`,
-                  state: { ...(app.createInitialState() || {}), ...(initialState || {}) }
+                  state: initialState
+                    ? { ...(app.createInitialState() || {}), ...initialState }
+                    : app.createInitialState()
                 }
               },
               activeTabId: tabId
