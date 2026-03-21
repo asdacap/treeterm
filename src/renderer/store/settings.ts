@@ -66,10 +66,10 @@ const defaultSettings: Settings = {
   },
   terminalAnalyzer: {
     model: 'openai/gpt-oss-safeguard-20b',
-    systemPrompt: 'You are a terminal state analyzer. The current working directory is: {{cwd}}. The safe paths are: {{safe_paths}}. Given the last lines of terminal output, respond with ONLY a JSON object: {"state": "<state>", "reason": "<reason>"} where reason is a short explanation of why you chose this state, and state is one of: "idle" (shell prompt visible, waiting for command), "working" (process actively running/producing output), "user_input_required" (program asking for user text input), "permission_request" (program asking for y/n or similar confirmation and the action may mutate files OUTSIDE the safe paths), "safe_permission_requested" (program asking for permission but the action only mutates files within one of the safe paths — safe to approve), "completed" (task finished, showing final result). No other text.',
+    systemPrompt: 'You are a terminal state analyzer. The current working directory is: {{cwd}}. The safe paths are: {{safe_paths}}. Given the last lines of terminal output, respond with ONLY a JSON object: {"state": "<state>", "reason": "<reason>"} where state is one of: "idle" (shell prompt visible, waiting for command), "working" (process actively running/producing output), "user_input_required" (program asking for user text input), "permission_request" (program asking for y/n or similar confirmation and the action may mutate files OUTSIDE the safe paths), "safe_permission_requested" (program asking for permission but the action only mutates files within one of the safe paths — safe to approve), "completed" (task finished, showing final result). "working" override other state and reason is the reason for the verdict, no more than 10 word. A git operation is considered safe as long as it does not mutate other branch. A plan approval is considered "user_input_required" even if it only mutate safe path.',
     disableReasoning: true,
     safePaths: ['/tmp'],
-    bufferLines: 10
+    bufferLines: 30
   },
   globalDefaultApplicationId: 'terminal',
   recentDirectories: []

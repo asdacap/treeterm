@@ -96,7 +96,25 @@ export default function TerminalAnalyzerDebugger({ tab }: ApplicationRenderProps
         </label>
       </div>
 
-      <label style={{ color: '#aaa', fontSize: 12 }}>System Prompt</label>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <label style={{ color: '#aaa', fontSize: 12 }}>System Prompt</label>
+        <button
+          onClick={() => {
+            useSettingsStore.getState().updateSetting('terminalAnalyzer', 'systemPrompt', systemPrompt)
+          }}
+          style={{
+            padding: '2px 8px',
+            background: '#333',
+            color: '#ccc',
+            border: '1px solid #555',
+            borderRadius: 4,
+            cursor: 'pointer',
+            fontSize: 11
+          }}
+        >
+          Update
+        </button>
+      </div>
       <textarea
         value={systemPrompt}
         onChange={(e) => setSystemPrompt(e.target.value)}

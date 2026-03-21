@@ -7,6 +7,7 @@ import { ReviewCommentsButton } from './ReviewCommentsButton'
 import { useSessionApi } from '../contexts/SessionStoreContext'
 import { useTtyCreation } from '../hooks/useTtyConnection'
 import { useTerminalAnalyzer } from '../hooks/useTerminalAnalyzer'
+import { useActivityStateStore } from '../store/activityState'
 import { useSettingsStore } from '../store/settings'
 import type { ActivityState, AiHarnessState, SandboxConfig, WorkspaceStore } from '../types'
 import { clampContextMenuPosition } from '../utils/contextMenuPosition'
@@ -104,6 +105,12 @@ export default function AiHarness({
     updateTabState,
     tabId
   )
+
+  // Sync LLM analyzer state to activity state store so TabActivityIndicator matches
+  const setActivityTabState = useActivityStateStore((s) => s.setTabState)
+  useEffect(() => {
+    setActivityTabState(tabId, aiState)
+  }, [tabId, aiState, setActivityTabState])
 
   const settings = useSettingsStore((s) => s.settings)
   const setAutoApprove = useCallback((value: boolean) => {
