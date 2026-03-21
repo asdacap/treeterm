@@ -348,7 +348,7 @@ ipcMain.handle('pty:isAlive', async (event, id: string) => {
 })
 
 // LLM chat — uses ipcMain.handle directly for event.sender access (like PTY)
-ipcMain.handle('llm:chat:send', async (event, requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string }) => {
+ipcMain.handle('llm:chat:send', async (event, requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string; reasoning: boolean }) => {
   await startChatStream(requestId, messages, settings, event.sender)
 })
 
