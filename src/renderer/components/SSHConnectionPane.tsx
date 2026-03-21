@@ -31,7 +31,11 @@ export default function SSHConnectionPane({ connectionId }: SSHConnectionPanePro
   const [output, setOutput] = useState<string[]>([])
   const [connection, setConnection] = useState<ConnectionInfo | undefined>()
   const ssh = useAppStore(s => s.ssh)
-  const disconnectRemote = useAppStore(s => s.disconnectRemote)
+  const activeSessionStore = useAppStore(s => {
+    const { activeSessionId, sessionStores } = s
+    if (!activeSessionId) return null
+    return sessionStores[activeSessionId] || null
+  })
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Watch connection status
@@ -96,7 +100,7 @@ export default function SSHConnectionPane({ connectionId }: SSHConnectionPanePro
         )}
         <button
           className="ssh-pane-disconnect"
-          onClick={() => disconnectRemote(connectionId)}
+          onClick={() => activeSessionStore?.getState().disconnect()}
           title="Disconnect"
         >
           Disconnect

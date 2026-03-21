@@ -2,13 +2,13 @@ import { useState, useMemo, useEffect } from 'react'
 import { GitFork, GitBranch, Folder, ChevronDown, ChevronRight } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
-import type { WorkspaceState } from '../store/createWorkspaceStore'
+import type { SessionState } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import { useNavigationStore } from '../store/navigation'
 import { usePrefixModeStore } from '../store/prefixMode'
 import CreateChildDialog from './CreateChildDialog'
 import OpenWorkspaceDialog from './OpenWorkspaceDialog'
-import type { Workspace, ConnectionInfo, ReviewState, WorktreeSettings } from '../types'
+import type { Workspace, ReviewState, WorktreeSettings } from '../types'
 
 // Import WorkspaceActivityIndicator from TreePane
 import { WorkspaceActivityIndicator } from './TreePane'
@@ -21,19 +21,19 @@ interface ContextMenu {
 
 interface SessionPanelProps {
   sessionId: string
-  workspaceStore: StoreApi<WorkspaceState>
-  connections: ConnectionInfo[]
+  sessionStore: StoreApi<SessionState>
   selectFolder: () => Promise<string | null>
   getRecentDirectories: () => Promise<string[]>
 }
 
 export default function SessionPanel({
   sessionId,
-  workspaceStore,
-  connections,
+  sessionStore,
   selectFolder,
   getRecentDirectories,
 }: SessionPanelProps): JSX.Element {
+  const workspaceStore = useStore(sessionStore, s => s.workspaceStore)
+  const connection = useStore(sessionStore, s => s.connection)
   const {
     workspaces,
     activeWorkspaceId,
@@ -281,8 +281,6 @@ export default function SessionPanel({
     )
   }
 
-  const remoteConnections = connections.filter(c => c.target.type === 'remote')
-
   return (
     <div className="session-panel" onClick={closeContextMenu}>
       <div className="session-panel-header" onClick={() => setIsCollapsed(!isCollapsed)}>
@@ -309,39 +307,36 @@ export default function SessionPanel({
             )}
           </div>
 
-          {/* SSH Connections for this session */}
-          {remoteConnections.length > 0 && (
-            <div className="tree-list ssh-connections-list">
-              {remoteConnections.map(conn => {
-                const config = conn.target.type === 'remote' ? conn.target.config : null
-                const label = config ? `${config.user}@${config.host}` : conn.id
-                const isActive = activeView?.type === 'ssh' && activeView.connectionId === conn.id
-                return (
-                  <div
-                    key={conn.id}
-                    className={`tree-item ${isActive ? 'active' : ''}`}
-                    onClick={() => setActiveView({ type: 'ssh', connectionId: conn.id })}
-                    title={label}
-                  >
-                    <span className="tree-item-expand-placeholder" />
-                    <span className="tree-item-icon">
-                      <span
-                        className="ssh-status-dot"
-                        style={{
-                          backgroundColor:
-                            conn.status === 'connected' ? '#4caf50' :
-                            conn.status === 'connecting' ? '#ff9800' :
-                            conn.status === 'error' ? '#f44336' : '#666'
-                        }}
-                      />
-                    </span>
-                    <span className="tree-item-name">{label}</span>
-                    <span className="ssh-status-text">{conn.status}</span>
-                  </div>
-                )
-              })}
-            </div>
-          )}
+          {/* SSH Connection for this session */}
+          {connection && connection.target.type === 'remote' && (() => {
+            const config = connection.target.config
+            const label = `${config.user}@${config.host}`
+            const isActive = activeView?.type === 'ssh' && activeView.connectionId === connection.id
+            return (
+              <div className="tree-list ssh-connections-list">
+                <div
+                  className={`tree-item ${isActive ? 'active' : ''}`}
+                  onClick={() => setActiveView({ type: 'ssh', connectionId: connection.id })}
+                  title={label}
+                >
+                  <span className="tree-item-expand-placeholder" />
+                  <span className="tree-item-icon">
+                    <span
+                      className="ssh-status-dot"
+                      style={{
+                        backgroundColor:
+                          connection.status === 'connected' ? '#4caf50' :
+                          connection.status === 'connecting' ? '#ff9800' :
+                          connection.status === 'error' ? '#f44336' : '#666'
+                      }}
+                    />
+                  </span>
+                  <span className="tree-item-name">{label}</span>
+                  <span className="ssh-status-text">{connection.status}</span>
+                </div>
+              </div>
+            )
+          })()}
         </>
       )}
 

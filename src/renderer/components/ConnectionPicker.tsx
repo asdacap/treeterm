@@ -8,7 +8,13 @@ interface ConnectionPickerProps {
 }
 
 export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerProps) {
-  const { connections, connectRemote, disconnectRemote, ssh, activeSessionId } = useAppStore()
+  const ssh = useAppStore(s => s.ssh)
+  const activeSessionStore = useAppStore(s => {
+    const { activeSessionId, sessionStores } = s
+    if (!activeSessionId) return null
+    return sessionStores[activeSessionId] || null
+  })
+  const connection = activeSessionStore?.getState().connection ?? null
   const [savedConnections, setSavedConnections] = useState<SSHConnectionConfig[]>([])
   const [host, setHost] = useState('')
   const [user, setUser] = useState('')
@@ -26,6 +32,16 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
   }, [isOpen, ssh])
 
   if (!isOpen) return null
+
+  const connectViaSession = async (config: SSHConnectionConfig) => {
+    if (!activeSessionStore) throw new Error('No active session')
+    await activeSessionStore.getState().connect(config)
+  }
+
+  const disconnectViaSession = async () => {
+    if (!activeSessionStore) return
+    await activeSessionStore.getState().disconnect()
+  }
 
   const handleConnect = async () => {
     if (!host || !user) {
@@ -46,7 +62,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
     setError(null)
     setSelectedOutputId(config.id)
     try {
-      await connectRemote(config, activeSessionId || undefined)
+      await connectViaSession(config)
       // Save connection for future use
       await ssh.saveConnection(config)
       setSavedConnections(await ssh.getSavedConnections())
@@ -68,7 +84,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
     setError(null)
     setSelectedOutputId(config.id)
     try {
-      await connectRemote(config, activeSessionId || undefined)
+      await connectViaSession(config)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Connection failed')
     } finally {
@@ -95,9 +111,6 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
     if (e.key === 'Enter' && !connecting) handleConnect()
   }
 
-  // Filter to show only remote connections
-  const remoteConnections = connections.filter(c => c.target.type === 'remote')
-
   return (
     <div
       style={{
@@ -118,47 +131,41 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
           <button onClick={onClose} style={closeButtonStyle}>x</button>
         </div>
 
-        {/* Active connections */}
-        {remoteConnections.length > 0 && (
+        {/* Active connection */}
+        {connection && connection.target.type === 'remote' && (
           <div style={{ marginBottom: 16 }}>
-            <h3 style={{ fontSize: 14, color: '#a6adc8', marginBottom: 8 }}>Active Connections</h3>
-            {remoteConnections.map(conn => (
-              <div key={conn.id} style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '8px 12px', backgroundColor: '#313244', borderRadius: 4, marginBottom: 4
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{
-                    width: 8, height: 8, borderRadius: '50%',
-                    backgroundColor: getStatusColor(conn.status), display: 'inline-block'
-                  }} />
-                  <span>
-                    {conn.target.type === 'remote'
-                      ? `${conn.target.config.user}@${conn.target.config.host}`
-                      : 'Local'}
-                  </span>
-                  <span style={{ fontSize: 12, color: '#666' }}>{conn.status}</span>
-                </div>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <button
-                    onClick={() => setSelectedOutputId(selectedOutputId === conn.id ? null : conn.id)}
-                    style={smallButtonStyle}
-                  >Log</button>
-                  <button
-                    onClick={() => disconnectRemote(conn.id)}
-                    style={{ ...smallButtonStyle, color: '#f44336' }}
-                  >Disconnect</button>
-                </div>
+            <h3 style={{ fontSize: 14, color: '#a6adc8', marginBottom: 8 }}>Active Connection</h3>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '8px 12px', backgroundColor: '#313244', borderRadius: 4, marginBottom: 4
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{
+                  width: 8, height: 8, borderRadius: '50%',
+                  backgroundColor: getStatusColor(connection.status), display: 'inline-block'
+                }} />
+                <span>{`${connection.target.config.user}@${connection.target.config.host}`}</span>
+                <span style={{ fontSize: 12, color: '#666' }}>{connection.status}</span>
               </div>
-            ))}
-            {selectedOutputId && remoteConnections.some(c => c.id === selectedOutputId) && (
-              <SSHOutputInline connectionId={selectedOutputId} />
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button
+                  onClick={() => setSelectedOutputId(selectedOutputId === connection.id ? null : connection.id)}
+                  style={smallButtonStyle}
+                >Log</button>
+                <button
+                  onClick={() => disconnectViaSession()}
+                  style={{ ...smallButtonStyle, color: '#f44336' }}
+                >Disconnect</button>
+              </div>
+            </div>
+            {selectedOutputId === connection.id && (
+              <SSHOutputInline connectionId={connection.id} />
             )}
           </div>
         )}
 
-        {/* Output for connection in progress (not yet in active connections) */}
-        {selectedOutputId && !remoteConnections.some(c => c.id === selectedOutputId) && (
+        {/* Output for connection in progress (not yet in active connection) */}
+        {selectedOutputId && (!connection || connection.id !== selectedOutputId) && (
           <div style={{ marginBottom: 16 }}>
             <h3 style={{ fontSize: 14, color: '#a6adc8', marginBottom: 8 }}>Connection Output</h3>
             <SSHOutputInline connectionId={selectedOutputId} />
@@ -170,9 +177,9 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
           <div style={{ marginBottom: 16 }}>
             <h3 style={{ fontSize: 14, color: '#a6adc8', marginBottom: 8 }}>Saved Connections</h3>
             {savedConnections.map(config => {
-              const isActive = remoteConnections.some(c =>
-                c.target.type === 'remote' && c.target.config.host === config.host && c.target.config.user === config.user
-              )
+              const isActive = connection?.target.type === 'remote'
+                && connection.target.config.host === config.host
+                && connection.target.config.user === config.user
               return (
                 <div key={config.id} style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',

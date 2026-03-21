@@ -7,13 +7,19 @@ interface SSHOutputPanelProps {
 
 export default function SSHOutputPanel({ connectionId }: SSHOutputPanelProps) {
   const [output, setOutput] = useState<string[]>([])
-  const connections = useAppStore(s => s.connections)
   const ssh = useAppStore(s => s.ssh)
+  const activeSessionStore = useAppStore(s => {
+    const { activeSessionId, sessionStores } = s
+    if (!activeSessionId) return null
+    return sessionStores[activeSessionId] || null
+  })
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  const connection = connections.find(c => c.id === connectionId)
-  const label = connection?.target.type === 'remote'
-    ? `${connection.target.config.user}@${connection.target.config.host}`
+  const connection = activeSessionStore?.getState().connection
+  const isMatch = connection?.id === connectionId
+  const matchedConnection = isMatch ? connection : undefined
+  const label = matchedConnection?.target.type === 'remote'
+    ? `${matchedConnection.target.config.user}@${matchedConnection.target.config.host}`
     : connectionId
 
   // Auto-scroll to bottom
@@ -60,15 +66,15 @@ export default function SSHOutputPanel({ connectionId }: SSHOutputPanelProps) {
       }}>
         <span style={{
           width: 8, height: 8, borderRadius: '50%',
-          backgroundColor: getStatusColor(connection?.status),
+          backgroundColor: getStatusColor(matchedConnection?.status),
           display: 'inline-block'
         }} />
         <span style={{ fontWeight: 600 }}>SSH: {label}</span>
-        {connection?.status && (
-          <span style={{ color: '#666', fontSize: 12 }}>({connection.status})</span>
+        {matchedConnection?.status && (
+          <span style={{ color: '#666', fontSize: 12 }}>({matchedConnection.status})</span>
         )}
-        {connection?.error && (
-          <span style={{ color: '#f44336', fontSize: 12 }}>{connection.error}</span>
+        {matchedConnection?.error && (
+          <span style={{ color: '#f44336', fontSize: 12 }}>{matchedConnection.error}</span>
         )}
       </div>
       <div

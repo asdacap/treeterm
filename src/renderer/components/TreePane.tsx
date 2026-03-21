@@ -30,8 +30,8 @@ interface TreePaneProps {
 }
 
 export default function TreePane({ selectFolder, getRecentDirectories }: TreePaneProps): JSX.Element {
-  const { workspaceStores, getSessionConnections } = useAppStore()
-  const sessionIds = Object.keys(workspaceStores)
+  const sessionStores = useAppStore(s => s.sessionStores)
+  const sessionIds = Object.keys(sessionStores)
 
   const handleShowSessions = async () => {
     const { sessionApi } = useAppStore.getState()
@@ -66,8 +66,7 @@ export default function TreePane({ selectFolder, getRecentDirectories }: TreePan
           <SessionPanel
             key={sessionId}
             sessionId={sessionId}
-            workspaceStore={workspaceStores[sessionId]}
-            connections={getSessionConnections(sessionId)}
+            sessionStore={sessionStores[sessionId]}
             selectFolder={selectFolder}
             getRecentDirectories={getRecentDirectories}
           />

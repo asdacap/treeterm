@@ -45,17 +45,15 @@ export default function App() {
     daemonSessions,
     daemonDisconnected,
     showConnectionPicker,
-    connections,
     getActiveWorkspaceStore,
-    handleSessionRestore,
   } = useAppStore()
 
   const activeView = useNavigationStore(s => s.activeView)
-  const workspaceStores = useAppStore(s => s.workspaceStores)
+  const sessionStores = useAppStore(s => s.sessionStores)
 
   // Derive active store from activeView.sessionId when viewing a workspace
   const activeStore = activeView?.type === 'workspace' && activeView.sessionId
-    ? workspaceStores[activeView.sessionId] || null
+    ? sessionStores[activeView.sessionId]?.getState().workspaceStore || null
     : getActiveWorkspaceStore()
 
   const handleConfirmClose = () => {
@@ -177,7 +175,17 @@ export default function App() {
           {showWorkspacePicker && (
             <WorkspacePickerDialog
               sessions={daemonSessions}
-              onSelect={handleSessionRestore}
+              onSelect={(session) => {
+                const store = useAppStore.getState()
+                // Switch to the session; onReady/onSync will handle restore
+                store.switchSession(session.id)
+                // If the session store already exists, restore directly
+                const sessionStore = store.sessionStores[session.id]
+                if (sessionStore) {
+                  sessionStore.getState().handleRestore(session)
+                }
+                useAppStore.setState({ showWorkspacePicker: false })
+              }}
               onOpenInNewWindow={handleOpenInNewWindow}
               onCreateNew={handleCreateNewFromPicker}
               onCancel={() => useAppStore.setState({ showWorkspacePicker: false })}
