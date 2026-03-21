@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { ChevronDown } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
@@ -69,6 +70,8 @@ export default function ReviewBrowser({
   // Action state
   const [isProcessing, setIsProcessing] = useState(false)
   const [processingAction, setProcessingAction] = useState<'merge' | 'squash' | null>(null)
+  const [mergeDropdownOpen, setMergeDropdownOpen] = useState(false)
+  const mergeDropdownRef = useRef<HTMLDivElement>(null)
 
   // Reviews state — comments are derived from workspace metadata via store
   const reviews = getReviewComments(workspaceId)
@@ -147,6 +150,18 @@ export default function ReviewBrowser({
       setLoading(false)
     }
   }, [workspaceId, parentWorkspaceId])
+
+  // Close merge dropdown on click outside
+  useEffect(() => {
+    if (!mergeDropdownOpen) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (mergeDropdownRef.current && !mergeDropdownRef.current.contains(e.target as Node)) {
+        setMergeDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [mergeDropdownOpen])
 
   const loadReviews = async () => {
     try {
@@ -915,24 +930,38 @@ export default function ReviewBrowser({
                 Prompt Rebase
               </button>
             )}
-            <button
-              className="review-action-btn review-merge-btn"
-              onClick={() => handleMerge(false)}
-              disabled={isProcessing}
-              title={hasConflicts ? 'Merge (conflicts will need to be resolved)' : 'Merge changes into parent branch'}
-            >
-              {processingAction === 'merge' ? <><span className="btn-spinner" />Merging...</> : 'Merge'}
-              {hasConflicts && ' (has conflicts)'}
-            </button>
-            <button
-              className="review-action-btn review-squash-btn"
-              onClick={() => handleMerge(true)}
-              disabled={isProcessing}
-              title={hasConflicts ? 'Squash merge (conflicts will need to be resolved)' : 'Squash all commits into one'}
-            >
-              {processingAction === 'squash' ? <><span className="btn-spinner" />Squashing...</> : 'Squash Merge'}
-              {hasConflicts && ' (has conflicts)'}
-            </button>
+            <div className="merge-btn-group" ref={mergeDropdownRef}>
+              <button
+                className="review-action-btn review-merge-btn merge-btn-main"
+                onClick={() => handleMerge(false)}
+                disabled={isProcessing}
+                title={hasConflicts ? 'Merge (conflicts will need to be resolved)' : 'Merge changes into parent branch'}
+              >
+                {processingAction === 'merge' ? <><span className="btn-spinner" />Merging...</> : 'Merge'}
+                {hasConflicts && ' (has conflicts)'}
+              </button>
+              <button
+                className="review-action-btn review-merge-btn merge-btn-dropdown-toggle"
+                onClick={() => setMergeDropdownOpen(!mergeDropdownOpen)}
+                disabled={isProcessing}
+                title="More merge options"
+              >
+                <ChevronDown size={14} />
+              </button>
+              {mergeDropdownOpen && (
+                <div className="merge-dropdown-menu">
+                  <button
+                    className="merge-dropdown-item"
+                    onClick={() => { setMergeDropdownOpen(false); handleMerge(true) }}
+                    disabled={isProcessing}
+                    title={hasConflicts ? 'Squash merge (conflicts will need to be resolved)' : 'Squash all commits into one'}
+                  >
+                    {processingAction === 'squash' ? <><span className="btn-spinner" />Squashing...</> : 'Squash Merge'}
+                    {hasConflicts && ' (has conflicts)'}
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               className="review-action-btn review-cancel-btn"
               onClick={handleCancel}

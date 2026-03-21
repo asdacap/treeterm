@@ -2813,22 +2813,67 @@ body,
   margin-right: 6px;
 }
 
+.merge-btn-group {
+  position: relative;
+  display: inline-flex;
+}
+
 .review-merge-btn {
   background: var(--accent);
   color: white;
+}
+
+.merge-btn-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.merge-btn-dropdown-toggle {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 8px 6px;
+  display: flex;
+  align-items: center;
 }
 
 .review-merge-btn:hover:not(:disabled) {
   background: #006cbf;
 }
 
-.review-squash-btn {
-  background: #238636;
-  color: white;
+.merge-dropdown-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+  min-width: 160px;
 }
 
-.review-squash-btn:hover:not(:disabled) {
-  background: #2ea043;
+.merge-dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.merge-dropdown-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.merge-dropdown-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .review-abandon-btn {
