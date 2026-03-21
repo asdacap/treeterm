@@ -120,16 +120,14 @@ export default function AiHarness({
         isVisible={isVisible}
         config={config}
       />
-      {aiState && (
-        <div
-          className="ai-state-badge"
-          style={{
-            background: STATE_COLORS[aiState] ?? '#666',
-          }}
-        >
-          {STATE_LABELS[aiState] ?? aiState}
-        </div>
-      )}
+      <div
+        className="ai-state-badge"
+        style={{
+          background: STATE_COLORS[aiState],
+        }}
+      >
+        {STATE_LABELS[aiState]}
+      </div>
       <PushToTalkButton
         onTranscript={handlePushToTalkTranscript}
         onSubmit={handlePushToTalkSubmit}

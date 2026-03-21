@@ -14,8 +14,8 @@ export function useTerminalAnalyzer(
   terminal: XTerm | null,
   dataVersionRef: React.MutableRefObject<number> | null,
   cwd: string
-): TerminalAiState | null {
-  const [aiState, setAiState] = useState<TerminalAiState | null>(null)
+): TerminalAiState {
+  const [aiState, setAiState] = useState<TerminalAiState>('idle')
   const lastVersionRef = useRef(0)
   const isAnalyzingRef = useRef(false)
   const settings = useSettingsStore((s) => s.settings)
