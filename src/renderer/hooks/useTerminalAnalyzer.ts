@@ -27,6 +27,7 @@ export function useTerminalAnalyzer(
     if (!settings.llm.apiKey || !settings.terminalAnalyzer.model) return
 
     const analyze = async () => {
+      const requestVersion = dataVersionRef.current
       try {
         const numLines = settings.terminalAnalyzer.bufferLines || 10
         const xtermBuffer = terminal.buffer.normal
@@ -51,6 +52,11 @@ export function useTerminalAnalyzer(
           disableReasoning: settings.terminalAnalyzer.disableReasoning,
           safePaths: settings.terminalAnalyzer.safePaths
         })
+
+        if (dataVersionRef.current !== requestVersion) {
+          console.debug('[terminal-analyzer] discarding stale response')
+          return
+        }
 
         console.debug('[terminal-analyzer] result:', result)
         if ('state' in result) {
