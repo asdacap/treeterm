@@ -114,7 +114,7 @@ export class ConnectionManager {
     }
   }
 
-  async connectRemote(config: SSHConnectionConfig): Promise<ConnectionInfo> {
+  async connectRemote(config: SSHConnectionConfig, options?: { refreshDaemon?: boolean }): Promise<ConnectionInfo> {
     // Check if already connected
     const existing = this.connections.get(config.id)
     if (existing && existing.status === 'connected') {
@@ -125,7 +125,7 @@ export class ConnectionManager {
       }
     }
 
-    const tunnel = new SSHTunnel(config)
+    const tunnel = new SSHTunnel(config, { refreshDaemon: options?.refreshDaemon })
     const target: ConnectionTarget = { type: 'remote', config }
 
     // Forward tunnel output to any active watchers for this connection
@@ -149,11 +149,15 @@ export class ConnectionManager {
 
     try {
       // Establish SSH tunnel
+      console.log(`[connectionManager] SSH tunnel connecting to ${config.host}:${config.port} (id=${config.id})`)
       const localSocketPath = await tunnel.connect()
+      console.log(`[connectionManager] SSH tunnel connected, local socket: ${localSocketPath}`)
 
       // Create gRPC client pointing at the forwarded socket
       const client = new GrpcDaemonClient(localSocketPath)
+      console.log(`[connectionManager] Connecting gRPC daemon client via forwarded socket...`)
       await client.connect()
+      console.log(`[connectionManager] gRPC daemon client connected successfully`)
 
       // Update connection with real client
       this.connections.set(config.id, {
@@ -186,6 +190,7 @@ export class ConnectionManager {
       return this.getConnection(config.id)!
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error)
+      console.error(`[connectionManager] SSH connection failed (id=${config.id}): ${errorMsg}`)
       const conn = this.connections.get(config.id)
       if (conn) {
         conn.status = 'error'

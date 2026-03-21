@@ -442,8 +442,8 @@ contextBridge.exposeInMainWorld('electron', {
     return client.appGetWindowUuid()
   },
   ssh: {
-    connect: (config: SSHConnectionConfig): Promise<{ info: ConnectionInfo, session?: Session }> => {
-      return client.sshConnect(config)
+    connect: (config: SSHConnectionConfig, options?: { refreshDaemon?: boolean }): Promise<{ info: ConnectionInfo, session?: Session }> => {
+      return client.sshConnect(config, options)
     },
     disconnect: (connectionId: string): Promise<void> => {
       return client.sshDisconnect(connectionId)

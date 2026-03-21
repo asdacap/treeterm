@@ -20,6 +20,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
   const [label, setLabel] = useState('')
   const [connecting, setConnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [refreshDaemon, setRefreshDaemon] = useState(false)
 
   useEffect(() => {
     if (isOpen) {
@@ -31,15 +32,20 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
 
   const connectAndCreateSession = async (config: SSHConnectionConfig) => {
     // 1. Show SSH pane for connection progress
+    console.log(`[renderer:ConnectionPicker] Initiating SSH connection to ${config.host}:${config.port} (id=${config.id})`)
     setActiveView({ type: 'ssh', connectionId: config.id })
     // 2. Connect to remote daemon and get session
-    const { info, session } = await ssh.connect(config)
+    const { info, session } = await ssh.connect(config, { refreshDaemon })
+    console.log(`[renderer:ConnectionPicker] ssh.connect returned: status=${info.status}, session=${session ? session.id : 'undefined'}`)
     if (info.status !== 'connected') {
       throw new Error(info.error || 'SSH connection failed')
     }
     // 3. Add remote session to store and switch to it
     if (session) {
+      console.log(`[renderer:ConnectionPicker] Adding remote session to store: session=${session.id}`)
       addRemoteSession(session, info)
+    } else {
+      throw new Error('SSH connected but no session was returned from remote daemon')
     }
     onClose()
   }
@@ -132,6 +138,16 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
                 <span>{config.label || `${config.user}@${config.host}`}</span>
                 <div style={{ display: 'flex', gap: 4 }}>
                   <button
+                    onClick={() => {
+                      setHost(config.host)
+                      setUser(config.user)
+                      setPort(String(config.port))
+                      setIdentityFile(config.identityFile || '')
+                      setLabel(config.label || '')
+                    }}
+                    style={smallButtonStyle}
+                  >Fill</button>
+                  <button
                     onClick={() => handleConnectSaved(config)}
                     disabled={connecting}
                     style={smallButtonStyle}
@@ -185,6 +201,15 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
             />
           </div>
         </div>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#a6adc8', marginBottom: 8 }}>
+          <input
+            type="checkbox"
+            checked={refreshDaemon}
+            onChange={e => setRefreshDaemon(e.target.checked)}
+          />
+          Refresh remote daemon
+        </label>
 
         {error && (
           <div style={{ color: '#f44336', fontSize: 13, marginBottom: 8 }}>{error}</div>

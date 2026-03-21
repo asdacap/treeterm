@@ -824,10 +824,12 @@ server.onAppGetWindowUuid((event) => {
 })
 
 // SSH IPC Handlers
-server.onSshConnect(async (event, config) => {
+server.onSshConnect(async (event, config, options) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
 
-  const info = await connectionManager.connectRemote(config)
+  console.log(`[main:ssh] onSshConnect called for host=${config.host}, id=${config.id}, refreshDaemon=${options?.refreshDaemon ?? false}`)
+  const info = await connectionManager.connectRemote(config, { refreshDaemon: options?.refreshDaemon })
+  console.log(`[main:ssh] connectRemote returned status=${info.status}${info.error ? `, error=${info.error}` : ''}`)
 
   // Switch the calling window to use the remote daemon
   if (info.status === 'connected') {
@@ -838,18 +840,30 @@ server.onSshConnect(async (event, config) => {
       // Load session from remote daemon and return it alongside connection info
       const remoteClient = connectionManager.getClient(config.id)
       try {
+        console.log(`[main:ssh] Fetching default session ID from remote daemon...`)
         const remoteSessionId = await remoteClient.getDefaultSessionId()
+        console.log(`[main:ssh] Got remote session ID: ${remoteSessionId}`)
+
+        console.log(`[main:ssh] Starting session watch for session=${remoteSessionId}`)
         const remoteWatch = remoteClient.watchSession(remoteSessionId, randomUUID(), (updatedSession) => {
+          console.log(`[main:ssh] Session sync update received for session=${updatedSession.id}, workspaces=${updatedSession.workspaces?.length ?? 0}`)
           const windowInfo = windowManager.getWindow(senderWindow.id)
           if (windowInfo) {
             windowInfo.ipcServer.sessionSync(updatedSession)
           }
         })
         const session = await remoteWatch.initial
+        console.log(`[main:ssh] Initial session loaded: id=${session.id}, workspaces=${session.workspaces?.length ?? 0}`)
         return { info, session }
       } catch (error) {
-        console.error('[main] Failed to load remote session:', error)
+        const errorMsg = error instanceof Error ? error.message : String(error)
+        console.error('[main:ssh] Failed to load remote session:', errorMsg)
+        return {
+          info: { ...info, status: 'error' as const, error: `Connected but failed to load session: ${errorMsg}` }
+        }
       }
+    } else {
+      console.warn('[main:ssh] Could not find sender window')
     }
   }
 

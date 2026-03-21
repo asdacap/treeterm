@@ -13,6 +13,10 @@ import { getRemoteForwardSocketPath } from '../daemon/socketPath'
 type OutputCallback = (line: string) => void
 type DisconnectCallback = (error?: string) => void
 
+export interface SSHTunnelOptions {
+  refreshDaemon?: boolean
+}
+
 export class SSHTunnel {
   private sshProcess: ChildProcess | null = null
   private outputBuffer: string[] = []
@@ -20,9 +24,11 @@ export class SSHTunnel {
   private disconnectListeners: Set<DisconnectCallback> = new Set()
   private localSocketPath: string
   private _connected: boolean = false
+  private options: SSHTunnelOptions
 
-  constructor(private config: SSHConnectionConfig) {
+  constructor(private config: SSHConnectionConfig, options?: SSHTunnelOptions) {
     this.localSocketPath = getRemoteForwardSocketPath(config.id)
+    this.options = options || {}
   }
 
   get connected(): boolean {
@@ -101,10 +107,12 @@ export class SSHTunnel {
       const sshArgs = this.buildBaseSSHArgs()
 
       // Bootstrap script: check for treeterm, clone+build if needed, start daemon, print socket path
+      const refreshDaemon = this.options.refreshDaemon ? '1' : '0'
       const bootstrapScript = [
         'set -e',
         'TREETERM_DIR="$HOME/.treeterm/repo"',
         'DAEMON_SOCKET="/tmp/treeterm-$(id -u)/daemon.sock"',
+        `REFRESH_DAEMON=${refreshDaemon}`,
         '',
         '# Clone or update the repo',
         'NEEDS_BUILD=0',
@@ -128,6 +136,14 @@ export class SSHTunnel {
         'if [ "$NEEDS_BUILD" = "1" ] || [ ! -f "$TREETERM_DIR/out/daemon/daemon/index.js" ]; then',
         '  npm install',
         '  npm run build:daemon',
+        'fi',
+        '',
+        '# Kill old daemon if refresh requested',
+        'if [ "$REFRESH_DAEMON" = "1" ] && [ -S "$DAEMON_SOCKET" ]; then',
+        '  echo "Refreshing daemon: killing old process..."',
+        '  pkill -f "node.*treeterm.*daemon/index.js" 2>/dev/null || true',
+        '  rm -f "$DAEMON_SOCKET"',
+        '  sleep 0.5',
         'fi',
         '',
         '# Start daemon if not already running',
