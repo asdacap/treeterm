@@ -176,13 +176,10 @@ export default function ActiveProcessesDialog({ workspaces, onClose }: ActivePro
 
   const handleStop = useCallback(async () => {
     if (!selectedId) return
-    terminalApi.kill(selectedId)
+    await terminalApi.kill(selectedId)
     setSelectedId(null)
-    // Refresh list after a small delay to let the kill propagate
-    setTimeout(async () => {
-      const list = await terminalApi.list()
-      setSessions(list)
-    }, 200)
+    const list = await terminalApi.list()
+    setSessions(list)
   }, [selectedId, terminalApi])
 
   const handleOverlayClick = useCallback(
