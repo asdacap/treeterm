@@ -335,7 +335,7 @@ function getOrCreateSession(
   get: () => AppState,
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void
 ): StoreApi<SessionState> {
-  const { sessionStores, windowUuid, git, sessionApi, terminal, ssh } = get()
+  const { sessionStores, windowUuid, git, filesystem, sessionApi, terminal, ssh } = get()
   let store = sessionStores[sessionId]
   if (!store) {
     store = createSessionStore(
@@ -343,6 +343,7 @@ function getOrCreateSession(
       {
         ssh,
         git,
+        filesystem,
         sessionApi,
         terminal,
         getSettings: () => useSettingsStore.getState().settings,

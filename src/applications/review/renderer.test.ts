@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { reviewApplication } from './renderer'
 import type { Tab, Workspace, ReviewState } from '../../renderer/types'
 import { createStore } from 'zustand/vanilla'
-import type { WorkspaceHandleState, WorkspaceHandle } from '../../renderer/store/createWorkspaceHandleStore'
+import type { WorkspaceStoreState, WorkspaceStore } from '../../renderer/store/createWorkspaceStore'
 
 // Mock React
 vi.mock('react', () => ({
@@ -14,7 +14,7 @@ vi.mock('../../renderer/components/ReviewBrowser', () => ({
   default: vi.fn(() => null)
 }))
 
-function createMockWorkspaceHandleStateData(overrides?: Partial<WorkspaceHandleState>): WorkspaceHandleState {
+function createMockWorkspaceStoreStateData(overrides?: Partial<WorkspaceStoreState>): WorkspaceStoreState {
   return {
     workspace: { id: 'ws-1', path: '/test' } as Workspace,
     addTab: vi.fn(),
@@ -41,10 +41,10 @@ function createMockWorkspaceHandleStateData(overrides?: Partial<WorkspaceHandleS
     removeKeepWorktree: vi.fn(),
     removeKeepBoth: vi.fn(),
     ...overrides,
-  } as WorkspaceHandleState
+  } as WorkspaceStoreState
 }
 
-const mockWorkspaceHandle = createStore<WorkspaceHandleState>()(() => createMockWorkspaceHandleStateData())
+const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => createMockWorkspaceStoreStateData())
 
 describe('Review Renderer', () => {
   beforeEach(() => {
@@ -91,7 +91,7 @@ describe('Review Renderer', () => {
 
         const result = reviewApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 
@@ -99,7 +99,7 @@ describe('Review Renderer', () => {
           component: expect.any(Function),
           props: expect.objectContaining({
             key: 'tab-1',
-            workspace: mockWorkspaceHandle,
+            workspace: mockWorkspaceStore,
             tabId: 'tab-1',
             parentWorkspaceId: undefined
           })
@@ -118,7 +118,7 @@ describe('Review Renderer', () => {
 
         const result = reviewApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         }) as { props: { parentWorkspaceId: string } }
 
@@ -135,7 +135,7 @@ describe('Review Renderer', () => {
 
         const result = reviewApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 
@@ -152,7 +152,7 @@ describe('Review Renderer', () => {
 
         const result = reviewApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 
@@ -169,7 +169,7 @@ describe('Review Renderer', () => {
 
         const result = reviewApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         }) as { props: { parentWorkspaceId: string | undefined } }
 
@@ -186,7 +186,7 @@ describe('Review Renderer', () => {
           }
         }
 
-        const wsHandle = createStore<WorkspaceHandleState>()(() => createMockWorkspaceHandleStateData({
+        const wsHandle = createStore<WorkspaceStoreState>()(() => createMockWorkspaceStoreStateData({
           workspace: { id: 'feature-ws', path: '/workspace/feature' } as Workspace,
         }))
 
@@ -194,7 +194,7 @@ describe('Review Renderer', () => {
           tab,
           workspace: wsHandle,
           isVisible: true,
-        }) as { props: { workspace: WorkspaceHandle } }
+        }) as { props: { workspace: WorkspaceStore } }
 
         expect(result.props.workspace.getState().workspace.id).toBe('feature-ws')
         expect(result.props.workspace.getState().workspace.path).toBe('/workspace/feature')
@@ -210,13 +210,13 @@ describe('Review Renderer', () => {
 
         const visibleResult = reviewApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 
         const hiddenResult = reviewApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: false,
         })
 
@@ -236,7 +236,7 @@ describe('Review Renderer', () => {
 
         const result = reviewApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 
@@ -257,7 +257,7 @@ describe('Review Renderer', () => {
 
         const result = reviewApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         }) as { props: { parentWorkspaceId: string } }
 

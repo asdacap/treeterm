@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
-import type { WorkspaceHandle } from '../store/createWorkspaceHandleStore'
-export type { WorkspaceHandle }
+import type { WorkspaceStore } from '../store/createWorkspaceStore'
+export type { WorkspaceStore }
 
 // Import and re-export shared types
 import type {
@@ -68,7 +68,7 @@ export interface Application<TState = unknown> {
 
 export interface ApplicationRenderProps {
   tab: Tab
-  workspace: WorkspaceHandle
+  workspace: WorkspaceStore
   isVisible: boolean
 }
 
@@ -151,6 +151,14 @@ export interface FilesystemApi {
     entries?: FileEntry[]
     error?: string
   }>
+}
+
+/** Workspace-scoped FilesystemApi with path pre-bound */
+export interface WorkspaceFilesystemApi {
+  readDirectory: (dirPath: string) => Promise<{ success: boolean; contents?: DirectoryContents; error?: string }>
+  readFile: (filePath: string) => Promise<{ success: boolean; file?: FileContents; error?: string }>
+  writeFile: (filePath: string, content: string) => Promise<{ success: boolean; error?: string }>
+  searchFiles: (query: string) => Promise<{ success: boolean; entries?: FileEntry[]; error?: string }>
 }
 
 export interface GitInfo {

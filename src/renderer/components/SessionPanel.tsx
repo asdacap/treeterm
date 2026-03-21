@@ -36,7 +36,7 @@ export default function SessionPanel({
   const connection = useStore(sessionStore, s => s.connection)
   const {
     workspaces,
-    workspaceHandles,
+    workspaceStores,
     activeWorkspaceId,
     addWorkspace,
     addChildWorkspace,
@@ -212,7 +212,7 @@ export default function SessionPanel({
     // For worktree workspaces with a parent, open the Review tab
     if (ws.isWorktree && ws.parentId) {
       setActiveWorkspace(id)
-      const handle = workspaceHandles[id]
+      const handle = workspaceStores[id]
       if (handle) {
         handle.getState().addTab<ReviewState>('review', {
           parentWorkspaceId: ws.parentId
@@ -224,7 +224,7 @@ export default function SessionPanel({
     // For regular workspaces, just confirm and remove
     const message = `Remove workspace "${ws.name}"?`
     if (confirm(message)) {
-      await workspaceHandles[id]!.getState().remove()
+      await workspaceStores[id]!.getState().remove()
     }
   }
 
@@ -245,7 +245,7 @@ export default function SessionPanel({
 
   // Get create child dialog parent handle
   const createChildDialogParentHandle = createChildDialogParentId
-    ? workspaceHandles[createChildDialogParentId] ?? null
+    ? workspaceStores[createChildDialogParentId] ?? null
     : null
 
   const handleWorkspaceClick = (ws: Workspace) => {

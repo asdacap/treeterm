@@ -62,7 +62,7 @@ vi.mock('./createSessionStore', () => ({
   createSessionStore: vi.fn().mockImplementation(() => ({
     getState: vi.fn().mockReturnValue({
       workspaces: {},
-      workspaceHandles: {},
+      workspaceStores: {},
       activeWorkspaceId: null,
       isRestoring: false,
       addWorkspace: vi.fn(),
@@ -204,7 +204,7 @@ describe('useAppStore', () => {
       const mockSessionStore = {
         getState: vi.fn().mockReturnValue({
           workspaces: {},
-          workspaceHandles: {},
+          workspaceStores: {},
           activeWorkspaceId: null,
         }),
         setState: vi.fn(),
@@ -229,7 +229,7 @@ describe('useAppStore', () => {
       const mockSessionStore = {
         getState: vi.fn().mockReturnValue({
           workspaces: {},
-          workspaceHandles: {},
+          workspaceStores: {},
           activeWorkspaceId: null,
         }),
         setState: vi.fn(),
@@ -260,7 +260,7 @@ describe('useAppStore', () => {
       mockedCreate.mockImplementation(() => ({
         getState: vi.fn().mockReturnValue({
           workspaces: {},
-          workspaceHandles: {},
+          workspaceStores: {},
           activeWorkspaceId: null,
           isRestoring: false,
           addWorkspace: mockAddWorkspace,
@@ -462,7 +462,7 @@ describe('useAppStore', () => {
       const mockStore = {
         getState: vi.fn().mockReturnValue({
           workspaces: { 'ws-1': mockWs },
-          workspaceHandles: {},
+          workspaceStores: {},
           handleRestore: vi.fn().mockResolvedValue(undefined),
           handleExternalUpdate: vi.fn().mockResolvedValue(undefined),
         }),
@@ -491,7 +491,7 @@ describe('useAppStore', () => {
       vi.mocked(createSessionStore).mockReturnValue({
         getState: vi.fn().mockReturnValue({
           workspaces: {},
-          workspaceHandles: {},
+          workspaceStores: {},
           activeWorkspaceId: null,
           isRestoring: false,
           addWorkspace: vi.fn(),
@@ -563,7 +563,7 @@ describe('useAppStore', () => {
       vi.mocked(createSessionStore).mockReturnValue({
         getState: vi.fn().mockReturnValue({
           workspaces: { 'ws-existing': { id: 'ws-existing', path: '/projects/existing', name: 'existing' } },
-          workspaceHandles: {},
+          workspaceStores: {},
           activeWorkspaceId: null,
           isRestoring: false,
           addWorkspace: vi.fn(),
@@ -611,7 +611,7 @@ describe('useAppStore', () => {
       vi.mocked(createSessionStore).mockReturnValue({
         getState: vi.fn().mockReturnValue({
           workspaces: {},
-          workspaceHandles: {},
+          workspaceStores: {},
           activeWorkspaceId: null,
           isRestoring: false,
           addWorkspace: mockAddWorkspace,
@@ -683,7 +683,7 @@ describe('useAppStore', () => {
       vi.mocked(createSessionStore).mockReturnValue({
         getState: vi.fn().mockReturnValue({
           workspaces: {},
-          workspaceHandles: {},
+          workspaceStores: {},
           activeWorkspaceId: null,
           isRestoring: false,
           addWorkspace: vi.fn(),

@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useStore } from 'zustand'
-import { useFilesystemApi } from '../contexts/FilesystemApiContext'
 import { generateReviewPrompt } from '../utils/reviewPrompt'
-import type { ReviewComment, FilesystemState, WorkspaceHandle } from '../types'
+import type { ReviewComment, FilesystemState, WorkspaceStore } from '../types'
 
 interface CommentsListProps {
-  workspace: WorkspaceHandle
+  workspace: WorkspaceStore
 }
 
 const CONTEXT_LINES = 3
@@ -30,9 +29,8 @@ function extractCodeContext(
 export default function CommentsList({
   workspace,
 }: CommentsListProps): JSX.Element {
-  const { workspace: wsData, getReviewComments, toggleReviewCommentAddressed, deleteReviewComment, addTab } = useStore(workspace)
-  const filesystem = useFilesystemApi()
-  const workspacePath = wsData.path
+  const { workspace: wsData, getReviewComments, toggleReviewCommentAddressed, deleteReviewComment, addTab, getFilesystemApi } = useStore(workspace)
+  const filesystem = getFilesystemApi()
   const comments: ReviewComment[] = getReviewComments()
   const [fileContents, setFileContents] = useState<Map<string, string>>(new Map())
   const [promptExpanded, setPromptExpanded] = useState(false)
@@ -50,7 +48,7 @@ export default function CommentsList({
       await Promise.all(
         missing.map(async (filePath) => {
           try {
-            const result = await filesystem.readFile(workspacePath, filePath)
+            const result = await filesystem.readFile(filePath)
             if (result.success && result.file) {
               newContents.set(filePath, result.file.content)
             }
@@ -63,7 +61,7 @@ export default function CommentsList({
     }
 
     fetchFiles()
-  }, [comments, workspacePath, filesystem])
+  }, [comments, wsData.path])
 
   const handleToggleAddressed = (commentId: string) => {
     toggleReviewCommentAddressed(commentId)

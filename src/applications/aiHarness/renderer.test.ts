@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createAiHarnessVariant } from './renderer'
 import type { Tab, Workspace, AiHarnessInstance, AiHarnessState } from '../../renderer/types'
 import { createStore } from 'zustand/vanilla'
-import type { WorkspaceHandleState } from '../../renderer/store/createWorkspaceHandleStore'
+import type { WorkspaceStoreState } from '../../renderer/store/createWorkspaceStore'
 import { useActivityStateStore } from '../../renderer/store/activityState'
 
 // Mock React
@@ -30,7 +30,7 @@ vi.mock('../../renderer/store/activityState', () => ({
 const mockTerminalKill = vi.fn()
 const mockDeps = { terminal: { kill: mockTerminalKill } }
 
-const mockWorkspaceHandleStateData = {
+const mockWorkspaceStoreStateData = {
   workspace: { id: 'ws-1', path: '/test' } as Workspace,
   addTab: vi.fn(),
   removeTab: vi.fn(),
@@ -56,9 +56,10 @@ const mockWorkspaceHandleStateData = {
   removeKeepWorktree: vi.fn(),
   removeKeepBoth: vi.fn(),
   getGitApi: vi.fn(),
-} as WorkspaceHandleState
+  getFilesystemApi: vi.fn(),
+} as WorkspaceStoreState
 
-const mockWorkspaceHandle = createStore<WorkspaceHandleState>()(() => mockWorkspaceHandleStateData)
+const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => mockWorkspaceStoreStateData)
 
 describe('AI Harness Renderer', () => {
   const mockInstance: AiHarnessInstance = {
@@ -292,7 +293,7 @@ describe('AI Harness Renderer', () => {
 
         const result = app.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 
@@ -301,7 +302,7 @@ describe('AI Harness Renderer', () => {
           props: expect.objectContaining({
             key: 'tab-1',
             cwd: '/test',
-            workspace: mockWorkspaceHandle,
+            workspace: mockWorkspaceStore,
             tabId: 'tab-1',
             sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] },
             isVisible: true,
@@ -323,7 +324,7 @@ describe('AI Harness Renderer', () => {
 
         const result = app.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 
@@ -344,7 +345,7 @@ describe('AI Harness Renderer', () => {
 
         const result = app.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: false,
         }) as { props: Record<string, unknown> }
 
@@ -370,7 +371,7 @@ describe('AI Harness Renderer', () => {
 
         const result = appWithoutScrollbarOption.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         }) as { props: Record<string, unknown> }
 

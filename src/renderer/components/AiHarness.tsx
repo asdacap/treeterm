@@ -4,11 +4,11 @@ import BaseTerminal, { type BaseTerminalConfig, type BaseTerminalState } from '.
 import PushToTalkButton from './PushToTalkButton'
 import { ReviewCommentsButton } from './ReviewCommentsButton'
 import { useSessionApi } from '../contexts/SessionStoreContext'
-import type { SandboxConfig, WorkspaceHandle } from '../types'
+import type { SandboxConfig, WorkspaceStore } from '../types'
 
 interface AiHarnessProps {
   cwd: string
-  workspace: WorkspaceHandle
+  workspace: WorkspaceStore
   tabId: string
   sandbox?: SandboxConfig
   isVisible?: boolean

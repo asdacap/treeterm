@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import type { FileEntry } from '../types'
-import { useFilesystemApi } from '../contexts/FilesystemApiContext'
+import { useStore } from 'zustand'
+import type { FileEntry, WorkspaceStore } from '../types'
 
 interface FileTreeProps {
-  workspacePath: string
+  workspace: WorkspaceStore
   selectedPath: string | null
   expandedDirs: string[]
   onSelectFile: (path: string) => void
@@ -24,13 +24,15 @@ interface SearchState {
 }
 
 export function FileTree({
-  workspacePath,
+  workspace,
   selectedPath,
   expandedDirs,
   onSelectFile,
   onToggleDir
 }: FileTreeProps): JSX.Element {
-  const filesystem = useFilesystemApi()
+  const { workspace: wsData, getFilesystemApi } = useStore(workspace)
+  const workspacePath = wsData.path
+  const filesystem = getFilesystemApi()
   const [dirContents, setDirContents] = useState<Record<string, DirectoryState>>({})
   const [search, setSearch] = useState<SearchState>({
     query: '',
@@ -59,7 +61,7 @@ export function FileTree({
       setSearch((prev) => ({ ...prev, loading: true, error: null }))
 
       try {
-        const result = await filesystem.searchFiles(workspacePath, debouncedQuery)
+        const result = await filesystem.searchFiles(debouncedQuery)
 
         if (result.success && result.entries) {
           setSearch((prev) => ({
@@ -100,7 +102,7 @@ export function FileTree({
       }))
 
       try {
-        const result = await filesystem.readDirectory(workspacePath, dirPath)
+        const result = await filesystem.readDirectory(dirPath)
 
         if (result.success && result.contents) {
           setDirContents((prev) => ({

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { filesystemApplication } from './renderer'
 import type { Tab, Workspace, FilesystemState } from '../../renderer/types'
 import { createStore } from 'zustand/vanilla'
-import type { WorkspaceHandleState, WorkspaceHandle } from '../../renderer/store/createWorkspaceHandleStore'
+import type { WorkspaceStoreState, WorkspaceStore } from '../../renderer/store/createWorkspaceStore'
 
 // Mock React
 vi.mock('react', () => ({
@@ -14,7 +14,7 @@ vi.mock('../../renderer/components/FilesystemBrowser', () => ({
   FilesystemBrowser: vi.fn(() => null)
 }))
 
-function createMockWorkspaceHandleStateData(overrides?: Partial<WorkspaceHandleState>): WorkspaceHandleState {
+function createMockWorkspaceStoreStateData(overrides?: Partial<WorkspaceStoreState>): WorkspaceStoreState {
   return {
     workspace: { id: 'ws-1', path: '/test' } as Workspace,
     addTab: vi.fn(),
@@ -41,10 +41,10 @@ function createMockWorkspaceHandleStateData(overrides?: Partial<WorkspaceHandleS
     removeKeepWorktree: vi.fn(),
     removeKeepBoth: vi.fn(),
     ...overrides,
-  } as WorkspaceHandleState
+  } as WorkspaceStoreState
 }
 
-const mockWorkspaceHandle = createStore<WorkspaceHandleState>()(() => createMockWorkspaceHandleStateData())
+const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => createMockWorkspaceStoreStateData())
 
 describe('Filesystem Renderer', () => {
   beforeEach(() => {
@@ -106,7 +106,7 @@ describe('Filesystem Renderer', () => {
 
         const result = filesystemApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 
@@ -114,7 +114,7 @@ describe('Filesystem Renderer', () => {
           component: expect.any(Function),
           props: expect.objectContaining({
             key: 'tab-1',
-            workspace: mockWorkspaceHandle,
+            workspace: mockWorkspaceStore,
             tabId: 'tab-1'
           })
         })
@@ -131,7 +131,7 @@ describe('Filesystem Renderer', () => {
           }
         }
 
-        const wsHandle = createStore<WorkspaceHandleState>()(() => createMockWorkspaceHandleStateData({
+        const wsHandle = createStore<WorkspaceStoreState>()(() => createMockWorkspaceStoreStateData({
           workspace: { id: 'project-ws', path: '/project' } as Workspace,
         }))
 
@@ -139,7 +139,7 @@ describe('Filesystem Renderer', () => {
           tab,
           workspace: wsHandle,
           isVisible: true,
-        }) as { props: { workspace: WorkspaceHandle } }
+        }) as { props: { workspace: WorkspaceStore } }
 
         expect(result.props.workspace.getState().workspace.id).toBe('project-ws')
         expect(result.props.workspace.getState().workspace.path).toBe('/project')
@@ -158,7 +158,7 @@ describe('Filesystem Renderer', () => {
 
         const result = filesystemApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         }) as { props: { tabId: string } }
 
@@ -178,7 +178,7 @@ describe('Filesystem Renderer', () => {
 
         const result = filesystemApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 
@@ -200,7 +200,7 @@ describe('Filesystem Renderer', () => {
 
         const result = filesystemApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 
@@ -218,7 +218,7 @@ describe('Filesystem Renderer', () => {
           }
         }
 
-        const wsHandle = createStore<WorkspaceHandleState>()(() => createMockWorkspaceHandleStateData({
+        const wsHandle = createStore<WorkspaceStoreState>()(() => createMockWorkspaceStoreStateData({
           workspace: { id: 'ws-root', path: '/root' } as Workspace,
         }))
 
@@ -244,13 +244,13 @@ describe('Filesystem Renderer', () => {
 
         const visibleResult = filesystemApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 
         const hiddenResult = filesystemApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: false,
         })
 
@@ -268,7 +268,7 @@ describe('Filesystem Renderer', () => {
 
         const result = filesystemApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 
@@ -288,7 +288,7 @@ describe('Filesystem Renderer', () => {
 
         const result = filesystemApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 

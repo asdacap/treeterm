@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { commentsApplication } from './renderer'
 import type { Tab, Workspace } from '../../renderer/types'
 import { createStore } from 'zustand/vanilla'
-import type { WorkspaceHandleState } from '../../renderer/store/createWorkspaceHandleStore'
+import type { WorkspaceStoreState } from '../../renderer/store/createWorkspaceStore'
 
 // Mock React
 vi.mock('react', () => ({
@@ -14,7 +14,7 @@ vi.mock('../../renderer/components/CommentsList', () => ({
   default: vi.fn(() => null)
 }))
 
-const mockWorkspaceHandleStateData = {
+const mockWorkspaceStoreStateData = {
   workspace: { id: 'ws-1', path: '/test' } as Workspace,
   addTab: vi.fn(),
   removeTab: vi.fn(),
@@ -40,9 +40,10 @@ const mockWorkspaceHandleStateData = {
   removeKeepWorktree: vi.fn(),
   removeKeepBoth: vi.fn(),
   getGitApi: vi.fn(),
-} as WorkspaceHandleState
+  getFilesystemApi: vi.fn(),
+} as WorkspaceStoreState
 
-const mockWorkspaceHandle = createStore<WorkspaceHandleState>()(() => mockWorkspaceHandleStateData)
+const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => mockWorkspaceStoreStateData)
 
 describe('Comments Renderer', () => {
   beforeEach(() => {
@@ -86,7 +87,7 @@ describe('Comments Renderer', () => {
 
         const result = commentsApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 
@@ -94,7 +95,7 @@ describe('Comments Renderer', () => {
           component: expect.any(Function),
           props: expect.objectContaining({
             key: 'tab-1',
-            workspace: mockWorkspaceHandle,
+            workspace: mockWorkspaceStore,
           })
         })
       })
@@ -109,7 +110,7 @@ describe('Comments Renderer', () => {
 
         const result = commentsApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 

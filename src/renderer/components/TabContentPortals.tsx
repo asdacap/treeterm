@@ -23,7 +23,7 @@ interface TabContentPortalsProps {
  */
 export default function TabContentPortals({ sessionStore, activeWorkspaceId }: TabContentPortalsProps) {
   const workspaces = useStore(sessionStore, s => s.workspaces)
-  const workspaceHandles = useStore(sessionStore, s => s.workspaceHandles)
+  const workspaceStores = useStore(sessionStore, s => s.workspaceStores)
   const applications = useAppStore((s) => s.applications)
 
   // Track available portal slots — updated via MutationObserver
@@ -72,7 +72,7 @@ export default function TabContentPortals({ sessionStore, activeWorkspaceId }: T
           const portalTarget = isActiveWorkspace ? portalSlots[tab.id] : null
           const isVisible = !!portalTarget
 
-          const handle = workspaceHandles[workspace.id]
+          const handle = workspaceStores[workspace.id]
           if (!handle) return null
 
           const content = (

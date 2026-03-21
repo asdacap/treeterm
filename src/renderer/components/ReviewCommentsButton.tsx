@@ -1,9 +1,9 @@
 import { useStore } from 'zustand'
-import type { WorkspaceHandle } from '../types'
+import type { WorkspaceStore } from '../types'
 import { generateReviewPrompt } from '../utils/reviewPrompt'
 
 interface ReviewCommentsButtonProps {
-  workspace: WorkspaceHandle
+  workspace: WorkspaceStore
 }
 
 export function ReviewCommentsButton({ workspace }: ReviewCommentsButtonProps): JSX.Element | null {

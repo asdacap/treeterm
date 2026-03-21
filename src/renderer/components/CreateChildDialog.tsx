@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useStore } from 'zustand'
-import type { ChildWorktreeInfo, BranchInfo, WorktreeSettings, WorkspaceHandle } from '../types'
+import type { ChildWorktreeInfo, BranchInfo, WorktreeSettings, WorkspaceStore } from '../types'
 import { useAppStore } from '../store/app'
 
 interface CreateChildDialogProps {
-  parentWorkspace: WorkspaceHandle
+  parentWorkspace: WorkspaceStore
   onCreate: (name: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
   onAdopt: (worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
   onCreateFromBranch: (branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>

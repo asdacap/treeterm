@@ -2,12 +2,11 @@ import { useEffect, useRef, useCallback, useState } from 'react'
 import Editor, { OnMount, OnChange } from '@monaco-editor/react'
 import { editor, KeyMod, KeyCode } from 'monaco-editor'
 import { useStore } from 'zustand'
-import { useFilesystemApi } from '../contexts/FilesystemApiContext'
-import type { EditorState, WorkspaceHandle } from '../types'
+import type { EditorState, WorkspaceStore } from '../types'
 import { MarkdownPreview } from './MarkdownPreview'
 
 interface FileEditorProps {
-  workspace: WorkspaceHandle
+  workspace: WorkspaceStore
   tabId: string
 }
 
@@ -23,9 +22,8 @@ function getFilename(filePath: string): string {
 }
 
 export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
-  const { workspace: wsData, updateTabState, updateTabTitle } = useStore(workspace)
-  const filesystem = useFilesystemApi()
-  const workspacePath = wsData.path
+  const { workspace: wsData, updateTabState, updateTabTitle, getFilesystemApi } = useStore(workspace)
+  const filesystem = getFilesystemApi()
   const appState = wsData?.appStates[tabId]
   const state = appState?.state as EditorState | undefined
 
@@ -44,7 +42,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
       }))
 
       try {
-        const result = await filesystem.readFile(workspacePath, state.filePath)
+        const result = await filesystem.readFile(state.filePath)
 
         if (result.success && result.file) {
           const language = mapLanguageToMonaco(result.file.language)
@@ -80,7 +78,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
     if (!state.originalContent && !state.error) {
       loadFile()
     }
-  }, [state?.filePath, workspacePath, tabId, workspace])
+  }, [state?.filePath, wsData.path, tabId, workspace])
 
   // Update tab title with dirty indicator
   useEffect(() => {
@@ -96,7 +94,6 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
     setSaving(true)
     try {
       const result = await filesystem.writeFile(
-        workspacePath,
         state.filePath,
         state.currentContent
       )
@@ -115,7 +112,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
     } finally {
       setSaving(false)
     }
-  }, [state, saving, workspacePath, tabId, workspace])
+  }, [state, saving, tabId, workspace])
 
   const handleEditorMount: OnMount = useCallback(
     (editor) => {

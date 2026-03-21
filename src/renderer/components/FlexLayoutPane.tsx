@@ -4,14 +4,14 @@ import { Layout, type ITabSetRenderValues, type ITabRenderValues } from '@aptre/
 import { Model, Actions, TabNode, TabSetNode, BorderNode, DockLocation, type Action } from '@aptre/flex-layout'
 import type { IJsonModel } from '@aptre/flex-layout'
 import { useStore } from 'zustand'
-import type { WorkspaceHandle } from '../store/createWorkspaceHandleStore'
+import type { WorkspaceStore } from '../store/createWorkspaceStore'
 import { useAppStore } from '../store/app'
 import { createDefaultLayoutModel, tabToFlexNode } from '../utils/layoutModel'
 import { TabActivityIndicator } from './TabActivityIndicator'
 import { getTabs } from '../types'
 
 interface FlexLayoutPaneProps {
-  workspace: WorkspaceHandle
+  workspace: WorkspaceStore
   onNewTab: (applicationId: string) => void
 }
 

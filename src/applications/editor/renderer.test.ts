@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { editorApplication } from './renderer'
 import type { Tab, Workspace, EditorState } from '../../renderer/types'
 import { createStore } from 'zustand/vanilla'
-import type { WorkspaceHandleState, WorkspaceHandle } from '../../renderer/store/createWorkspaceHandleStore'
+import type { WorkspaceStoreState, WorkspaceStore } from '../../renderer/store/createWorkspaceStore'
 
 // Mock React
 vi.mock('react', () => ({
@@ -14,7 +14,7 @@ vi.mock('../../renderer/components/FileEditor', () => ({
   FileEditor: vi.fn(() => null)
 }))
 
-function createMockWorkspaceHandleStateData(overrides?: Partial<WorkspaceHandleState>): WorkspaceHandleState {
+function createMockWorkspaceStoreStateData(overrides?: Partial<WorkspaceStoreState>): WorkspaceStoreState {
   return {
     workspace: { id: 'ws-1', path: '/test' } as Workspace,
     addTab: vi.fn(),
@@ -41,12 +41,12 @@ function createMockWorkspaceHandleStateData(overrides?: Partial<WorkspaceHandleS
     removeKeepWorktree: vi.fn(),
     removeKeepBoth: vi.fn(),
     ...overrides,
-  } as WorkspaceHandleState
+  } as WorkspaceStoreState
 }
 
-const mockWorkspaceHandleStateData = createMockWorkspaceHandleStateData()
+const mockWorkspaceStoreStateData = createMockWorkspaceStoreStateData()
 
-const mockWorkspaceHandle = createStore<WorkspaceHandleState>()(() => mockWorkspaceHandleStateData)
+const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => mockWorkspaceStoreStateData)
 
 describe('Editor Renderer', () => {
   beforeEach(() => {
@@ -259,7 +259,7 @@ describe('Editor Renderer', () => {
 
         const result = editorApplication.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 
@@ -267,7 +267,7 @@ describe('Editor Renderer', () => {
           component: expect.any(Function),
           props: expect.objectContaining({
             key: 'tab-1',
-            workspace: mockWorkspaceHandle,
+            workspace: mockWorkspaceStore,
             tabId: 'tab-1'
           })
         })
@@ -290,7 +290,7 @@ describe('Editor Renderer', () => {
           }
         }
 
-        const wsHandle = createStore<WorkspaceHandleState>()(() => createMockWorkspaceHandleStateData({
+        const wsHandle = createStore<WorkspaceStoreState>()(() => createMockWorkspaceStoreStateData({
           workspace: { id: 'ws-2', path: '/workspace' } as Workspace,
         }))
 
@@ -320,7 +320,7 @@ describe('Editor Renderer', () => {
           }
         }
 
-        const wsHandle = createStore<WorkspaceHandleState>()(() => createMockWorkspaceHandleStateData({
+        const wsHandle = createStore<WorkspaceStoreState>()(() => createMockWorkspaceStoreStateData({
           workspace: { id: 'project-ws', path: '/project' } as Workspace,
         }))
 
@@ -328,7 +328,7 @@ describe('Editor Renderer', () => {
           tab,
           workspace: wsHandle,
           isVisible: true,
-        }) as { props: { workspace: WorkspaceHandle } }
+        }) as { props: { workspace: WorkspaceStore } }
 
         expect(result.props.workspace.getState().workspace.id).toBe('project-ws')
         expect(result.props.workspace.getState().workspace.path).toBe('/project')
@@ -369,13 +369,13 @@ describe('Editor Renderer', () => {
 
         const dirtyResult = editorApplication.render({
           tab: dirtyTab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 
         const cleanResult = editorApplication.render({
           tab: cleanTab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 

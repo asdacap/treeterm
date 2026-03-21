@@ -3,10 +3,10 @@ import { useStore } from 'zustand'
 import { FileTree } from './FileTree'
 import { FileViewer } from './FileViewer'
 import { CommentDisplay } from './CommentDisplay'
-import type { FilesystemState, WorkspaceHandle } from '../types'
+import type { FilesystemState, WorkspaceStore } from '../types'
 
 interface FilesystemBrowserProps {
-  workspace: WorkspaceHandle
+  workspace: WorkspaceStore
   tabId: string
 }
 
@@ -129,7 +129,7 @@ export function FilesystemBrowser({
       )}
       <div style={{ width: treeWidth }}>
         <FileTree
-          workspacePath={workspacePath}
+          workspace={workspace}
           selectedPath={state.selectedPath}
           expandedDirs={state.expandedDirs}
           onSelectFile={setSelectedPath}

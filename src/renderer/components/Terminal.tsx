@@ -1,10 +1,10 @@
 import { useMemo } from 'react'
 import BaseTerminal, { type BaseTerminalConfig } from './BaseTerminal'
-import type { SandboxConfig, WorkspaceHandle } from '../types'
+import type { SandboxConfig, WorkspaceStore } from '../types'
 
 interface TerminalProps {
   cwd: string
-  workspace: WorkspaceHandle
+  workspace: WorkspaceStore
   tabId: string
   startupCommand?: string
   sandbox?: SandboxConfig

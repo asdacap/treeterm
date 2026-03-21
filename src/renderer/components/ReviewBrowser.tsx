@@ -3,13 +3,13 @@ import { ChevronDown } from 'lucide-react'
 import { useStore } from 'zustand'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
 import { getTabs } from '../types'
-import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, WorkspaceHandle } from '../types'
+import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, WorkspaceStore } from '../types'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
 import { CommentInput } from './CommentInput'
 import { CommentDisplay } from './CommentDisplay'
 
 interface ReviewBrowserProps {
-  workspace: WorkspaceHandle
+  workspace: WorkspaceStore
   tabId: string
   // parentWorkspaceId is optional - if undefined, this is a top-level worktree
   // and only uncommitted changes are shown (no merge functionality)

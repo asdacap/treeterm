@@ -25,7 +25,7 @@ interface WorkspacePaneProps {
 export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneProps) {
   const {
     workspaces,
-    workspaceHandles,
+    workspaceStores,
     activeWorkspaceId,
     addChildWorkspace,
     adoptExistingWorktree,
@@ -39,7 +39,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const menuApplications = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
 
   const activeWorkspace = activeWorkspaceId ? workspaces[activeWorkspaceId] : null
-  const activeHandle = activeWorkspaceId ? (workspaceHandles[activeWorkspaceId] ?? null) : null
+  const activeHandle = activeWorkspaceId ? (workspaceStores[activeWorkspaceId] ?? null) : null
 
   // Dialog state
   const [showCreateChildDialog, setShowCreateChildDialog] = useState(false)

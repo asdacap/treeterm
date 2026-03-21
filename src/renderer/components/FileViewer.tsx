@@ -3,13 +3,12 @@ import { createPortal } from 'react-dom'
 import Editor, { OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
 import { useStore } from 'zustand'
-import { useFilesystemApi } from '../contexts/FilesystemApiContext'
-import type { EditorState, ReviewComment, WorkspaceHandle } from '../types'
+import type { EditorState, ReviewComment, WorkspaceStore } from '../types'
 import { MarkdownPreview } from './MarkdownPreview'
 import { CommentInput } from './CommentInput'
 
 interface FileViewerProps {
-  workspace: WorkspaceHandle
+  workspace: WorkspaceStore
   filePath: string | null
   // Comment props
   comments?: ReviewComment[]
@@ -49,9 +48,8 @@ export function FileViewer({
   scrollToLine,
   onScrollToLineUsed
 }: FileViewerProps): JSX.Element {
-  const { workspace: wsData, addTab } = useStore(workspace)
-  const filesystem = useFilesystemApi()
-  const workspacePath = wsData.path
+  const { workspace: wsData, addTab, getFilesystemApi } = useStore(workspace)
+  const filesystem = getFilesystemApi()
   const [fileState, setFileState] = useState<FileState>({
     content: '',
     language: 'plaintext',
@@ -73,7 +71,7 @@ export function FileViewer({
       setFileState((prev) => ({ ...prev, loading: true, error: null }))
 
       try {
-        const result = await filesystem.readFile(workspacePath, filePath)
+        const result = await filesystem.readFile(filePath)
 
         if (result.success && result.file) {
           setFileState({
@@ -101,7 +99,7 @@ export function FileViewer({
     }
 
     loadFile()
-  }, [workspacePath, filePath])
+  }, [wsData.path, filePath])
 
   const handleEditorMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor

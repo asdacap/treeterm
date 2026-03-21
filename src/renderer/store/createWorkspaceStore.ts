@@ -1,13 +1,14 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, Tab, AppState, ReviewComment, AppRegistryApi, GitApi, WorkspaceGitApi } from '../types'
+import type { Workspace, Tab, AppState, ReviewComment, AppRegistryApi, GitApi, FilesystemApi, WorkspaceGitApi, WorkspaceFilesystemApi } from '../types'
 import { getTabs, isAiHarnessState } from '../types'
 import type { Tty } from './createTtyStore'
 
-export interface WorkspaceHandleDeps {
+export interface WorkspaceStoreDeps {
   appRegistry: AppRegistryApi
   getTty: (ptyId: string) => Tty | null
   git: GitApi
+  filesystem: FilesystemApi
   // Session-level callbacks
   syncToDaemon: () => void
   removeWorkspace: (id: string) => Promise<void>
@@ -21,7 +22,7 @@ export interface WorkspaceHandleDeps {
   lookupWorkspace: (id: string) => Workspace | undefined
 }
 
-export interface WorkspaceHandleState {
+export interface WorkspaceStoreState {
   workspace: Workspace
 
   // Tab methods
@@ -47,6 +48,9 @@ export interface WorkspaceHandleState {
   // Git API (workspace-scoped)
   getGitApi: () => WorkspaceGitApi
 
+  // Filesystem API (workspace-scoped)
+  getFilesystemApi: () => WorkspaceFilesystemApi
+
   // Cross-cutting (delegate to session)
   refreshGitInfo: () => Promise<void>
   quickForkWorkspace: () => Promise<{ success: boolean; error?: string }>
@@ -59,7 +63,7 @@ export interface WorkspaceHandleState {
   lookupWorkspace: (id: string) => Workspace | undefined
 }
 
-export type WorkspaceHandle = StoreApi<WorkspaceHandleState>
+export type WorkspaceStore = StoreApi<WorkspaceStoreState>
 
 function generateTabId(): string {
   return `tab-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -78,17 +82,17 @@ function serializeReviewComments(comments: ReviewComment[]): string {
   return JSON.stringify(comments)
 }
 
-export function createWorkspaceHandleStore(
+export function createWorkspaceStore(
   workspace: Workspace,
-  deps: WorkspaceHandleDeps
-): WorkspaceHandle {
+  deps: WorkspaceStoreDeps
+): WorkspaceStore {
   const id = workspace.id
 
   function updateWorkspace(updater: (ws: Workspace) => Workspace): void {
     store.setState((state) => ({ workspace: updater(state.workspace) }))
   }
 
-  const store = createStore<WorkspaceHandleState>()((set, get) => ({
+  const store = createStore<WorkspaceStoreState>()((set, get) => ({
     workspace,
 
     addTab: <T,>(applicationId: string, initialState?: Partial<T>): string => {
@@ -325,6 +329,16 @@ export function createWorkspaceHandleStore(
         getFileContentsForDiff: (parentBranch, filePath) => deps.git.getFileContentsForDiff(path, parentBranch, filePath),
         getUncommittedFileContentsForDiff: (filePath, staged) => deps.git.getUncommittedFileContentsForDiff(path, filePath, staged),
         getHeadCommitHash: () => deps.git.getHeadCommitHash(path),
+      }
+    },
+
+    getFilesystemApi: (): WorkspaceFilesystemApi => {
+      const path = get().workspace.path
+      return {
+        readDirectory: (dirPath) => deps.filesystem.readDirectory(path, dirPath),
+        readFile: (filePath) => deps.filesystem.readFile(path, filePath),
+        writeFile: (filePath, content) => deps.filesystem.writeFile(path, filePath, content),
+        searchFiles: (query) => deps.filesystem.searchFiles(path, query),
       }
     },
 

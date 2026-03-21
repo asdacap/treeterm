@@ -1,9 +1,9 @@
 import { useStore } from 'zustand'
-import type { WorkspaceHandle } from '../types'
+import type { WorkspaceStore } from '../types'
 
 interface PromptDescriptionButtonProps {
   description: string
-  workspace: WorkspaceHandle
+  workspace: WorkspaceStore
   onDismiss: () => void
 }
 

@@ -11,7 +11,6 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import AppErrorFallback from './components/AppErrorFallback'
 import { useAppStore } from './store/app'
 import { useNavigationStore } from './store/navigation'
-import { FilesystemApiContext } from './contexts/FilesystemApiContext'
 import { STTApiContext } from './contexts/STTApiContext'
 
 // One-time migration: clear localStorage since daemon is now source of truth
@@ -26,7 +25,6 @@ export default function App() {
 
   const {
     platform,
-    filesystem,
     stt,
     sandbox,
     appApi,
@@ -100,7 +98,6 @@ export default function App() {
 
   return (
     <ErrorBoundary fallback={<AppErrorFallback />}>
-      <FilesystemApiContext.Provider value={filesystem}>
       <STTApiContext.Provider value={stt}>
         <div
           className="app"
@@ -187,7 +184,6 @@ export default function App() {
           )}
         </div>
       </STTApiContext.Provider>
-      </FilesystemApiContext.Provider>
     </ErrorBoundary>
   )
 }

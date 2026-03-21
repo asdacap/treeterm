@@ -1,14 +1,14 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
 import { humanId } from 'human-id'
-import { createWorkspaceHandleStore } from './createWorkspaceHandleStore'
-import type { WorkspaceHandle, WorkspaceHandleDeps } from './createWorkspaceHandleStore'
+import { createWorkspaceStore } from './createWorkspaceStore'
+import type { WorkspaceStore, WorkspaceStoreDeps } from './createWorkspaceStore'
 import { createTtyStore } from './createTtyStore'
 import type { Tty } from './createTtyStore'
 import type {
   Workspace, Session, AppState, GitInfo,
   SSHConnectionConfig, ConnectionInfo,
-  TerminalApi, GitApi, SessionApi, SSHApi, Settings, WorktreeSettings,
+  TerminalApi, GitApi, FilesystemApi, SessionApi, SSHApi, Settings, WorktreeSettings,
   Application, SandboxConfig, SessionInfo
 } from '../types'
 
@@ -20,6 +20,7 @@ export interface AppRegistryApi {
 export interface SessionDeps {
   ssh: SSHApi
   git: GitApi
+  filesystem: FilesystemApi
   sessionApi: SessionApi
   terminal: TerminalApi
   getSettings: () => Settings
@@ -42,12 +43,12 @@ export interface SessionState {
   listTty: () => Promise<SessionInfo[]>
 
   // Workspace collection
-  workspaceHandles: Record<string, WorkspaceHandle>
+  workspaceStores: Record<string, WorkspaceStore>
   workspaces: Record<string, Workspace>
   activeWorkspaceId: string | null
   isRestoring: boolean
 
-  getWorkspace: (id: string) => WorkspaceHandle | null
+  getWorkspace: (id: string) => WorkspaceStore | null
   addWorkspace: (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => Promise<string>
   addChildWorkspace: (parentId: string, name: string, isDetached?: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
   adoptExistingWorktree: (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
@@ -163,11 +164,12 @@ export function createSessionStore(
     }, 500)
   }
 
-  function makeHandleDeps(): WorkspaceHandleDeps {
+  function makeHandleDeps(): WorkspaceStoreDeps {
     return {
       appRegistry: deps.appRegistry,
       getTty: (ptyId: string) => store.getState().getTty(ptyId),
       git: deps.git,
+      filesystem: deps.filesystem,
       syncToDaemon: () => debouncedSyncToDaemon(),
       removeWorkspace: (id) => store.getState().removeWorkspace(id),
       removeWorkspaceKeepBranch: (id) => store.getState().removeWorkspaceKeepBranch(id),
@@ -181,8 +183,8 @@ export function createSessionStore(
     }
   }
 
-  function createHandleForWorkspace(workspace: Workspace): WorkspaceHandle {
-    const handle = createWorkspaceHandleStore(workspace, makeHandleDeps())
+  function createHandleForWorkspace(workspace: Workspace): WorkspaceStore {
+    const handle = createWorkspaceStore(workspace, makeHandleDeps())
 
     // Keep the workspaces snapshot in sync when handle state changes
     handle.subscribe((state) => {
@@ -253,12 +255,12 @@ export function createSessionStore(
         } : {})
       }
       // Also update the parent handle's workspace data
-      const parentHandle = s.workspaceHandles[parentId]
+      const parentHandle = s.workspaceStores[parentId]
       if (parentHandle && parentWs) {
         parentHandle.setState({ workspace: { ...parentWs, children: [...parentWs.children, id] } })
       }
       return {
-        workspaceHandles: { ...s.workspaceHandles, [id]: handle },
+        workspaceStores: { ...s.workspaceStores, [id]: handle },
         workspaces: updatedWorkspaces,
         activeWorkspaceId: id
       }
@@ -307,7 +309,7 @@ export function createSessionStore(
 
     // Update parent's children list
     if (workspace.parentId) {
-      const parentHandle = store.getState().workspaceHandles[workspace.parentId]
+      const parentHandle = store.getState().workspaceStores[workspace.parentId]
       if (parentHandle) {
         const parentWs = parentHandle.getState().workspace
         parentHandle.setState({
@@ -318,10 +320,10 @@ export function createSessionStore(
 
     // Remove handle and workspace
     store.setState((s) => {
-      const { [id]: _removedHandle, ...remainingHandles } = s.workspaceHandles
+      const { [id]: _removedHandle, ...remainingHandles } = s.workspaceStores
       const { [id]: _removedWs, ...remainingWorkspaces } = s.workspaces
       return {
-        workspaceHandles: remainingHandles,
+        workspaceStores: remainingHandles,
         workspaces: remainingWorkspaces,
         activeWorkspaceId: s.activeWorkspaceId === id ? null : s.activeWorkspaceId
       }
@@ -333,7 +335,7 @@ export function createSessionStore(
   const store = createStore<SessionState>()((set, get) => ({
     sessionId: config.sessionId,
     ttyHandles: {},
-    workspaceHandles: {},
+    workspaceStores: {},
     workspaces: {},
     activeWorkspaceId: null,
     isRestoring: false,
@@ -394,8 +396,8 @@ export function createSessionStore(
       set({ connection: null })
     },
 
-    getWorkspace: (id: string): WorkspaceHandle | null => {
-      return get().workspaceHandles[id] ?? null
+    getWorkspace: (id: string): WorkspaceStore | null => {
+      return get().workspaceStores[id] ?? null
     },
 
     addWorkspace: async (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => {
@@ -442,7 +444,7 @@ export function createSessionStore(
       const handle = createHandleForWorkspace(workspace)
 
       set((s) => ({
-        workspaceHandles: { ...s.workspaceHandles, [id]: handle },
+        workspaceStores: { ...s.workspaceStores, [id]: handle },
         workspaces: { ...s.workspaces, [id]: workspace },
         activeWorkspaceId: id
       }))
@@ -585,7 +587,7 @@ export function createSessionStore(
       if (!workspace) return
 
       if (workspace.parentId) {
-        const parentHandle = state.workspaceHandles[workspace.parentId]
+        const parentHandle = state.workspaceStores[workspace.parentId]
         if (parentHandle) {
           const parentWs = parentHandle.getState().workspace
           parentHandle.setState({
@@ -595,10 +597,10 @@ export function createSessionStore(
       }
 
       set((s) => {
-        const { [id]: _removedHandle, ...remainingHandles } = s.workspaceHandles
+        const { [id]: _removedHandle, ...remainingHandles } = s.workspaceStores
         const { [id]: _removedWs, ...remainingWorkspaces } = s.workspaces
         return {
-          workspaceHandles: remainingHandles,
+          workspaceStores: remainingHandles,
           workspaces: remainingWorkspaces,
           activeWorkspaceId: s.activeWorkspaceId === id ? null : s.activeWorkspaceId
         }
@@ -610,7 +612,7 @@ export function createSessionStore(
     },
 
     updateGitInfo: (id: string, gitInfo: GitInfo) => {
-      const handle = get().workspaceHandles[id]
+      const handle = get().workspaceStores[id]
       if (!handle) return
       const ws = handle.getState().workspace
       handle.setState({
@@ -671,7 +673,7 @@ export function createSessionStore(
       }
 
       // Update status on the handle
-      const handle = get().workspaceHandles[id]
+      const handle = get().workspaceStores[id]
       if (handle) {
         handle.getState().updateStatus('merged')
       }
@@ -779,7 +781,7 @@ function updateWorkspaceFields(
   existingId: string,
   daemonWorkspace: Workspace
 ): void {
-  const handle = store.getState().workspaceHandles[existingId]
+  const handle = store.getState().workspaceStores[existingId]
   if (!handle) return
   const ws = handle.getState().workspace
   handle.setState({
@@ -791,7 +793,7 @@ function updateWorkspaceFields(
 function applySessionWorkspaces(
   store: StoreApi<SessionState>,
   daemonWorkspaces: Workspace[],
-  createHandleForWorkspace: (ws: Workspace) => WorkspaceHandle,
+  createHandleForWorkspace: (ws: Workspace) => WorkspaceStore,
   options: { restoreExisting: boolean }
 ): void {
   const rootWorkspaces = daemonWorkspaces.filter(w => !w.parentId)
@@ -837,7 +839,7 @@ function restoreWorkspaceTabs(
   workspaceId: string,
   daemonWorkspace: Workspace
 ): void {
-  const handle = store.getState().workspaceHandles[workspaceId]
+  const handle = store.getState().workspaceStores[workspaceId]
   if (!handle) return
   const ws = handle.getState().workspace
   handle.setState({
@@ -853,7 +855,7 @@ function restoreWorkspaceTabs(
 function reconstructWorkspace(
   store: StoreApi<SessionState>,
   daemonWorkspace: Workspace,
-  createHandleForWorkspace: (ws: Workspace) => WorkspaceHandle
+  createHandleForWorkspace: (ws: Workspace) => WorkspaceStore
 ): string {
   const id = daemonWorkspace.id
   const parentId = daemonWorkspace.parentId
@@ -869,7 +871,7 @@ function reconstructWorkspace(
 
   store.setState((s) => {
     const newWorkspaces = { ...s.workspaces, [id]: workspace }
-    const newHandles = { ...s.workspaceHandles, [id]: handle }
+    const newHandles = { ...s.workspaceStores, [id]: handle }
 
     if (parentId && s.workspaces[parentId]) {
       newWorkspaces[parentId] = {
@@ -877,14 +879,14 @@ function reconstructWorkspace(
         children: [...s.workspaces[parentId].children, id]
       }
       // Update parent handle too
-      const parentHandle = s.workspaceHandles[parentId]
+      const parentHandle = s.workspaceStores[parentId]
       if (parentHandle) {
         parentHandle.setState({ workspace: newWorkspaces[parentId] })
       }
     }
 
     return {
-      workspaceHandles: newHandles,
+      workspaceStores: newHandles,
       workspaces: newWorkspaces,
       activeWorkspaceId: id
     }

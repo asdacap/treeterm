@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createWorkspaceHandleStore } from './createWorkspaceHandleStore'
-import type { WorkspaceHandleDeps } from './createWorkspaceHandleStore'
+import { createWorkspaceStore } from './createWorkspaceStore'
+import type { WorkspaceStoreDeps } from './createWorkspaceStore'
 import { getUnmergedSubWorkspaces } from './createSessionStore'
 import type { Workspace, Application } from '../types'
 
-function makeHandleDeps(overrides?: Partial<WorkspaceHandleDeps>): WorkspaceHandleDeps {
+function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStoreDeps {
   return {
     appRegistry: {
       get: vi.fn().mockReturnValue(null),
@@ -12,6 +12,7 @@ function makeHandleDeps(overrides?: Partial<WorkspaceHandleDeps>): WorkspaceHand
     },
     getTty: vi.fn().mockReturnValue(null),
     git: {} as any,
+    filesystem: {} as any,
     syncToDaemon: vi.fn(),
     removeWorkspace: vi.fn().mockResolvedValue(undefined),
     removeWorkspaceKeepBranch: vi.fn().mockResolvedValue(undefined),
@@ -90,21 +91,21 @@ describe('getUnmergedSubWorkspaces', () => {
   })
 })
 
-describe('createWorkspaceHandleStore', () => {
+describe('createWorkspaceStore', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
   it('creates a store with initial workspace state', () => {
     const ws = makeWorkspace()
-    const store = createWorkspaceHandleStore(ws, makeHandleDeps())
+    const store = createWorkspaceStore(ws, makeHandleDeps())
     const state = store.getState()
 
     expect(state.workspace).toEqual(ws)
   })
 
   it('exposes all required action methods', () => {
-    const store = createWorkspaceHandleStore(makeWorkspace(), makeHandleDeps())
+    const store = createWorkspaceStore(makeWorkspace(), makeHandleDeps())
     const state = store.getState()
 
     expect(typeof state.addTab).toBe('function')
@@ -126,7 +127,7 @@ describe('createWorkspaceHandleStore', () => {
 
   it('updateStatus updates workspace status field', () => {
     const ws = makeWorkspace({ id: 'ws-1', status: 'active' })
-    const store = createWorkspaceHandleStore(ws, makeHandleDeps())
+    const store = createWorkspaceStore(ws, makeHandleDeps())
 
     store.getState().updateStatus('merged')
 
@@ -139,7 +140,7 @@ describe('createWorkspaceHandleStore', () => {
       appStates: { 'tab-1': { applicationId: 'terminal', title: 'Terminal 1', state: { ptyId: null } } },
       activeTabId: 'tab-1'
     })
-    const store = createWorkspaceHandleStore(ws, makeHandleDeps())
+    const store = createWorkspaceStore(ws, makeHandleDeps())
 
     store.getState().updateTabTitle('tab-1', 'my shell')
 
@@ -155,7 +156,7 @@ describe('createWorkspaceHandleStore', () => {
       },
       activeTabId: 'tab-1'
     })
-    const store = createWorkspaceHandleStore(ws, makeHandleDeps())
+    const store = createWorkspaceStore(ws, makeHandleDeps())
 
     store.getState().setActiveTab('tab-2')
 
@@ -175,7 +176,7 @@ describe('createWorkspaceHandleStore', () => {
         id: 'ws-1',
         appStates: { 'tab-existing': { applicationId: 'terminal', title: 'Terminal 1', state: {} } },
       })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       const tabId = store.getState().addTab('terminal')
 
@@ -198,7 +199,7 @@ describe('createWorkspaceHandleStore', () => {
         id: 'ws-1',
         appStates: { 'tab-1': { applicationId: 'terminal', title: 'Terminal 1', state: {} } },
       })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       store.getState().addTab('terminal')
 
@@ -209,7 +210,7 @@ describe('createWorkspaceHandleStore', () => {
     it('returns tabId even when app not found (no-op on state)', () => {
       const deps = makeHandleDeps()
       const ws = makeWorkspace({ id: 'ws-1' })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       const tabId = store.getState().addTab('nonexistent')
 
@@ -226,7 +227,7 @@ describe('createWorkspaceHandleStore', () => {
         },
       })
       const ws = makeWorkspace({ id: 'ws-1' })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       const tabId = store.getState().addTab('terminal', { cwd: '/custom' })
 
@@ -247,7 +248,7 @@ describe('createWorkspaceHandleStore', () => {
         id: 'ws-1',
         appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: { ptyId: 'p1' } } },
       })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       store.getState().addTab('terminal', { newField: 'val' })
 
@@ -275,7 +276,7 @@ describe('createWorkspaceHandleStore', () => {
         },
         activeTabId: 'tab-1',
       })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       await store.getState().removeTab('tab-1')
 
@@ -299,7 +300,7 @@ describe('createWorkspaceHandleStore', () => {
         appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: {} } },
         activeTabId: 'tab-1',
       })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       await store.getState().removeTab('tab-1')
 
@@ -318,7 +319,7 @@ describe('createWorkspaceHandleStore', () => {
         id: 'ws-1',
         appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: {} } },
       })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       await store.getState().removeTab('tab-1')
 
@@ -327,7 +328,7 @@ describe('createWorkspaceHandleStore', () => {
 
     it('no-ops for unknown tab', async () => {
       const ws = makeWorkspace({ id: 'ws-1' })
-      const store = createWorkspaceHandleStore(ws, makeHandleDeps())
+      const store = createWorkspaceStore(ws, makeHandleDeps())
 
       // Should not throw
       await store.getState().removeTab('nonexistent')
@@ -341,7 +342,7 @@ describe('createWorkspaceHandleStore', () => {
         id: 'ws-1',
         appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: { count: 0 } } },
       })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       store.getState().updateTabState<{ count: number }>('tab-1', (s) => ({ ...s, count: s.count + 1 }))
 
@@ -355,7 +356,7 @@ describe('createWorkspaceHandleStore', () => {
         id: 'ws-1',
         appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: { count: 0 } } },
       })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       // Update without ptyId — syncToDaemon called only for the state update, not for ptyId
       store.getState().updateTabState('tab-1', (s: { count: number }) => ({ ...s, count: 1 }))
@@ -372,7 +373,7 @@ describe('createWorkspaceHandleStore', () => {
     it('addReviewComment adds a comment to metadata', () => {
       const deps = makeHandleDeps()
       const ws = makeWorkspace({ id: 'ws-1', metadata: {} })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       store.getState().addReviewComment({
         filePath: 'test.ts',
@@ -400,7 +401,7 @@ describe('createWorkspaceHandleStore', () => {
         { id: 'c2', filePath: 'b.ts', lineNumber: 2, text: 'B', commitHash: 'h1', createdAt: 2, isOutdated: false, addressed: false, side: 'modified' }
       ])
       const ws = makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       store.getState().deleteReviewComment('c1')
 
@@ -416,7 +417,7 @@ describe('createWorkspaceHandleStore', () => {
         { id: 'c1', filePath: 'a.ts', lineNumber: 1, text: 'A', commitHash: 'h1', createdAt: 1, isOutdated: false, addressed: false, side: 'modified' }
       ])
       const ws = makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       store.getState().toggleReviewCommentAddressed('c1')
 
@@ -432,7 +433,7 @@ describe('createWorkspaceHandleStore', () => {
         { id: 'c2', filePath: 'b.ts', lineNumber: 2, text: 'B', commitHash: 'new', createdAt: 2, isOutdated: false, addressed: false, side: 'modified' }
       ])
       const ws = makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       store.getState().updateOutdatedReviewComments('new')
 
@@ -448,7 +449,7 @@ describe('createWorkspaceHandleStore', () => {
         { id: 'c1', filePath: 'a.ts', lineNumber: 1, text: 'A', commitHash: 'h1', createdAt: 1, isOutdated: false, addressed: false, side: 'modified' }
       ])
       const ws = makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       store.getState().clearReviewComments()
 
@@ -462,7 +463,7 @@ describe('createWorkspaceHandleStore', () => {
     it('refreshGitInfo delegates to deps', async () => {
       const deps = makeHandleDeps()
       const ws = makeWorkspace({ id: 'ws-1' })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       await store.getState().refreshGitInfo()
 
@@ -472,7 +473,7 @@ describe('createWorkspaceHandleStore', () => {
     it('remove delegates to deps', async () => {
       const deps = makeHandleDeps()
       const ws = makeWorkspace({ id: 'ws-1' })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       await store.getState().remove()
 
@@ -482,7 +483,7 @@ describe('createWorkspaceHandleStore', () => {
     it('removeKeepBranch delegates to deps', async () => {
       const deps = makeHandleDeps()
       const ws = makeWorkspace({ id: 'ws-1' })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       await store.getState().removeKeepBranch()
 
@@ -492,7 +493,7 @@ describe('createWorkspaceHandleStore', () => {
     it('removeKeepWorktree delegates to deps', async () => {
       const deps = makeHandleDeps()
       const ws = makeWorkspace({ id: 'ws-1' })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       await store.getState().removeKeepWorktree()
 
@@ -502,7 +503,7 @@ describe('createWorkspaceHandleStore', () => {
     it('removeKeepBoth delegates to deps', async () => {
       const deps = makeHandleDeps()
       const ws = makeWorkspace({ id: 'ws-1' })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       await store.getState().removeKeepBoth()
 
@@ -512,7 +513,7 @@ describe('createWorkspaceHandleStore', () => {
     it('mergeAndRemove delegates to deps', async () => {
       const deps = makeHandleDeps()
       const ws = makeWorkspace({ id: 'ws-1' })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       await store.getState().mergeAndRemove(true)
 
@@ -522,7 +523,7 @@ describe('createWorkspaceHandleStore', () => {
     it('closeAndClean delegates to deps', async () => {
       const deps = makeHandleDeps()
       const ws = makeWorkspace({ id: 'ws-1' })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       await store.getState().closeAndClean()
 
@@ -532,7 +533,7 @@ describe('createWorkspaceHandleStore', () => {
     it('quickForkWorkspace delegates to deps', async () => {
       const deps = makeHandleDeps()
       const ws = makeWorkspace({ id: 'ws-1' })
-      const store = createWorkspaceHandleStore(ws, deps)
+      const store = createWorkspaceStore(ws, deps)
 
       await store.getState().quickForkWorkspace()
 

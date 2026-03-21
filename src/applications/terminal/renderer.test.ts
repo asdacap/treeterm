@@ -5,7 +5,7 @@ import {
 } from './renderer'
 import type { Tab, Workspace, TerminalInstance, TerminalState } from '../../renderer/types'
 import { createStore } from 'zustand/vanilla'
-import type { WorkspaceHandleState } from '../../renderer/store/createWorkspaceHandleStore'
+import type { WorkspaceStoreState } from '../../renderer/store/createWorkspaceStore'
 
 // Mock React
 vi.mock('react', () => ({
@@ -30,7 +30,7 @@ vi.mock('../../renderer/store/activityState', () => ({
 const mockTerminalKill = vi.fn()
 const mockDeps = { terminal: { kill: mockTerminalKill } }
 
-const mockWorkspaceHandleStateData = {
+const mockWorkspaceStoreStateData = {
   workspace: { id: 'ws-1', path: '/test' } as Workspace,
   addTab: vi.fn(),
   removeTab: vi.fn(),
@@ -56,9 +56,10 @@ const mockWorkspaceHandleStateData = {
   removeKeepWorktree: vi.fn(),
   removeKeepBoth: vi.fn(),
   getGitApi: vi.fn(),
-} as WorkspaceHandleState
+  getFilesystemApi: vi.fn(),
+} as WorkspaceStoreState
 
-const mockWorkspaceHandle = createStore<WorkspaceHandleState>()(() => mockWorkspaceHandleStateData)
+const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => mockWorkspaceStoreStateData)
 
 describe('Terminal Renderer', () => {
   beforeEach(() => {
@@ -238,7 +239,7 @@ describe('Terminal Renderer', () => {
 
         const result = app.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 
@@ -247,7 +248,7 @@ describe('Terminal Renderer', () => {
           props: expect.objectContaining({
             key: 'tab-1',
             cwd: '/test',
-            workspace: mockWorkspaceHandle,
+            workspace: mockWorkspaceStore,
             tabId: 'tab-1',
             isVisible: true
           })
@@ -281,7 +282,7 @@ describe('Terminal Renderer', () => {
 
       const result = app.render({
         tab,
-        workspace: mockWorkspaceHandle,
+        workspace: mockWorkspaceStore,
         isVisible: true,
       })
 
@@ -448,7 +449,7 @@ describe('Terminal Renderer', () => {
 
         const result = variant.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         })
 
@@ -457,7 +458,7 @@ describe('Terminal Renderer', () => {
           props: expect.objectContaining({
             key: 'tab-1',
             cwd: '/test',
-            workspace: mockWorkspaceHandle,
+            workspace: mockWorkspaceStore,
             tabId: 'tab-1',
             isVisible: true,
             startupCommand: 'echo "Hello"'
@@ -479,7 +480,7 @@ describe('Terminal Renderer', () => {
 
         const result = variantWithoutCommand.render({
           tab,
-          workspace: mockWorkspaceHandle,
+          workspace: mockWorkspaceStore,
           isVisible: true,
         }) as { props: { startupCommand: string } }
 

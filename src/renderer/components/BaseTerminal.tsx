@@ -8,7 +8,7 @@ import { useSessionApi } from '../contexts/SessionStoreContext'
 import { createActivityStateDetector } from '../utils/activityStateDetector'
 import type { Tty } from '../store/createTtyStore'
 import TerminalScrollWrapper from './TerminalScrollWrapper'
-import type { SandboxConfig, TerminalState, WorkspaceHandle } from '../types'
+import type { SandboxConfig, TerminalState, WorkspaceStore } from '../types'
 import '@xterm/xterm/css/xterm.css'
 
 // ANSI sequences that manipulate scrollback or clear the screen
@@ -79,7 +79,7 @@ export interface BaseTerminalConfig {
 
 interface BaseTerminalProps {
   cwd: string
-  workspace: WorkspaceHandle
+  workspace: WorkspaceStore
   tabId: string
   sandbox?: SandboxConfig
   isVisible?: boolean

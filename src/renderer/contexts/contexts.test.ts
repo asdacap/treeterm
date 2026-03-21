@@ -10,28 +10,12 @@ vi.mock('react', () => ({
   useContext: mockUseContext
 }))
 
-import { useFilesystemApi } from './FilesystemApiContext'
 import { useSTTApi } from './STTApiContext'
 import { useSessionApi } from './SessionStoreContext'
 
 describe('Context hooks', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-  })
-
-  describe('useFilesystemApi', () => {
-    it('throws when context is null', () => {
-      mockUseContext.mockReturnValue(null)
-      expect(() => useFilesystemApi()).toThrow(
-        'useFilesystemApi must be used within a FilesystemApiContext.Provider'
-      )
-    })
-
-    it('returns value when context is provided', () => {
-      const api = { readFile: vi.fn() }
-      mockUseContext.mockReturnValue(api)
-      expect(useFilesystemApi()).toBe(api)
-    })
   })
 
   describe('useSTTApi', () => {
