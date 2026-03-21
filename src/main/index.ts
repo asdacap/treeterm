@@ -24,7 +24,7 @@ for (const arg of process.argv) {
 import { loadSettings, saveSettings, Settings, addRecentDirectory } from './settings'
 import { createApplicationMenu } from './menu'
 import { registerSTTHandlers } from './stt'
-import { startChatStream, cancelChatStream } from './llm'
+import { startChatStream, cancelChatStream, completeChatCall } from './llm'
 
 let mainWindow: BrowserWindow | null = null
 let loadingWindow: BrowserWindow | null = null
@@ -350,6 +350,30 @@ ipcMain.handle('pty:isAlive', async (event, id: string) => {
 // LLM chat — uses ipcMain.handle directly for event.sender access (like PTY)
 ipcMain.handle('llm:chat:send', async (event, requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string }) => {
   await startChatStream(requestId, messages, settings, event.sender)
+})
+
+// Terminal analyzer — non-streaming LLM call
+ipcMain.handle('llm:analyzeTerminal', async (_event, lines: string[], cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; disableReasoning: boolean; safePaths: string[] }) => {
+  const allSafePaths = [...new Set([...settings.safePaths, cwd])]
+  const systemPrompt = settings.systemPrompt
+    .replace(/\{\{cwd\}\}/g, cwd)
+    .replace(/\{\{safe_paths\}\}/g, allSafePaths.join(', '))
+  const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: lines.join('\n') }
+  ]
+  try {
+    const response = await completeChatCall(messages, {
+      baseUrl: settings.baseUrl,
+      apiKey: settings.apiKey,
+      model: settings.model,
+      reasoning: !settings.disableReasoning
+    })
+    const cleaned = response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+    return { state: JSON.parse(cleaned).state }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Unknown error' }
+  }
 })
 
 server.onLlmChatCancel((requestId) => {

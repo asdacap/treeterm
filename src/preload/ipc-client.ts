@@ -74,6 +74,7 @@ const CHANNELS = {
   sshWatchConnectionStatus: 'ssh:watchConnectionStatus',
   sshUnwatchConnectionStatus: 'ssh:unwatchConnectionStatus',
   llmChatSend: 'llm:chat:send',
+  llmAnalyzeTerminal: 'llm:analyzeTerminal',
 
   // Send channels
   ptyWrite: 'pty:write',
@@ -437,6 +438,12 @@ export class IpcClient {
     ...args: IpcRequests['llmChatSend']['params']
   ): Promise<IpcRequests['llmChatSend']['result']> {
     return ipcRenderer.invoke(CHANNELS.llmChatSend, ...args)
+  }
+
+  llmAnalyzeTerminal(
+    ...args: IpcRequests['llmAnalyzeTerminal']['params']
+  ): Promise<IpcRequests['llmAnalyzeTerminal']['result']> {
+    return ipcRenderer.invoke(CHANNELS.llmAnalyzeTerminal, ...args)
   }
 
   // ==================== Fire-and-Forget Methods (send pattern, no return) ====================

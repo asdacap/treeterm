@@ -318,6 +318,10 @@ export interface IpcRequests {
     params: [requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string }]
     result: void
   }
+  llmAnalyzeTerminal: {
+    params: [lines: string[], cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; disableReasoning: boolean; safePaths: string[] }]
+    result: { state: string } | { error: string }
+  }
 }
 
 // === Fire-and-Forget Types (renderer sends, no response) ===

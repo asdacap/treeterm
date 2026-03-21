@@ -73,6 +73,8 @@ export interface BaseTerminalConfig {
   disableScrollbar?: boolean
   // Whether to strip CSI 3J (clear scrollback) from PTY data before writing to xterm
   stripScrollbackClear?: boolean
+  // Callback when terminal is ready, provides terminal instance and data version ref
+  onTerminalReady?: (terminal: XTerm, dataVersionRef: React.MutableRefObject<number>) => void
 }
 
 interface BaseTerminalProps {
@@ -102,6 +104,7 @@ export default function BaseTerminal({
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const detectorRef = useRef<ReturnType<typeof createActivityStateDetector> | null>(null)
   const rawCharsRef = useRef<string>('')
+  const dataVersionRef = useRef(0)
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
   const [overlay, setOverlay] = useState<{ message: string; type: 'info' | 'error' } | null>(null)
 
@@ -166,6 +169,9 @@ export default function BaseTerminal({
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
 
+    // Notify parent that terminal is ready
+    config.onTerminalReady?.(terminal, dataVersionRef)
+
     // Create activity state detector with optional custom patterns
     const detector = createActivityStateDetector(
       (state) => setTabState(tabId, state),
@@ -179,6 +185,8 @@ export default function BaseTerminal({
       const ttyState = tty.getState()
 
       const unsubscribeData = ttyState.onData((data) => {
+        // Track data version for terminal analyzer
+        dataVersionRef.current++
         // Dismiss overlay once live data starts flowing
         setOverlay(null)
         // Strip CSI 3J (clear scrollback) if configured

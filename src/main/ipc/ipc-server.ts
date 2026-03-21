@@ -76,6 +76,7 @@ const CHANNELS = {
 
   // LLM operations
   llmChatSend: 'llm:chat:send',
+  llmAnalyzeTerminal: 'llm:analyzeTerminal',
 
   // Send channels
   ptyWrite: 'pty:write',

@@ -61,6 +61,25 @@ export async function startChatStream(
   }
 }
 
+export async function completeChatCall(
+  messages: ChatMessage[],
+  settings: LlmSettings
+): Promise<string> {
+  const client = new OpenAI({
+    baseURL: settings.baseUrl,
+    apiKey: settings.apiKey
+  })
+
+  const response = await client.chat.completions.create({
+    model: settings.model,
+    messages,
+    stream: false,
+    ...(settings.reasoning ? { reasoning_effort: 'medium' as const } : {})
+  })
+
+  return response.choices[0]?.message?.content ?? ''
+}
+
 export function cancelChatStream(requestId: string): void {
   const controller = activeStreams.get(requestId)
   if (controller) {

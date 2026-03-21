@@ -581,7 +581,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                         llm: { ...prev.llm, baseUrl: e.target.value }
                       }))
                     }
-                    placeholder="https://api.openai.com/v1"
+                    placeholder="https://openrouter.ai/api/v1"
                   />
                   <p className="settings-hint">
                     OpenAI-compatible API endpoint. Works with OpenAI, Ollama, LM Studio, etc.
@@ -623,6 +623,87 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                   />
                   <p className="settings-hint">
                     Model name to use for chat completions.
+                  </p>
+                </div>
+
+                <h3 className="settings-section-title" style={{ marginTop: 24 }}>Terminal Analyzer</h3>
+
+                <div className="settings-group">
+                  <label className="settings-label">Model</label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    value={localSettings.terminalAnalyzer.model}
+                    onChange={(e) =>
+                      setLocalSettings((prev) => ({
+                        ...prev,
+                        terminalAnalyzer: { ...prev.terminalAnalyzer, model: e.target.value }
+                      }))
+                    }
+                    placeholder="openai/gpt-oss-safeguard-20b"
+                  />
+                  <p className="settings-hint">
+                    Model name for terminal state analysis. Uses the Base URL and API Key above.
+                  </p>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label">System Prompt</label>
+                  <textarea
+                    className="settings-input"
+                    rows={4}
+                    value={localSettings.terminalAnalyzer.systemPrompt}
+                    onChange={(e) =>
+                      setLocalSettings((prev) => ({
+                        ...prev,
+                        terminalAnalyzer: { ...prev.terminalAnalyzer, systemPrompt: e.target.value }
+                      }))
+                    }
+                    style={{ resize: 'vertical', fontFamily: 'inherit' }}
+                  />
+                  <p className="settings-hint">
+                    {'System prompt for the analyzer. Supports {{cwd}} and {{safe_paths}} template variables.'}
+                  </p>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label">Safe Paths</label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    value={localSettings.terminalAnalyzer.safePaths.join(', ')}
+                    onChange={(e) =>
+                      setLocalSettings((prev) => ({
+                        ...prev,
+                        terminalAnalyzer: {
+                          ...prev.terminalAnalyzer,
+                          safePaths: e.target.value.split(',').map((s) => s.trim()).filter(Boolean)
+                        }
+                      }))
+                    }
+                    placeholder="/tmp"
+                  />
+                  <p className="settings-hint">
+                    Comma-separated list of paths considered safe. The current working directory is always included automatically.
+                  </p>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      type="checkbox"
+                      checked={localSettings.terminalAnalyzer.disableReasoning}
+                      onChange={(e) =>
+                        setLocalSettings((prev) => ({
+                          ...prev,
+                          terminalAnalyzer: { ...prev.terminalAnalyzer, disableReasoning: e.target.checked }
+                        }))
+                      }
+                    />
+                    Disable Reasoning
+                  </label>
+                  <p className="settings-hint">
+                    When checked, reasoning effort is disabled for faster and cheaper analysis.
                   </p>
                 </div>
               </div>

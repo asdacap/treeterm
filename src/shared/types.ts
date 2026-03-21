@@ -181,6 +181,13 @@ export interface Settings {
     apiKey: string       // API key
     model: string        // Model name
   }
+  // Terminal analyzer LLM configuration
+  terminalAnalyzer: {
+    model: string           // Model name for terminal analysis
+    systemPrompt: string    // System prompt (supports {{cwd}} and {{safe_paths}} templates)
+    disableReasoning: boolean
+    safePaths: string[]     // Paths considered safe for permission_request classification
+  }
   // Global default application for new worktrees
   // If not set, falls back to 'terminal' or first available app
   globalDefaultApplicationId: string
