@@ -92,7 +92,7 @@ export default function AiHarness({
     setDataVersionReady(true)
   }, [])
 
-  const { aiState, analyzing } = useTerminalAnalyzer(
+  const { aiState, analyzing, reason } = useTerminalAnalyzer(
     terminal,
     dataVersionReady ? dataVersionRefHolder.current : null,
     cwd
@@ -185,6 +185,7 @@ export default function AiHarness({
         <div
           className="ai-state-badge"
           style={{ background: STATE_COLORS[aiState] }}
+          title={reason}
           onContextMenu={handleBadgeContextMenu}
         >
           {analyzing && <span className="ai-state-badge-spinner" />}

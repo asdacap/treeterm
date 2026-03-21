@@ -370,7 +370,8 @@ ipcMain.handle('llm:analyzeTerminal', async (_event, buffer: string, cwd: string
       reasoning: !settings.disableReasoning
     })
     const cleaned = response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    return { state: JSON.parse(cleaned).state }
+    const parsed = JSON.parse(cleaned)
+    return { state: parsed.state, reason: parsed.reason ?? '' }
   } catch (error) {
     return { error: formatLlmError(error) }
   }

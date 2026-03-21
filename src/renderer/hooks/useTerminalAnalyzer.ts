@@ -15,9 +15,10 @@ export function useTerminalAnalyzer(
   terminal: XTerm | null,
   dataVersionRef: React.MutableRefObject<number> | null,
   cwd: string
-): { aiState: TerminalAiState; analyzing: boolean } {
+): { aiState: TerminalAiState; analyzing: boolean; reason: string } {
   const [aiState, setAiState] = useState<TerminalAiState>('idle')
   const [analyzing, setAnalyzing] = useState(false)
+  const [reason, setReason] = useState('')
   const lastVersionRef = useRef(0)
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const settings = useSettingsStore((s) => s.settings)
@@ -60,8 +61,9 @@ export function useTerminalAnalyzer(
 
         console.debug('[terminal-analyzer] result:', result)
         if ('state' in result) {
-          console.debug('[terminal-analyzer] state set:', result.state)
+          console.debug('[terminal-analyzer] state set:', result.state, 'reason:', result.reason)
           setAiState(result.state as TerminalAiState)
+          setReason(result.reason)
         } else if ('error' in result) {
           console.error('[terminal-analyzer] error:', result.error)
           setAiState('error')
@@ -92,5 +94,5 @@ export function useTerminalAnalyzer(
     }
   }, [terminal, dataVersionRef, cwd, settings.llm.apiKey, settings.llm.baseUrl, settings.terminalAnalyzer.model, settings.terminalAnalyzer.systemPrompt, settings.terminalAnalyzer.disableReasoning, settings.terminalAnalyzer.safePaths, settings.terminalAnalyzer.bufferLines])
 
-  return { aiState, analyzing }
+  return { aiState, analyzing, reason }
 }
