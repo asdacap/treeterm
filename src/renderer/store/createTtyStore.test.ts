@@ -13,7 +13,6 @@ function makeMockTerminalApi(): TerminalApi {
     isAlive: vi.fn().mockResolvedValue(true),
     onData: vi.fn().mockReturnValue(() => {}),
     onExit: vi.fn().mockReturnValue(() => {}),
-    onNewTerminal: vi.fn().mockReturnValue(() => {}),
     onShowSessions: vi.fn().mockReturnValue(() => {}),
     onActiveProcessesOpen: vi.fn().mockReturnValue(() => {}),
   } as TerminalApi

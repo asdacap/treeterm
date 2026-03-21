@@ -89,7 +89,6 @@ const CHANNELS = {
   appReady: 'app:ready',
   capsLockEvent: 'capslock-event',
   daemonSessions: 'daemon:sessions',
-  terminalNew: 'terminal:new',
   terminalShowSessions: 'terminal:show-sessions',
   sessionShowSessions: 'session:show-sessions',
   sessionSync: 'session:sync',
@@ -498,12 +497,6 @@ export class IpcClient {
       callback(...(args as IpcEvents['daemonSessions']['params']))
     ipcRenderer.on(CHANNELS.daemonSessions, handler)
     return () => ipcRenderer.removeListener(CHANNELS.daemonSessions, handler)
-  }
-
-  onTerminalNew(callback: () => void): () => void {
-    const handler = () => callback()
-    ipcRenderer.on(CHANNELS.terminalNew, handler)
-    return () => ipcRenderer.removeListener(CHANNELS.terminalNew, handler)
   }
 
   onTerminalShowSessions(callback: () => void): () => void {

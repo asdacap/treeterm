@@ -233,15 +233,6 @@ describe('IpcServer', () => {
       expect(mockSend).toHaveBeenCalledWith('daemon:disconnected')
     })
 
-    it('terminalNew sends to window', () => {
-      const mockSend = vi.fn()
-      const mockWindow = { webContents: { send: mockSend } } as any
-      server.setWindow(mockWindow)
-
-      server.terminalNew()
-      expect(mockSend).toHaveBeenCalledWith('terminal:new')
-    })
-
     it('appReady sends to window webContents', () => {
       const mockSend = vi.fn()
       const mockWindow = { webContents: { send: mockSend } } as any

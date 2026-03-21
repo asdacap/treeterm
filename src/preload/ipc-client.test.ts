@@ -240,7 +240,6 @@ describe('IpcClient', () => {
       ['onAppReady', 'app:ready'],
       ['onCapsLockEvent', 'capslock-event'],
       ['onDaemonSessions', 'daemon:sessions'],
-      ['onTerminalNew', 'terminal:new'],
       ['onTerminalShowSessions', 'terminal:show-sessions'],
       ['onSessionShowSessions', 'session:show-sessions'],
     ] as const)('%s registers listener on %s and unsubscribe works', (method, channel) => {

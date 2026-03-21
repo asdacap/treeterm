@@ -255,7 +255,6 @@ export interface TerminalApi {
   isAlive: (id: string) => Promise<boolean>
   onData: (handle: string, callback: (data: string) => void) => () => void
   onExit: (handle: string, callback: (exitCode: number) => void) => () => void
-  onNewTerminal: (callback: () => void) => () => void
   onShowSessions: (callback: () => void) => () => void
   onActiveProcessesOpen: (callback: () => void) => () => void
 }

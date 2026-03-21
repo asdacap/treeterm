@@ -358,9 +358,6 @@ export interface IpcEvents {
   daemonSessions: {
     params: [sessions: SessionInfo[]]
   }
-  terminalNew: {
-    params: []
-  }
   terminalShowSessions: {
     params: []
   }

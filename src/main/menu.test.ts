@@ -21,7 +21,6 @@ import { createApplicationMenu } from './menu'
 describe('menu', () => {
   const mockServer = {
     settingsOpen: vi.fn(),
-    terminalNew: vi.fn(),
     sessionShowSessions: vi.fn()
   }
 

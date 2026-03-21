@@ -107,7 +107,6 @@ const mockDeps = {
   },
   daemon: { onDisconnected: vi.fn().mockReturnValue(() => {}) },
   terminal: {
-    onNewTerminal: vi.fn().mockReturnValue(() => {}),
     onActiveProcessesOpen: vi.fn().mockReturnValue(() => {}),
     list: vi.fn().mockResolvedValue([]),
     kill: vi.fn(),
@@ -432,7 +431,6 @@ describe('useAppStore', () => {
       expect(mockDeps.appApi.onReady).toHaveBeenCalled()
       expect(mockDeps.sessionApi.onSync).toHaveBeenCalled()
       expect(mockDeps.daemon.onDisconnected).toHaveBeenCalled()
-      expect(mockDeps.terminal.onNewTerminal).toHaveBeenCalled()
       expect(mockDeps.sessionApi.onShowSessions).toHaveBeenCalled()
       cleanup()
     })
@@ -531,45 +529,6 @@ describe('useAppStore', () => {
 
       expect(useAppStore.getState().activeSessionId).toBe('empty-session')
       expect(useAppStore.getState().sessionStores['empty-session']).toBeDefined()
-      cleanup()
-    })
-
-    it('onNewTerminal adds terminal tab to active workspace', async () => {
-      const mockHandleAddTab = vi.fn()
-      const mockHandleStore = {
-        getState: vi.fn().mockReturnValue({ addTab: mockHandleAddTab }),
-        setState: vi.fn(),
-        subscribe: vi.fn()
-      }
-      const { createSessionStore } = await import('./createSessionStore')
-      vi.mocked(createSessionStore).mockReturnValue({
-        getState: vi.fn().mockReturnValue({
-          workspaces: {},
-          workspaceHandles: {},
-          activeWorkspaceId: 'ws-1',
-          isRestoring: false,
-          addWorkspace: vi.fn(),
-          getWorkspace: vi.fn().mockReturnValue(mockHandleStore),
-          setActiveWorkspace: vi.fn(),
-          syncToDaemon: vi.fn(),
-          handleRestore: vi.fn().mockResolvedValue(undefined),
-          handleExternalUpdate: vi.fn().mockResolvedValue(undefined),
-        }),
-        setState: vi.fn(),
-        subscribe: vi.fn()
-      } as any)
-
-      const cleanup = await useAppStore.getState().initialize(mockDeps)
-
-      // Create an active session store
-      const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0]
-      readyCallback({ id: 'session-term', workspaces: [] })
-
-      // Trigger onNewTerminal
-      const termCallback = mockDeps.terminal.onNewTerminal.mock.calls[0][0]
-      termCallback()
-
-      expect(mockHandleAddTab).toHaveBeenCalledWith('terminal')
       cleanup()
     })
 

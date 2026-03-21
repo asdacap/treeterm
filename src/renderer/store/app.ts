@@ -261,16 +261,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
       set({ daemonDisconnected: true })
     })
 
-    const unsubNewTerminal = terminal.onNewTerminal(() => {
-      const sessionStore = get().getActiveSessionStore()
-      if (!sessionStore) return
-      const { activeWorkspaceId, getWorkspace } = sessionStore.getState()
-      if (activeWorkspaceId) {
-        const handle = getWorkspace(activeWorkspaceId)
-        if (handle) handle.getState().addTab('terminal')
-      }
-    })
-
     const unsubActiveProcesses = terminal.onActiveProcessesOpen(() => {
       set({ isActiveProcessesOpen: true })
     })
@@ -308,7 +298,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
       unsubReady()
       unsubSync()
       unsubDisconnect()
-      unsubNewTerminal()
       unsubActiveProcesses()
       unsubShowSessions()
     }
