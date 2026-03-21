@@ -10,8 +10,7 @@ interface ConnectionPickerProps {
 
 export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerProps) {
   const ssh = useAppStore(s => s.ssh)
-  const sessionApi = useAppStore(s => s.sessionApi)
-  const switchSession = useAppStore(s => s.switchSession)
+  const addRemoteSession = useAppStore(s => s.addRemoteSession)
   const { setActiveView } = useNavigationStore()
   const [savedConnections, setSavedConnections] = useState<SSHConnectionConfig[]>([])
   const [host, setHost] = useState('')
@@ -31,18 +30,17 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
   if (!isOpen) return null
 
   const connectAndCreateSession = async (config: SSHConnectionConfig) => {
-    // 1. Create session immediately
-    const result = await sessionApi.create([])
-    if (!result.success || !result.session) {
-      throw new Error(result.error || 'Failed to create session')
-    }
-    const session = result.session
-    // 2. Add to session list + switch to it
-    switchSession(session.id)
-    // 3. Set view to SSH pane
+    // 1. Show SSH pane for connection progress
     setActiveView({ type: 'ssh', connectionId: config.id })
-    // 4. Start SSH connect in background (fire-and-forget, output streams via watchOutput)
-    ssh.connect(config)
+    // 2. Connect to remote daemon and get session
+    const { info, session } = await ssh.connect(config)
+    if (info.status !== 'connected') {
+      throw new Error(info.error || 'SSH connection failed')
+    }
+    // 3. Add remote session to store and switch to it
+    if (session) {
+      addRemoteSession(session, info)
+    }
     onClose()
   }
 

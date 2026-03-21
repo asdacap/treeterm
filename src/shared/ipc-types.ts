@@ -270,7 +270,7 @@ export interface IpcRequests {
   // SSH operations
   sshConnect: {
     params: [config: SSHConnectionConfig]
-    result: ConnectionInfo
+    result: { info: ConnectionInfo, session?: Session }
   }
   sshDisconnect: {
     params: [connectionId: string]

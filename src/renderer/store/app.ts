@@ -69,6 +69,7 @@ interface AppState extends AppDeps {
   // Actions
   initialize: (deps: AppDeps) => Promise<() => void>
   switchSession: (sessionId: string) => void
+  addRemoteSession: (session: Session, connection: ConnectionInfo) => void
   getActiveSessionStore: () => StoreApi<SessionState> | null
 
   // Internal
@@ -305,6 +306,14 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   switchSession: (sessionId: string) => {
     set({ activeSessionId: sessionId })
+  },
+
+  addRemoteSession: (session: Session, connection: ConnectionInfo) => {
+    const store = getOrCreateSession(session.id, get, set, connection)
+    set({ activeSessionId: session.id })
+    if (session.workspaces && session.workspaces.length > 0) {
+      store.getState().handleRestore(session)
+    }
   },
 
   getActiveSessionStore: () => {

@@ -835,7 +835,7 @@ server.onSshConnect(async (event, config) => {
     if (senderWindow) {
       windowManager.updateConnectionId(senderWindow.id, config.id)
 
-      // Load session from remote daemon and re-initialize the renderer
+      // Load session from remote daemon and return it alongside connection info
       const remoteClient = connectionManager.getClient(config.id)
       try {
         const remoteSessionId = await remoteClient.getDefaultSessionId()
@@ -846,17 +846,14 @@ server.onSshConnect(async (event, config) => {
           }
         })
         const session = await remoteWatch.initial
-        const windowInfo = windowManager.getWindow(senderWindow.id)
-        if (windowInfo) {
-          windowInfo.ipcServer.appReady(session)
-        }
+        return { info, session }
       } catch (error) {
         console.error('[main] Failed to load remote session:', error)
       }
     }
   }
 
-  return info
+  return { info }
 })
 
 server.onSshDisconnect(async (connectionId) => {
