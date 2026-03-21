@@ -56,6 +56,10 @@ export default function TabContentPortals({ sessionStore, activeWorkspaceId }: T
     return () => observer.disconnect()
   }, [])
 
+  // Collect tab IDs for the active workspace to detect unassigned portal slots
+  const activeWorkspace = activeWorkspaceId ? workspaces[activeWorkspaceId] : null
+  const activeTabIds = activeWorkspace ? new Set(getTabs(activeWorkspace).map(t => t.id)) : new Set<string>()
+
   return (
     <SessionStoreContext.Provider value={sessionStore}>
       {Object.values(workspaces).map(workspace => {
@@ -116,6 +120,19 @@ export default function TabContentPortals({ sessionStore, activeWorkspaceId }: T
 
           return null
         })
+      })}
+      {Object.entries(portalSlots).map(([slotId, slotEl]) => {
+        if (activeTabIds.has(slotId)) return null
+        return createPortal(
+          <div className="tab-error-fallback">
+            <div className="tab-error-content">
+              <h3>No View</h3>
+              <p>No view is assigned to this tab.</p>
+            </div>
+          </div>,
+          slotEl,
+          `orphan-${slotId}`,
+        )
       })}
     </SessionStoreContext.Provider>
   )

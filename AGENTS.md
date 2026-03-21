@@ -102,6 +102,7 @@ the error UI.
 - Composition over Inheritence. No inheritence! I got burned on that many times already!
 - What should not be nullable, do not mark as nullable. Prefer no nullable parameter where possible.
 - Do not add code for cases that cannot or should not happen. For example, workspace should always be possible in a tab, or session should be always available in a workspace. So dont care for case where workspace it not available in a tab. 
+- No overengineering unless explicitly told to. No `useMemo`!
 
 ### Worktree and File Changes
 All file/worktree mutations **must go through the daemon** (via gRPC `WriteFile`). No `fs.writeFile` in Main or Renderer.
