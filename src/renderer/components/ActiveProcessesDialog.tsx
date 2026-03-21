@@ -29,10 +29,15 @@ function PtyViewer({ ptyId, terminalApi }: { ptyId: string; terminalApi: Termina
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
+
+    let cancelled = false
+    const cleanups: (() => void)[] = []
 
     const term = new Terminal({
       fontSize: 13,
@@ -53,54 +58,96 @@ function PtyViewer({ ptyId, terminalApi }: { ptyId: string; terminalApi: Termina
     termRef.current = term
     fitAddonRef.current = fitAddon
 
-    // Attach to PTY and get scrollback
-    terminalApi.attach(ptyId).then((result) => {
-      if (result.success && result.scrollback) {
-        for (const line of result.scrollback) {
-          term.write(line)
-        }
-      }
-    })
-
-    // Subscribe to data
-    const unsubData = terminalApi.onData(ptyId, (data) => {
-      term.write(data)
-    })
-
-    // Subscribe to exit
-    const unsubExit = terminalApi.onExit(ptyId, () => {
-      term.write('\r\n\x1b[90m[Process exited]\x1b[0m\r\n')
-    })
-
-    // Forward input
-    const onDataDisposable = term.onData((data) => {
-      terminalApi.write(ptyId, data)
-    })
-
-    // Handle resize
-    const onResizeDisposable = term.onResize(({ cols, rows }) => {
-      terminalApi.resize(ptyId, cols, rows)
-    })
-
-    // Observe container size changes
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit()
     })
     resizeObserver.observe(container)
+    cleanups.push(() => resizeObserver.disconnect())
+
+    // Attach to PTY and get scrollback
+    terminalApi.attach(ptyId).then((result) => {
+      if (cancelled) return
+
+      if (!result.success) {
+        setStatus('error')
+        setErrorMessage(result.error ?? `Failed to attach to PTY session ${ptyId}`)
+        return
+      }
+
+      const handle = result.handle
+      if (!handle) {
+        setStatus('error')
+        setErrorMessage(`Attach succeeded but no handle returned for session ${ptyId}`)
+        return
+      }
+
+      if (result.scrollback) {
+        for (const line of result.scrollback) {
+          term.write(line)
+        }
+      }
+
+      // Subscribe to data using handle
+      const unsubData = terminalApi.onData(handle, (data) => {
+        term.write(data)
+      })
+      cleanups.push(unsubData)
+
+      // Subscribe to exit using handle
+      const unsubExit = terminalApi.onExit(handle, () => {
+        term.write('\r\n\x1b[90m[Process exited]\x1b[0m\r\n')
+      })
+      cleanups.push(unsubExit)
+
+      // Forward input using handle
+      const onDataDisposable = term.onData((data) => {
+        terminalApi.write(handle, data)
+      })
+      cleanups.push(() => onDataDisposable.dispose())
+
+      // Handle resize using handle
+      const onResizeDisposable = term.onResize(({ cols, rows }) => {
+        terminalApi.resize(handle, cols, rows)
+      })
+      cleanups.push(() => onResizeDisposable.dispose())
+
+      setStatus('ready')
+    }).catch((err: unknown) => {
+      if (cancelled) return
+      setStatus('error')
+      setErrorMessage(err instanceof Error ? err.message : `Failed to attach to PTY session ${ptyId}`)
+    })
 
     return () => {
-      resizeObserver.disconnect()
-      onDataDisposable.dispose()
-      onResizeDisposable.dispose()
-      unsubData()
-      unsubExit()
+      cancelled = true
+      for (const cleanup of cleanups) cleanup()
       term.dispose()
       termRef.current = null
       fitAddonRef.current = null
     }
   }, [ptyId, terminalApi])
 
-  return <div ref={containerRef} className="active-processes-pty-viewer" />
+  if (status === 'error') {
+    return (
+      <div className="active-processes-pty-viewer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f44336', padding: '24px', textAlign: 'center' }}>
+        <div>
+          <div style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '8px' }}>Failed to attach to process</div>
+          <div style={{ fontSize: '13px', opacity: 0.8 }}>{errorMessage}</div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      {status === 'loading' && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888', zIndex: 1 }}>
+          Attaching to process...
+        </div>
+      )}
+      <div ref={containerRef} className="active-processes-pty-viewer" />
+    </div>
+  )
 }
 
 function getDisplayName(cwd: string, workspaces: Record<string, Workspace>): string {
