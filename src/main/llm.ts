@@ -1,11 +1,13 @@
 import OpenAI, { APIError } from 'openai'
 import { BrowserWindow } from 'electron'
 
+import type { ReasoningEffort } from '../shared/types'
+
 interface LlmSettings {
   baseUrl: string
   apiKey: string
   model: string
-  reasoning: boolean
+  reasoning: ReasoningEffort
 }
 
 interface ChatMessage {
@@ -43,7 +45,7 @@ export async function startChatStream(
         model: settings.model,
         messages,
         stream: true,
-        ...(settings.reasoning && { reasoning_effort: 'medium' as const })
+        ...(settings.reasoning !== 'off' && { reasoning_effort: settings.reasoning })
       },
       { signal: controller.signal }
     )
@@ -80,7 +82,7 @@ export async function completeChatCall(
     model: settings.model,
     messages,
     stream: false,
-    ...(settings.reasoning ? { reasoning_effort: 'medium' as const } : {})
+    ...(settings.reasoning !== 'off' ? { reasoning_effort: settings.reasoning } : {})
   })
 
   return response.choices[0]?.message?.content ?? ''

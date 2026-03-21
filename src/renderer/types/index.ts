@@ -18,7 +18,8 @@ import type {
   WorktreeSettings,
   RunAction,
   SSHConnectionConfig,
-  ConnectionInfo
+  ConnectionInfo,
+  ReasoningEffort
 } from '../../shared/types'
 
 export type {
@@ -36,7 +37,8 @@ export type {
   WorktreeSettings,
   RunAction,
   SSHConnectionConfig,
-  ConnectionInfo
+  ConnectionInfo,
+  ReasoningEffort
 }
 
 /** Convenience type: AppState with its id (the map key) */
@@ -389,8 +391,8 @@ export interface DaemonApi {
 }
 
 export interface LlmApi {
-  send: (requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string; reasoning: boolean }) => Promise<void>
-  analyzeTerminal: (buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; disableReasoning: boolean; safePaths: string[] }) => Promise<{ state: string; reason: string } | { error: string }>
+  send: (requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string; reasoning: ReasoningEffort }) => Promise<void>
+  analyzeTerminal: (buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; reasoningEffort: ReasoningEffort; safePaths: string[] }) => Promise<{ state: string; reason: string } | { error: string }>
   cancel: (requestId: string) => void
   onDelta: (callback: (requestId: string, text: string) => void) => () => void
   onDone: (callback: (requestId: string) => void) => () => void

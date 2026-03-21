@@ -11,7 +11,8 @@ import type {
   WorkspaceInput,
   RunAction,
   SSHConnectionConfig,
-  ConnectionInfo
+  ConnectionInfo,
+  ReasoningEffort
 } from './types'
 
 import type {
@@ -319,7 +320,7 @@ export interface IpcRequests {
     result: void
   }
   llmAnalyzeTerminal: {
-    params: [buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; disableReasoning: boolean; safePaths: string[] }]
+    params: [buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; reasoningEffort: ReasoningEffort; safePaths: string[] }]
     result: { state: string; reason: string } | { error: string }
   }
 }

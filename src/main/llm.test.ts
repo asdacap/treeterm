@@ -39,7 +39,7 @@ const mockSettings = {
   baseUrl: 'https://api.openai.com/v1',
   apiKey: 'test-key',
   model: 'gpt-4',
-  reasoning: false,
+  reasoning: 'off' as const,
 }
 
 function makeMockSender() {
@@ -127,7 +127,7 @@ describe('startChatStream', () => {
     })
 
     const sender = makeMockSender()
-    await startChatStream('req-5', [], { ...mockSettings, reasoning: true }, sender)
+    await startChatStream('req-5', [], { ...mockSettings, reasoning: 'medium' }, sender)
 
     expect(mockCreate).toHaveBeenCalledWith(
       expect.objectContaining({ reasoning_effort: 'medium' }),
@@ -172,9 +172,9 @@ describe('completeChatCall', () => {
   it('passes reasoning_effort when reasoning enabled', async () => {
     mockCreate.mockResolvedValue({ choices: [] })
 
-    await completeChatCall([], { ...mockSettings, reasoning: true })
+    await completeChatCall([], { ...mockSettings, reasoning: 'high' })
     expect(mockCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ reasoning_effort: 'medium', stream: false })
+      expect.objectContaining({ reasoning_effort: 'high', stream: false })
     )
   })
 })
