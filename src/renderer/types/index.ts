@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
-import type { StoreApi } from 'zustand'
-import type { WorkspaceState } from '../store/createWorkspaceStore'
+import type { WorkspaceHandle } from '../store/createWorkspaceStore'
+export type { WorkspaceHandle }
 
 // Import and re-export shared types
 import type {
@@ -68,10 +68,8 @@ export interface Application<TState = unknown> {
 
 export interface ApplicationRenderProps {
   tab: Tab
-  workspaceId: string
-  workspacePath: string
+  workspace: WorkspaceHandle
   isVisible: boolean
-  workspaceStore: StoreApi<WorkspaceState>
 }
 
 // Type-specific state interfaces (for internal use within applications)

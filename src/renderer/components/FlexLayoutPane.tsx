@@ -6,6 +6,7 @@ import type { IJsonModel } from '@aptre/flex-layout'
 import type { StoreApi } from 'zustand'
 import { useStore } from 'zustand'
 import type { WorkspaceState } from '../store/createWorkspaceStore'
+import { useWorkspace } from '../hooks/useWorkspace'
 import { useAppStore } from '../store/app'
 import { createDefaultLayoutModel, tabToFlexNode } from '../utils/layoutModel'
 import { TabActivityIndicator } from './TabActivityIndicator'
@@ -18,10 +19,8 @@ interface FlexLayoutPaneProps {
 }
 
 export default function FlexLayoutPane({ workspaceId, workspaceStore, onNewTab }: FlexLayoutPaneProps) {
+  const ws = useWorkspace(workspaceStore, workspaceId)
   const workspace = useStore(workspaceStore, s => s.workspaces[workspaceId])
-  const removeTab = useStore(workspaceStore, s => s.removeTab)
-  const setActiveTab = useStore(workspaceStore, s => s.setActiveTab)
-  const updateWorkspaceMetadata = useStore(workspaceStore, s => s.updateWorkspaceMetadata)
   const applications = useAppStore((s) => s.applications)
   const getApplication = useCallback((id: string) => applications[id], [applications])
   const menuApplications = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
@@ -161,21 +160,21 @@ export default function FlexLayoutPane({ workspaceId, workspaceStore, onNewTab }
   // Handle actions from FlexLayout (intercept delete to route through store)
   const handleAction = useCallback((action: Action): Action | undefined => {
     if (action.type === Actions.DELETE_TAB) {
-      removeTab(workspaceId, action.data.node)
+      ws.removeTab(action.data.node)
       return undefined // Prevent FlexLayout from handling it — store will sync
     }
     if (action.type === Actions.SELECT_TAB) {
-      setActiveTab(workspaceId, action.data.tabNode)
+      ws.setActiveTab(action.data.tabNode)
     }
     return action
-  }, [workspaceId, removeTab, setActiveTab])
+  }, [workspaceId, ws])
 
   // Serialize model changes to metadata
   const handleModelChange = useCallback((m: Model, _action: Action) => {
     if (suppressModelChangeRef.current) return
     const json = JSON.stringify(m.toJson())
-    updateWorkspaceMetadata(workspaceId, 'layoutModel', json)
-  }, [workspaceId, updateWorkspaceMetadata])
+    ws.updateMetadata('layoutModel', json)
+  }, [workspaceId, ws])
 
   // Customize tab rendering with icons and activity indicators
   const handleRenderTab = useCallback((node: TabNode, renderValues: ITabRenderValues) => {

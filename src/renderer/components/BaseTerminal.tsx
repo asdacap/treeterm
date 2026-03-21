@@ -1,15 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { useStore } from 'zustand'
-import type { StoreApi } from 'zustand'
-import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useSettingsStore } from '../store/settings'
 import { useActivityStateStore } from '../store/activityState'
 import { useTerminalApi } from '../contexts/TerminalApiContext'
 import { createActivityStateDetector } from '../utils/activityStateDetector'
 import TerminalScrollWrapper from './TerminalScrollWrapper'
-import type { SandboxConfig, TerminalState } from '../types'
+import type { SandboxConfig, TerminalState, WorkspaceHandle } from '../types'
 import '@xterm/xterm/css/xterm.css'
 
 // ANSI sequences that manipulate scrollback or clear the screen
@@ -80,12 +77,11 @@ export interface BaseTerminalConfig {
 
 interface BaseTerminalProps {
   cwd: string
-  workspaceId: string
+  workspace: WorkspaceHandle
   tabId: string
   sandbox?: SandboxConfig
   isVisible?: boolean
   config: BaseTerminalConfig
-  workspaceStore: StoreApi<WorkspaceState>
 }
 
 interface ContextMenu {
@@ -95,13 +91,13 @@ interface ContextMenu {
 
 export default function BaseTerminal({
   cwd,
-  workspaceId,
+  workspace,
   tabId,
   sandbox,
   isVisible,
   config,
-  workspaceStore
 }: BaseTerminalProps) {
+  const workspaceId = workspace.id
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -116,14 +112,12 @@ export default function BaseTerminal({
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
 
   const terminalApi = useTerminalApi()
-  const workspace = useStore(workspaceStore, (state) => state.workspaces[workspaceId])
-  const updateTabState = useStore(workspaceStore, (state) => state.updateTabState)
-  const removeTab = useStore(workspaceStore, (state) => state.removeTab)
   const setTabState = useActivityStateStore((state) => state.setTabState)
   const settings = useSettingsStore((state) => state.settings)
 
   // Get existing ptyId from store for reconnection
-  const appState = workspace?.appStates[tabId]
+  const wsData = workspace.data
+  const appState = wsData?.appStates[tabId]
   const existingPtyId = (appState?.state as BaseTerminalState | undefined)?.ptyId
 
   useEffect(() => {
@@ -264,12 +258,12 @@ export default function BaseTerminal({
       const unsubscribeExit = terminalApi.onExit(handle, (exitCode) => {
         console.log(`[${config.logPrefix} ${tabId}] PTY exited with code:`, exitCode)
         if (isMountedRef.current) {
-          const currentTab = workspaceStore.getState().workspaces[workspaceId]?.appStates[tabId]
+          const currentTab = workspace.data?.appStates[tabId]
           const keepOnExit = (currentTab?.state as BaseTerminalState | undefined)?.keepOnExit
           if (keepOnExit) {
             terminal.write(`\r\n\x1b[2mProcess exited with exit code ${exitCode}\x1b[0m\r\n`)
           } else {
-            removeTab(workspaceId, tabId)
+            workspace.removeTab(tabId)
           }
         }
       })
@@ -317,7 +311,7 @@ export default function BaseTerminal({
             }
 
             connectToPty(result.handle)
-            updateTabState<BaseTerminalState>(workspaceId, tabId, (state) => ({
+            workspace.updateTabState<BaseTerminalState>(tabId, (state) => ({
               ...state,
               ptyHandle: result.handle!
             }))
@@ -343,7 +337,7 @@ export default function BaseTerminal({
       console.log(`[${config.logPrefix} ${tabId}] created new PTY:`, result.sessionId, 'handle:', result.handle)
       sessionIdRef.current = result.sessionId
       connectToPty(result.handle)
-      updateTabState<BaseTerminalState>(workspaceId, tabId, (state) => ({
+      workspace.updateTabState<BaseTerminalState>(tabId, (state) => ({
         ...state,
         ptyId: result.sessionId,
         ptyHandle: result.handle

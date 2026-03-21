@@ -39,14 +39,14 @@ export default function SessionPanel({
     activeWorkspaceId,
     addWorkspace,
     addChildWorkspace,
-    addTab,
     adoptExistingWorktree,
     createWorktreeFromBranch,
     createWorktreeFromRemote,
     removeWorkspace,
     quickForkWorkspace,
-    setActiveWorkspace
-  } = useStore(workspaceStore)
+    setActiveWorkspace,
+    getWorkspace,
+  } = useStore(sessionStore)
   const { activeSessionId, switchSession } = useAppStore()
   const { activeView, setActiveView } = useNavigationStore()
   const {
@@ -178,19 +178,22 @@ export default function SessionPanel({
 
   const handleRemove = async (id: string) => {
     closeContextMenu()
-    const workspace = workspaces[id]
+    const ws = workspaces[id]
 
     // For worktree workspaces with a parent, open the Review tab
-    if (workspace.isWorktree && workspace.parentId) {
+    if (ws.isWorktree && ws.parentId) {
       setActiveWorkspace(id)
-      addTab<ReviewState>(id, 'review', {
-        parentWorkspaceId: workspace.parentId
-      })
+      const handle = getWorkspace(id)
+      if (handle) {
+        handle.addTab<ReviewState>('review', {
+          parentWorkspaceId: ws.parentId
+        })
+      }
       return
     }
 
     // For regular workspaces, just confirm and remove
-    const message = `Remove workspace "${workspace.name}"?`
+    const message = `Remove workspace "${ws.name}"?`
     if (confirm(message)) {
       await removeWorkspace(id)
     }

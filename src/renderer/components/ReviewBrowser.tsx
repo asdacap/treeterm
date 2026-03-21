@@ -1,40 +1,34 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ChevronDown } from 'lucide-react'
-import { useStore } from 'zustand'
-import type { StoreApi } from 'zustand'
-import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useGitApi } from '../contexts/GitApiContext'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
 import { getTabs } from '../types'
-import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, ReviewComment } from '../types'
+import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, WorkspaceHandle } from '../types'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
 import { CommentInput } from './CommentInput'
 import { CommentDisplay } from './CommentDisplay'
 
 interface ReviewBrowserProps {
-  workspaceId: string
-  workspacePath: string
+  workspace: WorkspaceHandle
   tabId: string
   // parentWorkspaceId is optional - if undefined, this is a top-level worktree
   // and only uncommitted changes are shown (no merge functionality)
   parentWorkspaceId?: string
-  workspaceStore: StoreApi<WorkspaceState>
 }
 
 type ViewMode = 'committed' | 'uncommitted'
 
 export default function ReviewBrowser({
-  workspaceId,
-  workspacePath,
+  workspace,
   tabId,
   parentWorkspaceId,
-  workspaceStore
 }: ReviewBrowserProps) {
   const git = useGitApi()
-  const { workspaces, mergeAndRemoveWorkspace, closeAndCleanWorkspace, removeTab, setActiveTab, promptHarness, addReviewComment, deleteReviewComment, updateOutdatedReviewComments, getReviewComments } = useStore(workspaceStore)
-  const workspace = workspaces[workspaceId]
-  const parentWorkspace = parentWorkspaceId ? workspaces[parentWorkspaceId] : undefined
-  
+  const workspaceId = workspace.id
+  const wsData = workspace.data
+  const workspacePath = wsData.path
+  const parentWorkspace = parentWorkspaceId ? workspace.lookupWorkspace(parentWorkspaceId) : undefined
+
   // For top-level worktrees, we only show uncommitted changes (no parent to compare against)
   const hasParent = !!parentWorkspaceId
 
@@ -48,7 +42,6 @@ export default function ReviewBrowser({
 
   // Uncommitted changes state
   const [uncommitted, setUncommitted] = useState<UncommittedChanges | null>(null)
-  // Default to 'committed' view, but for top-level worktrees we only show uncommitted
   const [viewMode, setViewMode] = useState<ViewMode>('committed')
   const [selectedUncommittedFile, setSelectedUncommittedFile] = useState<UncommittedFile | null>(null)
 
@@ -73,8 +66,8 @@ export default function ReviewBrowser({
   const [mergeDropdownOpen, setMergeDropdownOpen] = useState(false)
   const mergeDropdownRef = useRef<HTMLDivElement>(null)
 
-  // Reviews state — comments are derived from workspace metadata via store
-  const reviews = getReviewComments(workspaceId)
+  // Reviews state
+  const reviews = workspace.getReviewComments()
   const [commentInput, setCommentInput] = useState<{
     visible: boolean
     lineNumber: number
@@ -87,7 +80,7 @@ export default function ReviewBrowser({
   const [isResizing, setIsResizing] = useState(false)
 
   // AI harness prompt support
-  const runningHarness = workspace ? findRunningHarness(getTabs(workspace)) : null
+  const runningHarness = wsData ? findRunningHarness(getTabs(wsData)) : null
 
   const [refreshing, setRefreshing] = useState(false)
 
@@ -105,16 +98,16 @@ export default function ReviewBrowser({
   }, [workspacePath, parentWorkspace])
 
   const handlePromptCommit = useCallback(() => {
-    promptHarness(workspaceId, 'commit')
-  }, [promptHarness, workspaceId])
+    workspace.promptHarness('commit')
+  }, [workspace])
 
   const handlePromptRebase = useCallback(() => {
     if (parentWorkspace?.gitBranch) {
-      promptHarness(workspaceId, `rebase with ${parentWorkspace.gitBranch}`)
+      workspace.promptHarness(`rebase with ${parentWorkspace.gitBranch}`)
     }
-  }, [promptHarness, workspaceId, parentWorkspace?.gitBranch])
+  }, [workspace, parentWorkspace?.gitBranch])
 
-  // Resize handlers (must be defined before any early returns)
+  // Resize handlers
   const handleResizeMouseDown = useCallback(() => {
     setIsResizing(true)
   }, [])
@@ -135,18 +128,15 @@ export default function ReviewBrowser({
   }, [])
 
   useEffect(() => {
-    if (!workspace) return
+    if (!wsData) return
 
-    // Always load uncommitted changes
     loadUncommittedChanges()
     loadReviews()
 
     if (parentWorkspace) {
-      // For child worktrees: load diff and check conflicts for merge
       loadDiff()
       checkConflicts()
     } else {
-      // For top-level worktrees: no diff to show, just clear loading state
       setLoading(false)
     }
   }, [workspaceId, parentWorkspaceId])
@@ -168,7 +158,7 @@ export default function ReviewBrowser({
       const hashResult = await git.getHeadCommitHash(workspacePath)
       if (hashResult.success && hashResult.hash) {
         setCurrentCommitHash(hashResult.hash)
-        updateOutdatedReviewComments(workspaceId, hashResult.hash)
+        workspace.updateOutdatedReviewComments(hashResult.hash)
       }
     } catch (error) {
       console.error('Failed to load reviews:', error)
@@ -177,7 +167,8 @@ export default function ReviewBrowser({
   }
 
   const loadDiff = async () => {
-    if (!workspace?.gitBranch || !parentWorkspace?.gitBranch) return
+    const ws = workspace.data
+    if (!ws?.gitBranch || !parentWorkspace?.gitBranch) return
 
     setLoading(true)
     setError(null)
@@ -207,14 +198,15 @@ export default function ReviewBrowser({
   }
 
   const checkConflicts = async () => {
-    if (!workspace?.gitBranch || !parentWorkspace?.gitBranch || !parentWorkspace.gitRootPath) return
+    const ws = workspace.data
+    if (!ws?.gitBranch || !parentWorkspace?.gitBranch || !parentWorkspace.gitRootPath) return
 
     setIsCheckingConflicts(true)
     setConflictError(null)
     try {
       const result = await git.checkMergeConflicts(
         parentWorkspace.gitRootPath,
-        workspace.gitBranch,
+        ws.gitBranch,
         parentWorkspace.gitBranch
       )
       if (result.success && result.conflicts) {
@@ -362,7 +354,6 @@ export default function ReviewBrowser({
   }
 
   const handleMerge = async (squash: boolean) => {
-    // Check for uncommitted changes and warn user
     if (hasUncommitted) {
       const fileCount = uncommitted!.files.length
       const confirmed = confirm(
@@ -378,21 +369,19 @@ export default function ReviewBrowser({
     setProcessingAction(squash ? 'squash' : 'merge')
 
     try {
-      const result = await mergeAndRemoveWorkspace(workspaceId, squash)
+      const result = await workspace.mergeAndRemove(squash)
       if (!result.success) {
         alert(`Merge failed: ${result.error}`)
         setIsProcessing(false)
         setProcessingAction(null)
         return
       }
-      // Tab will close automatically when workspace is removed
     } catch (err) {
       alert(`Merge failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
       setIsProcessing(false)
       setProcessingAction(null)
     }
   }
-
 
   const handleCloseAndClean = async () => {
     if (!confirm('Close this workspace? The worktree will be removed but the branch will be kept.')) {
@@ -402,13 +391,12 @@ export default function ReviewBrowser({
     setIsProcessing(true)
 
     try {
-      const result = await closeAndCleanWorkspace(workspaceId)
+      const result = await workspace.closeAndClean()
       if (!result.success) {
         alert(`Close failed: ${result.error}`)
         setIsProcessing(false)
         return
       }
-      // Tab will close automatically when workspace is removed
     } catch (err) {
       alert(`Close failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
       setIsProcessing(false)
@@ -416,7 +404,7 @@ export default function ReviewBrowser({
   }
 
   const handleCancel = () => {
-    removeTab(workspaceId, tabId)
+    workspace.removeTab(tabId)
   }
 
   const getStatusIcon = (status: DiffFile['status'] | UncommittedFile['status']) => {
@@ -434,7 +422,7 @@ export default function ReviewBrowser({
     }
   }
 
-  if (!workspace) {
+  if (!wsData) {
     return <div className="review-browser-error">Workspace not found</div>
   }
 
@@ -444,7 +432,6 @@ export default function ReviewBrowser({
   const hasCommittedChanges = diff && diff.files.length > 0
   const hasConflicts = conflictInfo?.hasConflicts || false
 
-  // File navigation helpers
   const fileList = viewMode === 'committed'
     ? diff?.files.map(f => f.path) || []
     : [...stagedFiles, ...unstagedFiles].map(f => f.path)
@@ -479,7 +466,6 @@ export default function ReviewBrowser({
     }
   }
 
-  // Comment handlers
   const handleLineClick = (lineNumber: number, side: 'original' | 'modified') => {
     setCommentInput({ visible: true, lineNumber, side })
   }
@@ -489,7 +475,7 @@ export default function ReviewBrowser({
     if (!commentInput || !currentCommitHash || !filePath) return
 
     try {
-      const comment = {
+      workspace.addReviewComment({
         filePath,
         lineNumber: commentInput.lineNumber,
         text,
@@ -497,9 +483,7 @@ export default function ReviewBrowser({
         isOutdated: false,
         addressed: false,
         side: commentInput.side
-      }
-
-      addReviewComment(workspaceId, comment)
+      })
       setCommentInput(null)
     } catch (error) {
       console.error('Failed to add comment:', error)
@@ -508,10 +492,9 @@ export default function ReviewBrowser({
   }
 
   const handleCommentDelete = (commentId: string) => {
-    deleteReviewComment(workspaceId, commentId)
+    workspace.deleteReviewComment(commentId)
   }
 
-  // Filter comments for current file
   const currentFilePath = selectedFile || selectedUncommittedFile?.path
   const fileComments = currentFilePath
     ? reviews.filter(c => c.filePath === currentFilePath)
@@ -522,9 +505,9 @@ export default function ReviewBrowser({
       {/* Header */}
       <div className="review-header">
         <div className="review-header-info">
-          <span className="review-workspace-name">{workspace.name}</span>
+          <span className="review-workspace-name">{wsData.name}</span>
           <span className="review-branch-info">
-            <span className="review-branch">{workspace.gitBranch}</span>
+            <span className="review-branch">{wsData.gitBranch}</span>
             {parentWorkspace && (
               <>
                 <span className="review-arrow">→</span>
@@ -548,17 +531,14 @@ export default function ReviewBrowser({
         </div>
       </div>
 
-      {/* Load Error */}
       {loadError && (
         <div className="review-load-error">{loadError}</div>
       )}
 
-      {/* Conflict Check Error */}
       {conflictError && (
         <div className="review-conflict-error">Could not check for conflicts: {conflictError}</div>
       )}
 
-      {/* Conflict Warning */}
       {hasConflicts && (
         <div className="review-conflict-banner">
           <span className="review-conflict-icon">⚠️</span>
@@ -572,7 +552,6 @@ export default function ReviewBrowser({
         </div>
       )}
 
-      {/* View Mode Tabs */}
       <div className="diff-tabs">
         {hasParent ? (
           <button
@@ -604,7 +583,6 @@ export default function ReviewBrowser({
         </button>
       </div>
 
-      {/* Content */}
       {loading ? (
         <div className="review-loading">Loading changes...</div>
       ) : error ? (
@@ -612,7 +590,6 @@ export default function ReviewBrowser({
       ) : (
         <>
           {viewMode === 'committed' ? (
-            // Committed view
             !hasParent ? (
               <div className="diff-empty">Top-level worktree - no parent branch to compare committed changes against</div>
             ) : !hasCommittedChanges ? (
@@ -662,24 +639,22 @@ export default function ReviewBrowser({
                       loadingFileDiff ? (
                         <div className="diff-loading">Loading...</div>
                       ) : fileDiffContents ? (
-                        <>
-                          <MonacoDiffViewer
-                            originalContent={fileDiffContents.originalContent}
-                            modifiedContent={fileDiffContents.modifiedContent}
-                            language={fileDiffContents.language}
-                            originalLabel={diff?.baseBranch || 'Original'}
-                            modifiedLabel={diff?.headBranch || 'Modified'}
-                            onPreviousFile={handlePreviousFile}
-                            onNextFile={handleNextFile}
-                            hasPreviousFile={currentFileIndex > 0}
-                            hasNextFile={currentFileIndex < fileList.length - 1}
-                            comments={fileComments}
-                            onLineClick={handleLineClick}
-                            inlineCommentInput={commentInput}
-                            onCommentSubmit={handleCommentSubmit}
-                            onCommentCancel={() => setCommentInput(null)}
-                          />
-                        </>
+                        <MonacoDiffViewer
+                          originalContent={fileDiffContents.originalContent}
+                          modifiedContent={fileDiffContents.modifiedContent}
+                          language={fileDiffContents.language}
+                          originalLabel={diff?.baseBranch || 'Original'}
+                          modifiedLabel={diff?.headBranch || 'Modified'}
+                          onPreviousFile={handlePreviousFile}
+                          onNextFile={handleNextFile}
+                          hasPreviousFile={currentFileIndex > 0}
+                          hasNextFile={currentFileIndex < fileList.length - 1}
+                          comments={fileComments}
+                          onLineClick={handleLineClick}
+                          inlineCommentInput={commentInput}
+                          onCommentSubmit={handleCommentSubmit}
+                          onCommentCancel={() => setCommentInput(null)}
+                        />
                       ) : (
                         <div className="diff-placeholder">Failed to load diff contents</div>
                       )
@@ -708,7 +683,6 @@ export default function ReviewBrowser({
               </>
             )
           ) : (
-            // Uncommitted view
             !hasUncommitted ? (
               <div className="diff-empty">No uncommitted changes</div>
             ) : (
@@ -832,7 +806,6 @@ export default function ReviewBrowser({
                   </div>
                 </div>
 
-                {/* Commit Section */}
                 {stagedFiles.length > 0 && (
                   <div className="review-commit-section">
                     <input
@@ -869,7 +842,6 @@ export default function ReviewBrowser({
       {/* Action Bar */}
       <div className="review-actions">
         {!hasParent ? (
-          // Top-level worktree: only show Cancel (no merge/abandon actions)
           <>
             <span className="review-top-level-message">Top-level worktree - review only</span>
             <button
@@ -880,7 +852,7 @@ export default function ReviewBrowser({
               Close Review
             </button>
           </>
-        ) : workspace?.isDetached ? (
+        ) : wsData?.isDetached ? (
           <>
             {hasUncommitted && runningHarness && (
               <button

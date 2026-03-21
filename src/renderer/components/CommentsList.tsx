@@ -1,15 +1,10 @@
 import { useState, useEffect } from 'react'
-import { useStore } from 'zustand'
-import type { StoreApi } from 'zustand'
-import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useFilesystemApi } from '../contexts/FilesystemApiContext'
 import { generateReviewPrompt } from '../utils/reviewPrompt'
-import type { ReviewComment, FilesystemState } from '../types'
+import type { ReviewComment, FilesystemState, WorkspaceHandle } from '../types'
 
 interface CommentsListProps {
-  workspacePath: string
-  workspaceId: string
-  workspaceStore: StoreApi<WorkspaceState>
+  workspace: WorkspaceHandle
 }
 
 const CONTEXT_LINES = 3
@@ -32,14 +27,11 @@ function extractCodeContext(
 }
 
 export default function CommentsList({
-  workspacePath,
-  workspaceId,
-  workspaceStore
+  workspace,
 }: CommentsListProps): JSX.Element {
   const filesystem = useFilesystemApi()
-  const { workspaces, addTab, deleteReviewComment, toggleReviewCommentAddressed, getReviewComments } = useStore(workspaceStore)
-  const workspace = workspaces[workspaceId]
-  const comments: ReviewComment[] = getReviewComments(workspaceId)
+  const workspacePath = workspace.data.path
+  const comments: ReviewComment[] = workspace.getReviewComments()
   const [fileContents, setFileContents] = useState<Map<string, string>>(new Map())
   const [promptExpanded, setPromptExpanded] = useState(false)
 
@@ -72,15 +64,15 @@ export default function CommentsList({
   }, [comments, workspacePath, filesystem])
 
   const handleToggleAddressed = (commentId: string) => {
-    toggleReviewCommentAddressed(workspaceId, commentId)
+    workspace.toggleReviewCommentAddressed(commentId)
   }
 
   const handleDelete = (commentId: string) => {
-    deleteReviewComment(workspaceId, commentId)
+    workspace.deleteReviewComment(commentId)
   }
 
   const handleGoToFile = (comment: ReviewComment) => {
-    addTab<FilesystemState>(workspaceId, 'filesystem', {
+    workspace.addTab<FilesystemState>('filesystem', {
       selectedPath: comment.filePath,
       scrollToLine: comment.lineNumber
     })

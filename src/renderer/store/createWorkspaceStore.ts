@@ -12,10 +12,35 @@ export interface WorkspaceDeps {
   terminal: TerminalApi
 }
 
+export interface WorkspaceHandle {
+  id: string
+  data: Workspace
+  addTab: <T>(applicationId: string, initialState?: Partial<T>) => string
+  removeTab: (tabId: string) => Promise<void>
+  setActiveTab: (tabId: string) => void
+  updateTabTitle: (tabId: string, title: string) => void
+  updateTabState: <T>(tabId: string, updater: (state: T) => T) => void
+  getReviewComments: () => ReviewComment[]
+  addReviewComment: (comment: Omit<ReviewComment, 'id' | 'createdAt'>) => void
+  deleteReviewComment: (commentId: string) => void
+  toggleReviewCommentAddressed: (commentId: string) => void
+  updateOutdatedReviewComments: (currentCommitHash: string) => void
+  clearReviewComments: () => void
+  promptHarness: (text: string) => boolean
+  quickForkWorkspace: () => Promise<{ success: boolean; error?: string }>
+  updateMetadata: (key: string, value: string) => void
+  updateStatus: (status: Workspace['status']) => void
+  refreshGitInfo: () => Promise<void>
+  mergeAndRemove: (squash: boolean) => Promise<{ success: boolean; error?: string }>
+  closeAndClean: () => Promise<{ success: boolean; error?: string }>
+  lookupWorkspace: (id: string) => Workspace | undefined
+}
+
 export interface WorkspaceState {
   workspaces: Record<string, Workspace>
   activeWorkspaceId: string | null
   isRestoring: boolean  // Set externally by appStore during restoration; checked by syncSessionToDaemon
+  getWorkspace: (id: string) => WorkspaceHandle | null
   addWorkspace: (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => Promise<string>
   addChildWorkspace: (parentId: string, name: string, isDetached?: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
   adoptExistingWorktree: (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
@@ -291,6 +316,53 @@ export function createWorkspaceStore(
     workspaces: {},
     activeWorkspaceId: null,
     isRestoring: false,
+
+    getWorkspace: (id: string): WorkspaceHandle | null => {
+      const workspace = get().workspaces[id]
+      if (!workspace) return null
+      return {
+        get id() { return id },
+        get data() { return store.getState().workspaces[id] },
+        addTab: <T,>(applicationId: string, initialState?: Partial<T>) =>
+          store.getState().addTab(id, applicationId, initialState),
+        removeTab: (tabId: string) =>
+          store.getState().removeTab(id, tabId),
+        setActiveTab: (tabId: string) =>
+          store.getState().setActiveTab(id, tabId),
+        updateTabTitle: (tabId: string, title: string) =>
+          store.getState().updateTabTitle(id, tabId, title),
+        updateTabState: <T,>(tabId: string, updater: (state: T) => T) =>
+          store.getState().updateTabState(id, tabId, updater),
+        getReviewComments: () =>
+          store.getState().getReviewComments(id),
+        addReviewComment: (comment: Omit<ReviewComment, 'id' | 'createdAt'>) =>
+          store.getState().addReviewComment(id, comment),
+        deleteReviewComment: (commentId: string) =>
+          store.getState().deleteReviewComment(id, commentId),
+        toggleReviewCommentAddressed: (commentId: string) =>
+          store.getState().toggleReviewCommentAddressed(id, commentId),
+        updateOutdatedReviewComments: (currentCommitHash: string) =>
+          store.getState().updateOutdatedReviewComments(id, currentCommitHash),
+        clearReviewComments: () =>
+          store.getState().clearReviewComments(id),
+        promptHarness: (text: string) =>
+          store.getState().promptHarness(id, text),
+        quickForkWorkspace: () =>
+          store.getState().quickForkWorkspace(id),
+        updateMetadata: (key: string, value: string) =>
+          store.getState().updateWorkspaceMetadata(id, key, value),
+        updateStatus: (status: Workspace['status']) =>
+          store.getState().updateWorkspaceStatus(id, status),
+        refreshGitInfo: () =>
+          store.getState().refreshGitInfo(id),
+        mergeAndRemove: (squash: boolean) =>
+          store.getState().mergeAndRemoveWorkspace(id, squash),
+        closeAndClean: () =>
+          store.getState().closeAndCleanWorkspace(id),
+        lookupWorkspace: (otherId: string) =>
+          store.getState().workspaces[otherId],
+      }
+    },
 
     addWorkspace: async (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => {
       console.log('[workspace] addWorkspace called for path:', path)

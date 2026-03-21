@@ -12,17 +12,15 @@ export const reviewApplication: Application<ReviewState> = {
     // parentWorkspaceId is optional - null means top-level worktree (no merge parent)
   }),
 
-  render: ({ tab, workspaceId, workspacePath, workspaceStore }) => {
+  render: ({ tab, workspace }) => {
     if (!isReviewState(tab.state)) {
       return null
     }
     return createElement(ReviewBrowser, {
       key: tab.id,
-      workspaceId,
-      workspacePath,
+      workspace,
       tabId: tab.id,
       parentWorkspaceId: tab.state.parentWorkspaceId,
-      workspaceStore
     })
   },
 

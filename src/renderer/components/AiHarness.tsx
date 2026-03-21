@@ -1,16 +1,13 @@
 import { useCallback, useMemo } from 'react'
-import { useStore } from 'zustand'
 import BaseTerminal, { type BaseTerminalConfig, type BaseTerminalState } from './BaseTerminal'
 import PushToTalkButton from './PushToTalkButton'
 import { ReviewCommentsButton } from './ReviewCommentsButton'
 import { useTerminalApi } from '../contexts/TerminalApiContext'
-import type { SandboxConfig } from '../types'
-import type { StoreApi } from 'zustand'
-import type { WorkspaceState } from '../store/createWorkspaceStore'
+import type { SandboxConfig, WorkspaceHandle } from '../types'
 
 interface AiHarnessProps {
   cwd: string
-  workspaceId: string
+  workspace: WorkspaceHandle
   tabId: string
   sandbox?: SandboxConfig
   isVisible?: boolean
@@ -18,12 +15,11 @@ interface AiHarnessProps {
   backgroundColor: string
   disableScrollbar?: boolean
   stripScrollbackClear?: boolean
-  workspaceStore: StoreApi<WorkspaceState>
 }
 
 export default function AiHarness({
   cwd,
-  workspaceId,
+  workspace,
   tabId,
   sandbox,
   isVisible,
@@ -31,11 +27,10 @@ export default function AiHarness({
   backgroundColor,
   disableScrollbar,
   stripScrollbackClear,
-  workspaceStore
 }: AiHarnessProps) {
   const terminalApi = useTerminalApi()
-  const workspace = useStore(workspaceStore, (state) => state.workspaces[workspaceId])
-  const appState = workspace?.appStates[tabId]
+  const wsData = workspace.data
+  const appState = wsData?.appStates[tabId]
   const ptyHandle = (appState?.state as BaseTerminalState | undefined)?.ptyHandle
 
   const handlePushToTalkTranscript = useCallback((text: string) => {
@@ -64,20 +59,18 @@ export default function AiHarness({
     <div className="ai-harness-wrapper" style={{ position: 'relative', width: '100%', height: '100%' }}>
       <BaseTerminal
         cwd={cwd}
-        workspaceId={workspaceId}
+        workspace={workspace}
         tabId={tabId}
         sandbox={sandbox}
         isVisible={isVisible}
         config={config}
-        workspaceStore={workspaceStore}
       />
       <PushToTalkButton
         onTranscript={handlePushToTalkTranscript}
         onSubmit={handlePushToTalkSubmit}
       />
       <ReviewCommentsButton
-        workspaceStore={workspaceStore}
-        workspaceId={workspaceId}
+        workspace={workspace}
       />
     </div>
   )

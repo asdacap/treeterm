@@ -1,24 +1,19 @@
-import { useStore } from 'zustand'
-import type { StoreApi } from 'zustand'
-import type { WorkspaceState } from '../store/createWorkspaceStore'
+import type { WorkspaceHandle } from '../types'
 import { generateReviewPrompt } from '../utils/reviewPrompt'
 
 interface ReviewCommentsButtonProps {
-  workspaceStore: StoreApi<WorkspaceState>
-  workspaceId: string
+  workspace: WorkspaceHandle
 }
 
-export function ReviewCommentsButton({ workspaceStore, workspaceId }: ReviewCommentsButtonProps): JSX.Element | null {
-  const getReviewComments = useStore(workspaceStore, (state) => state.getReviewComments)
-  const promptHarness = useStore(workspaceStore, (state) => state.promptHarness)
-  const comments = getReviewComments(workspaceId)
+export function ReviewCommentsButton({ workspace }: ReviewCommentsButtonProps): JSX.Element | null {
+  const comments = workspace.getReviewComments()
 
   if (comments.length === 0) return null
 
   const handleClick = () => {
     const prompt = generateReviewPrompt(comments)
     if (prompt) {
-      promptHarness(workspaceId, prompt)
+      workspace.promptHarness(prompt)
     }
   }
 

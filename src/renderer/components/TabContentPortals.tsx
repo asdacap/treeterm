@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import type { StoreApi } from 'zustand'
 import { useStore } from 'zustand'
@@ -22,9 +22,7 @@ interface TabContentPortalsProps {
  */
 export default function TabContentPortals({ workspaceStore, activeWorkspaceId }: TabContentPortalsProps) {
   const workspaces = useStore(workspaceStore, s => s.workspaces)
-  const removeTab = useStore(workspaceStore, s => s.removeTab)
   const applications = useAppStore((s) => s.applications)
-  const getApplication = useCallback((id: string) => applications[id], [applications])
 
   // Track available portal slots — updated via MutationObserver
   const [portalSlots, setPortalSlots] = useState<Record<string, HTMLElement>>({})
@@ -63,7 +61,7 @@ export default function TabContentPortals({ workspaceStore, activeWorkspaceId }:
         const isActiveWorkspace = workspace.id === activeWorkspaceId
 
         return wsTabs.map(tab => {
-          const app = getApplication(tab.applicationId)
+          const app = applications[tab.applicationId]
           if (!app) return null
 
           // Skip rendering if app doesn't need to stay alive and workspace is inactive
@@ -71,6 +69,10 @@ export default function TabContentPortals({ workspaceStore, activeWorkspaceId }:
 
           const portalTarget = isActiveWorkspace ? portalSlots[tab.id] : null
           const isVisible = !!portalTarget
+
+          // Construct a WorkspaceHandle for this workspace
+          const handle = workspaceStore.getState().getWorkspace(workspace.id)
+          if (!handle) return null
 
           const content = (
             <ErrorBoundary
@@ -80,7 +82,7 @@ export default function TabContentPortals({ workspaceStore, activeWorkspaceId }:
                   error={error}
                   tabTitle={tab.title}
                   onReset={reset}
-                  onClose={() => removeTab(workspace.id, tab.id)}
+                  onClose={() => handle.removeTab(tab.id)}
                 />
               )}
             >
@@ -90,10 +92,8 @@ export default function TabContentPortals({ workspaceStore, activeWorkspaceId }:
               >
                 {app.render({
                   tab,
-                  workspaceId: workspace.id,
-                  workspacePath: workspace.path,
+                  workspace: handle,
                   isVisible,
-                  workspaceStore
                 })}
               </div>
             </ErrorBoundary>

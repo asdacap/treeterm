@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createStore } from 'zustand/vanilla'
 import { commentsApplication } from './renderer'
-import type { Tab } from '../../renderer/types'
+import type { Tab, Workspace } from '../../renderer/types'
+import type { WorkspaceHandle } from '../../renderer/store/createWorkspaceStore'
 
 // Mock React
 vi.mock('react', () => ({
@@ -13,8 +13,29 @@ vi.mock('../../renderer/components/CommentsList', () => ({
   default: vi.fn(() => null)
 }))
 
-import type { WorkspaceState } from '../../renderer/store/createWorkspaceStore'
-const mockWorkspaceStore = createStore(() => ({} as WorkspaceState))
+const mockWorkspaceHandle = {
+  id: 'ws-1',
+  data: { path: '/test' } as Workspace,
+  addTab: vi.fn(),
+  removeTab: vi.fn(),
+  setActiveTab: vi.fn(),
+  updateTabTitle: vi.fn(),
+  updateTabState: vi.fn(),
+  getReviewComments: vi.fn(),
+  addReviewComment: vi.fn(),
+  deleteReviewComment: vi.fn(),
+  toggleReviewCommentAddressed: vi.fn(),
+  updateOutdatedReviewComments: vi.fn(),
+  clearReviewComments: vi.fn(),
+  promptHarness: vi.fn(),
+  quickForkWorkspace: vi.fn(),
+  updateMetadata: vi.fn(),
+  updateStatus: vi.fn(),
+  refreshGitInfo: vi.fn(),
+  mergeAndRemove: vi.fn(),
+  closeAndClean: vi.fn(),
+  lookupWorkspace: vi.fn(),
+} satisfies WorkspaceHandle
 
 describe('Comments Renderer', () => {
   beforeEach(() => {
@@ -58,19 +79,15 @@ describe('Comments Renderer', () => {
 
         const result = commentsApplication.render({
           tab,
-          workspaceId: 'ws-1',
-          workspacePath: '/test',
+          workspace: mockWorkspaceHandle,
           isVisible: true,
-          workspaceStore: mockWorkspaceStore
         })
 
         expect(result).toEqual({
           component: expect.any(Function),
           props: expect.objectContaining({
             key: 'tab-1',
-            workspacePath: '/test',
-            workspaceId: 'ws-1',
-            workspaceStore: mockWorkspaceStore
+            workspace: mockWorkspaceHandle,
           })
         })
       })
@@ -85,10 +102,8 @@ describe('Comments Renderer', () => {
 
         const result = commentsApplication.render({
           tab,
-          workspaceId: 'ws-1',
-          workspacePath: '/test',
+          workspace: mockWorkspaceHandle,
           isVisible: true,
-          workspaceStore: mockWorkspaceStore
         })
 
         expect(result).toBeNull()

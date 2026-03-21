@@ -46,15 +46,17 @@ export default function App() {
     daemonDisconnected,
     showConnectionPicker,
     getActiveWorkspaceStore,
+    getActiveSessionStore,
   } = useAppStore()
 
   const activeView = useNavigationStore(s => s.activeView)
   const sessionStores = useAppStore(s => s.sessionStores)
 
-  // Derive active store from activeView.sessionId when viewing a workspace
-  const activeStore = activeView?.type === 'workspace' && activeView.sessionId
-    ? sessionStores[activeView.sessionId]?.getState().workspaceStore || null
-    : getActiveWorkspaceStore()
+  // Derive active session store and workspace store from activeView
+  const activeSessionStore = activeView?.type === 'workspace' && activeView.sessionId
+    ? sessionStores[activeView.sessionId] || null
+    : getActiveSessionStore()
+  const activeStore = activeSessionStore?.getState().workspaceStore || getActiveWorkspaceStore()
 
   const handleConfirmClose = () => {
     useAppStore.setState({ showCloseConfirm: false })
@@ -129,10 +131,10 @@ export default function App() {
             onMouseDown={handleMouseDown}
           />
           <div className="workspace-pane">
-            {activeStore ? (
+            {activeSessionStore ? (
               <>
                 <div style={{ display: activeView?.type !== 'ssh' ? 'contents' : 'none' }}>
-                  <WorkspacePane workspaceStore={activeStore} platform={platform} />
+                  <WorkspacePane sessionStore={activeSessionStore} platform={platform} />
                 </div>
                 {activeView?.type === 'ssh' && (
                   <SSHConnectionPane connectionId={activeView.connectionId} />

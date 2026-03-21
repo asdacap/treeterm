@@ -524,7 +524,8 @@ describe('useAppStore', () => {
     })
 
     it('onNewTerminal adds terminal tab to active workspace', async () => {
-      const mockAddTab = vi.fn()
+      const mockHandleAddTab = vi.fn()
+      const mockHandle = { addTab: mockHandleAddTab }
       const { createWorkspaceStore } = await import('./createWorkspaceStore')
       vi.mocked(createWorkspaceStore).mockReturnValue({
         getState: vi.fn().mockReturnValue({
@@ -532,7 +533,8 @@ describe('useAppStore', () => {
           activeWorkspaceId: 'ws-1',
           isRestoring: false,
           addWorkspace: vi.fn(),
-          addTab: mockAddTab,
+          addTab: vi.fn(),
+          getWorkspace: vi.fn().mockReturnValue(mockHandle),
           setActiveWorkspace: vi.fn(),
           setActiveTab: vi.fn(),
           syncToDaemon: vi.fn()
@@ -551,7 +553,7 @@ describe('useAppStore', () => {
       const termCallback = mockDeps.terminal.onNewTerminal.mock.calls[0][0]
       termCallback()
 
-      expect(mockAddTab).toHaveBeenCalledWith('ws-1', 'terminal')
+      expect(mockHandleAddTab).toHaveBeenCalledWith('terminal')
       cleanup()
     })
 

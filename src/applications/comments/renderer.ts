@@ -10,15 +10,13 @@ export const commentsApplication: Application<CommentsState> = {
 
   createInitialState: () => ({}),
 
-  render: ({ tab, workspacePath, workspaceId, workspaceStore }) => {
+  render: ({ tab, workspace }) => {
     if (!isCommentsState(tab.state)) {
       return null
     }
     return createElement(CommentsList, {
       key: tab.id,
-      workspacePath,
-      workspaceId,
-      workspaceStore
+      workspace,
     })
   },
 

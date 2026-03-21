@@ -1,19 +1,14 @@
-import type { StoreApi } from 'zustand'
-import { useStore } from 'zustand'
-import type { WorkspaceState } from '../store/createWorkspaceStore'
+import type { WorkspaceHandle } from '../types'
 
 interface PromptDescriptionButtonProps {
   description: string
-  workspaceStore: StoreApi<WorkspaceState>
-  workspaceId: string
+  workspace: WorkspaceHandle
   onDismiss: () => void
 }
 
-export function PromptDescriptionButton({ description, workspaceStore, workspaceId, onDismiss }: PromptDescriptionButtonProps): JSX.Element | null {
-  const promptHarness = useStore(workspaceStore, (state) => state.promptHarness)
-
+export function PromptDescriptionButton({ description, workspace, onDismiss }: PromptDescriptionButtonProps): JSX.Element | null {
   const handlePrompt = () => {
-    promptHarness(workspaceId, description)
+    workspace.promptHarness(description)
     onDismiss()
   }
 

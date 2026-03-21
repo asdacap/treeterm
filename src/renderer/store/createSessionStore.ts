@@ -1,11 +1,11 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
 import { createWorkspaceStore } from './createWorkspaceStore'
-import type { WorkspaceState } from './createWorkspaceStore'
+import type { WorkspaceState, WorkspaceHandle } from './createWorkspaceStore'
 import type {
   Workspace, Session,
   SSHConnectionConfig, ConnectionInfo,
-  TerminalApi, GitApi, SessionApi, SSHApi, Settings
+  TerminalApi, GitApi, SessionApi, SSHApi, Settings, WorktreeSettings
 } from '../types'
 
 export interface AppRegistryApi {
@@ -31,6 +31,25 @@ export interface SessionState {
   connect: (config: SSHConnectionConfig) => Promise<void>
   disconnect: () => Promise<void>
 
+  // Workspace collection management (delegates to workspace store)
+  workspaces: Record<string, Workspace>
+  activeWorkspaceId: string | null
+  getWorkspace: (id: string) => WorkspaceHandle | null
+  addWorkspace: (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => Promise<string>
+  addChildWorkspace: (parentId: string, name: string, isDetached?: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
+  adoptExistingWorktree: (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
+  createWorktreeFromBranch: (parentId: string, branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
+  createWorktreeFromRemote: (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
+  removeWorkspace: (id: string) => Promise<void>
+  removeWorkspaceKeepBranch: (id: string) => Promise<void>
+  removeWorkspaceKeepWorktree: (id: string) => Promise<void>
+  removeWorkspaceKeepBoth: (id: string) => Promise<void>
+  removeOrphanWorkspace: (id: string) => void
+  mergeAndRemoveWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
+  closeAndCleanWorkspace: (id: string) => Promise<{ success: boolean; error?: string }>
+  setActiveWorkspace: (id: string | null) => void
+  quickForkWorkspace: (workspaceId: string) => Promise<{ success: boolean; error?: string }>
+
   // Session lifecycle
   handleRestore: (session: Session) => Promise<void>
   handleExternalUpdate: (session: Session) => Promise<void>
@@ -51,9 +70,42 @@ export function createSessionStore(
     }
   )
 
+  // Keep session store's workspace snapshot in sync with workspace store
+  workspaceStore.subscribe((wsState) => {
+    store.setState({
+      workspaces: wsState.workspaces,
+      activeWorkspaceId: wsState.activeWorkspaceId,
+    })
+  })
+
   const store = createStore<SessionState>()((set, get) => ({
     sessionId: config.sessionId,
     workspaceStore,
+
+    // Workspace collection — synced from workspace store
+    workspaces: workspaceStore.getState().workspaces,
+    activeWorkspaceId: workspaceStore.getState().activeWorkspaceId,
+
+    // Delegates to workspace store
+    getWorkspace: (id: string) => workspaceStore.getState().getWorkspace(id),
+    addWorkspace: (path, options?) => workspaceStore.getState().addWorkspace(path, options),
+    addChildWorkspace: (parentId, name, isDetached?, settings?, description?) =>
+      workspaceStore.getState().addChildWorkspace(parentId, name, isDetached, settings, description),
+    adoptExistingWorktree: (parentId, worktreePath, branch, name, settings?, description?) =>
+      workspaceStore.getState().adoptExistingWorktree(parentId, worktreePath, branch, name, settings, description),
+    createWorktreeFromBranch: (parentId, branch, isDetached, settings?, description?) =>
+      workspaceStore.getState().createWorktreeFromBranch(parentId, branch, isDetached, settings, description),
+    createWorktreeFromRemote: (parentId, remoteBranch, isDetached, settings?, description?) =>
+      workspaceStore.getState().createWorktreeFromRemote(parentId, remoteBranch, isDetached, settings, description),
+    removeWorkspace: (id) => workspaceStore.getState().removeWorkspace(id),
+    removeWorkspaceKeepBranch: (id) => workspaceStore.getState().removeWorkspaceKeepBranch(id),
+    removeWorkspaceKeepWorktree: (id) => workspaceStore.getState().removeWorkspaceKeepWorktree(id),
+    removeWorkspaceKeepBoth: (id) => workspaceStore.getState().removeWorkspaceKeepBoth(id),
+    removeOrphanWorkspace: (id) => workspaceStore.getState().removeOrphanWorkspace(id),
+    mergeAndRemoveWorkspace: (id, squash) => workspaceStore.getState().mergeAndRemoveWorkspace(id, squash),
+    closeAndCleanWorkspace: (id) => workspaceStore.getState().closeAndCleanWorkspace(id),
+    setActiveWorkspace: (id) => workspaceStore.getState().setActiveWorkspace(id),
+    quickForkWorkspace: (workspaceId) => workspaceStore.getState().quickForkWorkspace(workspaceId),
 
     connection: null,
 

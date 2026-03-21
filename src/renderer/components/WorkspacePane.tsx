@@ -2,7 +2,7 @@ import { useEffect, useCallback, useState, useRef, useMemo } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
-import type { WorkspaceState } from '../store/createWorkspaceStore'
+import type { SessionState } from '../store/createSessionStore'
 import { usePrefixModeStore } from '../store/prefixMode'
 import { useAppStore } from '../store/app'
 import { usePrefixKeybindings } from '../hooks/usePrefixKeybindings'
@@ -18,17 +18,15 @@ import { PromptDescriptionButton } from './PromptDescriptionButton'
 import RunActionDropdown from './RunActionDropdown'
 
 interface WorkspacePaneProps {
-  workspaceStore: StoreApi<WorkspaceState>
+  sessionStore: StoreApi<SessionState>
   platform: Platform
 }
 
-export default function WorkspacePane({ workspaceStore, platform }: WorkspacePaneProps) {
+export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneProps) {
+  const workspaceStore = useStore(sessionStore, s => s.workspaceStore)
   const {
     workspaces,
     activeWorkspaceId,
-    addTab,
-    removeTab,
-    setActiveTab,
     addChildWorkspace,
     adoptExistingWorktree,
     createWorktreeFromBranch,
@@ -37,18 +35,19 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
     removeWorkspaceKeepBranch,
     removeWorkspaceKeepWorktree,
     removeWorkspaceKeepBoth,
-    mergeAndRemoveWorkspace,
-    closeAndCleanWorkspace,
     setActiveWorkspace,
-    updateWorkspaceMetadata,
-    updateTabTitle
-  } = useStore(workspaceStore)
+  } = useStore(sessionStore)
   const { enterWorkspaceFocus } = usePrefixModeStore()
   const applications = useAppStore((s) => s.applications)
   const getApplication = useCallback((id: string) => applications[id], [applications])
   const menuApplications = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
 
   const activeWorkspace = activeWorkspaceId ? workspaces[activeWorkspaceId] : null
+  // Get workspace handle for active workspace (for per-workspace operations)
+  const activeHandle = useMemo(() => {
+    if (!activeWorkspaceId) return null
+    return workspaceStore.getState().getWorkspace(activeWorkspaceId)
+  }, [activeWorkspaceId, workspaceStore])
 
   // Dialog state
   const [showCreateChildDialog, setShowCreateChildDialog] = useState(false)
@@ -68,13 +67,13 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
   }, [activeWorkspace])
 
   const handleSaveName = useCallback(() => {
-    if (!activeWorkspaceId) return
+    if (!activeHandle) return
     const trimmedName = editName.trim()
     if (trimmedName) {
-      updateWorkspaceMetadata(activeWorkspaceId, 'displayName', trimmedName)
+      activeHandle.updateMetadata('displayName', trimmedName)
     }
     setIsEditingName(false)
-  }, [activeWorkspaceId, editName, updateWorkspaceMetadata])
+  }, [activeHandle, editName])
 
   const handleStartEditDescription = useCallback(() => {
     if (!activeWorkspace) return
@@ -83,10 +82,10 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
   }, [activeWorkspace])
 
   const handleSaveDescription = useCallback(() => {
-    if (!activeWorkspaceId) return
-    updateWorkspaceMetadata(activeWorkspaceId, 'description', editDescription.trim())
+    if (!activeHandle) return
+    activeHandle.updateMetadata('description', editDescription.trim())
     setIsEditingDescription(false)
-  }, [activeWorkspaceId, editDescription, updateWorkspaceMetadata])
+  }, [activeHandle, editDescription])
 
   // Focus name input when entering edit mode
   useEffect(() => {
@@ -113,43 +112,42 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
 
   const handleNewTab = useCallback(
     (applicationId: string) => {
-      if (!activeWorkspaceId) return
+      if (!activeHandle) return
       if (applicationId === 'review') {
-        addTab<ReviewState>(activeWorkspaceId, 'review', {
+        activeHandle.addTab<ReviewState>('review', {
           parentWorkspaceId: activeWorkspace?.parentId ?? undefined
         })
       } else {
-        addTab(activeWorkspaceId, applicationId)
+        activeHandle.addTab(applicationId)
       }
     },
-    [activeWorkspaceId, activeWorkspace?.parentId, addTab]
+    [activeHandle, activeWorkspace?.parentId]
   )
 
   // Create new tab using the first available application
   const handleNewDefaultTab = useCallback(() => {
-    // Find the first app that allows new tabs
     const defaultApp = menuApplications.find((app) => app.canHaveMultiple)
-    if (activeWorkspaceId && defaultApp) {
-      addTab(activeWorkspaceId, defaultApp.id)
+    if (activeHandle && defaultApp) {
+      activeHandle.addTab(defaultApp.id)
     }
-  }, [activeWorkspaceId, addTab, menuApplications])
+  }, [activeHandle, menuApplications])
 
   const handleCloseTab = useCallback(
     (tabId: string) => {
-      if (activeWorkspaceId) {
-        removeTab(activeWorkspaceId, tabId)
+      if (activeHandle) {
+        activeHandle.removeTab(tabId)
       }
     },
-    [activeWorkspaceId, removeTab]
+    [activeHandle]
   )
 
   const handleSelectTab = useCallback(
     (tabId: string) => {
-      if (activeWorkspaceId) {
-        setActiveTab(activeWorkspaceId, tabId)
+      if (activeHandle) {
+        activeHandle.setActiveTab(tabId)
       }
     },
-    [activeWorkspaceId, setActiveTab]
+    [activeHandle]
   )
 
   // Compute paths of already-open worktrees
@@ -209,8 +207,8 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
 
   // Review handler
   const handleOpenReview = () => {
-    if (!activeWorkspaceId || !activeWorkspace?.parentId) return
-    addTab<ReviewState>(activeWorkspaceId, 'review', {
+    if (!activeHandle || !activeWorkspace?.parentId) return
+    activeHandle.addTab<ReviewState>('review', {
       parentWorkspaceId: activeWorkspace.parentId
     })
   }
@@ -369,10 +367,10 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
     && !activeWorkspace?.metadata?.descriptionPrompted
 
   const handlePromptDescriptionDismiss = useCallback(() => {
-    if (activeWorkspaceId) {
-      updateWorkspaceMetadata(activeWorkspaceId, 'descriptionPrompted', 'true')
+    if (activeHandle) {
+      activeHandle.updateMetadata('descriptionPrompted', 'true')
     }
-  }, [activeWorkspaceId, updateWorkspaceMetadata])
+  }, [activeHandle])
 
   return (
     <ErrorBoundary fallback={(error, reset) => <WorkspaceErrorFallback error={error} onReset={reset} />}>
@@ -420,9 +418,9 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                   <RunActionDropdown
                     workspacePath={activeWorkspace.path}
                     onRun={async (ptyId, actionId) => {
-                      if (activeWorkspaceId) {
-                        const tabId = addTab(activeWorkspaceId, 'terminal', { ptyId, ptyHandle: null, keepOnExit: true })
-                        updateTabTitle(activeWorkspaceId, tabId, actionId)
+                      if (activeHandle) {
+                        const tabId = activeHandle.addTab('terminal', { ptyId, ptyHandle: null, keepOnExit: true })
+                        activeHandle.updateTabTitle(tabId, actionId)
                       }
                     }}
                   />
@@ -508,8 +506,7 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                     {showPromptDescriptionButton && (
                       <PromptDescriptionButton
                         description={activeWorkspace.metadata.description}
-                        workspaceStore={workspaceStore}
-                        workspaceId={activeWorkspaceId!}
+                        workspace={activeHandle!}
                         onDismiss={handlePromptDescriptionDismiss}
                       />
                     )}

@@ -1,30 +1,23 @@
 import { useState, useCallback, useEffect } from 'react'
-import { useStore } from 'zustand'
-import type { StoreApi } from 'zustand'
-import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useGitApi } from '../contexts/GitApiContext'
 import { FileTree } from './FileTree'
 import { FileViewer } from './FileViewer'
 import { CommentDisplay } from './CommentDisplay'
-import type { FilesystemState } from '../types'
+import type { FilesystemState, WorkspaceHandle } from '../types'
 
 interface FilesystemBrowserProps {
-  workspacePath: string
-  workspaceId: string
+  workspace: WorkspaceHandle
   tabId: string
-  workspaceStore: StoreApi<WorkspaceState>
 }
 
 export function FilesystemBrowser({
-  workspacePath,
-  workspaceId,
+  workspace,
   tabId,
-  workspaceStore
 }: FilesystemBrowserProps): JSX.Element {
-  const { workspaces, updateTabState, addReviewComment, deleteReviewComment, updateOutdatedReviewComments, getReviewComments } = useStore(workspaceStore)
   const git = useGitApi()
-  const workspace = workspaces[workspaceId]
-  const appState = workspace?.appStates[tabId]
+  const workspacePath = workspace.data.path
+  const wsData = workspace.data
+  const appState = wsData?.appStates[tabId]
   const state = appState?.state as FilesystemState | undefined
 
   // Resize state
@@ -32,7 +25,7 @@ export function FilesystemBrowser({
   const [isResizing, setIsResizing] = useState(false)
 
   // Reviews state — derived from store
-  const allComments = getReviewComments(workspaceId)
+  const allComments = workspace.getReviewComments()
   const [commentInput, setCommentInput] = useState<{ lineNumber: number } | null>(null)
   const [currentCommitHash, setCurrentCommitHash] = useState<string | null>(null)
   const [commitHashError, setCommitHashError] = useState<string | null>(null)
@@ -42,14 +35,14 @@ export function FilesystemBrowser({
   }
 
   const setSelectedPath = (path: string | null) => {
-    updateTabState<FilesystemState>(workspaceId, tabId, (s) => ({
+    workspace.updateTabState<FilesystemState>(tabId, (s) => ({
       ...s,
       selectedPath: path
     }))
   }
 
   const toggleExpandedDir = (dirPath: string) => {
-    updateTabState<FilesystemState>(workspaceId, tabId, (s) => {
+    workspace.updateTabState<FilesystemState>(tabId, (s) => {
       const isExpanded = s.expandedDirs.includes(dirPath)
       return {
         ...s,
@@ -67,7 +60,7 @@ export function FilesystemBrowser({
         const hashResult = await git.getHeadCommitHash(workspacePath)
         if (hashResult.success && hashResult.hash) {
           setCurrentCommitHash(hashResult.hash)
-          updateOutdatedReviewComments(workspaceId, hashResult.hash)
+          workspace.updateOutdatedReviewComments(hashResult.hash)
         }
       } catch (error) {
         console.error('Failed to update outdated comments:', error)
@@ -88,7 +81,7 @@ export function FilesystemBrowser({
 
   const handleCommentSubmit = (text: string) => {
     if (!commentInput || !currentCommitHash || !state.selectedPath) return
-    addReviewComment(workspaceId, {
+    workspace.addReviewComment({
       filePath: state.selectedPath,
       lineNumber: commentInput.lineNumber,
       text,
@@ -101,7 +94,7 @@ export function FilesystemBrowser({
   }
 
   const handleCommentDelete = (commentId: string) => {
-    deleteReviewComment(workspaceId, commentId)
+    workspace.deleteReviewComment(commentId)
   }
 
   // Filter comments for current file
@@ -146,10 +139,8 @@ export function FilesystemBrowser({
       <div className={`divider ${isResizing ? 'active' : ''}`} onMouseDown={handleMouseDown} />
       <div className="filesystem-browser-content">
         <FileViewer
-          workspacePath={workspacePath}
-          workspaceId={workspaceId}
+          workspace={workspace}
           filePath={state.selectedPath}
-          workspaceStore={workspaceStore}
           comments={fileComments}
           onLineClick={handleLineClick}
           inlineCommentInput={commentInput}
@@ -157,7 +148,7 @@ export function FilesystemBrowser({
           onCommentCancel={() => setCommentInput(null)}
           scrollToLine={state.scrollToLine}
           onScrollToLineUsed={() => {
-            updateTabState<FilesystemState>(workspaceId, tabId, (s) => ({
+            workspace.updateTabState<FilesystemState>(tabId, (s) => ({
               ...s,
               scrollToLine: undefined
             }))

@@ -1,18 +1,13 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import Editor, { OnMount, OnChange } from '@monaco-editor/react'
 import { editor, KeyMod, KeyCode } from 'monaco-editor'
-import { useStore } from 'zustand'
-import type { StoreApi } from 'zustand'
-import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useFilesystemApi } from '../contexts/FilesystemApiContext'
-import type { EditorState } from '../types'
+import type { EditorState, WorkspaceHandle } from '../types'
 import { MarkdownPreview } from './MarkdownPreview'
 
 interface FileEditorProps {
-  workspaceId: string
-  workspacePath: string
+  workspace: WorkspaceHandle
   tabId: string
-  workspaceStore: StoreApi<WorkspaceState>
 }
 
 function mapLanguageToMonaco(language: string): string {
@@ -26,11 +21,11 @@ function getFilename(filePath: string): string {
   return filePath.split('/').pop() || filePath
 }
 
-export function FileEditor({ workspaceId, workspacePath, tabId, workspaceStore }: FileEditorProps): JSX.Element {
+export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
   const filesystem = useFilesystemApi()
-  const { workspaces, updateTabState, updateTabTitle } = useStore(workspaceStore)
-  const workspace = workspaces[workspaceId]
-  const appState = workspace?.appStates[tabId]
+  const workspacePath = workspace.data.path
+  const wsData = workspace.data
+  const appState = wsData?.appStates[tabId]
   const state = appState?.state as EditorState | undefined
 
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
@@ -41,7 +36,7 @@ export function FileEditor({ workspaceId, workspacePath, tabId, workspaceStore }
     if (!state?.filePath || state.isLoading) return
 
     const loadFile = async () => {
-      updateTabState<EditorState>(workspaceId, tabId, (s) => ({
+      workspace.updateTabState<EditorState>(tabId, (s) => ({
         ...s,
         isLoading: true,
         error: null
@@ -54,7 +49,7 @@ export function FileEditor({ workspaceId, workspacePath, tabId, workspaceStore }
           const language = mapLanguageToMonaco(result.file.language)
           const isMarkdown = language === 'markdown'
 
-          updateTabState<EditorState>(workspaceId, tabId, (s) => ({
+          workspace.updateTabState<EditorState>(tabId, (s) => ({
             ...s,
             originalContent: result.file!.content,
             currentContent: result.file!.content,
@@ -64,16 +59,16 @@ export function FileEditor({ workspaceId, workspacePath, tabId, workspaceStore }
             isDirty: false
           }))
 
-          updateTabTitle(workspaceId, tabId, getFilename(state.filePath))
+          workspace.updateTabTitle(tabId, getFilename(state.filePath))
         } else {
-          updateTabState<EditorState>(workspaceId, tabId, (s) => ({
+          workspace.updateTabState<EditorState>(tabId, (s) => ({
             ...s,
             isLoading: false,
             error: result.error || 'Failed to load file'
           }))
         }
       } catch (err) {
-        updateTabState<EditorState>(workspaceId, tabId, (s) => ({
+        workspace.updateTabState<EditorState>(tabId, (s) => ({
           ...s,
           isLoading: false,
           error: `Error loading file: ${err}`
@@ -84,15 +79,15 @@ export function FileEditor({ workspaceId, workspacePath, tabId, workspaceStore }
     if (!state.originalContent && !state.error) {
       loadFile()
     }
-  }, [state?.filePath, workspacePath, workspaceId, tabId, updateTabState, updateTabTitle])
+  }, [state?.filePath, workspacePath, tabId, workspace])
 
   // Update tab title with dirty indicator
   useEffect(() => {
     if (!state?.filePath) return
     const filename = getFilename(state.filePath)
     const title = state.isDirty ? `${filename} \u2022` : filename
-    updateTabTitle(workspaceId, tabId, title)
-  }, [state?.isDirty, state?.filePath, workspaceId, tabId, updateTabTitle])
+    workspace.updateTabTitle(tabId, title)
+  }, [state?.isDirty, state?.filePath, tabId, workspace])
 
   const handleSave = useCallback(async () => {
     if (!state || !state.isDirty || saving) return
@@ -106,7 +101,7 @@ export function FileEditor({ workspaceId, workspacePath, tabId, workspaceStore }
       )
 
       if (result.success) {
-        updateTabState<EditorState>(workspaceId, tabId, (s) => ({
+        workspace.updateTabState<EditorState>(tabId, (s) => ({
           ...s,
           originalContent: s.currentContent,
           isDirty: false
@@ -119,7 +114,7 @@ export function FileEditor({ workspaceId, workspacePath, tabId, workspaceStore }
     } finally {
       setSaving(false)
     }
-  }, [state, saving, workspacePath, workspaceId, tabId, updateTabState])
+  }, [state, saving, workspacePath, tabId, workspace])
 
   const handleEditorMount: OnMount = useCallback(
     (editor) => {
@@ -135,21 +130,21 @@ export function FileEditor({ workspaceId, workspacePath, tabId, workspaceStore }
     (value) => {
       if (value === undefined) return
 
-      updateTabState<EditorState>(workspaceId, tabId, (s) => ({
+      workspace.updateTabState<EditorState>(tabId, (s) => ({
         ...s,
         currentContent: value,
         isDirty: value !== s.originalContent
       }))
     },
-    [workspaceId, tabId, updateTabState]
+    [tabId, workspace]
   )
 
   const toggleViewMode = useCallback(() => {
-    updateTabState<EditorState>(workspaceId, tabId, (s) => ({
+    workspace.updateTabState<EditorState>(tabId, (s) => ({
       ...s,
       viewMode: s.viewMode === 'preview' ? 'editor' : 'preview'
     }))
-  }, [workspaceId, tabId, updateTabState])
+  }, [tabId, workspace])
 
   if (!state) {
     return <div className="file-editor-error">Invalid tab</div>

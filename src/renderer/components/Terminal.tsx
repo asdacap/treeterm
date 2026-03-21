@@ -1,20 +1,17 @@
 import { useMemo } from 'react'
 import BaseTerminal, { type BaseTerminalConfig } from './BaseTerminal'
-import type { SandboxConfig } from '../types'
-import type { StoreApi } from 'zustand'
-import type { WorkspaceState } from '../store/createWorkspaceStore'
+import type { SandboxConfig, WorkspaceHandle } from '../types'
 
 interface TerminalProps {
   cwd: string
-  workspaceId: string
+  workspace: WorkspaceHandle
   tabId: string
   startupCommand?: string
   sandbox?: SandboxConfig
   isVisible?: boolean
-  workspaceStore: StoreApi<WorkspaceState>
 }
 
-export default function Terminal({ cwd, workspaceId, tabId, startupCommand, sandbox, isVisible, workspaceStore }: TerminalProps) {
+export default function Terminal({ cwd, workspace, tabId, startupCommand, sandbox, isVisible }: TerminalProps) {
   // Build terminal config with optional startup command from props
   const terminalConfig = useMemo<BaseTerminalConfig>(() => ({
     themeBackground: '#1e1e1e',
@@ -25,12 +22,11 @@ export default function Terminal({ cwd, workspaceId, tabId, startupCommand, sand
   return (
     <BaseTerminal
       cwd={cwd}
-      workspaceId={workspaceId}
+      workspace={workspace}
       tabId={tabId}
       sandbox={sandbox}
       isVisible={isVisible}
       config={terminalConfig}
-      workspaceStore={workspaceStore}
     />
   )
 }

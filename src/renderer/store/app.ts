@@ -266,9 +266,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const unsubNewTerminal = terminal.onNewTerminal(() => {
       const activeStore = get().getActiveWorkspaceStore()
       if (!activeStore) return
-      const { activeWorkspaceId, addTab } = activeStore.getState()
+      const { activeWorkspaceId } = activeStore.getState()
       if (activeWorkspaceId) {
-        addTab(activeWorkspaceId, 'terminal')
+        const handle = activeStore.getState().getWorkspace(activeWorkspaceId)
+        if (handle) handle.addTab('terminal')
       }
     })
 

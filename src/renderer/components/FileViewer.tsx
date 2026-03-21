@@ -2,19 +2,14 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import Editor, { OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
-import { useStore } from 'zustand'
-import type { StoreApi } from 'zustand'
-import type { WorkspaceState } from '../store/createWorkspaceStore'
 import { useFilesystemApi } from '../contexts/FilesystemApiContext'
-import type { EditorState, ReviewComment } from '../types'
+import type { EditorState, ReviewComment, WorkspaceHandle } from '../types'
 import { MarkdownPreview } from './MarkdownPreview'
 import { CommentInput } from './CommentInput'
 
 interface FileViewerProps {
-  workspacePath: string
-  workspaceId: string
+  workspace: WorkspaceHandle
   filePath: string | null
-  workspaceStore: StoreApi<WorkspaceState>
   // Comment props
   comments?: ReviewComment[]
   onLineClick?: (lineNumber: number) => void
@@ -43,10 +38,8 @@ function mapLanguageToMonaco(language: string): string {
 }
 
 export function FileViewer({
-  workspacePath,
-  workspaceId,
+  workspace,
   filePath,
-  workspaceStore,
   comments = [],
   onLineClick,
   inlineCommentInput,
@@ -56,7 +49,7 @@ export function FileViewer({
   onScrollToLineUsed
 }: FileViewerProps): JSX.Element {
   const filesystem = useFilesystemApi()
-  const { addTab } = useStore(workspaceStore)
+  const workspacePath = workspace.data.path
   const [fileState, setFileState] = useState<FileState>({
     content: '',
     language: 'plaintext',
@@ -214,7 +207,7 @@ export function FileViewer({
   const handleOpenInTab = useCallback(() => {
     if (!filePath) return
 
-    addTab<EditorState>(workspaceId, 'editor', {
+    workspace.addTab<EditorState>('editor', {
       filePath: filePath,
       originalContent: fileState.content,
       currentContent: fileState.content,
@@ -224,7 +217,7 @@ export function FileViewer({
       isLoading: false,
       error: null
     })
-  }, [filePath, fileState, workspaceId, addTab])
+  }, [filePath, fileState, workspace])
 
   if (!filePath) {
     return (

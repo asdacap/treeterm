@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createStore } from 'zustand/vanilla'
 import {
   createTerminalApplication,
   createTerminalVariant
 } from './renderer'
 import type { Tab, Workspace, TerminalInstance, TerminalState } from '../../renderer/types'
+import type { WorkspaceHandle } from '../../renderer/store/createWorkspaceStore'
 
 // Mock React
 vi.mock('react', () => ({
@@ -28,8 +28,30 @@ vi.mock('../../renderer/store/activityState', () => ({
 
 const mockTerminalKill = vi.fn()
 const mockDeps = { terminal: { kill: mockTerminalKill } }
-import type { WorkspaceState } from "../../renderer/store/createWorkspaceStore"
-const mockWorkspaceStore = createStore(() => ({} as WorkspaceState))
+
+const mockWorkspaceHandle = {
+  id: 'ws-1',
+  data: { path: '/test' } as Workspace,
+  addTab: vi.fn(),
+  removeTab: vi.fn(),
+  setActiveTab: vi.fn(),
+  updateTabTitle: vi.fn(),
+  updateTabState: vi.fn(),
+  getReviewComments: vi.fn(),
+  addReviewComment: vi.fn(),
+  deleteReviewComment: vi.fn(),
+  toggleReviewCommentAddressed: vi.fn(),
+  updateOutdatedReviewComments: vi.fn(),
+  clearReviewComments: vi.fn(),
+  promptHarness: vi.fn(),
+  quickForkWorkspace: vi.fn(),
+  updateMetadata: vi.fn(),
+  updateStatus: vi.fn(),
+  refreshGitInfo: vi.fn(),
+  mergeAndRemove: vi.fn(),
+  closeAndClean: vi.fn(),
+  lookupWorkspace: vi.fn(),
+} satisfies WorkspaceHandle
 
 describe('Terminal Renderer', () => {
   beforeEach(() => {
@@ -209,10 +231,8 @@ describe('Terminal Renderer', () => {
 
         const result = app.render({
           tab,
-          workspaceId: 'ws-1',
-          workspacePath: '/test',
+          workspace: mockWorkspaceHandle,
           isVisible: true,
-          workspaceStore: mockWorkspaceStore
         })
 
         expect(result).toEqual(expect.objectContaining({
@@ -220,7 +240,7 @@ describe('Terminal Renderer', () => {
           props: expect.objectContaining({
             key: 'tab-1',
             cwd: '/test',
-            workspaceId: 'ws-1',
+            workspace: mockWorkspaceHandle,
             tabId: 'tab-1',
             isVisible: true
           })
@@ -254,10 +274,8 @@ describe('Terminal Renderer', () => {
 
       const result = app.render({
         tab,
-        workspaceId: 'ws-1',
-        workspacePath: '/test',
+        workspace: mockWorkspaceHandle,
         isVisible: true,
-        workspaceStore: mockWorkspaceStore
       })
 
       expect(result).toBeDefined()
@@ -423,10 +441,8 @@ describe('Terminal Renderer', () => {
 
         const result = variant.render({
           tab,
-          workspaceId: 'ws-1',
-          workspacePath: '/test',
+          workspace: mockWorkspaceHandle,
           isVisible: true,
-          workspaceStore: mockWorkspaceStore
         })
 
         expect(result).toEqual(expect.objectContaining({
@@ -434,7 +450,7 @@ describe('Terminal Renderer', () => {
           props: expect.objectContaining({
             key: 'tab-1',
             cwd: '/test',
-            workspaceId: 'ws-1',
+            workspace: mockWorkspaceHandle,
             tabId: 'tab-1',
             isVisible: true,
             startupCommand: 'echo "Hello"'
@@ -456,10 +472,8 @@ describe('Terminal Renderer', () => {
 
         const result = variantWithoutCommand.render({
           tab,
-          workspaceId: 'ws-1',
-          workspacePath: '/test',
+          workspace: mockWorkspaceHandle,
           isVisible: true,
-          workspaceStore: mockWorkspaceStore
         }) as { props: { startupCommand: string } }
 
         expect(result.props.startupCommand).toBe('')

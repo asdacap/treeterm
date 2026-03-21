@@ -32,14 +32,14 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
       useActivityStateStore.getState().removeTabState(tab.id)
     },
 
-    render: ({ tab, workspaceId, workspacePath, isVisible, workspaceStore }) => {
+    render: ({ tab, workspace, isVisible }) => {
       if (!isAiHarnessState(tab.state)) {
         return null
       }
       return createElement(AiHarness, {
         key: tab.id,
-        cwd: workspacePath,
-        workspaceId,
+        cwd: workspace.data.path,
+        workspace,
         tabId: tab.id,
         sandbox: tab.state.sandbox,
         isVisible,
@@ -47,7 +47,6 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
         backgroundColor: instance.backgroundColor,
         disableScrollbar: instance.disableScrollbar,
         stripScrollbackClear: instance.stripScrollbackClear,
-        workspaceStore
       })
     },
 
