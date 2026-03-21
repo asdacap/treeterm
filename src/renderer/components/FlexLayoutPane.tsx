@@ -62,10 +62,10 @@ export default function FlexLayoutPane({ workspaceId, workspaceStore, onNewTab }
       try {
         json = JSON.parse(saved)
       } catch {
-        json = createDefaultLayoutModel(tabs, activeTabId)
+        json = createDefaultLayoutModel(tabs, activeTabId, getApplication)
       }
     } else {
-      json = createDefaultLayoutModel(tabs, activeTabId)
+      json = createDefaultLayoutModel(tabs, activeTabId, getApplication)
     }
 
     const m = Model.fromJson(json)

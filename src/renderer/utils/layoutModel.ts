@@ -6,7 +6,7 @@ import type { Application } from '../types'
  * Creates a default FlexLayout JSON model from a flat array of tabs.
  * Used for legacy workspaces that don't have metadata.layoutModel yet.
  */
-export function createDefaultLayoutModel(tabs: Tab[], activeTabId: string | null): IJsonModel {
+export function createDefaultLayoutModel(tabs: Tab[], activeTabId: string | null, appLookup?: (applicationId: string) => Application | undefined): IJsonModel {
   const selectedIndex = activeTabId
     ? Math.max(0, tabs.findIndex(t => t.id === activeTabId))
     : 0
@@ -29,7 +29,7 @@ export function createDefaultLayoutModel(tabs: Tab[], activeTabId: string | null
           type: 'tabset',
           active: true,
           selected: selectedIndex,
-          children: tabs.map((tab): IJsonTabNode => tabToFlexNode(tab)),
+          children: tabs.map((tab): IJsonTabNode => tabToFlexNode(tab, appLookup?.(tab.applicationId))),
         },
       ],
     },
