@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { GitFork, GitBranch, Folder, ChevronDown, ChevronRight } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
@@ -6,6 +6,7 @@ import type { SessionState } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import { useNavigationStore } from '../store/navigation'
 import { usePrefixModeStore } from '../store/prefixMode'
+import { useSessionNamesStore } from '../store/sessionNames'
 import CreateChildDialog from './CreateChildDialog'
 import OpenWorkspaceDialog from './OpenWorkspaceDialog'
 import type { Workspace, ReviewState, WorktreeSettings } from '../types'
@@ -64,6 +65,36 @@ export default function SessionPanel({
   const [createChildDialogParentId, setCreateChildDialogParentId] = useState<string | null>(null)
   const [isOpenWorkspaceDialogOpen, setIsOpenWorkspaceDialogOpen] = useState(false)
   const [isCollapsed, setIsCollapsed] = useState(false)
+
+  // Session name editing
+  const displayName = useSessionNamesStore(s => s.names[sessionId]?.name)
+  const setSessionName = useSessionNamesStore(s => s.setName)
+  const removeSessionName = useSessionNamesStore(s => s.removeName)
+  const [isEditingName, setIsEditingName] = useState(false)
+  const [editName, setEditName] = useState('')
+  const nameInputRef = useRef<HTMLInputElement>(null)
+
+  const handleStartEditName = useCallback(() => {
+    setEditName(displayName || sessionId)
+    setIsEditingName(true)
+  }, [displayName, sessionId])
+
+  const handleSaveName = useCallback(() => {
+    const trimmed = editName.trim()
+    if (trimmed && trimmed !== sessionId) {
+      setSessionName(sessionId, trimmed)
+    } else {
+      removeSessionName(sessionId)
+    }
+    setIsEditingName(false)
+  }, [editName, sessionId, setSessionName, removeSessionName])
+
+  useEffect(() => {
+    if (isEditingName && nameInputRef.current) {
+      nameInputRef.current.focus()
+      nameInputRef.current.select()
+    }
+  }, [isEditingName])
 
   const isActiveSession = activeSessionId === sessionId
 
@@ -288,7 +319,27 @@ export default function SessionPanel({
         <span className="session-panel-expand">
           {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
         </span>
-        <span className="tree-title">{sessionId.slice(0, 8)}</span>
+        {isEditingName ? (
+          <input
+            ref={nameInputRef}
+            className="tree-title-input"
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleSaveName()
+              if (e.key === 'Escape') setIsEditingName(false)
+            }}
+            onBlur={handleSaveName}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <span
+            className="tree-title"
+            onDoubleClick={(e) => { e.stopPropagation(); handleStartEditName() }}
+          >
+            {displayName || sessionId}
+          </span>
+        )}
         <button
           className="add-button"
           onClick={(e) => { e.stopPropagation(); handleAddWorkspace() }}
