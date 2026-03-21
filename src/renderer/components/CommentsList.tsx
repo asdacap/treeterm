@@ -37,7 +37,7 @@ export default function CommentsList({
   workspaceStore
 }: CommentsListProps): JSX.Element {
   const filesystem = useFilesystemApi()
-  const { workspaces, addTabWithState, deleteReviewComment, toggleReviewCommentAddressed, getReviewComments } = useStore(workspaceStore)
+  const { workspaces, addTab, deleteReviewComment, toggleReviewCommentAddressed, getReviewComments } = useStore(workspaceStore)
   const workspace = workspaces[workspaceId]
   const comments: ReviewComment[] = getReviewComments(workspaceId)
   const [fileContents, setFileContents] = useState<Map<string, string>>(new Map())
@@ -80,7 +80,7 @@ export default function CommentsList({
   }
 
   const handleGoToFile = (comment: ReviewComment) => {
-    addTabWithState<FilesystemState>(workspaceId, 'filesystem', {
+    addTab<FilesystemState>(workspaceId, 'filesystem', {
       selectedPath: comment.filePath,
       scrollToLine: comment.lineNumber
     })

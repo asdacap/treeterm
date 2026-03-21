@@ -39,7 +39,7 @@ export default function SessionPanel({
     activeWorkspaceId,
     addWorkspace,
     addChildWorkspace,
-    addTabWithState,
+    addTab,
     adoptExistingWorktree,
     createWorktreeFromBranch,
     createWorktreeFromRemote,
@@ -183,7 +183,7 @@ export default function SessionPanel({
     // For worktree workspaces with a parent, open the Review tab
     if (workspace.isWorktree && workspace.parentId) {
       setActiveWorkspace(id)
-      addTabWithState<ReviewState>(id, 'review', {
+      addTab<ReviewState>(id, 'review', {
         parentWorkspaceId: workspace.parentId
       })
       return

@@ -22,9 +22,6 @@ export interface SessionDeps {
   appRegistry: AppRegistryApi
 }
 
-type AddTabWithStateFn = <T>(workspaceId: string, applicationId: string, initialState: Partial<T>, existingTabId?: string) => string
-type SetActiveTabFn = (workspaceId: string, tabId: string) => void
-
 export interface SessionState {
   sessionId: string
   workspaceStore: StoreApi<WorkspaceState>
@@ -147,7 +144,7 @@ function applySessionWorkspaces(
   daemonWorkspaces: Workspace[],
   options: { restoreExisting: boolean }
 ): void {
-  const { addTabWithState, setActiveTab, setActiveWorkspace } = store.getState()
+  const { setActiveWorkspace } = store.getState()
 
   const rootWorkspaces = daemonWorkspaces.filter(w => !w.parentId)
   const childWorkspaces = daemonWorkspaces.filter(w => w.parentId)
@@ -160,7 +157,7 @@ function applySessionWorkspaces(
     if (existing) {
       if (options.restoreExisting) {
         setActiveWorkspace(existing.id)
-        restoreWorkspaceTabs(existing.id, daemonWorkspace, addTabWithState, setActiveTab)
+        restoreWorkspaceTabs(store, existing.id, daemonWorkspace)
       } else {
         updateWorkspaceFields(store, existing.id, daemonWorkspace)
       }
@@ -176,7 +173,7 @@ function applySessionWorkspaces(
 
     if (existing) {
       if (options.restoreExisting) {
-        restoreWorkspaceTabs(existing.id, daemonWorkspace, addTabWithState, setActiveTab)
+        restoreWorkspaceTabs(store, existing.id, daemonWorkspace)
       } else {
         updateWorkspaceFields(store, existing.id, daemonWorkspace)
       }
@@ -186,20 +183,26 @@ function applySessionWorkspaces(
   }
 }
 
-// Helper: restore workspace tabs
+// Helper: restore workspace tabs by setting appStates directly
 function restoreWorkspaceTabs(
+  store: StoreApi<WorkspaceState>,
   workspaceId: string,
-  daemonWorkspace: Workspace,
-  addTabWithState: AddTabWithStateFn,
-  setActiveTab: SetActiveTabFn
+  daemonWorkspace: Workspace
 ): void {
-  for (const [tabId, appState] of Object.entries(daemonWorkspace.appStates)) {
-    addTabWithState(workspaceId, appState.applicationId, appState.state as Record<string, unknown>, tabId)
-  }
-
-  if (daemonWorkspace.activeTabId) {
-    setActiveTab(workspaceId, daemonWorkspace.activeTabId)
-  }
+  store.setState((state) => {
+    const ws = state.workspaces[workspaceId]
+    if (!ws) return state
+    return {
+      workspaces: {
+        ...state.workspaces,
+        [workspaceId]: {
+          ...ws,
+          appStates: daemonWorkspace.appStates,
+          activeTabId: daemonWorkspace.activeTabId || Object.keys(daemonWorkspace.appStates)[0] || null
+        }
+      }
+    }
+  })
 }
 
 // Helper: reconstruct workspace preserving daemon IDs

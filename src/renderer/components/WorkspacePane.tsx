@@ -27,7 +27,6 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
     workspaces,
     activeWorkspaceId,
     addTab,
-    addTabWithState,
     removeTab,
     setActiveTab,
     addChildWorkspace,
@@ -206,7 +205,7 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
   // Review handler
   const handleOpenReview = () => {
     if (!activeWorkspaceId || !activeWorkspace?.parentId) return
-    addTabWithState<ReviewState>(activeWorkspaceId, 'review', {
+    addTab<ReviewState>(activeWorkspaceId, 'review', {
       parentWorkspaceId: activeWorkspace.parentId
     })
   }
@@ -417,7 +416,7 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
                     workspacePath={activeWorkspace.path}
                     onRun={async (ptyId, actionId) => {
                       if (activeWorkspaceId) {
-                        const tabId = addTabWithState(activeWorkspaceId, 'terminal', { ptyId, ptyHandle: null, keepOnExit: true })
+                        const tabId = addTab(activeWorkspaceId, 'terminal', { ptyId, ptyHandle: null, keepOnExit: true })
                         updateTabTitle(activeWorkspaceId, tabId, actionId)
                       }
                     }}
