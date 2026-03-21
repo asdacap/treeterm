@@ -18,23 +18,18 @@ export function useTerminalAnalyzer(
   const [aiState, setAiState] = useState<TerminalAiState>('idle')
   const lastVersionRef = useRef(0)
   const isAnalyzingRef = useRef(false)
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const settings = useSettingsStore((s) => s.settings)
 
   useEffect(() => {
     if (!terminal || !dataVersionRef) return
     if (!settings.llm.apiKey || !settings.terminalAnalyzer.model) return
 
-    const interval = setInterval(async () => {
-      // Skip if no new data since last check
-      if (dataVersionRef.current === lastVersionRef.current) return
-      // Skip if already analyzing
+    const analyze = async () => {
       if (isAnalyzingRef.current) return
-
-      lastVersionRef.current = dataVersionRef.current
       isAnalyzingRef.current = true
 
       try {
-        // Read last N lines from xterm buffer
         const numLines = settings.terminalAnalyzer.bufferLines || 10
         const buffer = terminal.buffer.active
         const lineCount = buffer.length
@@ -45,8 +40,9 @@ export function useTerminalAnalyzer(
           if (line) lines.push(line.translateToString(true))
         }
 
-        // Skip if all lines are empty
         if (lines.every((l) => l.trim() === '')) return
+
+        console.debug('[terminal-analyzer] buffer:', lines)
 
         const result = await window.electron.llm.analyzeTerminal(lines, cwd, {
           baseUrl: settings.llm.baseUrl,
@@ -65,10 +61,23 @@ export function useTerminalAnalyzer(
       } finally {
         isAnalyzingRef.current = false
       }
-    }, 10_000)
+    }
 
-    return () => clearInterval(interval)
-  }, [terminal, dataVersionRef, cwd, settings.llm.apiKey, settings.llm.baseUrl, settings.terminalAnalyzer.model, settings.terminalAnalyzer.systemPrompt, settings.terminalAnalyzer.disableReasoning, settings.terminalAnalyzer.safePaths])
+    const interval = setInterval(() => {
+      if (dataVersionRef.current === lastVersionRef.current) return
+
+      lastVersionRef.current = dataVersionRef.current
+      setAiState('working')
+
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
+      debounceTimerRef.current = setTimeout(analyze, 500)
+    }, 200)
+
+    return () => {
+      clearInterval(interval)
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
+    }
+  }, [terminal, dataVersionRef, cwd, settings.llm.apiKey, settings.llm.baseUrl, settings.terminalAnalyzer.model, settings.terminalAnalyzer.systemPrompt, settings.terminalAnalyzer.disableReasoning, settings.terminalAnalyzer.safePaths, settings.terminalAnalyzer.bufferLines])
 
   return aiState
 }

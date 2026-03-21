@@ -11,6 +11,7 @@ import { reviewApplication } from '../../applications/review/renderer'
 import { editorApplication } from '../../applications/editor/renderer'
 import { commentsApplication } from '../../applications/comments/renderer'
 import { chatApplication } from '../../applications/chat/renderer'
+import { terminalAnalyzerDebuggerApplication } from '../../applications/terminalAnalyzerDebugger/renderer'
 import type {
   Workspace, Session, Application,
   Platform, TerminalApi, GitApi, SessionApi, AppApi, DaemonApi,
@@ -163,6 +164,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     get().registerApplication(editorApplication)
     get().registerApplication(commentsApplication)
     get().registerApplication(chatApplication)
+    get().registerApplication(terminalAnalyzerDebuggerApplication)
   },
 
   registerTerminalVariants: (instances: TerminalInstance[], terminalSettings: Settings['terminal'] | undefined) => {
