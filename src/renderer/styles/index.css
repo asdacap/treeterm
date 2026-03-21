@@ -909,13 +909,18 @@ body,
   position: relative;
 }
 
-.terminal-container {
+.terminal-padding-wrapper {
   flex: 1;
   min-height: 0;
   width: 100%;
   overflow: hidden;
   position: relative;
-  padding: 8px;
+  padding: 0.5em;
+}
+
+.terminal-container {
+  width: 100%;
+  height: 100%;
 }
 
 /* Scrollbar */

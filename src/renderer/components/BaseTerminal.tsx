@@ -438,11 +438,13 @@ export default function BaseTerminal({
     <TerminalScrollWrapper
       terminalRef={terminalRef}
     >
-      <div
-        ref={containerRef}
-        className={`terminal-container${config.disableScrollbar ? ' disable-scrollbar' : ''}`}
-        onContextMenu={handleContextMenu}
-      />
+      <div className="terminal-padding-wrapper">
+        <div
+          ref={containerRef}
+          className={`terminal-container${config.disableScrollbar ? ' disable-scrollbar' : ''}`}
+          onContextMenu={handleContextMenu}
+        />
+      </div>
 
       {overlay && (
         <div
