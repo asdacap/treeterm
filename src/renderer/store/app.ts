@@ -4,6 +4,7 @@ import { createSessionStore } from './createSessionStore'
 import type { SessionState } from './createSessionStore'
 import { getUnmergedSubWorkspaces } from './createSessionStore'
 import { useSettingsStore } from './settings'
+import { useNavigationStore } from './navigation'
 import { createTerminalApplication, createTerminalVariant } from '../../applications/terminal/renderer'
 import { filesystemApplication } from '../../applications/filesystem/renderer'
 import { createAiHarnessVariant } from '../../applications/aiHarness/renderer'
@@ -65,15 +66,12 @@ interface AppState extends AppDeps {
   registerAiHarnessVariants: (instances: AiHarnessInstance[]) => void
 
   // Session management
-  activeSessionId: string | null
   sessionStores: Record<string, StoreApi<SessionState>>
 
   // Actions
   initialize: (deps: AppDeps) => Promise<() => void>
-  switchSession: (sessionId: string) => void
   disconnectSession: (sessionId: string) => void
   addRemoteSession: (session: Session, connection: ConnectionInfo) => void
-  getActiveSessionStore: () => StoreApi<SessionState> | null
 
   // Internal
   createNewSession: () => Promise<void>
@@ -111,7 +109,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
   showWorkspacePicker: false,
   daemonSessions: [],
   showConnectionPicker: false,
-  activeSessionId: null,
   sessionStores: {},
 
   // Application registry
@@ -232,14 +229,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
     })
 
     const unsubClose = appApi.onCloseConfirm(() => {
-      const sessionStore = get().getActiveSessionStore()
-      if (!sessionStore) {
-        appApi.confirmClose()
-        return
+      const allUnmerged: Workspace[] = []
+      for (const store of Object.values(get().sessionStores)) {
+        allUnmerged.push(...getUnmergedSubWorkspaces(store.getState().workspaces))
       }
-      const unmerged = getUnmergedSubWorkspaces(sessionStore.getState().workspaces)
-      if (unmerged.length > 0) {
-        set({ unmergedWorkspaces: unmerged, showCloseConfirm: true })
+      if (allUnmerged.length > 0) {
+        set({ unmergedWorkspaces: allUnmerged, showCloseConfirm: true })
       } else {
         appApi.confirmClose()
       }
@@ -249,9 +244,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
       console.log('[App] Received app:ready with session:', session?.id)
       if (session) {
         const sessionStore = getOrCreateSession(session.id, get, set)
-        set({ activeSessionId: session.id })
         if (session.workspaces && session.workspaces.length > 0) {
           sessionStore.getState().handleRestore(session)
+          const firstWs = session.workspaces[0]
+          useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: session.id })
         }
       }
     })
@@ -286,7 +282,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
     // Handle initial workspace from CLI
     const initialPath = await getInitialWorkspace()
     if (initialPath) {
-      const sessionStore = get().getActiveSessionStore()
+      const { activeView } = useNavigationStore.getState()
+      const sessionId = activeView?.type === 'workspace' ? activeView.sessionId : null
+      const sessionStore = sessionId ? get().sessionStores[sessionId] : Object.values(get().sessionStores)[0]
       if (sessionStore) {
         const { workspaces, addWorkspace, setActiveWorkspace } = sessionStore.getState()
         const existingWorkspace = Object.values(workspaces).find(ws => ws.path === initialPath)
@@ -309,48 +307,39 @@ export const useAppStore = create<AppState>()((set, get) => ({
     }
   },
 
-  switchSession: (sessionId: string) => {
-    set({ activeSessionId: sessionId })
-  },
-
   disconnectSession: (sessionId: string) => {
     set((state) => {
       const { [sessionId]: _, ...remainingSessions } = state.sessionStores
-      const remainingIds = Object.keys(remainingSessions)
-      const newActiveId = state.activeSessionId === sessionId
-        ? (remainingIds[0] ?? null)
-        : state.activeSessionId
-      return {
-        sessionStores: remainingSessions,
-        activeSessionId: newActiveId,
-      }
+      return { sessionStores: remainingSessions }
     })
+    // Clear navigation if it pointed to this session
+    const { activeView } = useNavigationStore.getState()
+    if (activeView?.type === 'workspace' && activeView.sessionId === sessionId) {
+      const remainingIds = Object.keys(get().sessionStores)
+      if (remainingIds.length > 0) {
+        const nextStore = get().sessionStores[remainingIds[0]]
+        const workspaces = nextStore.getState().workspaces
+        const firstWs = Object.values(workspaces)[0]
+        if (firstWs) {
+          useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: remainingIds[0] })
+        }
+      }
+    }
   },
 
   addRemoteSession: (session: Session, connection: ConnectionInfo) => {
     console.log(`[renderer:app] addRemoteSession called: session=${session.id}, connection=${connection.id}, status=${connection.status}, workspaces=${session.workspaces?.length ?? 0}`)
     const store = getOrCreateSession(session.id, get, set, connection)
     console.log(`[renderer:app] Session store created/retrieved for session=${session.id}`)
-    set({ activeSessionId: session.id })
-    console.log(`[renderer:app] activeSessionId set to ${session.id}`)
     if (session.workspaces && session.workspaces.length > 0) {
       console.log(`[renderer:app] Restoring ${session.workspaces.length} workspaces for session=${session.id}`)
       store.getState().handleRestore(session)
+      const firstWs = session.workspaces[0]
+      useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: session.id })
     } else {
       console.log(`[renderer:app] No workspaces to restore for session=${session.id}`)
     }
   },
-
-  getActiveSessionStore: () => {
-    const { activeSessionId, sessionStores } = get()
-    if (!activeSessionId) return null
-    const store = sessionStores[activeSessionId] || null
-    if (!store) {
-      console.warn(`[renderer:app] getActiveSessionStore: no store found for activeSessionId=${activeSessionId}, available sessions=[${Object.keys(sessionStores).join(', ')}]`)
-    }
-    return store
-  },
-
 
   createNewSession: async () => {
     const { sessionApi } = get()

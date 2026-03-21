@@ -38,17 +38,15 @@ export default function App() {
     daemonSessions,
     daemonDisconnected,
     showConnectionPicker,
-    getActiveSessionStore,
   } = useAppStore()
 
   const activeView = useNavigationStore(s => s.activeView)
   const sessionStores = useAppStore(s => s.sessionStores)
 
-  // Derive active session store and workspace store from activeView
+  // Derive active session store from activeView
   const activeSessionStore = activeView?.type === 'workspace' && activeView.sessionId
     ? sessionStores[activeView.sessionId] || null
-    : getActiveSessionStore()
-  const resolvedSessionStore = activeSessionStore || getActiveSessionStore()
+    : null
 
   const handleConfirmClose = () => {
     useAppStore.setState({ showCloseConfirm: false })
@@ -153,7 +151,7 @@ export default function App() {
           )}
           {isActiveProcessesOpen && (
             <ActiveProcessesDialog
-              workspaces={resolvedSessionStore?.getState().workspaces ?? {}}
+              workspaces={activeSessionStore?.getState().workspaces ?? {}}
               onClose={() => useAppStore.setState({ isActiveProcessesOpen: false })}
             />
           )}
@@ -166,12 +164,14 @@ export default function App() {
               sessions={daemonSessions}
               onSelect={(session) => {
                 const store = useAppStore.getState()
-                // Switch to the session; onReady/onSync will handle restore
-                store.switchSession(session.id)
                 // If the session store already exists, restore directly
                 const sessionStore = store.sessionStores[session.id]
                 if (sessionStore) {
                   sessionStore.getState().handleRestore(session)
+                }
+                // Navigate to first workspace if available
+                if (session.workspaces && session.workspaces.length > 0) {
+                  useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: session.workspaces[0].id, sessionId: session.id })
                 }
                 useAppStore.setState({ showWorkspacePicker: false })
               }}

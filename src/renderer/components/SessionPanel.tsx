@@ -45,7 +45,6 @@ export default function SessionPanel({
     quickForkWorkspace,
     setActiveWorkspace,
   } = useStore(sessionStore)
-  const switchSession = useAppStore(s => s.switchSession)
   const { activeView, setActiveView } = useNavigationStore()
   const {
     state: prefixState,
@@ -265,7 +264,6 @@ export default function SessionPanel({
     : null
 
   const handleWorkspaceClick = (ws: Workspace) => {
-    switchSession(sessionId)
     setActiveWorkspace(ws.id)
     setActiveView({ type: 'workspace', workspaceId: ws.id, sessionId })
   }

@@ -56,6 +56,7 @@ vi.mock('../../applications/comments/renderer', () => ({
 
 
 import { useAppStore } from './app'
+import { useNavigationStore } from './navigation'
 
 // Mock createSessionStore and its utilities
 vi.mock('./createSessionStore', () => ({
@@ -143,9 +144,9 @@ describe('useAppStore', () => {
       unmergedWorkspaces: [],
       showWorkspacePicker: false,
       daemonSessions: [],
-      activeSessionId: null,
       sessionStores: {}
     })
+    useNavigationStore.setState({ activeView: null })
   })
 
   describe('initial state', () => {
@@ -155,10 +156,6 @@ describe('useAppStore', () => {
 
     it('has daemonDisconnected false by default', () => {
       expect(useAppStore.getState().daemonDisconnected).toBe(false)
-    })
-
-    it('has no active session by default', () => {
-      expect(useAppStore.getState().activeSessionId).toBeNull()
     })
 
     it('has empty sessionStores by default', () => {
@@ -174,72 +171,31 @@ describe('useAppStore', () => {
     })
   })
 
-  describe('switchSession', () => {
-    it('sets the active session ID', () => {
-      useAppStore.getState().switchSession('session-123')
-      expect(useAppStore.getState().activeSessionId).toBe('session-123')
-    })
-
-    it('switches between sessions', () => {
-      useAppStore.getState().switchSession('session-1')
-      useAppStore.getState().switchSession('session-2')
-      expect(useAppStore.getState().activeSessionId).toBe('session-2')
-    })
-  })
-
-  describe('getActiveSessionStore', () => {
-    it('returns null when no active session', () => {
-      const result = useAppStore.getState().getActiveSessionStore()
-      expect(result).toBeNull()
-    })
-
-    it('returns null when active session has no store', () => {
-      useAppStore.setState({ activeSessionId: 'session-1', sessionStores: {} })
-      const result = useAppStore.getState().getActiveSessionStore()
-      expect(result).toBeNull()
-    })
-
-    it('returns the session store for the active session', () => {
-      const mockSessionStore = {
-        getState: vi.fn().mockReturnValue({
-          workspaces: {},
-          workspaceStores: {},
-          activeWorkspaceId: null,
-        }),
+  describe('disconnectSession', () => {
+    it('removes session from sessionStores', () => {
+      const mockStore = {
+        getState: vi.fn().mockReturnValue({ workspaces: {} }),
         setState: vi.fn(),
         subscribe: vi.fn()
       } as never
-      useAppStore.setState({
-        activeSessionId: 'session-1',
-        sessionStores: { 'session-1': mockSessionStore }
-      })
-      const result = useAppStore.getState().getActiveSessionStore()
-      expect(result).toBe(mockSessionStore)
-    })
-  })
-
-  describe('getActiveSessionStore', () => {
-    it('returns null when no active session', () => {
-      const result = useAppStore.getState().getActiveSessionStore()
-      expect(result).toBeNull()
+      useAppStore.setState({ sessionStores: { 's1': mockStore, 's2': mockStore } })
+      useAppStore.getState().disconnectSession('s1')
+      expect(useAppStore.getState().sessionStores['s1']).toBeUndefined()
+      expect(useAppStore.getState().sessionStores['s2']).toBeDefined()
     })
 
-    it('returns the session store for the active session (2)', () => {
-      const mockSessionStore = {
-        getState: vi.fn().mockReturnValue({
-          workspaces: {},
-          workspaceStores: {},
-          activeWorkspaceId: null,
-        }),
+    it('clears navigation when disconnecting viewed session', () => {
+      const mockStore = {
+        getState: vi.fn().mockReturnValue({ workspaces: { 'ws-1': { id: 'ws-1' } } }),
         setState: vi.fn(),
         subscribe: vi.fn()
       } as never
-      useAppStore.setState({
-        activeSessionId: 'session-1',
-        sessionStores: { 'session-1': mockSessionStore }
-      })
-      const result = useAppStore.getState().getActiveSessionStore()
-      expect(result).toBe(mockSessionStore)
+      useAppStore.setState({ sessionStores: { 's1': mockStore, 's2': mockStore } })
+      useNavigationStore.setState({ activeView: { type: 'workspace', workspaceId: 'ws-x', sessionId: 's1' } })
+      useAppStore.getState().disconnectSession('s1')
+      // Should switch to remaining session's first workspace
+      const nav = useNavigationStore.getState().activeView
+      expect(nav?.type === 'workspace' && nav.sessionId).toBe('s2')
     })
   })
 
@@ -516,7 +472,7 @@ describe('useAppStore', () => {
       }
       readyCallback(session)
 
-      expect(useAppStore.getState().activeSessionId).toBe('session-ready')
+      expect(useAppStore.getState().sessionStores['session-ready']).toBeDefined()
       cleanup()
     })
 
@@ -526,7 +482,6 @@ describe('useAppStore', () => {
 
       readyCallback({ id: 'empty-session', workspaces: [] })
 
-      expect(useAppStore.getState().activeSessionId).toBe('empty-session')
       expect(useAppStore.getState().sessionStores['empty-session']).toBeDefined()
       cleanup()
     })
@@ -595,7 +550,6 @@ describe('useAppStore', () => {
       // Create a mock session store directly
       const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', windowUuid: null }, {} as any) as any
       useAppStore.setState({
-        activeSessionId: 'pre-session',
         sessionStores: { 'pre-session': mockSessionStoreInstance }
       })
 
@@ -626,7 +580,6 @@ describe('useAppStore', () => {
 
       const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', windowUuid: null }, {} as any) as any
       useAppStore.setState({
-        activeSessionId: 'pre-session',
         sessionStores: { 'pre-session': mockSessionStoreInstance }
       })
 
