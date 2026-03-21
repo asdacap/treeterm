@@ -297,6 +297,7 @@ export class GrpcServer {
         }
       } catch (error) {
         log.error({ err: error, sessionId }, 'error processing pty stream input')
+        call.destroy(error instanceof Error ? error : new Error(String(error)))
       }
     })
 

@@ -118,33 +118,38 @@ export class PtyStream {
     return new Promise((resolve, reject) => {
       let resolved = false
 
+      const finish = (result: { scrollback: string[]; exitCode?: number }): void => {
+        if (resolved) return
+        resolved = true
+        this.stream.removeListener('data', onData)
+        resolve(result)
+      }
+
       const onData = (output: PtyOutput): void => {
         if (resolved) return
         if (output.data) {
           scrollback.push(output.data.data.toString('utf-8'))
         } else if (output.exit) {
-          resolved = true
-          this.stream.removeListener('data', onData)
-          resolve({ scrollback, exitCode: output.exit.exitCode })
+          finish({ scrollback, exitCode: output.exit.exitCode })
         }
       }
 
       this.stream.on('data', onData)
 
-      // After the current tick, resolve with collected scrollback
-      queueMicrotask(() => {
-        if (!resolved) {
-          resolved = true
-          this.stream.removeListener('data', onData)
-          resolve({ scrollback })
-        }
-      })
+      // Use setTimeout instead of queueMicrotask so I/O events
+      // (gRPC data/error) can arrive before we resolve
+      setTimeout(() => finish({ scrollback }), 50)
 
       this.stream.on('error', (error) => {
         if (!resolved) {
           resolved = true
+          this.stream.removeListener('data', onData)
           reject(error)
         }
+      })
+
+      this.stream.on('end', () => {
+        finish({ scrollback })
       })
     })
   }
