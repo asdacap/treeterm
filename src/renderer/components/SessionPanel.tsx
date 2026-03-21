@@ -53,7 +53,10 @@ export default function SessionPanel({
     workspaceIds: focusedWorkspaceIds
   } = usePrefixModeStore()
 
+  const disconnectSession = useAppStore(s => s.disconnectSession)
+
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
+  const [sessionContextMenu, setSessionContextMenu] = useState<{ x: number; y: number } | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     return new Set(
       Object.values(workspaces)
@@ -136,6 +139,19 @@ export default function SessionPanel({
 
   const closeContextMenu = () => {
     setContextMenu(null)
+    setSessionContextMenu(null)
+  }
+
+  const handleSessionContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const pos = clampContextMenuPosition(e.clientX, e.clientY)
+    setSessionContextMenu(pos)
+  }
+
+  const handleDisconnectSession = () => {
+    closeContextMenu()
+    disconnectSession(sessionId)
   }
 
   const handleCreateChild = (parentId: string) => {
@@ -315,7 +331,7 @@ export default function SessionPanel({
 
   return (
     <div className="session-panel" onClick={closeContextMenu}>
-      <div className="session-panel-header" onClick={() => setIsCollapsed(!isCollapsed)}>
+      <div className="session-panel-header" onClick={() => setIsCollapsed(!isCollapsed)} onContextMenu={handleSessionContextMenu}>
         <span className="session-panel-expand">
           {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
         </span>
@@ -414,6 +430,19 @@ export default function SessionPanel({
               Remove
             </div>
           )}
+        </div>
+      )}
+
+      {/* Session Context Menu */}
+      {sessionContextMenu && (
+        <div
+          className="context-menu"
+          style={{ top: sessionContextMenu.y, left: sessionContextMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="context-menu-item danger" onClick={handleDisconnectSession}>
+            Disconnect
+          </div>
         </div>
       )}
 
