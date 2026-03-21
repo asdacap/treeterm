@@ -114,11 +114,16 @@ export default function WorkspacePane({ workspaceStore, platform }: WorkspacePan
 
   const handleNewTab = useCallback(
     (applicationId: string) => {
-      if (activeWorkspaceId) {
+      if (!activeWorkspaceId) return
+      if (applicationId === 'review') {
+        addTabWithState<ReviewState>(activeWorkspaceId, 'review', {
+          parentWorkspaceId: activeWorkspace?.parentId ?? undefined
+        })
+      } else {
         addTab(activeWorkspaceId, applicationId)
       }
     },
-    [activeWorkspaceId, addTab]
+    [activeWorkspaceId, activeWorkspace?.parentId, addTab, addTabWithState]
   )
 
   // Create new tab using the first available application
