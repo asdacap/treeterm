@@ -103,6 +103,7 @@ export default function BaseTerminal({
   const detectorRef = useRef<ReturnType<typeof createActivityStateDetector> | null>(null)
   const rawCharsRef = useRef<string>('')
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
+  const [overlay, setOverlay] = useState<{ message: string; type: 'info' | 'error' } | null>(null)
 
   const sessionStore = useSessionApi()
   const setTabState = useActivityStateStore((state) => state.setTabState)
@@ -178,6 +179,8 @@ export default function BaseTerminal({
       const ttyState = tty.getState()
 
       const unsubscribeData = ttyState.onData((data) => {
+        // Dismiss overlay once live data starts flowing
+        setOverlay(null)
         // Strip CSI 3J (clear scrollback) if configured
         const dataToWrite = config.stripScrollbackClear
           ? data.replace(/\x1b\[3J/g, '')
@@ -247,7 +250,7 @@ export default function BaseTerminal({
     // Attach to existing PTY
     const initPty = async () => {
       if (!existingPtyId) {
-        terminal.write(`\x1b[31mNo PTY available for this terminal\x1b[0m\r\n`)
+        setOverlay({ message: 'No PTY available for this terminal', type: 'error' })
         return
       }
 
@@ -263,7 +266,7 @@ export default function BaseTerminal({
             terminal.write(chunk)
           }
         } else {
-          terminal.write('\x1b[2mno buffer\x1b[0m\r\n')
+          setOverlay({ message: 'No scrollback buffer available', type: 'info' })
         }
 
         // If session already exited, show exit message and don't subscribe for live data
@@ -277,7 +280,7 @@ export default function BaseTerminal({
         connectToTty(tty)
       } catch (error) {
         console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, existingPtyId, error)
-        terminal.write(`\x1b[31mFailed to reattach terminal: ${error instanceof Error ? error.message : 'Unknown error'}\x1b[0m\r\n`)
+        setOverlay({ message: `Failed to reattach terminal: ${error instanceof Error ? error.message : 'Unknown error'}`, type: 'error' })
       }
     }
 
@@ -431,6 +434,15 @@ export default function BaseTerminal({
         className={`terminal-container${config.disableScrollbar ? ' disable-scrollbar' : ''}`}
         onContextMenu={handleContextMenu}
       />
+
+      {overlay && (
+        <div
+          className={`terminal-overlay terminal-overlay-${overlay.type}`}
+          onClick={() => setOverlay(null)}
+        >
+          {overlay.message}
+        </div>
+      )}
 
       {contextMenu && (
         <div

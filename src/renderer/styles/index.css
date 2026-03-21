@@ -4120,6 +4120,30 @@ body,
   opacity: 0.9;
 }
 
+/* Terminal overlay banner */
+.terminal-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  cursor: pointer;
+  text-align: center;
+}
+
+.terminal-overlay-info {
+  background: rgba(255, 255, 255, 0.05);
+  color: #888;
+}
+
+.terminal-overlay-error {
+  background: rgba(205, 49, 49, 0.15);
+  color: #f48771;
+}
+
 /* Tab-level error fallback */
 .tab-error-fallback {
   display: flex;
