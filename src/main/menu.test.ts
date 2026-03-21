@@ -9,9 +9,17 @@ vi.mock('electron', () => ({
     name: 'TreeTerm',
     quit: vi.fn()
   },
-  BrowserWindow: vi.fn(),
+  BrowserWindow: Object.assign(vi.fn(), {
+    getFocusedWindow: vi.fn(() => null)
+  }),
   shell: {
     openExternal: vi.fn()
+  }
+}))
+
+vi.mock('./windowManager', () => ({
+  windowManager: {
+    getWindow: vi.fn(() => undefined)
   }
 }))
 

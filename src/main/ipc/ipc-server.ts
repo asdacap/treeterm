@@ -130,26 +130,6 @@ export class IpcServer {
     )
   }
 
-  onPtyList(
-    handler: (
-      ...args: IpcRequests['ptyList']['params']
-    ) => IpcRequests['ptyList']['result'] | Promise<IpcRequests['ptyList']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.ptyList, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['ptyList']['params']))
-    )
-  }
-
-  onPtyIsAlive(
-    handler: (
-      ...args: IpcRequests['ptyIsAlive']['params']
-    ) => IpcRequests['ptyIsAlive']['result'] | Promise<IpcRequests['ptyIsAlive']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.ptyIsAlive, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['ptyIsAlive']['params']))
-    )
-  }
-
   // Git request handlers
   onGitGetInfo(
     handler: (

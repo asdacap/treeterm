@@ -298,12 +298,11 @@ ipcMain.handle('pty:attach', async (event, sessionId: string) => {
   }
 })
 
-server.onPtyList(async () => {
-  if (!daemonClient) return []
-
+ipcMain.handle('pty:list', async (event) => {
   try {
-    await daemonClient.ensureDaemonRunning()
-    return await daemonClient.listPtySessions()
+    const client = getClientForWindow(event.sender.id)
+    await client.ensureDaemonRunning()
+    return await client.listPtySessions()
   } catch (error) {
     console.error('[main] failed to list sessions:', error)
     return []
@@ -318,8 +317,7 @@ ipcMain.on('pty:resize', (_event, handle: string, cols: number, rows: number) =>
   ptyStreams.get(handle)?.resize(cols, rows)
 })
 
-ipcMain.on('pty:kill', (_event, sessionId: string) => {
-  if (!daemonClient) return
+ipcMain.on('pty:kill', (event, sessionId: string) => {
   // Close any PtyStreams for this session
   for (const [handle, stream] of ptyStreams) {
     if (stream.sessionId === sessionId) {
@@ -327,15 +325,20 @@ ipcMain.on('pty:kill', (_event, sessionId: string) => {
       ptyStreams.delete(handle)
     }
   }
-  daemonClient.killPtySession(sessionId).catch(error => {
+  try {
+    const client = getClientForWindow(event.sender.id)
+    client.killPtySession(sessionId).catch(error => {
+      console.error('[main] failed to kill PTY:', error)
+    })
+  } catch (error) {
     console.error('[main] failed to kill PTY:', error)
-  })
+  }
 })
 
-server.onPtyIsAlive(async (id) => {
-  if (!daemonClient) return false
+ipcMain.handle('pty:isAlive', async (event, id: string) => {
   try {
-    const sessions = await daemonClient.listPtySessions()
+    const client = getClientForWindow(event.sender.id)
+    const sessions = await client.listPtySessions()
     return sessions.some(s => s.id === id)
   } catch (error) {
     console.warn('[main] PTY alive check failed:', error)

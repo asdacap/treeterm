@@ -1,5 +1,18 @@
 import { Menu, app, BrowserWindow } from 'electron'
 import type { IpcServer } from './ipc/ipc-server'
+import { windowManager } from './windowManager'
+
+function sendToFocusedWindow(fallbackServer: IpcServer, action: (server: IpcServer) => void): void {
+  const focused = BrowserWindow.getFocusedWindow()
+  if (focused) {
+    const windowInfo = windowManager.getWindow(focused.id)
+    if (windowInfo) {
+      action(windowInfo.ipcServer)
+      return
+    }
+  }
+  action(fallbackServer)
+}
 
 export function createApplicationMenu(
   mainWindow: BrowserWindow | null,
@@ -21,7 +34,7 @@ export function createApplicationMenu(
                 label: 'Preferences...',
                 accelerator: 'Cmd+,',
                 click: () => {
-                  server.settingsOpen()
+                  sendToFocusedWindow(server, s => s.settingsOpen())
                 }
               },
               { type: 'separator' as const },
@@ -48,7 +61,7 @@ export function createApplicationMenu(
                 label: 'Settings',
                 accelerator: 'Ctrl+,',
                 click: () => {
-                  server.settingsOpen()
+                  sendToFocusedWindow(server, s => s.settingsOpen())
                 }
               },
               { type: 'separator' as const }
@@ -96,7 +109,7 @@ export function createApplicationMenu(
         {
           label: 'Browse Sessions...',
           click: () => {
-            server.sessionShowSessions()
+            sendToFocusedWindow(server, s => s.sessionShowSessions())
           }
         }
       ]
@@ -128,7 +141,7 @@ export function createApplicationMenu(
         {
           label: 'Active Processes',
           click: () => {
-            server.activeProcessesOpen()
+            sendToFocusedWindow(server, s => s.activeProcessesOpen())
           }
         },
         ...(isMac

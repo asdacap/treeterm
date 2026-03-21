@@ -91,8 +91,6 @@ describe('IpcServer', () => {
 
     it.each([
       ['onPtyAttach', 'pty:attach'],
-      ['onPtyList', 'pty:list'],
-      ['onPtyIsAlive', 'pty:isAlive'],
       ['onGitCreateWorktree', 'git:createWorktree'],
       ['onGitRemoveWorktree', 'git:removeWorktree'],
       ['onGitListWorktrees', 'git:listWorktrees'],
@@ -143,8 +141,6 @@ describe('IpcServer', () => {
 
     it.each([
       ['onPtyAttach', 'pty:attach'],
-      ['onPtyList', 'pty:list'],
-      ['onPtyIsAlive', 'pty:isAlive'],
       ['onGitCreateWorktree', 'git:createWorktree'],
       ['onSettingsSave', 'settings:save'],
       ['onFsReadDirectory', 'fs:readDirectory'],
