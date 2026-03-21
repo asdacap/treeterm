@@ -17,7 +17,6 @@ export function useTerminalAnalyzer(
 ): TerminalAiState {
   const [aiState, setAiState] = useState<TerminalAiState>('idle')
   const lastVersionRef = useRef(0)
-  const isAnalyzingRef = useRef(false)
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const settings = useSettingsStore((s) => s.settings)
 
@@ -26,25 +25,21 @@ export function useTerminalAnalyzer(
     if (!settings.llm.apiKey || !settings.terminalAnalyzer.model) return
 
     const analyze = async () => {
-      if (isAnalyzingRef.current) return
-      isAnalyzingRef.current = true
-
       try {
         const numLines = settings.terminalAnalyzer.bufferLines || 10
-        const buffer = terminal.buffer.active
-        const lineCount = buffer.length
+        const xtermBuffer = terminal.buffer.active
+        const lineCount = xtermBuffer.length
         const startLine = Math.max(0, lineCount - numLines)
         const lines: string[] = []
         for (let i = startLine; i < lineCount; i++) {
-          const line = buffer.getLine(i)
+          const line = xtermBuffer.getLine(i)
           if (line) lines.push(line.translateToString(true))
         }
 
-        if (lines.every((l) => l.trim() === '')) return
+        const buffer = lines.join('\n')
+        console.debug('[terminal-analyzer] buffer:', buffer)
 
-        console.debug('[terminal-analyzer] buffer:', lines)
-
-        const result = await window.electron.llm.analyzeTerminal(lines, cwd, {
+        const result = await window.electron.llm.analyzeTerminal(buffer, cwd, {
           baseUrl: settings.llm.baseUrl,
           apiKey: settings.llm.apiKey,
           model: settings.terminalAnalyzer.model,
@@ -53,13 +48,17 @@ export function useTerminalAnalyzer(
           safePaths: settings.terminalAnalyzer.safePaths
         })
 
+        console.debug('[terminal-analyzer] result:', result)
         if ('state' in result) {
+          console.debug('[terminal-analyzer] state set:', result.state)
           setAiState(result.state as TerminalAiState)
+        } else if ('error' in result) {
+          console.debug('[terminal-analyzer] ignored (error):', result.error)
+        } else {
+          console.debug('[terminal-analyzer] ignored (no state in result)')
         }
       } catch (err) {
         console.warn('[terminal-analyzer] LLM call failed:', err)
-      } finally {
-        isAnalyzingRef.current = false
       }
     }
 

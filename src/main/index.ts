@@ -353,14 +353,14 @@ ipcMain.handle('llm:chat:send', async (event, requestId: string, messages: { rol
 })
 
 // Terminal analyzer — non-streaming LLM call
-ipcMain.handle('llm:analyzeTerminal', async (_event, lines: string[], cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; disableReasoning: boolean; safePaths: string[] }) => {
+ipcMain.handle('llm:analyzeTerminal', async (_event, buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; disableReasoning: boolean; safePaths: string[] }) => {
   const allSafePaths = [...new Set([...settings.safePaths, cwd])]
   const systemPrompt = settings.systemPrompt
     .replace(/\{\{cwd\}\}/g, cwd)
     .replace(/\{\{safe_paths\}\}/g, allSafePaths.join(', '))
   const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
     { role: 'system', content: systemPrompt },
-    { role: 'user', content: lines.join('\n') }
+    { role: 'user', content: buffer }
   ]
   try {
     const response = await completeChatCall(messages, {

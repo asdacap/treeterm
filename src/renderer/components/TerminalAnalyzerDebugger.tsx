@@ -15,13 +15,13 @@ export default function TerminalAnalyzerDebugger() {
       return
     }
 
-    const lines = bufferText.split('\n')
+    const buffer = bufferText
     setLoading(true)
     setError(null)
     setResult(null)
 
     try {
-      const response = await window.electron.llm.analyzeTerminal(lines, '', {
+      const response = await window.electron.llm.analyzeTerminal(buffer, '', {
         baseUrl: settings.llm.baseUrl,
         apiKey: settings.llm.apiKey,
         model: settings.terminalAnalyzer.model,

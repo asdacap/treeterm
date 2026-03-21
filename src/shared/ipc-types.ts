@@ -319,7 +319,7 @@ export interface IpcRequests {
     result: void
   }
   llmAnalyzeTerminal: {
-    params: [lines: string[], cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; disableReasoning: boolean; safePaths: string[] }]
+    params: [buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; disableReasoning: boolean; safePaths: string[] }]
     result: { state: string } | { error: string }
   }
 }

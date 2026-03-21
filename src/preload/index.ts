@@ -469,8 +469,8 @@ contextBridge.exposeInMainWorld('electron', {
     cancel: (requestId: string): void => {
       client.llmChatCancel(requestId)
     },
-    analyzeTerminal: (lines: string[], cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; disableReasoning: boolean; safePaths: string[] }): Promise<{ state: string } | { error: string }> => {
-      return client.llmAnalyzeTerminal(lines, cwd, settings)
+    analyzeTerminal: (buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; disableReasoning: boolean; safePaths: string[] }): Promise<{ state: string } | { error: string }> => {
+      return client.llmAnalyzeTerminal(buffer, cwd, settings)
     },
     onDelta: (callback: LlmDeltaCallback): (() => void) => {
       llmDeltaListeners.push(callback)
