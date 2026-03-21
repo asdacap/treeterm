@@ -309,17 +309,27 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   addRemoteSession: (session: Session, connection: ConnectionInfo) => {
+    console.log(`[renderer:app] addRemoteSession called: session=${session.id}, connection=${connection.id}, status=${connection.status}, workspaces=${session.workspaces?.length ?? 0}`)
     const store = getOrCreateSession(session.id, get, set, connection)
+    console.log(`[renderer:app] Session store created/retrieved for session=${session.id}`)
     set({ activeSessionId: session.id })
+    console.log(`[renderer:app] activeSessionId set to ${session.id}`)
     if (session.workspaces && session.workspaces.length > 0) {
+      console.log(`[renderer:app] Restoring ${session.workspaces.length} workspaces for session=${session.id}`)
       store.getState().handleRestore(session)
+    } else {
+      console.log(`[renderer:app] No workspaces to restore for session=${session.id}`)
     }
   },
 
   getActiveSessionStore: () => {
     const { activeSessionId, sessionStores } = get()
     if (!activeSessionId) return null
-    return sessionStores[activeSessionId] || null
+    const store = sessionStores[activeSessionId] || null
+    if (!store) {
+      console.warn(`[renderer:app] getActiveSessionStore: no store found for activeSessionId=${activeSessionId}, available sessions=[${Object.keys(sessionStores).join(', ')}]`)
+    }
+    return store
   },
 
 
@@ -348,6 +358,7 @@ function getOrCreateSession(
   const { sessionStores, windowUuid, git, filesystem, sessionApi, terminal } = get()
   let store = sessionStores[sessionId]
   if (!store) {
+    console.log(`[renderer:app] getOrCreateSession: creating new session store for session=${sessionId}, connection=${connection?.id ?? 'local'}`)
     store = createSessionStore(
       { sessionId, windowUuid, connection },
       {
@@ -365,6 +376,9 @@ function getOrCreateSession(
     set((state) => ({
       sessionStores: { ...state.sessionStores, [sessionId]: store! }
     }))
+    console.log(`[renderer:app] getOrCreateSession: session store added to sessionStores, total sessions=${Object.keys(get().sessionStores).length}`)
+  } else {
+    console.log(`[renderer:app] getOrCreateSession: reusing existing session store for session=${sessionId}`)
   }
   return store
 }

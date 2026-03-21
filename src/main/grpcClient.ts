@@ -390,20 +390,24 @@ export class GrpcDaemonClient {
       rejectInitial = reject
     })
 
+    console.log(`[grpcClient] watchSession started for session=${sessionId}, listener=${listenerId}`)
+
     stream.on('data', (event) => {
       if (event.session) {
         const session = this.convertFromProtoSession(event.session)
         if (isFirst) {
           isFirst = false
+          console.log(`[grpcClient] watchSession initial data received: session=${session.id}, workspaces=${session.workspaces?.length ?? 0}`)
           resolveInitial(session)
         } else {
+          console.log(`[grpcClient] watchSession update received: session=${session.id}, workspaces=${session.workspaces?.length ?? 0}`)
           onUpdate(session)
         }
       }
     })
 
     stream.on('error', (error) => {
-      console.error('[grpcDaemonClient] sessionWatch stream error:', error)
+      console.error(`[grpcClient] watchSession stream error for session=${sessionId}:`, error)
       if (isFirst) {
         isFirst = false
         rejectInitial(error)
@@ -444,13 +448,17 @@ export class GrpcDaemonClient {
       throw new Error('Not connected to daemon')
     }
 
+    console.log('[grpcClient] getDefaultSessionId request sent')
     return new Promise((resolve, reject) => {
       this.client!.getDefaultSessionId({}, (error, response) => {
         if (error) {
+          console.error('[grpcClient] getDefaultSessionId error:', error.message)
           reject(new Error(error.message))
         } else if (response) {
+          console.log(`[grpcClient] getDefaultSessionId resolved: ${response.sessionId}`)
           resolve(response.sessionId)
         } else {
+          console.error('[grpcClient] getDefaultSessionId: no response from daemon')
           reject(new Error('No response from daemon'))
         }
       })

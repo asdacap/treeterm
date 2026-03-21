@@ -368,7 +368,7 @@ export interface DaemonApi {
 }
 
 export interface SSHApi {
-  connect: (config: SSHConnectionConfig) => Promise<{ info: ConnectionInfo, session?: Session }>
+  connect: (config: SSHConnectionConfig, options?: { refreshDaemon?: boolean }) => Promise<{ info: ConnectionInfo, session?: Session }>
   disconnect: (connectionId: string) => Promise<void>
   listConnections: () => Promise<ConnectionInfo[]>
   saveConnection: (config: SSHConnectionConfig) => Promise<void>
