@@ -13,7 +13,6 @@ import { useAppStore } from './store/app'
 import { useNavigationStore } from './store/navigation'
 import { TerminalApiContext } from './contexts/TerminalApiContext'
 import { FilesystemApiContext } from './contexts/FilesystemApiContext'
-import { GitApiContext } from './contexts/GitApiContext'
 import { STTApiContext } from './contexts/STTApiContext'
 
 // One-time migration: clear localStorage since daemon is now source of truth
@@ -30,7 +29,6 @@ export default function App() {
     platform,
     terminal,
     filesystem,
-    git,
     stt,
     sandbox,
     appApi,
@@ -106,7 +104,6 @@ export default function App() {
     <ErrorBoundary fallback={<AppErrorFallback />}>
       <TerminalApiContext.Provider value={terminal}>
       <FilesystemApiContext.Provider value={filesystem}>
-      <GitApiContext.Provider value={git}>
       <STTApiContext.Provider value={stt}>
         <div
           className="app"
@@ -194,7 +191,6 @@ export default function App() {
           )}
         </div>
       </STTApiContext.Provider>
-      </GitApiContext.Provider>
       </FilesystemApiContext.Provider>
       </TerminalApiContext.Provider>
     </ErrorBoundary>

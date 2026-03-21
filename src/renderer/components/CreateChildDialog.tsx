@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo } from 'react'
-import type { Workspace, ChildWorktreeInfo, BranchInfo, WorktreeSettings } from '../types'
+import { useStore } from 'zustand'
+import type { ChildWorktreeInfo, BranchInfo, WorktreeSettings, WorkspaceHandle } from '../types'
 import { useAppStore } from '../store/app'
-import { useGitApi } from '../contexts/GitApiContext'
 
 interface CreateChildDialogProps {
-  parentWorkspace: Workspace
+  parentWorkspace: WorkspaceHandle
   onCreate: (name: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
   onAdopt: (worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
   onCreateFromBranch: (branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
@@ -26,7 +26,8 @@ export default function CreateChildDialog({
   openWorktreePaths,
   initialMode
 }: CreateChildDialogProps) {
-  const git = useGitApi()
+  const { workspace: parentWsData, getGitApi } = useStore(parentWorkspace)
+  const git = getGitApi()
   const [mode, setMode] = useState<TabMode>(initialMode ?? 'create')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -61,28 +62,27 @@ export default function CreateChildDialog({
 
   // Get inherited app name
   const inheritedApp = useMemo(() => {
-    if (parentWorkspace.settings?.defaultApplicationId) {
-      const app = applications[parentWorkspace.settings.defaultApplicationId]
+    if (parentWsData.settings?.defaultApplicationId) {
+      const app = applications[parentWsData.settings.defaultApplicationId]
       if (app) return app
     }
     return null
-  }, [parentWorkspace.settings, applications])
+  }, [parentWsData.settings, applications])
 
   // Get available apps
   const availableApps = useMemo(() => Object.values(applications).filter(app => app.showInNewTabMenu), [applications])
 
   // Load existing worktrees when "existing" tab is selected
   useEffect(() => {
-    if (mode === 'existing' && parentWorkspace.gitRootPath) {
+    if (mode === 'existing' && parentWsData.gitRootPath) {
       console.log('[CreateChildDialog] Loading worktrees for:', {
-        gitRootPath: parentWorkspace.gitRootPath,
-        gitBranch: parentWorkspace.gitBranch,
+        gitRootPath: parentWsData.gitRootPath,
+        gitBranch: parentWsData.gitBranch,
         openWorktreePaths
       })
       setIsLoadingWorktrees(true)
       git.getChildWorktrees(
-        parentWorkspace.gitRootPath,
-        parentWorkspace.parentId === null ? null : parentWorkspace.gitBranch
+        parentWsData.parentId === null ? null : parentWsData.gitBranch
       ).then(worktrees => {
         console.log('[CreateChildDialog] Received worktrees:', worktrees)
         // Filter out worktrees that are already open
@@ -98,18 +98,18 @@ export default function CreateChildDialog({
     } else {
       console.log('[CreateChildDialog] Skipping worktree load:', {
         mode,
-        hasGitRootPath: !!parentWorkspace.gitRootPath
+        hasGitRootPath: !!parentWsData.gitRootPath
       })
     }
-  }, [mode, parentWorkspace.gitRootPath, parentWorkspace.gitBranch, parentWorkspace.parentId, openWorktreePaths])
+  }, [mode, parentWsData.gitRootPath, parentWsData.gitBranch, parentWsData.parentId, openWorktreePaths])
 
   // Load local branches when "branch" tab is selected
   useEffect(() => {
-    if (mode === 'branch' && parentWorkspace.gitRootPath) {
+    if (mode === 'branch' && parentWsData.gitRootPath) {
       setIsLoadingBranches(true)
       Promise.all([
-        git.listLocalBranches(parentWorkspace.gitRootPath),
-        git.getBranchesInWorktrees(parentWorkspace.gitRootPath)
+        git.listLocalBranches(),
+        git.getBranchesInWorktrees()
       ]).then(([allBranches, branchesInWorktrees]) => {
         const branchInfos: BranchInfo[] = allBranches.map(name => ({
           name,
@@ -124,16 +124,16 @@ export default function CreateChildDialog({
         setError(`Failed to load branches: ${error instanceof Error ? error.message : 'Unknown error'}`)
       })
     }
-  }, [mode, parentWorkspace.gitRootPath])
+  }, [mode, parentWsData.gitRootPath])
 
   // Load remote branches when "remote" tab is selected
   useEffect(() => {
-    if (mode === 'remote' && parentWorkspace.gitRootPath) {
+    if (mode === 'remote' && parentWsData.gitRootPath) {
       setIsLoadingRemoteBranches(true)
       Promise.all([
-        git.listRemoteBranches(parentWorkspace.gitRootPath),
-        git.getBranchesInWorktrees(parentWorkspace.gitRootPath),
-        git.listLocalBranches(parentWorkspace.gitRootPath)
+        git.listRemoteBranches(),
+        git.getBranchesInWorktrees(),
+        git.listLocalBranches()
       ]).then(([remoteBranchNames, branchesInWorktrees, localBranches]) => {
         const branchInfos: BranchInfo[] = remoteBranchNames.map(name => {
           // Extract local name from remote branch (e.g., origin/feature -> feature)
@@ -156,7 +156,7 @@ export default function CreateChildDialog({
         setError(`Failed to load remote branches: ${error instanceof Error ? error.message : 'Unknown error'}`)
       })
     }
-  }, [mode, parentWorkspace.gitRootPath])
+  }, [mode, parentWsData.gitRootPath])
 
   // Filter branches based on search
   const filteredBranches = useMemo(() => {
@@ -361,7 +361,7 @@ export default function CreateChildDialog({
         <div className="create-child-dialog-content">
           <div className="create-child-dialog-info">
             <span className="create-child-label">Parent:</span>
-            <span className="create-child-value">{parentWorkspace.name}</span>
+            <span className="create-child-value">{parentWsData.name}</span>
           </div>
 
           {mode === 'create' ? (

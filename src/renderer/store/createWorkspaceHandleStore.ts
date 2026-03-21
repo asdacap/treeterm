@@ -1,11 +1,12 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, Tab, AppState, ReviewComment, AppRegistryApi, TerminalApi } from '../types'
+import type { Workspace, Tab, AppState, ReviewComment, AppRegistryApi, TerminalApi, GitApi, WorkspaceGitApi } from '../types'
 import { getTabs, isAiHarnessState } from '../types'
 
 export interface WorkspaceHandleDeps {
   appRegistry: AppRegistryApi
   terminal: TerminalApi
+  git: GitApi
   // Session-level callbacks
   syncToDaemon: () => void
   removeWorkspace: (id: string) => Promise<void>
@@ -41,6 +42,9 @@ export interface WorkspaceHandleState {
   promptHarness: (text: string) => boolean
   updateMetadata: (key: string, value: string) => void
   updateStatus: (status: Workspace['status']) => void
+
+  // Git API (workspace-scoped)
+  getGitApi: () => WorkspaceGitApi
 
   // Cross-cutting (delegate to session)
   refreshGitInfo: () => Promise<void>
@@ -285,6 +289,39 @@ export function createWorkspaceHandleStore(
       deps.terminal.write(ptyHandle, text + '\r')
       get().setActiveTab(tabId)
       return true
+    },
+
+    getGitApi: (): WorkspaceGitApi => {
+      const path = get().workspace.path
+      return {
+        getInfo: () => deps.git.getInfo(path),
+        createWorktree: (name, baseBranch?) => deps.git.createWorktree(path, name, baseBranch),
+        removeWorktree: (worktreePath, deleteBranch?) => deps.git.removeWorktree(path, worktreePath, deleteBranch),
+        listWorktrees: () => deps.git.listWorktrees(path),
+        getChildWorktrees: (parentBranch) => deps.git.getChildWorktrees(path, parentBranch),
+        listLocalBranches: () => deps.git.listLocalBranches(path),
+        listRemoteBranches: () => deps.git.listRemoteBranches(path),
+        getBranchesInWorktrees: () => deps.git.getBranchesInWorktrees(path),
+        createWorktreeFromBranch: (branch, worktreeName) => deps.git.createWorktreeFromBranch(path, branch, worktreeName),
+        createWorktreeFromRemote: (remoteBranch, worktreeName) => deps.git.createWorktreeFromRemote(path, remoteBranch, worktreeName),
+        getDiff: (parentBranch) => deps.git.getDiff(path, parentBranch),
+        getFileDiff: (parentBranch, filePath) => deps.git.getFileDiff(path, parentBranch, filePath),
+        checkMergeConflicts: (sourceBranch, targetBranch) => deps.git.checkMergeConflicts(path, sourceBranch, targetBranch),
+        merge: (worktreeBranch, targetBranch, squash?) => deps.git.merge(path, worktreeBranch, targetBranch, squash),
+        hasUncommittedChanges: () => deps.git.hasUncommittedChanges(path),
+        commitAll: (message) => deps.git.commitAll(path, message),
+        deleteBranch: (branchName) => deps.git.deleteBranch(path, branchName),
+        getUncommittedChanges: () => deps.git.getUncommittedChanges(path),
+        getUncommittedFileDiff: (filePath, staged) => deps.git.getUncommittedFileDiff(path, filePath, staged),
+        stageFile: (filePath) => deps.git.stageFile(path, filePath),
+        unstageFile: (filePath) => deps.git.unstageFile(path, filePath),
+        stageAll: () => deps.git.stageAll(path),
+        unstageAll: () => deps.git.unstageAll(path),
+        commitStaged: (message) => deps.git.commitStaged(path, message),
+        getFileContentsForDiff: (parentBranch, filePath) => deps.git.getFileContentsForDiff(path, parentBranch, filePath),
+        getUncommittedFileContentsForDiff: (filePath, staged) => deps.git.getUncommittedFileContentsForDiff(path, filePath, staged),
+        getHeadCommitHash: () => deps.git.getHeadCommitHash(path),
+      }
     },
 
     // Cross-cutting operations — delegate to session

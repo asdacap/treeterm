@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useStore } from 'zustand'
-import { useGitApi } from '../contexts/GitApiContext'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
 import { getTabs } from '../types'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, WorkspaceHandle } from '../types'
@@ -25,11 +24,11 @@ export default function ReviewBrowser({
   parentWorkspaceId,
 }: ReviewBrowserProps) {
   const {
-    workspace: wsData, lookupWorkspace, getReviewComments,
+    workspace: wsData, lookupWorkspace, getReviewComments, getGitApi,
     promptHarness, mergeAndRemove, closeAndClean, removeTab,
     addReviewComment, deleteReviewComment, updateOutdatedReviewComments, refreshGitInfo,
   } = useStore(workspace)
-  const git = useGitApi()
+  const git = getGitApi()
   const workspaceId = wsData.id
   const workspacePath = wsData.path
   const parentWorkspace = parentWorkspaceId ? lookupWorkspace(parentWorkspaceId) : undefined
@@ -160,7 +159,7 @@ export default function ReviewBrowser({
 
   const loadReviews = async () => {
     try {
-      const hashResult = await git.getHeadCommitHash(workspacePath)
+      const hashResult = await git.getHeadCommitHash()
       if (hashResult.success && hashResult.hash) {
         setCurrentCommitHash(hashResult.hash)
         updateOutdatedReviewComments(hashResult.hash)
@@ -178,7 +177,7 @@ export default function ReviewBrowser({
     setLoading(true)
     setError(null)
     try {
-      const result = await git.getDiff(workspacePath, parentWorkspace.gitBranch)
+      const result = await git.getDiff(parentWorkspace.gitBranch)
       if (result.success && result.diff) {
         setDiff(result.diff)
       } else {
@@ -193,7 +192,7 @@ export default function ReviewBrowser({
 
   const loadUncommittedChanges = async () => {
     try {
-      const result = await git.getUncommittedChanges(workspacePath)
+      const result = await git.getUncommittedChanges()
       if (result.success && result.changes) {
         setUncommitted(result.changes)
       }
@@ -210,7 +209,6 @@ export default function ReviewBrowser({
     setConflictError(null)
     try {
       const result = await git.checkMergeConflicts(
-        parentWorkspace.gitRootPath,
         ws.gitBranch,
         parentWorkspace.gitBranch
       )
@@ -234,7 +232,7 @@ export default function ReviewBrowser({
     setFileDiffContents(null)
     setLoadError(null)
     try {
-      const result = await git.getFileContentsForDiff(workspacePath, parentWorkspace.gitBranch, filePath)
+      const result = await git.getFileContentsForDiff(parentWorkspace.gitBranch, filePath)
       if (result.success && result.contents) {
         setFileDiffContents(result.contents)
       } else {
@@ -255,7 +253,7 @@ export default function ReviewBrowser({
     setFileDiffContents(null)
     setLoadError(null)
     try {
-      const result = await git.getUncommittedFileContentsForDiff(workspacePath, file.path, file.staged)
+      const result = await git.getUncommittedFileContentsForDiff(file.path, file.staged)
       if (result.success && result.contents) {
         setFileDiffContents(result.contents)
       } else {
@@ -273,7 +271,7 @@ export default function ReviewBrowser({
     setStagingInProgress(true)
     setStageError(null)
     try {
-      const result = await git.stageFile(workspacePath, filePath)
+      const result = await git.stageFile(filePath)
       if (result.success) {
         await loadUncommittedChanges()
       } else {
@@ -289,7 +287,7 @@ export default function ReviewBrowser({
     setStagingInProgress(true)
     setStageError(null)
     try {
-      const result = await git.unstageFile(workspacePath, filePath)
+      const result = await git.unstageFile(filePath)
       if (result.success) {
         await loadUncommittedChanges()
       } else {
@@ -305,7 +303,7 @@ export default function ReviewBrowser({
     setStagingInProgress(true)
     setStageError(null)
     try {
-      const result = await git.stageAll(workspacePath)
+      const result = await git.stageAll()
       if (result.success) {
         await loadUncommittedChanges()
       } else {
@@ -321,7 +319,7 @@ export default function ReviewBrowser({
     setStagingInProgress(true)
     setStageError(null)
     try {
-      const result = await git.unstageAll(workspacePath)
+      const result = await git.unstageAll()
       if (result.success) {
         await loadUncommittedChanges()
       } else {
@@ -343,7 +341,7 @@ export default function ReviewBrowser({
     setCommitError(null)
 
     try {
-      const result = await git.commitStaged(workspacePath, commitMessage.trim())
+      const result = await git.commitStaged(commitMessage.trim())
       if (result.success) {
         setCommitMessage('')
         await loadUncommittedChanges()

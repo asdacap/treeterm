@@ -537,9 +537,9 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
         </div>
 
         {/* Create Child Dialog (Fork) */}
-        {showCreateChildDialog && activeWorkspace && (
+        {showCreateChildDialog && activeHandle && (
           <CreateChildDialog
-            parentWorkspace={activeWorkspace}
+            parentWorkspace={activeHandle}
             onCreate={handleCreateChildSubmit}
             onAdopt={handleAdoptWorktreeSubmit}
             onCreateFromBranch={handleCreateFromBranchSubmit}

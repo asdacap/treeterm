@@ -212,9 +212,9 @@ export default function SessionPanel({
   // Get root workspaces (those without parents)
   const rootWorkspaces = Object.values(workspaces).filter((ws) => !ws.parentId)
 
-  // Get create child dialog parent
-  const createChildDialogParent = createChildDialogParentId
-    ? workspaces[createChildDialogParentId]
+  // Get create child dialog parent handle
+  const createChildDialogParentHandle = createChildDialogParentId
+    ? workspaceHandles[createChildDialogParentId] ?? null
     : null
 
   const handleWorkspaceClick = (ws: Workspace) => {
@@ -367,9 +367,9 @@ export default function SessionPanel({
       )}
 
       {/* Create Child Dialog */}
-      {createChildDialogParent && (
+      {createChildDialogParentHandle && (
         <CreateChildDialog
-          parentWorkspace={createChildDialogParent}
+          parentWorkspace={createChildDialogParentHandle}
           onCreate={handleCreateChildSubmit}
           onAdopt={handleAdoptWorktreeSubmit}
           onCreateFromBranch={handleCreateFromBranchSubmit}

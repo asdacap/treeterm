@@ -55,6 +55,7 @@ const mockWorkspaceHandleStateData = {
   removeKeepBranch: vi.fn(),
   removeKeepWorktree: vi.fn(),
   removeKeepBoth: vi.fn(),
+  getGitApi: vi.fn(),
 } as WorkspaceHandleState
 
 const mockWorkspaceHandle = createStore<WorkspaceHandleState>()(() => mockWorkspaceHandleStateData)

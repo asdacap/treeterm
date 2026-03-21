@@ -158,6 +158,7 @@ export function createSessionStore(
     return {
       appRegistry: deps.appRegistry,
       terminal: deps.terminal,
+      git: deps.git,
       syncToDaemon: () => debouncedSyncToDaemon(),
       removeWorkspace: (id) => store.getState().removeWorkspace(id),
       removeWorkspaceKeepBranch: (id) => store.getState().removeWorkspaceKeepBranch(id),
