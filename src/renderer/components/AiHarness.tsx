@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from 'zustand'
 import type { Terminal as XTerm } from '@xterm/xterm'
 import BaseTerminal, { type BaseTerminalConfig, type BaseTerminalState } from './BaseTerminal'
@@ -7,6 +7,7 @@ import { ReviewCommentsButton } from './ReviewCommentsButton'
 import { useSessionApi } from '../contexts/SessionStoreContext'
 import { useTtyCreation } from '../hooks/useTtyConnection'
 import { useTerminalAnalyzer, type TerminalAiState } from '../hooks/useTerminalAnalyzer'
+import { useSettingsStore } from '../store/settings'
 import type { SandboxConfig, WorkspaceStore } from '../types'
 
 const STATE_COLORS: Record<TerminalAiState, string> = {
@@ -90,11 +91,50 @@ export default function AiHarness({
     setDataVersionReady(true)
   }, [])
 
-  const aiState = useTerminalAnalyzer(
+  const { aiState, analyzing } = useTerminalAnalyzer(
     terminal,
     dataVersionReady ? dataVersionRefHolder.current : null,
     cwd
   )
+
+  const settings = useSettingsStore((s) => s.settings)
+  const [badgeContextMenu, setBadgeContextMenu] = useState<{ x: number; y: number } | null>(null)
+
+  const handleBadgeContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setBadgeContextMenu({ x: e.clientX, y: e.clientY })
+  }
+
+  // Close badge context menu on outside click
+  useEffect(() => {
+    if (!badgeContextMenu) return
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (target.closest('.context-menu')) return
+      setBadgeContextMenu(null)
+    }
+    document.addEventListener('click', handleClick, true)
+    return () => document.removeEventListener('click', handleClick, true)
+  }, [badgeContextMenu])
+
+  const handleDebugAnalyzer = () => {
+    setBadgeContextMenu(null)
+    if (!terminal) return
+
+    const numLines = settings.terminalAnalyzer.bufferLines || 10
+    const xtermBuffer = terminal.buffer.normal
+    const contentEnd = xtermBuffer.baseY + xtermBuffer.cursorY + 1
+    const startLine = Math.max(0, contentEnd - numLines)
+    const lines: string[] = []
+    for (let i = startLine; i < contentEnd; i++) {
+      const line = xtermBuffer.getLine(i)
+      if (line) lines.push(line.translateToString(true))
+    }
+    const buffer = lines.join('\n')
+
+    workspace.getState().addTab<{ bufferText: string }>('analyzer-debugger', { bufferText: buffer })
+  }
 
   // Memoize config based on props to prevent unnecessary re-renders
   const config = useMemo<BaseTerminalConfig>(() => ({
@@ -127,9 +167,21 @@ export default function AiHarness({
         style={{
           background: STATE_COLORS[aiState],
         }}
+        onContextMenu={handleBadgeContextMenu}
       >
+        {analyzing && <span className="ai-state-badge-spinner" />}
         {STATE_LABELS[aiState]}
       </div>
+      {badgeContextMenu && (
+        <div
+          className="context-menu"
+          style={{ top: badgeContextMenu.y, left: badgeContextMenu.x }}
+        >
+          <div className="context-menu-item" onClick={handleDebugAnalyzer}>
+            Debug Analyzer
+          </div>
+        </div>
+      )}
       <PushToTalkButton
         onTranscript={handlePushToTalkTranscript}
         onSubmit={handlePushToTalkSubmit}

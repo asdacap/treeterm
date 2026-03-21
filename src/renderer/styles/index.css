@@ -4181,8 +4181,21 @@ body,
   font-size: 11px;
   opacity: 0.8;
   color: #fff;
-  pointer-events: none;
+  pointer-events: auto;
   z-index: 10;
+  cursor: default;
+}
+
+.ai-state-badge-spinner {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid white;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  margin-right: 4px;
+  vertical-align: middle;
 }
 
 /* Tab-level error fallback */

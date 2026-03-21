@@ -15,8 +15,9 @@ export function useTerminalAnalyzer(
   terminal: XTerm | null,
   dataVersionRef: React.MutableRefObject<number> | null,
   cwd: string
-): TerminalAiState {
+): { aiState: TerminalAiState; analyzing: boolean } {
   const [aiState, setAiState] = useState<TerminalAiState>('idle')
+  const [analyzing, setAnalyzing] = useState(false)
   const lastVersionRef = useRef(0)
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const settings = useSettingsStore((s) => s.settings)
@@ -41,6 +42,7 @@ export function useTerminalAnalyzer(
         if (!buffer.trim()) return
         console.debug('[terminal-analyzer] buffer:', buffer)
 
+        setAnalyzing(true)
         const result = await window.electron.llm.analyzeTerminal(buffer, cwd, {
           baseUrl: settings.llm.baseUrl,
           apiKey: settings.llm.apiKey,
@@ -63,6 +65,8 @@ export function useTerminalAnalyzer(
       } catch (err) {
         console.error('[terminal-analyzer] LLM call failed:', err)
         setAiState('error')
+      } finally {
+        setAnalyzing(false)
       }
     }
 
@@ -82,5 +86,5 @@ export function useTerminalAnalyzer(
     }
   }, [terminal, dataVersionRef, cwd, settings.llm.apiKey, settings.llm.baseUrl, settings.terminalAnalyzer.model, settings.terminalAnalyzer.systemPrompt, settings.terminalAnalyzer.disableReasoning, settings.terminalAnalyzer.safePaths, settings.terminalAnalyzer.bufferLines])
 
-  return aiState
+  return { aiState, analyzing }
 }

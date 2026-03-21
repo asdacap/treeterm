@@ -7,7 +7,7 @@ export const terminalAnalyzerDebuggerApplication: Application = {
   name: 'Analyzer Debugger',
   icon: '🔬',
   createInitialState: () => ({}),
-  render: (_props: ApplicationRenderProps) => createElement(TerminalAnalyzerDebugger),
+  render: (props: ApplicationRenderProps) => createElement(TerminalAnalyzerDebugger, props),
   canClose: true,
   canHaveMultiple: false,
   showInNewTabMenu: true,
