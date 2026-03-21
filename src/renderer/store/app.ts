@@ -15,7 +15,7 @@ import type {
   Platform, TerminalApi, GitApi, SessionApi, AppApi, DaemonApi,
   FilesystemApi, STTApi, SandboxApi, SettingsApi, RunActionsApi,
   TerminalInstance, AiHarnessInstance, Settings,
-  SSHConnectionConfig, ConnectionInfo, SSHApi
+  ConnectionInfo, SSHApi
 } from '../types'
 
 export interface AppDeps {
@@ -333,15 +333,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
 function getOrCreateSession(
   sessionId: string,
   get: () => AppState,
-  set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void
+  set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
+  connection?: ConnectionInfo
 ): StoreApi<SessionState> {
-  const { sessionStores, windowUuid, git, filesystem, sessionApi, terminal, ssh } = get()
+  const { sessionStores, windowUuid, git, filesystem, sessionApi, terminal } = get()
   let store = sessionStores[sessionId]
   if (!store) {
     store = createSessionStore(
-      { sessionId, windowUuid },
+      { sessionId, windowUuid, connection },
       {
-        ssh,
         git,
         filesystem,
         sessionApi,

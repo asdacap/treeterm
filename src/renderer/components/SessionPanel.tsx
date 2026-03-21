@@ -46,7 +46,7 @@ export default function SessionPanel({
     quickForkWorkspace,
     setActiveWorkspace,
   } = useStore(sessionStore)
-  const { activeSessionId, switchSession } = useAppStore()
+  const switchSession = useAppStore(s => s.switchSession)
   const { activeView, setActiveView } = useNavigationStore()
   const {
     state: prefixState,
@@ -96,7 +96,7 @@ export default function SessionPanel({
     }
   }, [isEditingName])
 
-  const isActiveSession = activeSessionId === sessionId
+  const isActiveSession = activeView?.type === 'workspace' && activeView.sessionId === sessionId
 
   // Expand any workspace that gains children after mount
   useEffect(() => {

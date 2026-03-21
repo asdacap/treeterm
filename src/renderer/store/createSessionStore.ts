@@ -7,8 +7,8 @@ import { createTtyStore } from './createTtyStore'
 import type { Tty } from './createTtyStore'
 import type {
   Workspace, Session, AppState, GitInfo,
-  SSHConnectionConfig, ConnectionInfo,
-  TerminalApi, GitApi, FilesystemApi, SessionApi, SSHApi, Settings, WorktreeSettings,
+  ConnectionInfo,
+  TerminalApi, GitApi, FilesystemApi, SessionApi, Settings, WorktreeSettings,
   Application, SandboxConfig, SessionInfo
 } from '../types'
 
@@ -18,7 +18,6 @@ export interface AppRegistryApi {
 }
 
 export interface SessionDeps {
-  ssh: SSHApi
   git: GitApi
   filesystem: FilesystemApi
   sessionApi: SessionApi
@@ -30,10 +29,8 @@ export interface SessionDeps {
 export interface SessionState {
   sessionId: string
 
-  // Single SSH connection for this session
+  // Single SSH connection for this session (set at creation, immutable)
   connection: ConnectionInfo | null
-  connect: (config: SSHConnectionConfig) => Promise<void>
-  disconnect: () => Promise<void>
 
   // TTY sub-stores (enclosed ID pattern)
   ttyHandles: Record<string, Tty>
@@ -115,7 +112,7 @@ export function getUnmergedSubWorkspaces(workspaces: Record<string, Workspace>):
 }
 
 export function createSessionStore(
-  config: { sessionId: string; windowUuid: string | null },
+  config: { sessionId: string; windowUuid: string | null; connection?: ConnectionInfo },
   deps: SessionDeps
 ): StoreApi<SessionState> {
   let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -340,7 +337,7 @@ export function createSessionStore(
     activeWorkspaceId: null,
     isRestoring: false,
 
-    connection: null,
+    connection: config.connection ?? null,
 
     createTty: async (cwd: string, sandbox?: SandboxConfig, startupCommand?: string): Promise<string> => {
       const result = await deps.terminal.create(cwd, sandbox, startupCommand)
@@ -372,28 +369,6 @@ export function createSessionStore(
 
     listTty: (): Promise<SessionInfo[]> => {
       return deps.terminal.list()
-    },
-
-    connect: async (sshConfig: SSHConnectionConfig) => {
-      const { ssh } = deps
-      try {
-        const info = await ssh.connect(sshConfig)
-        if (info.status === 'error') {
-          throw new Error(info.error || 'Connection failed')
-        }
-        set({ connection: info })
-      } catch (error) {
-        console.error('[Session] SSH connect failed:', error)
-        throw error
-      }
-    },
-
-    disconnect: async () => {
-      const { connection } = get()
-      if (!connection) return
-      const { ssh } = deps
-      await ssh.disconnect(connection.id)
-      set({ connection: null })
     },
 
     getWorkspace: (id: string): WorkspaceStore | null => {

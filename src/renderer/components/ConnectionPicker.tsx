@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAppStore } from '../store/app'
-import type { SSHConnectionConfig, ConnectionInfo } from '../types'
+import { useNavigationStore } from '../store/navigation'
+import type { SSHConnectionConfig } from '../types'
 
 interface ConnectionPickerProps {
   isOpen: boolean
@@ -9,12 +10,9 @@ interface ConnectionPickerProps {
 
 export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerProps) {
   const ssh = useAppStore(s => s.ssh)
-  const activeSessionStore = useAppStore(s => {
-    const { activeSessionId, sessionStores } = s
-    if (!activeSessionId) return null
-    return sessionStores[activeSessionId] || null
-  })
-  const connection = activeSessionStore?.getState().connection ?? null
+  const sessionApi = useAppStore(s => s.sessionApi)
+  const switchSession = useAppStore(s => s.switchSession)
+  const { setActiveView } = useNavigationStore()
   const [savedConnections, setSavedConnections] = useState<SSHConnectionConfig[]>([])
   const [host, setHost] = useState('')
   const [user, setUser] = useState('')
@@ -23,7 +21,6 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
   const [label, setLabel] = useState('')
   const [connecting, setConnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [selectedOutputId, setSelectedOutputId] = useState<string | null>(null)
 
   useEffect(() => {
     if (isOpen) {
@@ -33,14 +30,20 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
 
   if (!isOpen) return null
 
-  const connectViaSession = async (config: SSHConnectionConfig) => {
-    if (!activeSessionStore) throw new Error('No active session')
-    await activeSessionStore.getState().connect(config)
-  }
-
-  const disconnectViaSession = async () => {
-    if (!activeSessionStore) return
-    await activeSessionStore.getState().disconnect()
+  const connectAndCreateSession = async (config: SSHConnectionConfig) => {
+    // 1. Create session immediately
+    const result = await sessionApi.create([])
+    if (!result.success || !result.session) {
+      throw new Error(result.error || 'Failed to create session')
+    }
+    const session = result.session
+    // 2. Add to session list + switch to it
+    switchSession(session.id)
+    // 3. Set view to SSH pane
+    setActiveView({ type: 'ssh', connectionId: config.id })
+    // 4. Start SSH connect in background (fire-and-forget, output streams via watchOutput)
+    ssh.connect(config)
+    onClose()
   }
 
   const handleConnect = async () => {
@@ -60,12 +63,10 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
 
     setConnecting(true)
     setError(null)
-    setSelectedOutputId(config.id)
     try {
-      await connectViaSession(config)
+      await connectAndCreateSession(config)
       // Save connection for future use
       await ssh.saveConnection(config)
-      setSavedConnections(await ssh.getSavedConnections())
       // Reset form
       setHost('')
       setUser('')
@@ -82,9 +83,8 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
   const handleConnectSaved = async (config: SSHConnectionConfig) => {
     setConnecting(true)
     setError(null)
-    setSelectedOutputId(config.id)
     try {
-      await connectViaSession(config)
+      await connectAndCreateSession(config)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Connection failed')
     } finally {
@@ -95,15 +95,6 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
   const handleRemoveSaved = async (id: string) => {
     await ssh.removeSavedConnection(id)
     setSavedConnections(await ssh.getSavedConnections())
-  }
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'connected': return '#4caf50'
-      case 'connecting': return '#ff9800'
-      case 'error': return '#f44336'
-      default: return '#666'
-    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -131,77 +122,29 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
           <button onClick={onClose} style={closeButtonStyle}>x</button>
         </div>
 
-        {/* Active connection */}
-        {connection && connection.target.type === 'remote' && (
-          <div style={{ marginBottom: 16 }}>
-            <h3 style={{ fontSize: 14, color: '#a6adc8', marginBottom: 8 }}>Active Connection</h3>
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '8px 12px', backgroundColor: '#313244', borderRadius: 4, marginBottom: 4
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{
-                  width: 8, height: 8, borderRadius: '50%',
-                  backgroundColor: getStatusColor(connection.status), display: 'inline-block'
-                }} />
-                <span>{`${connection.target.config.user}@${connection.target.config.host}`}</span>
-                <span style={{ fontSize: 12, color: '#666' }}>{connection.status}</span>
-              </div>
-              <div style={{ display: 'flex', gap: 4 }}>
-                <button
-                  onClick={() => setSelectedOutputId(selectedOutputId === connection.id ? null : connection.id)}
-                  style={smallButtonStyle}
-                >Log</button>
-                <button
-                  onClick={() => disconnectViaSession()}
-                  style={{ ...smallButtonStyle, color: '#f44336' }}
-                >Disconnect</button>
-              </div>
-            </div>
-            {selectedOutputId === connection.id && (
-              <SSHOutputInline connectionId={connection.id} />
-            )}
-          </div>
-        )}
-
-        {/* Output for connection in progress (not yet in active connection) */}
-        {selectedOutputId && (!connection || connection.id !== selectedOutputId) && (
-          <div style={{ marginBottom: 16 }}>
-            <h3 style={{ fontSize: 14, color: '#a6adc8', marginBottom: 8 }}>Connection Output</h3>
-            <SSHOutputInline connectionId={selectedOutputId} />
-          </div>
-        )}
-
         {/* Saved connections */}
         {savedConnections.length > 0 && (
           <div style={{ marginBottom: 16 }}>
             <h3 style={{ fontSize: 14, color: '#a6adc8', marginBottom: 8 }}>Saved Connections</h3>
-            {savedConnections.map(config => {
-              const isActive = connection?.target.type === 'remote'
-                && connection.target.config.host === config.host
-                && connection.target.config.user === config.user
-              return (
-                <div key={config.id} style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '6px 12px', backgroundColor: '#313244', borderRadius: 4, marginBottom: 4
-                }}>
-                  <span>{config.label || `${config.user}@${config.host}`}</span>
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    {!isActive && (
-                      <button
-                        onClick={() => handleConnectSaved(config)}
-                        disabled={connecting}
-                        style={smallButtonStyle}
-                      >Connect</button>
-                    )}
-                    <button
-                      onClick={() => handleRemoveSaved(config.id)}
-                      style={{ ...smallButtonStyle, color: '#f44336' }}
-                    >Remove</button>
-                  </div>
+            {savedConnections.map(config => (
+              <div key={config.id} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '6px 12px', backgroundColor: '#313244', borderRadius: 4, marginBottom: 4
+              }}>
+                <span>{config.label || `${config.user}@${config.host}`}</span>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <button
+                    onClick={() => handleConnectSaved(config)}
+                    disabled={connecting}
+                    style={smallButtonStyle}
+                  >Connect</button>
+                  <button
+                    onClick={() => handleRemoveSaved(config.id)}
+                    style={{ ...smallButtonStyle, color: '#f44336' }}
+                  >Remove</button>
                 </div>
-              )
-            })}
+              </div>
+            ))}
           </div>
         )}
 
@@ -260,47 +203,6 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
           {connecting ? 'Connecting...' : 'Connect'}
         </button>
       </div>
-    </div>
-  )
-}
-
-function SSHOutputInline({ connectionId }: { connectionId: string }) {
-  const [output, setOutput] = useState<string[]>([])
-  const ssh = useAppStore(s => s.ssh)
-  const scrollRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    let unsubscribe: (() => void) | undefined
-
-    ssh.watchOutput(connectionId, (line) => {
-      setOutput(prev => [...prev, line])
-    }).then(({ scrollback, unsubscribe: unsub }) => {
-      setOutput(scrollback)
-      unsubscribe = unsub
-    }).catch(() => {})
-
-    return () => {
-      unsubscribe?.()
-    }
-  }, [connectionId, ssh])
-
-  // Auto-scroll
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
-  }, [output.length])
-
-  return (
-    <div ref={scrollRef} style={{
-      backgroundColor: '#11111b', border: '1px solid #333', borderRadius: 4,
-      padding: 8, marginTop: 4, maxHeight: 200, overflow: 'auto',
-      fontFamily: 'monospace', fontSize: 12, color: '#a6adc8'
-    }}>
-      {output.length === 0 && <div style={{ color: '#666' }}>No output yet</div>}
-      {output.map((line, i) => (
-        <div key={i} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{line}</div>
-      ))}
     </div>
   )
 }
