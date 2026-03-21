@@ -101,7 +101,6 @@ export default function BaseTerminal({
   const ttyRef = useRef<Tty | null>(null)
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const detectorRef = useRef<ReturnType<typeof createActivityStateDetector> | null>(null)
-  const isMountedRef = useRef(true)
   const rawCharsRef = useRef<string>('')
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
 
@@ -121,7 +120,7 @@ export default function BaseTerminal({
 
     if (!containerRef.current) return
 
-    isMountedRef.current = true
+    let cancelled = false
 
     // Create terminal with configurable theme
     const terminal = new XTerm({
@@ -162,37 +161,6 @@ export default function BaseTerminal({
       cols: terminal.cols,
       rows: terminal.rows
     })
-
-    // Delayed fit to ensure proper dimensions after layout stabilizes
-    // This helps fix scrollbar viewport calculation issues
-    setTimeout(() => {
-      if (isMountedRef.current && fitAddonRef.current && terminalRef.current) {
-        const term = terminalRef.current
-
-        // Save scroll position as ratio before fit to prevent scroll jumping
-        const prevViewportY = term.buffer.active.viewportY
-        const prevBaseY = term.buffer.active.baseY
-        // Consider "at bottom" if within 3 lines of the bottom (accounts for partial scrolls)
-        const wasAtBottom = prevBaseY - prevViewportY <= 3
-        const scrollRatio = prevBaseY > 0 ? prevViewportY / prevBaseY : 0
-
-        fitAddonRef.current.fit()
-
-        // Restore scroll position after fit
-        if (wasAtBottom) {
-          term.scrollToBottom()
-        } else {
-          // Use ratio to calculate new scroll position after buffer reflow
-          const newScrollLine = Math.round(term.buffer.active.baseY * scrollRatio)
-          term.scrollToLine(newScrollLine)
-        }
-
-        console.log(`[${config.logPrefix} ${tabId}] delayed fit terminal size:`, {
-          cols: term.cols,
-          rows: term.rows
-        })
-      }
-    }, 100)
 
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
@@ -250,7 +218,7 @@ export default function BaseTerminal({
 
       const unsubscribeExit = ttyState.onExit((exitCode) => {
         console.log(`[${config.logPrefix} ${tabId}] PTY exited with code:`, exitCode)
-        if (isMountedRef.current) {
+        if (!cancelled) {
           const currentTab = wsData?.appStates[tabId]
           const keepOnExit = (currentTab?.state as BaseTerminalState | undefined)?.keepOnExit
           if (keepOnExit) {
@@ -286,7 +254,7 @@ export default function BaseTerminal({
       try {
         const result = await session.attachTty(existingPtyId)
         console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, existingPtyId)
-        if (!isMountedRef.current) return
+        if (cancelled) return
 
         // Restore scrollback buffer
         if (result.scrollback && result.scrollback.length > 0) {
@@ -362,7 +330,7 @@ export default function BaseTerminal({
         ptyId: ttyRef.current?.getState().ptyId,
         workspaceId
       })
-      isMountedRef.current = false
+      cancelled = true
       inputDisposable.dispose()
       resizeObserver.disconnect()
       if (unsubscribeRef.current) {
