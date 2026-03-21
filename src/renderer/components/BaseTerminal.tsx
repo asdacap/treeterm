@@ -316,7 +316,7 @@ export default function BaseTerminal({
         } catch (error) {
           console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, existingPtyId, error)
           terminal.write(`\x1b[31mFailed to reattach terminal: ${error instanceof Error ? error.message : 'Unknown error'}\x1b[0m\r\n`)
-          terminal.write(`\x1b[2mCreating new terminal session...\x1b[0m\r\n`)
+          return
         }
       }
 
