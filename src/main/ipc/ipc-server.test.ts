@@ -261,15 +261,6 @@ describe('IpcServer', () => {
       expect(mockSend).toHaveBeenCalledWith('daemon:sessions', sessions)
     })
 
-    it('terminalShowSessions sends to window webContents', () => {
-      const mockSend = vi.fn()
-      const mockWindow = { webContents: { send: mockSend } } as any
-      server.setWindow(mockWindow)
-
-      server.terminalShowSessions()
-      expect(mockSend).toHaveBeenCalledWith('terminal:show-sessions')
-    })
-
     it('sessionShowSessions sends to window webContents', () => {
       const mockSend = vi.fn()
       const mockWindow = { webContents: { send: mockSend } } as any

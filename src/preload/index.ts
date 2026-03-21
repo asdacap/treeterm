@@ -68,13 +68,6 @@ client.onDaemonSessions((sessions) => {
 })
 
 
-type TerminalMenuCallback = () => void
-const terminalShowSessionsListeners: TerminalMenuCallback[] = []
-
-client.onTerminalShowSessions(() => {
-  terminalShowSessionsListeners.forEach((cb) => cb())
-})
-
 type SessionMenuCallback = () => void
 const sessionShowSessionsListeners: SessionMenuCallback[] = []
 
@@ -190,13 +183,6 @@ contextBridge.exposeInMainWorld('electron', {
             listeners.splice(index, 1)
           }
         }
-      }
-    },
-    onShowSessions: (callback: TerminalMenuCallback): (() => void) => {
-      terminalShowSessionsListeners.push(callback)
-      return () => {
-        const index = terminalShowSessionsListeners.indexOf(callback)
-        if (index > -1) terminalShowSessionsListeners.splice(index, 1)
       }
     },
     onActiveProcessesOpen: (callback: ActiveProcessesOpenCallback): (() => void) => {

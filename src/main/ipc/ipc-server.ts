@@ -89,7 +89,6 @@ const CHANNELS = {
   appReady: 'app:ready',
   capsLockEvent: 'capslock-event',
   daemonSessions: 'daemon:sessions',
-  terminalShowSessions: 'terminal:show-sessions',
   sessionShowSessions: 'session:show-sessions',
   sessionSync: 'session:sync',
   daemonDisconnected: 'daemon:disconnected',
@@ -798,10 +797,6 @@ export class IpcServer {
 
   daemonSessions(...args: IpcEvents['daemonSessions']['params']): void {
     this.window?.webContents.send(CHANNELS.daemonSessions, ...args)
-  }
-
-  terminalShowSessions(): void {
-    this.window?.webContents.send(CHANNELS.terminalShowSessions)
   }
 
   sessionShowSessions(): void {
