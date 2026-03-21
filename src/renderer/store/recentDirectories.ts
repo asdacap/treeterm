@@ -8,6 +8,7 @@ interface RecentDirectoriesState {
 }
 
 const MAX_RECENT = 10
+const EMPTY_ARRAY: string[] = []
 
 export const useRecentDirectoriesStore = create<RecentDirectoriesState>()(
   persist(
@@ -22,7 +23,7 @@ export const useRecentDirectoriesStore = create<RecentDirectoriesState>()(
         })
       },
       getRecent: (connectionKey: string) => {
-        return get().directories[connectionKey] || []
+        return get().directories[connectionKey] ?? EMPTY_ARRAY
       },
     }),
     {

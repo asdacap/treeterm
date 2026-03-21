@@ -379,7 +379,7 @@ export interface DaemonApi {
 
 export interface LlmApi {
   send: (requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string; reasoning: boolean }) => Promise<void>
-  analyzeTerminal: (buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; disableReasoning: boolean; safePaths: string[] }) => Promise<{ state: string } | { error: string }>
+  analyzeTerminal: (buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; disableReasoning: boolean; safePaths: string[] }) => Promise<{ state: string; reason: string } | { error: string }>
   cancel: (requestId: string) => void
   onDelta: (callback: (requestId: string, text: string) => void) => () => void
   onDone: (callback: (requestId: string) => void) => () => void

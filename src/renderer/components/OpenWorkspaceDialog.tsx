@@ -3,6 +3,8 @@ import { useAppStore } from '../store/app'
 import { useRecentDirectoriesStore } from '../store/recentDirectories'
 import type { WorktreeSettings } from '../types'
 
+const EMPTY_RECENT: string[] = []
+
 interface OpenWorkspaceDialogProps {
   onOpen: (path: string, settings?: WorktreeSettings) => void
   onCancel: () => void
@@ -16,7 +18,7 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, co
   const [isSelecting, setIsSelecting] = useState(false)
   const [selectedAppId, setSelectedAppId] = useState<string>('')
 
-  const recentDirectories = useRecentDirectoriesStore(s => s.getRecent(connectionKey))
+  const recentDirectories = useRecentDirectoriesStore(s => s.directories[connectionKey]) ?? EMPTY_RECENT
   const addRecent = useRecentDirectoriesStore(s => s.addRecent)
 
   const applications = useAppStore((s) => s.applications)
