@@ -5,6 +5,7 @@ import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
 import { getTabs } from '../types'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, WorkspaceStore } from '../types'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
+import { CommittedDiffFileTree, UncommittedDiffFileTree } from './DiffFileTree'
 import { CommentInput } from './CommentInput'
 import { CommentDisplay } from './CommentDisplay'
 
@@ -616,20 +617,12 @@ export default function ReviewBrowser({
                   onMouseLeave={handleResizeMouseUp}
                 >
                   <div className="diff-file-list" style={{ width: fileListWidth }}>
-                    {diff.files.map((file) => (
-                      <div
-                        key={file.path}
-                        className={`diff-file-item ${selectedFile === file.path ? 'selected' : ''}`}
-                        onClick={() => loadFileDiff(file.path)}
-                      >
-                        {getStatusIcon(file.status)}
-                        <span className="diff-file-path">{file.path}</span>
-                        <span className="diff-file-stats">
-                          <span className="additions">+{file.additions}</span>
-                          <span className="deletions">-{file.deletions}</span>
-                        </span>
-                      </div>
-                    ))}
+                    <CommittedDiffFileTree
+                      files={diff.files}
+                      selectedFile={selectedFile}
+                      onSelectFile={loadFileDiff}
+                      getStatusIcon={getStatusIcon}
+                    />
                   </div>
 
                   <div
@@ -717,59 +710,29 @@ export default function ReviewBrowser({
                     {stagedFiles.length > 0 && (
                       <>
                         <div className="diff-file-section">Staged</div>
-                        {stagedFiles.map((file) => (
-                          <div
-                            key={file.path}
-                            className={`diff-file-item ${selectedUncommittedFile?.path === file.path ? 'selected' : ''}`}
-                            onClick={() => loadUncommittedFileDiff(file)}
-                          >
-                            {getStatusIcon(file.status)}
-                            <span className="diff-file-path">{file.path}</span>
-                            <span className="diff-file-stats">
-                              <span className="additions">+{file.additions}</span>
-                              <span className="deletions">-{file.deletions}</span>
-                            </span>
-                            <button
-                              className="diff-file-action"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleUnstageFile(file.path)
-                              }}
-                              disabled={stagingInProgress}
-                            >
-                              Unstage
-                            </button>
-                          </div>
-                        ))}
+                        <UncommittedDiffFileTree
+                          files={stagedFiles}
+                          selectedFile={selectedUncommittedFile}
+                          onSelectFile={loadUncommittedFileDiff}
+                          getStatusIcon={getStatusIcon}
+                          onAction={handleUnstageFile}
+                          actionLabel="Unstage"
+                          stagingInProgress={stagingInProgress}
+                        />
                       </>
                     )}
                     {unstagedFiles.length > 0 && (
                       <>
                         <div className="diff-file-section">Unstaged</div>
-                        {unstagedFiles.map((file) => (
-                          <div
-                            key={file.path}
-                            className={`diff-file-item ${selectedUncommittedFile?.path === file.path ? 'selected' : ''}`}
-                            onClick={() => loadUncommittedFileDiff(file)}
-                          >
-                            {getStatusIcon(file.status)}
-                            <span className="diff-file-path">{file.path}</span>
-                            <span className="diff-file-stats">
-                              <span className="additions">+{file.additions}</span>
-                              <span className="deletions">-{file.deletions}</span>
-                            </span>
-                            <button
-                              className="diff-file-action"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleStageFile(file.path)
-                              }}
-                              disabled={stagingInProgress}
-                            >
-                              Stage
-                            </button>
-                          </div>
-                        ))}
+                        <UncommittedDiffFileTree
+                          files={unstagedFiles}
+                          selectedFile={selectedUncommittedFile}
+                          onSelectFile={loadUncommittedFileDiff}
+                          getStatusIcon={getStatusIcon}
+                          onAction={handleStageFile}
+                          actionLabel="Stage"
+                          stagingInProgress={stagingInProgress}
+                        />
                       </>
                     )}
                   </div>
