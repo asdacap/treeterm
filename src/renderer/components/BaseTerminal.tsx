@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { useStore } from 'zustand'
@@ -67,8 +67,6 @@ export interface BaseTerminalConfig {
   themeBackground: string
   // Activity state detector prompt patterns (optional)
   promptPatterns?: RegExp[]
-  // Startup command to run when creating new PTY (optional)
-  startupCommand?: string
   // Log prefix for console messages
   logPrefix: string
   // Whether to disable the scrollbar (for tools with own scrolling like opencode)
@@ -78,10 +76,8 @@ export interface BaseTerminalConfig {
 }
 
 interface BaseTerminalProps {
-  cwd: string
   workspace: WorkspaceStore
   tabId: string
-  sandbox?: SandboxConfig
   isVisible?: boolean
   config: BaseTerminalConfig
 }
@@ -92,14 +88,12 @@ interface ContextMenu {
 }
 
 export default function BaseTerminal({
-  cwd,
   workspace,
   tabId,
-  sandbox,
   isVisible,
   config,
 }: BaseTerminalProps) {
-  const { workspace: wsData, removeTab, updateTabState } = useStore(workspace)
+  const { workspace: wsData, removeTab } = useStore(workspace)
   const workspaceId = wsData.id
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
@@ -121,15 +115,13 @@ export default function BaseTerminal({
 
   useEffect(() => {
     console.log(`[${config.logPrefix} ${tabId}] useEffect running`, {
-      cwd,
-      sandboxEnabled: sandbox?.enabled,
+      existingPtyId,
       workspaceId
     })
 
     if (!containerRef.current) return
 
     isMountedRef.current = true
-    const isSandboxed = sandbox?.enabled ?? false
 
     // Create terminal with configurable theme
     const terminal = new XTerm({
@@ -138,10 +130,10 @@ export default function BaseTerminal({
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       scrollback: 50000, // Increase scrollback buffer to handle long outputs
       theme: {
-        background: isSandboxed ? '#1a1a2e' : config.themeBackground,
+        background: config.themeBackground,
         foreground: '#d4d4d4',
         cursor: '#d4d4d4',
-        cursorAccent: isSandboxed ? '#1a1a2e' : config.themeBackground,
+        cursorAccent: config.themeBackground,
         selectionBackground: '#264f78',
         black: '#000000',
         red: '#cd3131',
@@ -284,62 +276,41 @@ export default function BaseTerminal({
 
     const session = sessionStore.getState()
 
-    // Try to reconnect to existing PTY, or create a new one
+    // Attach to existing PTY
     const initPty = async () => {
-      // Try to attach to existing session (daemon mode)
-      if (existingPtyId) {
-        try {
-          const result = await session.attachTty(existingPtyId)
-          console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, existingPtyId)
-          if (!isMountedRef.current) return
-
-          // Restore scrollback buffer
-          if (result.scrollback && result.scrollback.length > 0) {
-            console.log(`[${config.logPrefix} ${tabId}] restoring ${result.scrollback.length} scrollback chunks`)
-            for (const chunk of result.scrollback) {
-              terminal.write(chunk)
-            }
-          } else {
-            terminal.write('\x1b[2mno buffer\x1b[0m\r\n')
-          }
-
-          // If session already exited, show exit message and don't subscribe for live data
-          if (result.exitCode !== undefined) {
-            terminal.write(`\r\n\x1b[2mProcess exited with exit code ${result.exitCode}\x1b[0m\r\n`)
-            return
-          }
-
-          const tty = session.getTty(existingPtyId)
-          if (!tty) return
-          connectToTty(tty)
-          return
-        } catch (error) {
-          console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, existingPtyId, error)
-          terminal.write(`\x1b[31mFailed to reattach terminal: ${error instanceof Error ? error.message : 'Unknown error'}\x1b[0m\r\n`)
-          return
-        }
-      }
-
-      // No existing PTY or it's dead - create a new one
-      const ptyId = await session.createTty(cwd, sandbox, config.startupCommand)
-
-      // Check if component is still mounted
-      if (!isMountedRef.current) {
-        // Component unmounted during PTY creation - kill the orphaned PTY
-        const orphanTty = session.getTty(ptyId)
-        if (orphanTty) orphanTty.getState().kill()
+      if (!existingPtyId) {
+        terminal.write(`\x1b[31mNo PTY available for this terminal\x1b[0m\r\n`)
         return
       }
 
-      const tty = session.getTty(ptyId)
-      if (!tty) return
+      try {
+        const result = await session.attachTty(existingPtyId)
+        console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, existingPtyId)
+        if (!isMountedRef.current) return
 
-      console.log(`[${config.logPrefix} ${tabId}] created new PTY:`, ptyId)
-      connectToTty(tty)
-      updateTabState<BaseTerminalState>(tabId, (state) => ({
-        ...state,
-        ptyId,
-      }))
+        // Restore scrollback buffer
+        if (result.scrollback && result.scrollback.length > 0) {
+          console.log(`[${config.logPrefix} ${tabId}] restoring ${result.scrollback.length} scrollback chunks`)
+          for (const chunk of result.scrollback) {
+            terminal.write(chunk)
+          }
+        } else {
+          terminal.write('\x1b[2mno buffer\x1b[0m\r\n')
+        }
+
+        // If session already exited, show exit message and don't subscribe for live data
+        if (result.exitCode !== undefined) {
+          terminal.write(`\r\n\x1b[2mProcess exited with exit code ${result.exitCode}\x1b[0m\r\n`)
+          return
+        }
+
+        const tty = session.getTty(existingPtyId)
+        if (!tty) return
+        connectToTty(tty)
+      } catch (error) {
+        console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, existingPtyId, error)
+        terminal.write(`\x1b[31mFailed to reattach terminal: ${error instanceof Error ? error.message : 'Unknown error'}\x1b[0m\r\n`)
+      }
     }
 
     initPty()
@@ -389,8 +360,6 @@ export default function BaseTerminal({
     return () => {
       console.log(`[${config.logPrefix} ${tabId}] cleanup running (PTY preserved):`, {
         ptyId: ttyRef.current?.getState().ptyId,
-        cwd,
-        sandboxEnabled: sandbox?.enabled,
         workspaceId
       })
       isMountedRef.current = false
@@ -407,7 +376,7 @@ export default function BaseTerminal({
       terminal.dispose()
     }
     // Note: existingPtyId is intentionally NOT in deps - we only check it on mount/re-run
-  }, [cwd, tabId, sandbox?.enabled, workspaceId, config.startupCommand, config.themeBackground])
+  }, [tabId, workspaceId, config.themeBackground])
 
   // Refresh terminal when tab becomes visible to fix blank screen issue
   useEffect(() => {

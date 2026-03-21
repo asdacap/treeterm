@@ -4,6 +4,7 @@ import BaseTerminal, { type BaseTerminalConfig, type BaseTerminalState } from '.
 import PushToTalkButton from './PushToTalkButton'
 import { ReviewCommentsButton } from './ReviewCommentsButton'
 import { useSessionApi } from '../contexts/SessionStoreContext'
+import { useTtyCreation } from '../hooks/useTtyConnection'
 import type { SandboxConfig, WorkspaceStore } from '../types'
 
 interface AiHarnessProps {
@@ -30,9 +31,18 @@ export default function AiHarness({
   stripScrollbackClear,
 }: AiHarnessProps) {
   const sessionStore = useSessionApi()
-  const { workspace: wsData } = useStore(workspace)
+  const { workspace: wsData, updateTabState } = useStore(workspace)
   const appState = wsData?.appStates[tabId]
   const ptyId = (appState?.state as BaseTerminalState | undefined)?.ptyId
+
+  const onCreated = useCallback((newPtyId: string) => {
+    updateTabState<BaseTerminalState>(tabId, (state) => ({
+      ...state,
+      ptyId: newPtyId,
+    }))
+  }, [tabId, updateTabState])
+
+  const { loading, error } = useTtyCreation(ptyId, cwd, sandbox, command, onCreated)
 
   const handlePushToTalkTranscript = useCallback((text: string) => {
     if (ptyId) {
@@ -52,19 +62,24 @@ export default function AiHarness({
   const config = useMemo<BaseTerminalConfig>(() => ({
     themeBackground: backgroundColor,
     promptPatterns: [/❯\s/], // Common AI tool prompt pattern
-    startupCommand: command,
     logPrefix: 'AiHarness',
     disableScrollbar,
     stripScrollbackClear
-  }), [backgroundColor, command, disableScrollbar, stripScrollbackClear])
+  }), [backgroundColor, disableScrollbar, stripScrollbackClear])
+
+  if (loading) {
+    return <div style={{ padding: 16, color: '#888' }}>Starting AI harness...</div>
+  }
+
+  if (error) {
+    return <div style={{ padding: 16, color: '#f14c4c' }}>Failed to start AI harness: {error.message}</div>
+  }
 
   return (
     <div className="ai-harness-wrapper" style={{ position: 'relative', width: '100%', height: '100%' }}>
       <BaseTerminal
-        cwd={cwd}
         workspace={workspace}
         tabId={tabId}
-        sandbox={sandbox}
         isVisible={isVisible}
         config={config}
       />
