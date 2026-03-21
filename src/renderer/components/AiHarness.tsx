@@ -8,7 +8,7 @@ import { useSessionApi } from '../contexts/SessionStoreContext'
 import { useTtyCreation } from '../hooks/useTtyConnection'
 import { useTerminalAnalyzer, type TerminalAiState } from '../hooks/useTerminalAnalyzer'
 import { useSettingsStore } from '../store/settings'
-import type { SandboxConfig, WorkspaceStore } from '../types'
+import type { AiHarnessState, SandboxConfig, WorkspaceStore } from '../types'
 import { clampContextMenuPosition } from '../utils/contextMenuPosition'
 
 const STATE_COLORS: Record<TerminalAiState, string> = {
@@ -58,6 +58,7 @@ export default function AiHarness({
   const { workspace: wsData, updateTabState } = useStore(workspace)
   const appState = wsData?.appStates[tabId]
   const ptyId = (appState?.state as BaseTerminalState | undefined)?.ptyId
+  const autoApprove = (appState?.state as AiHarnessState | undefined)?.autoApprove ?? false
 
   const [terminal, setTerminal] = useState<XTerm | null>(null)
   const dataVersionRefHolder = useRef<React.MutableRefObject<number> | null>(null)
@@ -99,7 +100,9 @@ export default function AiHarness({
   )
 
   const settings = useSettingsStore((s) => s.settings)
-  const [autoApprove, setAutoApprove] = useState(false)
+  const setAutoApprove = useCallback((value: boolean) => {
+    updateTabState<AiHarnessState>(tabId, (state) => ({ ...state, autoApprove: value }))
+  }, [tabId, updateTabState])
   const autoApproveSentRef = useRef(false)
   const [badgeContextMenu, setBadgeContextMenu] = useState<{ x: number; y: number } | null>(null)
 

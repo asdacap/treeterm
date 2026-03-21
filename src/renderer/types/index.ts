@@ -81,6 +81,7 @@ export interface TerminalState {
 
 export type AiHarnessState = TerminalState & {
   sandbox: SandboxConfig
+  autoApprove?: boolean
 }
 
 export interface FilesystemState {
