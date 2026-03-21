@@ -156,14 +156,18 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
   // Handle actions from FlexLayout (intercept delete to route through store)
   const handleAction = useCallback((action: Action): Action | undefined => {
     if (action.type === Actions.DELETE_TAB) {
-      removeTab(action.data.node)
+      const tabId = action.data.node
+      if (!workspace?.appStates[tabId]) {
+        return action // Orphan tab — let FlexLayout remove it directly
+      }
+      removeTab(tabId)
       return undefined // Prevent FlexLayout from handling it — store will sync
     }
     if (action.type === Actions.SELECT_TAB) {
       setActiveTab(action.data.tabNode)
     }
     return action
-  }, [removeTab, setActiveTab])
+  }, [workspace, removeTab, setActiveTab])
 
   // Serialize model changes to metadata
   const handleModelChange = useCallback((m: Model, _action: Action) => {
