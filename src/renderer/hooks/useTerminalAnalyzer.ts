@@ -34,10 +34,11 @@ export function useTerminalAnalyzer(
       isAnalyzingRef.current = true
 
       try {
-        // Read last 10 lines from xterm buffer
+        // Read last N lines from xterm buffer
+        const numLines = settings.terminalAnalyzer.bufferLines || 10
         const buffer = terminal.buffer.active
         const lineCount = buffer.length
-        const startLine = Math.max(0, lineCount - 10)
+        const startLine = Math.max(0, lineCount - numLines)
         const lines: string[] = []
         for (let i = startLine; i < lineCount; i++) {
           const line = buffer.getLine(i)

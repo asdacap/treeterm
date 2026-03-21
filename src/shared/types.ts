@@ -187,6 +187,7 @@ export interface Settings {
     systemPrompt: string    // System prompt (supports {{cwd}} and {{safe_paths}} templates)
     disableReasoning: boolean
     safePaths: string[]     // Paths considered safe for permission_request classification
+    bufferLines: number     // Number of lines to read from terminal buffer
   }
   // Global default application for new worktrees
   // If not set, falls back to 'terminal' or first available app

@@ -71,7 +71,8 @@ const defaultSettings: Settings = {
     model: 'openai/gpt-oss-safeguard-20b',
     systemPrompt: 'You are a terminal state analyzer. The current working directory is: {{cwd}}. The safe paths are: {{safe_paths}}. Given the last lines of terminal output, respond with ONLY a JSON object: {"state": "<state>"} where state is one of: "idle" (shell prompt visible, waiting for command), "working" (process actively running/producing output), "user_input_required" (program asking for user text input), "permission_request" (program asking for y/n or similar confirmation and the action may mutate files OUTSIDE the safe paths), "safe_permission_requested" (program asking for permission but the action only mutates files within one of the safe paths — safe to approve), "completed" (task finished, showing final result). No other text.',
     disableReasoning: true,
-    safePaths: ['/tmp']
+    safePaths: ['/tmp'],
+    bufferLines: 10
   },
   globalDefaultApplicationId: 'terminal',
   recentDirectories: []

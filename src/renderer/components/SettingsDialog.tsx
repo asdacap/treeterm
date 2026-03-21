@@ -689,6 +689,26 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                 </div>
 
                 <div className="settings-group">
+                  <label className="settings-label">Buffer Lines</label>
+                  <input
+                    type="number"
+                    className="settings-input"
+                    min={1}
+                    max={100}
+                    value={localSettings.terminalAnalyzer.bufferLines}
+                    onChange={(e) =>
+                      setLocalSettings((prev) => ({
+                        ...prev,
+                        terminalAnalyzer: { ...prev.terminalAnalyzer, bufferLines: parseInt(e.target.value) || 10 }
+                      }))
+                    }
+                  />
+                  <p className="settings-hint">
+                    Number of terminal buffer lines to send to the analyzer.
+                  </p>
+                </div>
+
+                <div className="settings-group">
                   <label className="settings-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <input
                       type="checkbox"
