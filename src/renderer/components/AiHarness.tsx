@@ -98,7 +98,23 @@ export default function AiHarness({
   )
 
   const settings = useSettingsStore((s) => s.settings)
+  const [autoApprove, setAutoApprove] = useState(false)
+  const autoApproveSentRef = useRef(false)
   const [badgeContextMenu, setBadgeContextMenu] = useState<{ x: number; y: number } | null>(null)
+
+  // Auto-approve safe permission requests
+  useEffect(() => {
+    if (aiState === 'safe_permission_requested' && autoApprove && !autoApproveSentRef.current) {
+      autoApproveSentRef.current = true
+      if (ptyId) {
+        const tty = sessionStore.getState().getTty(ptyId)
+        if (tty) tty.getState().write('\r')
+      }
+    }
+    if (aiState !== 'safe_permission_requested') {
+      autoApproveSentRef.current = false
+    }
+  }, [aiState, autoApprove, ptyId, sessionStore])
 
   const handleBadgeContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -155,22 +171,33 @@ export default function AiHarness({
   }
 
   return (
-    <div className="ai-harness-wrapper" style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <BaseTerminal
-        workspace={workspace}
-        tabId={tabId}
-        isVisible={isVisible}
-        config={config}
-      />
-      <div
-        className="ai-state-badge"
-        style={{
-          background: STATE_COLORS[aiState],
-        }}
-        onContextMenu={handleBadgeContextMenu}
-      >
-        {analyzing && <span className="ai-state-badge-spinner" />}
-        {STATE_LABELS[aiState]}
+    <div className="ai-harness-wrapper">
+      <div className="ai-harness-terminal">
+        <BaseTerminal
+          workspace={workspace}
+          tabId={tabId}
+          isVisible={isVisible}
+          config={config}
+        />
+      </div>
+      <div className="ai-harness-status-bar">
+        <div
+          className="ai-state-badge"
+          style={{ background: STATE_COLORS[aiState] }}
+          onContextMenu={handleBadgeContextMenu}
+        >
+          {analyzing && <span className="ai-state-badge-spinner" />}
+          {STATE_LABELS[aiState]}
+        </div>
+        <label className="ai-harness-toggle">
+          <input
+            type="checkbox"
+            checked={autoApprove}
+            onChange={(e) => setAutoApprove(e.target.checked)}
+          />
+          <span className="ai-harness-toggle-slider" />
+          <span className="ai-harness-toggle-label">Auto-approve safe</span>
+        </label>
       </div>
       {badgeContextMenu && (
         <div
