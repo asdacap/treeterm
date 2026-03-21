@@ -5,6 +5,7 @@ interface LlmSettings {
   baseUrl: string
   apiKey: string
   model: string
+  reasoning: boolean
 }
 
 interface ChatMessage {
@@ -34,7 +35,8 @@ export async function startChatStream(
       {
         model: settings.model,
         messages,
-        stream: true
+        stream: true,
+        ...(settings.reasoning && { reasoning_effort: 'medium' as const })
       },
       { signal: controller.signal }
     )

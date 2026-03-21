@@ -14,6 +14,7 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [reasoning, setReasoning] = useState(false)
   const activeRequestId = useRef<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const workspaceStore = useStore(workspace)
@@ -99,14 +100,15 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
       await llm.send(requestId, apiMessages, {
         baseUrl: settings.llm.baseUrl,
         apiKey: settings.llm.apiKey,
-        model: settings.llm.model
+        model: settings.llm.model,
+        reasoning
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send message')
       setIsStreaming(false)
       activeRequestId.current = null
     }
-  }, [input, messages, isStreaming, settings.llm, llm])
+  }, [input, messages, isStreaming, settings.llm, llm, reasoning])
 
   const handleCancel = useCallback(() => {
     if (activeRequestId.current) {
@@ -159,6 +161,17 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
         <div ref={messagesEndRef} />
       </div>
       <div className="chat-input-area">
+        <div className="chat-input-options">
+          <label className="chat-reasoning-label">
+            <input
+              type="checkbox"
+              checked={reasoning}
+              onChange={(e) => setReasoning(e.target.checked)}
+              disabled={isStreaming}
+            />
+            Reasoning
+          </label>
+        </div>
         <textarea
           className="chat-input"
           value={input}
