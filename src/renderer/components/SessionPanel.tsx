@@ -42,7 +42,6 @@ export default function SessionPanel({
     adoptExistingWorktree,
     createWorktreeFromBranch,
     createWorktreeFromRemote,
-    removeWorkspace,
     quickForkWorkspace,
     setActiveWorkspace,
     getWorkspace,
@@ -195,7 +194,7 @@ export default function SessionPanel({
     // For regular workspaces, just confirm and remove
     const message = `Remove workspace "${ws.name}"?`
     if (confirm(message)) {
-      await removeWorkspace(id)
+      await getWorkspace(id)!.remove()
     }
   }
 

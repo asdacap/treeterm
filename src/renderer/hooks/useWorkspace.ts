@@ -55,6 +55,14 @@ export function useWorkspace(
       workspaceStore.getState().closeAndCleanWorkspace(workspaceId),
     lookupWorkspace: (otherId: string) =>
       workspaceStore.getState().workspaces[otherId],
+    remove: () =>
+      workspaceStore.getState().removeWorkspace(workspaceId),
+    removeKeepBranch: () =>
+      workspaceStore.getState().removeWorkspaceKeepBranch(workspaceId),
+    removeKeepWorktree: () =>
+      workspaceStore.getState().removeWorkspaceKeepWorktree(workspaceId),
+    removeKeepBoth: () =>
+      workspaceStore.getState().removeWorkspaceKeepBoth(workspaceId),
   // workspace in deps ensures re-creation when workspace data changes (for reactive `data`)
   }), [workspaceStore, workspaceId, workspace])
 }

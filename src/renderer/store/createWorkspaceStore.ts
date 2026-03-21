@@ -34,6 +34,10 @@ export interface WorkspaceHandle {
   mergeAndRemove: (squash: boolean) => Promise<{ success: boolean; error?: string }>
   closeAndClean: () => Promise<{ success: boolean; error?: string }>
   lookupWorkspace: (id: string) => Workspace | undefined
+  remove: () => Promise<void>
+  removeKeepBranch: () => Promise<void>
+  removeKeepWorktree: () => Promise<void>
+  removeKeepBoth: () => Promise<void>
 }
 
 export interface WorkspaceState {
@@ -361,6 +365,14 @@ export function createWorkspaceStore(
           store.getState().closeAndCleanWorkspace(id),
         lookupWorkspace: (otherId: string) =>
           store.getState().workspaces[otherId],
+        remove: () =>
+          store.getState().removeWorkspace(id),
+        removeKeepBranch: () =>
+          store.getState().removeWorkspaceKeepBranch(id),
+        removeKeepWorktree: () =>
+          store.getState().removeWorkspaceKeepWorktree(id),
+        removeKeepBoth: () =>
+          store.getState().removeWorkspaceKeepBoth(id),
       }
     },
 

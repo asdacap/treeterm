@@ -31,10 +31,6 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     adoptExistingWorktree,
     createWorktreeFromBranch,
     createWorktreeFromRemote,
-    removeWorkspace,
-    removeWorkspaceKeepBranch,
-    removeWorkspaceKeepWorktree,
-    removeWorkspaceKeepBoth,
     setActiveWorkspace,
   } = useStore(sessionStore)
   const { enterWorkspaceFocus } = usePrefixModeStore()
@@ -236,41 +232,37 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [abandonMenuOpen])
 
-  // Abandon handlers
+  // Abandon handlers — these are only callable when activeHandle exists (past the early return)
   const handleAbandon = async () => {
-    if (!activeWorkspaceId) return
     if (!confirm('Are you sure you want to abandon this workspace? All changes will be discarded.')) {
       return
     }
     setAbandonMenuOpen(false)
-    await removeWorkspace(activeWorkspaceId)
+    await activeHandle!.remove()
   }
 
   const handleAbandonKeepBranch = async () => {
-    if (!activeWorkspaceId) return
     if (!confirm('Abandon this workspace but keep the branch? The worktree will be removed but the branch will be kept.')) {
       return
     }
     setAbandonMenuOpen(false)
-    await removeWorkspaceKeepBranch(activeWorkspaceId)
+    await activeHandle!.removeKeepBranch()
   }
 
   const handleAbandonKeepWorktree = async () => {
-    if (!activeWorkspaceId) return
     if (!confirm('Abandon this workspace but keep the worktree on disk? The worktree will remain but the branch will be deleted.')) {
       return
     }
     setAbandonMenuOpen(false)
-    await removeWorkspaceKeepWorktree(activeWorkspaceId)
+    await activeHandle!.removeKeepWorktree()
   }
 
   const handleAbandonKeepBoth = async () => {
-    if (!activeWorkspaceId) return
     if (!confirm('Abandon this workspace but keep both the worktree and branch? They will remain but will no longer be tracked in TreeTerm.')) {
       return
     }
     setAbandonMenuOpen(false)
-    await removeWorkspaceKeepBoth(activeWorkspaceId)
+    await activeHandle!.removeKeepBoth()
   }
 
   // Compute flattened workspace list for navigation

@@ -35,6 +35,10 @@ const mockWorkspaceHandle = {
   mergeAndRemove: vi.fn(),
   closeAndClean: vi.fn(),
   lookupWorkspace: vi.fn(),
+  remove: vi.fn(),
+  removeKeepBranch: vi.fn(),
+  removeKeepWorktree: vi.fn(),
+  removeKeepBoth: vi.fn(),
 } satisfies WorkspaceHandle
 
 describe('Comments Renderer', () => {
