@@ -158,7 +158,7 @@ describe('createSessionStore', () => {
       const ptyId = await store.getState().createTty('/home')
       expect(ptyId).toBe('pty-1')
       expect(store.getState().ttyHandles['pty-1']).toBeDefined()
-      expect(deps.terminal.create).toHaveBeenCalledWith('/home', undefined, undefined)
+      expect(deps.terminal.create).toHaveBeenCalledWith('local', '/home', undefined, undefined)
     })
 
     it('createTty throws when terminal.create returns null', async () => {

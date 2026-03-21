@@ -10,7 +10,6 @@ interface WindowInfo {
   window: BrowserWindow
   ipcServer: IpcServer
   uuid: string
-  connectionId: string
 }
 
 class WindowManager {
@@ -27,9 +26,9 @@ class WindowManager {
   /**
    * Register a window
    */
-  registerWindow(window: BrowserWindow, ipcServer: IpcServer, uuid?: string, connectionId: string = 'local'): void {
+  registerWindow(window: BrowserWindow, ipcServer: IpcServer, uuid?: string): void {
     const id = window.id
-    this.windows.set(id, { window, ipcServer, uuid: uuid || `win-${id}`, connectionId })
+    this.windows.set(id, { window, ipcServer, uuid: uuid || `win-${id}` })
 
     // Clean up when window closes
     window.on('closed', () => {
@@ -56,16 +55,6 @@ class WindowManager {
    */
   getWindowCount(): number {
     return this.windows.size
-  }
-
-  /**
-   * Update the connection ID for a window
-   */
-  updateConnectionId(windowId: number, connectionId: string): void {
-    const info = this.windows.get(windowId)
-    if (info) {
-      this.windows.set(windowId, { ...info, connectionId })
-    }
   }
 
   /**

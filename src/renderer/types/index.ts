@@ -83,6 +83,7 @@ export interface ApplicationRenderProps {
 export interface TerminalState {
   ptyId: string | null       // daemon sessionId — persisted for reconnection
   ptyHandle: string | null   // ephemeral stream handle — used for write/resize/onData/onExit
+  connectionId?: string      // which connection this PTY belongs to — used for routing kill/isAlive
   keepOnExit?: boolean
 }
 
@@ -275,13 +276,13 @@ export interface ConflictCheckResult {
 }
 
 export interface TerminalApi {
-  create: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<{ sessionId: string; handle: string } | null>
-  attach: (sessionId: string) => Promise<{ success: boolean; handle?: string; scrollback?: string[]; exitCode?: number; error?: string }>
-  list: () => Promise<SessionInfo[]>
+  create: (connectionId: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<{ sessionId: string; handle: string } | null>
+  attach: (connectionId: string, sessionId: string) => Promise<{ success: boolean; handle?: string; scrollback?: string[]; exitCode?: number; error?: string }>
+  list: (connectionId: string) => Promise<SessionInfo[]>
   write: (handle: string, data: string) => void
   resize: (handle: string, cols: number, rows: number) => void
-  kill: (sessionId: string) => void
-  isAlive: (id: string) => Promise<boolean>
+  kill: (connectionId: string, sessionId: string) => void
+  isAlive: (connectionId: string, id: string) => Promise<boolean>
   onData: (handle: string, callback: (data: string) => void) => () => void
   onExit: (handle: string, callback: (exitCode: number) => void) => () => void
   onActiveProcessesOpen: (callback: () => void) => () => void

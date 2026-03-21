@@ -161,7 +161,7 @@ describe('AI Harness Renderer', () => {
 
         await app.cleanup?.(tab, workspace)
 
-        expect(mockTerminalKill).toHaveBeenCalledWith('pty-789')
+        expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-789')
       })
 
       it('does not kill PTY when tab has no ptyId', async () => {

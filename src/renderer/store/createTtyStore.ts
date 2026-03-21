@@ -1,6 +1,15 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { TerminalApi } from '../types'
+
+/** Subset of TerminalApi needed by TtyStore (without connectionId params — bound by session store) */
+export interface TtyTerminalDeps {
+  write: (handle: string, data: string) => void
+  resize: (handle: string, cols: number, rows: number) => void
+  kill: (sessionId: string) => void
+  isAlive: (id: string) => Promise<boolean>
+  onData: (handle: string, callback: (data: string) => void) => () => void
+  onExit: (handle: string, callback: (exitCode: number) => void) => () => void
+}
 
 export interface TtyState {
   ptyId: string
@@ -14,7 +23,7 @@ export interface TtyState {
 
 export type Tty = StoreApi<TtyState>
 
-export function createTtyStore(ptyId: string, handle: string, terminal: TerminalApi): Tty {
+export function createTtyStore(ptyId: string, handle: string, terminal: TtyTerminalDeps): Tty {
   return createStore<TtyState>()(() => ({
     ptyId,
     write: (data: string) => terminal.write(handle, data),

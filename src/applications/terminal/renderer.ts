@@ -4,7 +4,7 @@ import Terminal from '../../renderer/components/Terminal'
 import { createElement } from 'react'
 import { useActivityStateStore } from '../../renderer/store/activityState'
 
-type TerminalDeps = { terminal: Pick<TerminalApi, 'kill'> }
+type TerminalDeps = { terminal: { kill: (connectionId: string, sessionId: string) => void } }
 
 // Factory function to create the base terminal application with configurable isDefault
 export function createTerminalApplication(startByDefault: boolean, deps: TerminalDeps): Application<TerminalState> {
@@ -20,7 +20,7 @@ export function createTerminalApplication(startByDefault: boolean, deps: Termina
 
     cleanup: async (tab: Tab, _workspace: Workspace) => {
       if (isTerminalState(tab.state) && tab.state.ptyId) {
-        deps.terminal.kill(tab.state.ptyId)
+        deps.terminal.kill(tab.state.connectionId ?? 'local', tab.state.ptyId)
       }
       // Remove activity state for this tab
       useActivityStateStore.getState().removeTabState(tab.id)
@@ -59,7 +59,7 @@ export function createTerminalVariant(instance: TerminalInstance, deps: Terminal
 
     cleanup: async (tab: Tab, _workspace: Workspace) => {
       if (isTerminalState(tab.state) && tab.state.ptyId) {
-        deps.terminal.kill(tab.state.ptyId)
+        deps.terminal.kill(tab.state.connectionId ?? 'local', tab.state.ptyId)
       }
       useActivityStateStore.getState().removeTabState(tab.id)
     },

@@ -3,7 +3,7 @@ import { isAiHarnessState } from '../../renderer/types'
 import AiHarness from '../../renderer/components/AiHarness'
 import { createElement } from 'react'
 
-type TerminalDeps = { terminal: Pick<TerminalApi, 'kill'> }
+type TerminalDeps = { terminal: { kill: (connectionId: string, sessionId: string) => void } }
 
 // Factory function to create AI Harness variant applications
 export function createAiHarnessVariant(instance: AiHarnessInstance, deps: TerminalDeps): Application<AiHarnessState> {
@@ -29,7 +29,7 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
 
     cleanup: async (tab: Tab, _workspace: Workspace) => {
       if (isAiHarnessState(tab.state) && tab.state.ptyId) {
-        deps.terminal.kill(tab.state.ptyId)
+        deps.terminal.kill(tab.state.connectionId ?? 'local', tab.state.ptyId)
       }
     },
 

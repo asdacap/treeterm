@@ -2,6 +2,7 @@ import { useCallback, useMemo } from 'react'
 import { useStore } from 'zustand'
 import BaseTerminal, { type BaseTerminalConfig, type BaseTerminalState } from './BaseTerminal'
 import { useTtyCreation } from '../hooks/useTtyConnection'
+import { useSessionApi } from '../contexts/SessionStoreContext'
 import type { SandboxConfig, WorkspaceStore } from '../types'
 
 interface TerminalProps {
@@ -15,15 +16,18 @@ interface TerminalProps {
 
 export default function Terminal({ cwd, workspace, tabId, startupCommand, sandbox, isVisible }: TerminalProps) {
   const { workspace: wsData, updateTabState } = useStore(workspace)
+  const sessionStore = useSessionApi()
   const appState = wsData?.appStates[tabId]
   const existingPtyId = (appState?.state as BaseTerminalState | undefined)?.ptyId
 
   const onCreated = useCallback((ptyId: string) => {
+    const connId = sessionStore.getState().connection?.id ?? 'local'
     updateTabState<BaseTerminalState>(tabId, (state) => ({
       ...state,
       ptyId,
+      connectionId: connId,
     }))
-  }, [tabId, updateTabState])
+  }, [tabId, updateTabState, sessionStore])
 
   const { loading, error } = useTtyCreation(existingPtyId, cwd, sandbox, startupCommand, onCreated)
 

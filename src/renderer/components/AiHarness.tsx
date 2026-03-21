@@ -70,11 +70,13 @@ export default function AiHarness({
   const [dataVersionReady, setDataVersionReady] = useState(false)
 
   const onCreated = useCallback((newPtyId: string) => {
+    const connId = sessionStore.getState().connection?.id ?? 'local'
     updateTabState<BaseTerminalState>(tabId, (state) => ({
       ...state,
       ptyId: newPtyId,
+      connectionId: connId,
     }))
-  }, [tabId, updateTabState])
+  }, [tabId, updateTabState, sessionStore])
 
   const { loading, error } = useTtyCreation(ptyId, cwd, sandbox, command, onCreated)
 

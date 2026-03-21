@@ -33,19 +33,19 @@ import type {
 export interface IpcRequests {
   // PTY operations
   ptyCreate: {
-    params: [cwd: string, sandbox?: SandboxConfig, startupCommand?: string]
+    params: [connectionId: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string]
     result: { sessionId: string; handle: string } | null
   }
   ptyAttach: {
-    params: [sessionId: string]
+    params: [connectionId: string, sessionId: string]
     result: { success: boolean; handle?: string; scrollback?: string[]; exitCode?: number; error?: string }
   }
   ptyList: {
-    params: []
+    params: [connectionId: string]
     result: SessionInfo[]
   }
   ptyIsAlive: {
-    params: [id: string]
+    params: [connectionId: string, id: string]
     result: boolean
   }
 
@@ -334,7 +334,7 @@ export interface IpcSends {
     params: [handle: string, cols: number, rows: number]
   }
   ptyKill: {
-    params: [sessionId: string]
+    params: [connectionId: string, sessionId: string]
   }
   appCloseConfirmed: {
     params: []

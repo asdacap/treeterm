@@ -126,7 +126,7 @@ describe('Terminal Renderer', () => {
 
         await app.cleanup?.(tab, workspace)
 
-        expect(mockTerminalKill).toHaveBeenCalledWith('pty-123')
+        expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-123')
         expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
       })
 
@@ -319,7 +319,7 @@ describe('Terminal Renderer', () => {
 
       await app.cleanup?.(tab, workspace)
 
-      expect(mockTerminalKill).toHaveBeenCalledWith('pty-123')
+      expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-123')
       expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
     })
   })
@@ -400,7 +400,7 @@ describe('Terminal Renderer', () => {
 
         await variant.cleanup?.(tab, workspace)
 
-        expect(mockTerminalKill).toHaveBeenCalledWith('pty-456')
+        expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-456')
         expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
       })
 

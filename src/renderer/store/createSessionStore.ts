@@ -4,7 +4,7 @@ import { humanId } from 'human-id'
 import { createWorkspaceStore } from './createWorkspaceStore'
 import type { WorkspaceStore, WorkspaceStoreDeps } from './createWorkspaceStore'
 import { createTtyStore } from './createTtyStore'
-import type { Tty } from './createTtyStore'
+import type { Tty, TtyTerminalDeps } from './createTtyStore'
 import type {
   Workspace, Session, AppState, GitInfo,
   ConnectionInfo,
@@ -329,6 +329,18 @@ export function createSessionStore(
     await syncSessionToDaemon(store.getState().isRestoring)
   }
 
+  const connectionId = config.connection?.id ?? 'local'
+
+  // Create a terminal wrapper with connectionId bound for tty stores
+  const boundTerminal: TtyTerminalDeps = {
+    write: deps.terminal.write,
+    resize: deps.terminal.resize,
+    kill: (sessionId: string) => deps.terminal.kill(connectionId, sessionId),
+    isAlive: (id: string) => deps.terminal.isAlive(connectionId, id),
+    onData: deps.terminal.onData,
+    onExit: deps.terminal.onExit,
+  }
+
   const store = createStore<SessionState>()((set, get) => ({
     sessionId: config.sessionId,
     ttyHandles: {},
@@ -340,11 +352,11 @@ export function createSessionStore(
     connection: config.connection ?? null,
 
     createTty: async (cwd: string, sandbox?: SandboxConfig, startupCommand?: string): Promise<string> => {
-      const result = await deps.terminal.create(cwd, sandbox, startupCommand)
+      const result = await deps.terminal.create(connectionId, cwd, sandbox, startupCommand)
       if (!result) {
         throw new Error('Failed to create PTY')
       }
-      const tty = createTtyStore(result.sessionId, result.handle, deps.terminal)
+      const tty = createTtyStore(result.sessionId, result.handle, boundTerminal)
       set((s) => ({
         ttyHandles: { ...s.ttyHandles, [result.sessionId]: tty }
       }))
@@ -352,11 +364,11 @@ export function createSessionStore(
     },
 
     attachTty: async (ptyId: string): Promise<{ scrollback?: string[]; exitCode?: number }> => {
-      const result = await deps.terminal.attach(ptyId)
+      const result = await deps.terminal.attach(connectionId, ptyId)
       if (!result.success || !result.handle) {
         throw new Error(result.error || 'Failed to attach to PTY')
       }
-      const tty = createTtyStore(ptyId, result.handle, deps.terminal)
+      const tty = createTtyStore(ptyId, result.handle, boundTerminal)
       set((s) => ({
         ttyHandles: { ...s.ttyHandles, [ptyId]: tty }
       }))
@@ -368,7 +380,7 @@ export function createSessionStore(
     },
 
     listTty: (): Promise<SessionInfo[]> => {
-      return deps.terminal.list()
+      return deps.terminal.list(connectionId)
     },
 
     getWorkspace: (id: string): WorkspaceStore | null => {

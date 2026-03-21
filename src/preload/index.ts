@@ -151,14 +151,14 @@ client.onSshConnectionStatus((info) => {
 contextBridge.exposeInMainWorld('electron', {
   platform: process.platform,
   terminal: {
-    create: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string): Promise<{ sessionId: string; handle: string } | null> => {
-      return client.ptyCreate(cwd, sandbox, startupCommand)
+    create: (connectionId: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string): Promise<{ sessionId: string; handle: string } | null> => {
+      return client.ptyCreate(connectionId, cwd, sandbox, startupCommand)
     },
-    attach: (sessionId: string): Promise<{ success: boolean; handle?: string; scrollback?: string[]; exitCode?: number; error?: string }> => {
-      return client.ptyAttach(sessionId)
+    attach: (connectionId: string, sessionId: string): Promise<{ success: boolean; handle?: string; scrollback?: string[]; exitCode?: number; error?: string }> => {
+      return client.ptyAttach(connectionId, sessionId)
     },
-    list: (): Promise<SessionInfo[]> => {
-      return client.ptyList()
+    list: (connectionId: string): Promise<SessionInfo[]> => {
+      return client.ptyList(connectionId)
     },
     write: (id: string, data: string): void => {
       client.ptyWrite(id, data)
@@ -166,11 +166,11 @@ contextBridge.exposeInMainWorld('electron', {
     resize: (id: string, cols: number, rows: number): void => {
       client.ptyResize(id, cols, rows)
     },
-    kill: (id: string): void => {
-      client.ptyKill(id)
+    kill: (connectionId: string, id: string): void => {
+      client.ptyKill(connectionId, id)
     },
-    isAlive: (id: string): Promise<boolean> => {
-      return client.ptyIsAlive(id)
+    isAlive: (connectionId: string, id: string): Promise<boolean> => {
+      return client.ptyIsAlive(connectionId, id)
     },
     onData: (id: string, callback: DataCallback): (() => void) => {
       if (!dataListeners.has(id)) {

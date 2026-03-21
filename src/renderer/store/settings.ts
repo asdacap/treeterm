@@ -77,10 +77,10 @@ const defaultSettings: Settings = {
 
 interface SettingsState {
   settingsApi: SettingsApi | null
-  terminalKill: ((id: string) => void) | null
+  terminalKill: ((connectionId: string, id: string) => void) | null
   settings: Settings
   isLoaded: boolean
-  init: (settingsApi: SettingsApi, terminalKill: (id: string) => void) => void
+  init: (settingsApi: SettingsApi, terminalKill: (connectionId: string, id: string) => void) => void
   loadSettings: () => Promise<void>
   saveSettings: (settings: Settings) => Promise<void>
   updateSetting: <K extends keyof Settings>(
@@ -96,7 +96,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   settings: defaultSettings,
   isLoaded: false,
 
-  init: (settingsApi: SettingsApi, terminalKill: (id: string) => void) => {
+  init: (settingsApi: SettingsApi, terminalKill: (connectionId: string, id: string) => void) => {
     set({ settingsApi, terminalKill })
     get().loadSettings()
   },

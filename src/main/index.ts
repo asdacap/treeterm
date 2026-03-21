@@ -38,12 +38,10 @@ let useDaemon = true // Always use daemon mode
 // Simple object storage — each entry is an independent terminal's stream.
 const ptyStreams = new Map<string, PtyStream>()
 
-// Helper: get the daemon client for a given window (based on its connectionId)
-function getClientForWindow(webContentsId: number): GrpcDaemonClient {
+// Helper: get the daemon client for a given connectionId
+function getClientForConnection(connId: string): GrpcDaemonClient {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
-  const windowInfo = windowManager.findWindowByWebContentsId(webContentsId)
-  if (!windowInfo) throw new Error('Window not found')
-  return connectionManager.getClient(windowInfo.connectionId)
+  return connectionManager.getClient(connId)
 }
 
 // Initialize IPC server
@@ -249,11 +247,11 @@ function createWindow(initialSessionId?: string): BrowserWindow {
 
 // IPC Handlers
 // PTY create/attach use ipcMain.handle directly to get event.sender for routing PTY data to the correct window
-ipcMain.handle('pty:create', async (event, cwd: string, sandbox?: unknown, startupCommand?: string) => {
+ipcMain.handle('pty:create', async (event, connectionId: string, cwd: string, sandbox?: unknown, startupCommand?: string) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
 
   try {
-    const client = getClientForWindow(event.sender.id)
+    const client = getClientForConnection(connectionId)
     await client.ensureDaemonRunning()
     const sessionId = await client.createPtySession({ cwd, sandbox: sandbox as SandboxConfig | undefined, startupCommand })
     const ptyStream = client.openPtyStream(sessionId)
@@ -272,22 +270,22 @@ ipcMain.handle('pty:create', async (event, cwd: string, sandbox?: unknown, start
   }
 })
 
-ipcMain.handle('pty:attach', async (event, sessionId: string) => {
+ipcMain.handle('pty:attach', async (_event, connectionId: string, sessionId: string) => {
   if (!daemonClient) {
     return { success: false, error: 'Daemon not initialized' }
   }
 
   try {
-    const client = getClientForWindow(event.sender.id)
+    const client = getClientForConnection(connectionId)
     await client.ensureDaemonRunning()
     const ptyStream = client.openPtyStream(sessionId)
     ptyStreams.set(ptyStream.handle, ptyStream)
 
     const { scrollback, exitCode } = await ptyStream.collectScrollback()
 
-    ptyStream.onData(data => event.sender.send('pty:data', ptyStream.handle, data))
+    ptyStream.onData(data => _event.sender.send('pty:data', ptyStream.handle, data))
     ptyStream.onExit(exitCode => {
-      event.sender.send('pty:exit', ptyStream.handle, exitCode)
+      _event.sender.send('pty:exit', ptyStream.handle, exitCode)
       ptyStreams.delete(ptyStream.handle)
     })
 
@@ -299,9 +297,9 @@ ipcMain.handle('pty:attach', async (event, sessionId: string) => {
   }
 })
 
-ipcMain.handle('pty:list', async (event) => {
+ipcMain.handle('pty:list', async (_event, connectionId: string) => {
   try {
-    const client = getClientForWindow(event.sender.id)
+    const client = getClientForConnection(connectionId)
     await client.ensureDaemonRunning()
     return await client.listPtySessions()
   } catch (error) {
@@ -318,7 +316,7 @@ ipcMain.on('pty:resize', (_event, handle: string, cols: number, rows: number) =>
   ptyStreams.get(handle)?.resize(cols, rows)
 })
 
-ipcMain.on('pty:kill', (event, sessionId: string) => {
+ipcMain.on('pty:kill', (_event, connectionId: string, sessionId: string) => {
   // Close any PtyStreams for this session
   for (const [handle, stream] of ptyStreams) {
     if (stream.sessionId === sessionId) {
@@ -327,7 +325,7 @@ ipcMain.on('pty:kill', (event, sessionId: string) => {
     }
   }
   try {
-    const client = getClientForWindow(event.sender.id)
+    const client = getClientForConnection(connectionId)
     client.killPtySession(sessionId).catch(error => {
       console.error('[main] failed to kill PTY:', error)
     })
@@ -336,9 +334,9 @@ ipcMain.on('pty:kill', (event, sessionId: string) => {
   }
 })
 
-ipcMain.handle('pty:isAlive', async (event, id: string) => {
+ipcMain.handle('pty:isAlive', async (_event, connectionId: string, id: string) => {
   try {
-    const client = getClientForWindow(event.sender.id)
+    const client = getClientForConnection(connectionId)
     const sessions = await client.listPtySessions()
     return sessions.some(s => s.id === id)
   } catch (error) {
@@ -870,8 +868,6 @@ server.onSshConnect(async (event, config, options) => {
   if (info.status === 'connected') {
     const senderWindow = BrowserWindow.fromWebContents(event.sender)
     if (senderWindow) {
-      windowManager.updateConnectionId(senderWindow.id, config.id)
-
       // Load session from remote daemon and return it alongside connection info
       const remoteClient = connectionManager.getClient(config.id)
       try {
@@ -1071,8 +1067,6 @@ app.whenReady().then(async () => {
         if (info.status === 'connected') {
           console.log('[main] SSH connected:', info.id)
           if (mainWindow) {
-            windowManager.updateConnectionId(mainWindow.id, parsed.id)
-
             // Load session from remote daemon and re-initialize the renderer
             try {
               const remoteClient = connectionManager!.getClient(parsed.id)
