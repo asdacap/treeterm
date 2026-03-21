@@ -25,7 +25,6 @@ window.electron.app.onReady(() => {
     appApi: e.app,
     daemon: e.daemon,
     selectFolder: e.selectFolder,
-    getRecentDirectories: e.getRecentDirectories,
     getWindowUuid: e.getWindowUuid,
     getInitialWorkspace: e.getInitialWorkspace,
   })

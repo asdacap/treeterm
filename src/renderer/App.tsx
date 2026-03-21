@@ -30,7 +30,6 @@ export default function App() {
     appApi,
     sessionApi,
     selectFolder,
-    getRecentDirectories,
     isSettingsOpen,
     isActiveProcessesOpen,
     showCloseConfirm,
@@ -113,7 +112,6 @@ export default function App() {
           <div className="tree-pane" style={{ width: treeWidth }}>
             <TreePane
               selectFolder={selectFolder}
-              getRecentDirectories={getRecentDirectories}
             />
           </div>
           <div

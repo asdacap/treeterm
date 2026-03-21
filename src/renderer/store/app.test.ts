@@ -130,7 +130,6 @@ const mockDeps = {
     onOutput: vi.fn().mockReturnValue(() => {})
   },
   selectFolder: vi.fn(),
-  getRecentDirectories: vi.fn(),
 } as any
 
 describe('useAppStore', () => {

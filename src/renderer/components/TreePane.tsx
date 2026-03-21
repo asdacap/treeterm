@@ -26,10 +26,9 @@ export function WorkspaceActivityIndicator({ tabIds }: { tabIds: string[] }) {
 
 interface TreePaneProps {
   selectFolder: () => Promise<string | null>
-  getRecentDirectories: () => Promise<string[]>
 }
 
-export default function TreePane({ selectFolder, getRecentDirectories }: TreePaneProps): JSX.Element {
+export default function TreePane({ selectFolder }: TreePaneProps): JSX.Element {
   const sessionStores = useAppStore(s => s.sessionStores)
   const sessionIds = Object.keys(sessionStores)
 
@@ -68,7 +67,6 @@ export default function TreePane({ selectFolder, getRecentDirectories }: TreePan
             sessionId={sessionId}
             sessionStore={sessionStores[sessionId]}
             selectFolder={selectFolder}
-            getRecentDirectories={getRecentDirectories}
           />
         ))}
         {sessionIds.length === 0 && (
