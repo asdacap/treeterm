@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createAiHarnessVariant } from './renderer'
 import type { Tab, Workspace, AiHarnessInstance, AiHarnessState } from '../../renderer/types'
-import type { WorkspaceHandle } from '../../renderer/store/createWorkspaceStore'
+import { createStore } from 'zustand/vanilla'
+import type { WorkspaceHandleState } from '../../renderer/store/createWorkspaceHandleStore'
 import { useActivityStateStore } from '../../renderer/store/activityState'
 
 // Mock React
@@ -29,9 +30,8 @@ vi.mock('../../renderer/store/activityState', () => ({
 const mockTerminalKill = vi.fn()
 const mockDeps = { terminal: { kill: mockTerminalKill } }
 
-const mockWorkspaceHandle = {
-  id: 'ws-1',
-  data: { path: '/test' } as Workspace,
+const mockWorkspaceHandleStateData = {
+  workspace: { id: 'ws-1', path: '/test' } as Workspace,
   addTab: vi.fn(),
   removeTab: vi.fn(),
   setActiveTab: vi.fn(),
@@ -55,13 +55,15 @@ const mockWorkspaceHandle = {
   removeKeepBranch: vi.fn(),
   removeKeepWorktree: vi.fn(),
   removeKeepBoth: vi.fn(),
-} satisfies WorkspaceHandle
+} as WorkspaceHandleState
+
+const mockWorkspaceHandle = createStore<WorkspaceHandleState>()(() => mockWorkspaceHandleStateData)
 
 describe('AI Harness Renderer', () => {
   const mockInstance: AiHarnessInstance = {
     id: 'claude',
     name: 'Claude',
-    icon: '✦',
+    icon: '\u2726',
     command: 'claude',
     isDefault: false,
     enableSandbox: true,
@@ -80,7 +82,7 @@ describe('AI Harness Renderer', () => {
 
       expect(app.id).toBe('aiharness-claude')
       expect(app.name).toBe('Claude')
-      expect(app.icon).toBe('✦')
+      expect(app.icon).toBe('\u2726')
       expect(app.canClose).toBe(true)
       expect(app.canHaveMultiple).toBe(true)
       expect(app.showInNewTabMenu).toBe(true)

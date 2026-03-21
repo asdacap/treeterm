@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import Editor, { OnMount, OnChange } from '@monaco-editor/react'
 import { editor, KeyMod, KeyCode } from 'monaco-editor'
+import { useStore } from 'zustand'
 import { useFilesystemApi } from '../contexts/FilesystemApiContext'
 import type { EditorState, WorkspaceHandle } from '../types'
 import { MarkdownPreview } from './MarkdownPreview'
@@ -22,9 +23,9 @@ function getFilename(filePath: string): string {
 }
 
 export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
+  const { workspace: wsData, updateTabState, updateTabTitle } = useStore(workspace)
   const filesystem = useFilesystemApi()
-  const workspacePath = workspace.data.path
-  const wsData = workspace.data
+  const workspacePath = wsData.path
   const appState = wsData?.appStates[tabId]
   const state = appState?.state as EditorState | undefined
 
@@ -36,7 +37,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
     if (!state?.filePath || state.isLoading) return
 
     const loadFile = async () => {
-      workspace.updateTabState<EditorState>(tabId, (s) => ({
+      updateTabState<EditorState>(tabId, (s) => ({
         ...s,
         isLoading: true,
         error: null
@@ -49,7 +50,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
           const language = mapLanguageToMonaco(result.file.language)
           const isMarkdown = language === 'markdown'
 
-          workspace.updateTabState<EditorState>(tabId, (s) => ({
+          updateTabState<EditorState>(tabId, (s) => ({
             ...s,
             originalContent: result.file!.content,
             currentContent: result.file!.content,
@@ -59,16 +60,16 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
             isDirty: false
           }))
 
-          workspace.updateTabTitle(tabId, getFilename(state.filePath))
+          updateTabTitle(tabId, getFilename(state.filePath))
         } else {
-          workspace.updateTabState<EditorState>(tabId, (s) => ({
+          updateTabState<EditorState>(tabId, (s) => ({
             ...s,
             isLoading: false,
             error: result.error || 'Failed to load file'
           }))
         }
       } catch (err) {
-        workspace.updateTabState<EditorState>(tabId, (s) => ({
+        updateTabState<EditorState>(tabId, (s) => ({
           ...s,
           isLoading: false,
           error: `Error loading file: ${err}`
@@ -86,7 +87,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
     if (!state?.filePath) return
     const filename = getFilename(state.filePath)
     const title = state.isDirty ? `${filename} \u2022` : filename
-    workspace.updateTabTitle(tabId, title)
+    updateTabTitle(tabId, title)
   }, [state?.isDirty, state?.filePath, tabId, workspace])
 
   const handleSave = useCallback(async () => {
@@ -101,7 +102,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
       )
 
       if (result.success) {
-        workspace.updateTabState<EditorState>(tabId, (s) => ({
+        updateTabState<EditorState>(tabId, (s) => ({
           ...s,
           originalContent: s.currentContent,
           isDirty: false
@@ -130,7 +131,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
     (value) => {
       if (value === undefined) return
 
-      workspace.updateTabState<EditorState>(tabId, (s) => ({
+      updateTabState<EditorState>(tabId, (s) => ({
         ...s,
         currentContent: value,
         isDirty: value !== s.originalContent
@@ -140,7 +141,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
   )
 
   const toggleViewMode = useCallback(() => {
-    workspace.updateTabState<EditorState>(tabId, (s) => ({
+    updateTabState<EditorState>(tabId, (s) => ({
       ...s,
       viewMode: s.viewMode === 'preview' ? 'editor' : 'preview'
     }))

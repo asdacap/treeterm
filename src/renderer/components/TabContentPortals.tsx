@@ -2,14 +2,14 @@ import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import type { StoreApi } from 'zustand'
 import { useStore } from 'zustand'
-import type { WorkspaceState } from '../store/createWorkspaceStore'
+import type { SessionState } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import { ErrorBoundary } from './ErrorBoundary'
 import TabErrorFallback from './TabErrorFallback'
 import { getTabs } from '../types'
 
 interface TabContentPortalsProps {
-  workspaceStore: StoreApi<WorkspaceState>
+  sessionStore: StoreApi<SessionState>
   activeWorkspaceId: string | null
 }
 
@@ -20,8 +20,9 @@ interface TabContentPortalsProps {
  * Visibility is determined by portal slot presence in the DOM —
  * FlexLayout creates these slots when a tab is selected/visible.
  */
-export default function TabContentPortals({ workspaceStore, activeWorkspaceId }: TabContentPortalsProps) {
-  const workspaces = useStore(workspaceStore, s => s.workspaces)
+export default function TabContentPortals({ sessionStore, activeWorkspaceId }: TabContentPortalsProps) {
+  const workspaces = useStore(sessionStore, s => s.workspaces)
+  const workspaceHandles = useStore(sessionStore, s => s.workspaceHandles)
   const applications = useAppStore((s) => s.applications)
 
   // Track available portal slots — updated via MutationObserver
@@ -70,8 +71,7 @@ export default function TabContentPortals({ workspaceStore, activeWorkspaceId }:
           const portalTarget = isActiveWorkspace ? portalSlots[tab.id] : null
           const isVisible = !!portalTarget
 
-          // Construct a WorkspaceHandle for this workspace
-          const handle = workspaceStore.getState().getWorkspace(workspace.id)
+          const handle = workspaceHandles[workspace.id]
           if (!handle) return null
 
           const content = (
@@ -82,7 +82,7 @@ export default function TabContentPortals({ workspaceStore, activeWorkspaceId }:
                   error={error}
                   tabTitle={tab.title}
                   onReset={reset}
-                  onClose={() => handle.removeTab(tab.id)}
+                  onClose={() => handle.getState().removeTab(tab.id)}
                 />
               )}
             >

@@ -38,7 +38,7 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
       }
       return createElement(AiHarness, {
         key: tab.id,
-        cwd: workspace.data.path,
+        cwd: workspace.getState().workspace.path,
         workspace,
         tabId: tab.id,
         sandbox: tab.state.sandbox,

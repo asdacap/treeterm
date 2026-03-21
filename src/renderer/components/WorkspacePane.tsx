@@ -23,9 +23,9 @@ interface WorkspacePaneProps {
 }
 
 export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneProps) {
-  const workspaceStore = useStore(sessionStore, s => s.workspaceStore)
   const {
     workspaces,
+    workspaceHandles,
     activeWorkspaceId,
     addChildWorkspace,
     adoptExistingWorktree,
@@ -39,11 +39,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const menuApplications = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
 
   const activeWorkspace = activeWorkspaceId ? workspaces[activeWorkspaceId] : null
-  // Get workspace handle for active workspace (for per-workspace operations)
-  const activeHandle = useMemo(() => {
-    if (!activeWorkspaceId) return null
-    return workspaceStore.getState().getWorkspace(activeWorkspaceId)
-  }, [activeWorkspaceId, workspaceStore])
+  const activeHandle = activeWorkspaceId ? (workspaceHandles[activeWorkspaceId] ?? null) : null
 
   // Dialog state
   const [showCreateChildDialog, setShowCreateChildDialog] = useState(false)
@@ -66,7 +62,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     if (!activeHandle) return
     const trimmedName = editName.trim()
     if (trimmedName) {
-      activeHandle.updateMetadata('displayName', trimmedName)
+      activeHandle.getState().updateMetadata('displayName', trimmedName)
     }
     setIsEditingName(false)
   }, [activeHandle, editName])
@@ -79,7 +75,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
 
   const handleSaveDescription = useCallback(() => {
     if (!activeHandle) return
-    activeHandle.updateMetadata('description', editDescription.trim())
+    activeHandle.getState().updateMetadata('description', editDescription.trim())
     setIsEditingDescription(false)
   }, [activeHandle, editDescription])
 
@@ -110,11 +106,11 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     (applicationId: string) => {
       if (!activeHandle) return
       if (applicationId === 'review') {
-        activeHandle.addTab<ReviewState>('review', {
+        activeHandle.getState().addTab<ReviewState>('review', {
           parentWorkspaceId: activeWorkspace?.parentId ?? undefined
         })
       } else {
-        activeHandle.addTab(applicationId)
+        activeHandle.getState().addTab(applicationId)
       }
     },
     [activeHandle, activeWorkspace?.parentId]
@@ -124,14 +120,14 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const handleNewDefaultTab = useCallback(() => {
     const defaultApp = menuApplications.find((app) => app.canHaveMultiple)
     if (activeHandle && defaultApp) {
-      activeHandle.addTab(defaultApp.id)
+      activeHandle.getState().addTab(defaultApp.id)
     }
   }, [activeHandle, menuApplications])
 
   const handleCloseTab = useCallback(
     (tabId: string) => {
       if (activeHandle) {
-        activeHandle.removeTab(tabId)
+        activeHandle.getState().removeTab(tabId)
       }
     },
     [activeHandle]
@@ -140,7 +136,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const handleSelectTab = useCallback(
     (tabId: string) => {
       if (activeHandle) {
-        activeHandle.setActiveTab(tabId)
+        activeHandle.getState().setActiveTab(tabId)
       }
     },
     [activeHandle]
@@ -204,7 +200,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   // Review handler
   const handleOpenReview = () => {
     if (!activeHandle || !activeWorkspace?.parentId) return
-    activeHandle.addTab<ReviewState>('review', {
+    activeHandle.getState().addTab<ReviewState>('review', {
       parentWorkspaceId: activeWorkspace.parentId
     })
   }
@@ -238,7 +234,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
       return
     }
     setAbandonMenuOpen(false)
-    await activeHandle!.remove()
+    await activeHandle!.getState().remove()
   }
 
   const handleAbandonKeepBranch = async () => {
@@ -246,7 +242,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
       return
     }
     setAbandonMenuOpen(false)
-    await activeHandle!.removeKeepBranch()
+    await activeHandle!.getState().removeKeepBranch()
   }
 
   const handleAbandonKeepWorktree = async () => {
@@ -254,7 +250,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
       return
     }
     setAbandonMenuOpen(false)
-    await activeHandle!.removeKeepWorktree()
+    await activeHandle!.getState().removeKeepWorktree()
   }
 
   const handleAbandonKeepBoth = async () => {
@@ -262,7 +258,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
       return
     }
     setAbandonMenuOpen(false)
-    await activeHandle!.removeKeepBoth()
+    await activeHandle!.getState().removeKeepBoth()
   }
 
   // Compute flattened workspace list for navigation
@@ -360,7 +356,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
 
   const handlePromptDescriptionDismiss = useCallback(() => {
     if (activeHandle) {
-      activeHandle.updateMetadata('descriptionPrompted', 'true')
+      activeHandle.getState().updateMetadata('descriptionPrompted', 'true')
     }
   }, [activeHandle])
 
@@ -411,8 +407,8 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                     workspacePath={activeWorkspace.path}
                     onRun={async (ptyId, actionId) => {
                       if (activeHandle) {
-                        const tabId = activeHandle.addTab('terminal', { ptyId, ptyHandle: null, keepOnExit: true })
-                        activeHandle.updateTabTitle(tabId, actionId)
+                        const tabId = activeHandle.getState().addTab('terminal', { ptyId, ptyHandle: null, keepOnExit: true })
+                        activeHandle.getState().updateTabTitle(tabId, actionId)
                       }
                     }}
                   />
@@ -527,16 +523,15 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
           </>
         )}
         <div className="workspace-terminal" style={{ display: activeWorkspace ? 'flex' : 'none' }}>
-          {activeWorkspaceId && (
+          {activeWorkspaceId && activeHandle && (
             <FlexLayoutPane
               key={activeWorkspaceId}
-              workspaceId={activeWorkspaceId}
-              workspaceStore={workspaceStore}
+              workspace={activeHandle}
               onNewTab={handleNewTab}
             />
           )}
           <TabContentPortals
-            workspaceStore={workspaceStore}
+            sessionStore={sessionStore}
             activeWorkspaceId={activeWorkspaceId}
           />
         </div>

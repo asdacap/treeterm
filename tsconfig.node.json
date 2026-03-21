@@ -19,6 +19,7 @@
     "src/daemon/**/*.ts",
     "src/generated/**/*.ts",
     "src/renderer/types/**/*.ts",
-    "src/renderer/store/createWorkspaceStore.ts"
+    "src/renderer/store/createWorkspaceHandleStore.ts",
+    "src/renderer/store/createSessionStore.ts"
   ]
 }

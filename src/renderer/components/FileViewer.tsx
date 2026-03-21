@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import Editor, { OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
+import { useStore } from 'zustand'
 import { useFilesystemApi } from '../contexts/FilesystemApiContext'
 import type { EditorState, ReviewComment, WorkspaceHandle } from '../types'
 import { MarkdownPreview } from './MarkdownPreview'
@@ -48,8 +49,9 @@ export function FileViewer({
   scrollToLine,
   onScrollToLineUsed
 }: FileViewerProps): JSX.Element {
+  const { workspace: wsData, addTab } = useStore(workspace)
   const filesystem = useFilesystemApi()
-  const workspacePath = workspace.data.path
+  const workspacePath = wsData.path
   const [fileState, setFileState] = useState<FileState>({
     content: '',
     language: 'plaintext',
@@ -207,7 +209,7 @@ export function FileViewer({
   const handleOpenInTab = useCallback(() => {
     if (!filePath) return
 
-    workspace.addTab<EditorState>('editor', {
+    addTab<EditorState>('editor', {
       filePath: filePath,
       originalContent: fileState.content,
       currentContent: fileState.content,

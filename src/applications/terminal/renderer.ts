@@ -29,7 +29,7 @@ export function createTerminalApplication(startByDefault: boolean, deps: Termina
     render: ({ tab, workspace, isVisible }) => {
       return createElement(Terminal, {
         key: tab.id,
-        cwd: workspace.data.path,
+        cwd: workspace.getState().workspace.path,
         workspace,
         tabId: tab.id,
         isVisible,
@@ -67,7 +67,7 @@ export function createTerminalVariant(instance: TerminalInstance, deps: Terminal
     render: ({ tab, workspace, isVisible }) => {
       return createElement(Terminal, {
         key: tab.id,
-        cwd: workspace.data.path,
+        cwd: workspace.getState().workspace.path,
         workspace,
         tabId: tab.id,
         isVisible,

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { commentsApplication } from './renderer'
 import type { Tab, Workspace } from '../../renderer/types'
-import type { WorkspaceHandle } from '../../renderer/store/createWorkspaceStore'
+import { createStore } from 'zustand/vanilla'
+import type { WorkspaceHandleState } from '../../renderer/store/createWorkspaceHandleStore'
 
 // Mock React
 vi.mock('react', () => ({
@@ -13,9 +14,8 @@ vi.mock('../../renderer/components/CommentsList', () => ({
   default: vi.fn(() => null)
 }))
 
-const mockWorkspaceHandle = {
-  id: 'ws-1',
-  data: { path: '/test' } as Workspace,
+const mockWorkspaceHandleStateData = {
+  workspace: { id: 'ws-1', path: '/test' } as Workspace,
   addTab: vi.fn(),
   removeTab: vi.fn(),
   setActiveTab: vi.fn(),
@@ -39,7 +39,9 @@ const mockWorkspaceHandle = {
   removeKeepBranch: vi.fn(),
   removeKeepWorktree: vi.fn(),
   removeKeepBoth: vi.fn(),
-} satisfies WorkspaceHandle
+} as WorkspaceHandleState
+
+const mockWorkspaceHandle = createStore<WorkspaceHandleState>()(() => mockWorkspaceHandleStateData)
 
 describe('Comments Renderer', () => {
   beforeEach(() => {

@@ -1,3 +1,4 @@
+import { useStore } from 'zustand'
 import type { WorkspaceHandle } from '../types'
 import { generateReviewPrompt } from '../utils/reviewPrompt'
 
@@ -6,14 +7,15 @@ interface ReviewCommentsButtonProps {
 }
 
 export function ReviewCommentsButton({ workspace }: ReviewCommentsButtonProps): JSX.Element | null {
-  const comments = workspace.getReviewComments()
+  const { getReviewComments, promptHarness } = useStore(workspace)
+  const comments = getReviewComments()
 
   if (comments.length === 0) return null
 
   const handleClick = () => {
     const prompt = generateReviewPrompt(comments)
     if (prompt) {
-      workspace.promptHarness(prompt)
+      promptHarness(prompt)
     }
   }
 

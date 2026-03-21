@@ -1,3 +1,4 @@
+import { useStore } from 'zustand'
 import type { WorkspaceHandle } from '../types'
 
 interface PromptDescriptionButtonProps {
@@ -7,8 +8,10 @@ interface PromptDescriptionButtonProps {
 }
 
 export function PromptDescriptionButton({ description, workspace, onDismiss }: PromptDescriptionButtonProps): JSX.Element | null {
+  const { promptHarness } = useStore(workspace)
+
   const handlePrompt = () => {
-    workspace.promptHarness(description)
+    promptHarness(description)
     onDismiss()
   }
 

@@ -2,8 +2,7 @@ import { create } from 'zustand'
 import type { StoreApi } from 'zustand'
 import { createSessionStore } from './createSessionStore'
 import type { SessionState } from './createSessionStore'
-import type { WorkspaceState } from './createWorkspaceStore'
-import { getUnmergedSubWorkspaces } from './createWorkspaceStore'
+import { getUnmergedSubWorkspaces } from './createSessionStore'
 import { useSettingsStore } from './settings'
 import { createTerminalApplication, createTerminalVariant } from '../../applications/terminal/renderer'
 import { filesystemApplication } from '../../applications/filesystem/renderer'
@@ -71,7 +70,6 @@ interface AppState extends AppDeps {
   initialize: (deps: AppDeps) => Promise<() => void>
   switchSession: (sessionId: string) => void
   getActiveSessionStore: () => StoreApi<SessionState> | null
-  getActiveWorkspaceStore: () => StoreApi<WorkspaceState> | null
 
   // Internal
   createNewSession: () => Promise<void>
@@ -228,12 +226,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
     })
 
     const unsubClose = appApi.onCloseConfirm(() => {
-      const activeStore = get().getActiveWorkspaceStore()
-      if (!activeStore) {
+      const sessionStore = get().getActiveSessionStore()
+      if (!sessionStore) {
         appApi.confirmClose()
         return
       }
-      const unmerged = getUnmergedSubWorkspaces(activeStore.getState().workspaces)
+      const unmerged = getUnmergedSubWorkspaces(sessionStore.getState().workspaces)
       if (unmerged.length > 0) {
         set({ unmergedWorkspaces: unmerged, showCloseConfirm: true })
       } else {
@@ -264,12 +262,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
     })
 
     const unsubNewTerminal = terminal.onNewTerminal(() => {
-      const activeStore = get().getActiveWorkspaceStore()
-      if (!activeStore) return
-      const { activeWorkspaceId } = activeStore.getState()
+      const sessionStore = get().getActiveSessionStore()
+      if (!sessionStore) return
+      const { activeWorkspaceId, getWorkspace } = sessionStore.getState()
       if (activeWorkspaceId) {
-        const handle = activeStore.getState().getWorkspace(activeWorkspaceId)
-        if (handle) handle.addTab('terminal')
+        const handle = getWorkspace(activeWorkspaceId)
+        if (handle) handle.getState().addTab('terminal')
       }
     })
 
@@ -292,9 +290,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
     // Handle initial workspace from CLI
     const initialPath = await getInitialWorkspace()
     if (initialPath) {
-      const activeStore = get().getActiveWorkspaceStore()
-      if (activeStore) {
-        const { workspaces, addWorkspace, setActiveWorkspace } = activeStore.getState()
+      const sessionStore = get().getActiveSessionStore()
+      if (sessionStore) {
+        const { workspaces, addWorkspace, setActiveWorkspace } = sessionStore.getState()
         const existingWorkspace = Object.values(workspaces).find(ws => ws.path === initialPath)
         if (existingWorkspace) {
           setActiveWorkspace(existingWorkspace.id)
@@ -326,11 +324,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
     return sessionStores[activeSessionId] || null
   },
 
-  getActiveWorkspaceStore: () => {
-    const sessionStore = get().getActiveSessionStore()
-    if (!sessionStore) return null
-    return sessionStore.getState().workspaceStore
-  },
 
   createNewSession: async () => {
     const { sessionApi } = get()

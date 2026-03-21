@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ChevronDown } from 'lucide-react'
+import { useStore } from 'zustand'
 import { useGitApi } from '../contexts/GitApiContext'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
 import { getTabs } from '../types'
@@ -23,11 +24,15 @@ export default function ReviewBrowser({
   tabId,
   parentWorkspaceId,
 }: ReviewBrowserProps) {
+  const {
+    workspace: wsData, lookupWorkspace, getReviewComments,
+    promptHarness, mergeAndRemove, closeAndClean, removeTab,
+    addReviewComment, deleteReviewComment, updateOutdatedReviewComments, refreshGitInfo,
+  } = useStore(workspace)
   const git = useGitApi()
-  const workspaceId = workspace.id
-  const wsData = workspace.data
+  const workspaceId = wsData.id
   const workspacePath = wsData.path
-  const parentWorkspace = parentWorkspaceId ? workspace.lookupWorkspace(parentWorkspaceId) : undefined
+  const parentWorkspace = parentWorkspaceId ? lookupWorkspace(parentWorkspaceId) : undefined
 
   // For top-level worktrees, we only show uncommitted changes (no parent to compare against)
   const hasParent = !!parentWorkspaceId
@@ -67,7 +72,7 @@ export default function ReviewBrowser({
   const mergeDropdownRef = useRef<HTMLDivElement>(null)
 
   // Reviews state
-  const reviews = workspace.getReviewComments()
+  const reviews = getReviewComments()
   const [commentInput, setCommentInput] = useState<{
     visible: boolean
     lineNumber: number
@@ -98,12 +103,12 @@ export default function ReviewBrowser({
   }, [workspacePath, parentWorkspace])
 
   const handlePromptCommit = useCallback(() => {
-    workspace.promptHarness('commit')
+    promptHarness('commit')
   }, [workspace])
 
   const handlePromptRebase = useCallback(() => {
     if (parentWorkspace?.gitBranch) {
-      workspace.promptHarness(`rebase with ${parentWorkspace.gitBranch}`)
+      promptHarness(`rebase with ${parentWorkspace.gitBranch}`)
     }
   }, [workspace, parentWorkspace?.gitBranch])
 
@@ -158,7 +163,7 @@ export default function ReviewBrowser({
       const hashResult = await git.getHeadCommitHash(workspacePath)
       if (hashResult.success && hashResult.hash) {
         setCurrentCommitHash(hashResult.hash)
-        workspace.updateOutdatedReviewComments(hashResult.hash)
+        updateOutdatedReviewComments(hashResult.hash)
       }
     } catch (error) {
       console.error('Failed to load reviews:', error)
@@ -167,7 +172,7 @@ export default function ReviewBrowser({
   }
 
   const loadDiff = async () => {
-    const ws = workspace.data
+    const ws = wsData
     if (!ws?.gitBranch || !parentWorkspace?.gitBranch) return
 
     setLoading(true)
@@ -198,7 +203,7 @@ export default function ReviewBrowser({
   }
 
   const checkConflicts = async () => {
-    const ws = workspace.data
+    const ws = wsData
     if (!ws?.gitBranch || !parentWorkspace?.gitBranch || !parentWorkspace.gitRootPath) return
 
     setIsCheckingConflicts(true)
@@ -369,7 +374,7 @@ export default function ReviewBrowser({
     setProcessingAction(squash ? 'squash' : 'merge')
 
     try {
-      const result = await workspace.mergeAndRemove(squash)
+      const result = await mergeAndRemove(squash)
       if (!result.success) {
         alert(`Merge failed: ${result.error}`)
         setIsProcessing(false)
@@ -391,7 +396,7 @@ export default function ReviewBrowser({
     setIsProcessing(true)
 
     try {
-      const result = await workspace.closeAndClean()
+      const result = await closeAndClean()
       if (!result.success) {
         alert(`Close failed: ${result.error}`)
         setIsProcessing(false)
@@ -404,7 +409,7 @@ export default function ReviewBrowser({
   }
 
   const handleCancel = () => {
-    workspace.removeTab(tabId)
+    removeTab(tabId)
   }
 
   const getStatusIcon = (status: DiffFile['status'] | UncommittedFile['status']) => {
@@ -475,7 +480,7 @@ export default function ReviewBrowser({
     if (!commentInput || !currentCommitHash || !filePath) return
 
     try {
-      workspace.addReviewComment({
+      addReviewComment({
         filePath,
         lineNumber: commentInput.lineNumber,
         text,
@@ -492,7 +497,7 @@ export default function ReviewBrowser({
   }
 
   const handleCommentDelete = (commentId: string) => {
-    workspace.deleteReviewComment(commentId)
+    deleteReviewComment(commentId)
   }
 
   const currentFilePath = selectedFile || selectedUncommittedFile?.path

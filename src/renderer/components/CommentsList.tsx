@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useStore } from 'zustand'
 import { useFilesystemApi } from '../contexts/FilesystemApiContext'
 import { generateReviewPrompt } from '../utils/reviewPrompt'
 import type { ReviewComment, FilesystemState, WorkspaceHandle } from '../types'
@@ -29,9 +30,10 @@ function extractCodeContext(
 export default function CommentsList({
   workspace,
 }: CommentsListProps): JSX.Element {
+  const { workspace: wsData, getReviewComments, toggleReviewCommentAddressed, deleteReviewComment, addTab } = useStore(workspace)
   const filesystem = useFilesystemApi()
-  const workspacePath = workspace.data.path
-  const comments: ReviewComment[] = workspace.getReviewComments()
+  const workspacePath = wsData.path
+  const comments: ReviewComment[] = getReviewComments()
   const [fileContents, setFileContents] = useState<Map<string, string>>(new Map())
   const [promptExpanded, setPromptExpanded] = useState(false)
 
@@ -64,15 +66,15 @@ export default function CommentsList({
   }, [comments, workspacePath, filesystem])
 
   const handleToggleAddressed = (commentId: string) => {
-    workspace.toggleReviewCommentAddressed(commentId)
+    toggleReviewCommentAddressed(commentId)
   }
 
   const handleDelete = (commentId: string) => {
-    workspace.deleteReviewComment(commentId)
+    deleteReviewComment(commentId)
   }
 
   const handleGoToFile = (comment: ReviewComment) => {
-    workspace.addTab<FilesystemState>('filesystem', {
+    addTab<FilesystemState>('filesystem', {
       selectedPath: comment.filePath,
       scrollToLine: comment.lineNumber
     })

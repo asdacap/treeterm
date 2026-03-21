@@ -3,24 +3,20 @@ import { createPortal } from 'react-dom'
 import { Layout, type ITabSetRenderValues, type ITabRenderValues } from '@aptre/flex-layout'
 import { Model, Actions, TabNode, TabSetNode, BorderNode, DockLocation, type Action } from '@aptre/flex-layout'
 import type { IJsonModel } from '@aptre/flex-layout'
-import type { StoreApi } from 'zustand'
 import { useStore } from 'zustand'
-import type { WorkspaceState } from '../store/createWorkspaceStore'
-import { useWorkspace } from '../hooks/useWorkspace'
+import type { WorkspaceHandle } from '../store/createWorkspaceHandleStore'
 import { useAppStore } from '../store/app'
 import { createDefaultLayoutModel, tabToFlexNode } from '../utils/layoutModel'
 import { TabActivityIndicator } from './TabActivityIndicator'
 import { getTabs } from '../types'
 
 interface FlexLayoutPaneProps {
-  workspaceId: string
-  workspaceStore: StoreApi<WorkspaceState>
+  workspace: WorkspaceHandle
   onNewTab: (applicationId: string) => void
 }
 
-export default function FlexLayoutPane({ workspaceId, workspaceStore, onNewTab }: FlexLayoutPaneProps) {
-  const ws = useWorkspace(workspaceStore, workspaceId)
-  const workspace = useStore(workspaceStore, s => s.workspaces[workspaceId])
+export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPaneProps) {
+  const { workspace, removeTab, setActiveTab, updateMetadata } = useStore(ws)
   const applications = useAppStore((s) => s.applications)
   const getApplication = useCallback((id: string) => applications[id], [applications])
   const menuApplications = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
@@ -71,7 +67,7 @@ export default function FlexLayoutPane({ workspaceId, workspaceStore, onNewTab }
     setModel(m)
     syncedTabIdsRef.current = new Set(tabs.map(t => t.id))
     // Only run on mount / workspace ID change
-  }, [workspaceId])
+  }, [workspace.id])
 
   // Sync store tab changes → model (adds/removes)
   useEffect(() => {
@@ -160,21 +156,21 @@ export default function FlexLayoutPane({ workspaceId, workspaceStore, onNewTab }
   // Handle actions from FlexLayout (intercept delete to route through store)
   const handleAction = useCallback((action: Action): Action | undefined => {
     if (action.type === Actions.DELETE_TAB) {
-      ws.removeTab(action.data.node)
+      removeTab(action.data.node)
       return undefined // Prevent FlexLayout from handling it — store will sync
     }
     if (action.type === Actions.SELECT_TAB) {
-      ws.setActiveTab(action.data.tabNode)
+      setActiveTab(action.data.tabNode)
     }
     return action
-  }, [workspaceId, ws])
+  }, [removeTab, setActiveTab])
 
   // Serialize model changes to metadata
   const handleModelChange = useCallback((m: Model, _action: Action) => {
     if (suppressModelChangeRef.current) return
     const json = JSON.stringify(m.toJson())
-    ws.updateMetadata('layoutModel', json)
-  }, [workspaceId, ws])
+    updateMetadata('layoutModel', json)
+  }, [updateMetadata])
 
   // Customize tab rendering with icons and activity indicators
   const handleRenderTab = useCallback((node: TabNode, renderValues: ITabRenderValues) => {

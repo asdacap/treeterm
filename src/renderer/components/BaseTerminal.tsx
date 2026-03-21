@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { useStore } from 'zustand'
 import { useSettingsStore } from '../store/settings'
 import { useActivityStateStore } from '../store/activityState'
 import { useTerminalApi } from '../contexts/TerminalApiContext'
@@ -97,7 +98,8 @@ export default function BaseTerminal({
   isVisible,
   config,
 }: BaseTerminalProps) {
-  const workspaceId = workspace.id
+  const { workspace: wsData, removeTab, updateTabState } = useStore(workspace)
+  const workspaceId = wsData.id
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -116,7 +118,6 @@ export default function BaseTerminal({
   const settings = useSettingsStore((state) => state.settings)
 
   // Get existing ptyId from store for reconnection
-  const wsData = workspace.data
   const appState = wsData?.appStates[tabId]
   const existingPtyId = (appState?.state as BaseTerminalState | undefined)?.ptyId
 
@@ -258,12 +259,12 @@ export default function BaseTerminal({
       const unsubscribeExit = terminalApi.onExit(handle, (exitCode) => {
         console.log(`[${config.logPrefix} ${tabId}] PTY exited with code:`, exitCode)
         if (isMountedRef.current) {
-          const currentTab = workspace.data?.appStates[tabId]
+          const currentTab = wsData?.appStates[tabId]
           const keepOnExit = (currentTab?.state as BaseTerminalState | undefined)?.keepOnExit
           if (keepOnExit) {
             terminal.write(`\r\n\x1b[2mProcess exited with exit code ${exitCode}\x1b[0m\r\n`)
           } else {
-            workspace.removeTab(tabId)
+            removeTab(tabId)
           }
         }
       })
@@ -311,7 +312,7 @@ export default function BaseTerminal({
             }
 
             connectToPty(result.handle)
-            workspace.updateTabState<BaseTerminalState>(tabId, (state) => ({
+            updateTabState<BaseTerminalState>(tabId, (state) => ({
               ...state,
               ptyHandle: result.handle!
             }))
@@ -337,7 +338,7 @@ export default function BaseTerminal({
       console.log(`[${config.logPrefix} ${tabId}] created new PTY:`, result.sessionId, 'handle:', result.handle)
       sessionIdRef.current = result.sessionId
       connectToPty(result.handle)
-      workspace.updateTabState<BaseTerminalState>(tabId, (state) => ({
+      updateTabState<BaseTerminalState>(tabId, (state) => ({
         ...state,
         ptyId: result.sessionId,
         ptyHandle: result.handle

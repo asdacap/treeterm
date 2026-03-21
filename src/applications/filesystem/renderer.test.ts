@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { filesystemApplication } from './renderer'
 import type { Tab, Workspace, FilesystemState } from '../../renderer/types'
-import type { WorkspaceHandle } from '../../renderer/store/createWorkspaceStore'
+import { createStore } from 'zustand/vanilla'
+import type { WorkspaceHandleState, WorkspaceHandle } from '../../renderer/store/createWorkspaceHandleStore'
 
 // Mock React
 vi.mock('react', () => ({
@@ -13,33 +14,37 @@ vi.mock('../../renderer/components/FilesystemBrowser', () => ({
   FilesystemBrowser: vi.fn(() => null)
 }))
 
-const mockWorkspaceHandle = {
-  id: 'ws-1',
-  data: { path: '/test' } as Workspace,
-  addTab: vi.fn(),
-  removeTab: vi.fn(),
-  setActiveTab: vi.fn(),
-  updateTabTitle: vi.fn(),
-  updateTabState: vi.fn(),
-  getReviewComments: vi.fn(),
-  addReviewComment: vi.fn(),
-  deleteReviewComment: vi.fn(),
-  toggleReviewCommentAddressed: vi.fn(),
-  updateOutdatedReviewComments: vi.fn(),
-  clearReviewComments: vi.fn(),
-  promptHarness: vi.fn(),
-  quickForkWorkspace: vi.fn(),
-  updateMetadata: vi.fn(),
-  updateStatus: vi.fn(),
-  refreshGitInfo: vi.fn(),
-  mergeAndRemove: vi.fn(),
-  closeAndClean: vi.fn(),
-  lookupWorkspace: vi.fn(),
-  remove: vi.fn(),
-  removeKeepBranch: vi.fn(),
-  removeKeepWorktree: vi.fn(),
-  removeKeepBoth: vi.fn(),
-} satisfies WorkspaceHandle
+function createMockWorkspaceHandleStateData(overrides?: Partial<WorkspaceHandleState>): WorkspaceHandleState {
+  return {
+    workspace: { id: 'ws-1', path: '/test' } as Workspace,
+    addTab: vi.fn(),
+    removeTab: vi.fn(),
+    setActiveTab: vi.fn(),
+    updateTabTitle: vi.fn(),
+    updateTabState: vi.fn(),
+    getReviewComments: vi.fn(),
+    addReviewComment: vi.fn(),
+    deleteReviewComment: vi.fn(),
+    toggleReviewCommentAddressed: vi.fn(),
+    updateOutdatedReviewComments: vi.fn(),
+    clearReviewComments: vi.fn(),
+    promptHarness: vi.fn(),
+    quickForkWorkspace: vi.fn(),
+    updateMetadata: vi.fn(),
+    updateStatus: vi.fn(),
+    refreshGitInfo: vi.fn(),
+    mergeAndRemove: vi.fn(),
+    closeAndClean: vi.fn(),
+    lookupWorkspace: vi.fn(),
+    remove: vi.fn(),
+    removeKeepBranch: vi.fn(),
+    removeKeepWorktree: vi.fn(),
+    removeKeepBoth: vi.fn(),
+    ...overrides,
+  } as WorkspaceHandleState
+}
+
+const mockWorkspaceHandle = createStore<WorkspaceHandleState>()(() => createMockWorkspaceHandleStateData())
 
 describe('Filesystem Renderer', () => {
   beforeEach(() => {
@@ -117,7 +122,7 @@ describe('Filesystem Renderer', () => {
 
       it('passes workspace correctly', () => {
         const tab: Tab = {
-          id: 'fs-tab-123',
+          id: 'tab-1',
           applicationId: 'filesystem',
           title: 'Files',
           state: {
@@ -126,7 +131,9 @@ describe('Filesystem Renderer', () => {
           }
         }
 
-        const wsHandle = { ...mockWorkspaceHandle, id: 'project-ws', data: { path: '/project' } as Workspace }
+        const wsHandle = createStore<WorkspaceHandleState>()(() => createMockWorkspaceHandleStateData({
+          workspace: { id: 'project-ws', path: '/project' } as Workspace,
+        }))
 
         const result = filesystemApplication.render({
           tab,
@@ -134,8 +141,8 @@ describe('Filesystem Renderer', () => {
           isVisible: true,
         }) as { props: { workspace: WorkspaceHandle } }
 
-        expect(result.props.workspace.id).toBe('project-ws')
-        expect(result.props.workspace.data.path).toBe('/project')
+        expect(result.props.workspace.getState().workspace.id).toBe('project-ws')
+        expect(result.props.workspace.getState().workspace.path).toBe('/project')
       })
 
       it('passes correct tabId', () => {
@@ -211,7 +218,9 @@ describe('Filesystem Renderer', () => {
           }
         }
 
-        const wsHandle = { ...mockWorkspaceHandle, data: { path: '/root' } as Workspace }
+        const wsHandle = createStore<WorkspaceHandleState>()(() => createMockWorkspaceHandleStateData({
+          workspace: { id: 'ws-root', path: '/root' } as Workspace,
+        }))
 
         const result = filesystemApplication.render({
           tab,

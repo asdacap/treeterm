@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { WorkspaceHandle } from '../store/createWorkspaceStore'
+import type { WorkspaceHandle } from '../store/createWorkspaceHandleStore'
 export type { WorkspaceHandle }
 
 // Import and re-export shared types

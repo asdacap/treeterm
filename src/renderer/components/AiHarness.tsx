@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from 'react'
+import { useStore } from 'zustand'
 import BaseTerminal, { type BaseTerminalConfig, type BaseTerminalState } from './BaseTerminal'
 import PushToTalkButton from './PushToTalkButton'
 import { ReviewCommentsButton } from './ReviewCommentsButton'
@@ -29,7 +30,7 @@ export default function AiHarness({
   stripScrollbackClear,
 }: AiHarnessProps) {
   const terminalApi = useTerminalApi()
-  const wsData = workspace.data
+  const { workspace: wsData } = useStore(workspace)
   const appState = wsData?.appStates[tabId]
   const ptyHandle = (appState?.state as BaseTerminalState | undefined)?.ptyHandle
 

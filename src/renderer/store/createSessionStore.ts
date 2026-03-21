@@ -1,16 +1,18 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import { createWorkspaceStore } from './createWorkspaceStore'
-import type { WorkspaceState, WorkspaceHandle } from './createWorkspaceStore'
+import { humanId } from 'human-id'
+import { createWorkspaceHandleStore } from './createWorkspaceHandleStore'
+import type { WorkspaceHandle, WorkspaceHandleDeps } from './createWorkspaceHandleStore'
 import type {
-  Workspace, Session,
+  Workspace, Session, AppState, GitInfo,
   SSHConnectionConfig, ConnectionInfo,
-  TerminalApi, GitApi, SessionApi, SSHApi, Settings, WorktreeSettings
+  TerminalApi, GitApi, SessionApi, SSHApi, Settings, WorktreeSettings,
+  Application
 } from '../types'
 
 export interface AppRegistryApi {
-  get: (id: string) => import('../types').Application | undefined
-  getDefaultApp: (appId?: string) => import('../types').Application | null
+  get: (id: string) => Application | undefined
+  getDefaultApp: (appId?: string) => Application | null
 }
 
 export interface SessionDeps {
@@ -24,16 +26,18 @@ export interface SessionDeps {
 
 export interface SessionState {
   sessionId: string
-  workspaceStore: StoreApi<WorkspaceState>
 
   // Single SSH connection for this session
   connection: ConnectionInfo | null
   connect: (config: SSHConnectionConfig) => Promise<void>
   disconnect: () => Promise<void>
 
-  // Workspace collection management (delegates to workspace store)
+  // Workspace collection
+  workspaceHandles: Record<string, WorkspaceHandle>
   workspaces: Record<string, Workspace>
   activeWorkspaceId: string | null
+  isRestoring: boolean
+
   getWorkspace: (id: string) => WorkspaceHandle | null
   addWorkspace: (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => Promise<string>
   addChildWorkspace: (parentId: string, name: string, isDetached?: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
@@ -48,64 +52,280 @@ export interface SessionState {
   mergeAndRemoveWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
   closeAndCleanWorkspace: (id: string) => Promise<{ success: boolean; error?: string }>
   setActiveWorkspace: (id: string | null) => void
+  updateGitInfo: (id: string, gitInfo: GitInfo) => void
+  refreshGitInfo: (id: string) => Promise<void>
   quickForkWorkspace: (workspaceId: string) => Promise<{ success: boolean; error?: string }>
+  syncToDaemon: () => Promise<void>
 
   // Session lifecycle
   handleRestore: (session: Session) => Promise<void>
   handleExternalUpdate: (session: Session) => Promise<void>
 }
 
+function generateId(): string {
+  return `ws-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+function generateTabId(): string {
+  return `tab-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+function getNameFromPath(path: string): string {
+  return path.split('/').pop() || path
+}
+
+function getDefaultAppForWorktree(
+  deps: Pick<SessionDeps, 'appRegistry' | 'getSettings'>,
+  settings?: WorktreeSettings,
+  parentSettings?: WorktreeSettings
+): Application | null | undefined {
+  if (settings?.defaultApplicationId) {
+    const app = deps.appRegistry.get(settings.defaultApplicationId)
+    if (app) return app
+  }
+  if (parentSettings?.defaultApplicationId) {
+    const app = deps.appRegistry.get(parentSettings.defaultApplicationId)
+    if (app) return app
+  }
+  const globalSettings = deps.getSettings()
+  if (globalSettings.globalDefaultApplicationId) {
+    const app = deps.appRegistry.get(globalSettings.globalDefaultApplicationId)
+    if (app) return app
+  }
+  return deps.appRegistry.getDefaultApp()
+}
+
+/**
+ * Helper function to find unmerged sub-workspaces (worktrees with status 'active')
+ */
+export function getUnmergedSubWorkspaces(workspaces: Record<string, Workspace>): Workspace[] {
+  return Object.values(workspaces).filter(
+    (ws) => ws.isWorktree && ws.status === 'active'
+  )
+}
+
 export function createSessionStore(
   config: { sessionId: string; windowUuid: string | null },
   deps: SessionDeps
 ): StoreApi<SessionState> {
-  const workspaceStore = createWorkspaceStore(
-    { sessionId: config.sessionId, windowUuid: config.windowUuid },
-    {
-      git: deps.git,
-      session: deps.sessionApi,
-      terminal: deps.terminal,
-      getSettings: deps.getSettings,
-      appRegistry: deps.appRegistry,
-    }
-  )
+  let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
-  // Keep session store's workspace snapshot in sync with workspace store
-  workspaceStore.subscribe((wsState) => {
-    store.setState({
-      workspaces: wsState.workspaces,
-      activeWorkspaceId: wsState.activeWorkspaceId,
+  async function syncSessionToDaemon(isRestoring: boolean = false): Promise<void> {
+    try {
+      const settings = deps.getSettings()
+      const workspaces = store.getState().workspaces
+      console.log('[session] syncSessionToDaemon called - workspaces:', Object.keys(workspaces).length, 'isRestoring:', isRestoring)
+
+      if (isRestoring) {
+        console.log('[session] currently restoring, skipping sync')
+        return
+      }
+
+      const daemonWorkspaces = Object.values(workspaces).map(({ createdAt, lastActivity, ...ws }) => ws)
+
+      console.log('[session] syncing to daemon:', daemonWorkspaces.length, 'workspaces')
+
+      if (daemonWorkspaces.length === 0) {
+        if (config.sessionId) {
+          console.log('[session] deleting session:', config.sessionId)
+          await deps.sessionApi.delete(config.sessionId)
+        }
+        return
+      }
+
+      console.log('[session] updating session:', config.sessionId, 'senderUuid:', config.windowUuid)
+      const result = await deps.sessionApi.update(config.sessionId, daemonWorkspaces, config.windowUuid || undefined)
+      if (!result.success) {
+        console.error('[session] failed to update session:', result.error)
+      } else {
+        console.log('[session] session updated successfully')
+      }
+    } catch (error) {
+      console.error('[session] failed to sync session to daemon:', error)
+    }
+  }
+
+  function debouncedSyncToDaemon(): void {
+    if (syncDebounceTimer) {
+      clearTimeout(syncDebounceTimer)
+    }
+    syncDebounceTimer = setTimeout(() => {
+      syncSessionToDaemon(store.getState().isRestoring)
+    }, 500)
+  }
+
+  function makeHandleDeps(): WorkspaceHandleDeps {
+    return {
+      appRegistry: deps.appRegistry,
+      terminal: deps.terminal,
+      syncToDaemon: () => debouncedSyncToDaemon(),
+      removeWorkspace: (id) => store.getState().removeWorkspace(id),
+      removeWorkspaceKeepBranch: (id) => store.getState().removeWorkspaceKeepBranch(id),
+      removeWorkspaceKeepWorktree: (id) => store.getState().removeWorkspaceKeepWorktree(id),
+      removeWorkspaceKeepBoth: (id) => store.getState().removeWorkspaceKeepBoth(id),
+      mergeAndRemoveWorkspace: (id, squash) => store.getState().mergeAndRemoveWorkspace(id, squash),
+      closeAndCleanWorkspace: (id) => store.getState().closeAndCleanWorkspace(id),
+      quickForkWorkspace: (id) => store.getState().quickForkWorkspace(id),
+      refreshGitInfo: (id) => store.getState().refreshGitInfo(id),
+      lookupWorkspace: (id) => store.getState().workspaces[id],
+    }
+  }
+
+  function createHandleForWorkspace(workspace: Workspace): WorkspaceHandle {
+    const handle = createWorkspaceHandleStore(workspace, makeHandleDeps())
+
+    // Keep the workspaces snapshot in sync when handle state changes
+    handle.subscribe((state) => {
+      store.setState((s) => ({
+        workspaces: { ...s.workspaces, [state.workspace.id]: state.workspace }
+      }))
     })
-  })
+
+    return handle
+  }
+
+  // Shared helper: creates a child workspace from a git operation result
+  async function addChildWorkspaceFromResult(
+    parentId: string,
+    name: string,
+    path: string,
+    branch: string,
+    options: { isDetached?: boolean; isWorktree?: boolean; settings?: WorktreeSettings; metadata?: Record<string, string> } = {}
+  ): Promise<string> {
+    const state = store.getState()
+    const parent = state.workspaces[parentId]
+
+    const id = generateId()
+    const appStates: Record<string, AppState> = {}
+    let activeTabId: string | null = null
+
+    const defaultApp = getDefaultAppForWorktree(deps, options.settings, parent?.settings)
+    if (defaultApp) {
+      const tabId = generateTabId()
+      appStates[tabId] = {
+        applicationId: defaultApp.id,
+        title: defaultApp.name,
+        state: defaultApp.createInitialState()
+      }
+      activeTabId = tabId
+    }
+
+    const childWorkspace: Workspace = {
+      id,
+      name,
+      path,
+      parentId,
+      children: [],
+      status: 'active',
+      isGitRepo: true,
+      gitBranch: branch,
+      gitRootPath: parent?.gitRootPath ?? null,
+      isWorktree: options.isWorktree ?? true,
+      isDetached: options.isDetached,
+      appStates,
+      activeTabId,
+      settings: options.settings,
+      metadata: options.metadata ?? {},
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+    }
+
+    const handle = createHandleForWorkspace(childWorkspace)
+
+    // Update parent children and add handle
+    store.setState((s) => {
+      const parentWs = s.workspaces[parentId]
+      const updatedWorkspaces = {
+        ...s.workspaces,
+        [id]: childWorkspace,
+        ...(parentWs ? {
+          [parentId]: { ...parentWs, children: [...parentWs.children, id] }
+        } : {})
+      }
+      // Also update the parent handle's workspace data
+      const parentHandle = s.workspaceHandles[parentId]
+      if (parentHandle && parentWs) {
+        parentHandle.setState({ workspace: { ...parentWs, children: [...parentWs.children, id] } })
+      }
+      return {
+        workspaceHandles: { ...s.workspaceHandles, [id]: handle },
+        workspaces: updatedWorkspaces,
+        activeWorkspaceId: id
+      }
+    })
+
+    await syncSessionToDaemon(store.getState().isRestoring)
+    return id
+  }
+
+  // Shared helper: removes a workspace with configurable git cleanup behavior
+  async function removeWorkspaceInternal(
+    id: string,
+    options: { keepBranch: boolean; keepWorktree: boolean }
+  ): Promise<void> {
+    const state = store.getState()
+    const workspace = state.workspaces[id]
+    if (!workspace) return
+
+    // Recursively remove children first
+    for (const childId of workspace.children) {
+      await removeWorkspaceInternal(childId, options)
+    }
+
+    // Cleanup tabs
+    for (const [tabId, appState] of Object.entries(workspace.appStates)) {
+      const tab = { ...appState, id: tabId }
+      const app = deps.appRegistry.get(tab.applicationId)
+      if (app?.cleanup) {
+        await app.cleanup(tab, workspace)
+      }
+    }
+
+    // Git cleanup
+    if (workspace.isWorktree && workspace.gitRootPath) {
+      if (!options.keepWorktree) {
+        const deleteBranch = !options.keepBranch && !workspace.isDetached
+        await deps.git.removeWorktree(
+          workspace.gitRootPath,
+          workspace.path,
+          deleteBranch
+        )
+      } else if (!options.keepBranch && !workspace.isDetached && workspace.gitBranch) {
+        await deps.git.deleteBranch(workspace.gitRootPath, workspace.gitBranch)
+      }
+    }
+
+    // Update parent's children list
+    if (workspace.parentId) {
+      const parentHandle = store.getState().workspaceHandles[workspace.parentId]
+      if (parentHandle) {
+        const parentWs = parentHandle.getState().workspace
+        parentHandle.setState({
+          workspace: { ...parentWs, children: parentWs.children.filter((cid) => cid !== id) }
+        })
+      }
+    }
+
+    // Remove handle and workspace
+    store.setState((s) => {
+      const { [id]: _removedHandle, ...remainingHandles } = s.workspaceHandles
+      const { [id]: _removedWs, ...remainingWorkspaces } = s.workspaces
+      return {
+        workspaceHandles: remainingHandles,
+        workspaces: remainingWorkspaces,
+        activeWorkspaceId: s.activeWorkspaceId === id ? null : s.activeWorkspaceId
+      }
+    })
+
+    await syncSessionToDaemon(store.getState().isRestoring)
+  }
 
   const store = createStore<SessionState>()((set, get) => ({
     sessionId: config.sessionId,
-    workspaceStore,
-
-    // Workspace collection — synced from workspace store
-    workspaces: workspaceStore.getState().workspaces,
-    activeWorkspaceId: workspaceStore.getState().activeWorkspaceId,
-
-    // Delegates to workspace store
-    getWorkspace: (id: string) => workspaceStore.getState().getWorkspace(id),
-    addWorkspace: (path, options?) => workspaceStore.getState().addWorkspace(path, options),
-    addChildWorkspace: (parentId, name, isDetached?, settings?, description?) =>
-      workspaceStore.getState().addChildWorkspace(parentId, name, isDetached, settings, description),
-    adoptExistingWorktree: (parentId, worktreePath, branch, name, settings?, description?) =>
-      workspaceStore.getState().adoptExistingWorktree(parentId, worktreePath, branch, name, settings, description),
-    createWorktreeFromBranch: (parentId, branch, isDetached, settings?, description?) =>
-      workspaceStore.getState().createWorktreeFromBranch(parentId, branch, isDetached, settings, description),
-    createWorktreeFromRemote: (parentId, remoteBranch, isDetached, settings?, description?) =>
-      workspaceStore.getState().createWorktreeFromRemote(parentId, remoteBranch, isDetached, settings, description),
-    removeWorkspace: (id) => workspaceStore.getState().removeWorkspace(id),
-    removeWorkspaceKeepBranch: (id) => workspaceStore.getState().removeWorkspaceKeepBranch(id),
-    removeWorkspaceKeepWorktree: (id) => workspaceStore.getState().removeWorkspaceKeepWorktree(id),
-    removeWorkspaceKeepBoth: (id) => workspaceStore.getState().removeWorkspaceKeepBoth(id),
-    removeOrphanWorkspace: (id) => workspaceStore.getState().removeOrphanWorkspace(id),
-    mergeAndRemoveWorkspace: (id, squash) => workspaceStore.getState().mergeAndRemoveWorkspace(id, squash),
-    closeAndCleanWorkspace: (id) => workspaceStore.getState().closeAndCleanWorkspace(id),
-    setActiveWorkspace: (id) => workspaceStore.getState().setActiveWorkspace(id),
-    quickForkWorkspace: (workspaceId) => workspaceStore.getState().quickForkWorkspace(workspaceId),
+    workspaceHandles: {},
+    workspaces: {},
+    activeWorkspaceId: null,
+    isRestoring: false,
 
     connection: null,
 
@@ -131,14 +351,357 @@ export function createSessionStore(
       set({ connection: null })
     },
 
+    getWorkspace: (id: string): WorkspaceHandle | null => {
+      return get().workspaceHandles[id] ?? null
+    },
+
+    addWorkspace: async (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => {
+      console.log('[session] addWorkspace called for path:', path)
+      const id = generateId()
+
+      const gitInfo = await deps.git.getInfo(path)
+
+      const appStates: Record<string, AppState> = {}
+      let activeTabId: string | null = null
+
+      if (!options?.skipDefaultTabs) {
+        const defaultApp = getDefaultAppForWorktree(deps, options?.settings, undefined)
+        if (defaultApp) {
+          const tabId = generateTabId()
+          appStates[tabId] = {
+            applicationId: defaultApp.id,
+            title: defaultApp.name,
+            state: defaultApp.createInitialState()
+          }
+          activeTabId = tabId
+        }
+      }
+
+      const workspace: Workspace = {
+        id,
+        name: getNameFromPath(path),
+        path,
+        parentId: null,
+        children: [],
+        status: 'active',
+        isGitRepo: gitInfo.isRepo,
+        gitBranch: gitInfo.branch,
+        gitRootPath: gitInfo.rootPath,
+        isWorktree: false,
+        appStates,
+        activeTabId,
+        settings: options?.settings,
+        metadata: {},
+        createdAt: Date.now(),
+        lastActivity: Date.now(),
+      }
+
+      const handle = createHandleForWorkspace(workspace)
+
+      set((s) => ({
+        workspaceHandles: { ...s.workspaceHandles, [id]: handle },
+        workspaces: { ...s.workspaces, [id]: workspace },
+        activeWorkspaceId: id
+      }))
+
+      await syncSessionToDaemon(get().isRestoring)
+      return id
+    },
+
+    addChildWorkspace: async (parentId: string, name: string, isDetached: boolean = false, settings?: WorktreeSettings, description?: string) => {
+      const state = get()
+      const parent = state.workspaces[parentId]
+
+      if (!parent) {
+        return { success: false, error: 'Parent workspace not found' }
+      }
+
+      if (!parent.isGitRepo || !parent.gitRootPath) {
+        return { success: false, error: 'Parent workspace is not a git repository' }
+      }
+
+      const currentGitInfo = await deps.git.getInfo(parent.path)
+      const currentBranch = currentGitInfo.branch
+
+      const result = await deps.git.createWorktree(
+        parent.gitRootPath,
+        name,
+        currentBranch || undefined
+      )
+
+      if (!result.success) {
+        return { success: false, error: result.error }
+      }
+
+      if (currentBranch && currentBranch !== parent.gitBranch) {
+        get().updateGitInfo(parentId, currentGitInfo)
+      }
+
+      const metadata = description ? { description } : undefined
+      await addChildWorkspaceFromResult(parentId, name, result.path!, result.branch!, { isDetached, settings, metadata })
+      return { success: true }
+    },
+
+    adoptExistingWorktree: async (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => {
+      const state = get()
+      const parent = state.workspaces[parentId]
+
+      if (!parent) {
+        return { success: false, error: 'Parent workspace not found' }
+      }
+
+      const existingWorkspace = Object.values(state.workspaces).find(
+        ws => ws.path === worktreePath
+      )
+      if (existingWorkspace) {
+        return { success: false, error: 'This worktree is already open' }
+      }
+
+      const metadata = description ? { description } : undefined
+      await addChildWorkspaceFromResult(parentId, name, worktreePath, branch, { settings, metadata })
+      return { success: true }
+    },
+
+    createWorktreeFromBranch: async (parentId: string, branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => {
+      console.log('[session] createWorktreeFromBranch called:', { parentId, branch, isDetached })
+      const state = get()
+      const parent = state.workspaces[parentId]
+
+      if (!parent) {
+        return { success: false, error: 'Parent workspace not found' }
+      }
+
+      if (!parent.isGitRepo || !parent.gitRootPath) {
+        return { success: false, error: 'Parent workspace is not a git repository' }
+      }
+
+      const worktreeName = branch.split('/').pop() || branch
+      const result = await deps.git.createWorktreeFromBranch(
+        parent.gitRootPath,
+        branch,
+        worktreeName
+      )
+
+      if (!result.success) {
+        return { success: false, error: result.error }
+      }
+
+      const metadata = description ? { description } : undefined
+      await addChildWorkspaceFromResult(parentId, worktreeName, result.path!, result.branch!, { isDetached, settings, metadata })
+      return { success: true }
+    },
+
+    createWorktreeFromRemote: async (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => {
+      console.log('[session] createWorktreeFromRemote called:', { parentId, remoteBranch, isDetached })
+      const state = get()
+      const parent = state.workspaces[parentId]
+
+      if (!parent) {
+        return { success: false, error: 'Parent workspace not found' }
+      }
+
+      if (!parent.isGitRepo || !parent.gitRootPath) {
+        return { success: false, error: 'Parent workspace is not a git repository' }
+      }
+
+      const worktreeName = remoteBranch.split('/').pop() || remoteBranch
+      const result = await deps.git.createWorktreeFromRemote(
+        parent.gitRootPath,
+        remoteBranch,
+        worktreeName
+      )
+
+      if (!result.success) {
+        return { success: false, error: result.error }
+      }
+
+      const metadata = description ? { description } : undefined
+      await addChildWorkspaceFromResult(parentId, worktreeName, result.path!, result.branch!, { isDetached, settings, metadata })
+      return { success: true }
+    },
+
+    removeWorkspace: async (id: string) => {
+      await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: false })
+    },
+
+    removeWorkspaceKeepBranch: async (id: string) => {
+      await removeWorkspaceInternal(id, { keepBranch: true, keepWorktree: false })
+    },
+
+    removeWorkspaceKeepWorktree: async (id: string) => {
+      await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: true })
+    },
+
+    removeWorkspaceKeepBoth: async (id: string) => {
+      await removeWorkspaceInternal(id, { keepBranch: true, keepWorktree: true })
+    },
+
+    removeOrphanWorkspace: (id: string) => {
+      const state = get()
+      const workspace = state.workspaces[id]
+      if (!workspace) return
+
+      if (workspace.parentId) {
+        const parentHandle = state.workspaceHandles[workspace.parentId]
+        if (parentHandle) {
+          const parentWs = parentHandle.getState().workspace
+          parentHandle.setState({
+            workspace: { ...parentWs, children: parentWs.children.filter((cid) => cid !== id) }
+          })
+        }
+      }
+
+      set((s) => {
+        const { [id]: _removedHandle, ...remainingHandles } = s.workspaceHandles
+        const { [id]: _removedWs, ...remainingWorkspaces } = s.workspaces
+        return {
+          workspaceHandles: remainingHandles,
+          workspaces: remainingWorkspaces,
+          activeWorkspaceId: s.activeWorkspaceId === id ? null : s.activeWorkspaceId
+        }
+      })
+    },
+
+    setActiveWorkspace: (id: string | null) => {
+      set({ activeWorkspaceId: id })
+    },
+
+    updateGitInfo: (id: string, gitInfo: GitInfo) => {
+      const handle = get().workspaceHandles[id]
+      if (!handle) return
+      const ws = handle.getState().workspace
+      handle.setState({
+        workspace: {
+          ...ws,
+          isGitRepo: gitInfo.isRepo,
+          gitBranch: gitInfo.branch,
+          gitRootPath: gitInfo.rootPath
+        }
+      })
+      syncSessionToDaemon(get().isRestoring).catch(console.error)
+    },
+
+    refreshGitInfo: async (id: string) => {
+      const workspace = get().workspaces[id]
+      if (!workspace) return
+      const gitInfo = await deps.git.getInfo(workspace.path)
+      get().updateGitInfo(id, gitInfo)
+    },
+
+    mergeAndRemoveWorkspace: async (id: string, squash: boolean) => {
+      const state = get()
+      const workspace = state.workspaces[id]
+
+      if (!workspace) {
+        return { success: false, error: 'Workspace not found' }
+      }
+
+      if (!workspace.isWorktree || !workspace.parentId) {
+        return { success: false, error: 'Not a worktree workspace' }
+      }
+
+      const parent = state.workspaces[workspace.parentId]
+      if (!parent || !parent.gitRootPath || !parent.gitBranch) {
+        return { success: false, error: 'Parent workspace not found or not a git repo' }
+      }
+
+      const hasChanges = await deps.git.hasUncommittedChanges(workspace.path)
+      if (hasChanges) {
+        const commitResult = await deps.git.commitAll(
+          workspace.path,
+          `WIP: Auto-commit before merge from ${workspace.name}`
+        )
+        if (!commitResult.success) {
+          return { success: false, error: `Failed to commit changes: ${commitResult.error}` }
+        }
+      }
+
+      const mergeResult = await deps.git.merge(
+        parent.gitRootPath,
+        workspace.gitBranch!,
+        parent.gitBranch,
+        squash
+      )
+
+      if (!mergeResult.success) {
+        return { success: false, error: `Merge failed: ${mergeResult.error}` }
+      }
+
+      // Update status on the handle
+      const handle = get().workspaceHandles[id]
+      if (handle) {
+        handle.getState().updateStatus('merged')
+      }
+      await get().removeWorkspace(id)
+
+      return { success: true }
+    },
+
+    closeAndCleanWorkspace: async (id: string) => {
+      const state = get()
+      const workspace = state.workspaces[id]
+
+      if (!workspace) {
+        return { success: false, error: 'Workspace not found' }
+      }
+
+      if (!workspace.isWorktree || !workspace.parentId) {
+        return { success: false, error: 'Not a worktree workspace' }
+      }
+
+      const parent = state.workspaces[workspace.parentId]
+      if (!parent || !parent.gitRootPath) {
+        return { success: false, error: 'Parent workspace not found or not a git repo' }
+      }
+
+      await get().removeWorkspace(id)
+      return { success: true }
+    },
+
+    quickForkWorkspace: async (workspaceId: string) => {
+      const state = get()
+      const ws = state.workspaces[workspaceId]
+
+      if (!ws) {
+        return { success: false, error: 'Workspace not found' }
+      }
+
+      if (!ws.gitRootPath) {
+        return { success: false, error: 'Workspace has no git root path' }
+      }
+
+      const existingBranches = await deps.git.listLocalBranches(ws.gitRootPath)
+      const parentBranch = ws.gitBranch || ''
+
+      let name: string | null = null
+      for (let i = 0; i < 3; i++) {
+        const candidate = humanId({ separator: '-', capitalize: false })
+        const fullBranch = parentBranch ? `${parentBranch}/${candidate}` : candidate
+        if (!existingBranches.includes(fullBranch)) {
+          name = candidate
+          break
+        }
+      }
+
+      if (!name) {
+        return { success: false, error: 'Failed to generate unique branch name' }
+      }
+
+      return get().addChildWorkspace(workspaceId, name, false)
+    },
+
+    syncToDaemon: async () => {
+      await syncSessionToDaemon(get().isRestoring)
+    },
+
     handleRestore: async (daemonSession: Session) => {
       console.log('[Session] Restoring session', daemonSession.id, 'with', daemonSession.workspaces.length, 'workspaces')
 
-      workspaceStore.setState({ isRestoring: true })
-      applySessionWorkspaces(workspaceStore, daemonSession.workspaces, { restoreExisting: true })
-      workspaceStore.setState({ isRestoring: false })
+      set({ isRestoring: true })
+      applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: true })
+      set({ isRestoring: false })
 
-      console.log('[Session] Session restore complete, workspace count:', Object.keys(workspaceStore.getState().workspaces).length)
+      console.log('[Session] Session restore complete, workspace count:', Object.keys(get().workspaces).length)
     },
 
     handleExternalUpdate: async (daemonSession: Session) => {
@@ -147,20 +710,19 @@ export function createSessionStore(
         workspaces: daemonSession.workspaces.map(ws => ({ path: ws.path, metadata: ws.metadata })),
       })
 
-      workspaceStore.setState({ isRestoring: true })
-      applySessionWorkspaces(workspaceStore, daemonSession.workspaces, { restoreExisting: false })
+      set({ isRestoring: true })
+      applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: false })
 
-      // Remove workspaces not present in daemon session.
+      // Remove workspaces not present in daemon session
       const incomingPaths = new Set(daemonSession.workspaces.map(ws => ws.path))
-      const { removeOrphanWorkspace } = workspaceStore.getState()
-      const updatedState = workspaceStore.getState()
+      const updatedState = get()
       for (const [id, ws] of Object.entries(updatedState.workspaces)) {
         if (!incomingPaths.has(ws.path)) {
-          removeOrphanWorkspace(id)
+          get().removeOrphanWorkspace(id)
         }
       }
 
-      workspaceStore.setState({ isRestoring: false })
+      set({ isRestoring: false })
       console.log('[Session] External session update applied')
     }
   }))
@@ -168,36 +730,27 @@ export function createSessionStore(
   return store
 }
 
-// Helper: sync metadata and name from daemon workspace to existing workspace
+// Helper: sync metadata and name from daemon workspace to existing workspace handle
 function updateWorkspaceFields(
-  store: StoreApi<WorkspaceState>,
+  store: StoreApi<SessionState>,
   existingId: string,
   daemonWorkspace: Workspace
 ): void {
-  store.setState((state) => {
-    const existing = state.workspaces[existingId]
-    if (!existing) return state
-    return {
-      workspaces: {
-        ...state.workspaces,
-        [existingId]: {
-          ...existing,
-          metadata: daemonWorkspace.metadata,
-          name: daemonWorkspace.name,
-        }
-      }
-    }
+  const handle = store.getState().workspaceHandles[existingId]
+  if (!handle) return
+  const ws = handle.getState().workspace
+  handle.setState({
+    workspace: { ...ws, metadata: daemonWorkspace.metadata, name: daemonWorkspace.name }
   })
 }
 
-// Helper: apply daemon workspaces to a store
+// Helper: apply daemon workspaces to the session store
 function applySessionWorkspaces(
-  store: StoreApi<WorkspaceState>,
+  store: StoreApi<SessionState>,
   daemonWorkspaces: Workspace[],
+  createHandleForWorkspace: (ws: Workspace) => WorkspaceHandle,
   options: { restoreExisting: boolean }
 ): void {
-  const { setActiveWorkspace } = store.getState()
-
   const rootWorkspaces = daemonWorkspaces.filter(w => !w.parentId)
   const childWorkspaces = daemonWorkspaces.filter(w => w.parentId)
 
@@ -208,13 +761,13 @@ function applySessionWorkspaces(
 
     if (existing) {
       if (options.restoreExisting) {
-        setActiveWorkspace(existing.id)
+        store.getState().setActiveWorkspace(existing.id)
         restoreWorkspaceTabs(store, existing.id, daemonWorkspace)
       } else {
         updateWorkspaceFields(store, existing.id, daemonWorkspace)
       }
     } else {
-      reconstructWorkspace(store, daemonWorkspace)
+      reconstructWorkspace(store, daemonWorkspace, createHandleForWorkspace)
     }
   }
 
@@ -230,37 +783,34 @@ function applySessionWorkspaces(
         updateWorkspaceFields(store, existing.id, daemonWorkspace)
       }
     } else {
-      reconstructWorkspace(store, daemonWorkspace)
+      reconstructWorkspace(store, daemonWorkspace, createHandleForWorkspace)
     }
   }
 }
 
-// Helper: restore workspace tabs by setting appStates directly
+// Helper: restore workspace tabs by updating the handle's workspace state
 function restoreWorkspaceTabs(
-  store: StoreApi<WorkspaceState>,
+  store: StoreApi<SessionState>,
   workspaceId: string,
   daemonWorkspace: Workspace
 ): void {
-  store.setState((state) => {
-    const ws = state.workspaces[workspaceId]
-    if (!ws) return state
-    return {
-      workspaces: {
-        ...state.workspaces,
-        [workspaceId]: {
-          ...ws,
-          appStates: daemonWorkspace.appStates,
-          activeTabId: daemonWorkspace.activeTabId || Object.keys(daemonWorkspace.appStates)[0] || null
-        }
-      }
+  const handle = store.getState().workspaceHandles[workspaceId]
+  if (!handle) return
+  const ws = handle.getState().workspace
+  handle.setState({
+    workspace: {
+      ...ws,
+      appStates: daemonWorkspace.appStates,
+      activeTabId: daemonWorkspace.activeTabId || Object.keys(daemonWorkspace.appStates)[0] || null
     }
   })
 }
 
 // Helper: reconstruct workspace preserving daemon IDs
 function reconstructWorkspace(
-  store: StoreApi<WorkspaceState>,
-  daemonWorkspace: Workspace
+  store: StoreApi<SessionState>,
+  daemonWorkspace: Workspace,
+  createHandleForWorkspace: (ws: Workspace) => WorkspaceHandle
 ): string {
   const id = daemonWorkspace.id
   const parentId = daemonWorkspace.parentId
@@ -272,20 +822,29 @@ function reconstructWorkspace(
     activeTabId: daemonWorkspace.activeTabId || (Object.keys(daemonWorkspace.appStates).length > 0 ? Object.keys(daemonWorkspace.appStates)[0] : null)
   }
 
-  store.setState((state) => {
-    const newWorkspaces = {
-      ...state.workspaces,
-      [id]: workspace,
-    }
+  const handle = createHandleForWorkspace(workspace)
 
-    if (parentId && state.workspaces[parentId]) {
+  store.setState((s) => {
+    const newWorkspaces = { ...s.workspaces, [id]: workspace }
+    const newHandles = { ...s.workspaceHandles, [id]: handle }
+
+    if (parentId && s.workspaces[parentId]) {
       newWorkspaces[parentId] = {
-        ...state.workspaces[parentId],
-        children: [...state.workspaces[parentId].children, id]
+        ...s.workspaces[parentId],
+        children: [...s.workspaces[parentId].children, id]
+      }
+      // Update parent handle too
+      const parentHandle = s.workspaceHandles[parentId]
+      if (parentHandle) {
+        parentHandle.setState({ workspace: newWorkspaces[parentId] })
       }
     }
 
-    return { workspaces: newWorkspaces, activeWorkspaceId: id }
+    return {
+      workspaceHandles: newHandles,
+      workspaces: newWorkspaces,
+      activeWorkspaceId: id
+    }
   })
 
   console.log('[Session] Reconstructed workspace:', daemonWorkspace.name, 'parentId:', parentId)

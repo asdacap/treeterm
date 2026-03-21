@@ -1,0 +1,560 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { createWorkspaceHandleStore } from './createWorkspaceHandleStore'
+import type { WorkspaceHandleDeps } from './createWorkspaceHandleStore'
+import { getUnmergedSubWorkspaces } from './createSessionStore'
+import type { Workspace, Application } from '../types'
+
+function makeHandleDeps(overrides?: Partial<WorkspaceHandleDeps>): WorkspaceHandleDeps {
+  return {
+    appRegistry: {
+      get: vi.fn().mockReturnValue(null),
+      getDefaultApp: vi.fn().mockReturnValue(null),
+    },
+    terminal: {
+      create: vi.fn().mockResolvedValue(null),
+      attach: vi.fn().mockResolvedValue({ success: false }),
+      list: vi.fn().mockResolvedValue([]),
+      write: vi.fn(),
+      resize: vi.fn(),
+      kill: vi.fn(),
+      isAlive: vi.fn().mockResolvedValue(false),
+      onData: vi.fn().mockReturnValue(() => {}),
+      onExit: vi.fn().mockReturnValue(() => {}),
+      onNewTerminal: vi.fn().mockReturnValue(() => {}),
+      onShowSessions: vi.fn().mockReturnValue(() => {}),
+      onActiveProcessesOpen: vi.fn().mockReturnValue(() => {}),
+    } as any,
+    syncToDaemon: vi.fn(),
+    removeWorkspace: vi.fn().mockResolvedValue(undefined),
+    removeWorkspaceKeepBranch: vi.fn().mockResolvedValue(undefined),
+    removeWorkspaceKeepWorktree: vi.fn().mockResolvedValue(undefined),
+    removeWorkspaceKeepBoth: vi.fn().mockResolvedValue(undefined),
+    mergeAndRemoveWorkspace: vi.fn().mockResolvedValue({ success: true }),
+    closeAndCleanWorkspace: vi.fn().mockResolvedValue({ success: true }),
+    quickForkWorkspace: vi.fn().mockResolvedValue({ success: true }),
+    refreshGitInfo: vi.fn().mockResolvedValue(undefined),
+    lookupWorkspace: vi.fn().mockReturnValue(undefined),
+    ...overrides,
+  }
+}
+
+function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
+  return {
+    id: 'ws-1',
+    name: 'test',
+    path: '/test',
+    parentId: null,
+    children: [],
+    status: 'active',
+    isGitRepo: false,
+    gitBranch: null,
+    gitRootPath: null,
+    isWorktree: false,
+    appStates: {},
+    activeTabId: null,
+    metadata: {},
+    createdAt: Date.now(),
+    lastActivity: Date.now(),
+    ...overrides
+  }
+}
+
+function makeFakeApp(overrides: Partial<Application> = {}): Application {
+  return {
+    id: 'terminal',
+    name: 'Terminal',
+    icon: 'terminal',
+    createInitialState: () => ({ ptyId: null }),
+    canClose: true,
+    canHaveMultiple: true,
+    showInNewTabMenu: true,
+    keepAlive: false,
+    displayStyle: 'block',
+    isDefault: false,
+    render: () => null,
+    ...overrides,
+  }
+}
+
+describe('getUnmergedSubWorkspaces', () => {
+  it('returns empty array when no workspaces', () => {
+    expect(getUnmergedSubWorkspaces({})).toEqual([])
+  })
+
+  it('returns only active worktree workspaces', () => {
+    const workspaces: Record<string, Workspace> = {
+      root: makeWorkspace({ id: 'root', isWorktree: false, status: 'active' }),
+      child1: makeWorkspace({ id: 'child1', isWorktree: true, status: 'active' }),
+      child2: makeWorkspace({ id: 'child2', isWorktree: true, status: 'merged' }),
+      child3: makeWorkspace({ id: 'child3', isWorktree: true, status: 'active' })
+    }
+    const result = getUnmergedSubWorkspaces(workspaces)
+    expect(result).toHaveLength(2)
+    expect(result.map(w => w.id)).toContain('child1')
+    expect(result.map(w => w.id)).toContain('child3')
+  })
+
+  it('excludes non-worktree workspaces even if active', () => {
+    const workspaces: Record<string, Workspace> = {
+      root: makeWorkspace({ id: 'root', isWorktree: false, status: 'active' })
+    }
+    expect(getUnmergedSubWorkspaces(workspaces)).toEqual([])
+  })
+})
+
+describe('createWorkspaceHandleStore', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('creates a store with initial workspace state', () => {
+    const ws = makeWorkspace()
+    const store = createWorkspaceHandleStore(ws, makeHandleDeps())
+    const state = store.getState()
+
+    expect(state.workspace).toEqual(ws)
+  })
+
+  it('exposes all required action methods', () => {
+    const store = createWorkspaceHandleStore(makeWorkspace(), makeHandleDeps())
+    const state = store.getState()
+
+    expect(typeof state.addTab).toBe('function')
+    expect(typeof state.removeTab).toBe('function')
+    expect(typeof state.setActiveTab).toBe('function')
+    expect(typeof state.updateTabTitle).toBe('function')
+    expect(typeof state.updateTabState).toBe('function')
+    expect(typeof state.updateMetadata).toBe('function')
+    expect(typeof state.updateStatus).toBe('function')
+    expect(typeof state.getReviewComments).toBe('function')
+    expect(typeof state.addReviewComment).toBe('function')
+    expect(typeof state.deleteReviewComment).toBe('function')
+    expect(typeof state.toggleReviewCommentAddressed).toBe('function')
+    expect(typeof state.updateOutdatedReviewComments).toBe('function')
+    expect(typeof state.clearReviewComments).toBe('function')
+    expect(typeof state.refreshGitInfo).toBe('function')
+    expect(typeof state.remove).toBe('function')
+  })
+
+  it('updateStatus updates workspace status field', () => {
+    const ws = makeWorkspace({ id: 'ws-1', status: 'active' })
+    const store = createWorkspaceHandleStore(ws, makeHandleDeps())
+
+    store.getState().updateStatus('merged')
+
+    expect(store.getState().workspace.status).toBe('merged')
+  })
+
+  it('updateTabTitle updates the tab title', () => {
+    const ws = makeWorkspace({
+      id: 'ws-1',
+      appStates: { 'tab-1': { applicationId: 'terminal', title: 'Terminal 1', state: { ptyId: null } } },
+      activeTabId: 'tab-1'
+    })
+    const store = createWorkspaceHandleStore(ws, makeHandleDeps())
+
+    store.getState().updateTabTitle('tab-1', 'my shell')
+
+    expect(store.getState().workspace.appStates['tab-1'].title).toBe('my shell')
+  })
+
+  it('setActiveTab updates the workspace activeTabId', () => {
+    const ws = makeWorkspace({
+      id: 'ws-1',
+      appStates: {
+        'tab-1': { applicationId: 'terminal', title: 'T1', state: {} },
+        'tab-2': { applicationId: 'terminal', title: 'T2', state: {} }
+      },
+      activeTabId: 'tab-1'
+    })
+    const store = createWorkspaceHandleStore(ws, makeHandleDeps())
+
+    store.getState().setActiveTab('tab-2')
+
+    expect(store.getState().workspace.activeTabId).toBe('tab-2')
+  })
+
+  describe('addTab', () => {
+    it('adds tab with correct title numbering', () => {
+      const app = makeFakeApp()
+      const deps = makeHandleDeps({
+        appRegistry: {
+          get: vi.fn().mockReturnValue(app),
+          getDefaultApp: vi.fn().mockReturnValue(null),
+        },
+      })
+      const ws = makeWorkspace({
+        id: 'ws-1',
+        appStates: { 'tab-existing': { applicationId: 'terminal', title: 'Terminal 1', state: {} } },
+      })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      const tabId = store.getState().addTab('terminal')
+
+      const wsState = store.getState().workspace
+      const newTab = wsState.appStates[tabId]
+      expect(newTab).toBeDefined()
+      expect(newTab!.title).toBe('Terminal 2')
+      expect(wsState.activeTabId).toBe(tabId)
+    })
+
+    it('respects canHaveMultiple: false — no-ops if tab of same app exists', () => {
+      const app = makeFakeApp({ canHaveMultiple: false })
+      const deps = makeHandleDeps({
+        appRegistry: {
+          get: vi.fn().mockReturnValue(app),
+          getDefaultApp: vi.fn().mockReturnValue(null),
+        },
+      })
+      const ws = makeWorkspace({
+        id: 'ws-1',
+        appStates: { 'tab-1': { applicationId: 'terminal', title: 'Terminal 1', state: {} } },
+      })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      store.getState().addTab('terminal')
+
+      const wsState = store.getState().workspace
+      expect(Object.keys(wsState.appStates)).toHaveLength(1)
+    })
+
+    it('returns tabId even when app not found (no-op on state)', () => {
+      const deps = makeHandleDeps()
+      const ws = makeWorkspace({ id: 'ws-1' })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      const tabId = store.getState().addTab('nonexistent')
+
+      expect(typeof tabId).toBe('string')
+      expect(Object.keys(store.getState().workspace.appStates)).toHaveLength(0)
+    })
+
+    it('creates new tab with merged initial + provided state', () => {
+      const app = makeFakeApp({ createInitialState: () => ({ ptyId: null, cwd: '/default' }) })
+      const deps = makeHandleDeps({
+        appRegistry: {
+          get: vi.fn().mockReturnValue(app),
+          getDefaultApp: vi.fn().mockReturnValue(null),
+        },
+      })
+      const ws = makeWorkspace({ id: 'ws-1' })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      const tabId = store.getState().addTab('terminal', { cwd: '/custom' })
+
+      const tab = store.getState().workspace.appStates[tabId]
+      expect(tab).toBeDefined()
+      expect(tab!.state).toEqual({ ptyId: null, cwd: '/custom' })
+    })
+
+    it('respects canHaveMultiple: false — merges state into existing tab', () => {
+      const app = makeFakeApp({ canHaveMultiple: false })
+      const deps = makeHandleDeps({
+        appRegistry: {
+          get: vi.fn().mockReturnValue(app),
+          getDefaultApp: vi.fn().mockReturnValue(null),
+        },
+      })
+      const ws = makeWorkspace({
+        id: 'ws-1',
+        appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: { ptyId: 'p1' } } },
+      })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      store.getState().addTab('terminal', { newField: 'val' })
+
+      const wsState = store.getState().workspace
+      expect(Object.keys(wsState.appStates)).toHaveLength(1)
+      expect(wsState.appStates['tab-1'].state).toEqual({ ptyId: 'p1', newField: 'val' })
+      expect(wsState.activeTabId).toBe('tab-1')
+    })
+  })
+
+  describe('removeTab', () => {
+    it('removes tab and adjusts activeTabId', async () => {
+      const app = makeFakeApp({ canClose: true })
+      const deps = makeHandleDeps({
+        appRegistry: {
+          get: vi.fn().mockReturnValue(app),
+          getDefaultApp: vi.fn().mockReturnValue(null),
+        },
+      })
+      const ws = makeWorkspace({
+        id: 'ws-1',
+        appStates: {
+          'tab-1': { applicationId: 'terminal', title: 'T1', state: {} },
+          'tab-2': { applicationId: 'terminal', title: 'T2', state: {} },
+        },
+        activeTabId: 'tab-1',
+      })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      await store.getState().removeTab('tab-1')
+
+      const wsState = store.getState().workspace
+      expect(Object.keys(wsState.appStates)).toHaveLength(1)
+      expect(Object.keys(wsState.appStates)[0]).toBe('tab-2')
+      expect(wsState.activeTabId).toBe('tab-2')
+    })
+
+    it('calls app cleanup', async () => {
+      const cleanup = vi.fn()
+      const app = makeFakeApp({ canClose: true, cleanup })
+      const deps = makeHandleDeps({
+        appRegistry: {
+          get: vi.fn().mockReturnValue(app),
+          getDefaultApp: vi.fn().mockReturnValue(null),
+        },
+      })
+      const ws = makeWorkspace({
+        id: 'ws-1',
+        appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: {} } },
+        activeTabId: 'tab-1',
+      })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      await store.getState().removeTab('tab-1')
+
+      expect(cleanup).toHaveBeenCalledTimes(1)
+    })
+
+    it('no-ops when canClose is false', async () => {
+      const app = makeFakeApp({ canClose: false })
+      const deps = makeHandleDeps({
+        appRegistry: {
+          get: vi.fn().mockReturnValue(app),
+          getDefaultApp: vi.fn().mockReturnValue(null),
+        },
+      })
+      const ws = makeWorkspace({
+        id: 'ws-1',
+        appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: {} } },
+      })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      await store.getState().removeTab('tab-1')
+
+      expect(Object.keys(store.getState().workspace.appStates)).toHaveLength(1)
+    })
+
+    it('no-ops for unknown tab', async () => {
+      const ws = makeWorkspace({ id: 'ws-1' })
+      const store = createWorkspaceHandleStore(ws, makeHandleDeps())
+
+      // Should not throw
+      await store.getState().removeTab('nonexistent')
+    })
+  })
+
+  describe('updateTabState', () => {
+    it('applies updater function to tab state', () => {
+      const deps = makeHandleDeps()
+      const ws = makeWorkspace({
+        id: 'ws-1',
+        appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: { count: 0 } } },
+      })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      store.getState().updateTabState<{ count: number }>('tab-1', (s) => ({ ...s, count: s.count + 1 }))
+
+      const tab = store.getState().workspace.appStates['tab-1']
+      expect(tab.state).toEqual({ count: 1 })
+    })
+
+    it('syncs to daemon only when ptyId is present in updated state', () => {
+      const deps = makeHandleDeps()
+      const ws = makeWorkspace({
+        id: 'ws-1',
+        appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: { count: 0 } } },
+      })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      // Update without ptyId — syncToDaemon called only for the state update, not for ptyId
+      store.getState().updateTabState('tab-1', (s: { count: number }) => ({ ...s, count: 1 }))
+      // syncToDaemon should NOT be called for non-pty state updates
+      expect(deps.syncToDaemon).not.toHaveBeenCalled()
+
+      // Update WITH ptyId — should sync
+      store.getState().updateTabState('tab-1', (s: { count: number }) => ({ ...s, count: 2, ptyId: 'pty-1' }))
+      expect(deps.syncToDaemon).toHaveBeenCalled()
+    })
+  })
+
+  describe('review comments', () => {
+    it('addReviewComment adds a comment to metadata', () => {
+      const deps = makeHandleDeps()
+      const ws = makeWorkspace({ id: 'ws-1', metadata: {} })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      store.getState().addReviewComment({
+        filePath: 'test.ts',
+        lineNumber: 10,
+        text: 'Fix this',
+        commitHash: 'abc123',
+        isOutdated: false,
+        addressed: false,
+        side: 'modified'
+      })
+
+      const wsState = store.getState().workspace
+      const comments = JSON.parse(wsState.metadata.reviewComments)
+      expect(comments).toHaveLength(1)
+      expect(comments[0].text).toBe('Fix this')
+      expect(comments[0].filePath).toBe('test.ts')
+      expect(comments[0].id).toBeDefined()
+      expect(comments[0].createdAt).toBeDefined()
+    })
+
+    it('deleteReviewComment removes a comment', () => {
+      const deps = makeHandleDeps()
+      const existingComments = JSON.stringify([
+        { id: 'c1', filePath: 'a.ts', lineNumber: 1, text: 'A', commitHash: 'h1', createdAt: 1, isOutdated: false, addressed: false, side: 'modified' },
+        { id: 'c2', filePath: 'b.ts', lineNumber: 2, text: 'B', commitHash: 'h1', createdAt: 2, isOutdated: false, addressed: false, side: 'modified' }
+      ])
+      const ws = makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      store.getState().deleteReviewComment('c1')
+
+      const wsState = store.getState().workspace
+      const comments = JSON.parse(wsState.metadata.reviewComments)
+      expect(comments).toHaveLength(1)
+      expect(comments[0].id).toBe('c2')
+    })
+
+    it('toggleReviewCommentAddressed toggles addressed flag', () => {
+      const deps = makeHandleDeps()
+      const existingComments = JSON.stringify([
+        { id: 'c1', filePath: 'a.ts', lineNumber: 1, text: 'A', commitHash: 'h1', createdAt: 1, isOutdated: false, addressed: false, side: 'modified' }
+      ])
+      const ws = makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      store.getState().toggleReviewCommentAddressed('c1')
+
+      const wsState = store.getState().workspace
+      const comments = JSON.parse(wsState.metadata.reviewComments)
+      expect(comments[0].addressed).toBe(true)
+    })
+
+    it('updateOutdatedReviewComments marks comments with different hash as outdated', () => {
+      const deps = makeHandleDeps()
+      const existingComments = JSON.stringify([
+        { id: 'c1', filePath: 'a.ts', lineNumber: 1, text: 'A', commitHash: 'old', createdAt: 1, isOutdated: false, addressed: false, side: 'modified' },
+        { id: 'c2', filePath: 'b.ts', lineNumber: 2, text: 'B', commitHash: 'new', createdAt: 2, isOutdated: false, addressed: false, side: 'modified' }
+      ])
+      const ws = makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      store.getState().updateOutdatedReviewComments('new')
+
+      const wsState = store.getState().workspace
+      const comments = JSON.parse(wsState.metadata.reviewComments)
+      expect(comments[0].isOutdated).toBe(true)
+      expect(comments[1].isOutdated).toBe(false)
+    })
+
+    it('clearReviewComments empties the comments', () => {
+      const deps = makeHandleDeps()
+      const existingComments = JSON.stringify([
+        { id: 'c1', filePath: 'a.ts', lineNumber: 1, text: 'A', commitHash: 'h1', createdAt: 1, isOutdated: false, addressed: false, side: 'modified' }
+      ])
+      const ws = makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      store.getState().clearReviewComments()
+
+      const wsState = store.getState().workspace
+      const comments = JSON.parse(wsState.metadata.reviewComments)
+      expect(comments).toHaveLength(0)
+    })
+  })
+
+  describe('cross-cutting operations delegate to deps', () => {
+    it('refreshGitInfo delegates to deps', async () => {
+      const deps = makeHandleDeps()
+      const ws = makeWorkspace({ id: 'ws-1' })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      await store.getState().refreshGitInfo()
+
+      expect(deps.refreshGitInfo).toHaveBeenCalledWith('ws-1')
+    })
+
+    it('remove delegates to deps', async () => {
+      const deps = makeHandleDeps()
+      const ws = makeWorkspace({ id: 'ws-1' })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      await store.getState().remove()
+
+      expect(deps.removeWorkspace).toHaveBeenCalledWith('ws-1')
+    })
+
+    it('removeKeepBranch delegates to deps', async () => {
+      const deps = makeHandleDeps()
+      const ws = makeWorkspace({ id: 'ws-1' })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      await store.getState().removeKeepBranch()
+
+      expect(deps.removeWorkspaceKeepBranch).toHaveBeenCalledWith('ws-1')
+    })
+
+    it('removeKeepWorktree delegates to deps', async () => {
+      const deps = makeHandleDeps()
+      const ws = makeWorkspace({ id: 'ws-1' })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      await store.getState().removeKeepWorktree()
+
+      expect(deps.removeWorkspaceKeepWorktree).toHaveBeenCalledWith('ws-1')
+    })
+
+    it('removeKeepBoth delegates to deps', async () => {
+      const deps = makeHandleDeps()
+      const ws = makeWorkspace({ id: 'ws-1' })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      await store.getState().removeKeepBoth()
+
+      expect(deps.removeWorkspaceKeepBoth).toHaveBeenCalledWith('ws-1')
+    })
+
+    it('mergeAndRemove delegates to deps', async () => {
+      const deps = makeHandleDeps()
+      const ws = makeWorkspace({ id: 'ws-1' })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      await store.getState().mergeAndRemove(true)
+
+      expect(deps.mergeAndRemoveWorkspace).toHaveBeenCalledWith('ws-1', true)
+    })
+
+    it('closeAndClean delegates to deps', async () => {
+      const deps = makeHandleDeps()
+      const ws = makeWorkspace({ id: 'ws-1' })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      await store.getState().closeAndClean()
+
+      expect(deps.closeAndCleanWorkspace).toHaveBeenCalledWith('ws-1')
+    })
+
+    it('quickForkWorkspace delegates to deps', async () => {
+      const deps = makeHandleDeps()
+      const ws = makeWorkspace({ id: 'ws-1' })
+      const store = createWorkspaceHandleStore(ws, deps)
+
+      await store.getState().quickForkWorkspace()
+
+      expect(deps.quickForkWorkspace).toHaveBeenCalledWith('ws-1')
+    })
+  })
+
+  // TODO: Collection-level tests (addWorkspace, addChildWorkspace, removeWorkspace,
+  // adoptExistingWorktree, createWorktreeFromBranch, createWorktreeFromRemote,
+  // removeWorkspaceKeep*, removeOrphanWorkspace, mergeAndRemoveWorkspace,
+  // closeAndCleanWorkspace, refreshGitInfo, syncSessionToDaemon) need to be
+  // moved to a createSessionStore.test.ts file that tests against the session store.
+})

@@ -32,10 +32,10 @@ export default function SessionPanel({
   selectFolder,
   getRecentDirectories,
 }: SessionPanelProps): JSX.Element {
-  const workspaceStore = useStore(sessionStore, s => s.workspaceStore)
   const connection = useStore(sessionStore, s => s.connection)
   const {
     workspaces,
+    workspaceHandles,
     activeWorkspaceId,
     addWorkspace,
     addChildWorkspace,
@@ -44,7 +44,6 @@ export default function SessionPanel({
     createWorktreeFromRemote,
     quickForkWorkspace,
     setActiveWorkspace,
-    getWorkspace,
   } = useStore(sessionStore)
   const { activeSessionId, switchSession } = useAppStore()
   const { activeView, setActiveView } = useNavigationStore()
@@ -182,9 +181,9 @@ export default function SessionPanel({
     // For worktree workspaces with a parent, open the Review tab
     if (ws.isWorktree && ws.parentId) {
       setActiveWorkspace(id)
-      const handle = getWorkspace(id)
+      const handle = workspaceHandles[id]
       if (handle) {
-        handle.addTab<ReviewState>('review', {
+        handle.getState().addTab<ReviewState>('review', {
           parentWorkspaceId: ws.parentId
         })
       }
@@ -194,7 +193,7 @@ export default function SessionPanel({
     // For regular workspaces, just confirm and remove
     const message = `Remove workspace "${ws.name}"?`
     if (confirm(message)) {
-      await getWorkspace(id)!.remove()
+      await workspaceHandles[id]!.getState().remove()
     }
   }
 

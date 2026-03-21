@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { reviewApplication } from './renderer'
 import type { Tab, Workspace, ReviewState } from '../../renderer/types'
-import type { WorkspaceHandle } from '../../renderer/store/createWorkspaceStore'
+import { createStore } from 'zustand/vanilla'
+import type { WorkspaceHandleState, WorkspaceHandle } from '../../renderer/store/createWorkspaceHandleStore'
 
 // Mock React
 vi.mock('react', () => ({
@@ -13,33 +14,37 @@ vi.mock('../../renderer/components/ReviewBrowser', () => ({
   default: vi.fn(() => null)
 }))
 
-const mockWorkspaceHandle = {
-  id: 'ws-1',
-  data: { path: '/test' } as Workspace,
-  addTab: vi.fn(),
-  removeTab: vi.fn(),
-  setActiveTab: vi.fn(),
-  updateTabTitle: vi.fn(),
-  updateTabState: vi.fn(),
-  getReviewComments: vi.fn(),
-  addReviewComment: vi.fn(),
-  deleteReviewComment: vi.fn(),
-  toggleReviewCommentAddressed: vi.fn(),
-  updateOutdatedReviewComments: vi.fn(),
-  clearReviewComments: vi.fn(),
-  promptHarness: vi.fn(),
-  quickForkWorkspace: vi.fn(),
-  updateMetadata: vi.fn(),
-  updateStatus: vi.fn(),
-  refreshGitInfo: vi.fn(),
-  mergeAndRemove: vi.fn(),
-  closeAndClean: vi.fn(),
-  lookupWorkspace: vi.fn(),
-  remove: vi.fn(),
-  removeKeepBranch: vi.fn(),
-  removeKeepWorktree: vi.fn(),
-  removeKeepBoth: vi.fn(),
-} satisfies WorkspaceHandle
+function createMockWorkspaceHandleStateData(overrides?: Partial<WorkspaceHandleState>): WorkspaceHandleState {
+  return {
+    workspace: { id: 'ws-1', path: '/test' } as Workspace,
+    addTab: vi.fn(),
+    removeTab: vi.fn(),
+    setActiveTab: vi.fn(),
+    updateTabTitle: vi.fn(),
+    updateTabState: vi.fn(),
+    getReviewComments: vi.fn(),
+    addReviewComment: vi.fn(),
+    deleteReviewComment: vi.fn(),
+    toggleReviewCommentAddressed: vi.fn(),
+    updateOutdatedReviewComments: vi.fn(),
+    clearReviewComments: vi.fn(),
+    promptHarness: vi.fn(),
+    quickForkWorkspace: vi.fn(),
+    updateMetadata: vi.fn(),
+    updateStatus: vi.fn(),
+    refreshGitInfo: vi.fn(),
+    mergeAndRemove: vi.fn(),
+    closeAndClean: vi.fn(),
+    lookupWorkspace: vi.fn(),
+    remove: vi.fn(),
+    removeKeepBranch: vi.fn(),
+    removeKeepWorktree: vi.fn(),
+    removeKeepBoth: vi.fn(),
+    ...overrides,
+  } as WorkspaceHandleState
+}
+
+const mockWorkspaceHandle = createStore<WorkspaceHandleState>()(() => createMockWorkspaceHandleStateData())
 
 describe('Review Renderer', () => {
   beforeEach(() => {
@@ -50,7 +55,7 @@ describe('Review Renderer', () => {
     it('has correct application properties', () => {
       expect(reviewApplication.id).toBe('review')
       expect(reviewApplication.name).toBe('Review')
-      expect(reviewApplication.icon).toBe('📋')
+      expect(reviewApplication.icon).toBe('\u{1F4CB}')
       expect(reviewApplication.canClose).toBe(true)
       expect(reviewApplication.canHaveMultiple).toBe(false)
       expect(reviewApplication.showInNewTabMenu).toBe(true)
@@ -173,7 +178,7 @@ describe('Review Renderer', () => {
 
       it('passes workspace correctly', () => {
         const tab: Tab = {
-          id: 'review-tab',
+          id: 'tab-1',
           applicationId: 'review',
           title: 'Review Changes',
           state: {
@@ -181,7 +186,9 @@ describe('Review Renderer', () => {
           }
         }
 
-        const wsHandle = { ...mockWorkspaceHandle, id: 'feature-ws', data: { path: '/workspace/feature' } as Workspace }
+        const wsHandle = createStore<WorkspaceHandleState>()(() => createMockWorkspaceHandleStateData({
+          workspace: { id: 'feature-ws', path: '/workspace/feature' } as Workspace,
+        }))
 
         const result = reviewApplication.render({
           tab,
@@ -189,8 +196,8 @@ describe('Review Renderer', () => {
           isVisible: true,
         }) as { props: { workspace: WorkspaceHandle } }
 
-        expect(result.props.workspace.id).toBe('feature-ws')
-        expect(result.props.workspace.data.path).toBe('/workspace/feature')
+        expect(result.props.workspace.getState().workspace.id).toBe('feature-ws')
+        expect(result.props.workspace.getState().workspace.path).toBe('/workspace/feature')
       })
 
       it('renders regardless of isVisible flag', () => {

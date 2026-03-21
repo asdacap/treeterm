@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
+import { useStore } from 'zustand'
 import { useGitApi } from '../contexts/GitApiContext'
 import { FileTree } from './FileTree'
 import { FileViewer } from './FileViewer'
@@ -14,9 +15,9 @@ export function FilesystemBrowser({
   workspace,
   tabId,
 }: FilesystemBrowserProps): JSX.Element {
+  const { workspace: wsData, updateTabState, getReviewComments, addReviewComment, deleteReviewComment, updateOutdatedReviewComments } = useStore(workspace)
   const git = useGitApi()
-  const workspacePath = workspace.data.path
-  const wsData = workspace.data
+  const workspacePath = wsData.path
   const appState = wsData?.appStates[tabId]
   const state = appState?.state as FilesystemState | undefined
 
@@ -25,7 +26,7 @@ export function FilesystemBrowser({
   const [isResizing, setIsResizing] = useState(false)
 
   // Reviews state — derived from store
-  const allComments = workspace.getReviewComments()
+  const allComments = getReviewComments()
   const [commentInput, setCommentInput] = useState<{ lineNumber: number } | null>(null)
   const [currentCommitHash, setCurrentCommitHash] = useState<string | null>(null)
   const [commitHashError, setCommitHashError] = useState<string | null>(null)
@@ -35,14 +36,14 @@ export function FilesystemBrowser({
   }
 
   const setSelectedPath = (path: string | null) => {
-    workspace.updateTabState<FilesystemState>(tabId, (s) => ({
+    updateTabState<FilesystemState>(tabId, (s) => ({
       ...s,
       selectedPath: path
     }))
   }
 
   const toggleExpandedDir = (dirPath: string) => {
-    workspace.updateTabState<FilesystemState>(tabId, (s) => {
+    updateTabState<FilesystemState>(tabId, (s) => {
       const isExpanded = s.expandedDirs.includes(dirPath)
       return {
         ...s,
@@ -60,7 +61,7 @@ export function FilesystemBrowser({
         const hashResult = await git.getHeadCommitHash(workspacePath)
         if (hashResult.success && hashResult.hash) {
           setCurrentCommitHash(hashResult.hash)
-          workspace.updateOutdatedReviewComments(hashResult.hash)
+          updateOutdatedReviewComments(hashResult.hash)
         }
       } catch (error) {
         console.error('Failed to update outdated comments:', error)
@@ -81,7 +82,7 @@ export function FilesystemBrowser({
 
   const handleCommentSubmit = (text: string) => {
     if (!commentInput || !currentCommitHash || !state.selectedPath) return
-    workspace.addReviewComment({
+    addReviewComment({
       filePath: state.selectedPath,
       lineNumber: commentInput.lineNumber,
       text,
@@ -94,7 +95,7 @@ export function FilesystemBrowser({
   }
 
   const handleCommentDelete = (commentId: string) => {
-    workspace.deleteReviewComment(commentId)
+    deleteReviewComment(commentId)
   }
 
   // Filter comments for current file
@@ -148,7 +149,7 @@ export function FilesystemBrowser({
           onCommentCancel={() => setCommentInput(null)}
           scrollToLine={state.scrollToLine}
           onScrollToLineUsed={() => {
-            workspace.updateTabState<FilesystemState>(tabId, (s) => ({
+            updateTabState<FilesystemState>(tabId, (s) => ({
               ...s,
               scrollToLine: undefined
             }))

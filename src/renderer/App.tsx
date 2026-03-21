@@ -45,7 +45,6 @@ export default function App() {
     daemonSessions,
     daemonDisconnected,
     showConnectionPicker,
-    getActiveWorkspaceStore,
     getActiveSessionStore,
   } = useAppStore()
 
@@ -56,7 +55,7 @@ export default function App() {
   const activeSessionStore = activeView?.type === 'workspace' && activeView.sessionId
     ? sessionStores[activeView.sessionId] || null
     : getActiveSessionStore()
-  const activeStore = activeSessionStore?.getState().workspaceStore || getActiveWorkspaceStore()
+  const resolvedSessionStore = activeSessionStore || getActiveSessionStore()
 
   const handleConfirmClose = () => {
     useAppStore.setState({ showCloseConfirm: false })
@@ -166,7 +165,7 @@ export default function App() {
           {isActiveProcessesOpen && (
             <ActiveProcessesDialog
               terminalApi={terminal}
-              workspaces={activeStore?.getState().workspaces ?? {}}
+              workspaces={resolvedSessionStore?.getState().workspaces ?? {}}
               onClose={() => useAppStore.setState({ isActiveProcessesOpen: false })}
             />
           )}
