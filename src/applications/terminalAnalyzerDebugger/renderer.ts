@@ -3,7 +3,7 @@ import type { Application, ApplicationRenderProps } from '../../renderer/types'
 import TerminalAnalyzerDebugger from '../../renderer/components/TerminalAnalyzerDebugger'
 
 export const terminalAnalyzerDebuggerApplication: Application = {
-  id: 'terminal-analyzer-debugger',
+  id: 'analyzer-debugger',
   name: 'Analyzer Debugger',
   icon: '🔬',
   createInitialState: () => ({}),
