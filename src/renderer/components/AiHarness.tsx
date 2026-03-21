@@ -3,7 +3,7 @@ import { useStore } from 'zustand'
 import BaseTerminal, { type BaseTerminalConfig, type BaseTerminalState } from './BaseTerminal'
 import PushToTalkButton from './PushToTalkButton'
 import { ReviewCommentsButton } from './ReviewCommentsButton'
-import { useTerminalApi } from '../contexts/TerminalApiContext'
+import { useSessionApi } from '../contexts/SessionStoreContext'
 import type { SandboxConfig, WorkspaceHandle } from '../types'
 
 interface AiHarnessProps {
@@ -29,22 +29,24 @@ export default function AiHarness({
   disableScrollbar,
   stripScrollbackClear,
 }: AiHarnessProps) {
-  const terminalApi = useTerminalApi()
+  const sessionStore = useSessionApi()
   const { workspace: wsData } = useStore(workspace)
   const appState = wsData?.appStates[tabId]
-  const ptyHandle = (appState?.state as BaseTerminalState | undefined)?.ptyHandle
+  const ptyId = (appState?.state as BaseTerminalState | undefined)?.ptyId
 
   const handlePushToTalkTranscript = useCallback((text: string) => {
-    if (ptyHandle) {
-      terminalApi.write(ptyHandle, text)
+    if (ptyId) {
+      const tty = sessionStore.getState().getTty(ptyId)
+      if (tty) tty.getState().write(text)
     }
-  }, [ptyHandle, terminalApi])
+  }, [ptyId, sessionStore])
 
   const handlePushToTalkSubmit = useCallback(() => {
-    if (ptyHandle) {
-      terminalApi.write(ptyHandle, '\r')
+    if (ptyId) {
+      const tty = sessionStore.getState().getTty(ptyId)
+      if (tty) tty.getState().write('\r')
     }
-  }, [ptyHandle, terminalApi])
+  }, [ptyId, sessionStore])
 
   // Memoize config based on props to prevent unnecessary re-renders
   const config = useMemo<BaseTerminalConfig>(() => ({

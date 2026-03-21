@@ -12,7 +12,7 @@ vi.mock('react', () => ({
 
 import { useFilesystemApi } from './FilesystemApiContext'
 import { useSTTApi } from './STTApiContext'
-import { useTerminalApi } from './TerminalApiContext'
+import { useSessionApi } from './SessionStoreContext'
 
 describe('Context hooks', () => {
   beforeEach(() => {
@@ -49,18 +49,18 @@ describe('Context hooks', () => {
     })
   })
 
-  describe('useTerminalApi', () => {
+  describe('useSessionApi', () => {
     it('throws when context is null', () => {
       mockUseContext.mockReturnValue(null)
-      expect(() => useTerminalApi()).toThrow(
-        'useTerminalApi must be used within a TerminalApiContext.Provider'
+      expect(() => useSessionApi()).toThrow(
+        'useSessionApi must be used within a SessionStoreContext.Provider'
       )
     })
 
     it('returns value when context is provided', () => {
-      const api = { createTerminal: vi.fn() }
-      mockUseContext.mockReturnValue(api)
-      expect(useTerminalApi()).toBe(api)
+      const store = { getState: vi.fn() }
+      mockUseContext.mockReturnValue(store)
+      expect(useSessionApi()).toBe(store)
     })
   })
 })

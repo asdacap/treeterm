@@ -3,11 +3,13 @@ import type { StoreApi } from 'zustand'
 import { humanId } from 'human-id'
 import { createWorkspaceHandleStore } from './createWorkspaceHandleStore'
 import type { WorkspaceHandle, WorkspaceHandleDeps } from './createWorkspaceHandleStore'
+import { createTtyStore } from './createTtyStore'
+import type { Tty } from './createTtyStore'
 import type {
   Workspace, Session, AppState, GitInfo,
   SSHConnectionConfig, ConnectionInfo,
   TerminalApi, GitApi, SessionApi, SSHApi, Settings, WorktreeSettings,
-  Application
+  Application, SandboxConfig, SessionInfo
 } from '../types'
 
 export interface AppRegistryApi {
@@ -31,6 +33,13 @@ export interface SessionState {
   connection: ConnectionInfo | null
   connect: (config: SSHConnectionConfig) => Promise<void>
   disconnect: () => Promise<void>
+
+  // TTY sub-stores (enclosed ID pattern)
+  ttyHandles: Record<string, Tty>
+  createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
+  attachTty: (ptyId: string) => Promise<{ scrollback?: string[]; exitCode?: number }>
+  getTty: (ptyId: string) => Tty | null
+  listTty: () => Promise<SessionInfo[]>
 
   // Workspace collection
   workspaceHandles: Record<string, WorkspaceHandle>
@@ -157,7 +166,7 @@ export function createSessionStore(
   function makeHandleDeps(): WorkspaceHandleDeps {
     return {
       appRegistry: deps.appRegistry,
-      terminal: deps.terminal,
+      getTty: (ptyId: string) => store.getState().getTty(ptyId),
       git: deps.git,
       syncToDaemon: () => debouncedSyncToDaemon(),
       removeWorkspace: (id) => store.getState().removeWorkspace(id),
@@ -323,12 +332,45 @@ export function createSessionStore(
 
   const store = createStore<SessionState>()((set, get) => ({
     sessionId: config.sessionId,
+    ttyHandles: {},
     workspaceHandles: {},
     workspaces: {},
     activeWorkspaceId: null,
     isRestoring: false,
 
     connection: null,
+
+    createTty: async (cwd: string, sandbox?: SandboxConfig, startupCommand?: string): Promise<string> => {
+      const result = await deps.terminal.create(cwd, sandbox, startupCommand)
+      if (!result) {
+        throw new Error('Failed to create PTY')
+      }
+      const tty = createTtyStore(result.sessionId, result.handle, deps.terminal)
+      set((s) => ({
+        ttyHandles: { ...s.ttyHandles, [result.sessionId]: tty }
+      }))
+      return result.sessionId
+    },
+
+    attachTty: async (ptyId: string): Promise<{ scrollback?: string[]; exitCode?: number }> => {
+      const result = await deps.terminal.attach(ptyId)
+      if (!result.success || !result.handle) {
+        throw new Error(result.error || 'Failed to attach to PTY')
+      }
+      const tty = createTtyStore(ptyId, result.handle, deps.terminal)
+      set((s) => ({
+        ttyHandles: { ...s.ttyHandles, [ptyId]: tty }
+      }))
+      return { scrollback: result.scrollback, exitCode: result.exitCode }
+    },
+
+    getTty: (ptyId: string): Tty | null => {
+      return get().ttyHandles[ptyId] ?? null
+    },
+
+    listTty: (): Promise<SessionInfo[]> => {
+      return deps.terminal.list()
+    },
 
     connect: async (sshConfig: SSHConnectionConfig) => {
       const { ssh } = deps

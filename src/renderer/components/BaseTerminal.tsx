@@ -4,8 +4,9 @@ import { FitAddon } from '@xterm/addon-fit'
 import { useStore } from 'zustand'
 import { useSettingsStore } from '../store/settings'
 import { useActivityStateStore } from '../store/activityState'
-import { useTerminalApi } from '../contexts/TerminalApiContext'
+import { useSessionApi } from '../contexts/SessionStoreContext'
 import { createActivityStateDetector } from '../utils/activityStateDetector'
+import type { Tty } from '../store/createTtyStore'
 import TerminalScrollWrapper from './TerminalScrollWrapper'
 import type { SandboxConfig, TerminalState, WorkspaceHandle } from '../types'
 import '@xterm/xterm/css/xterm.css'
@@ -103,17 +104,14 @@ export default function BaseTerminal({
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
-  // handle is the ephemeral stream identifier used for write/resize/onData/onExit
-  const handleRef = useRef<string | null>(null)
-  // sessionId is the daemon PTY identifier used for persistence and kill
-  const sessionIdRef = useRef<string | null>(null)
+  const ttyRef = useRef<Tty | null>(null)
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const detectorRef = useRef<ReturnType<typeof createActivityStateDetector> | null>(null)
   const isMountedRef = useRef(true)
   const rawCharsRef = useRef<string>('')
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
 
-  const terminalApi = useTerminalApi()
+  const sessionStore = useSessionApi()
   const setTabState = useActivityStateStore((state) => state.setTabState)
   const settings = useSettingsStore((state) => state.settings)
 
@@ -214,10 +212,12 @@ export default function BaseTerminal({
     )
     detectorRef.current = detector
 
-    // Helper to subscribe to PTY stream and set up refs
-    const connectToPty = (handle: string) => {
-      handleRef.current = handle
-      const unsubscribeData = terminalApi.onData(handle, (data) => {
+    // Helper to subscribe to Tty sub-store and set up refs
+    const connectToTty = (tty: Tty) => {
+      ttyRef.current = tty
+      const ttyState = tty.getState()
+
+      const unsubscribeData = ttyState.onData((data) => {
         // Strip CSI 3J (clear scrollback) if configured
         const dataToWrite = config.stripScrollbackClear
           ? data.replace(/\x1b\[3J/g, '')
@@ -256,7 +256,7 @@ export default function BaseTerminal({
         }
       })
 
-      const unsubscribeExit = terminalApi.onExit(handle, (exitCode) => {
+      const unsubscribeExit = ttyState.onExit((exitCode) => {
         console.log(`[${config.logPrefix} ${tabId}] PTY exited with code:`, exitCode)
         if (isMountedRef.current) {
           const currentTab = wsData?.appStates[tabId]
@@ -275,49 +275,44 @@ export default function BaseTerminal({
       }
 
       console.log(`[${config.logPrefix} ${tabId}] initial PTY resize:`, {
-        handle,
+        ptyId: ttyState.ptyId,
         cols: terminal.cols,
         rows: terminal.rows
       })
-      terminalApi.resize(handle, terminal.cols, terminal.rows)
+      ttyState.resize(terminal.cols, terminal.rows)
     }
+
+    const session = sessionStore.getState()
 
     // Try to reconnect to existing PTY, or create a new one
     const initPty = async () => {
       // Try to attach to existing session (daemon mode)
       if (existingPtyId) {
         try {
-          const result = await terminalApi.attach(existingPtyId)
-          if (result.success && result.handle) {
-            console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, existingPtyId)
-            if (!isMountedRef.current) return
+          const result = await session.attachTty(existingPtyId)
+          console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, existingPtyId)
+          if (!isMountedRef.current) return
 
-            sessionIdRef.current = existingPtyId
-
-            // Restore scrollback buffer
-            if (result.scrollback && result.scrollback.length > 0) {
-              console.log(`[${config.logPrefix} ${tabId}] restoring ${result.scrollback.length} scrollback chunks`)
-              for (const chunk of result.scrollback) {
-                terminal.write(chunk)
-              }
-            } else {
-              terminal.write('\x1b[2mno buffer\x1b[0m\r\n')
+          // Restore scrollback buffer
+          if (result.scrollback && result.scrollback.length > 0) {
+            console.log(`[${config.logPrefix} ${tabId}] restoring ${result.scrollback.length} scrollback chunks`)
+            for (const chunk of result.scrollback) {
+              terminal.write(chunk)
             }
+          } else {
+            terminal.write('\x1b[2mno buffer\x1b[0m\r\n')
+          }
 
-            // If session already exited, show exit message and don't subscribe for live data
-            if (result.exitCode !== undefined) {
-              terminal.write(`\r\n\x1b[2mProcess exited with exit code ${result.exitCode}\x1b[0m\r\n`)
-              handleRef.current = result.handle
-              return
-            }
-
-            connectToPty(result.handle)
-            updateTabState<BaseTerminalState>(tabId, (state) => ({
-              ...state,
-              ptyHandle: result.handle!
-            }))
+          // If session already exited, show exit message and don't subscribe for live data
+          if (result.exitCode !== undefined) {
+            terminal.write(`\r\n\x1b[2mProcess exited with exit code ${result.exitCode}\x1b[0m\r\n`)
             return
           }
+
+          const tty = session.getTty(existingPtyId)
+          if (!tty) return
+          connectToTty(tty)
+          return
         } catch (error) {
           console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, existingPtyId, error)
           terminal.write(`\x1b[2merror attaching to tty: ${error instanceof Error ? error.message : 'Unknown error'}\x1b[0m\r\n`)
@@ -325,23 +320,24 @@ export default function BaseTerminal({
       }
 
       // No existing PTY or it's dead - create a new one
-      const result = await terminalApi.create(cwd, sandbox, config.startupCommand)
-      if (!result) return
+      const ptyId = await session.createTty(cwd, sandbox, config.startupCommand)
 
       // Check if component is still mounted
       if (!isMountedRef.current) {
         // Component unmounted during PTY creation - kill the orphaned PTY
-        terminalApi.kill(result.sessionId)
+        const orphanTty = session.getTty(ptyId)
+        if (orphanTty) orphanTty.getState().kill()
         return
       }
 
-      console.log(`[${config.logPrefix} ${tabId}] created new PTY:`, result.sessionId, 'handle:', result.handle)
-      sessionIdRef.current = result.sessionId
-      connectToPty(result.handle)
+      const tty = session.getTty(ptyId)
+      if (!tty) return
+
+      console.log(`[${config.logPrefix} ${tabId}] created new PTY:`, ptyId)
+      connectToTty(tty)
       updateTabState<BaseTerminalState>(tabId, (state) => ({
         ...state,
-        ptyId: result.sessionId,
-        ptyHandle: result.handle
+        ptyId,
       }))
     }
 
@@ -349,8 +345,8 @@ export default function BaseTerminal({
 
     // Forward terminal input to PTY
     const inputDisposable = terminal.onData((data) => {
-      if (handleRef.current) {
-        terminalApi.write(handleRef.current, data)
+      if (ttyRef.current) {
+        ttyRef.current.getState().write(data)
       }
     })
 
@@ -381,8 +377,8 @@ export default function BaseTerminal({
         terminal.scrollToLine(newScrollLine)
       }
 
-      if (handleRef.current) {
-        terminalApi.resize(handleRef.current, terminal.cols, terminal.rows)
+      if (ttyRef.current) {
+        ttyRef.current.getState().resize(terminal.cols, terminal.rows)
       }
     })
     resizeObserver.observe(containerRef.current)
@@ -391,8 +387,7 @@ export default function BaseTerminal({
     // PTY is explicitly killed in removeWorkspace/removeTab
     return () => {
       console.log(`[${config.logPrefix} ${tabId}] cleanup running (PTY preserved):`, {
-        handle: handleRef.current,
-        sessionId: sessionIdRef.current,
+        ptyId: ttyRef.current?.getState().ptyId,
         cwd,
         sandboxEnabled: sandbox?.enabled,
         workspaceId
@@ -479,8 +474,8 @@ export default function BaseTerminal({
   const handlePaste = async () => {
     try {
       const text = await navigator.clipboard.readText()
-      if (text && handleRef.current) {
-        terminalApi.write(handleRef.current, text)
+      if (text && ttyRef.current) {
+        ttyRef.current.getState().write(text)
       }
     } catch (error) {
       console.error(`[${config.logPrefix} ${tabId}] Failed to read from clipboard:`, error)

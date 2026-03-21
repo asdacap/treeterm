@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { useAppStore } from '../store/app'
 import type { TerminalApi, SessionInfo, Workspace } from '../types'
 
 interface ActiveProcessesDialogProps {
-  terminalApi: TerminalApi
   workspaces: Record<string, Workspace>
   onClose: () => void
 }
@@ -109,7 +109,8 @@ function getDisplayName(cwd: string, workspaces: Record<string, Workspace>): str
   return lastSegment(cwd)
 }
 
-export default function ActiveProcessesDialog({ terminalApi, workspaces, onClose }: ActiveProcessesDialogProps) {
+export default function ActiveProcessesDialog({ workspaces, onClose }: ActiveProcessesDialogProps) {
+  const terminalApi = useAppStore(s => s.terminal)
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
 

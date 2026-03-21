@@ -1,11 +1,12 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, Tab, AppState, ReviewComment, AppRegistryApi, TerminalApi, GitApi, WorkspaceGitApi } from '../types'
+import type { Workspace, Tab, AppState, ReviewComment, AppRegistryApi, GitApi, WorkspaceGitApi } from '../types'
 import { getTabs, isAiHarnessState } from '../types'
+import type { Tty } from './createTtyStore'
 
 export interface WorkspaceHandleDeps {
   appRegistry: AppRegistryApi
-  terminal: TerminalApi
+  getTty: (ptyId: string) => Tty | null
   git: GitApi
   // Session-level callbacks
   syncToDaemon: () => void
@@ -274,19 +275,22 @@ export function createWorkspaceHandleStore(
     promptHarness: (text: string): boolean => {
       const ws = get().workspace
       const tabs = getTabs(ws)
-      let ptyHandle: string | null = null
+      let ptyId: string | null = null
       let tabId: string | null = null
       for (const tab of tabs) {
         if (tab.applicationId.startsWith('aiharness-') && isAiHarnessState(tab.state) && tab.state.ptyId !== null) {
-          ptyHandle = tab.state.ptyHandle ?? null
+          ptyId = tab.state.ptyId
           tabId = tab.id
           break
         }
       }
 
-      if (!ptyHandle || !tabId) return false
+      if (!ptyId || !tabId) return false
 
-      deps.terminal.write(ptyHandle, text + '\r')
+      const tty = deps.getTty(ptyId)
+      if (!tty) return false
+
+      tty.getState().write(text + '\r')
       get().setActiveTab(tabId)
       return true
     },

@@ -4,6 +4,7 @@ import type { StoreApi } from 'zustand'
 import { useStore } from 'zustand'
 import type { SessionState } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
+import { SessionStoreContext } from '../contexts/SessionStoreContext'
 import { ErrorBoundary } from './ErrorBoundary'
 import TabErrorFallback from './TabErrorFallback'
 import { getTabs } from '../types'
@@ -56,7 +57,7 @@ export default function TabContentPortals({ sessionStore, activeWorkspaceId }: T
   }, [])
 
   return (
-    <>
+    <SessionStoreContext.Provider value={sessionStore}>
       {Object.values(workspaces).map(workspace => {
         const wsTabs = getTabs(workspace)
         const isActiveWorkspace = workspace.id === activeWorkspaceId
@@ -116,6 +117,6 @@ export default function TabContentPortals({ sessionStore, activeWorkspaceId }: T
           return null
         })
       })}
-    </>
+    </SessionStoreContext.Provider>
   )
 }

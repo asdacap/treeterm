@@ -11,7 +11,6 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import AppErrorFallback from './components/AppErrorFallback'
 import { useAppStore } from './store/app'
 import { useNavigationStore } from './store/navigation'
-import { TerminalApiContext } from './contexts/TerminalApiContext'
 import { FilesystemApiContext } from './contexts/FilesystemApiContext'
 import { STTApiContext } from './contexts/STTApiContext'
 
@@ -27,7 +26,6 @@ export default function App() {
 
   const {
     platform,
-    terminal,
     filesystem,
     stt,
     sandbox,
@@ -102,7 +100,6 @@ export default function App() {
 
   return (
     <ErrorBoundary fallback={<AppErrorFallback />}>
-      <TerminalApiContext.Provider value={terminal}>
       <FilesystemApiContext.Provider value={filesystem}>
       <STTApiContext.Provider value={stt}>
         <div
@@ -161,7 +158,6 @@ export default function App() {
           )}
           {isActiveProcessesOpen && (
             <ActiveProcessesDialog
-              terminalApi={terminal}
               workspaces={resolvedSessionStore?.getState().workspaces ?? {}}
               onClose={() => useAppStore.setState({ isActiveProcessesOpen: false })}
             />
@@ -192,7 +188,6 @@ export default function App() {
         </div>
       </STTApiContext.Provider>
       </FilesystemApiContext.Provider>
-      </TerminalApiContext.Provider>
     </ErrorBoundary>
   )
 }
