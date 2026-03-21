@@ -9,6 +9,7 @@ export type TerminalAiState =
   | 'permission_request'
   | 'safe_permission_requested'
   | 'completed'
+  | 'error'
 
 export function useTerminalAnalyzer(
   terminal: XTerm | null,
@@ -27,16 +28,17 @@ export function useTerminalAnalyzer(
     const analyze = async () => {
       try {
         const numLines = settings.terminalAnalyzer.bufferLines || 10
-        const xtermBuffer = terminal.buffer.active
-        const lineCount = xtermBuffer.length
-        const startLine = Math.max(0, lineCount - numLines)
+        const xtermBuffer = terminal.buffer.normal
+        const contentEnd = xtermBuffer.baseY + xtermBuffer.cursorY + 1
+        const startLine = Math.max(0, contentEnd - numLines)
         const lines: string[] = []
-        for (let i = startLine; i < lineCount; i++) {
+        for (let i = startLine; i < contentEnd; i++) {
           const line = xtermBuffer.getLine(i)
           if (line) lines.push(line.translateToString(true))
         }
 
         const buffer = lines.join('\n')
+        if (!buffer.trim()) return
         console.debug('[terminal-analyzer] buffer:', buffer)
 
         const result = await window.electron.llm.analyzeTerminal(buffer, cwd, {
@@ -53,12 +55,14 @@ export function useTerminalAnalyzer(
           console.debug('[terminal-analyzer] state set:', result.state)
           setAiState(result.state as TerminalAiState)
         } else if ('error' in result) {
-          console.debug('[terminal-analyzer] ignored (error):', result.error)
+          console.error('[terminal-analyzer] error:', result.error)
+          setAiState('error')
         } else {
           console.debug('[terminal-analyzer] ignored (no state in result)')
         }
       } catch (err) {
-        console.warn('[terminal-analyzer] LLM call failed:', err)
+        console.error('[terminal-analyzer] LLM call failed:', err)
+        setAiState('error')
       }
     }
 

@@ -24,7 +24,7 @@ for (const arg of process.argv) {
 import { loadSettings, saveSettings, Settings, addRecentDirectory } from './settings'
 import { createApplicationMenu } from './menu'
 import { registerSTTHandlers } from './stt'
-import { startChatStream, cancelChatStream, completeChatCall } from './llm'
+import { startChatStream, cancelChatStream, completeChatCall, formatLlmError } from './llm'
 
 let mainWindow: BrowserWindow | null = null
 let loadingWindow: BrowserWindow | null = null
@@ -372,7 +372,7 @@ ipcMain.handle('llm:analyzeTerminal', async (_event, buffer: string, cwd: string
     const cleaned = response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
     return { state: JSON.parse(cleaned).state }
   } catch (error) {
-    return { error: error instanceof Error ? error.message : 'Unknown error' }
+    return { error: formatLlmError(error) }
   }
 })
 

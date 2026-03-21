@@ -1,4 +1,4 @@
-import OpenAI from 'openai'
+import OpenAI, { APIError } from 'openai'
 import { BrowserWindow } from 'electron'
 
 interface LlmSettings {
@@ -11,6 +11,13 @@ interface LlmSettings {
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
+}
+
+export function formatLlmError(error: unknown): string {
+  if (error instanceof APIError) {
+    return `${error.message}${error.error ? '\n' + JSON.stringify(error.error) : ''}`
+  }
+  return error instanceof Error ? error.message : 'Unknown LLM error'
 }
 
 // Track active streams for cancellation
@@ -54,8 +61,7 @@ export async function startChatStream(
     }
   } catch (error: unknown) {
     if (controller.signal.aborted) return
-    const message = error instanceof Error ? error.message : 'Unknown LLM error'
-    sender.send('llm:chat:error', requestId, message)
+    sender.send('llm:chat:error', requestId, formatLlmError(error))
   } finally {
     activeStreams.delete(requestId)
   }

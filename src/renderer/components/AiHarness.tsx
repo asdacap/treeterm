@@ -15,7 +15,8 @@ const STATE_COLORS: Record<TerminalAiState, string> = {
   user_input_required: '#e5e510',
   permission_request: '#cd6600',
   safe_permission_requested: '#0dbc79',
-  completed: '#23d18b'
+  completed: '#23d18b',
+  error: '#f44747'
 }
 
 const STATE_LABELS: Record<TerminalAiState, string> = {
@@ -24,7 +25,8 @@ const STATE_LABELS: Record<TerminalAiState, string> = {
   user_input_required: 'input required',
   permission_request: 'permission request',
   safe_permission_requested: 'safe permission',
-  completed: 'completed'
+  completed: 'completed',
+  error: 'error'
 }
 
 interface AiHarnessProps {
