@@ -131,6 +131,8 @@ export interface RunAction {
   description: string
 }
 
+export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high'
+
 export interface Settings {
   terminal: {
     fontSize: number
@@ -185,7 +187,7 @@ export interface Settings {
   terminalAnalyzer: {
     model: string           // Model name for terminal analysis
     systemPrompt: string    // System prompt (supports {{cwd}} and {{safe_paths}} templates)
-    disableReasoning: boolean
+    reasoningEffort: ReasoningEffort
     safePaths: string[]     // Paths considered safe for permission_request classification
     bufferLines: number     // Number of lines to read from terminal buffer
   }

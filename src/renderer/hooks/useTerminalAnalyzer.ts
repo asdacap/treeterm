@@ -41,7 +41,7 @@ export function useTerminalAnalyzer(
           apiKey: settings.llm.apiKey,
           model: settings.terminalAnalyzer.model,
           systemPrompt: settings.terminalAnalyzer.systemPrompt,
-          disableReasoning: settings.terminalAnalyzer.disableReasoning,
+          reasoningEffort: settings.terminalAnalyzer.reasoningEffort,
           safePaths: settings.terminalAnalyzer.safePaths
         })
 
@@ -87,5 +87,5 @@ export function useTerminalAnalyzer(
       clearInterval(interval)
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
     }
-  }, [terminal, dataVersionRef, cwd, updateTabState, tabId, settings.llm.apiKey, settings.llm.baseUrl, settings.terminalAnalyzer.model, settings.terminalAnalyzer.systemPrompt, settings.terminalAnalyzer.disableReasoning, settings.terminalAnalyzer.safePaths, settings.terminalAnalyzer.bufferLines])
+  }, [terminal, dataVersionRef, cwd, updateTabState, tabId, settings.llm.apiKey, settings.llm.baseUrl, settings.terminalAnalyzer.model, settings.terminalAnalyzer.systemPrompt, settings.terminalAnalyzer.reasoningEffort, settings.terminalAnalyzer.safePaths, settings.terminalAnalyzer.bufferLines])
 }

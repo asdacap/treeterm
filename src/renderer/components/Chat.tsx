@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useStore } from 'zustand'
-import type { ApplicationRenderProps, ChatState, ChatMessage } from '../types'
+import type { ApplicationRenderProps, ChatState, ChatMessage, ReasoningEffort } from '../types'
 import { useSettingsStore } from '../store/settings'
 import { useAppStore } from '../store/app'
 
@@ -14,7 +14,7 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [reasoning, setReasoning] = useState(false)
+  const [reasoning, setReasoning] = useState<ReasoningEffort>('off')
   const activeRequestId = useRef<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const workspaceStore = useStore(workspace)
@@ -163,13 +163,17 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
       <div className="chat-input-area">
         <div className="chat-input-options">
           <label className="chat-reasoning-label">
-            <input
-              type="checkbox"
-              checked={reasoning}
-              onChange={(e) => setReasoning(e.target.checked)}
-              disabled={isStreaming}
-            />
             Reasoning
+            <select
+              value={reasoning}
+              onChange={(e) => setReasoning(e.target.value as ReasoningEffort)}
+              disabled={isStreaming}
+            >
+              <option value="off">Off</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
           </label>
         </div>
         <textarea

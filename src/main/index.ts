@@ -8,7 +8,7 @@ import { GitClient } from './git'
 import { createRunActionsClient, RunActionsClient } from './runActions'
 import { ConnectionManager } from './connectionManager'
 import { windowManager } from './windowManager'
-import type { SandboxConfig, SSHConnectionConfig } from '../shared/types'
+import type { ReasoningEffort, SandboxConfig, SSHConnectionConfig } from '../shared/types'
 
 // Parse initial workspace and SSH target from command line
 let initialWorkspacePath: string | null = null
@@ -346,12 +346,12 @@ ipcMain.handle('pty:isAlive', async (_event, connectionId: string, id: string) =
 })
 
 // LLM chat — uses ipcMain.handle directly for event.sender access (like PTY)
-ipcMain.handle('llm:chat:send', async (event, requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string; reasoning: boolean }) => {
+ipcMain.handle('llm:chat:send', async (event, requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string; reasoning: ReasoningEffort }) => {
   await startChatStream(requestId, messages, settings, event.sender)
 })
 
 // Terminal analyzer — non-streaming LLM call
-ipcMain.handle('llm:analyzeTerminal', async (_event, buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; disableReasoning: boolean; safePaths: string[] }) => {
+ipcMain.handle('llm:analyzeTerminal', async (_event, buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; reasoningEffort: ReasoningEffort; safePaths: string[] }) => {
   const allSafePaths = [...new Set([...settings.safePaths, cwd])]
   const systemPrompt = settings.systemPrompt
     .replace(/\{\{cwd\}\}/g, cwd)
@@ -365,7 +365,7 @@ ipcMain.handle('llm:analyzeTerminal', async (_event, buffer: string, cwd: string
       baseUrl: settings.baseUrl,
       apiKey: settings.apiKey,
       model: settings.model,
-      reasoning: !settings.disableReasoning
+      reasoning: settings.reasoningEffort
     })
     const cleaned = response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
     const parsed = JSON.parse(cleaned)

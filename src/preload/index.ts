@@ -1,5 +1,5 @@
 import { contextBridge } from 'electron'
-import type { SandboxConfig, Session, SessionInfo, WorkspaceInput, Settings, SSHConnectionConfig, ConnectionInfo } from '../shared/types'
+import type { SandboxConfig, Session, SessionInfo, WorkspaceInput, Settings, SSHConnectionConfig, ConnectionInfo, ReasoningEffort } from '../shared/types'
 import { IpcClient } from './ipc-client'
 
 type DataCallback = (data: string) => void
@@ -469,7 +469,7 @@ contextBridge.exposeInMainWorld('electron', {
     cancel: (requestId: string): void => {
       client.llmChatCancel(requestId)
     },
-    analyzeTerminal: (buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; disableReasoning: boolean; safePaths: string[] }): Promise<{ state: string } | { error: string }> => {
+    analyzeTerminal: (buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; reasoningEffort: ReasoningEffort; safePaths: string[] }): Promise<{ state: string } | { error: string }> => {
       return client.llmAnalyzeTerminal(buffer, cwd, settings)
     },
     onDelta: (callback: LlmDeltaCallback): (() => void) => {

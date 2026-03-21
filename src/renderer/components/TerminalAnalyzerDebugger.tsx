@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSettingsStore } from '../store/settings'
-import type { ApplicationRenderProps } from '../types'
+import type { ApplicationRenderProps, ReasoningEffort } from '../types'
 
 interface DebuggerState {
   bufferText?: string
@@ -12,7 +12,7 @@ export default function TerminalAnalyzerDebugger({ tab }: ApplicationRenderProps
   const [systemPrompt, setSystemPrompt] = useState(settings.terminalAnalyzer.systemPrompt)
   const [bufferText, setBufferText] = useState(debuggerState?.bufferText ?? '')
   const [model, setModel] = useState(settings.terminalAnalyzer.model)
-  const [disableReasoning, setDisableReasoning] = useState(settings.terminalAnalyzer.disableReasoning)
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(settings.terminalAnalyzer.reasoningEffort)
   const [result, setResult] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -44,7 +44,7 @@ export default function TerminalAnalyzerDebugger({ tab }: ApplicationRenderProps
         apiKey: settings.llm.apiKey,
         model,
         systemPrompt,
-        disableReasoning,
+        reasoningEffort,
         safePaths: settings.terminalAnalyzer.safePaths
       })
       setDuration(Date.now() - start)
@@ -87,12 +87,24 @@ export default function TerminalAnalyzerDebugger({ tab }: ApplicationRenderProps
           />
         </div>
         <label style={{ color: '#aaa', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-          <input
-            type="checkbox"
-            checked={!disableReasoning}
-            onChange={(e) => setDisableReasoning(!e.target.checked)}
-          />
           Reasoning
+          <select
+            value={reasoningEffort}
+            onChange={(e) => setReasoningEffort(e.target.value as ReasoningEffort)}
+            style={{
+              background: '#1e1e1e',
+              color: '#d4d4d4',
+              border: '1px solid #333',
+              borderRadius: 4,
+              padding: '2px 4px',
+              fontSize: 12
+            }}
+          >
+            <option value="off">Off</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
         </label>
       </div>
 

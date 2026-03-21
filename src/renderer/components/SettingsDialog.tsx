@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import type { Settings } from '../types'
+import type { Settings, ReasoningEffort } from '../types'
 import { useSettingsStore } from '../store/settings'
 import { useAppStore } from '../store/app'
 import type { SandboxApi, Platform } from '../types'
@@ -710,17 +710,21 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
 
                 <div className="settings-group">
                   <label className="settings-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <input
-                      type="checkbox"
-                      checked={localSettings.terminalAnalyzer.disableReasoning}
+                    Reasoning
+                    <select
+                      value={localSettings.terminalAnalyzer.reasoningEffort}
                       onChange={(e) =>
                         setLocalSettings((prev) => ({
                           ...prev,
-                          terminalAnalyzer: { ...prev.terminalAnalyzer, disableReasoning: e.target.checked }
+                          terminalAnalyzer: { ...prev.terminalAnalyzer, reasoningEffort: e.target.value as ReasoningEffort }
                         }))
                       }
-                    />
-                    Disable Reasoning
+                    >
+                      <option value="off">Off</option>
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                    </select>
                   </label>
                   <p className="settings-hint">
                     When checked, reasoning effort is disabled for faster and cheaper analysis.
