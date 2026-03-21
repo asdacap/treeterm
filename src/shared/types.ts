@@ -175,6 +175,12 @@ export interface Settings {
   ssh: {
     savedConnections: SSHConnectionConfig[]
   }
+  // LLM configuration (OpenAI-compatible)
+  llm: {
+    baseUrl: string      // OpenAI-compatible endpoint URL
+    apiKey: string       // API key
+    model: string        // Model name
+  }
   // Global default application for new worktrees
   // If not set, falls back to 'terminal' or first available app
   globalDefaultApplicationId: string

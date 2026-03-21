@@ -103,6 +103,27 @@ client.onSshConnectionStatus((info) => {
   sshConnectionStatusListeners.forEach((cb) => cb(info))
 })
 
+type LlmDeltaCallback = (requestId: string, text: string) => void
+const llmDeltaListeners: LlmDeltaCallback[] = []
+
+client.onLlmChatDelta((requestId, text) => {
+  llmDeltaListeners.forEach((cb) => cb(requestId, text))
+})
+
+type LlmDoneCallback = (requestId: string) => void
+const llmDoneListeners: LlmDoneCallback[] = []
+
+client.onLlmChatDone((requestId) => {
+  llmDoneListeners.forEach((cb) => cb(requestId))
+})
+
+type LlmErrorCallback = (requestId: string, error: string) => void
+const llmErrorListeners: LlmErrorCallback[] = []
+
+client.onLlmChatError((requestId, error) => {
+  llmErrorListeners.forEach((cb) => cb(requestId, error))
+})
+
 type SshOutputCallback = (connectionId: string, line: string) => void
 const sshOutputListeners: SshOutputCallback[] = []
 
@@ -440,6 +461,35 @@ contextBridge.exposeInMainWorld('electron', {
   },
   getWindowUuid: (): Promise<string> => {
     return client.appGetWindowUuid()
+  },
+  llm: {
+    send: (requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string }): Promise<void> => {
+      return client.llmChatSend(requestId, messages, settings)
+    },
+    cancel: (requestId: string): void => {
+      client.llmChatCancel(requestId)
+    },
+    onDelta: (callback: LlmDeltaCallback): (() => void) => {
+      llmDeltaListeners.push(callback)
+      return () => {
+        const index = llmDeltaListeners.indexOf(callback)
+        if (index > -1) llmDeltaListeners.splice(index, 1)
+      }
+    },
+    onDone: (callback: LlmDoneCallback): (() => void) => {
+      llmDoneListeners.push(callback)
+      return () => {
+        const index = llmDoneListeners.indexOf(callback)
+        if (index > -1) llmDoneListeners.splice(index, 1)
+      }
+    },
+    onError: (callback: LlmErrorCallback): (() => void) => {
+      llmErrorListeners.push(callback)
+      return () => {
+        const index = llmErrorListeners.indexOf(callback)
+        if (index > -1) llmErrorListeners.splice(index, 1)
+      }
+    }
   },
   ssh: {
     connect: (config: SSHConnectionConfig, options?: { refreshDaemon?: boolean }): Promise<{ info: ConnectionInfo, session?: Session }> => {

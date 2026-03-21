@@ -10,12 +10,13 @@ import { createAiHarnessVariant } from '../../applications/aiHarness/renderer'
 import { reviewApplication } from '../../applications/review/renderer'
 import { editorApplication } from '../../applications/editor/renderer'
 import { commentsApplication } from '../../applications/comments/renderer'
+import { chatApplication } from '../../applications/chat/renderer'
 import type {
   Workspace, Session, Application,
   Platform, TerminalApi, GitApi, SessionApi, AppApi, DaemonApi,
   FilesystemApi, STTApi, SandboxApi, SettingsApi, RunActionsApi,
   TerminalInstance, AiHarnessInstance, Settings,
-  ConnectionInfo, SSHApi
+  ConnectionInfo, SSHApi, LlmApi
 } from '../types'
 
 export interface AppDeps {
@@ -31,6 +32,7 @@ export interface AppDeps {
   runActions: RunActionsApi
   sandbox: SandboxApi
   ssh: SSHApi
+  llm: LlmApi
   selectFolder: () => Promise<string | null>
   getWindowUuid: () => Promise<string>
   getInitialWorkspace: () => Promise<string | null>
@@ -93,6 +95,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   runActions: UNINITIALIZED,
   sandbox: UNINITIALIZED,
   ssh: UNINITIALIZED,
+  llm: UNINITIALIZED,
   selectFolder: UNINITIALIZED,
   getWindowUuid: UNINITIALIZED,
   getInitialWorkspace: UNINITIALIZED,
@@ -159,6 +162,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     get().registerApplication(reviewApplication)
     get().registerApplication(editorApplication)
     get().registerApplication(commentsApplication)
+    get().registerApplication(chatApplication)
   },
 
   registerTerminalVariants: (instances: TerminalInstance[], terminalSettings: Settings['terminal'] | undefined) => {

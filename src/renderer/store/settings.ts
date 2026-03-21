@@ -59,6 +59,11 @@ const defaultSettings: Settings = {
   ssh: {
     savedConnections: []
   },
+  llm: {
+    baseUrl: 'https://api.openai.com/v1',
+    apiKey: '',
+    model: 'gpt-4o'
+  },
   globalDefaultApplicationId: 'terminal',
   recentDirectories: []
 }

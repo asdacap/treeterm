@@ -312,6 +312,12 @@ export interface IpcRequests {
     params: [connectionId: string]
     result: void
   }
+
+  // LLM operations
+  llmChatSend: {
+    params: [requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string }]
+    result: void
+  }
 }
 
 // === Fire-and-Forget Types (renderer sends, no response) ===
@@ -331,6 +337,9 @@ export interface IpcSends {
   }
   appCloseCancelled: {
     params: []
+  }
+  llmChatCancel: {
+    params: [requestId: string]
   }
 }
 
@@ -375,6 +384,15 @@ export interface IpcEvents {
   }
   sshOutput: {
     params: [connectionId: string, line: string]
+  }
+  llmChatDelta: {
+    params: [requestId: string, text: string]
+  }
+  llmChatDone: {
+    params: [requestId: string]
+  }
+  llmChatError: {
+    params: [requestId: string, error: string]
   }
 }
 

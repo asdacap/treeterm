@@ -74,12 +74,16 @@ const CHANNELS = {
   sshWatchConnectionStatus: 'ssh:watchConnectionStatus',
   sshUnwatchConnectionStatus: 'ssh:unwatchConnectionStatus',
 
+  // LLM operations
+  llmChatSend: 'llm:chat:send',
+
   // Send channels
   ptyWrite: 'pty:write',
   ptyResize: 'pty:resize',
   ptyKill: 'pty:kill',
   appCloseConfirmed: 'app:close-confirmed',
   appCloseCancelled: 'app:close-cancelled',
+  llmChatCancel: 'llm:chat:cancel',
 
   // Event channels
   ptyData: 'pty:data',
@@ -94,7 +98,10 @@ const CHANNELS = {
   daemonDisconnected: 'daemon:disconnected',
   activeProcessesOpen: 'active-processes:open',
   sshConnectionStatus: 'ssh:connectionStatus',
-  sshOutput: 'ssh:output'
+  sshOutput: 'ssh:output',
+  llmChatDelta: 'llm:chat:delta',
+  llmChatDone: 'llm:chat:done',
+  llmChatError: 'llm:chat:error'
 } as const
 
 export class IpcServer {
@@ -747,6 +754,12 @@ export class IpcServer {
 
   onAppCloseCancelled(handler: (event: IpcMainEvent) => void): void {
     ipcMain.on(CHANNELS.appCloseCancelled, (event: IpcMainEvent) => handler(event))
+  }
+
+  onLlmChatCancel(handler: (...args: IpcSends['llmChatCancel']['params']) => void): void {
+    ipcMain.on(CHANNELS.llmChatCancel, (_event: IpcMainEvent, ...args: unknown[]) =>
+      handler(...(args as IpcSends['llmChatCancel']['params']))
+    )
   }
 
   // ==================== Event Emitters (main → renderer) ====================

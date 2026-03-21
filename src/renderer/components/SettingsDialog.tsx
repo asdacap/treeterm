@@ -11,13 +11,14 @@ interface SettingsDialogProps {
   platform: Platform
 }
 
-type TabId = 'general' | 'terminal' | 'sandbox' | 'ai-harness' | 'appearance' | 'keybindings' | 'terminal-profiles' | 'speech'
+type TabId = 'general' | 'terminal' | 'sandbox' | 'ai-harness' | 'llm' | 'appearance' | 'keybindings' | 'terminal-profiles' | 'speech'
 
 const tabs: { id: TabId; label: string }[] = [
   { id: 'general', label: 'General' },
   { id: 'terminal', label: 'Terminal' },
   { id: 'terminal-profiles', label: 'Terminal Profiles' },
   { id: 'ai-harness', label: 'AI Harness' },
+  { id: 'llm', label: 'LLM' },
   { id: 'sandbox', label: 'Sandbox' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'keybindings', label: 'Keybindings' },
@@ -563,6 +564,67 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                   Default profiles open automatically in new workspaces.
                   Sandbox settings restrict file and network access.
                 </p>
+              </div>
+            )}
+
+            {activeTab === 'llm' && (
+              <div className="settings-section">
+                <div className="settings-group">
+                  <label className="settings-label">Base URL</label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    value={localSettings.llm.baseUrl}
+                    onChange={(e) =>
+                      setLocalSettings((prev) => ({
+                        ...prev,
+                        llm: { ...prev.llm, baseUrl: e.target.value }
+                      }))
+                    }
+                    placeholder="https://api.openai.com/v1"
+                  />
+                  <p className="settings-hint">
+                    OpenAI-compatible API endpoint. Works with OpenAI, Ollama, LM Studio, etc.
+                  </p>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label">API Key</label>
+                  <input
+                    type="password"
+                    className="settings-input"
+                    value={localSettings.llm.apiKey}
+                    onChange={(e) =>
+                      setLocalSettings((prev) => ({
+                        ...prev,
+                        llm: { ...prev.llm, apiKey: e.target.value }
+                      }))
+                    }
+                    placeholder="sk-..."
+                  />
+                  <p className="settings-hint">
+                    Your API key is stored locally and never sent anywhere except the configured endpoint.
+                  </p>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label">Model</label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    value={localSettings.llm.model}
+                    onChange={(e) =>
+                      setLocalSettings((prev) => ({
+                        ...prev,
+                        llm: { ...prev.llm, model: e.target.value }
+                      }))
+                    }
+                    placeholder="gpt-4o"
+                  />
+                  <p className="settings-hint">
+                    Model name to use for chat completions.
+                  </p>
+                </div>
               </div>
             )}
 
