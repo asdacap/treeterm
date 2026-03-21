@@ -73,6 +73,7 @@ const CHANNELS = {
   sshUnwatchOutput: 'ssh:unwatchOutput',
   sshWatchConnectionStatus: 'ssh:watchConnectionStatus',
   sshUnwatchConnectionStatus: 'ssh:unwatchConnectionStatus',
+  llmChatSend: 'llm:chat:send',
 
   // Send channels
   ptyWrite: 'pty:write',
@@ -80,6 +81,7 @@ const CHANNELS = {
   ptyKill: 'pty:kill',
   appCloseConfirmed: 'app:close-confirmed',
   appCloseCancelled: 'app:close-cancelled',
+  llmChatCancel: 'llm:chat:cancel',
 
   // Event channels
   ptyData: 'pty:data',
@@ -94,7 +96,10 @@ const CHANNELS = {
   daemonDisconnected: 'daemon:disconnected',
   activeProcessesOpen: 'active-processes:open',
   sshConnectionStatus: 'ssh:connectionStatus',
-  sshOutput: 'ssh:output'
+  sshOutput: 'ssh:output',
+  llmChatDelta: 'llm:chat:delta',
+  llmChatDone: 'llm:chat:done',
+  llmChatError: 'llm:chat:error'
 } as const
 
 export class IpcClient {
@@ -427,6 +432,13 @@ export class IpcClient {
     return ipcRenderer.invoke(CHANNELS.sshUnwatchConnectionStatus, ...args)
   }
 
+  // LLM requests
+  llmChatSend(
+    ...args: IpcRequests['llmChatSend']['params']
+  ): Promise<IpcRequests['llmChatSend']['result']> {
+    return ipcRenderer.invoke(CHANNELS.llmChatSend, ...args)
+  }
+
   // ==================== Fire-and-Forget Methods (send pattern, no return) ====================
 
   ptyWrite(...args: IpcSends['ptyWrite']['params']): void {
@@ -447,6 +459,10 @@ export class IpcClient {
 
   appCloseCancelled(...args: IpcSends['appCloseCancelled']['params']): void {
     ipcRenderer.send(CHANNELS.appCloseCancelled, ...args)
+  }
+
+  llmChatCancel(...args: IpcSends['llmChatCancel']['params']): void {
+    ipcRenderer.send(CHANNELS.llmChatCancel, ...args)
   }
 
   // ==================== Event Listeners (on pattern, returns unsubscribe function) ====================
@@ -535,5 +551,26 @@ export class IpcClient {
       callback(...(args as IpcEvents['sshOutput']['params']))
     ipcRenderer.on(CHANNELS.sshOutput, handler)
     return () => ipcRenderer.removeListener(CHANNELS.sshOutput, handler)
+  }
+
+  onLlmChatDelta(callback: (...args: IpcEvents['llmChatDelta']['params']) => void): () => void {
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
+      callback(...(args as IpcEvents['llmChatDelta']['params']))
+    ipcRenderer.on(CHANNELS.llmChatDelta, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.llmChatDelta, handler)
+  }
+
+  onLlmChatDone(callback: (...args: IpcEvents['llmChatDone']['params']) => void): () => void {
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
+      callback(...(args as IpcEvents['llmChatDone']['params']))
+    ipcRenderer.on(CHANNELS.llmChatDone, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.llmChatDone, handler)
+  }
+
+  onLlmChatError(callback: (...args: IpcEvents['llmChatError']['params']) => void): () => void {
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
+      callback(...(args as IpcEvents['llmChatError']['params']))
+    ipcRenderer.on(CHANNELS.llmChatError, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.llmChatError, handler)
   }
 }

@@ -1,0 +1,19 @@
+import { createElement } from 'react'
+import type { Application, ApplicationRenderProps, ChatState } from '../../renderer/types'
+import Chat from '../../renderer/components/Chat'
+
+export const chatApplication: Application<ChatState> = {
+  id: 'chat',
+  name: 'Chat',
+  icon: 'M',
+  createInitialState: (): ChatState => ({
+    messages: []
+  }),
+  render: (props: ApplicationRenderProps) => createElement(Chat, props),
+  canClose: true,
+  canHaveMultiple: true,
+  showInNewTabMenu: true,
+  keepAlive: false,
+  displayStyle: 'flex',
+  isDefault: false
+}

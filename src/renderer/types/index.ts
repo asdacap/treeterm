@@ -99,6 +99,16 @@ export interface CommentsState {
   // empty - no persisted state needed
 }
 
+export interface ChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface ChatState {
+  messages: ChatMessage[]
+}
+
 export interface EditorState {
   filePath: string
   originalContent: string
@@ -367,6 +377,14 @@ export interface DaemonApi {
   onDisconnected: (callback: () => void) => () => void
 }
 
+export interface LlmApi {
+  send: (requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string }) => Promise<void>
+  cancel: (requestId: string) => void
+  onDelta: (callback: (requestId: string, text: string) => void) => () => void
+  onDone: (callback: (requestId: string) => void) => () => void
+  onError: (callback: (requestId: string, error: string) => void) => () => void
+}
+
 export interface SSHApi {
   connect: (config: SSHConnectionConfig, options?: { refreshDaemon?: boolean }) => Promise<{ info: ConnectionInfo, session?: Session }>
   disconnect: (connectionId: string) => Promise<void>
@@ -414,6 +432,7 @@ declare global {
       daemon: DaemonApi
       session: SessionApi
       getWindowUuid: () => Promise<string>
+      llm: LlmApi
       ssh: SSHApi
     }
   }

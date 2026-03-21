@@ -24,6 +24,7 @@ for (const arg of process.argv) {
 import { loadSettings, saveSettings, Settings, addRecentDirectory } from './settings'
 import { createApplicationMenu } from './menu'
 import { registerSTTHandlers } from './stt'
+import { startChatStream, cancelChatStream } from './llm'
 
 let mainWindow: BrowserWindow | null = null
 let loadingWindow: BrowserWindow | null = null
@@ -344,6 +345,15 @@ ipcMain.handle('pty:isAlive', async (event, id: string) => {
     console.warn('[main] PTY alive check failed:', error)
     return false
   }
+})
+
+// LLM chat — uses ipcMain.handle directly for event.sender access (like PTY)
+ipcMain.handle('llm:chat:send', async (event, requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string }) => {
+  await startChatStream(requestId, messages, settings, event.sender)
+})
+
+server.onLlmChatCancel((requestId) => {
+  cancelChatStream(requestId)
 })
 
 server.onDaemonShutdown(async () => {

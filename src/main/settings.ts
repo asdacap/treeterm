@@ -62,6 +62,11 @@ const defaultSettings: Settings = {
   ssh: {
     savedConnections: []
   },
+  llm: {
+    baseUrl: 'https://api.openai.com/v1',
+    apiKey: '',
+    model: 'gpt-4o'
+  },
   globalDefaultApplicationId: 'terminal',
   recentDirectories: []
 }
@@ -232,6 +237,10 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
     ssh: {
       ...defaults.ssh,
       ...loaded.ssh
+    },
+    llm: {
+      ...defaults.llm,
+      ...loaded.llm
     },
     globalDefaultApplicationId: loaded.globalDefaultApplicationId || defaults.globalDefaultApplicationId,
     recentDirectories: loaded.recentDirectories || defaults.recentDirectories
