@@ -74,6 +74,8 @@ export interface BaseTerminalConfig {
   disableScrollbar?: boolean
   // Whether to strip CSI 3J (clear scrollback) from PTY data before writing to xterm
   stripScrollbackClear?: boolean
+  // Whether to disable the regex-based activity state detector (e.g. when using LLM-based analysis)
+  disableActivityDetector?: boolean
   // Callback when terminal is ready, provides terminal instance and data version ref
   onTerminalReady?: (terminal: XTerm, dataVersionRef: React.MutableRefObject<number>) => void
 }
@@ -174,10 +176,13 @@ export default function BaseTerminal({
     config.onTerminalReady?.(terminal, dataVersionRef)
 
     // Create activity state detector with optional custom patterns
-    const detector = createActivityStateDetector(
-      (state) => setTabState(tabId, state),
-      config.promptPatterns ? { promptPatterns: config.promptPatterns } : undefined
-    )
+    // Skip when LLM-based analysis handles state (disableActivityDetector)
+    const detector = config.disableActivityDetector
+      ? null
+      : createActivityStateDetector(
+          (state) => setTabState(tabId, state),
+          config.promptPatterns ? { promptPatterns: config.promptPatterns } : undefined
+        )
     detectorRef.current = detector
 
     // Helper to subscribe to Tty sub-store and set up refs
@@ -220,7 +225,7 @@ export default function BaseTerminal({
           terminal.write(dataToWrite)
         }
         // Process data for activity state detection
-        detector.processData(data)
+        if (detector) detector.processData(data)
         // Log raw characters to console for debugging
         if (settings.terminal.showRawChars) {
           rawCharsRef.current = (rawCharsRef.current + data).slice(-50)

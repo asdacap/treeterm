@@ -176,6 +176,7 @@ export default function AiHarness({
     logPrefix: 'AiHarness',
     disableScrollbar,
     stripScrollbackClear,
+    disableActivityDetector: true,
     onTerminalReady: handleTerminalReady
   }), [backgroundColor, disableScrollbar, stripScrollbackClear, handleTerminalReady])
 
