@@ -126,7 +126,7 @@ Prefer to validate data at the last minute. Eg: do not check for valid parent id
 
 ## Testing
 
-- Run `npm run test:coverage` when writing or modifying code
+- Run `npm run test:coverage` and `npm run build` when writing or modifying code
 - AlWAYS run `npm run build` and check coverage and test before committing.
   - Just install dependencies if needed to run it.
 - Minimum 10% code and branch coverage for new code

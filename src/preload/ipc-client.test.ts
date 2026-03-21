@@ -29,8 +29,8 @@ describe('IpcClient', () => {
   describe('invoke pattern (request methods)', () => {
     it('ptyCreate calls ipcRenderer.invoke with correct channel and args', async () => {
       mockInvoke.mockResolvedValue('pty-123')
-      const result = await client.ptyCreate('/home/user')
-      expect(mockInvoke).toHaveBeenCalledWith('pty:create', '/home/user')
+      const result = await client.ptyCreate('local', '/home/user')
+      expect(mockInvoke).toHaveBeenCalledWith('pty:create', 'local', '/home/user')
       expect(result).toBe('pty-123')
     })
 
@@ -142,8 +142,8 @@ describe('IpcClient', () => {
     })
 
     it('ptyKill calls ipcRenderer.send with correct channel and args', () => {
-      client.ptyKill('pty-123')
-      expect(mockSend).toHaveBeenCalledWith('pty:kill', 'pty-123')
+      client.ptyKill('local', 'pty-123')
+      expect(mockSend).toHaveBeenCalledWith('pty:kill', 'local', 'pty-123')
     })
 
     it('appCloseConfirmed calls ipcRenderer.send with correct channel', () => {

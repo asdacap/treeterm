@@ -6,6 +6,7 @@ import type { TerminalApi, SessionInfo, Workspace } from '../types'
 
 interface ActiveProcessesDialogProps {
   workspaces: Record<string, Workspace>
+  connectionId: string
   onClose: () => void
 }
 
@@ -25,7 +26,7 @@ function lastSegment(cwd: string): string {
   return parts[parts.length - 1] || cwd
 }
 
-function PtyViewer({ ptyId, terminalApi }: { ptyId: string; terminalApi: TerminalApi }) {
+function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connectionId: string; terminalApi: TerminalApi }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -65,7 +66,7 @@ function PtyViewer({ ptyId, terminalApi }: { ptyId: string; terminalApi: Termina
     cleanups.push(() => resizeObserver.disconnect())
 
     // Attach to PTY and get scrollback
-    terminalApi.attach(ptyId).then((result) => {
+    terminalApi.attach(connectionId, ptyId).then((result) => {
       if (cancelled) return
 
       if (!result.success) {
@@ -156,19 +157,19 @@ function getDisplayName(cwd: string, workspaces: Record<string, Workspace>): str
   return lastSegment(cwd)
 }
 
-export default function ActiveProcessesDialog({ workspaces, onClose }: ActiveProcessesDialogProps) {
+export default function ActiveProcessesDialog({ workspaces, connectionId, onClose }: ActiveProcessesDialogProps) {
   const terminalApi = useAppStore(s => s.terminal)
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const fetchSessions = useCallback(async () => {
-    const list = await terminalApi.list()
+    const list = await terminalApi.list(connectionId)
     setSessions(list)
     // Clear selection if selected PTY no longer exists
     if (selectedId && !list.find((s) => s.id === selectedId)) {
       setSelectedId(null)
     }
-  }, [terminalApi, selectedId])
+  }, [terminalApi, connectionId, selectedId])
 
   useEffect(() => {
     fetchSessions()
@@ -176,11 +177,11 @@ export default function ActiveProcessesDialog({ workspaces, onClose }: ActivePro
 
   const handleStop = useCallback(async () => {
     if (!selectedId) return
-    await terminalApi.kill(selectedId)
+    await terminalApi.kill(connectionId, selectedId)
     setSelectedId(null)
-    const list = await terminalApi.list()
+    const list = await terminalApi.list(connectionId)
     setSessions(list)
-  }, [selectedId, terminalApi])
+  }, [selectedId, connectionId, terminalApi])
 
   const handleOverlayClick = useCallback(
     (e: React.MouseEvent) => {
@@ -227,7 +228,7 @@ export default function ActiveProcessesDialog({ workspaces, onClose }: ActivePro
                     Stop Process
                   </button>
                 </div>
-                <PtyViewer key={selectedId} ptyId={selectedId} terminalApi={terminalApi} />
+                <PtyViewer key={selectedId} ptyId={selectedId} connectionId={connectionId} terminalApi={terminalApi} />
               </>
             ) : (
               <div className="active-processes-empty">Select a process to view its terminal</div>
