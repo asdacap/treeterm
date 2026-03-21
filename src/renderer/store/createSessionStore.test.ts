@@ -147,7 +147,7 @@ describe('createSessionStore', () => {
     })
 
     it('preserves connection when provided', () => {
-      const conn = { id: 'conn-1', host: 'example.com', status: 'connected' as const }
+      const conn = { id: 'conn-1', target: { type: 'local' as const }, host: 'example.com', status: 'connected' as const }
       const s = createSessionStore({ sessionId: 's', windowUuid: null, connection: conn }, deps)
       expect(s.getState().connection).toEqual(conn)
     })
@@ -182,7 +182,7 @@ describe('createSessionStore', () => {
     })
 
     it('listTty delegates to terminal.list', async () => {
-      vi.mocked(deps.terminal.list).mockResolvedValue([{ id: 'pty-1', pid: 123, cwd: '/home' }])
+      vi.mocked(deps.terminal.list).mockResolvedValue([{ id: 'pty-1', cwd: '/home', cols: 80, rows: 24, createdAt: Date.now(), lastActivity: Date.now() }])
       const result = await store.getState().listTty()
       expect(result).toHaveLength(1)
     })
@@ -517,7 +517,7 @@ describe('createSessionStore', () => {
 
     it('falls back to global default app', async () => {
       const app = makeFakeApp({ id: 'global-default' })
-      vi.mocked(deps.appRegistry.get).mockReturnValue(null)
+      vi.mocked(deps.appRegistry.get).mockReturnValue(undefined)
       vi.mocked(deps.appRegistry.getDefaultApp).mockReturnValue(app)
 
       const id = await store.getState().addWorkspace('/test')
@@ -550,6 +550,8 @@ describe('createSessionStore', () => {
         workspaces: [
           makeWorkspace({ id: 'ws-restored', name: 'restored', path: '/restored', appStates: {}, activeTabId: null }),
         ],
+        createdAt: Date.now(),
+        lastActivity: Date.now(),
       }
 
       await store.getState().handleRestore(daemonSession)
@@ -569,6 +571,8 @@ describe('createSessionStore', () => {
         workspaces: [
           makeWorkspace({ id: 'ws-new', name: 'new-workspace', path: '/new' }),
         ],
+        createdAt: Date.now(),
+        lastActivity: Date.now(),
       }
 
       await store.getState().handleExternalUpdate(daemonSession)
@@ -587,6 +591,8 @@ describe('createSessionStore', () => {
           makeWorkspace({ id: 'ws-parent', name: 'parent', path: '/parent', children: [] }),
           makeWorkspace({ id: 'ws-child', name: 'child', path: '/child', parentId: 'ws-parent', isWorktree: true }),
         ],
+        createdAt: Date.now(),
+        lastActivity: Date.now(),
       }
 
       await store.getState().handleRestore(daemonSession)

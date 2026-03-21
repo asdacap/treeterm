@@ -6,11 +6,15 @@ const { mockCreate } = vi.hoisted(() => ({
 
 vi.mock('openai', () => {
   class MockAPIError extends Error {
+    status: number | undefined
     error: unknown
-    constructor(message: string, errorBody?: unknown) {
-      super(message)
+    headers: unknown
+    constructor(status: number | undefined, error: unknown, message: string | undefined, headers?: unknown) {
+      super(message ?? '')
       this.name = 'APIError'
-      this.error = errorBody
+      this.status = status
+      this.error = error
+      this.headers = headers
     }
   }
 
@@ -44,14 +48,14 @@ function makeMockSender() {
 
 describe('formatLlmError', () => {
   it('formats APIError with error body', () => {
-    const err = new APIError('rate limit', { message: 'too many requests' })
+    const err = new APIError(429, { message: 'too many requests' }, 'rate limit', undefined)
     const result = formatLlmError(err)
     expect(result).toContain('rate limit')
     expect(result).toContain('too many requests')
   })
 
   it('formats APIError without error body', () => {
-    const err = new APIError('bad request')
+    const err = new APIError(400, undefined, 'bad request', undefined)
     const result = formatLlmError(err)
     expect(result).toBe('bad request')
   })
