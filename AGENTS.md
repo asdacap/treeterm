@@ -67,6 +67,11 @@ Never silently swallow errors or return empty/default values on failure. Throw e
 - Use Zod for runtime validation at system boundaries
 - Make invalid states unrepresentable via interface design
 
+### Onclosed ID on large object
+- Prefer to have store with id within it and expose operation to that store instead of having a service based pattern.
+- eg: Instead of WorkspaceApi.addTab(workspaceId), have SessionApi.getWorkspace(workspaceId).addTab()
+- Special care need to be taken with react where the key={itemId} need to be specified for the update to work correctly.
+
 ### Reactivity
 - A lot the time we will an actively changing resource such as the worktree.
 - Usually, there is two rpc, getResource and watchResoure. When this happen, remove getResource and just make watchResource return initial value as first event.
@@ -96,6 +101,7 @@ the error UI.
 - If you have a daemon type and a main type variant, something is wrong. Eg: DaemonSession and Session. They should use the same type. Use a wrapper like UISession if needed, but its a wrapper, not a copy, it should contain a Session.
 - Composition over Inheritence. No inheritence! I got burned on that many times already!
 - What should not be nullable, do not mark as nullable. Prefer no nullable parameter where possible.
+- Do not add code for cases that cannot or should not happen. For example, workspace should always be possible in a tab, or session should be always available in a workspace. So dont care for case where workspace it not available in a tab. 
 
 ### Worktree and File Changes
 All file/worktree mutations **must go through the daemon** (via gRPC `WriteFile`). No `fs.writeFile` in Main or Renderer.
