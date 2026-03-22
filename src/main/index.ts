@@ -392,6 +392,24 @@ ipcMain.handle('llm:clearAnalyzerCache', () => {
   analyzerCache.length = 0
 })
 
+ipcMain.handle('llm:generateTitle', async (_event, buffer: string, settings: { baseUrl: string; apiKey: string; model: string; titleSystemPrompt: string; reasoningEffort: ReasoningEffort }) => {
+  const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
+    { role: 'system', content: settings.titleSystemPrompt },
+    { role: 'user', content: buffer }
+  ]
+  try {
+    const response = await completeChatCall(messages, {
+      baseUrl: settings.baseUrl,
+      apiKey: settings.apiKey,
+      model: settings.model,
+      reasoning: settings.reasoningEffort
+    })
+    return { title: response.trim() }
+  } catch (error) {
+    return { error: formatLlmError(error) }
+  }
+})
+
 server.onLlmChatCancel((requestId) => {
   cancelChatStream(requestId)
 })

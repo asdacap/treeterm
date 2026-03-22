@@ -114,6 +114,47 @@ export default function AiHarness({
     setActivityTabState(tabId, aiState)
   }, [tabId, aiState, setActivityTabState])
 
+  // Auto-generate workspace title on first successful analyzer return
+  const titleGeneratedRef = useRef(false)
+  useEffect(() => {
+    if (titleGeneratedRef.current) return
+    if (aiState === 'idle' || aiState === 'error' || !aiState) return
+    if (!terminal) return
+    const ws = workspace.getState().workspace
+    if (ws.metadata?.displayName) return
+
+    const s = useSettingsStore.getState().settings
+    if (!s.llm.apiKey || !s.terminalAnalyzer.model) return
+
+    titleGeneratedRef.current = true
+
+    const numLines = s.terminalAnalyzer.bufferLines || 10
+    const xtermBuffer = terminal.buffer.normal
+    const contentEnd = xtermBuffer.baseY + xtermBuffer.cursorY + 1
+    const startLine = Math.max(0, contentEnd - numLines)
+    const lines: string[] = []
+    for (let i = startLine; i < contentEnd; i++) {
+      const line = xtermBuffer.getLine(i)
+      if (line) lines.push(line.translateToString(true))
+    }
+    const buffer = lines.join('\n')
+    if (!buffer.trim()) { titleGeneratedRef.current = false; return }
+
+    window.electron.llm.generateTitle(buffer, {
+      baseUrl: s.llm.baseUrl,
+      apiKey: s.llm.apiKey,
+      model: s.terminalAnalyzer.model,
+      titleSystemPrompt: s.terminalAnalyzer.titleSystemPrompt,
+      reasoningEffort: s.terminalAnalyzer.reasoningEffort
+    }).then((result) => {
+      if ('title' in result && result.title) {
+        workspace.getState().updateMetadata('displayName', result.title)
+      }
+    }).catch((err) => {
+      console.error('[ai-harness] title generation failed:', err)
+    })
+  }, [aiState, terminal, workspace])
+
   const settings = useSettingsStore((s) => s.settings)
   const setAutoApprove = useCallback((value: boolean) => {
     updateTabState<AiHarnessState>(tabId, (state) => ({ ...state, autoApprove: value }))
@@ -168,7 +209,7 @@ export default function AiHarness({
     }
     const buffer = lines.join('\n')
 
-    workspace.getState().addTab<{ bufferText: string }>('analyzer-debugger', { bufferText: buffer })
+    workspace.getState().addTab<{ bufferText: string }>('system-prompt-debugger', { bufferText: buffer })
   }
 
   // Memoize config based on props to prevent unnecessary re-renders
@@ -226,7 +267,7 @@ export default function AiHarness({
           style={{ top: badgeContextMenu.y, left: badgeContextMenu.x }}
         >
           <div className="context-menu-item" onClick={handleDebugAnalyzer}>
-            Debug Analyzer
+            Debug System Prompt
           </div>
         </div>
       )}

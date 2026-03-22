@@ -667,6 +667,25 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                 </div>
 
                 <div className="settings-group">
+                  <label className="settings-label">Title System Prompt</label>
+                  <textarea
+                    className="settings-input"
+                    rows={3}
+                    value={localSettings.terminalAnalyzer.titleSystemPrompt}
+                    onChange={(e) =>
+                      setLocalSettings((prev) => ({
+                        ...prev,
+                        terminalAnalyzer: { ...prev.terminalAnalyzer, titleSystemPrompt: e.target.value }
+                      }))
+                    }
+                    style={{ resize: 'vertical', fontFamily: 'inherit' }}
+                  />
+                  <p className="settings-hint">
+                    System prompt for auto-generating workspace titles from terminal output.
+                  </p>
+                </div>
+
+                <div className="settings-group">
                   <label className="settings-label">Safe Paths</label>
                   <input
                     type="text"

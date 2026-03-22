@@ -76,6 +76,7 @@ const CHANNELS = {
   llmChatSend: 'llm:chat:send',
   llmAnalyzeTerminal: 'llm:analyzeTerminal',
   llmClearAnalyzerCache: 'llm:clearAnalyzerCache',
+  llmGenerateTitle: 'llm:generateTitle',
 
   // Send channels
   ptyWrite: 'pty:write',
@@ -449,6 +450,12 @@ export class IpcClient {
 
   llmClearAnalyzerCache(): Promise<void> {
     return ipcRenderer.invoke(CHANNELS.llmClearAnalyzerCache)
+  }
+
+  llmGenerateTitle(
+    ...args: IpcRequests['llmGenerateTitle']['params']
+  ): Promise<IpcRequests['llmGenerateTitle']['result']> {
+    return ipcRenderer.invoke(CHANNELS.llmGenerateTitle, ...args)
   }
 
   // ==================== Fire-and-Forget Methods (send pattern, no return) ====================

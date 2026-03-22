@@ -187,6 +187,7 @@ export interface Settings {
   terminalAnalyzer: {
     model: string           // Model name for terminal analysis
     systemPrompt: string    // System prompt (supports {{cwd}} and {{safe_paths}} templates)
+    titleSystemPrompt: string // System prompt for generating workspace titles from terminal output
     reasoningEffort: ReasoningEffort
     safePaths: string[]     // Paths considered safe for permission_request classification
     bufferLines: number     // Number of lines to read from terminal buffer
