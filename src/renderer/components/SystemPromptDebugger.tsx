@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSettingsStore } from '../store/settings'
-import type { ApplicationRenderProps, ReasoningEffort } from '../types'
+import { useActivityStateStore } from '../store/activityState'
+import type { ActivityState, ApplicationRenderProps, ReasoningEffort } from '../types'
 
 type DebugMode = 'analyzer' | 'title'
 
@@ -10,6 +11,8 @@ interface DebuggerState {
 
 export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
   const settings = useSettingsStore((s) => s.settings)
+  const setTabState = useActivityStateStore((s) => s.setTabState)
+  const removeTabState = useActivityStateStore((s) => s.removeTabState)
   const debuggerState = tab.state as DebuggerState | undefined
   const [mode, setMode] = useState<DebugMode>('analyzer')
   const [analyzerPrompt, setAnalyzerPrompt] = useState(settings.terminalAnalyzer.systemPrompt)
@@ -29,6 +32,11 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
     }
   }, [debuggerState?.bufferText])
 
+  // Clean up activity state on unmount
+  useEffect(() => {
+    return () => removeTabState(tab.id)
+  }, [tab.id, removeTabState])
+
   const systemPrompt = mode === 'analyzer' ? analyzerPrompt : titlePrompt
   const setSystemPrompt = mode === 'analyzer' ? setAnalyzerPrompt : setTitlePrompt
 
@@ -42,6 +50,7 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
     setError(null)
     setResult(null)
     setDuration(null)
+    setTabState(tab.id, 'working')
 
     const start = Date.now()
     try {
@@ -58,8 +67,10 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
         setDuration(Date.now() - start)
         if ('error' in response) {
           setError(response.error)
+          setTabState(tab.id, 'error')
         } else {
           setResult(JSON.stringify(response, null, 2))
+          setTabState(tab.id, response.state as ActivityState)
         }
       } else {
         const response = await window.electron.llm.generateTitle(bufferText, {
@@ -72,13 +83,16 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
         setDuration(Date.now() - start)
         if ('error' in response) {
           setError(response.error)
+          setTabState(tab.id, 'error')
         } else {
           setResult(response.title)
+          setTabState(tab.id, 'completed')
         }
       }
     } catch (err) {
       setDuration(Date.now() - start)
       setError(err instanceof Error ? err.message : String(err))
+      setTabState(tab.id, 'error')
     } finally {
       setLoading(false)
     }
