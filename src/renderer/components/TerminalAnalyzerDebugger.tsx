@@ -31,6 +31,7 @@ export default function TerminalAnalyzerDebugger({ tab }: ApplicationRenderProps
       return
     }
 
+    await window.electron.llm.clearAnalyzerCache()
     const buffer = bufferText
     setLoading(true)
     setError(null)

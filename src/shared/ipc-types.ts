@@ -323,6 +323,10 @@ export interface IpcRequests {
     params: [buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; reasoningEffort: ReasoningEffort; safePaths: string[] }]
     result: { state: string; reason: string } | { error: string }
   }
+  llmClearAnalyzerCache: {
+    params: []
+    result: void
+  }
 }
 
 // === Fire-and-Forget Types (renderer sends, no response) ===

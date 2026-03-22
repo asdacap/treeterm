@@ -350,8 +350,16 @@ ipcMain.handle('llm:chat:send', async (event, requestId: string, messages: { rol
   await startChatStream(requestId, messages, settings, event.sender)
 })
 
-// Terminal analyzer — non-streaming LLM call
+// Terminal analyzer — non-streaming LLM call with buffer cache
+const analyzerCache: { buffer: string; result: { state: string; reason: string } }[] = []
+const ANALYZER_CACHE_SIZE = 10
+
 ipcMain.handle('llm:analyzeTerminal', async (_event, buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; reasoningEffort: ReasoningEffort; safePaths: string[] }) => {
+  const cached = analyzerCache.find((entry) => entry.buffer === buffer)
+  if (cached) {
+    return cached.result
+  }
+
   const allSafePaths = [...new Set([...settings.safePaths, cwd])]
   const systemPrompt = settings.systemPrompt
     .replace(/\{\{cwd\}\}/g, cwd)
@@ -369,10 +377,19 @@ ipcMain.handle('llm:analyzeTerminal', async (_event, buffer: string, cwd: string
     })
     const cleaned = response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
     const parsed = JSON.parse(cleaned)
-    return { state: parsed.state, reason: parsed.reason ?? '' }
+    const result = { state: parsed.state, reason: parsed.reason ?? '' }
+    analyzerCache.push({ buffer, result })
+    if (analyzerCache.length > ANALYZER_CACHE_SIZE) {
+      analyzerCache.shift()
+    }
+    return result
   } catch (error) {
     return { error: formatLlmError(error) }
   }
+})
+
+ipcMain.handle('llm:clearAnalyzerCache', () => {
+  analyzerCache.length = 0
 })
 
 server.onLlmChatCancel((requestId) => {

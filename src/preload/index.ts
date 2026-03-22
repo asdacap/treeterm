@@ -472,6 +472,9 @@ contextBridge.exposeInMainWorld('electron', {
     analyzeTerminal: (buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; reasoningEffort: ReasoningEffort; safePaths: string[] }): Promise<{ state: string } | { error: string }> => {
       return client.llmAnalyzeTerminal(buffer, cwd, settings)
     },
+    clearAnalyzerCache: (): Promise<void> => {
+      return client.llmClearAnalyzerCache()
+    },
     onDelta: (callback: LlmDeltaCallback): (() => void) => {
       llmDeltaListeners.push(callback)
       return () => {

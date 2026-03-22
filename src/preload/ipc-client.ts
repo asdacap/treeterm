@@ -75,6 +75,7 @@ const CHANNELS = {
   sshUnwatchConnectionStatus: 'ssh:unwatchConnectionStatus',
   llmChatSend: 'llm:chat:send',
   llmAnalyzeTerminal: 'llm:analyzeTerminal',
+  llmClearAnalyzerCache: 'llm:clearAnalyzerCache',
 
   // Send channels
   ptyWrite: 'pty:write',
@@ -444,6 +445,10 @@ export class IpcClient {
     ...args: IpcRequests['llmAnalyzeTerminal']['params']
   ): Promise<IpcRequests['llmAnalyzeTerminal']['result']> {
     return ipcRenderer.invoke(CHANNELS.llmAnalyzeTerminal, ...args)
+  }
+
+  llmClearAnalyzerCache(): Promise<void> {
+    return ipcRenderer.invoke(CHANNELS.llmClearAnalyzerCache)
   }
 
   // ==================== Fire-and-Forget Methods (send pattern, no return) ====================
