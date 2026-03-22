@@ -19,21 +19,21 @@ describe('navigation store', () => {
     })
   })
 
-  it('sets ssh view', () => {
-    useNavigationStore.getState().setActiveView({ type: 'ssh', connectionId: 'conn-1' })
+  it('sets session view', () => {
+    useNavigationStore.getState().setActiveView({ type: 'session', sessionId: 'sess-1' })
     expect(useNavigationStore.getState().activeView).toEqual({
-      type: 'ssh',
-      connectionId: 'conn-1',
+      type: 'session',
+      sessionId: 'sess-1',
     })
   })
 
   it('switches between views', () => {
     const { setActiveView } = useNavigationStore.getState()
     setActiveView({ type: 'workspace', workspaceId: 'ws-1', sessionId: 'sess-1' })
-    setActiveView({ type: 'ssh', connectionId: 'conn-1' })
+    setActiveView({ type: 'session', sessionId: 'sess-2' })
     expect(useNavigationStore.getState().activeView).toEqual({
-      type: 'ssh',
-      connectionId: 'conn-1',
+      type: 'session',
+      sessionId: 'sess-2',
     })
   })
 })

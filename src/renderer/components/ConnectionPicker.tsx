@@ -33,7 +33,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
   const connectAndCreateSession = async (config: SSHConnectionConfig) => {
     // 1. Show SSH pane for connection progress
     console.log(`[renderer:ConnectionPicker] Initiating SSH connection to ${config.host}:${config.port} (id=${config.id})`)
-    setActiveView({ type: 'ssh', connectionId: config.id })
+    // Navigate to session view after connection is established (handled in addRemoteSession)
     // 2. Connect to remote daemon and get session
     const { info, session } = await ssh.connect(config, { refreshDaemon })
     console.log(`[renderer:ConnectionPicker] ssh.connect returned: status=${info.status}, session=${session ? session.id : 'undefined'}`)

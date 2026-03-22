@@ -75,11 +75,6 @@ body,
   flex: 1;
 }
 
-.session-panel-expand {
-  display: flex;
-  align-items: center;
-  color: var(--text-secondary);
-}
 
 .session-panel .tree-list {
   flex: none;
@@ -4966,26 +4961,7 @@ body,
   font-size: 12px;
 }
 
-/* SSH Connections in Tree Pane */
-.ssh-connections-list {
-  flex: none;
-}
-
-.ssh-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-}
-
-.ssh-status-text {
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-left: auto;
-  padding-right: 8px;
-}
-
-/* SSH Connection Pane */
+/* Session Info Pane */
 .ssh-pane {
   display: flex;
   flex-direction: column;

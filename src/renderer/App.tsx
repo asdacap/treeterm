@@ -6,7 +6,7 @@ import CloseConfirmDialog from './components/CloseConfirmDialog'
 import WorkspacePickerDialog from './components/WorkspacePickerDialog'
 import ActiveProcessesDialog from './components/ActiveProcessesDialog'
 import ConnectionPicker from './components/ConnectionPicker'
-import SSHConnectionPane from './components/SSHConnectionPane'
+import SessionInfoPane from './components/SessionInfoPane'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import AppErrorFallback from './components/AppErrorFallback'
 import { useAppStore } from './store/app'
@@ -44,8 +44,11 @@ export default function App() {
   const sessionStores = useAppStore(s => s.sessionStores)
 
   // Derive active session store from activeView
-  const activeSessionStore = activeView?.type === 'workspace' && activeView.sessionId
-    ? sessionStores[activeView.sessionId] || null
+  const activeSessionId = activeView?.type === 'workspace' ? activeView.sessionId
+    : activeView?.type === 'session' ? activeView.sessionId
+    : null
+  const activeSessionStore = activeSessionId
+    ? sessionStores[activeSessionId] || null
     : null
 
   const handleConfirmClose = () => {
@@ -119,20 +122,16 @@ export default function App() {
           <div className="workspace-pane">
             {activeSessionStore ? (
               <>
-                <div style={{ display: activeView?.type !== 'ssh' ? 'contents' : 'none' }}>
+                <div style={{ display: activeView?.type === 'workspace' ? 'contents' : 'none' }}>
                   <WorkspacePane sessionStore={activeSessionStore} platform={platform} />
                 </div>
-                {activeView?.type === 'ssh' && (
-                  <SSHConnectionPane connectionId={activeView.connectionId} />
+                {activeView?.type === 'session' && (
+                  <SessionInfoPane sessionId={activeView.sessionId} sessionStore={activeSessionStore} />
                 )}
               </>
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>
-                {activeView?.type === 'ssh' ? (
-                  <SSHConnectionPane connectionId={activeView.connectionId} />
-                ) : (
-                  <span>Select a workspace to get started</span>
-                )}
+                <span>Select a workspace to get started</span>
               </div>
             )}
           </div>

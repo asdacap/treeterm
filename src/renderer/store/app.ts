@@ -314,7 +314,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     })
     // Clear navigation if it pointed to this session
     const { activeView } = useNavigationStore.getState()
-    if (activeView?.type === 'workspace' && activeView.sessionId === sessionId) {
+    if ((activeView?.type === 'workspace' || activeView?.type === 'session') && activeView.sessionId === sessionId) {
       const remainingIds = Object.keys(get().sessionStores)
       if (remainingIds.length > 0) {
         const nextStore = get().sessionStores[remainingIds[0]]

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 
 export type ActiveView =
   | { type: 'workspace'; workspaceId: string; sessionId: string }
-  | { type: 'ssh'; connectionId: string }
+  | { type: 'session'; sessionId: string }
 
 interface NavigationState {
   activeView: ActiveView | null

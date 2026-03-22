@@ -65,7 +65,6 @@ export default function SessionPanel({
   })
   const [createChildDialogParentId, setCreateChildDialogParentId] = useState<string | null>(null)
   const [isOpenWorkspaceDialogOpen, setIsOpenWorkspaceDialogOpen] = useState(false)
-  const [isCollapsed, setIsCollapsed] = useState(false)
 
   // Session name editing
   const displayName = useSessionNamesStore(s => s.names[sessionId]?.name)
@@ -329,10 +328,7 @@ export default function SessionPanel({
 
   return (
     <div className="session-panel" onClick={closeContextMenu}>
-      <div className="session-panel-header" onClick={() => setIsCollapsed(!isCollapsed)} onContextMenu={handleSessionContextMenu}>
-        <span className="session-panel-expand">
-          {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-        </span>
+      <div className="session-panel-header" onClick={() => setActiveView({ type: 'session', sessionId })} onContextMenu={handleSessionContextMenu}>
         {isEditingName ? (
           <input
             ref={nameInputRef}
@@ -363,48 +359,13 @@ export default function SessionPanel({
         </button>
       </div>
 
-      {!isCollapsed && (
-        <>
-          <div className="tree-list">
-            {rootWorkspaces.length === 0 ? (
-              <div className="tree-empty">No workspaces. Click + to add one.</div>
-            ) : (
-              rootWorkspaces.map((ws) => renderWorkspace(ws))
-            )}
-          </div>
-
-          {/* SSH Connection for this session */}
-          {connection && connection.target.type === 'remote' && (() => {
-            const config = connection.target.config
-            const label = `${config.user}@${config.host}`
-            const isActive = activeView?.type === 'ssh' && activeView.connectionId === connection.id
-            return (
-              <div className="tree-list ssh-connections-list">
-                <div
-                  className={`tree-item ${isActive ? 'active' : ''}`}
-                  onClick={() => setActiveView({ type: 'ssh', connectionId: connection.id })}
-                  title={label}
-                >
-                  <span className="tree-item-expand-placeholder" />
-                  <span className="tree-item-icon">
-                    <span
-                      className="ssh-status-dot"
-                      style={{
-                        backgroundColor:
-                          connection.status === 'connected' ? '#4caf50' :
-                          connection.status === 'connecting' ? '#ff9800' :
-                          connection.status === 'error' ? '#f44336' : '#666'
-                      }}
-                    />
-                  </span>
-                  <span className="tree-item-name">{label}</span>
-                  <span className="ssh-status-text">{connection.status}</span>
-                </div>
-              </div>
-            )
-          })()}
-        </>
-      )}
+      <div className="tree-list">
+        {rootWorkspaces.length === 0 ? (
+          <div className="tree-empty">No workspaces. Click + to add one.</div>
+        ) : (
+          rootWorkspaces.map((ws) => renderWorkspace(ws))
+        )}
+      </div>
 
       {/* Context Menu */}
       {contextMenu && (
