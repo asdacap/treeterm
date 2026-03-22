@@ -99,6 +99,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   sandbox: UNINITIALIZED,
   ssh: UNINITIALIZED,
   llm: UNINITIALIZED,
+  clipboard: UNINITIALIZED,
   selectFolder: UNINITIALIZED,
   getWindowUuid: UNINITIALIZED,
   getInitialWorkspace: UNINITIALIZED,

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, type RefObject } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useStore } from 'zustand'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
@@ -105,7 +105,7 @@ export default function ReviewBrowser({
   }, [workspacePath, parentWorkspace])
 
   // Auto-refresh when tab becomes visible (e.g., switching back from terminal)
-  const wasVisibleRef: RefObject<boolean | null> = useRef(null)
+  const wasVisibleRef = useRef<boolean | null>(null)
   useEffect(() => {
     if (wasVisibleRef.current === false && isVisible) {
       handleRefresh()

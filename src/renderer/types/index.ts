@@ -450,6 +450,7 @@ declare global {
       daemon: DaemonApi
       session: SessionApi
       getWindowUuid: () => Promise<string>
+      clipboard: ClipboardApi
       llm: LlmApi
       ssh: SSHApi
     }
