@@ -34,7 +34,7 @@ export default function SessionInfoPane({ sessionId, sessionStore }: SessionInfo
   const connection = useStore(sessionStore, s => s.connection)
   const isRemote = connection?.target.type === 'remote'
 
-  const [activeTab, setActiveTab] = useState<TabId>(isRemote ? 'daemon' : 'info')
+  const [activeTab, setActiveTab] = useState<TabId>('info')
   const [output, setOutput] = useState<string[]>([])
   const ssh = useAppStore(s => s.ssh)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -73,7 +73,7 @@ export default function SessionInfoPane({ sessionId, sessionStore }: SessionInfo
     : displayName || sessionId
 
   const tabs: { id: TabId; label: string }[] = isRemote
-    ? [{ id: 'daemon', label: 'Daemon' }, { id: 'proxy', label: 'Proxy' }]
+    ? [{ id: 'info', label: 'Info' }, { id: 'daemon', label: 'Daemon' }, { id: 'proxy', label: 'Proxy' }]
     : [{ id: 'info', label: 'Info' }]
 
   return (
@@ -110,7 +110,23 @@ export default function SessionInfoPane({ sessionId, sessionStore }: SessionInfo
       {activeTab === 'info' ? (
         <div className="ssh-pane-output">
           <div className="ssh-pane-output-line">Session ID: {sessionId}</div>
-          <div className="ssh-pane-output-line">Connection: Local</div>
+          {isRemote && connection.target.type === 'remote' ? (
+            <>
+              <div className="ssh-pane-output-line">Connection: SSH</div>
+              <div className="ssh-pane-output-line">Host: {connection.target.config.host}</div>
+              <div className="ssh-pane-output-line">User: {connection.target.config.user}</div>
+              <div className="ssh-pane-output-line">Port: {connection.target.config.port}</div>
+              {connection.target.config.identityFile && (
+                <div className="ssh-pane-output-line">Identity File: {connection.target.config.identityFile}</div>
+              )}
+              <div className="ssh-pane-output-line">Status: {connection.status}</div>
+              {connection.error && (
+                <div className="ssh-pane-output-line">Error: {connection.error}</div>
+              )}
+            </>
+          ) : (
+            <div className="ssh-pane-output-line">Connection: Local</div>
+          )}
         </div>
       ) : (
         <div className="ssh-pane-output" ref={scrollRef}>
