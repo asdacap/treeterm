@@ -20,7 +20,7 @@ import type {
   Platform, TerminalApi, GitApi, SessionApi, AppApi, DaemonApi,
   FilesystemApi, STTApi, SandboxApi, SettingsApi, RunActionsApi,
   TerminalInstance, AiHarnessInstance,
-  ConnectionInfo, SSHApi, LlmApi
+  ConnectionInfo, SSHApi, LlmApi, ClipboardApi
 } from '../types'
 
 export interface AppDeps {
@@ -37,6 +37,7 @@ export interface AppDeps {
   sandbox: SandboxApi
   ssh: SSHApi
   llm: LlmApi
+  clipboard: ClipboardApi
   selectFolder: () => Promise<string | null>
   getWindowUuid: () => Promise<string>
   getInitialWorkspace: () => Promise<string | null>

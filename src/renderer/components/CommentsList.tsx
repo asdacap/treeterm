@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useStore } from 'zustand'
+import { useAppStore } from '../store/app'
 import { generateReviewPrompt } from '../utils/reviewPrompt'
 import type { ReviewComment, FilesystemState, WorkspaceStore } from '../types'
 
@@ -30,6 +31,7 @@ export default function CommentsList({
   workspace,
 }: CommentsListProps): JSX.Element {
   const { workspace: wsData, getReviewComments, toggleReviewCommentAddressed, deleteReviewComment, addTab, getFilesystemApi } = useStore(workspace)
+  const clipboard = useAppStore((state) => state.clipboard)
   const filesystem = getFilesystemApi()
   const comments: ReviewComment[] = getReviewComments()
   const [fileContents, setFileContents] = useState<Map<string, string>>(new Map())
@@ -78,10 +80,10 @@ export default function CommentsList({
     })
   }
 
-  const handleCopyPrompt = async () => {
+  const handleCopyPrompt = () => {
     const prompt = generateReviewPrompt(comments)
     if (prompt) {
-      await navigator.clipboard.writeText(prompt)
+      clipboard.writeText(prompt)
     }
   }
 

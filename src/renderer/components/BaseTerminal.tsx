@@ -3,6 +3,7 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { useStore } from 'zustand'
 import { useSettingsStore } from '../store/settings'
+import { useAppStore } from '../store/app'
 import { useActivityStateStore } from '../store/activityState'
 import { useSessionApi } from '../contexts/SessionStoreContext'
 import { createActivityStateDetector } from '../utils/activityStateDetector'
@@ -114,6 +115,7 @@ export default function BaseTerminal({
   const sessionStore = useSessionApi()
   const setTabState = useActivityStateStore((state) => state.setTabState)
   const settings = useSettingsStore((state) => state.settings)
+  const clipboard = useAppStore((state) => state.clipboard)
 
   // Get existing ptyId from store for reconnection
   const appState = wsData?.appStates[tabId]
@@ -413,30 +415,20 @@ export default function BaseTerminal({
     setContextMenu(clampContextMenuPosition(e.clientX, e.clientY))
   }
 
-  const handleCopy = async () => {
-    try {
-      const selection = terminalRef.current?.getSelection()
-      if (selection) {
-        await navigator.clipboard.writeText(selection)
-      }
-    } catch (error) {
-      console.error(`[${config.logPrefix} ${tabId}] Failed to write to clipboard:`, error)
-    } finally {
-      setContextMenu(null)
+  const handleCopy = () => {
+    const selection = terminalRef.current?.getSelection()
+    if (selection) {
+      clipboard.writeText(selection)
     }
+    setContextMenu(null)
   }
 
-  const handlePaste = async () => {
-    try {
-      const text = await navigator.clipboard.readText()
-      if (text && ttyRef.current) {
-        ttyRef.current.getState().write(text)
-      }
-    } catch (error) {
-      console.error(`[${config.logPrefix} ${tabId}] Failed to read from clipboard:`, error)
-    } finally {
-      setContextMenu(null)
+  const handlePaste = () => {
+    const text = clipboard.readText()
+    if (text && ttyRef.current) {
+      ttyRef.current.getState().write(text)
     }
+    setContextMenu(null)
   }
 
   return (
