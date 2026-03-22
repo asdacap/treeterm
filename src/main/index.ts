@@ -404,7 +404,13 @@ ipcMain.handle('llm:generateTitle', async (_event, buffer: string, settings: { b
       model: settings.model,
       reasoning: settings.reasoningEffort
     })
-    return { title: response.trim() }
+    const trimmed = response.trim()
+    try {
+      const parsed = JSON.parse(trimmed)
+      return { title: parsed.title || trimmed, description: parsed.description || '' }
+    } catch {
+      return { title: trimmed, description: '' }
+    }
   } catch (error) {
     return { error: formatLlmError(error) }
   }

@@ -31,10 +31,11 @@ function makeDeps(overrides?: Partial<AnalyzerDeps>): AnalyzerDeps {
     } as unknown as Settings),
     llm: {
       analyzeTerminal: vi.fn().mockResolvedValue({ state: 'idle', reason: 'prompt visible' }),
-      generateTitle: vi.fn().mockResolvedValue({ title: 'Test Title' }),
+      generateTitle: vi.fn().mockResolvedValue({ title: 'Test Title', description: 'Test Description' }),
     },
     updateMetadata: vi.fn(),
     getDisplayName: vi.fn().mockReturnValue(undefined),
+    getDescription: vi.fn().mockReturnValue(undefined),
     setActivityTabState: vi.fn(),
     getTty: vi.fn().mockReturnValue(null),
     getPtyId: vi.fn().mockReturnValue(null),
@@ -184,7 +185,7 @@ describe('createAnalyzerStore', () => {
     deps = makeDeps({
       llm: {
         analyzeTerminal: vi.fn().mockResolvedValue({ error: 'API error' }),
-        generateTitle: vi.fn().mockResolvedValue({ title: '' }),
+        generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
       },
     })
     const store = createAnalyzerStore('tab-1', deps)
@@ -208,7 +209,7 @@ describe('createAnalyzerStore', () => {
     deps = makeDeps({
       llm: {
         analyzeTerminal: vi.fn().mockRejectedValue(new Error('Network error')),
-        generateTitle: vi.fn().mockResolvedValue({ title: '' }),
+        generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
       },
     })
     const store = createAnalyzerStore('tab-1', deps)
@@ -351,6 +352,9 @@ describe('createAnalyzerStore', () => {
       await vi.waitFor(() => {
         expect(deps.updateMetadata).toHaveBeenCalledWith('displayName', 'Test Title')
       })
+      await vi.waitFor(() => {
+        expect(deps.updateMetadata).toHaveBeenCalledWith('description', 'Test Description')
+      })
 
       store.getState().detach()
     })
@@ -383,8 +387,11 @@ describe('createAnalyzerStore', () => {
       store.getState().detach()
     })
 
-    it('does not generate title when displayName already exists', () => {
-      deps = makeDeps({ getDisplayName: vi.fn().mockReturnValue('Existing Title') })
+    it('does not generate title when displayName and description already exist', () => {
+      deps = makeDeps({
+        getDisplayName: vi.fn().mockReturnValue('Existing Title'),
+        getDescription: vi.fn().mockReturnValue('Existing Description'),
+      })
       const store = createAnalyzerStore('tab-1', deps)
       const terminal = makeMockTerminal()
 
@@ -392,6 +399,29 @@ describe('createAnalyzerStore', () => {
       store.getState().onUserInput('\r')
 
       expect(deps.llm.generateTitle).not.toHaveBeenCalled()
+
+      store.getState().detach()
+    })
+
+    it('generates description even when displayName already exists', async () => {
+      deps = makeDeps({
+        getDisplayName: vi.fn().mockReturnValue('Existing Title'),
+        getDescription: vi.fn().mockReturnValue(undefined),
+      })
+      const store = createAnalyzerStore('tab-1', deps)
+      const terminal = makeMockTerminal()
+
+      store.getState().attach(terminal, { current: 0 })
+      store.getState().onUserInput('\r')
+
+      await vi.waitFor(() => {
+        expect(deps.llm.generateTitle).toHaveBeenCalled()
+      })
+      await vi.waitFor(() => {
+        expect(deps.updateMetadata).toHaveBeenCalledWith('description', 'Test Description')
+      })
+      // Should not overwrite existing displayName
+      expect(deps.updateMetadata).not.toHaveBeenCalledWith('displayName', expect.anything())
 
       store.getState().detach()
     })
