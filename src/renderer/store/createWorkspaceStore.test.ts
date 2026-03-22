@@ -23,6 +23,15 @@ function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStore
     quickForkWorkspace: vi.fn().mockResolvedValue({ success: true }),
     refreshGitInfo: vi.fn().mockResolvedValue(undefined),
     lookupWorkspace: vi.fn().mockReturnValue(undefined),
+    getSettings: vi.fn().mockReturnValue({
+      llm: { apiKey: '', baseUrl: '' },
+      terminalAnalyzer: { model: '', systemPrompt: '', titleSystemPrompt: '', reasoningEffort: 'off', safePaths: [], bufferLines: 10 },
+    }),
+    llm: {
+      analyzeTerminal: vi.fn().mockResolvedValue({ state: 'idle', reason: '' }),
+      generateTitle: vi.fn().mockResolvedValue({ title: '' }),
+    },
+    setActivityTabState: vi.fn(),
     ...overrides,
   }
 }

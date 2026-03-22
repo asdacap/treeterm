@@ -72,6 +72,11 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       get: vi.fn().mockReturnValue(null),
       getDefaultApp: vi.fn().mockReturnValue(null),
     },
+    llm: {
+      analyzeTerminal: vi.fn().mockResolvedValue({ state: 'idle', reason: '' }),
+      generateTitle: vi.fn().mockResolvedValue({ title: '' }),
+    },
+    setActivityTabState: vi.fn(),
     ...overrides,
   }
 }

@@ -7,9 +7,9 @@ import { createTtyStore } from './createTtyStore'
 import type { Tty, TtyTerminalDeps } from './createTtyStore'
 import type {
   Workspace, Session, AppState, GitInfo,
-  ConnectionInfo,
+  ConnectionInfo, ActivityState,
   TerminalApi, GitApi, FilesystemApi, SessionApi, Settings, WorktreeSettings,
-  Application, SandboxConfig, SessionInfo
+  Application, SandboxConfig, SessionInfo, LlmApi
 } from '../types'
 
 export interface AppRegistryApi {
@@ -24,6 +24,8 @@ export interface SessionDeps {
   terminal: TerminalApi
   getSettings: () => Settings
   appRegistry: AppRegistryApi
+  llm: Pick<LlmApi, 'analyzeTerminal' | 'generateTitle'>
+  setActivityTabState: (tabId: string, state: ActivityState) => void
 }
 
 export interface SessionState {
@@ -167,6 +169,9 @@ export function createSessionStore(
       getTty: (ptyId: string) => store.getState().getTty(ptyId),
       git: deps.git,
       filesystem: deps.filesystem,
+      getSettings: deps.getSettings,
+      llm: deps.llm,
+      setActivityTabState: deps.setActivityTabState,
       syncToDaemon: () => debouncedSyncToDaemon(),
       removeWorkspace: (id) => store.getState().removeWorkspace(id),
       removeWorkspaceKeepBranch: (id) => store.getState().removeWorkspaceKeepBranch(id),

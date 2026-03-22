@@ -6,10 +6,8 @@ import PushToTalkButton from './PushToTalkButton'
 import { ReviewCommentsButton } from './ReviewCommentsButton'
 import { useSessionApi } from '../contexts/SessionStoreContext'
 import { useTtyCreation } from '../hooks/useTtyConnection'
-import { useTerminalAnalyzer } from '../hooks/useTerminalAnalyzer'
-import { useActivityStateStore } from '../store/activityState'
-import { useSettingsStore } from '../store/settings'
 import type { ActivityState, AiHarnessState, SandboxConfig, WorkspaceStore } from '../types'
+import type { Analyzer } from '../store/createAnalyzerStore'
 import { clampContextMenuPosition } from '../utils/contextMenuPosition'
 
 const STATE_COLORS: Record<ActivityState, string> = {
@@ -60,14 +58,15 @@ export default function AiHarness({
   const appState = wsData?.appStates[tabId]
   const state = appState?.state as AiHarnessState | undefined
   const ptyId = state?.ptyId ?? null
-  const aiState = state?.aiState ?? 'idle'
-  const analyzing = state?.analyzing ?? false
-  const reason = state?.reason ?? ''
-  const autoApprove = state?.autoApprove ?? false
 
-  const [terminal, setTerminal] = useState<XTerm | null>(null)
-  const dataVersionRefHolder = useRef<React.MutableRefObject<number> | null>(null)
-  const [dataVersionReady, setDataVersionReady] = useState(false)
+  // Create or get the analyzer store for this tab
+  const analyzerRef = useRef<Analyzer | null>(null)
+  if (!analyzerRef.current) {
+    analyzerRef.current = workspace.getState().createAnalyzer(tabId)
+  }
+  const analyzer = analyzerRef.current
+
+  const { aiState, analyzing, reason, autoApprove } = useStore(analyzer)
 
   const onCreated = useCallback((newPtyId: string) => {
     const connId = sessionStore.getState().connection?.id ?? 'local'
@@ -95,86 +94,25 @@ export default function AiHarness({
   }, [ptyId, sessionStore])
 
   const handleTerminalReady = useCallback((term: XTerm, dvRef: React.MutableRefObject<number>) => {
-    setTerminal(term)
-    dataVersionRefHolder.current = dvRef
-    setDataVersionReady(true)
-  }, [])
+    analyzer.getState().attach(term, dvRef)
 
-  useTerminalAnalyzer(
-    terminal,
-    dataVersionReady ? dataVersionRefHolder.current : null,
-    cwd,
-    updateTabState,
-    tabId
-  )
-
-  // Sync LLM analyzer state to activity state store so TabActivityIndicator matches
-  const setActivityTabState = useActivityStateStore((s) => s.setTabState)
-  useEffect(() => {
-    setActivityTabState(tabId, aiState)
-  }, [tabId, aiState, setActivityTabState])
-
-  // Auto-generate workspace title on first successful analyzer return
-  const titleGeneratedRef = useRef(false)
-  useEffect(() => {
-    if (titleGeneratedRef.current) return
-    if (aiState === 'idle' || aiState === 'error' || !aiState) return
-    if (!terminal) return
-    const ws = workspace.getState().workspace
-    if (ws.metadata?.displayName) return
-
-    const s = useSettingsStore.getState().settings
-    if (!s.llm.apiKey || !s.terminalAnalyzer.model) return
-
-    titleGeneratedRef.current = true
-
-    const numLines = s.terminalAnalyzer.bufferLines || 10
-    const xtermBuffer = terminal.buffer.normal
-    const contentEnd = xtermBuffer.baseY + xtermBuffer.cursorY + 1
-    const startLine = Math.max(0, contentEnd - numLines)
-    const lines: string[] = []
-    for (let i = startLine; i < contentEnd; i++) {
-      const line = xtermBuffer.getLine(i)
-      if (line) lines.push(line.translateToString(true))
-    }
-    const buffer = lines.join('\n')
-    if (!buffer.trim()) { titleGeneratedRef.current = false; return }
-
-    window.electron.llm.generateTitle(buffer, {
-      baseUrl: s.llm.baseUrl,
-      apiKey: s.llm.apiKey,
-      model: s.terminalAnalyzer.model,
-      titleSystemPrompt: s.terminalAnalyzer.titleSystemPrompt,
-      reasoningEffort: s.terminalAnalyzer.reasoningEffort
-    }).then((result) => {
-      if ('title' in result && result.title) {
-        workspace.getState().updateMetadata('displayName', result.title)
-      }
-    }).catch((err) => {
-      console.error('[ai-harness] title generation failed:', err)
+    // Intercept user input for title generation
+    const disposable = term.onData((data) => {
+      analyzer.getState().onUserInput(data)
     })
-  }, [aiState, terminal, workspace])
 
-  const settings = useSettingsStore((s) => s.settings)
-  const setAutoApprove = useCallback((value: boolean) => {
-    updateTabState<AiHarnessState>(tabId, (state) => ({ ...state, autoApprove: value }))
-  }, [tabId, updateTabState])
-  const autoApproveSentRef = useRef(false)
-  const [badgeContextMenu, setBadgeContextMenu] = useState<{ x: number; y: number } | null>(null)
+    // Store disposable for cleanup - we'll clean up via detach
+    return () => disposable.dispose()
+  }, [analyzer])
 
-  // Auto-approve safe permission requests
+  // Clean up analyzer on unmount
   useEffect(() => {
-    if (aiState === 'safe_permission_requested' && autoApprove && !autoApproveSentRef.current) {
-      autoApproveSentRef.current = true
-      if (ptyId) {
-        const tty = sessionStore.getState().getTty(ptyId)
-        if (tty) tty.getState().write('\r')
-      }
+    return () => {
+      analyzer.getState().detach()
     }
-    if (aiState !== 'safe_permission_requested') {
-      autoApproveSentRef.current = false
-    }
-  }, [aiState, autoApprove, ptyId, sessionStore])
+  }, [analyzer])
+
+  const [badgeContextMenu, setBadgeContextMenu] = useState<{ x: number; y: number } | null>(null)
 
   const handleBadgeContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -196,20 +134,9 @@ export default function AiHarness({
 
   const handleDebugAnalyzer = () => {
     setBadgeContextMenu(null)
-    if (!terminal) return
-
-    const numLines = settings.terminalAnalyzer.bufferLines || 10
-    const xtermBuffer = terminal.buffer.normal
-    const contentEnd = xtermBuffer.baseY + xtermBuffer.cursorY + 1
-    const startLine = Math.max(0, contentEnd - numLines)
-    const lines: string[] = []
-    for (let i = startLine; i < contentEnd; i++) {
-      const line = xtermBuffer.getLine(i)
-      if (line) lines.push(line.translateToString(true))
-    }
-    const buffer = lines.join('\n')
-
-    workspace.getState().addTab<{ bufferText: string }>('system-prompt-debugger', { bufferText: buffer })
+    const bufferText = analyzer.getState().getBufferText()
+    if (!bufferText) return
+    workspace.getState().addTab<{ bufferText: string }>('system-prompt-debugger', { bufferText })
   }
 
   // Memoize config based on props to prevent unnecessary re-renders
@@ -255,7 +182,7 @@ export default function AiHarness({
           <input
             type="checkbox"
             checked={autoApprove}
-            onChange={(e) => setAutoApprove(e.target.checked)}
+            onChange={(e) => analyzer.getState().setAutoApprove(e.target.checked)}
           />
           <span className="ai-harness-toggle-slider" />
           <span className="ai-harness-toggle-label">Auto-approve safe</span>
