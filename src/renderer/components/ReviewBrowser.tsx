@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, type RefObject } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useStore } from 'zustand'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
@@ -15,6 +15,7 @@ interface ReviewBrowserProps {
   // parentWorkspaceId is optional - if undefined, this is a top-level worktree
   // and only uncommitted changes are shown (no merge functionality)
   parentWorkspaceId?: string
+  isVisible: boolean
 }
 
 type ViewMode = 'committed' | 'uncommitted'
@@ -23,6 +24,7 @@ export default function ReviewBrowser({
   workspace,
   tabId,
   parentWorkspaceId,
+  isVisible,
 }: ReviewBrowserProps) {
   const {
     workspace: wsData, lookupWorkspace, getReviewComments, getGitApi,
@@ -101,6 +103,15 @@ export default function ReviewBrowser({
       setRefreshing(false)
     }
   }, [workspacePath, parentWorkspace])
+
+  // Auto-refresh when tab becomes visible (e.g., switching back from terminal)
+  const wasVisibleRef: RefObject<boolean | null> = useRef(null)
+  useEffect(() => {
+    if (wasVisibleRef.current === false && isVisible) {
+      handleRefresh()
+    }
+    wasVisibleRef.current = isVisible
+  }, [isVisible, handleRefresh])
 
   const handlePromptCommit = useCallback(() => {
     promptHarness('commit')
