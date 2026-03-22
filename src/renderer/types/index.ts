@@ -274,6 +274,11 @@ export interface ConflictCheckResult {
   error?: string
 }
 
+export interface ClipboardApi {
+  writeText: (text: string) => void
+  readText: () => string
+}
+
 export interface TerminalApi {
   create: (connectionId: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<{ sessionId: string; handle: string } | null>
   attach: (connectionId: string, sessionId: string) => Promise<{ success: boolean; handle?: string; scrollback?: string[]; exitCode?: number; error?: string }>
