@@ -13,7 +13,6 @@ const defaultSettings: Settings = {
     cursorStyle: 'block',
     cursorBlink: true,
     showRawChars: false,
-    startByDefault: true,
     instances: []
   },
   sandbox: {

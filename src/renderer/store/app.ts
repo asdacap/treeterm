@@ -18,7 +18,7 @@ import type {
   Workspace, Session, Application,
   Platform, TerminalApi, GitApi, SessionApi, AppApi, DaemonApi,
   FilesystemApi, STTApi, SandboxApi, SettingsApi, RunActionsApi,
-  TerminalInstance, AiHarnessInstance, Settings,
+  TerminalInstance, AiHarnessInstance,
   ConnectionInfo, SSHApi, LlmApi
 } from '../types'
 
@@ -63,7 +63,7 @@ interface AppState extends AppDeps {
   getDefaultApplications: () => Application[]
   getDefaultApplication: (appId?: string) => Application | null
   initializeApplications: () => void
-  registerTerminalVariants: (instances: TerminalInstance[], terminalSettings: Settings['terminal'] | undefined) => void
+  registerTerminalVariants: (instances: TerminalInstance[]) => void
   registerAiHarnessVariants: (instances: AiHarnessInstance[]) => void
 
   // Session management
@@ -157,7 +157,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   initializeApplications: () => {
     const { terminal } = get()
     const deps = { terminal: { kill: terminal.kill.bind(terminal) } }
-    get().registerApplication(createTerminalApplication(true, deps))
+    get().registerApplication(createTerminalApplication(deps))
     get().registerApplication(filesystemApplication)
     get().registerApplication(reviewApplication)
     get().registerApplication(editorApplication)
@@ -166,14 +166,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
     get().registerApplication(systemPromptDebuggerApplication)
   },
 
-  registerTerminalVariants: (instances: TerminalInstance[], terminalSettings: Settings['terminal'] | undefined) => {
+  registerTerminalVariants: (instances: TerminalInstance[]) => {
     const { terminal } = get()
     const deps = { terminal: { kill: terminal.kill.bind(terminal) } }
-
-    // Re-register base terminal with updated startByDefault setting
-    if (terminalSettings !== undefined) {
-      get().registerApplication(createTerminalApplication(terminalSettings.startByDefault, deps))
-    }
 
     // Unregister existing dynamic terminals
     const allApps = Object.values(get().applications)

@@ -71,7 +71,7 @@ describe('Terminal Renderer', () => {
 
   describe('createTerminalApplication', () => {
     it('creates terminal application with correct properties', () => {
-      const app = createTerminalApplication(true, mockDeps)
+      const app = createTerminalApplication(mockDeps)
 
       expect(app.id).toBe('terminal')
       expect(app.name).toBe('Terminal')
@@ -83,17 +83,14 @@ describe('Terminal Renderer', () => {
       expect(app.displayStyle).toBe('flex')
     })
 
-    it('sets isDefault based on parameter', () => {
-      const appWithDefault = createTerminalApplication(true, mockDeps)
-      expect(appWithDefault.isDefault).toBe(true)
-
-      const appWithoutDefault = createTerminalApplication(false, mockDeps)
-      expect(appWithoutDefault.isDefault).toBe(false)
+    it('has isDefault set to true', () => {
+      const app = createTerminalApplication(mockDeps)
+      expect(app.isDefault).toBe(true)
     })
 
     describe('createInitialState', () => {
       it('returns terminal state with null ptyId', () => {
-        const app = createTerminalApplication(true, mockDeps)
+        const app = createTerminalApplication(mockDeps)
         const state = app.createInitialState()
 
         expect(state).toEqual({ ptyId: null, ptyHandle: null })
@@ -102,7 +99,7 @@ describe('Terminal Renderer', () => {
 
     describe('cleanup', () => {
       it('kills PTY when tab has ptyId', async () => {
-        const app = createTerminalApplication(true, mockDeps)
+        const app = createTerminalApplication(mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal',
@@ -134,7 +131,7 @@ describe('Terminal Renderer', () => {
       })
 
       it('does not kill PTY when tab has no ptyId', async () => {
-        const app = createTerminalApplication(true, mockDeps)
+        const app = createTerminalApplication(mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal',
@@ -166,7 +163,7 @@ describe('Terminal Renderer', () => {
       })
 
       it('does not kill PTY when state is not terminal state', async () => {
-        const app = createTerminalApplication(true, mockDeps)
+        const app = createTerminalApplication(mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal',
@@ -198,7 +195,7 @@ describe('Terminal Renderer', () => {
       })
 
       it('removes activity state regardless of PTY', async () => {
-        const app = createTerminalApplication(true, mockDeps)
+        const app = createTerminalApplication(mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal',
@@ -232,7 +229,7 @@ describe('Terminal Renderer', () => {
 
     describe('render', () => {
       it('renders Terminal component with correct props', () => {
-        const app = createTerminalApplication(true, mockDeps)
+        const app = createTerminalApplication(mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal',
@@ -262,20 +259,20 @@ describe('Terminal Renderer', () => {
 
   describe('terminalApplication (via createTerminalApplication)', () => {
     it('is a terminal application with isDefault set to true', () => {
-      const app = createTerminalApplication(true, mockDeps)
+      const app = createTerminalApplication(mockDeps)
       expect(app.id).toBe('terminal')
       expect(app.name).toBe('Terminal')
       expect(app.isDefault).toBe(true)
     })
 
     it('can create initial state', () => {
-      const app = createTerminalApplication(true, mockDeps)
+      const app = createTerminalApplication(mockDeps)
       const state = app.createInitialState()
       expect(state).toEqual({ ptyId: null, ptyHandle: null })
     })
 
     it('can render Terminal component', () => {
-      const app = createTerminalApplication(true, mockDeps)
+      const app = createTerminalApplication(mockDeps)
       const tab: Tab = {
         id: 'tab-1',
         applicationId: 'terminal',
@@ -295,7 +292,7 @@ describe('Terminal Renderer', () => {
     })
 
     it('can cleanup tabs', async () => {
-      const app = createTerminalApplication(true, mockDeps)
+      const app = createTerminalApplication(mockDeps)
       const tab: Tab = {
         id: 'tab-1',
         applicationId: 'terminal',

@@ -9,7 +9,6 @@ const defaultSettings: Settings = {
     cursorStyle: 'block',
     cursorBlink: true,
     showRawChars: false,
-    startByDefault: true,
     instances: []
   },
   sandbox: {
@@ -107,7 +106,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const settings = await get().settingsApi!.load()
       set({ settings, isLoaded: true })
       // Register dynamic terminal variants and update base terminal
-      useAppStore.getState().registerTerminalVariants(settings.terminal.instances, settings.terminal)
+      useAppStore.getState().registerTerminalVariants(settings.terminal.instances)
       // Register dynamic AI Harness variants
       useAppStore.getState().registerAiHarnessVariants(settings.aiHarness.instances)
     } catch (error) {
@@ -121,7 +120,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await get().settingsApi!.save(settings)
       set({ settings })
       // Re-register terminal variants and update base terminal when settings change
-      useAppStore.getState().registerTerminalVariants(settings.terminal.instances, settings.terminal)
+      useAppStore.getState().registerTerminalVariants(settings.terminal.instances)
       // Re-register AI Harness variants when settings change
       useAppStore.getState().registerAiHarnessVariants(settings.aiHarness.instances)
     } catch (error) {
