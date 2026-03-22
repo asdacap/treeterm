@@ -308,11 +308,13 @@ body,
 .activity-working {
   color: #e5e510;
   animation: spin 1s linear infinite;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .activity-user_input_required {
-  color: #0dbc79;
+  color: #00bcd4;
 }
 
 .activity-permission_request {
