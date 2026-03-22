@@ -6,8 +6,8 @@ import { useActivityStateStore } from '../../renderer/store/activityState'
 
 type TerminalDeps = { terminal: { kill: (connectionId: string, sessionId: string) => void } }
 
-// Factory function to create the base terminal application with configurable isDefault
-export function createTerminalApplication(startByDefault: boolean, deps: TerminalDeps): Application<TerminalState> {
+// Factory function to create the base terminal application
+export function createTerminalApplication(deps: TerminalDeps): Application<TerminalState> {
   return {
     id: 'terminal',
     name: 'Terminal',
@@ -41,7 +41,7 @@ export function createTerminalApplication(startByDefault: boolean, deps: Termina
     showInNewTabMenu: true,
     keepAlive: true,
     displayStyle: 'flex',
-    isDefault: startByDefault
+    isDefault: true
   }
 }
 

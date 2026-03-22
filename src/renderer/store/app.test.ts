@@ -793,8 +793,7 @@ describe('useAppStore', () => {
     it('registerTerminalVariants updates base terminal and adds variants', async () => {
       const cleanup = await useAppStore.getState().initialize(mockDeps)
       useAppStore.getState().registerTerminalVariants(
-        [{ id: 'custom', name: 'Custom', icon: '>', startupCommand: 'bash', isDefault: false }],
-        { fontSize: 14, fontFamily: 'Menlo', cursorStyle: 'block', cursorBlink: true, showRawChars: false, startByDefault: false, instances: [] }
+        [{ id: 'custom', name: 'Custom', icon: '>', startupCommand: 'bash', isDefault: false }]
       )
       // Base terminal re-registered
       expect(useAppStore.getState().applications['terminal']).toBeDefined()

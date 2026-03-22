@@ -267,24 +267,6 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                   </p>
                 </div>
 
-                <div className="settings-group">
-                  <label className="settings-checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={localSettings.terminal.startByDefault}
-                      onChange={(e) =>
-                        setLocalSettings((prev) => ({
-                          ...prev,
-                          terminal: { ...prev.terminal, startByDefault: e.target.checked }
-                        }))
-                      }
-                    />
-                    Start by Default
-                  </label>
-                  <p className="settings-hint">
-                    Automatically open a Terminal tab when creating new workspaces
-                  </p>
-                </div>
               </div>
             )}
 
