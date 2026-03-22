@@ -25,7 +25,13 @@ The daemon survives app restarts — terminal sessions and state persist when El
   - **Filesystem** - File browser and viewer
   - **Editor** - Monaco-based code editor with vim mode support
   - **AI Harness** - Integration with configurable AI CLI tools (Claude is the default)
-  - **Review** - Review and merge changes from parent workspaces
+  - **Review** - Review and merge changes from parent workspaces with collapsible diff tree view
+  - **Chat** - Built-in LLM chat with configurable model, reasoning, and effort level settings
+  - **System Prompt Debugger** - Debug and inspect AI system prompts with model/reasoning/timing controls
+- **SSH Connections** - Connect to remote machines with session panel, connection info tab, and saved connection deduplication
+- **Terminal Analyzer** - AI-powered terminal state estimation that syncs activity state from terminal buffer content
+- **Auto Workspace Naming** - Automatically generate workspace titles and descriptions
+- **Squash Merge** - Optional squash merge via dropdown on the merge button
 - **Daemon Persistence** - Terminal sessions survive app restarts via a background daemon process
 - **Speech-to-Text** - Push-to-talk functionality with multiple STT providers:
   - Web Speech API (browser-based)
@@ -33,7 +39,8 @@ The daemon survives app restarts — terminal sessions and state persist when El
   - Local Whisper (stub, not yet functional)
 - **Process Sandboxing** - Optional sandboxing with macOS sandbox-exec and Linux Bubblewrap
 - **Prefix Mode Keybindings** - tmux-style prefix key system for workspace and tab navigation
-- **Activity State Tracking** - Real-time indicators showing if applications are idle, working, or waiting for input
+- **Activity State Tracking** - Real-time indicators showing if applications are idle, working, or waiting for input, with AI-powered analysis
+- **Status Bar** - Bottom status bar with auto-approve safe permissions toggle
 - **Persistent State** - Workspaces and tabs persist across sessions
 
 ## Installation
@@ -115,7 +122,7 @@ src/
 ├── main/             # Electron main process (git, IPC bridge, gRPC client, settings)
 ├── preload/          # Electron context bridge
 ├── renderer/         # React UI (components, Zustand stores, hooks)
-├── applications/     # Application type definitions (terminal, aiHarness, editor, filesystem, review)
+├── applications/     # Application type definitions (terminal, aiHarness, editor, filesystem, review, chat, comments, terminalAnalyzerDebugger)
 ├── proto/            # Protobuf definitions (treeterm.proto)
 ├── generated/        # Auto-generated protobuf TypeScript
 └── shared/           # Shared types (IPC types, common types)
@@ -160,7 +167,15 @@ Settings are stored in the Electron userData directory:
 | STT | pushToTalkKey | Shift+Space |
 | STT | language | en |
 | Daemon | enabled | true |
-| Daemon | scrollbackLimit | 50000 |
+| Daemon | scrollbackLimit | 10000 |
+| SSH | savedConnections | [] |
+| LLM | baseUrl | https://openrouter.ai/api/v1 |
+| LLM | apiKey | (empty) |
+| LLM | model | gpt-4o |
+| Terminal Analyzer | model | openai/gpt-oss-safeguard-20b |
+| Terminal Analyzer | reasoningEffort | off |
+| Terminal Analyzer | bufferLines | 30 |
+| Terminal Analyzer | safePaths | [/tmp] |
 | Global | globalDefaultApplicationId | terminal |
 | Global | recentDirectories | [] |
 
