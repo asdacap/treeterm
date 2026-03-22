@@ -191,6 +191,7 @@ export default function BaseTerminal({
     const connectToTty = (tty: Tty) => {
       ttyRef.current = tty
       const ttyState = tty.getState()
+      const connectedAt = Date.now()
 
       const unsubscribeData = ttyState.onData((data) => {
         // Track data version for terminal analyzer
@@ -240,7 +241,10 @@ export default function BaseTerminal({
         if (!cancelled) {
           const currentTab = wsData?.appStates[tabId]
           const keepOnExit = (currentTab?.state as BaseTerminalState | undefined)?.keepOnExit
-          if (keepOnExit) {
+          const immediateFailure = exitCode !== 0 && (Date.now() - connectedAt) < 1000
+          if (immediateFailure) {
+            setOverlay({ message: `Process exited immediately with code ${exitCode}`, type: 'error' })
+          } else if (keepOnExit) {
             terminal.write(`\r\n\x1b[2mProcess exited with exit code ${exitCode}\x1b[0m\r\n`)
           } else {
             removeTab(tabId)
