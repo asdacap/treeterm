@@ -91,9 +91,6 @@ export interface TerminalState {
 
 export type AiHarnessState = TerminalState & {
   sandbox: SandboxConfig
-  aiState: ActivityState
-  analyzing: boolean
-  reason: string
   autoApprove?: boolean
 }
 

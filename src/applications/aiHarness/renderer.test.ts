@@ -44,6 +44,9 @@ const mockWorkspaceStoreStateData = {
   removeKeepBoth: vi.fn(),
   getGitApi: vi.fn(),
   getFilesystemApi: vi.fn(),
+  createAnalyzer: vi.fn(),
+  getAnalyzer: vi.fn().mockReturnValue(null),
+  removeAnalyzer: vi.fn(),
 } as WorkspaceStoreState
 
 const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => mockWorkspaceStoreStateData)
@@ -91,7 +94,7 @@ describe('AI Harness Renderer', () => {
     })
 
     describe('createInitialState', () => {
-      it('returns AI Harness state with sandbox configuration and analyzer defaults', () => {
+      it('returns AI Harness state with sandbox configuration', () => {
         const app = createAiHarnessVariant(mockInstance, mockDeps)
         const state = app.createInitialState()
 
@@ -103,9 +106,6 @@ describe('AI Harness Renderer', () => {
             allowNetwork: false,
             allowedPaths: []
           },
-          aiState: 'idle',
-          analyzing: false,
-          reason: ''
         })
       })
 
@@ -331,42 +331,9 @@ describe('AI Harness Renderer', () => {
       })
     })
 
-    describe('getActivityState', () => {
-      it('returns aiState directly as ActivityState', () => {
-        const app = createAiHarnessVariant(mockInstance, mockDeps)
-        const states = ['idle', 'working', 'user_input_required', 'permission_request', 'safe_permission_requested', 'completed', 'error'] as const
-
-        for (const aiState of states) {
-          const tab: Tab = {
-            id: 'tab-1',
-            applicationId: 'aiharness-claude',
-            title: 'Claude',
-            state: {
-              ptyId: null,
-              sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] },
-              aiState,
-              analyzing: false,
-              reason: ''
-            }
-          }
-
-          expect(app.getActivityState?.(tab)).toBe(aiState)
-        }
-      })
-
-      it('returns idle when state is not AiHarnessState', () => {
-        const app = createAiHarnessVariant(mockInstance, mockDeps)
-        const tab: Tab = {
-          id: 'tab-1',
-          applicationId: 'aiharness-claude',
-          title: 'Claude',
-          state: { ptyId: 'pty-789' } // Not a valid AiHarnessState
-        }
-
-        const activityState = app.getActivityState?.(tab)
-
-        expect(activityState).toBe('idle')
-      })
+    it('does not define getActivityState (activity state is in analyzer store)', () => {
+      const app = createAiHarnessVariant(mockInstance, mockDeps)
+      expect(app.getActivityState).toBeUndefined()
     })
   })
 })

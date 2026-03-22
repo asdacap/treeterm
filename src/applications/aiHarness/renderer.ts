@@ -21,9 +21,6 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
           allowNetwork: instance.allowNetwork,
           allowedPaths: []
         },
-        aiState: 'idle',
-        analyzing: false,
-        reason: ''
       }
     },
 
@@ -49,11 +46,6 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
         disableScrollbar: instance.disableScrollbar,
         stripScrollbackClear: instance.stripScrollbackClear,
       })
-    },
-
-    getActivityState: (tab: Tab) => {
-      if (!isAiHarnessState(tab.state)) return 'idle'
-      return tab.state.aiState
     },
 
     canClose: true,

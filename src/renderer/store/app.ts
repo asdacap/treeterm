@@ -5,6 +5,7 @@ import type { SessionState } from './createSessionStore'
 import { getUnmergedSubWorkspaces } from './createSessionStore'
 import { useSettingsStore } from './settings'
 import { useNavigationStore } from './navigation'
+import { useActivityStateStore } from './activityState'
 import { createTerminalApplication, createTerminalVariant } from '../../applications/terminal/renderer'
 import { filesystemApplication } from '../../applications/filesystem/renderer'
 import { createAiHarnessVariant } from '../../applications/aiHarness/renderer'
@@ -368,7 +369,7 @@ function getOrCreateSession(
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
   connection?: ConnectionInfo
 ): StoreApi<SessionState> {
-  const { sessionStores, windowUuid, git, filesystem, sessionApi, terminal } = get()
+  const { sessionStores, windowUuid, git, filesystem, sessionApi, terminal, llm } = get()
   let store = sessionStores[sessionId]
   if (!store) {
     console.log(`[renderer:app] getOrCreateSession: creating new session store for session=${sessionId}, connection=${connection?.id ?? 'local'}`)
@@ -384,6 +385,8 @@ function getOrCreateSession(
           get: (id: string) => get().applications[id],
           getDefaultApp: (appId?: string) => get().getDefaultApplication(appId),
         },
+        llm: { analyzeTerminal: llm.analyzeTerminal, generateTitle: llm.generateTitle },
+        setActivityTabState: (tabId, state) => useActivityStateStore.getState().setTabState(tabId, state),
       }
     )
     set((state) => ({

@@ -131,6 +131,10 @@ const mockDeps = {
     onOutput: vi.fn().mockReturnValue(() => {})
   },
   selectFolder: vi.fn(),
+  llm: {
+    analyzeTerminal: vi.fn(),
+    generateTitle: vi.fn(),
+  },
 } as any
 
 describe('useAppStore', () => {

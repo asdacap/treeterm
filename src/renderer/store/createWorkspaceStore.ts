@@ -1,14 +1,19 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, Tab, AppState, ReviewComment, AppRegistryApi, GitApi, FilesystemApi, WorkspaceGitApi, WorkspaceFilesystemApi } from '../types'
+import type { Workspace, Tab, AppState, ReviewComment, AppRegistryApi, GitApi, FilesystemApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState } from '../types'
 import { getTabs, isAiHarnessState } from '../types'
 import type { Tty } from './createTtyStore'
+import { createAnalyzerStore } from './createAnalyzerStore'
+import type { Analyzer } from './createAnalyzerStore'
 
 export interface WorkspaceStoreDeps {
   appRegistry: AppRegistryApi
   getTty: (ptyId: string) => Tty | null
   git: GitApi
   filesystem: FilesystemApi
+  getSettings: () => Settings
+  llm: Pick<LlmApi, 'analyzeTerminal' | 'generateTitle'>
+  setActivityTabState: (tabId: string, state: ActivityState) => void
   // Session-level callbacks
   syncToDaemon: () => void
   removeWorkspace: (id: string) => Promise<void>
@@ -39,6 +44,11 @@ export interface WorkspaceStoreState {
   toggleReviewCommentAddressed: (commentId: string) => void
   updateOutdatedReviewComments: (currentCommitHash: string) => void
   clearReviewComments: () => void
+
+  // Analyzer stores (per-tab)
+  createAnalyzer: (tabId: string) => Analyzer
+  getAnalyzer: (tabId: string) => Analyzer | null
+  removeAnalyzer: (tabId: string) => void
 
   // Other per-workspace
   promptHarness: (text: string) => boolean
@@ -92,8 +102,44 @@ export function createWorkspaceStore(
     store.setState((state) => ({ workspace: updater(state.workspace) }))
   }
 
+  // Closure-level analyzer store registry (no need for reactivity on the map itself)
+  const analyzerStores: Record<string, Analyzer> = {}
+
   const store = createStore<WorkspaceStoreState>()((set, get) => ({
     workspace,
+
+    createAnalyzer: (tabId: string): Analyzer => {
+      const existing = analyzerStores[tabId]
+      if (existing) return existing
+
+      const analyzer = createAnalyzerStore(tabId, {
+        getSettings: deps.getSettings,
+        llm: deps.llm,
+        updateMetadata: (key, value) => get().updateMetadata(key, value),
+        getDisplayName: () => get().workspace.metadata?.displayName,
+        setActivityTabState: deps.setActivityTabState,
+        getTty: deps.getTty,
+        getPtyId: () => {
+          const appState = get().workspace.appStates[tabId]
+          return (appState?.state as { ptyId?: string })?.ptyId ?? null
+        },
+        cwd: get().workspace.path,
+      })
+      analyzerStores[tabId] = analyzer
+      return analyzer
+    },
+
+    getAnalyzer: (tabId: string): Analyzer | null => {
+      return analyzerStores[tabId] ?? null
+    },
+
+    removeAnalyzer: (tabId: string): void => {
+      const analyzer = analyzerStores[tabId]
+      if (analyzer) {
+        analyzer.getState().detach()
+        delete analyzerStores[tabId]
+      }
+    },
 
     addTab: <T,>(applicationId: string, initialState?: Partial<T>): string => {
       const tabId = generateTabId()
@@ -151,6 +197,9 @@ export function createWorkspaceStore(
       const app = deps.appRegistry.get(appState.applicationId)
       if (!app) return
       if (!app.canClose) return
+
+      // Clean up analyzer store if exists
+      get().removeAnalyzer(tabId)
 
       if (app.cleanup) {
         const tab: Tab = { ...appState, id: tabId }
