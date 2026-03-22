@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import type { Terminal as XTerm } from '@xterm/xterm'
 import { useSettingsStore } from '../store/settings'
 import type { ActivityState, AiHarnessState } from '../types'
+import { TerminalAnalyzerBuffer } from './terminalAnalyzerBuffer'
 
 export function useTerminalAnalyzer(
   terminal: XTerm | null,
@@ -12,6 +13,7 @@ export function useTerminalAnalyzer(
 ): void {
   const lastVersionRef = useRef(0)
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const bufferDedup = useRef(new TerminalAnalyzerBuffer())
   const settings = useSettingsStore((s) => s.settings)
 
   useEffect(() => {
@@ -33,8 +35,25 @@ export function useTerminalAnalyzer(
 
         const buffer = lines.join('\n')
         if (!buffer.trim()) return
-        console.debug('[terminal-analyzer] buffer:', buffer)
 
+        const checkResult = bufferDedup.current.check(buffer)
+        if (checkResult.action === 'skip') {
+          console.debug('[terminal-analyzer] skipping, same buffer in-flight')
+          return
+        }
+        if (checkResult.action === 'reuse') {
+          console.debug('[terminal-analyzer] reusing cached result for unchanged buffer')
+          updateTabState<AiHarnessState>(tabId, (s) => ({
+            ...s,
+            aiState: checkResult.result.state as ActivityState,
+            reason: checkResult.result.reason,
+            analyzing: false
+          }))
+          return
+        }
+
+        console.debug('[terminal-analyzer] buffer:', buffer)
+        bufferDedup.current.setInFlight(buffer)
         updateTabState<AiHarnessState>(tabId, (s) => ({ ...s, analyzing: true }))
         const result = await window.electron.llm.analyzeTerminal(buffer, cwd, {
           baseUrl: settings.llm.baseUrl,
@@ -47,6 +66,7 @@ export function useTerminalAnalyzer(
 
         if (dataVersionRef.current !== requestVersion) {
           console.debug('[terminal-analyzer] discarding stale response')
+          bufferDedup.current.clearInFlight()
           updateTabState<AiHarnessState>(tabId, (s) => ({ ...s, analyzing: false }))
           return
         }
@@ -54,6 +74,7 @@ export function useTerminalAnalyzer(
         console.debug('[terminal-analyzer] result:', result)
         if ('state' in result) {
           console.debug('[terminal-analyzer] state set:', result.state, 'reason:', result.reason)
+          bufferDedup.current.setResult(buffer, { state: result.state, reason: result.reason })
           updateTabState<AiHarnessState>(tabId, (s) => ({
             ...s,
             aiState: result.state as ActivityState,
@@ -62,9 +83,11 @@ export function useTerminalAnalyzer(
           }))
         } else if ('error' in result) {
           console.error('[terminal-analyzer] error:', result.error)
+          bufferDedup.current.clearInFlight()
           updateTabState<AiHarnessState>(tabId, (s) => ({ ...s, aiState: 'error', analyzing: false }))
         } else {
           console.debug('[terminal-analyzer] ignored (no state in result)')
+          bufferDedup.current.clearInFlight()
           updateTabState<AiHarnessState>(tabId, (s) => ({ ...s, analyzing: false }))
         }
       } catch (err) {
@@ -86,6 +109,7 @@ export function useTerminalAnalyzer(
     return () => {
       clearInterval(interval)
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
+      bufferDedup.current.reset()
     }
   }, [terminal, dataVersionRef, cwd, updateTabState, tabId, settings.llm.apiKey, settings.llm.baseUrl, settings.terminalAnalyzer.model, settings.terminalAnalyzer.systemPrompt, settings.terminalAnalyzer.reasoningEffort, settings.terminalAnalyzer.safePaths, settings.terminalAnalyzer.bufferLines])
 }
