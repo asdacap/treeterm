@@ -16,6 +16,13 @@ export interface AnalyzerDeps {
   cwd: string
 }
 
+export interface AnalyzerHistoryEntry {
+  timestamp: number
+  bufferText: string
+  state: ActivityState
+  reason: string
+}
+
 export interface AnalyzerState {
   tabId: string
   aiState: ActivityState
@@ -35,6 +42,7 @@ export interface AnalyzerState {
 
   // Debug support
   getBufferText(): string | null
+  getHistory(): AnalyzerHistoryEntry[]
 }
 
 export type Analyzer = StoreApi<AnalyzerState>
@@ -61,6 +69,10 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   let lastResult: AnalyzerResult | null = null
   let requestInFlight = false
   let pendingAnalyze = false
+
+  // History log
+  const history: AnalyzerHistoryEntry[] = []
+  const MAX_HISTORY = 1000
 
   function checkBuffer(buffer: string): BufferCheckResult {
     if (buffer === inFlightBuffer) {
@@ -160,11 +172,15 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         inFlightBuffer = null
         store.setState({ analyzing: false })
         updateAiState(result.state as ActivityState, result.reason)
+        history.push({ timestamp: Date.now(), bufferText: buffer, state: result.state as ActivityState, reason: result.reason })
+        if (history.length > MAX_HISTORY) history.shift()
       } else if ('error' in result) {
         console.error('[terminal-analyzer] error:', result.error)
         inFlightBuffer = null
         store.setState({ analyzing: false })
         updateAiState('error')
+        history.push({ timestamp: Date.now(), bufferText: buffer, state: 'error', reason: result.error })
+        if (history.length > MAX_HISTORY) history.shift()
       } else {
         console.debug('[terminal-analyzer] ignored (no state in result)')
         inFlightBuffer = null
@@ -302,6 +318,10 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
     getBufferText: (): string | null => {
       return extractBuffer()
+    },
+
+    getHistory: (): AnalyzerHistoryEntry[] => {
+      return [...history]
     },
   }))
 
