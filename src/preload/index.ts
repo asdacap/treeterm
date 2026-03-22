@@ -257,8 +257,8 @@ contextBridge.exposeInMainWorld('electron', {
     getFileDiff: (worktreePath: string, parentBranch: string, filePath: string) => {
       return client.gitGetFileDiff(worktreePath, parentBranch, filePath)
     },
-    merge: (mainRepoPath: string, worktreeBranch: string, targetBranch: string, squash: boolean = false) => {
-      return client.gitMerge(mainRepoPath, worktreeBranch, targetBranch, squash)
+    merge: (targetWorktreePath: string, worktreeBranch: string, squash: boolean = false) => {
+      return client.gitMerge(targetWorktreePath, worktreeBranch, squash)
     },
     checkMergeConflicts: (repoPath: string, sourceBranch: string, targetBranch: string) => {
       return client.gitCheckMergeConflicts(repoPath, sourceBranch, targetBranch)

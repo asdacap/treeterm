@@ -671,11 +671,11 @@ server.onGitGetFileDiff(async (worktreePath, parentBranch, filePath) => {
   return { success: true, diff }
 })
 
-server.onGitMerge(async (mainRepoPath, worktreeBranch, targetBranch, squash) => {
+server.onGitMerge(async (targetWorktreePath, worktreeBranch, squash) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
   initializeGitClient()
   if (!gitClient) throw new Error('Git client not initialized')
-  await gitClient.mergeWorktree(mainRepoPath, worktreeBranch, targetBranch, squash)
+  await gitClient.mergeWorktree(targetWorktreePath, worktreeBranch, squash)
   return { success: true }
 })
 

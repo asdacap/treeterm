@@ -100,7 +100,7 @@ export interface IpcRequests {
     result: { success: boolean; diff?: string; error?: string }
   }
   gitMerge: {
-    params: [mainRepoPath: string, worktreeBranch: string, targetBranch: string, squash: boolean]
+    params: [targetWorktreePath: string, worktreeBranch: string, squash: boolean]
     result: { success: boolean; error?: string }
   }
   gitCheckMergeConflicts: {

@@ -364,7 +364,7 @@ export function createWorkspaceStore(
         getDiff: (parentBranch) => deps.git.getDiff(path, parentBranch),
         getFileDiff: (parentBranch, filePath) => deps.git.getFileDiff(path, parentBranch, filePath),
         checkMergeConflicts: (sourceBranch, targetBranch) => deps.git.checkMergeConflicts(path, sourceBranch, targetBranch),
-        merge: (worktreeBranch, targetBranch, squash?) => deps.git.merge(path, worktreeBranch, targetBranch, squash),
+        merge: (worktreeBranch, squash?) => deps.git.merge(path, worktreeBranch, squash),
         hasUncommittedChanges: () => deps.git.hasUncommittedChanges(path),
         commitAll: (message) => deps.git.commitAll(path, message),
         deleteBranch: (branchName) => deps.git.deleteBranch(path, branchName),

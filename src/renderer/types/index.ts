@@ -301,7 +301,7 @@ export interface GitApi {
   getDiff: (worktreePath: string, parentBranch: string) => Promise<{ success: boolean; diff?: DiffResult; error?: string }>
   getFileDiff: (worktreePath: string, parentBranch: string, filePath: string) => Promise<{ success: boolean; diff?: string; error?: string }>
   checkMergeConflicts: (repoPath: string, sourceBranch: string, targetBranch: string) => Promise<ConflictCheckResult>
-  merge: (mainRepoPath: string, worktreeBranch: string, targetBranch: string, squash?: boolean) => Promise<{ success: boolean; error?: string }>
+  merge: (targetWorktreePath: string, worktreeBranch: string, squash?: boolean) => Promise<{ success: boolean; error?: string }>
   hasUncommittedChanges: (repoPath: string) => Promise<boolean>
   commitAll: (repoPath: string, message: string) => Promise<{ success: boolean; error?: string }>
   deleteBranch: (repoPath: string, branchName: string) => Promise<{ success: boolean; error?: string }>
@@ -332,7 +332,7 @@ export interface WorkspaceGitApi {
   getDiff: (parentBranch: string) => Promise<{ success: boolean; diff?: DiffResult; error?: string }>
   getFileDiff: (parentBranch: string, filePath: string) => Promise<{ success: boolean; diff?: string; error?: string }>
   checkMergeConflicts: (sourceBranch: string, targetBranch: string) => Promise<ConflictCheckResult>
-  merge: (worktreeBranch: string, targetBranch: string, squash?: boolean) => Promise<{ success: boolean; error?: string }>
+  merge: (worktreeBranch: string, squash?: boolean) => Promise<{ success: boolean; error?: string }>
   hasUncommittedChanges: () => Promise<boolean>
   commitAll: (message: string) => Promise<{ success: boolean; error?: string }>
   deleteBranch: (branchName: string) => Promise<{ success: boolean; error?: string }>

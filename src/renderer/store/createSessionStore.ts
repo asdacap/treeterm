@@ -654,9 +654,8 @@ export function createSessionStore(
       }
 
       const mergeResult = await deps.git.merge(
-        parent.gitRootPath,
+        parent.path,
         workspace.gitBranch!,
-        parent.gitBranch,
         squash
       )
 

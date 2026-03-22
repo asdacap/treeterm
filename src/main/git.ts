@@ -701,23 +701,16 @@ export class GitClient {
    * Merge a worktree branch into target branch
    */
   async mergeWorktree(
-    mainRepoPath: string,
+    targetWorktreePath: string,
     worktreeBranch: string,
-    targetBranch: string,
     squash: boolean = false
   ): Promise<void> {
-    // Switch to target branch
-    const checkoutResult = await this.exec(mainRepoPath, ['checkout', targetBranch])
-    if (checkoutResult.exitCode !== 0) {
-      throw this.interpretError(checkoutResult)
-    }
-
-    // Merge
-    const args = squash 
+    // Merge into the target worktree directory where the target branch is already checked out
+    const args = squash
       ? ['merge', '--squash', worktreeBranch]
       : ['merge', worktreeBranch]
-    
-    const result = await this.exec(mainRepoPath, args)
+
+    const result = await this.exec(targetWorktreePath, args)
     if (result.exitCode !== 0) {
       throw this.interpretError(result)
     }
