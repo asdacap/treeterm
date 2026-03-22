@@ -139,6 +139,11 @@ export default function AiHarness({
     workspace.getState().addTab<{ bufferText: string }>('system-prompt-debugger', { bufferText })
   }
 
+  const handleViewHistory = () => {
+    setBadgeContextMenu(null)
+    workspace.getState().addTab<{ sourceTabId: string }>('analyzer-history', { sourceTabId: tabId })
+  }
+
   // Memoize config based on props to prevent unnecessary re-renders
   const config = useMemo<BaseTerminalConfig>(() => ({
     themeBackground: backgroundColor,
@@ -195,6 +200,9 @@ export default function AiHarness({
         >
           <div className="context-menu-item" onClick={handleDebugAnalyzer}>
             Debug System Prompt
+          </div>
+          <div className="context-menu-item" onClick={handleViewHistory}>
+            History
           </div>
         </div>
       )}
