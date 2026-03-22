@@ -1,3 +1,5 @@
+[![codecov](https://codecov.io/gh/asdacap/treeterm/graph/badge.svg)](https://codecov.io/gh/asdacap/treeterm)
+
 # TreeTerm
 
 A hierarchical terminal manager and IDE built for AI agent workflows. TreeTerm is an Electron-based desktop application that manages multiple workspaces using Git worktrees, enabling branching development with AI agents.
