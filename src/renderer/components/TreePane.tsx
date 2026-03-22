@@ -1,7 +1,8 @@
-import { Loader2, Circle, Monitor } from 'lucide-react'
+import { Monitor } from 'lucide-react'
 import { useActivityStateStore } from '../store/activityState'
 import { useAppStore } from '../store/app'
 import SessionPanel from './SessionPanel'
+import { ActivityIndicator } from './ActivityIndicator'
 
 // Exported so SessionPanel can use it
 export function WorkspaceActivityIndicator({ tabIds }: { tabIds: string[] }) {
@@ -11,14 +12,7 @@ export function WorkspaceActivityIndicator({ tabIds }: { tabIds: string[] }) {
 
   if (activityState === 'idle') return null
 
-  return (
-    <span
-      className={`tree-item-activity tree-item-activity-${activityState}`}
-      title={activityState === 'working' ? 'Working...' : activityState.replace(/_/g, ' ')}
-    >
-      {activityState === 'working' ? <Loader2 size={10} /> : <Circle size={8} fill="currentColor" />}
-    </span>
-  )
+  return <ActivityIndicator activityState={activityState} className="tree-item-activity" />
 }
 
 interface TreePaneProps {
