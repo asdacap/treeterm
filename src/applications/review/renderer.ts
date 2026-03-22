@@ -12,7 +12,7 @@ export const reviewApplication: Application<ReviewState> = {
     // parentWorkspaceId is optional - null means top-level worktree (no merge parent)
   }),
 
-  render: ({ tab, workspace }) => {
+  render: ({ tab, workspace, isVisible }) => {
     if (!isReviewState(tab.state)) {
       return null
     }
@@ -21,6 +21,7 @@ export const reviewApplication: Application<ReviewState> = {
       workspace,
       tabId: tab.id,
       parentWorkspaceId: tab.state.parentWorkspaceId,
+      isVisible,
     })
   },
 
