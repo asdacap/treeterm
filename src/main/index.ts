@@ -948,7 +948,9 @@ server.onSshListConnections(async () => {
 
 server.onSshSaveConnection(async (config) => {
   const settings = loadSettings()
-  const existing = settings.ssh.savedConnections.findIndex(c => c.id === config.id)
+  const existing = settings.ssh.savedConnections.findIndex(
+    c => c.host === config.host && c.user === config.user && c.port === config.port
+  )
   if (existing >= 0) {
     settings.ssh.savedConnections[existing] = config
   } else {
