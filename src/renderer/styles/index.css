@@ -267,32 +267,6 @@ body,
   align-items: center;
 }
 
-.tree-item-activity-working {
-  color: #e5e510;
-  animation: spin 1s linear infinite;
-  display: inline-block;
-}
-
-.tree-item-activity-user_input_required {
-  color: #0dbc79;
-}
-
-.tree-item-activity-permission_request {
-  color: #cd6600;
-}
-
-.tree-item-activity-safe_permission_requested {
-  color: #0dbc79;
-}
-
-.tree-item-activity-completed {
-  color: #23d18b;
-}
-
-.tree-item-activity-error {
-  color: #f44747;
-}
-
 .tree-item-actions {
   display: flex;
   margin-left: auto;
@@ -330,29 +304,30 @@ body,
   flex-shrink: 0;
 }
 
-.tab-activity-working {
+/* Shared activity state colors */
+.activity-working {
   color: #e5e510;
   animation: spin 1s linear infinite;
   display: inline-block;
 }
 
-.tab-activity-user_input_required {
+.activity-user_input_required {
   color: #0dbc79;
 }
 
-.tab-activity-permission_request {
+.activity-permission_request {
   color: #cd6600;
 }
 
-.tab-activity-safe_permission_requested {
+.activity-safe_permission_requested {
   color: #0dbc79;
 }
 
-.tab-activity-completed {
+.activity-completed {
   color: #23d18b;
 }
 
-.tab-activity-error {
+.activity-error {
   color: #f44747;
 }
 
