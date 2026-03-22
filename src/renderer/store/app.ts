@@ -71,7 +71,7 @@ interface AppState extends AppDeps {
   // Actions
   initialize: (deps: AppDeps) => Promise<() => void>
   disconnectSession: (sessionId: string) => void
-  addRemoteSession: (session: Session, connection: ConnectionInfo) => void
+  addRemoteSession: (session: Session, connection: ConnectionInfo) => Promise<void>
 
   // Internal
   createNewSession: () => Promise<void>
@@ -327,7 +327,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     }
   },
 
-  addRemoteSession: (session: Session, connection: ConnectionInfo) => {
+  addRemoteSession: async (session: Session, connection: ConnectionInfo) => {
     console.log(`[renderer:app] addRemoteSession called: session=${session.id}, connection=${connection.id}, status=${connection.status}, workspaces=${session.workspaces?.length ?? 0}`)
     const store = getOrCreateSession(session.id, get, set, connection)
     console.log(`[renderer:app] Session store created/retrieved for session=${session.id}`)
@@ -336,6 +336,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
       store.getState().handleRestore(session)
       const firstWs = session.workspaces[0]
       useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: session.id })
+    } else if (connection.target.type === 'remote') {
+      const defaultPath = `/home/${connection.target.config.user}`
+      console.log(`[renderer:app] No workspaces for session=${session.id}, creating default workspace at ${defaultPath}`)
+      const workspaceId = await store.getState().addWorkspace(defaultPath)
+      useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId, sessionId: session.id })
     } else {
       console.log(`[renderer:app] No workspaces to restore for session=${session.id}`)
     }
