@@ -327,6 +327,10 @@ export interface IpcRequests {
     params: []
     result: void
   }
+  llmGenerateTitle: {
+    params: [buffer: string, settings: { baseUrl: string; apiKey: string; model: string; titleSystemPrompt: string; reasoningEffort: ReasoningEffort }]
+    result: { title: string } | { error: string }
+  }
 }
 
 // === Fire-and-Forget Types (renderer sends, no response) ===
