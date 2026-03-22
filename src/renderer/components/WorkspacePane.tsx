@@ -523,13 +523,27 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
           </>
         )}
         <div className="workspace-terminal" style={{ display: activeWorkspace ? 'flex' : 'none' }}>
-          {activeWorkspaceId && activeHandle && (
-            <FlexLayoutPane
-              key={activeWorkspaceId}
-              workspace={activeHandle}
-              onNewTab={handleNewTab}
-            />
-          )}
+          {Object.entries(workspaceStores).map(([wsId, handle]) => {
+            const ws = workspaces[wsId]
+            if (!handle || !ws) return null
+            const isActive = wsId === activeWorkspaceId
+            return (
+              <div key={wsId} style={{ display: isActive ? 'contents' : 'none', height: '100%', width: '100%' }}>
+                <FlexLayoutPane
+                  workspace={handle}
+                  onNewTab={(applicationId: string) => {
+                    if (applicationId === 'review') {
+                      handle.getState().addTab<ReviewState>('review', {
+                        parentWorkspaceId: ws.parentId ?? undefined
+                      })
+                    } else {
+                      handle.getState().addTab(applicationId)
+                    }
+                  }}
+                />
+              </div>
+            )
+          })}
           <TabContentPortals
             sessionStore={sessionStore}
             activeWorkspaceId={activeWorkspaceId}
