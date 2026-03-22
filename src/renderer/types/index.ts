@@ -392,7 +392,7 @@ export interface LlmApi {
   send: (requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string; reasoning: ReasoningEffort }) => Promise<void>
   analyzeTerminal: (buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; reasoningEffort: ReasoningEffort; safePaths: string[] }) => Promise<{ state: string; reason: string } | { error: string }>
   clearAnalyzerCache: () => Promise<void>
-  generateTitle: (buffer: string, settings: { baseUrl: string; apiKey: string; model: string; titleSystemPrompt: string; reasoningEffort: ReasoningEffort }) => Promise<{ title: string } | { error: string }>
+  generateTitle: (buffer: string, settings: { baseUrl: string; apiKey: string; model: string; titleSystemPrompt: string; reasoningEffort: ReasoningEffort }) => Promise<{ title: string; description: string } | { error: string }>
   cancel: (requestId: string) => void
   onDelta: (callback: (requestId: string, text: string) => void) => () => void
   onDone: (callback: (requestId: string) => void) => () => void

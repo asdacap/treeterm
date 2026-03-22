@@ -85,7 +85,7 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
           setError(response.error)
           setTabState(tab.id, 'error')
         } else {
-          setResult(response.title)
+          setResult(`Title: ${response.title}\nDescription: ${response.description}`)
           setTabState(tab.id, 'completed')
         }
       }

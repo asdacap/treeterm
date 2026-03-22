@@ -329,7 +329,7 @@ export interface IpcRequests {
   }
   llmGenerateTitle: {
     params: [buffer: string, settings: { baseUrl: string; apiKey: string; model: string; titleSystemPrompt: string; reasoningEffort: ReasoningEffort }]
-    result: { title: string } | { error: string }
+    result: { title: string; description: string } | { error: string }
   }
 }
 

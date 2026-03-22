@@ -117,6 +117,7 @@ export function createWorkspaceStore(
         llm: deps.llm,
         updateMetadata: (key, value) => get().updateMetadata(key, value),
         getDisplayName: () => get().workspace.metadata?.displayName,
+        getDescription: () => get().workspace.metadata?.description,
         setActivityTabState: deps.setActivityTabState,
         getTty: deps.getTty,
         getPtyId: () => {

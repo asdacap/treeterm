@@ -475,7 +475,7 @@ contextBridge.exposeInMainWorld('electron', {
     clearAnalyzerCache: (): Promise<void> => {
       return client.llmClearAnalyzerCache()
     },
-    generateTitle: (buffer: string, settings: { baseUrl: string; apiKey: string; model: string; titleSystemPrompt: string; reasoningEffort: ReasoningEffort }): Promise<{ title: string } | { error: string }> => {
+    generateTitle: (buffer: string, settings: { baseUrl: string; apiKey: string; model: string; titleSystemPrompt: string; reasoningEffort: ReasoningEffort }): Promise<{ title: string; description: string } | { error: string }> => {
       return client.llmGenerateTitle(buffer, settings)
     },
     onDelta: (callback: LlmDeltaCallback): (() => void) => {

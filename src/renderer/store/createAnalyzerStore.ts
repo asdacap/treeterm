@@ -9,6 +9,7 @@ export interface AnalyzerDeps {
   llm: Pick<LlmApi, 'analyzeTerminal' | 'generateTitle'>
   updateMetadata: (key: string, value: string) => void
   getDisplayName: () => string | undefined
+  getDescription: () => string | undefined
   setActivityTabState: (tabId: string, state: ActivityState) => void
   getTty: (ptyId: string) => Tty | null
   getPtyId: () => string | null
@@ -198,7 +199,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   async function generateTitle(): Promise<void> {
     const settings = deps.getSettings()
     if (!settings.llm.apiKey || !settings.terminalAnalyzer.model) return
-    if (deps.getDisplayName()) return
+    if (deps.getDisplayName() && deps.getDescription()) return
 
     const buffer = extractBuffer()
     if (!buffer) {
@@ -216,7 +217,12 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       })
 
       if ('title' in result && result.title) {
-        deps.updateMetadata('displayName', result.title)
+        if (!deps.getDisplayName()) {
+          deps.updateMetadata('displayName', result.title)
+        }
+        if (!deps.getDescription() && result.description) {
+          deps.updateMetadata('description', result.description)
+        }
       }
     } catch (err) {
       console.error('[analyzer] title generation failed:', err)
