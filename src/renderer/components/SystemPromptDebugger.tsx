@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSettingsStore } from '../store/settings'
 import { useActivityStateStore } from '../store/activityState'
+import { useAppStore } from '../store/app'
 import type { ActivityState, ApplicationRenderProps, ReasoningEffort } from '../types'
 
 type DebugMode = 'analyzer' | 'title'
@@ -11,6 +12,7 @@ interface DebuggerState {
 
 export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
   const settings = useSettingsStore((s) => s.settings)
+  const llm = useAppStore((s) => s.llm)
   const setTabState = useActivityStateStore((s) => s.setTabState)
   const removeTabState = useActivityStateStore((s) => s.removeTabState)
   const debuggerState = tab.state as DebuggerState | undefined
@@ -55,8 +57,8 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
     const start = Date.now()
     try {
       if (mode === 'analyzer') {
-        await window.electron.llm.clearAnalyzerCache()
-        const response = await window.electron.llm.analyzeTerminal(bufferText, '', {
+        await llm.clearAnalyzerCache()
+        const response = await llm.analyzeTerminal(bufferText, '', {
           baseUrl: settings.llm.baseUrl,
           apiKey: settings.llm.apiKey,
           model,
@@ -73,7 +75,7 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
           setTabState(tab.id, response.state as ActivityState)
         }
       } else {
-        const response = await window.electron.llm.generateTitle(bufferText, {
+        const response = await llm.generateTitle(bufferText, {
           baseUrl: settings.llm.baseUrl,
           apiKey: settings.llm.apiKey,
           model,
