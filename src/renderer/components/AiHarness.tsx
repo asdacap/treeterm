@@ -105,13 +105,6 @@ export default function AiHarness({
     return () => disposable.dispose()
   }, [analyzer])
 
-  // Clean up analyzer on unmount
-  useEffect(() => {
-    return () => {
-      analyzer.getState().detach()
-    }
-  }, [analyzer])
-
   const [badgeContextMenu, setBadgeContextMenu] = useState<{ x: number; y: number } | null>(null)
 
   const handleBadgeContextMenu = (e: React.MouseEvent) => {

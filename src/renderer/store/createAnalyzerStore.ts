@@ -60,6 +60,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   let lastVersion = 0
   let pollInterval: ReturnType<typeof setInterval> | null = null
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  let unsubscribeExit: (() => void) | null = null
   let running = false
   let titleGenerated = false
 
@@ -161,7 +162,10 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         console.debug('[terminal-analyzer] discarding stale response')
         inFlightBuffer = null
         store.setState({ analyzing: false })
-        drainPending()
+        if (pendingAnalyze) {
+          pendingAnalyze = false
+          analyze()
+        }
         return
       }
 
@@ -187,26 +191,37 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         store.setState({ analyzing: false })
       }
 
-      drainPending()
+      if (pendingAnalyze) {
+        pendingAnalyze = false
+        analyze()
+      }
     } catch (err) {
       requestInFlight = false
       console.error('[terminal-analyzer] LLM call failed:', err)
       store.setState({ analyzing: false })
       updateAiState('error')
-      drainPending()
-    }
-  }
-
-  function drainPending(): void {
-    if (pendingAnalyze) {
-      pendingAnalyze = false
-      analyze()
+      if (pendingAnalyze) {
+        pendingAnalyze = false
+        analyze()
+      }
     }
   }
 
   function startPolling(): void {
     if (pollInterval) return
     running = true
+
+    // Subscribe to TTY exit so we self-detach when the process closes
+    const ptyId = deps.getPtyId()
+    if (ptyId) {
+      const tty = deps.getTty(ptyId)
+      if (tty) {
+        unsubscribeExit = tty.getState().onExit(() => {
+          store.getState().detach()
+        })
+      }
+    }
+
     pollInterval = setInterval(() => {
       if (!dataVersionRef || dataVersionRef.current === lastVersion) return
 
@@ -220,6 +235,10 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
   function stopPolling(): void {
     running = false
+    if (unsubscribeExit) {
+      unsubscribeExit()
+      unsubscribeExit = null
+    }
     if (pollInterval) {
       clearInterval(pollInterval)
       pollInterval = null
