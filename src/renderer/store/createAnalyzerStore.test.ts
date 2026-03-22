@@ -502,4 +502,197 @@ describe('createAnalyzerStore', () => {
     store.getState().detach()
     vi.useRealTimers()
   })
+
+  describe('history logging', () => {
+    it('logs successful analysis to history with response', async () => {
+      vi.useFakeTimers()
+      const store = createAnalyzerStore('tab-1', deps)
+      const terminal = makeMockTerminal()
+      const dvRef = { current: 0 }
+
+      store.getState().attach(terminal, dvRef)
+      dvRef.current = 1
+      vi.advanceTimersByTime(1000)
+      await vi.advanceTimersByTimeAsync(0)
+
+      const history = store.getState().getHistory()
+      expect(history).toHaveLength(1)
+      expect(history[0].state).toBe('idle')
+      expect(history[0].reason).toBe('prompt visible')
+      expect(history[0].response).toBe(JSON.stringify({ state: 'idle', reason: 'prompt visible' }))
+
+      store.getState().detach()
+      vi.useRealTimers()
+    })
+
+    it('logs error result to history with response', async () => {
+      vi.useFakeTimers()
+      deps = makeDeps({
+        llm: {
+          analyzeTerminal: vi.fn().mockResolvedValue({ error: 'API error' }),
+          generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
+        },
+      })
+      const store = createAnalyzerStore('tab-1', deps)
+      const terminal = makeMockTerminal()
+      const dvRef = { current: 0 }
+
+      store.getState().attach(terminal, dvRef)
+      dvRef.current = 1
+      vi.advanceTimersByTime(1000)
+      await vi.advanceTimersByTimeAsync(0)
+
+      const history = store.getState().getHistory()
+      expect(history).toHaveLength(1)
+      expect(history[0].state).toBe('error')
+      expect(history[0].reason).toBe('API error')
+      expect(history[0].response).toBe(JSON.stringify({ error: 'API error' }))
+
+      store.getState().detach()
+      vi.useRealTimers()
+    })
+
+    it('logs discarded stale response to history', async () => {
+      vi.useFakeTimers()
+      let resolveAnalysis!: (value: any) => void
+      deps = makeDeps({
+        llm: {
+          analyzeTerminal: vi.fn().mockImplementation(() => new Promise(r => { resolveAnalysis = r })),
+          generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
+        },
+      })
+      const store = createAnalyzerStore('tab-1', deps)
+      const terminal = makeMockTerminal()
+      const dvRef = { current: 0 }
+
+      store.getState().attach(terminal, dvRef)
+
+      // Trigger analysis
+      dvRef.current = 1
+      vi.advanceTimersByTime(1000)
+
+      // Change data version while in-flight (makes response stale)
+      dvRef.current = 2
+
+      // Resolve the LLM call
+      resolveAnalysis({ state: 'idle', reason: 'prompt visible' })
+      await vi.advanceTimersByTimeAsync(0)
+
+      const history = store.getState().getHistory()
+      // First entry should be the discarded one
+      expect(history[0].reason).toContain('[discarded]')
+      expect(history[0].response).toBe(JSON.stringify({ state: 'idle', reason: 'prompt visible' }))
+
+      store.getState().detach()
+      vi.useRealTimers()
+    })
+
+    it('logs exception to history', async () => {
+      vi.useFakeTimers()
+      deps = makeDeps({
+        llm: {
+          analyzeTerminal: vi.fn().mockRejectedValue(new Error('Network error')),
+          generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
+        },
+      })
+      const store = createAnalyzerStore('tab-1', deps)
+      const terminal = makeMockTerminal()
+      const dvRef = { current: 0 }
+
+      store.getState().attach(terminal, dvRef)
+      dvRef.current = 1
+      vi.advanceTimersByTime(1000)
+      await vi.advanceTimersByTimeAsync(0)
+
+      const history = store.getState().getHistory()
+      expect(history).toHaveLength(1)
+      expect(history[0].state).toBe('error')
+      expect(history[0].reason).toBe('[exception] Network error')
+      expect(history[0].response).toBe('')
+
+      store.getState().detach()
+      vi.useRealTimers()
+    })
+
+    it('logs unexpected response (no state) to history', async () => {
+      vi.useFakeTimers()
+      deps = makeDeps({
+        llm: {
+          analyzeTerminal: vi.fn().mockResolvedValue({ something: 'unexpected' }),
+          generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
+        },
+      })
+      const store = createAnalyzerStore('tab-1', deps)
+      const terminal = makeMockTerminal()
+      const dvRef = { current: 0 }
+
+      store.getState().attach(terminal, dvRef)
+      dvRef.current = 1
+      vi.advanceTimersByTime(1000)
+      await vi.advanceTimersByTimeAsync(0)
+
+      const history = store.getState().getHistory()
+      expect(history).toHaveLength(1)
+      expect(history[0].state).toBe('error')
+      expect(history[0].reason).toBe('[unexpected] no state in result')
+      expect(history[0].response).toBe(JSON.stringify({ something: 'unexpected' }))
+
+      store.getState().detach()
+      vi.useRealTimers()
+    })
+
+    it('logs title generation to history', async () => {
+      const store = createAnalyzerStore('tab-1', deps)
+      const terminal = makeMockTerminal()
+
+      store.getState().attach(terminal, { current: 0 })
+      store.getState().onUserInput('hello\r')
+
+      await vi.waitFor(() => {
+        expect(deps.llm.generateTitle).toHaveBeenCalled()
+      })
+
+      await vi.waitFor(() => {
+        const history = store.getState().getHistory()
+        expect(history.some(h => h.reason === '[title] generated')).toBe(true)
+      })
+
+      const history = store.getState().getHistory()
+      const titleEntry = history.find(h => h.reason === '[title] generated')!
+      expect(titleEntry.state).toBe('idle')
+      expect(titleEntry.response).toBe(JSON.stringify({ title: 'Test Title', description: 'Test Description' }))
+
+      store.getState().detach()
+    })
+
+    it('logs title generation failure to history', async () => {
+      deps = makeDeps({
+        llm: {
+          analyzeTerminal: vi.fn().mockResolvedValue({ state: 'idle', reason: '' }),
+          generateTitle: vi.fn().mockRejectedValue(new Error('Title API error')),
+        },
+      })
+      const store = createAnalyzerStore('tab-1', deps)
+      const terminal = makeMockTerminal()
+
+      store.getState().attach(terminal, { current: 0 })
+      store.getState().onUserInput('hello\r')
+
+      await vi.waitFor(() => {
+        expect(deps.llm.generateTitle).toHaveBeenCalled()
+      })
+
+      await vi.waitFor(() => {
+        const history = store.getState().getHistory()
+        expect(history.some(h => h.reason === '[title] Title API error')).toBe(true)
+      })
+
+      const history = store.getState().getHistory()
+      const titleEntry = history.find(h => h.reason === '[title] Title API error')!
+      expect(titleEntry.state).toBe('error')
+      expect(titleEntry.response).toBe('')
+
+      store.getState().detach()
+    })
+  })
 })
