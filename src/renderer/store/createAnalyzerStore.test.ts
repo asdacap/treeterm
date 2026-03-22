@@ -124,7 +124,7 @@ describe('createAnalyzerStore', () => {
 
     // Simulate data version change
     dvRef.current = 1
-    vi.advanceTimersByTime(200) // poll interval
+    vi.advanceTimersByTime(500) // poll interval
 
     expect(store.getState().aiState).toBe('working')
 
@@ -146,7 +146,7 @@ describe('createAnalyzerStore', () => {
 
     store.getState().attach(terminal, dvRef)
     dvRef.current = 1
-    vi.advanceTimersByTime(200)
+    vi.advanceTimersByTime(500)
 
     expect(store.getState().aiState).toBe('idle')
 
@@ -163,7 +163,7 @@ describe('createAnalyzerStore', () => {
     store.getState().attach(terminal, dvRef)
 
     dvRef.current = 1
-    vi.advanceTimersByTime(200) // poll fires
+    vi.advanceTimersByTime(500) // poll fires
     vi.advanceTimersByTime(500) // debounce fires
 
     // Let the async analyze() complete
@@ -193,7 +193,7 @@ describe('createAnalyzerStore', () => {
 
     store.getState().attach(terminal, dvRef)
     dvRef.current = 1
-    vi.advanceTimersByTime(700)
+    vi.advanceTimersByTime(1000)
     await vi.advanceTimersByTimeAsync(0)
 
     expect(store.getState().aiState).toBe('error')
@@ -217,10 +217,61 @@ describe('createAnalyzerStore', () => {
 
     store.getState().attach(terminal, dvRef)
     dvRef.current = 1
-    vi.advanceTimersByTime(700)
+    vi.advanceTimersByTime(1000)
     await vi.advanceTimersByTimeAsync(0)
 
     expect(store.getState().aiState).toBe('error')
+
+    store.getState().detach()
+    vi.useRealTimers()
+  })
+
+  it('queues pending analyze when request is in-flight and drains after completion', async () => {
+    vi.useFakeTimers()
+    const lines1 = ['$ echo hello', 'hello', '$ ']
+    let currentLines = lines1
+    const terminal = {
+      buffer: {
+        normal: {
+          baseY: 0,
+          get cursorY() { return currentLines.length - 1 },
+          getLine: (i: number) => currentLines[i] ? { translateToString: () => currentLines[i] } : null,
+        },
+      },
+    } as any
+
+    let resolveFirst!: (value: any) => void
+    let resolveSecond!: (value: any) => void
+    const calls: Array<(value: any) => void> = []
+    ;(deps.llm.analyzeTerminal as any).mockImplementation(() => new Promise(r => { calls.push(r) }))
+
+    const store = createAnalyzerStore('tab-1', deps)
+    const dvRef = { current: 0 }
+    store.getState().attach(terminal, dvRef)
+
+    // First analysis triggers
+    dvRef.current = 1
+    vi.advanceTimersByTime(1000)
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
+
+    // Change buffer while request is in-flight
+    currentLines = ['$ npm test', 'PASS all tests', '$ ']
+    dvRef.current = 2
+    vi.advanceTimersByTime(1000)
+
+    // Should NOT start a second request — it should be queued
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
+
+    // Resolve the first request — should drain pending
+    calls[0]({ state: 'idle', reason: 'prompt visible' })
+    await vi.advanceTimersByTimeAsync(0)
+
+    // Now the pending analyze should have fired
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(2)
+
+    // Resolve second
+    calls[1]({ state: 'idle', reason: 'tests passed' })
+    await vi.advanceTimersByTimeAsync(0)
 
     store.getState().detach()
     vi.useRealTimers()
@@ -240,13 +291,13 @@ describe('createAnalyzerStore', () => {
 
     // First analysis
     dvRef.current = 1
-    vi.advanceTimersByTime(700)
+    vi.advanceTimersByTime(1000)
 
     expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
 
     // Second tick, same buffer (buffer content hasn't changed)
     dvRef.current = 2
-    vi.advanceTimersByTime(700)
+    vi.advanceTimersByTime(1000)
 
     // Should skip because same buffer is in-flight
     expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
@@ -268,14 +319,14 @@ describe('createAnalyzerStore', () => {
 
     // First analysis
     dvRef.current = 1
-    vi.advanceTimersByTime(700)
+    vi.advanceTimersByTime(1000)
     await vi.advanceTimersByTimeAsync(0)
 
     expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
 
     // Second analysis, same buffer
     dvRef.current = 2
-    vi.advanceTimersByTime(700)
+    vi.advanceTimersByTime(1000)
     await vi.advanceTimersByTimeAsync(0)
 
     // Should reuse cached result, not call LLM again
@@ -409,7 +460,7 @@ describe('createAnalyzerStore', () => {
     store.getState().attach(terminal, dvRef)
 
     dvRef.current = 1
-    vi.advanceTimersByTime(200) // poll detects change
+    vi.advanceTimersByTime(500) // poll detects change
     // 'working' state set via updateAiState
     expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', 'working')
 

@@ -58,6 +58,8 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   let inFlightBuffer: string | null = null
   let lastAnalyzedBuffer: string | null = null
   let lastResult: AnalyzerResult | null = null
+  let requestInFlight = false
+  let pendingAnalyze = false
 
   function checkBuffer(buffer: string): BufferCheckResult {
     if (buffer === inFlightBuffer) {
@@ -97,6 +99,12 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   async function analyze(): Promise<void> {
     if (!running || !dataVersionRef) return
 
+    // Only one request at a time — buffer pending work
+    if (requestInFlight) {
+      pendingAnalyze = true
+      return
+    }
+
     const requestVersion = dataVersionRef.current
     const settings = deps.getSettings()
 
@@ -120,6 +128,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
       console.debug('[terminal-analyzer] buffer:', buffer)
       inFlightBuffer = buffer
+      requestInFlight = true
       store.setState({ analyzing: true })
 
       const result = await deps.llm.analyzeTerminal(buffer, deps.cwd, {
@@ -131,12 +140,15 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         safePaths: settings.terminalAnalyzer.safePaths,
       })
 
+      requestInFlight = false
+
       if (!running) return
 
       if (dataVersionRef.current !== requestVersion) {
         console.debug('[terminal-analyzer] discarding stale response')
         inFlightBuffer = null
         store.setState({ analyzing: false })
+        drainPending()
         return
       }
 
@@ -157,10 +169,21 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         inFlightBuffer = null
         store.setState({ analyzing: false })
       }
+
+      drainPending()
     } catch (err) {
+      requestInFlight = false
       console.error('[terminal-analyzer] LLM call failed:', err)
       store.setState({ analyzing: false })
       updateAiState('error')
+      drainPending()
+    }
+  }
+
+  function drainPending(): void {
+    if (pendingAnalyze) {
+      pendingAnalyze = false
+      analyze()
     }
   }
 
@@ -175,7 +198,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(analyze, 500)
-    }, 200)
+    }, 500)
   }
 
   function stopPolling(): void {
@@ -193,6 +216,8 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     lastAnalyzedBuffer = null
     lastResult = null
     lastVersion = 0
+    requestInFlight = false
+    pendingAnalyze = false
   }
 
   async function generateTitle(): Promise<void> {
