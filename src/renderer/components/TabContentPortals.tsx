@@ -70,8 +70,7 @@ export default function TabContentPortals({ sessionStore, activeWorkspaceId }: T
           const app = applications[tab.applicationId]
           if (!app) return null
 
-          // Skip rendering if app doesn't need to stay alive and workspace is inactive
-          if (!app.keepAlive && !isActiveWorkspace) return null
+          // All tabs stay mounted (hidden when workspace is inactive)
 
           const portalTarget = isActiveWorkspace ? portalSlots[tab.id] : null
           const isVisible = !!portalTarget
@@ -109,8 +108,8 @@ export default function TabContentPortals({ sessionStore, activeWorkspaceId }: T
             return createPortal(content, portalTarget, `${workspace.id}-${tab.id}`)
           }
 
-          // Render hidden for keepAlive tabs in inactive workspaces
-          if (!isActiveWorkspace && app.keepAlive) {
+          // Render hidden for tabs in inactive workspaces
+          if (!isActiveWorkspace) {
             return (
               <div key={`${workspace.id}-${tab.id}`} style={{ display: 'none' }}>
                 {content}
