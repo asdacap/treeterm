@@ -127,6 +127,7 @@ export default function BaseTerminal({
     if (!containerRef.current) return
 
     let cancelled = false
+    let resizeTimeout: ReturnType<typeof setTimeout> | null = null
 
     // Create terminal with configurable theme
     const terminal = new XTerm({
@@ -259,7 +260,11 @@ export default function BaseTerminal({
         cols: terminal.cols,
         rows: terminal.rows
       })
-      ttyState.resize(terminal.cols, terminal.rows)
+      // Debounce resize to avoid sending transient tiny dimensions during workspace switch
+      if (resizeTimeout) clearTimeout(resizeTimeout)
+      resizeTimeout = setTimeout(() => {
+        ttyState.resize(terminal.cols, terminal.rows)
+      }, 100)
     }
 
     const session = sessionStore.getState()
@@ -337,9 +342,13 @@ export default function BaseTerminal({
         terminal.scrollToLine(newScrollLine)
       }
 
-      if (ttyRef.current) {
-        ttyRef.current.getState().resize(terminal.cols, terminal.rows)
-      }
+      // Debounce resize to avoid sending transient tiny dimensions during workspace switch
+      if (resizeTimeout) clearTimeout(resizeTimeout)
+      resizeTimeout = setTimeout(() => {
+        if (ttyRef.current) {
+          ttyRef.current.getState().resize(terminal.cols, terminal.rows)
+        }
+      }, 100)
     })
     resizeObserver.observe(containerRef.current)
 
@@ -351,6 +360,7 @@ export default function BaseTerminal({
         workspaceId
       })
       cancelled = true
+      if (resizeTimeout) clearTimeout(resizeTimeout)
       inputDisposable.dispose()
       resizeObserver.disconnect()
       if (unsubscribeRef.current) {
