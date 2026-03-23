@@ -63,7 +63,7 @@ export default function AiHarness({
   // Create or get the analyzer store for this tab
   const analyzerRef = useRef<Analyzer | null>(null)
   if (!analyzerRef.current) {
-    analyzerRef.current = workspace.getState().createAnalyzer(tabId)
+    analyzerRef.current = workspace.getState().getOrCreateAnalyzer(tabId)
   }
   const analyzer = analyzerRef.current
 
@@ -80,30 +80,32 @@ export default function AiHarness({
 
   const { loading, error } = useTtyCreation(ptyId, cwd, sandbox, command, onCreated)
 
+  // Start analyzer when ptyId becomes available
+  const analyzerStartedRef = useRef(false)
+  if (ptyId && !analyzerStartedRef.current) {
+    analyzerStartedRef.current = true
+    analyzer.getState().start(ptyId)
+  }
+
   const handlePushToTalkTranscript = useCallback((text: string) => {
     if (ptyId) {
-      const tty = sessionStore.getState().getTty(ptyId)
-      if (tty) tty.getState().write(text)
+      const writer = sessionStore.getState().getWriter(ptyId)
+      if (writer) writer.write(text)
     }
   }, [ptyId, sessionStore])
 
   const handlePushToTalkSubmit = useCallback(() => {
     if (ptyId) {
-      const tty = sessionStore.getState().getTty(ptyId)
-      if (tty) tty.getState().write('\r')
+      const writer = sessionStore.getState().getWriter(ptyId)
+      if (writer) writer.write('\r')
     }
   }, [ptyId, sessionStore])
 
-  const handleTerminalReady = useCallback((term: XTerm, dvRef: React.MutableRefObject<number>) => {
-    analyzer.getState().attach(term, dvRef)
-
+  const handleTerminalReady = useCallback((term: XTerm) => {
     // Intercept user input for title generation
-    const disposable = term.onData((data) => {
+    term.onData((data) => {
       analyzer.getState().onUserInput(data)
     })
-
-    // Store disposable for cleanup - we'll clean up via detach
-    return () => disposable.dispose()
   }, [analyzer])
 
   const openContextMenu = useContextMenuStore((s) => s.open)

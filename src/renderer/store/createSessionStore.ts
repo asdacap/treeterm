@@ -3,8 +3,8 @@ import type { StoreApi } from 'zustand'
 import { humanId } from 'human-id'
 import { createWorkspaceStore } from './createWorkspaceStore'
 import type { WorkspaceStore, WorkspaceStoreDeps } from './createWorkspaceStore'
-import { createTtyStore } from './createTtyStore'
-import type { Tty, TtyTerminalDeps } from './createTtyStore'
+import { createTtyStore, createTtyWriter } from './createTtyStore'
+import type { Tty, TtyWriter, TtyTerminalDeps } from './createTtyStore'
 import type {
   Workspace, Session, AppState, GitInfo,
   ConnectionInfo, ActivityState,
@@ -34,11 +34,12 @@ export interface SessionState {
   // Single SSH connection for this session (set at creation, immutable)
   connection: ConnectionInfo | null
 
-  // TTY sub-stores (enclosed ID pattern)
-  ttyHandles: Record<string, Tty>
+  // TTY writers (write-only, keyed by ptyId)
+  ttyWriters: Record<string, TtyWriter>
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
-  attachTty: (ptyId: string) => Promise<{ scrollback?: string[]; exitCode?: number }>
-  getTty: (ptyId: string) => Tty | null
+  openTtyStream: (ptyId: string) => Promise<{ tty: Tty; scrollback?: string[]; exitCode?: number }>
+  getWriter: (ptyId: string) => TtyWriter | null
+  killTty: (ptyId: string) => void
   listTty: () => Promise<SessionInfo[]>
 
   // Workspace collection
@@ -166,7 +167,8 @@ export function createSessionStore(
   function makeHandleDeps(): WorkspaceStoreDeps {
     return {
       appRegistry: deps.appRegistry,
-      getTty: (ptyId: string) => store.getState().getTty(ptyId),
+      openTtyStream: (ptyId: string) => store.getState().openTtyStream(ptyId),
+      getWriter: (ptyId: string) => store.getState().getWriter(ptyId),
       git: deps.git,
       filesystem: deps.filesystem,
       getSettings: deps.getSettings,
@@ -348,7 +350,7 @@ export function createSessionStore(
 
   const store = createStore<SessionState>()((set, get) => ({
     sessionId: config.sessionId,
-    ttyHandles: {},
+    ttyWriters: {},
     workspaceStores: {},
     workspaces: {},
     activeWorkspaceId: null,
@@ -361,27 +363,28 @@ export function createSessionStore(
       if (!result) {
         throw new Error('Failed to create PTY')
       }
-      const tty = createTtyStore(result.sessionId, result.handle, boundTerminal)
+      const writer = createTtyWriter(result.sessionId, result.handle, boundTerminal)
       set((s) => ({
-        ttyHandles: { ...s.ttyHandles, [result.sessionId]: tty }
+        ttyWriters: { ...s.ttyWriters, [result.sessionId]: writer }
       }))
       return result.sessionId
     },
 
-    attachTty: async (ptyId: string): Promise<{ scrollback?: string[]; exitCode?: number }> => {
+    openTtyStream: async (ptyId: string): Promise<{ tty: Tty; scrollback?: string[]; exitCode?: number }> => {
       const result = await deps.terminal.attach(connectionId, ptyId)
       if (!result.success || !result.handle) {
         throw new Error(result.error || 'Failed to attach to PTY')
       }
       const tty = createTtyStore(ptyId, result.handle, boundTerminal)
-      set((s) => ({
-        ttyHandles: { ...s.ttyHandles, [ptyId]: tty }
-      }))
-      return { scrollback: result.scrollback, exitCode: result.exitCode }
+      return { tty, scrollback: result.scrollback, exitCode: result.exitCode }
     },
 
-    getTty: (ptyId: string): Tty | null => {
-      return get().ttyHandles[ptyId] ?? null
+    getWriter: (ptyId: string): TtyWriter | null => {
+      return get().ttyWriters[ptyId] ?? null
+    },
+
+    killTty: (ptyId: string): void => {
+      boundTerminal.kill(ptyId)
     },
 
     listTty: (): Promise<SessionInfo[]> => {

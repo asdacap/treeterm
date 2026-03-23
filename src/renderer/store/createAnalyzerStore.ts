@@ -1,6 +1,6 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Terminal as XTerm } from '@xterm/xterm'
+import { Terminal } from '@xterm/xterm'
 import type { ActivityState, LlmApi, Settings } from '../types'
 import type { Tty } from './createTtyStore'
 
@@ -11,8 +11,7 @@ export interface AnalyzerDeps {
   getDisplayName: () => string | undefined
   getDescription: () => string | undefined
   setActivityTabState: (tabId: string, state: ActivityState) => void
-  getTty: (ptyId: string) => Tty | null
-  getPtyId: () => string | null
+  openTtyStream: (ptyId: string) => Promise<{ tty: Tty; scrollback?: string[]; exitCode?: number }>
   cwd: string
 }
 
@@ -32,8 +31,8 @@ export interface AnalyzerState {
   autoApprove: boolean
 
   // Lifecycle
-  attach(terminal: XTerm, dataVersionRef: { current: number }): void
-  detach(): void
+  start(ptyId: string): void
+  stop(): void
 
   // Called by component when user types in the terminal
   onUserInput(data: string): void
@@ -56,11 +55,13 @@ type BufferCheckResult =
 
 export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer {
   // Internal closure state — not part of Zustand state
-  let terminal: XTerm | null = null
-  let dataVersionRef: { current: number } | null = null
+  let terminal: Terminal | null = null
+  let ownTty: Tty | null = null
+  let dataVersion = 0
   let lastVersion = 0
   let pollInterval: ReturnType<typeof setInterval> | null = null
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  let unsubscribeData: (() => void) | null = null
   let unsubscribeExit: (() => void) | null = null
   let running = false
   let titleGenerated = false
@@ -88,7 +89,6 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
   function extractBuffer(): string | null {
     if (!terminal) return null
-    if (terminal.cols < 20) return null
     const settings = deps.getSettings()
     const numLines = settings.terminalAnalyzer.bufferLines || 10
     const xtermBuffer = terminal.buffer.normal
@@ -113,7 +113,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   }
 
   async function analyze(): Promise<void> {
-    if (!running || !dataVersionRef) return
+    if (!running) return
 
     // Only one request at a time — buffer pending work
     if (requestInFlight) {
@@ -121,7 +121,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       return
     }
 
-    const requestVersion = dataVersionRef.current
+    const requestVersion = dataVersion
     const settings = deps.getSettings()
 
     if (!settings.llm.apiKey || !settings.terminalAnalyzer.model) {
@@ -165,9 +165,9 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
       if (!running) return
 
-      if (dataVersionRef.current !== requestVersion) {
+      if (dataVersion !== requestVersion) {
         console.debug('[terminal-analyzer] discarding stale response')
-        const discardedState = 'state' in result ? result.state as ActivityState : 'error' in result ? 'error' as ActivityState : 'error' as ActivityState
+        const discardedState = 'state' in result ? result.state as ActivityState : 'error' as ActivityState
         const discardedReason = 'state' in result ? `[discarded] ${result.reason}` : 'error' in result ? `[discarded] ${result.error}` : '[discarded] no state in result'
         history.push({ timestamp: Date.now(), bufferText: buffer, state: discardedState, reason: discardedReason, response: JSON.stringify(result) })
         if (history.length > MAX_HISTORY) history.shift()
@@ -226,21 +226,10 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     if (pollInterval) return
     running = true
 
-    // Subscribe to TTY exit so we self-detach when the process closes
-    const ptyId = deps.getPtyId()
-    if (ptyId) {
-      const tty = deps.getTty(ptyId)
-      if (tty) {
-        unsubscribeExit = tty.getState().onExit(() => {
-          store.getState().detach()
-        })
-      }
-    }
-
     pollInterval = setInterval(() => {
-      if (!dataVersionRef || dataVersionRef.current === lastVersion) return
+      if (dataVersion === lastVersion) return
 
-      lastVersion = dataVersionRef.current
+      lastVersion = dataVersion
       updateAiState('working')
 
       if (debounceTimer) clearTimeout(debounceTimer)
@@ -250,6 +239,10 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
   function stopPolling(): void {
     running = false
+    if (unsubscribeData) {
+      unsubscribeData()
+      unsubscribeData = null
+    }
     if (unsubscribeExit) {
       unsubscribeExit()
       unsubscribeExit = null
@@ -262,10 +255,16 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       clearTimeout(debounceTimer)
       debounceTimer = null
     }
+    if (terminal) {
+      terminal.dispose()
+      terminal = null
+    }
+    ownTty = null
     // Reset dedup state
     inFlightBuffer = null
     lastAnalyzedBuffer = null
     lastResult = null
+    dataVersion = 0
     lastVersion = 0
     requestInFlight = false
     pendingAnalyze = false
@@ -311,12 +310,8 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   function handleAutoApprove(): void {
     const state = store.getState()
     if (state.aiState !== 'safe_permission_requested' || !state.autoApprove) return
-
-    const ptyId = deps.getPtyId()
-    if (!ptyId) return
-    const tty = deps.getTty(ptyId)
-    if (!tty) return
-    tty.getState().write('\r')
+    if (!ownTty) return
+    ownTty.getState().write('\r')
   }
 
   const store = createStore<AnalyzerState>()((set, get) => ({
@@ -326,16 +321,46 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     reason: '',
     autoApprove: false,
 
-    attach: (term: XTerm, dvRef: { current: number }): void => {
-      terminal = term
-      dataVersionRef = dvRef
+    start: (ptyId: string): void => {
+      if (running) return
+
+      // Create headless xterm (no DOM attachment needed)
+      terminal = new Terminal()
+
+      deps.openTtyStream(ptyId).then(({ tty, scrollback, exitCode }) => {
+        if (!running && !terminal) return // stopped before stream opened
+
+        ownTty = tty
+
+        // Restore scrollback into headless terminal
+        if (scrollback) {
+          for (const chunk of scrollback) {
+            terminal!.write(chunk)
+          }
+        }
+
+        // If already exited, don't start polling
+        if (exitCode !== undefined) return
+
+        // Subscribe to live data
+        unsubscribeData = tty.getState().onData((data) => {
+          terminal?.write(data)
+          dataVersion++
+        })
+
+        // Subscribe to exit
+        unsubscribeExit = tty.getState().onExit(() => {
+          store.getState().stop()
+        })
+      }).catch((err) => {
+        console.error('[analyzer] failed to open TTY stream:', err)
+      })
+
       startPolling()
     },
 
-    detach: (): void => {
+    stop: (): void => {
       stopPolling()
-      terminal = null
-      dataVersionRef = null
       titleGenerated = false
     },
 

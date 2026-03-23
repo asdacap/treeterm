@@ -2,13 +2,14 @@ import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
 import type { Workspace, Tab, AppState, ReviewComment, AppRegistryApi, GitApi, FilesystemApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings } from '../types'
 import { getTabs, isAiHarnessState } from '../types'
-import type { Tty } from './createTtyStore'
+import type { Tty, TtyWriter } from './createTtyStore'
 import { createAnalyzerStore } from './createAnalyzerStore'
 import type { Analyzer } from './createAnalyzerStore'
 
 export interface WorkspaceStoreDeps {
   appRegistry: AppRegistryApi
-  getTty: (ptyId: string) => Tty | null
+  openTtyStream: (ptyId: string) => Promise<{ tty: Tty; scrollback?: string[]; exitCode?: number }>
+  getWriter: (ptyId: string) => TtyWriter | null
   git: GitApi
   filesystem: FilesystemApi
   getSettings: () => Settings
@@ -46,7 +47,7 @@ export interface WorkspaceStoreState {
   clearReviewComments: () => void
 
   // Analyzer stores (per-tab)
-  createAnalyzer: (tabId: string) => Analyzer
+  getOrCreateAnalyzer: (tabId: string) => Analyzer
   getAnalyzer: (tabId: string) => Analyzer | null
   removeAnalyzer: (tabId: string) => void
 
@@ -109,7 +110,7 @@ export function createWorkspaceStore(
   const store = createStore<WorkspaceStoreState>()((set, get) => ({
     workspace,
 
-    createAnalyzer: (tabId: string): Analyzer => {
+    getOrCreateAnalyzer: (tabId: string): Analyzer => {
       const existing = analyzerStores[tabId]
       if (existing) return existing
 
@@ -120,11 +121,7 @@ export function createWorkspaceStore(
         getDisplayName: () => get().workspace.metadata?.displayName,
         getDescription: () => get().workspace.metadata?.description,
         setActivityTabState: deps.setActivityTabState,
-        getTty: deps.getTty,
-        getPtyId: () => {
-          const appState = get().workspace.appStates[tabId]
-          return (appState?.state as { ptyId?: string })?.ptyId ?? null
-        },
+        openTtyStream: deps.openTtyStream,
         cwd: get().workspace.path,
       })
       analyzerStores[tabId] = analyzer
@@ -138,7 +135,7 @@ export function createWorkspaceStore(
     removeAnalyzer: (tabId: string): void => {
       const analyzer = analyzerStores[tabId]
       if (analyzer) {
-        analyzer.getState().detach()
+        analyzer.getState().stop()
         delete analyzerStores[tabId]
       }
     },
@@ -350,10 +347,10 @@ export function createWorkspaceStore(
 
       if (!ptyId || !tabId) return false
 
-      const tty = deps.getTty(ptyId)
-      if (!tty) return false
+      const writer = deps.getWriter(ptyId)
+      if (!writer) return false
 
-      tty.getState().write(text + '\r')
+      writer.write(text + '\r')
       get().setActiveTab(tabId)
       return true
     },

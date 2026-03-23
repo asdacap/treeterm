@@ -277,14 +277,14 @@ export default function BaseTerminal({
       }
 
       try {
-        const result = await session.attachTty(existingPtyId)
+        const { tty, scrollback, exitCode } = await session.openTtyStream(existingPtyId)
         console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, existingPtyId)
         if (cancelled) return
 
         // Restore scrollback buffer
-        if (result.scrollback && result.scrollback.length > 0) {
-          console.log(`[${config.logPrefix} ${tabId}] restoring ${result.scrollback.length} scrollback chunks`)
-          for (const chunk of result.scrollback) {
+        if (scrollback && scrollback.length > 0) {
+          console.log(`[${config.logPrefix} ${tabId}] restoring ${scrollback.length} scrollback chunks`)
+          for (const chunk of scrollback) {
             terminal.write(chunk)
           }
         } else {
@@ -292,13 +292,11 @@ export default function BaseTerminal({
         }
 
         // If session already exited, show exit message and don't subscribe for live data
-        if (result.exitCode !== undefined) {
-          terminal.write(`\r\n\x1b[2mProcess exited with exit code ${result.exitCode}\x1b[0m\r\n`)
+        if (exitCode !== undefined) {
+          terminal.write(`\r\n\x1b[2mProcess exited with exit code ${exitCode}\x1b[0m\r\n`)
           return
         }
 
-        const tty = session.getTty(existingPtyId)
-        if (!tty) return
         connectToTty(tty)
       } catch (error) {
         console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, existingPtyId, error)

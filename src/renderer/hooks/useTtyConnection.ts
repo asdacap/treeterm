@@ -47,8 +47,7 @@ export function useTtyCreation(
 
         if (cancelled) {
           if (!mountedRef.current) {
-            const orphanTty = session.getTty(ptyId)
-            if (orphanTty) orphanTty.getState().kill()
+            session.killTty(ptyId)
           }
           return
         }

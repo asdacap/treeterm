@@ -34,3 +34,16 @@ export function createTtyStore(ptyId: string, handle: string, terminal: TtyTermi
     onExit: (cb: (exitCode: number) => void) => terminal.onExit(handle, cb),
   }))
 }
+
+/** Write-only wrapper for callers that just need to send input or kill a PTY */
+export interface TtyWriter {
+  write(data: string): void
+  kill(): void
+}
+
+export function createTtyWriter(ptyId: string, handle: string, terminal: TtyTerminalDeps): TtyWriter {
+  return {
+    write: (data: string) => terminal.write(handle, data),
+    kill: () => terminal.kill(ptyId),
+  }
+}

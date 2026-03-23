@@ -2,18 +2,38 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createAnalyzerStore } from './createAnalyzerStore'
 import type { AnalyzerDeps } from './createAnalyzerStore'
 import type { Settings } from '../types'
+import type { TtyState } from './createTtyStore'
+import { createStore } from 'zustand/vanilla'
 
-function makeMockTerminal() {
-  const lines = ['$ echo hello', 'hello', '$ ']
+/** Creates a mock Tty with controllable onData/onExit callbacks */
+function makeMockTty() {
+  let dataCallback: ((data: string) => void) | null = null
+  let exitCallback: ((exitCode: number) => void) | null = null
+
+  const ttyState: TtyState = {
+    ptyId: 'pty-1',
+    write: vi.fn(),
+    resize: vi.fn(),
+    kill: vi.fn(),
+    isAlive: vi.fn().mockResolvedValue(true),
+    onData: vi.fn((cb) => {
+      dataCallback = cb
+      return () => { dataCallback = null }
+    }),
+    onExit: vi.fn((cb) => {
+      exitCallback = cb
+      return () => { exitCallback = null }
+    }),
+  }
+
+  const tty = createStore<TtyState>()(() => ttyState)
+
   return {
-    buffer: {
-      normal: {
-        baseY: 0,
-        cursorY: lines.length - 1,
-        getLine: (i: number) => lines[i] ? { translateToString: () => lines[i] } : null,
-      },
-    },
-  } as any
+    tty,
+    ttyState,
+    emitData: (data: string) => dataCallback?.(data),
+    emitExit: (code: number) => exitCallback?.(code),
+  }
 }
 
 function makeDeps(overrides?: Partial<AnalyzerDeps>): AnalyzerDeps {
@@ -37,8 +57,7 @@ function makeDeps(overrides?: Partial<AnalyzerDeps>): AnalyzerDeps {
     getDisplayName: vi.fn().mockReturnValue(undefined),
     getDescription: vi.fn().mockReturnValue(undefined),
     setActivityTabState: vi.fn(),
-    getTty: vi.fn().mockReturnValue(null),
-    getPtyId: vi.fn().mockReturnValue(null),
+    openTtyStream: vi.fn().mockResolvedValue({ tty: makeMockTty().tty, scrollback: [], exitCode: undefined }),
     cwd: '/test',
     ...overrides,
   }
@@ -73,80 +92,64 @@ describe('createAnalyzerStore', () => {
     expect(store.getState().autoApprove).toBe(false)
   })
 
-  it('getBufferText returns null when not attached', () => {
+  it('getBufferText returns null when not started', () => {
     const store = createAnalyzerStore('tab-1', deps)
     expect(store.getState().getBufferText()).toBeNull()
   })
 
-  it('getBufferText returns buffer text when attached', () => {
+  it('stop resets terminal reference', async () => {
+    const mock = makeMockTty()
+    deps = makeDeps({
+      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ echo hello\r\nhello\r\n$ '], exitCode: undefined }),
+    })
     const store = createAnalyzerStore('tab-1', deps)
-    const terminal = makeMockTerminal()
 
-    store.getState().attach(terminal, { current: 0 })
-    const text = store.getState().getBufferText()
+    store.getState().start('pty-1')
+    await vi.waitFor(() => {
+      expect(store.getState().getBufferText()).not.toBeNull()
+    })
 
-    expect(text).toBe('$ echo hello\nhello\n$ ')
-  })
-
-  it('getBufferText returns null for empty buffer', () => {
-    const store = createAnalyzerStore('tab-1', deps)
-    const terminal = {
-      buffer: {
-        normal: {
-          baseY: 0,
-          cursorY: 0,
-          getLine: () => ({ translateToString: () => '' }),
-        },
-      },
-    } as any
-
-    store.getState().attach(terminal, { current: 0 })
+    store.getState().stop()
     expect(store.getState().getBufferText()).toBeNull()
   })
 
-  it('detach resets terminal reference', () => {
-    const store = createAnalyzerStore('tab-1', deps)
-    const terminal = makeMockTerminal()
-
-    store.getState().attach(terminal, { current: 0 })
-    expect(store.getState().getBufferText()).not.toBeNull()
-
-    store.getState().detach()
-    expect(store.getState().getBufferText()).toBeNull()
-  })
-
-  it('attach starts polling when settings are configured', () => {
+  it('start opens TTY stream and starts polling when settings are configured', async () => {
     vi.useFakeTimers()
+    const mock = makeMockTty()
+    deps = makeDeps({
+      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+    })
     const store = createAnalyzerStore('tab-1', deps)
-    const terminal = makeMockTerminal()
-    const dvRef = { current: 0 }
 
-    store.getState().attach(terminal, dvRef)
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0) // resolve openTtyStream
 
-    // Simulate data version change
-    dvRef.current = 1
+    // Simulate data arrival
+    mock.emitData('$ echo hello\r\nhello\r\n$ ')
     vi.advanceTimersByTime(500) // poll interval
 
     expect(store.getState().aiState).toBe('working')
 
-    store.getState().detach()
+    store.getState().stop()
     vi.useRealTimers()
   })
 
-  it('attach polls but analyze resets to idle when settings are missing', async () => {
+  it('start polls but analyze resets to idle when settings are missing', async () => {
     vi.useFakeTimers()
+    const mock = makeMockTty()
     deps = makeDeps({
       getSettings: vi.fn().mockReturnValue({
         llm: { apiKey: '', baseUrl: '' },
         terminalAnalyzer: { model: '', systemPrompt: '', titleSystemPrompt: '', reasoningEffort: 'off', safePaths: [], bufferLines: 10 },
       } as unknown as Settings),
+      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
     })
     const store = createAnalyzerStore('tab-1', deps)
-    const terminal = makeMockTerminal()
-    const dvRef = { current: 0 }
 
-    store.getState().attach(terminal, dvRef)
-    dvRef.current = 1
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0)
+
+    mock.emitData('$ hello')
     await vi.advanceTimersByTimeAsync(500)
     // Poll fires and sets 'working', then schedules analyze
     expect(store.getState().aiState).toBe('working')
@@ -154,19 +157,22 @@ describe('createAnalyzerStore', () => {
     // analyze() sees missing settings and resets to idle
     expect(store.getState().aiState).toBe('idle')
 
-    store.getState().detach()
+    store.getState().stop()
     vi.useRealTimers()
   })
 
   it('analyze calls llm.analyzeTerminal and updates state', async () => {
     vi.useFakeTimers()
+    const mock = makeMockTty()
+    deps = makeDeps({
+      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+    })
     const store = createAnalyzerStore('tab-1', deps)
-    const terminal = makeMockTerminal()
-    const dvRef = { current: 0 }
 
-    store.getState().attach(terminal, dvRef)
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0)
 
-    dvRef.current = 1
+    mock.emitData('$ echo hello\r\nhello\r\n$ ')
     vi.advanceTimersByTime(500) // poll fires
     vi.advanceTimersByTime(500) // debounce fires
 
@@ -179,88 +185,86 @@ describe('createAnalyzerStore', () => {
     expect(store.getState().analyzing).toBe(false)
     expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', 'idle')
 
-    store.getState().detach()
+    store.getState().stop()
     vi.useRealTimers()
   })
 
   it('analyze handles error result', async () => {
     vi.useFakeTimers()
+    const mock = makeMockTty()
     deps = makeDeps({
       llm: {
         analyzeTerminal: vi.fn().mockResolvedValue({ error: 'API error' }),
         generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
       },
+      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
     })
     const store = createAnalyzerStore('tab-1', deps)
-    const terminal = makeMockTerminal()
-    const dvRef = { current: 0 }
 
-    store.getState().attach(terminal, dvRef)
-    dvRef.current = 1
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0)
+
+    mock.emitData('$ echo hello\r\nhello\r\n$ ')
     vi.advanceTimersByTime(1000)
     await vi.advanceTimersByTimeAsync(0)
 
     expect(store.getState().aiState).toBe('error')
     expect(store.getState().analyzing).toBe(false)
 
-    store.getState().detach()
+    store.getState().stop()
     vi.useRealTimers()
   })
 
   it('analyze handles LLM call failure', async () => {
     vi.useFakeTimers()
+    const mock = makeMockTty()
     deps = makeDeps({
       llm: {
         analyzeTerminal: vi.fn().mockRejectedValue(new Error('Network error')),
         generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
       },
+      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
     })
     const store = createAnalyzerStore('tab-1', deps)
-    const terminal = makeMockTerminal()
-    const dvRef = { current: 0 }
 
-    store.getState().attach(terminal, dvRef)
-    dvRef.current = 1
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0)
+
+    mock.emitData('$ echo hello\r\nhello\r\n$ ')
     vi.advanceTimersByTime(1000)
     await vi.advanceTimersByTimeAsync(0)
 
     expect(store.getState().aiState).toBe('error')
 
-    store.getState().detach()
+    store.getState().stop()
     vi.useRealTimers()
   })
 
   it('queues pending analyze when request is in-flight and drains after completion', async () => {
     vi.useFakeTimers()
-    const lines1 = ['$ echo hello', 'hello', '$ ']
-    let currentLines = lines1
-    const terminal = {
-      buffer: {
-        normal: {
-          baseY: 0,
-          get cursorY() { return currentLines.length - 1 },
-          getLine: (i: number) => currentLines[i] ? { translateToString: () => currentLines[i] } : null,
-        },
-      },
-    } as any
+    const mock = makeMockTty()
 
     let resolveFirst!: (value: any) => void
-    let resolveSecond!: (value: any) => void
     const calls: Array<(value: any) => void> = []
-    ;(deps.llm.analyzeTerminal as any).mockImplementation(() => new Promise(r => { calls.push(r) }))
+    deps = makeDeps({
+      llm: {
+        analyzeTerminal: vi.fn().mockImplementation(() => new Promise(r => { calls.push(r) })),
+        generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
+      },
+      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+    })
 
     const store = createAnalyzerStore('tab-1', deps)
-    const dvRef = { current: 0 }
-    store.getState().attach(terminal, dvRef)
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0)
 
     // First analysis triggers
-    dvRef.current = 1
+    mock.emitData('$ echo hello\r\nhello\r\n$ ')
     vi.advanceTimersByTime(1000)
     expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
 
     // Change buffer while request is in-flight
-    currentLines = ['$ npm test', 'PASS all tests', '$ ']
-    dvRef.current = 2
+    mock.emitData('$ npm test\r\nPASS all tests\r\n$ ')
     vi.advanceTimersByTime(1000)
 
     // Should NOT start a second request — it should be queued
@@ -277,30 +281,35 @@ describe('createAnalyzerStore', () => {
     calls[1]({ state: 'idle', reason: 'tests passed' })
     await vi.advanceTimersByTimeAsync(0)
 
-    store.getState().detach()
+    store.getState().stop()
     vi.useRealTimers()
   })
 
   it('dedup skips analysis when same buffer is in-flight', async () => {
     vi.useFakeTimers()
-    const store = createAnalyzerStore('tab-1', deps)
-    const terminal = makeMockTerminal()
-    const dvRef = { current: 0 }
+    const mock = makeMockTty()
 
-    // Make analyzeTerminal slow
     let resolveAnalysis!: (value: any) => void
-    ;(deps.llm.analyzeTerminal as any).mockImplementation(() => new Promise(r => { resolveAnalysis = r }))
+    deps = makeDeps({
+      llm: {
+        analyzeTerminal: vi.fn().mockImplementation(() => new Promise(r => { resolveAnalysis = r })),
+        generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
+      },
+      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+    })
 
-    store.getState().attach(terminal, dvRef)
+    const store = createAnalyzerStore('tab-1', deps)
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0)
 
     // First analysis
-    dvRef.current = 1
+    mock.emitData('$ echo hello\r\nhello\r\n$ ')
     vi.advanceTimersByTime(1000)
 
     expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
 
-    // Second tick, same buffer (buffer content hasn't changed)
-    dvRef.current = 2
+    // Second tick with dataVersion change but same buffer content
+    mock.emitData('') // empty data just bumps dataVersion
     vi.advanceTimersByTime(1000)
 
     // Should skip because same buffer is in-flight
@@ -309,46 +318,76 @@ describe('createAnalyzerStore', () => {
     resolveAnalysis({ state: 'idle', reason: '' })
     await vi.advanceTimersByTimeAsync(0)
 
-    store.getState().detach()
+    store.getState().stop()
     vi.useRealTimers()
   })
 
   it('dedup reuses cached result for unchanged buffer', async () => {
     vi.useFakeTimers()
+    const mock = makeMockTty()
+    deps = makeDeps({
+      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+    })
     const store = createAnalyzerStore('tab-1', deps)
-    const terminal = makeMockTerminal()
-    const dvRef = { current: 0 }
 
-    store.getState().attach(terminal, dvRef)
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0)
 
     // First analysis
-    dvRef.current = 1
+    mock.emitData('$ echo hello\r\nhello\r\n$ ')
     vi.advanceTimersByTime(1000)
     await vi.advanceTimersByTimeAsync(0)
 
     expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
 
-    // Second analysis, same buffer
-    dvRef.current = 2
+    // Second analysis, same buffer (empty data just bumps version)
+    mock.emitData('')
     vi.advanceTimersByTime(1000)
     await vi.advanceTimersByTimeAsync(0)
 
     // Should reuse cached result, not call LLM again
     expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
 
-    store.getState().detach()
+    store.getState().stop()
     vi.useRealTimers()
+  })
+
+  it('restores scrollback into headless terminal on start', async () => {
+    const mock = makeMockTty()
+    deps = makeDeps({
+      openTtyStream: vi.fn().mockResolvedValue({
+        tty: mock.tty,
+        scrollback: ['$ echo hello\r\nhello\r\n$ '],
+        exitCode: undefined,
+      }),
+    })
+    const store = createAnalyzerStore('tab-1', deps)
+
+    store.getState().start('pty-1')
+    await vi.waitFor(() => {
+      expect(store.getState().getBufferText()).not.toBeNull()
+    })
+
+    expect(store.getState().getBufferText()).toContain('hello')
+
+    store.getState().stop()
   })
 
   describe('onUserInput', () => {
     it('triggers title generation on first Enter key', async () => {
+      const mock = makeMockTty()
+      deps = makeDeps({
+        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }),
+      })
       const store = createAnalyzerStore('tab-1', deps)
-      const terminal = makeMockTerminal()
 
-      store.getState().attach(terminal, { current: 0 })
+      store.getState().start('pty-1')
+      await vi.waitFor(() => {
+        expect(store.getState().getBufferText()).not.toBeNull()
+      })
+
       store.getState().onUserInput('hello\r')
 
-      // Wait for async title generation
       await vi.waitFor(() => {
         expect(deps.llm.generateTitle).toHaveBeenCalled()
       })
@@ -359,24 +398,39 @@ describe('createAnalyzerStore', () => {
         expect(deps.updateMetadata).toHaveBeenCalledWith('description', 'Test Description')
       })
 
-      store.getState().detach()
+      store.getState().stop()
     })
 
-    it('does not trigger title generation on non-Enter input', () => {
+    it('does not trigger title generation on non-Enter input', async () => {
+      const mock = makeMockTty()
+      deps = makeDeps({
+        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }),
+      })
       const store = createAnalyzerStore('tab-1', deps)
-      const terminal = makeMockTerminal()
 
-      store.getState().attach(terminal, { current: 0 })
+      store.getState().start('pty-1')
+      await vi.waitFor(() => {
+        expect(store.getState().getBufferText()).not.toBeNull()
+      })
+
       store.getState().onUserInput('hello')
 
       expect(deps.llm.generateTitle).not.toHaveBeenCalled()
+      store.getState().stop()
     })
 
     it('does not trigger title generation twice', async () => {
+      const mock = makeMockTty()
+      deps = makeDeps({
+        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }),
+      })
       const store = createAnalyzerStore('tab-1', deps)
-      const terminal = makeMockTerminal()
 
-      store.getState().attach(terminal, { current: 0 })
+      store.getState().start('pty-1')
+      await vi.waitFor(() => {
+        expect(store.getState().getBufferText()).not.toBeNull()
+      })
+
       store.getState().onUserInput('\r')
 
       await vi.waitFor(() => {
@@ -387,34 +441,43 @@ describe('createAnalyzerStore', () => {
       // Still only called once
       expect(deps.llm.generateTitle).toHaveBeenCalledTimes(1)
 
-      store.getState().detach()
+      store.getState().stop()
     })
 
-    it('does not generate title when displayName and description already exist', () => {
+    it('does not generate title when displayName and description already exist', async () => {
+      const mock = makeMockTty()
       deps = makeDeps({
         getDisplayName: vi.fn().mockReturnValue('Existing Title'),
         getDescription: vi.fn().mockReturnValue('Existing Description'),
+        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }),
       })
       const store = createAnalyzerStore('tab-1', deps)
-      const terminal = makeMockTerminal()
 
-      store.getState().attach(terminal, { current: 0 })
+      store.getState().start('pty-1')
+      await vi.waitFor(() => {
+        expect(store.getState().getBufferText()).not.toBeNull()
+      })
+
       store.getState().onUserInput('\r')
 
       expect(deps.llm.generateTitle).not.toHaveBeenCalled()
-
-      store.getState().detach()
+      store.getState().stop()
     })
 
     it('generates description even when displayName already exists', async () => {
+      const mock = makeMockTty()
       deps = makeDeps({
         getDisplayName: vi.fn().mockReturnValue('Existing Title'),
         getDescription: vi.fn().mockReturnValue(undefined),
+        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }),
       })
       const store = createAnalyzerStore('tab-1', deps)
-      const terminal = makeMockTerminal()
 
-      store.getState().attach(terminal, { current: 0 })
+      store.getState().start('pty-1')
+      await vi.waitFor(() => {
+        expect(store.getState().getBufferText()).not.toBeNull()
+      })
+
       store.getState().onUserInput('\r')
 
       await vi.waitFor(() => {
@@ -426,73 +489,82 @@ describe('createAnalyzerStore', () => {
       // Should not overwrite existing displayName
       expect(deps.updateMetadata).not.toHaveBeenCalledWith('displayName', expect.anything())
 
-      store.getState().detach()
+      store.getState().stop()
     })
   })
 
   describe('auto-approve', () => {
-    it('auto-approves safe permission requests', () => {
-      const mockTty = {
-        getState: vi.fn().mockReturnValue({ write: vi.fn() }),
-      }
+    it('auto-approves safe permission requests via own TTY', async () => {
+      const mock = makeMockTty()
       deps = makeDeps({
-        getTty: vi.fn().mockReturnValue(mockTty),
-        getPtyId: vi.fn().mockReturnValue('pty-1'),
+        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
       })
 
       const store = createAnalyzerStore('tab-1', deps)
+      store.getState().start('pty-1')
+      await vi.waitFor(() => {
+        expect(deps.openTtyStream).toHaveBeenCalled()
+      })
+      // Wait for stream to be connected
+      await vi.advanceTimersByTimeAsync?.(0).catch(() => {})
+      await new Promise(r => setTimeout(r, 0))
+
       store.getState().setAutoApprove(true)
 
       // Simulate state change to safe_permission_requested
       store.setState({ aiState: 'safe_permission_requested' })
 
-      expect(mockTty.getState().write).toHaveBeenCalledWith('\r')
+      expect(mock.ttyState.write).toHaveBeenCalledWith('\r')
+
+      store.getState().stop()
     })
 
-    it('does not auto-approve when autoApprove is false', () => {
-      const mockTty = {
-        getState: vi.fn().mockReturnValue({ write: vi.fn() }),
-      }
+    it('does not auto-approve when autoApprove is false', async () => {
+      const mock = makeMockTty()
       deps = makeDeps({
-        getTty: vi.fn().mockReturnValue(mockTty),
-        getPtyId: vi.fn().mockReturnValue('pty-1'),
+        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
       })
 
       const store = createAnalyzerStore('tab-1', deps)
-      // autoApprove defaults to false
+      store.getState().start('pty-1')
+      await new Promise(r => setTimeout(r, 0))
 
       store.setState({ aiState: 'safe_permission_requested' })
 
-      expect(mockTty.getState().write).not.toHaveBeenCalled()
+      expect(mock.ttyState.write).not.toHaveBeenCalled()
+      store.getState().stop()
     })
 
-    it('does not auto-approve for non-safe states', () => {
-      const mockTty = {
-        getState: vi.fn().mockReturnValue({ write: vi.fn() }),
-      }
+    it('does not auto-approve for non-safe states', async () => {
+      const mock = makeMockTty()
       deps = makeDeps({
-        getTty: vi.fn().mockReturnValue(mockTty),
-        getPtyId: vi.fn().mockReturnValue('pty-1'),
+        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
       })
 
       const store = createAnalyzerStore('tab-1', deps)
-      store.getState().setAutoApprove(true)
+      store.getState().start('pty-1')
+      await new Promise(r => setTimeout(r, 0))
 
+      store.getState().setAutoApprove(true)
       store.setState({ aiState: 'permission_request' })
 
-      expect(mockTty.getState().write).not.toHaveBeenCalled()
+      expect(mock.ttyState.write).not.toHaveBeenCalled()
+      store.getState().stop()
     })
   })
 
   it('activity state sync calls setActivityTabState during analysis', async () => {
     vi.useFakeTimers()
+    const mock = makeMockTty()
+    deps = makeDeps({
+      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+    })
     const store = createAnalyzerStore('tab-1', deps)
-    const terminal = makeMockTerminal()
-    const dvRef = { current: 0 }
 
-    store.getState().attach(terminal, dvRef)
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0)
 
-    dvRef.current = 1
+    mock.emitData('$ echo hello\r\nhello\r\n$ ')
     vi.advanceTimersByTime(500) // poll detects change
     // 'working' state set via updateAiState
     expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', 'working')
@@ -502,19 +574,23 @@ describe('createAnalyzerStore', () => {
     // 'idle' state set after analysis completes
     expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', 'idle')
 
-    store.getState().detach()
+    store.getState().stop()
     vi.useRealTimers()
   })
 
   describe('history logging', () => {
     it('logs successful analysis to history with response', async () => {
       vi.useFakeTimers()
+      const mock = makeMockTty()
+      deps = makeDeps({
+        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+      })
       const store = createAnalyzerStore('tab-1', deps)
-      const terminal = makeMockTerminal()
-      const dvRef = { current: 0 }
 
-      store.getState().attach(terminal, dvRef)
-      dvRef.current = 1
+      store.getState().start('pty-1')
+      await vi.advanceTimersByTimeAsync(0)
+
+      mock.emitData('$ echo hello\r\nhello\r\n$ ')
       vi.advanceTimersByTime(1000)
       await vi.advanceTimersByTimeAsync(0)
 
@@ -524,24 +600,26 @@ describe('createAnalyzerStore', () => {
       expect(history[0].reason).toBe('prompt visible')
       expect(history[0].response).toBe(JSON.stringify({ state: 'idle', reason: 'prompt visible' }))
 
-      store.getState().detach()
+      store.getState().stop()
       vi.useRealTimers()
     })
 
     it('logs error result to history with response', async () => {
       vi.useFakeTimers()
+      const mock = makeMockTty()
       deps = makeDeps({
         llm: {
           analyzeTerminal: vi.fn().mockResolvedValue({ error: 'API error' }),
           generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
         },
+        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
       })
       const store = createAnalyzerStore('tab-1', deps)
-      const terminal = makeMockTerminal()
-      const dvRef = { current: 0 }
 
-      store.getState().attach(terminal, dvRef)
-      dvRef.current = 1
+      store.getState().start('pty-1')
+      await vi.advanceTimersByTimeAsync(0)
+
+      mock.emitData('$ echo hello\r\nhello\r\n$ ')
       vi.advanceTimersByTime(1000)
       await vi.advanceTimersByTimeAsync(0)
 
@@ -551,59 +629,26 @@ describe('createAnalyzerStore', () => {
       expect(history[0].reason).toBe('API error')
       expect(history[0].response).toBe(JSON.stringify({ error: 'API error' }))
 
-      store.getState().detach()
-      vi.useRealTimers()
-    })
-
-    it('logs discarded stale response to history', async () => {
-      vi.useFakeTimers()
-      let resolveAnalysis!: (value: any) => void
-      deps = makeDeps({
-        llm: {
-          analyzeTerminal: vi.fn().mockImplementation(() => new Promise(r => { resolveAnalysis = r })),
-          generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
-        },
-      })
-      const store = createAnalyzerStore('tab-1', deps)
-      const terminal = makeMockTerminal()
-      const dvRef = { current: 0 }
-
-      store.getState().attach(terminal, dvRef)
-
-      // Trigger analysis
-      dvRef.current = 1
-      vi.advanceTimersByTime(1000)
-
-      // Change data version while in-flight (makes response stale)
-      dvRef.current = 2
-
-      // Resolve the LLM call
-      resolveAnalysis({ state: 'idle', reason: 'prompt visible' })
-      await vi.advanceTimersByTimeAsync(0)
-
-      const history = store.getState().getHistory()
-      // First entry should be the discarded one
-      expect(history[0].reason).toContain('[discarded]')
-      expect(history[0].response).toBe(JSON.stringify({ state: 'idle', reason: 'prompt visible' }))
-
-      store.getState().detach()
+      store.getState().stop()
       vi.useRealTimers()
     })
 
     it('logs exception to history', async () => {
       vi.useFakeTimers()
+      const mock = makeMockTty()
       deps = makeDeps({
         llm: {
           analyzeTerminal: vi.fn().mockRejectedValue(new Error('Network error')),
           generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
         },
+        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
       })
       const store = createAnalyzerStore('tab-1', deps)
-      const terminal = makeMockTerminal()
-      const dvRef = { current: 0 }
 
-      store.getState().attach(terminal, dvRef)
-      dvRef.current = 1
+      store.getState().start('pty-1')
+      await vi.advanceTimersByTimeAsync(0)
+
+      mock.emitData('$ echo hello\r\nhello\r\n$ ')
       vi.advanceTimersByTime(1000)
       await vi.advanceTimersByTimeAsync(0)
 
@@ -613,24 +658,26 @@ describe('createAnalyzerStore', () => {
       expect(history[0].reason).toBe('[exception] Network error')
       expect(history[0].response).toBe('')
 
-      store.getState().detach()
+      store.getState().stop()
       vi.useRealTimers()
     })
 
     it('logs unexpected response (no state) to history', async () => {
       vi.useFakeTimers()
+      const mock = makeMockTty()
       deps = makeDeps({
         llm: {
           analyzeTerminal: vi.fn().mockResolvedValue({ something: 'unexpected' }),
           generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
         },
+        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
       })
       const store = createAnalyzerStore('tab-1', deps)
-      const terminal = makeMockTerminal()
-      const dvRef = { current: 0 }
 
-      store.getState().attach(terminal, dvRef)
-      dvRef.current = 1
+      store.getState().start('pty-1')
+      await vi.advanceTimersByTimeAsync(0)
+
+      mock.emitData('$ echo hello\r\nhello\r\n$ ')
       vi.advanceTimersByTime(1000)
       await vi.advanceTimersByTimeAsync(0)
 
@@ -640,15 +687,22 @@ describe('createAnalyzerStore', () => {
       expect(history[0].reason).toBe('[unexpected] no state in result')
       expect(history[0].response).toBe(JSON.stringify({ something: 'unexpected' }))
 
-      store.getState().detach()
+      store.getState().stop()
       vi.useRealTimers()
     })
 
     it('logs title generation to history', async () => {
+      const mock = makeMockTty()
+      deps = makeDeps({
+        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }),
+      })
       const store = createAnalyzerStore('tab-1', deps)
-      const terminal = makeMockTerminal()
 
-      store.getState().attach(terminal, { current: 0 })
+      store.getState().start('pty-1')
+      await vi.waitFor(() => {
+        expect(store.getState().getBufferText()).not.toBeNull()
+      })
+
       store.getState().onUserInput('hello\r')
 
       await vi.waitFor(() => {
@@ -665,20 +719,25 @@ describe('createAnalyzerStore', () => {
       expect(titleEntry.state).toBe('idle')
       expect(titleEntry.response).toBe(JSON.stringify({ title: 'Test Title', description: 'Test Description' }))
 
-      store.getState().detach()
+      store.getState().stop()
     })
 
     it('logs title generation failure to history', async () => {
+      const mock = makeMockTty()
       deps = makeDeps({
         llm: {
           analyzeTerminal: vi.fn().mockResolvedValue({ state: 'idle', reason: '' }),
           generateTitle: vi.fn().mockRejectedValue(new Error('Title API error')),
         },
+        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }),
       })
       const store = createAnalyzerStore('tab-1', deps)
-      const terminal = makeMockTerminal()
 
-      store.getState().attach(terminal, { current: 0 })
+      store.getState().start('pty-1')
+      await vi.waitFor(() => {
+        expect(store.getState().getBufferText()).not.toBeNull()
+      })
+
       store.getState().onUserInput('hello\r')
 
       await vi.waitFor(() => {
@@ -695,7 +754,31 @@ describe('createAnalyzerStore', () => {
       expect(titleEntry.state).toBe('error')
       expect(titleEntry.response).toBe('')
 
-      store.getState().detach()
+      store.getState().stop()
     })
+  })
+
+  it('stops polling on TTY exit', async () => {
+    vi.useFakeTimers()
+    const mock = makeMockTty()
+    deps = makeDeps({
+      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+    })
+    const store = createAnalyzerStore('tab-1', deps)
+
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0)
+
+    // Simulate PTY exit
+    mock.emitExit(0)
+
+    // Data should not trigger analysis after exit
+    mock.emitData('some data')
+    vi.advanceTimersByTime(1000)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(deps.llm.analyzeTerminal).not.toHaveBeenCalled()
+
+    vi.useRealTimers()
   })
 })
