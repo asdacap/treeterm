@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import { useStore } from 'zustand'
 import type { Terminal as XTerm } from '@xterm/xterm'
 import BaseTerminal, { type BaseTerminalConfig, type BaseTerminalState } from './BaseTerminal'
@@ -8,7 +8,8 @@ import { useSessionApi } from '../contexts/SessionStoreContext'
 import { useTtyCreation } from '../hooks/useTtyConnection'
 import type { ActivityState, AiHarnessState, SandboxConfig, WorkspaceStore } from '../types'
 import type { Analyzer } from '../store/createAnalyzerStore'
-import { clampContextMenuPosition } from '../utils/contextMenuPosition'
+import { useContextMenuStore } from '../store/contextMenu'
+import ContextMenu from './ContextMenu'
 
 const STATE_COLORS: Record<ActivityState, string> = {
   idle: '#666',
@@ -105,35 +106,25 @@ export default function AiHarness({
     return () => disposable.dispose()
   }, [analyzer])
 
-  const [badgeContextMenu, setBadgeContextMenu] = useState<{ x: number; y: number } | null>(null)
+  const openContextMenu = useContextMenuStore((s) => s.open)
+  const closeContextMenu = useContextMenuStore((s) => s.close)
+  const badgeMenuId = `ai-badge-${tabId}`
 
   const handleBadgeContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    setBadgeContextMenu(clampContextMenuPosition(e.clientX, e.clientY))
+    openContextMenu(badgeMenuId, e.clientX, e.clientY)
   }
 
-  // Close badge context menu on outside click
-  useEffect(() => {
-    if (!badgeContextMenu) return
-    const handleClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement
-      if (target.closest('.context-menu')) return
-      setBadgeContextMenu(null)
-    }
-    document.addEventListener('click', handleClick, true)
-    return () => document.removeEventListener('click', handleClick, true)
-  }, [badgeContextMenu])
-
   const handleDebugAnalyzer = () => {
-    setBadgeContextMenu(null)
+    closeContextMenu()
     const bufferText = analyzer.getState().getBufferText()
     if (!bufferText) return
     workspace.getState().addTab<{ bufferText: string }>('system-prompt-debugger', { bufferText })
   }
 
   const handleViewHistory = () => {
-    setBadgeContextMenu(null)
+    closeContextMenu()
     workspace.getState().addTab<{ sourceTabId: string }>('analyzer-history', { sourceTabId: tabId })
   }
 
@@ -186,19 +177,14 @@ export default function AiHarness({
           <span className="ai-harness-toggle-label">Auto-approve safe</span>
         </label>
       </div>
-      {badgeContextMenu && (
-        <div
-          className="context-menu"
-          style={{ top: badgeContextMenu.y, left: badgeContextMenu.x }}
-        >
-          <div className="context-menu-item" onClick={handleDebugAnalyzer}>
-            Debug System Prompt
-          </div>
-          <div className="context-menu-item" onClick={handleViewHistory}>
-            History
-          </div>
+      <ContextMenu menuId={badgeMenuId}>
+        <div className="context-menu-item" onClick={handleDebugAnalyzer}>
+          Debug System Prompt
         </div>
-      )}
+        <div className="context-menu-item" onClick={handleViewHistory}>
+          History
+        </div>
+      </ContextMenu>
       <PushToTalkButton
         onTranscript={handlePushToTalkTranscript}
         onSubmit={handlePushToTalkSubmit}
