@@ -255,14 +255,14 @@ export default function BaseTerminal({
         unsubscribeExit()
       }
 
-      console.log(`[${config.logPrefix} ${tabId}] initial PTY resize:`, {
-        ptyId: ttyState.ptyId,
-        cols: terminal.cols,
-        rows: terminal.rows
-      })
       // Debounce resize to avoid sending transient tiny dimensions during workspace switch
+      // Re-fit inside timeout so we get the settled container dimensions, not the stale mount-time ones
       if (resizeTimeout) clearTimeout(resizeTimeout)
       resizeTimeout = setTimeout(() => {
+        // Skip if container is not laid out (display:none gives zero dimensions)
+        const rect = containerRef.current?.getBoundingClientRect()
+        if (!rect || rect.width === 0 || rect.height === 0) return
+        fitAddon.fit()
         ttyState.resize(terminal.cols, terminal.rows)
       }, 100)
     }
