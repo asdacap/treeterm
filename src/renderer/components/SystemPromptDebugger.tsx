@@ -43,8 +43,8 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
   const setSystemPrompt = mode === 'analyzer' ? setAnalyzerPrompt : setTitlePrompt
 
   const handleTest = async () => {
-    if (!settings.llm.apiKey || !model) {
-      setError('LLM API key and model must be configured.')
+    if (!model) {
+      setError('Model must be configured.')
       return
     }
 

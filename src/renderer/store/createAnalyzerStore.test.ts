@@ -133,7 +133,7 @@ describe('createAnalyzerStore', () => {
     vi.useRealTimers()
   })
 
-  it('attach does not poll when settings are missing', () => {
+  it('attach polls but analyze resets to idle when settings are missing', async () => {
     vi.useFakeTimers()
     deps = makeDeps({
       getSettings: vi.fn().mockReturnValue({
@@ -147,8 +147,11 @@ describe('createAnalyzerStore', () => {
 
     store.getState().attach(terminal, dvRef)
     dvRef.current = 1
-    vi.advanceTimersByTime(500)
-
+    await vi.advanceTimersByTimeAsync(500)
+    // Poll fires and sets 'working', then schedules analyze
+    expect(store.getState().aiState).toBe('working')
+    await vi.advanceTimersByTimeAsync(500)
+    // analyze() sees missing settings and resets to idle
     expect(store.getState().aiState).toBe('idle')
 
     store.getState().detach()
