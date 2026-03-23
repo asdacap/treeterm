@@ -14,14 +14,15 @@
           config.allowUnfree = true; # Electron is unfree
         };
 
-        # Node.js version - using LTS (20.x)
-        nodejs = pkgs.nodejs_20;
+        # Node.js LTS (22.x) - must use pkgs.nodejs, not nodejs_20,
+        # because nodejs_20's npm has a broken nodejs-slim prefix that
+        # fails when loaded via direnv.
+        nodejs = pkgs.nodejs;
 
         # Build inputs needed for native dependencies (node-pty, etc.)
         nativeBuildInputs = with pkgs; [
           nodejs
-          nodePackages.npm
-          python3 # Required by node-gyp for native modules
+          (python3.withPackages (ps: [ ps.setuptools ])) # Required by node-gyp for native modules
           pkg-config
           makeWrapper
         ];
@@ -51,19 +52,19 @@
           nss
           pango
           systemd
-          xorg.libX11
-          xorg.libXScrnSaver
-          xorg.libXcomposite
-          xorg.libXcursor
-          xorg.libXdamage
-          xorg.libXext
-          xorg.libXfixes
-          xorg.libXi
-          xorg.libXrandr
-          xorg.libXrender
-          xorg.libXtst
-          xorg.libxcb
-          xorg.libxshmfence
+          libx11
+          libxscrnsaver
+          libxcomposite
+          libxcursor
+          libxdamage
+          libxext
+          libxfixes
+          libxi
+          libxrandr
+          libxrender
+          libxtst
+          libxcb
+          libxshmfence
         ] ++ lib.optionals stdenv.isDarwin [
           # macOS-specific dependencies
           darwin.apple_sdk.frameworks.CoreServices
@@ -95,7 +96,8 @@
 
           # Environment variables
           ELECTRON_SKIP_BINARY_DOWNLOAD = "1";
-          ELECTRON_OVERRIDE_DIST_PATH = "${pkgs.electron_33}/bin/";
+          ELECTRON_OVERRIDE_DIST_PATH = "${pkgs.electron}/bin/";
+          ELECTRON_EXEC_PATH = "${pkgs.electron}/bin/electron";
           NODE_OPTIONS = "--max-old-space-size=4096";
         };
 

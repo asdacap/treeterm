@@ -190,25 +190,28 @@ export class DaemonPtyManager {
     if (isSandboxed && process.platform === 'darwin') {
       shell = '/usr/bin/sandbox-exec'
       const profile = generateSandboxProfile(cwd, config.sandbox!)
-      args = ['-p', profile, process.env.SHELL || '/bin/zsh']
+      args = ['-p', profile, process.env.SHELL || '/bin/zsh', '-l']
       env.TREETERM_SANDBOXED = '1'
       env.PS1 = '[SANDBOX] ' + (env.PS1 || '\\$ ')
     } else if (isSandboxed && process.platform === 'linux') {
       if (isBwrapAvailable()) {
         const bwrapArgs = generateBwrapArgs(cwd, config.sandbox!)
         shell = 'bwrap'
-        args = [...bwrapArgs, '--', process.env.SHELL || '/bin/bash']
+        args = [...bwrapArgs, '--', process.env.SHELL || '/bin/bash', '-l']
         env.TREETERM_SANDBOXED = '1'
         env.PS1 = '[SANDBOX] ' + (env.PS1 || '\\$ ')
       } else {
         log.warn('bwrap not found, sandbox not available')
         shell = process.env.SHELL || '/bin/bash'
+        args = ['-l']
       }
     } else if (isSandboxed) {
       log.warn({ platform: process.platform }, 'sandbox not available on this platform')
       shell = process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/zsh'
+      if (process.platform !== 'win32') args = ['-l']
     } else {
       shell = process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/zsh'
+      if (process.platform !== 'win32') args = ['-l']
     }
 
     const ptyProcess = pty.spawn(shell, args, {
