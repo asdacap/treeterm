@@ -43,6 +43,7 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
   }
 
   const [entries, setEntries] = useState<AnalyzerHistoryEntry[]>(() => analyzer.getState().getHistory())
+  const [expandedEntries, setExpandedEntries] = useState<Set<number>>(new Set())
 
   const handleRefresh = () => {
     setEntries(analyzer.getState().getHistory())
@@ -50,6 +51,15 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
 
   const handleDebug = (entry: AnalyzerHistoryEntry) => {
     workspace.getState().addTab<{ bufferText: string }>('system-prompt-debugger', { bufferText: entry.bufferText })
+  }
+
+  const toggleExpand = (index: number) => {
+    setExpandedEntries(prev => {
+      const next = new Set(prev)
+      if (next.has(index)) next.delete(index)
+      else next.add(index)
+      return next
+    })
   }
 
   const reversed = [...entries].reverse()
@@ -114,16 +124,20 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
                   {entry.reason && (
                     <div style={{ color: '#aaa', fontSize: 12 }}>{entry.reason}</div>
                   )}
-                  <pre style={{
-                    margin: 0,
-                    color: '#666',
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                    whiteSpace: 'pre-wrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis'
-                  }}>
-                    {bufferPreview(entry.bufferText)}
+                  <pre
+                    onClick={() => toggleExpand(entries.length - 1 - i)}
+                    style={{
+                      margin: 0,
+                      color: '#666',
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                      whiteSpace: 'pre-wrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {expandedEntries.has(entries.length - 1 - i) ? entry.bufferText : bufferPreview(entry.bufferText)}
                   </pre>
                 </div>
                 <button
