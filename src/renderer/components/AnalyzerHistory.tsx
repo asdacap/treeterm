@@ -44,6 +44,7 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
 
   const [entries, setEntries] = useState<AnalyzerHistoryEntry[]>(() => analyzer.getState().getHistory())
   const [expandedEntries, setExpandedEntries] = useState<Set<number>>(new Set())
+  const [expandedResponses, setExpandedResponses] = useState<Set<number>>(new Set())
 
   const handleRefresh = () => {
     setEntries(analyzer.getState().getHistory())
@@ -60,6 +61,19 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
       else next.add(index)
       return next
     })
+  }
+
+  const toggleResponse = (index: number) => {
+    setExpandedResponses(prev => {
+      const next = new Set(prev)
+      if (next.has(index)) next.delete(index)
+      else next.add(index)
+      return next
+    })
+  }
+
+  function formatResponse(response: string): string {
+    try { return JSON.stringify(JSON.parse(response), null, 2) } catch { return response }
   }
 
   const reversed = [...entries].reverse()
@@ -139,6 +153,26 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
                   >
                     {expandedEntries.has(entries.length - 1 - i) ? entry.bufferText : bufferPreview(entry.bufferText)}
                   </pre>
+                  {entry.response && (
+                    <pre
+                      onClick={() => toggleResponse(entries.length - 1 - i)}
+                      style={{
+                        margin: 0,
+                        color: '#23d18b',
+                        fontSize: 11,
+                        fontFamily: 'monospace',
+                        whiteSpace: 'pre-wrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        cursor: 'pointer',
+                        background: '#1a1a1a',
+                        padding: 4,
+                        borderRadius: 3
+                      }}
+                    >
+                      {expandedResponses.has(entries.length - 1 - i) ? formatResponse(entry.response) : entry.response.slice(0, 80) + (entry.response.length > 80 ? '...' : '')}
+                    </pre>
+                  )}
                 </div>
                 <button
                   onClick={() => handleDebug(entry)}

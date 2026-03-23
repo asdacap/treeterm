@@ -124,7 +124,11 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     const requestVersion = dataVersionRef.current
     const settings = deps.getSettings()
 
-    if (!settings.llm.apiKey || !settings.terminalAnalyzer.model) return
+    if (!settings.llm.apiKey || !settings.terminalAnalyzer.model) {
+      store.setState({ analyzing: false })
+      updateAiState('idle')
+      return
+    }
 
     const buffer = extractBuffer()
     if (!buffer) return
@@ -325,10 +329,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     attach: (term: XTerm, dvRef: { current: number }): void => {
       terminal = term
       dataVersionRef = dvRef
-      const settings = deps.getSettings()
-      if (settings.llm.apiKey && settings.terminalAnalyzer.model) {
-        startPolling()
-      }
+      startPolling()
     },
 
     detach: (): void => {

@@ -28,8 +28,8 @@ export default function TerminalAnalyzerDebugger({ tab }: ApplicationRenderProps
   }, [debuggerState?.bufferText])
 
   const handleTest = async () => {
-    if (!settings.llm.apiKey || !model) {
-      setError('LLM API key and model must be configured.')
+    if (!model) {
+      setError('Model must be configured.')
       return
     }
 
