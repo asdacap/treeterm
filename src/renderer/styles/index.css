@@ -5227,3 +5227,52 @@ body,
   background: rgba(255, 80, 80, 0.2);
   color: #ff5050;
 }
+
+/* === Workspace Settings === */
+
+.workspace-settings {
+  padding: 20px;
+  max-width: 600px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  overflow-y: auto;
+}
+
+.workspace-settings h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.workspace-settings textarea.settings-input {
+  resize: vertical;
+  min-height: 60px;
+}
+
+.workspace-settings-json-toggle {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.workspace-settings-json-toggle:hover {
+  color: var(--text-primary);
+}
+
+.workspace-settings-json pre {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 12px;
+  font-size: 12px;
+  overflow: auto;
+  max-height: 400px;
+  color: var(--text-primary);
+  margin-top: 8px;
+}

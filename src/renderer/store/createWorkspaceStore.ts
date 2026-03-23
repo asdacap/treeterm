@@ -1,6 +1,6 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, Tab, AppState, ReviewComment, AppRegistryApi, GitApi, FilesystemApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState } from '../types'
+import type { Workspace, Tab, AppState, ReviewComment, AppRegistryApi, GitApi, FilesystemApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings } from '../types'
 import { getTabs, isAiHarnessState } from '../types'
 import type { Tty } from './createTtyStore'
 import { createAnalyzerStore } from './createAnalyzerStore'
@@ -53,6 +53,7 @@ export interface WorkspaceStoreState {
   // Other per-workspace
   promptHarness: (text: string) => boolean
   updateMetadata: (key: string, value: string) => void
+  updateSettings: (settings: Partial<WorktreeSettings>) => void
   updateStatus: (status: Workspace['status']) => void
 
   // Git API (workspace-scoped)
@@ -271,6 +272,14 @@ export function createWorkspaceStore(
       updateWorkspace((ws) => ({
         ...ws,
         metadata: { ...ws.metadata, [key]: value }
+      }))
+      deps.syncToDaemon()
+    },
+
+    updateSettings: (newSettings: Partial<WorktreeSettings>): void => {
+      updateWorkspace((ws) => ({
+        ...ws,
+        settings: { ...(ws.settings ?? {}), ...newSettings } as WorktreeSettings
       }))
       deps.syncToDaemon()
     },
