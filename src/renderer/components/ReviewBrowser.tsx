@@ -7,7 +7,6 @@ import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, Conflic
 import { MonacoDiffViewer } from './MonacoDiffViewer'
 import { CommittedDiffFileTree, UncommittedDiffFileTree } from './DiffFileTree'
 import { CommentInput } from './CommentInput'
-import { CommentDisplay } from './CommentDisplay'
 
 interface ReviewBrowserProps {
   workspace: WorkspaceStore
@@ -661,6 +660,7 @@ export default function ReviewBrowser({
                           inlineCommentInput={commentInput}
                           onCommentSubmit={handleCommentSubmit}
                           onCommentCancel={() => setCommentInput(null)}
+                          onCommentDelete={handleCommentDelete}
                         />
                       ) : (
                         <div className="diff-placeholder">Failed to load diff contents</div>
@@ -670,22 +670,6 @@ export default function ReviewBrowser({
                     )}
                   </div>
 
-                  {selectedFile && fileComments.length > 0 && (
-                    <div className="diff-comments-panel">
-                      <div className="diff-comments-header">
-                        Comments ({fileComments.length})
-                      </div>
-                      <div className="diff-comments-list">
-                        {fileComments.map((comment) => (
-                          <CommentDisplay
-                            key={comment.id}
-                            comment={comment}
-                            onDelete={handleCommentDelete}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
               </>
             )
@@ -773,6 +757,7 @@ export default function ReviewBrowser({
                           inlineCommentInput={commentInput}
                           onCommentSubmit={handleCommentSubmit}
                           onCommentCancel={() => setCommentInput(null)}
+                          onCommentDelete={handleCommentDelete}
                         />
                       ) : (
                         <div className="diff-placeholder">Failed to load diff contents</div>

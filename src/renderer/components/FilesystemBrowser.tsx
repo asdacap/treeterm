@@ -2,7 +2,6 @@ import { useState, useCallback, useEffect } from 'react'
 import { useStore } from 'zustand'
 import { FileTree } from './FileTree'
 import { FileViewer } from './FileViewer'
-import { CommentDisplay } from './CommentDisplay'
 import type { FilesystemState, WorkspaceStore } from '../types'
 
 interface FilesystemBrowserProps {
@@ -146,6 +145,7 @@ export function FilesystemBrowser({
           inlineCommentInput={commentInput}
           onCommentSubmit={handleCommentSubmit}
           onCommentCancel={() => setCommentInput(null)}
+          onCommentDelete={handleCommentDelete}
           scrollToLine={state.scrollToLine}
           onScrollToLineUsed={() => {
             updateTabState<FilesystemState>(tabId, (s) => ({
@@ -154,22 +154,6 @@ export function FilesystemBrowser({
             }))
           }}
         />
-        {state.selectedPath && fileComments.length > 0 && (
-          <div className="diff-comments-panel">
-            <div className="diff-comments-header">
-              Comments ({fileComments.length})
-            </div>
-            <div className="diff-comments-list">
-              {fileComments.map((comment) => (
-                <CommentDisplay
-                  key={comment.id}
-                  comment={comment}
-                  onDelete={handleCommentDelete}
-                />
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )

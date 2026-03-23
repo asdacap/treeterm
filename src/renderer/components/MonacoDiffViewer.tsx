@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import type { editor } from 'monaco-editor'
 import type { ReviewComment } from '../types'
 import { CommentInput } from './CommentInput'
+import { CommentDisplay } from './CommentDisplay'
 
 interface MonacoDiffViewerProps {
   originalContent: string
@@ -26,6 +27,7 @@ interface MonacoDiffViewerProps {
   } | null
   onCommentSubmit?: (text: string) => void
   onCommentCancel?: () => void
+  onCommentDelete?: (commentId: string) => void
 }
 
 export function MonacoDiffViewer({
@@ -42,7 +44,8 @@ export function MonacoDiffViewer({
   onLineClick,
   inlineCommentInput,
   onCommentSubmit,
-  onCommentCancel
+  onCommentCancel,
+  onCommentDelete
 }: MonacoDiffViewerProps): JSX.Element {
   const diffEditorRef = useRef<editor.IStandaloneDiffEditor | null>(null)
   const [lineChanges, setLineChanges] = useState<editor.ILineChange[] | null>(null)
@@ -51,6 +54,9 @@ export function MonacoDiffViewer({
   const decorationsRef = useRef<{ original: string[]; modified: string[] }>({ original: [], modified: [] })
   const viewZoneIdRef = useRef<string | null>(null)
   const [commentContainer, setCommentContainer] = useState<HTMLDivElement | null>(null)
+  // Inline comment display zones
+  const commentDisplayZonesRef = useRef<Map<string, { zoneId: string; container: HTMLDivElement; editor: editor.IStandaloneCodeEditor }>>(new Map())
+  const [commentDisplayContainers, setCommentDisplayContainers] = useState<Map<string, { container: HTMLDivElement; comments: ReviewComment[] }>>(new Map())
 
   // Reset when content changes
   useEffect(() => {
@@ -236,6 +242,75 @@ export function MonacoDiffViewer({
     )
   }, [comments])
 
+  // Manage inline comment display view zones
+  useEffect(() => {
+    if (!diffEditorRef.current) return
+
+    const modifiedEditor = diffEditorRef.current.getModifiedEditor()
+    const originalEditor = diffEditorRef.current.getOriginalEditor()
+
+    // Group comments by side:lineNumber
+    const groups = new Map<string, ReviewComment[]>()
+    for (const comment of comments) {
+      const key = `${comment.side}:${comment.lineNumber}`
+      const group = groups.get(key)
+      if (group) {
+        group.push(comment)
+      } else {
+        groups.set(key, [comment])
+      }
+    }
+
+    // Remove all existing display zones
+    const existingZones = commentDisplayZonesRef.current
+    Array.from(existingZones.values()).forEach(zone => {
+      zone.editor.changeViewZones((accessor: editor.IViewZoneChangeAccessor) => {
+        accessor.removeZone(zone.zoneId)
+      })
+    })
+    existingZones.clear()
+
+    // Create new zones for each group
+    const newContainers = new Map<string, { container: HTMLDivElement; comments: ReviewComment[] }>()
+
+    Array.from(groups.entries()).forEach(([key, groupComments]) => {
+      const [side, lineStr] = key.split(':')
+      const lineNumber = parseInt(lineStr, 10)
+      const targetEditor = side === 'modified' ? modifiedEditor : originalEditor
+
+      const container = document.createElement('div')
+      container.className = 'inline-comment-zone inline-comment-display-zone'
+      container.addEventListener('mousedown', (e) => e.stopPropagation())
+
+      targetEditor.changeViewZones((accessor: editor.IViewZoneChangeAccessor) => {
+        const zoneId = accessor.addZone({
+          afterLineNumber: lineNumber,
+          heightInPx: groupComments.length * 44 + 12,
+          domNode: container,
+          suppressMouseDown: true
+        })
+        existingZones.set(key, { zoneId, container, editor: targetEditor })
+      })
+
+      newContainers.set(key, { container, comments: groupComments })
+    })
+
+    setCommentDisplayContainers(newContainers)
+
+    return () => {
+      Array.from(commentDisplayZonesRef.current.values()).forEach(zone => {
+        try {
+          zone.editor.changeViewZones((accessor: editor.IViewZoneChangeAccessor) => {
+            accessor.removeZone(zone.zoneId)
+          })
+        } catch {
+          // Editor may already be disposed
+        }
+      })
+      commentDisplayZonesRef.current.clear()
+    }
+  }, [comments])
+
   // Manage inline comment view zone
   useEffect(() => {
     if (!diffEditorRef.current) return
@@ -389,6 +464,21 @@ export function MonacoDiffViewer({
           onCancel={onCommentCancel}
         />,
         commentContainer
+      )}
+      {Array.from(commentDisplayContainers.entries()).map(([key, { container, comments: groupComments }]) =>
+        createPortal(
+          <div className="inline-comment-display-group" key={key}>
+            {groupComments.map(comment => (
+              <CommentDisplay
+                key={comment.id}
+                comment={comment}
+                onDelete={onCommentDelete ?? (() => {})}
+                hideLineRef
+              />
+            ))}
+          </div>,
+          container
+        )
       )}
     </div>
   )

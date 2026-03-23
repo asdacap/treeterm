@@ -2228,11 +2228,6 @@ body,
   overflow: hidden;
 }
 
-.filesystem-browser-content > .diff-comments-panel {
-  width: auto;
-  border-left: none;
-  border-top: 1px solid var(--border-color);
-}
 
 .filesystem-browser-error {
   padding: 20px;
@@ -3743,6 +3738,40 @@ body,
   pointer-events: auto;
 }
 
+.inline-comment-zone.inline-comment-display-zone {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 2px 0;
+  margin: 0;
+}
+
+.inline-comment-display-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 2px 8px;
+  margin-right: 2em;
+}
+
+.inline-comment-display-group .comment-display {
+  margin-bottom: 0;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+}
+
+.inline-comment-display-group .comment-display-header {
+  margin-bottom: 2px;
+}
+
+.inline-comment-display-group .comment-display-text {
+  margin-bottom: 2px;
+}
+
 .comment-input-container {
   padding: 0;
 }
@@ -3872,6 +3901,11 @@ body,
   color: #f14c4c;
 }
 
+.comment-delete-btn.inline {
+  float: right;
+  margin-left: 8px;
+}
+
 .comment-display-text {
   color: var(--text-primary);
   font-size: 13px;
@@ -3886,30 +3920,6 @@ body,
 }
 
 /* Comments Panel */
-.diff-comments-panel {
-  width: 300px;
-  border-left: 1px solid var(--border-color);
-  background: var(--bg-secondary);
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-}
-
-.diff-comments-header {
-  padding: 8px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.diff-comments-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 12px;
-}
 
 /* Monaco Editor Comment Decorations */
 .comment-line {

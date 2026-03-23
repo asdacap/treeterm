@@ -6,6 +6,7 @@ import { useStore } from 'zustand'
 import type { EditorState, ReviewComment, WorkspaceStore } from '../types'
 import { MarkdownPreview } from './MarkdownPreview'
 import { CommentInput } from './CommentInput'
+import { CommentDisplay } from './CommentDisplay'
 
 interface FileViewerProps {
   workspace: WorkspaceStore
@@ -16,6 +17,7 @@ interface FileViewerProps {
   inlineCommentInput?: { lineNumber: number } | null
   onCommentSubmit?: (text: string) => void
   onCommentCancel?: () => void
+  onCommentDelete?: (commentId: string) => void
   // Scroll to a specific line after file loads
   scrollToLine?: number
   onScrollToLineUsed?: () => void
@@ -45,6 +47,7 @@ export function FileViewer({
   inlineCommentInput,
   onCommentSubmit,
   onCommentCancel,
+  onCommentDelete,
   scrollToLine,
   onScrollToLineUsed
 }: FileViewerProps): JSX.Element {
@@ -60,6 +63,9 @@ export function FileViewer({
   const decorationsRef = useRef<string[]>([])
   const viewZoneIdRef = useRef<string | null>(null)
   const [commentContainer, setCommentContainer] = useState<HTMLDivElement | null>(null)
+  // Inline comment display zones
+  const commentDisplayZonesRef = useRef<Map<string, { zoneId: string; container: HTMLDivElement }>>(new Map())
+  const [commentDisplayContainers, setCommentDisplayContainers] = useState<Map<string, { container: HTMLDivElement; comments: ReviewComment[] }>>(new Map())
 
   useEffect(() => {
     if (!filePath) {
@@ -153,6 +159,72 @@ export function FileViewer({
       [],
       decorations
     )
+  }, [comments])
+
+  // Manage inline comment display view zones
+  useEffect(() => {
+    if (!editorRef.current) return
+
+    const ed = editorRef.current
+
+    // Group comments by lineNumber
+    const groups = new Map<string, ReviewComment[]>()
+    for (const comment of comments) {
+      const key = String(comment.lineNumber)
+      const group = groups.get(key)
+      if (group) {
+        group.push(comment)
+      } else {
+        groups.set(key, [comment])
+      }
+    }
+
+    // Remove all existing display zones
+    const existingZones = commentDisplayZonesRef.current
+    Array.from(existingZones.values()).forEach(zone => {
+      ed.changeViewZones((accessor: editor.IViewZoneChangeAccessor) => {
+        accessor.removeZone(zone.zoneId)
+      })
+    })
+    existingZones.clear()
+
+    // Create new zones for each group
+    const newContainers = new Map<string, { container: HTMLDivElement; comments: ReviewComment[] }>()
+
+    Array.from(groups.entries()).forEach(([key, groupComments]) => {
+      const lineNumber = parseInt(key, 10)
+
+      const container = document.createElement('div')
+      container.className = 'inline-comment-zone inline-comment-display-zone'
+      container.addEventListener('mousedown', (e) => e.stopPropagation())
+
+      ed.changeViewZones((accessor: editor.IViewZoneChangeAccessor) => {
+        const zoneId = accessor.addZone({
+          afterLineNumber: lineNumber,
+          heightInPx: groupComments.length * 44 + 12,
+          domNode: container,
+          suppressMouseDown: true
+        })
+        existingZones.set(key, { zoneId, container })
+      })
+
+      newContainers.set(key, { container, comments: groupComments })
+    })
+
+    setCommentDisplayContainers(newContainers)
+
+    return () => {
+      Array.from(commentDisplayZonesRef.current.values()).forEach(zone => {
+        try {
+          ed.changeViewZones((accessor: editor.IViewZoneChangeAccessor) => {
+            accessor.removeZone(zone.zoneId)
+          })
+        } catch {
+          // Editor may already be disposed
+        }
+      })
+      commentDisplayZonesRef.current.clear()
+    }
   }, [comments])
 
   // Manage inline comment view zone
@@ -297,6 +369,21 @@ export function FileViewer({
           onCancel={onCommentCancel}
         />,
         commentContainer
+      )}
+      {Array.from(commentDisplayContainers.entries()).map(([key, { container, comments: groupComments }]) =>
+        createPortal(
+          <div className="inline-comment-display-group" key={key}>
+            {groupComments.map(comment => (
+              <CommentDisplay
+                key={comment.id}
+                comment={comment}
+                onDelete={onCommentDelete ?? (() => {})}
+                hideLineRef
+              />
+            ))}
+          </div>,
+          container
+        )
       )}
     </div>
   )
