@@ -1,4 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { useContextMenuStore } from '../store/contextMenu'
+import ContextMenu from './ContextMenu'
 import { GitFork, GitBranch, Folder, ChevronDown, ChevronRight } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
@@ -13,13 +15,6 @@ import type { Workspace, ReviewState, WorktreeSettings } from '../types'
 
 // Import WorkspaceActivityIndicator from TreePane
 import { WorkspaceActivityIndicator } from './TreePane'
-import { clampContextMenuPosition } from '../utils/contextMenuPosition'
-
-interface ContextMenu {
-  x: number
-  y: number
-  workspaceId: string
-}
 
 interface SessionPanelProps {
   sessionId: string
@@ -54,8 +49,9 @@ export default function SessionPanel({
 
   const disconnectSession = useAppStore(s => s.disconnectSession)
 
-  const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
-  const [sessionContextMenu, setSessionContextMenu] = useState<{ x: number; y: number } | null>(null)
+  const openContextMenu = useContextMenuStore((s) => s.open)
+  const closeContextMenu = useContextMenuStore((s) => s.close)
+  const contextMenuWorkspaceRef = useRef<string>('')
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     return new Set(
       Object.values(workspaces)
@@ -131,20 +127,14 @@ export default function SessionPanel({
   const handleContextMenu = (e: React.MouseEvent, id: string) => {
     e.preventDefault()
     e.stopPropagation()
-    const pos = clampContextMenuPosition(e.clientX, e.clientY)
-    setContextMenu({ ...pos, workspaceId: id })
-  }
-
-  const closeContextMenu = () => {
-    setContextMenu(null)
-    setSessionContextMenu(null)
+    contextMenuWorkspaceRef.current = id
+    openContextMenu('session-ws-context', e.clientX, e.clientY)
   }
 
   const handleSessionContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    const pos = clampContextMenuPosition(e.clientX, e.clientY)
-    setSessionContextMenu(pos)
+    openContextMenu('session-context', e.clientX, e.clientY)
   }
 
   const handleDisconnectSession = () => {
@@ -156,6 +146,8 @@ export default function SessionPanel({
     closeContextMenu()
     setCreateChildDialogParentId(parentId)
   }
+
+  const contextMenuWorkspaceId = contextMenuWorkspaceRef.current
 
   const handleQuickFork = async (wsId: string) => {
     const result = await quickForkWorkspace(wsId)
@@ -327,7 +319,7 @@ export default function SessionPanel({
   }
 
   return (
-    <div className="session-panel" onClick={closeContextMenu}>
+    <div className="session-panel">
       <div className="session-panel-header" onClick={() => setActiveView({ type: 'session', sessionId })} onContextMenu={handleSessionContextMenu}>
         {isEditingName ? (
           <input
@@ -368,42 +360,30 @@ export default function SessionPanel({
       </div>
 
       {/* Context Menu */}
-      {contextMenu && (
-        <div
-          className="context-menu"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {workspaces[contextMenu.workspaceId]?.isGitRepo && (
-            <div className="context-menu-item" onClick={() => handleCreateChild(contextMenu.workspaceId)}>
-              Open Existing Branch
-            </div>
-          )}
-          {workspaces[contextMenu.workspaceId]?.isWorktree && workspaces[contextMenu.workspaceId]?.parentId && (
-            <div className="context-menu-item" onClick={() => handleRemove(contextMenu.workspaceId)}>
-              Review & Merge
-            </div>
-          )}
-          {!workspaces[contextMenu.workspaceId]?.isWorktree && (
-            <div className="context-menu-item danger" onClick={() => handleRemove(contextMenu.workspaceId)}>
-              Remove
-            </div>
-          )}
-        </div>
-      )}
+      <ContextMenu menuId="session-ws-context">
+        {workspaces[contextMenuWorkspaceId]?.isGitRepo && (
+          <div className="context-menu-item" onClick={() => handleCreateChild(contextMenuWorkspaceId)}>
+            Open Existing Branch
+          </div>
+        )}
+        {workspaces[contextMenuWorkspaceId]?.isWorktree && workspaces[contextMenuWorkspaceId]?.parentId && (
+          <div className="context-menu-item" onClick={() => handleRemove(contextMenuWorkspaceId)}>
+            Review & Merge
+          </div>
+        )}
+        {!workspaces[contextMenuWorkspaceId]?.isWorktree && (
+          <div className="context-menu-item danger" onClick={() => handleRemove(contextMenuWorkspaceId)}>
+            Remove
+          </div>
+        )}
+      </ContextMenu>
 
       {/* Session Context Menu */}
-      {sessionContextMenu && (
-        <div
-          className="context-menu"
-          style={{ top: sessionContextMenu.y, left: sessionContextMenu.x }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="context-menu-item danger" onClick={handleDisconnectSession}>
-            Disconnect
-          </div>
+      <ContextMenu menuId="session-context">
+        <div className="context-menu-item danger" onClick={handleDisconnectSession}>
+          Disconnect
         </div>
-      )}
+      </ContextMenu>
 
       {/* Create Child Dialog */}
       {createChildDialogParentHandle && (

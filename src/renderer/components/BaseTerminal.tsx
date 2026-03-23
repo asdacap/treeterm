@@ -10,7 +10,8 @@ import { createActivityStateDetector } from '../utils/activityStateDetector'
 import type { Tty } from '../store/createTtyStore'
 import TerminalScrollWrapper from './TerminalScrollWrapper'
 import type { SandboxConfig, TerminalState, WorkspaceStore } from '../types'
-import { clampContextMenuPosition } from '../utils/contextMenuPosition'
+import { useContextMenuStore } from '../store/contextMenu'
+import ContextMenu from './ContextMenu'
 import '@xterm/xterm/css/xterm.css'
 
 // ANSI sequences that manipulate scrollback or clear the screen
@@ -88,11 +89,6 @@ interface BaseTerminalProps {
   config: BaseTerminalConfig
 }
 
-interface ContextMenu {
-  x: number
-  y: number
-}
-
 export default function BaseTerminal({
   workspace,
   tabId,
@@ -109,7 +105,6 @@ export default function BaseTerminal({
   const detectorRef = useRef<ReturnType<typeof createActivityStateDetector> | null>(null)
   const rawCharsRef = useRef<string>('')
   const dataVersionRef = useRef(0)
-  const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null)
   const [overlay, setOverlay] = useState<{ message: string; type: 'info' | 'error' } | null>(null)
 
   const sessionStore = useSessionApi()
@@ -400,23 +395,13 @@ export default function BaseTerminal({
   }, [isVisible])
 
 
-  // Close context menu when clicking outside
-  useEffect(() => {
-    if (!contextMenu) return
-    const handleClick = (e: MouseEvent) => {
-      // Don't close if clicking on the context menu itself
-      const target = e.target as HTMLElement
-      if (target.closest('.context-menu')) return
-      setContextMenu(null)
-    }
-    // Use capture phase so the event is caught before xterm.js can stop propagation
-    document.addEventListener('click', handleClick, true)
-    return () => document.removeEventListener('click', handleClick, true)
-  }, [contextMenu])
+  const openContextMenu = useContextMenuStore((s) => s.open)
+  const closeContextMenu = useContextMenuStore((s) => s.close)
+  const contextMenuId = `terminal-${tabId}`
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
-    setContextMenu(clampContextMenuPosition(e.clientX, e.clientY))
+    openContextMenu(contextMenuId, e.clientX, e.clientY)
   }
 
   const handleCopy = () => {
@@ -424,7 +409,7 @@ export default function BaseTerminal({
     if (selection) {
       clipboard.writeText(selection)
     }
-    setContextMenu(null)
+    closeContextMenu()
   }
 
   const handlePaste = () => {
@@ -432,7 +417,7 @@ export default function BaseTerminal({
     if (text && ttyRef.current) {
       ttyRef.current.getState().write(text)
     }
-    setContextMenu(null)
+    closeContextMenu()
   }
 
   return (
@@ -456,19 +441,14 @@ export default function BaseTerminal({
         </div>
       )}
 
-      {contextMenu && (
-        <div
-          className="context-menu"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
-        >
-          <div className="context-menu-item" onClick={handleCopy}>
-            Copy
-          </div>
-          <div className="context-menu-item" onClick={handlePaste}>
-            Paste
-          </div>
+      <ContextMenu menuId={contextMenuId}>
+        <div className="context-menu-item" onClick={handleCopy}>
+          Copy
         </div>
-      )}
+        <div className="context-menu-item" onClick={handlePaste}>
+          Paste
+        </div>
+      </ContextMenu>
     </TerminalScrollWrapper>
   )
 }
