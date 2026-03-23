@@ -100,6 +100,8 @@ export default function BaseTerminal({
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const isVisibleRef = useRef(isVisible)
+  isVisibleRef.current = isVisible
   const ttyRef = useRef<Tty | null>(null)
   const unsubscribeRef = useRef<(() => void) | null>(null)
   const detectorRef = useRef<ReturnType<typeof createActivityStateDetector> | null>(null)
@@ -313,9 +315,9 @@ export default function BaseTerminal({
       const entry = entries[0]
       if (!entry) return
 
-      // Skip resize when container is hidden (0x0 dimensions)
-      const { width, height } = entry.contentRect
-      if (width === 0 || height === 0) return
+      // Skip resize when terminal is not visible (e.g. during workspace switch)
+      // to prevent transient small dimensions from reflowing the buffer
+      if (!isVisibleRef.current) return
 
       // Save scroll position as ratio before fit to prevent scroll jumping
       const prevViewportY = terminal.buffer.active.viewportY

@@ -88,6 +88,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
   function extractBuffer(): string | null {
     if (!terminal) return null
+    if (terminal.cols < 20) return null
     const settings = deps.getSettings()
     const numLines = settings.terminalAnalyzer.bufferLines || 10
     const xtermBuffer = terminal.buffer.normal
