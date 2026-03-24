@@ -300,6 +300,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         }
         if (!deps.getDescription() && result.description) {
           deps.updateMetadata('description', result.description)
+          deps.updateMetadata('descriptionPrompted', 'true')
         }
       }
       history.push({ timestamp: Date.now(), kind: 'title', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result) })
