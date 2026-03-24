@@ -128,10 +128,13 @@ export default function BaseTerminal({
     let unsubscribe: (() => void) | null = null
     let rawChars = ''
 
+    let initialResizeDone = false
+
     const setupResizeObserver = (term: XTerm, resize: (cols: number, rows: number) => void) => {
       resizeObserver = new ResizeObserver((entries) => {
         const entry = entries[0]
         if (!entry) return
+        if (!initialResizeDone) return
 
         console.log(`[${config.logPrefix} ${tabId}] resize (observer):`, { cols: term.cols, rows: term.rows })
         fitTerminal(term, resize)
@@ -316,6 +319,7 @@ export default function BaseTerminal({
       resizeTimeout = setTimeout(() => {
         console.log(`[${config.logPrefix} ${tabId}] resize (initial):`, { cols: terminal!.cols, rows: terminal!.rows })
         fitTerminal(terminal!, resize)
+        initialResizeDone = true
       }, 100)
     }
 
