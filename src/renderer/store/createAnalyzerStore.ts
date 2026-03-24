@@ -19,9 +19,8 @@ export interface AnalyzerHistoryEntry {
   timestamp: number
   kind: 'analyzer' | 'title'
   bufferText: string
-  state: ActivityState
-  reason: string
   response: string
+  error?: string
 }
 
 export interface AnalyzerState {
@@ -169,9 +168,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
       if (dataVersion !== requestVersion) {
         console.debug('[terminal-analyzer] discarding stale response')
-        const discardedState = 'state' in result ? result.state as ActivityState : 'error' as ActivityState
-        const discardedReason = 'state' in result ? `[discarded] ${result.reason}` : 'error' in result ? `[discarded] ${result.error}` : '[discarded] no state in result'
-        history.push({ timestamp: Date.now(), kind: 'analyzer', bufferText: buffer, state: discardedState, reason: discardedReason, response: JSON.stringify(result) })
+        history.push({ timestamp: Date.now(), kind: 'analyzer', bufferText: buffer, response: JSON.stringify(result), error: '[discarded]' })
         if (history.length > MAX_HISTORY) history.shift()
         inFlightBuffer = null
         store.setState({ analyzing: false })
@@ -189,20 +186,20 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         inFlightBuffer = null
         store.setState({ analyzing: false })
         updateAiState(result.state as ActivityState, result.reason)
-        history.push({ timestamp: Date.now(), kind: 'analyzer', bufferText: buffer, state: result.state as ActivityState, reason: result.reason, response: JSON.stringify(result) })
+        history.push({ timestamp: Date.now(), kind: 'analyzer', bufferText: buffer, response: JSON.stringify(result) })
         if (history.length > MAX_HISTORY) history.shift()
       } else if ('error' in result) {
         console.error('[terminal-analyzer] error:', result.error)
         inFlightBuffer = null
         store.setState({ analyzing: false })
         updateAiState('error')
-        history.push({ timestamp: Date.now(), kind: 'analyzer', bufferText: buffer, state: 'error', reason: result.error, response: JSON.stringify(result) })
+        history.push({ timestamp: Date.now(), kind: 'analyzer', bufferText: buffer, response: JSON.stringify(result), error: result.error })
         if (history.length > MAX_HISTORY) history.shift()
       } else {
         console.debug('[terminal-analyzer] ignored (no state in result)')
         inFlightBuffer = null
         store.setState({ analyzing: false })
-        history.push({ timestamp: Date.now(), kind: 'analyzer', bufferText: buffer, state: 'error', reason: '[unexpected] no state in result', response: JSON.stringify(result) })
+        history.push({ timestamp: Date.now(), kind: 'analyzer', bufferText: buffer, response: JSON.stringify(result), error: '[unexpected] no state in result' })
         if (history.length > MAX_HISTORY) history.shift()
       }
 
@@ -215,7 +212,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       console.error('[terminal-analyzer] LLM call failed:', err)
       store.setState({ analyzing: false })
       updateAiState('error')
-      history.push({ timestamp: Date.now(), kind: 'analyzer', bufferText: buffer, state: 'error', reason: `[exception] ${err instanceof Error ? err.message : String(err)}`, response: '' })
+      history.push({ timestamp: Date.now(), kind: 'analyzer', bufferText: buffer, response: '', error: err instanceof Error ? err.message : String(err) })
       if (history.length > MAX_HISTORY) history.shift()
       if (pendingAnalyze) {
         pendingAnalyze = false
@@ -304,11 +301,11 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
           deps.updateMetadata('description', result.description)
         }
       }
-      history.push({ timestamp: Date.now(), kind: 'title', bufferText: buffer, state: 'idle', reason: '[title] generated', response: JSON.stringify(result) })
+      history.push({ timestamp: Date.now(), kind: 'title', bufferText: buffer, response: JSON.stringify(result) })
       if (history.length > MAX_HISTORY) history.shift()
     } catch (err) {
       console.error('[analyzer] title generation failed:', err)
-      history.push({ timestamp: Date.now(), kind: 'title', bufferText: buffer, state: 'error', reason: `[title] ${err instanceof Error ? err.message : String(err)}`, response: '' })
+      history.push({ timestamp: Date.now(), kind: 'title', bufferText: buffer, response: '', error: err instanceof Error ? err.message : String(err) })
       if (history.length > MAX_HISTORY) history.shift()
     }
   }

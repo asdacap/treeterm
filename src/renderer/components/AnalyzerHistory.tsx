@@ -1,15 +1,10 @@
 import { useState } from 'react'
-import type { ApplicationRenderProps, ActivityState } from '../types'
+import type { ApplicationRenderProps } from '../types'
 import type { AnalyzerHistoryEntry } from '../store/createAnalyzerStore'
 
-const STATE_COLORS: Record<ActivityState, string> = {
-  idle: '#666',
-  working: '#2472c8',
-  user_input_required: '#e5e510',
-  permission_request: '#cd6600',
-  safe_permission_requested: '#0dbc79',
-  completed: '#23d18b',
-  error: '#f44747'
+const KIND_COLORS: Record<string, string> = {
+  analyzer: '#1a5276',
+  title: '#6a0dad'
 }
 
 interface AnalyzerHistoryState {
@@ -124,7 +119,7 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
                     </span>
                     <span
                       style={{
-                        background: entry.kind === 'title' ? '#6a0dad' : '#1a5276',
+                        background: KIND_COLORS[entry.kind] ?? '#555',
                         color: '#fff',
                         padding: '1px 6px',
                         borderRadius: 3,
@@ -134,21 +129,23 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
                     >
                       {entry.kind}
                     </span>
-                    <span
-                      style={{
-                        background: STATE_COLORS[entry.state],
-                        color: '#fff',
-                        padding: '1px 6px',
-                        borderRadius: 3,
-                        fontSize: 11,
-                        fontWeight: 500
-                      }}
-                    >
-                      {entry.state}
-                    </span>
+                    {entry.error && (
+                      <span
+                        style={{
+                          background: '#f44747',
+                          color: '#fff',
+                          padding: '1px 6px',
+                          borderRadius: 3,
+                          fontSize: 11,
+                          fontWeight: 500
+                        }}
+                      >
+                        error
+                      </span>
+                    )}
                   </div>
-                  {entry.reason && (
-                    <div style={{ color: '#aaa', fontSize: 12 }}>{entry.reason}</div>
+                  {entry.error && (
+                    <div style={{ color: '#f44747', fontSize: 12 }}>{entry.error}</div>
                   )}
                   <pre
                     onClick={() => toggleExpand(entries.length - 1 - i)}

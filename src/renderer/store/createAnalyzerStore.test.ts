@@ -598,8 +598,7 @@ describe('createAnalyzerStore', () => {
       const history = store.getState().getHistory()
       expect(history).toHaveLength(1)
       expect(history[0].kind).toBe('analyzer')
-      expect(history[0].state).toBe('idle')
-      expect(history[0].reason).toBe('prompt visible')
+      expect(history[0].error).toBeUndefined()
       expect(history[0].response).toBe(JSON.stringify({ state: 'idle', reason: 'prompt visible' }))
 
       store.getState().stop()
@@ -628,8 +627,7 @@ describe('createAnalyzerStore', () => {
       const history = store.getState().getHistory()
       expect(history).toHaveLength(1)
       expect(history[0].kind).toBe('analyzer')
-      expect(history[0].state).toBe('error')
-      expect(history[0].reason).toBe('API error')
+      expect(history[0].error).toBe('API error')
       expect(history[0].response).toBe(JSON.stringify({ error: 'API error' }))
 
       store.getState().stop()
@@ -658,8 +656,7 @@ describe('createAnalyzerStore', () => {
       const history = store.getState().getHistory()
       expect(history).toHaveLength(1)
       expect(history[0].kind).toBe('analyzer')
-      expect(history[0].state).toBe('error')
-      expect(history[0].reason).toBe('[exception] Network error')
+      expect(history[0].error).toBe('Network error')
       expect(history[0].response).toBe('')
 
       store.getState().stop()
@@ -688,8 +685,7 @@ describe('createAnalyzerStore', () => {
       const history = store.getState().getHistory()
       expect(history).toHaveLength(1)
       expect(history[0].kind).toBe('analyzer')
-      expect(history[0].state).toBe('error')
-      expect(history[0].reason).toBe('[unexpected] no state in result')
+      expect(history[0].error).toBe('[unexpected] no state in result')
       expect(history[0].response).toBe(JSON.stringify({ something: 'unexpected' }))
 
       store.getState().stop()
@@ -716,13 +712,12 @@ describe('createAnalyzerStore', () => {
 
       await vi.waitFor(() => {
         const history = store.getState().getHistory()
-        expect(history.some(h => h.reason === '[title] generated')).toBe(true)
+        expect(history.some(h => h.kind === 'title')).toBe(true)
       })
 
       const history = store.getState().getHistory()
-      const titleEntry = history.find(h => h.reason === '[title] generated')!
-      expect(titleEntry.kind).toBe('title')
-      expect(titleEntry.state).toBe('idle')
+      const titleEntry = history.find(h => h.kind === 'title')!
+      expect(titleEntry.error).toBeUndefined()
       expect(titleEntry.response).toBe(JSON.stringify({ title: 'Test Title', description: 'Test Description' }))
 
       store.getState().stop()
@@ -752,13 +747,12 @@ describe('createAnalyzerStore', () => {
 
       await vi.waitFor(() => {
         const history = store.getState().getHistory()
-        expect(history.some(h => h.reason === '[title] Title API error')).toBe(true)
+        expect(history.some(h => h.kind === 'title' && h.error)).toBe(true)
       })
 
       const history = store.getState().getHistory()
-      const titleEntry = history.find(h => h.reason === '[title] Title API error')!
-      expect(titleEntry.kind).toBe('title')
-      expect(titleEntry.state).toBe('error')
+      const titleEntry = history.find(h => h.kind === 'title' && h.error)!
+      expect(titleEntry.error).toBe('Title API error')
       expect(titleEntry.response).toBe('')
 
       store.getState().stop()
