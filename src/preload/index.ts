@@ -4,6 +4,7 @@ import { IpcClient } from './ipc-client'
 
 type DataCallback = (data: string) => void
 const dataListeners = new Map<string, DataCallback[]>()
+const dataBuffer = new Map<string, string[]>()
 
 type ExitCallback = (exitCode: number) => void
 const exitListeners = new Map<string, ExitCallback[]>()
@@ -19,6 +20,11 @@ client.onPtyData((id, data) => {
   const listeners = dataListeners.get(id)
   if (listeners) {
     listeners.forEach((cb) => cb(data))
+  } else {
+    // Buffer data until a listener registers (covers the gap between
+    // main forwarding live data and renderer subscribing after resize debounce)
+    if (!dataBuffer.has(id)) dataBuffer.set(id, [])
+    dataBuffer.get(id)!.push(data)
   }
 })
 
@@ -28,6 +34,7 @@ client.onPtyExit((id, exitCode) => {
     listeners.forEach((cb) => cb(exitCode))
   }
   dataListeners.delete(id)
+  dataBuffer.delete(id)
   exitListeners.delete(id)
   resizeEventListeners.delete(id)
 })
@@ -195,6 +202,15 @@ contextBridge.exposeInMainWorld('electron', {
         dataListeners.set(id, [])
       }
       dataListeners.get(id)!.push(callback)
+
+      // Flush any data that arrived before the listener registered
+      const buffered = dataBuffer.get(id)
+      if (buffered) {
+        dataBuffer.delete(id)
+        for (const data of buffered) {
+          callback(data)
+        }
+      }
 
       // Return unsubscribe function
       return () => {
