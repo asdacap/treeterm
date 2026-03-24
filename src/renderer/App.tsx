@@ -11,6 +11,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import AppErrorFallback from './components/AppErrorFallback'
 import { useAppStore } from './store/app'
 import { useNavigationStore } from './store/navigation'
+import { useSettingsStore } from './store/settings'
 import { STTApiContext } from './contexts/STTApiContext'
 
 // One-time migration: clear localStorage since daemon is now source of truth
@@ -20,6 +21,7 @@ if (typeof localStorage !== 'undefined') {
 
 export default function App() {
   console.log('[App] Component rendering')
+  const isSettingsLoaded = useSettingsStore(s => s.isLoaded)
   const [treeWidth, setTreeWidth] = useState(250)
   const [isResizing, setIsResizing] = useState(false)
 
@@ -95,6 +97,14 @@ export default function App() {
   const handleMouseUp = useCallback(() => {
     setIsResizing(false)
   }, [])
+
+  if (!isSettingsLoaded) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--text-secondary)' }}>
+        <span>Loading settings…</span>
+      </div>
+    )
+  }
 
   return (
     <ErrorBoundary fallback={<AppErrorFallback />}>
