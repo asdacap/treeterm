@@ -288,7 +288,7 @@ export default function SessionPanel({
                 toggleExpand(ws.id)
               }}
             >
-              {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             </span>
           ) : (
             <span className="tree-item-expand-placeholder" />
@@ -310,7 +310,7 @@ export default function SessionPanel({
                 title="Fork"
                 onClick={(e) => { e.stopPropagation(); handleQuickFork(ws.id) }}
               >
-                <GitFork size={14} />
+                <GitFork size={16} />
               </button>
             )}
 
