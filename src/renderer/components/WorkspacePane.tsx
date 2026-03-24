@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState, useRef, useMemo } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Loader2 } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { SessionState } from '../store/createSessionStore'
@@ -32,6 +32,8 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     createWorktreeFromBranch,
     createWorktreeFromRemote,
     setActiveWorkspace,
+    workspaceLoadStates,
+    dismissFailedWorkspace,
   } = useStore(sessionStore)
   const { enterWorkspaceFocus } = usePrefixModeStore()
   const applications = useAppStore((s) => s.applications)
@@ -40,6 +42,8 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
 
   const activeWorkspace = activeWorkspaceId ? workspaces[activeWorkspaceId] : null
   const activeHandle = activeWorkspaceId ? (workspaceStores[activeWorkspaceId] ?? null) : null
+  const activeLoadState = activeWorkspaceId ? workspaceLoadStates[activeWorkspaceId] : undefined
+  const outputRef = useRef<HTMLPreElement>(null)
 
   // Dialog state
   const [showCreateChildDialog, setShowCreateChildDialog] = useState(false)
@@ -102,6 +106,14 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     setIsEditingDescription(false)
   }, [activeWorkspaceId])
 
+  // Auto-scroll loading output
+  const outputLength = activeLoadState?.status === 'loading' ? activeLoadState.output.length : 0
+  useEffect(() => {
+    if (outputRef.current) {
+      outputRef.current.scrollTop = outputRef.current.scrollHeight
+    }
+  }, [outputLength])
+
   const handleNewTab = useCallback(
     (applicationId: string) => {
       if (!activeHandle) return
@@ -150,10 +162,10 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   }, [workspaces])
 
   // Fork handler - create new worktree
-  const handleCreateChildSubmit = async (name: string, isDetached: boolean, settings?: import('../types').WorktreeSettings, description?: string) => {
+  const handleCreateChildSubmit = (name: string, isDetached: boolean, settings?: import('../types').WorktreeSettings, description?: string) => {
     if (!activeWorkspaceId) return { success: false, error: 'No workspace selected' }
 
-    const result = await addChildWorkspace(activeWorkspaceId, name, isDetached, settings, description)
+    const result = addChildWorkspace(activeWorkspaceId, name, isDetached, settings, description)
     if (result.success) {
       setShowCreateChildDialog(false)
     }
@@ -172,11 +184,11 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   }
 
   // Create worktree from existing branch handler
-  const handleCreateFromBranchSubmit = async (branch: string, isDetached: boolean, settings?: import('../types').WorktreeSettings, description?: string) => {
+  const handleCreateFromBranchSubmit = (branch: string, isDetached: boolean, settings?: import('../types').WorktreeSettings, description?: string) => {
     console.log('[WorkspacePane] handleCreateFromBranchSubmit called:', { branch, isDetached, activeWorkspaceId })
     if (!activeWorkspaceId) return { success: false, error: 'No workspace selected' }
 
-    const result = await createWorktreeFromBranch(activeWorkspaceId, branch, isDetached, settings, description)
+    const result = createWorktreeFromBranch(activeWorkspaceId, branch, isDetached, settings, description)
     console.log('[WorkspacePane] handleCreateFromBranchSubmit result:', result)
     if (result.success) {
       setShowCreateChildDialog(false)
@@ -185,11 +197,11 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   }
 
   // Create worktree from remote branch handler
-  const handleCreateFromRemoteSubmit = async (remoteBranch: string, isDetached: boolean, settings?: import('../types').WorktreeSettings, description?: string) => {
+  const handleCreateFromRemoteSubmit = (remoteBranch: string, isDetached: boolean, settings?: import('../types').WorktreeSettings, description?: string) => {
     console.log('[WorkspacePane] handleCreateFromRemoteSubmit called:', { remoteBranch, isDetached, activeWorkspaceId })
     if (!activeWorkspaceId) return { success: false, error: 'No workspace selected' }
 
-    const result = await createWorktreeFromRemote(activeWorkspaceId, remoteBranch, isDetached, settings, description)
+    const result = createWorktreeFromRemote(activeWorkspaceId, remoteBranch, isDetached, settings, description)
     console.log('[WorkspacePane] handleCreateFromRemoteSubmit result:', result)
     if (result.success) {
       setShowCreateChildDialog(false)
@@ -520,9 +532,35 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                 )}
               </div>
             </div>
+            {activeLoadState?.status === 'loading' && (
+              <div className="workspace-loading">
+                <div className="workspace-loading-header">
+                  <Loader2 size={16} className="spinning" />
+                  <span>{activeLoadState.message}</span>
+                </div>
+                {activeLoadState.output.length > 0 && (
+                  <pre className="workspace-loading-output" ref={outputRef}>
+                    {activeLoadState.output.join('')}
+                  </pre>
+                )}
+              </div>
+            )}
+            {activeLoadState?.status === 'error' && (
+              <div className="workspace-load-error">
+                <div className="workspace-load-error-content">
+                  <h3>Failed to create workspace</h3>
+                  <p className="workspace-load-error-message">{activeLoadState.error}</p>
+                  <div className="workspace-load-error-actions">
+                    <button className="workspace-action-btn" onClick={() => dismissFailedWorkspace(activeWorkspaceId!)}>
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
-        <div className="workspace-terminal" style={{ display: activeWorkspace ? 'flex' : 'none' }}>
+        <div className="workspace-terminal" style={{ display: activeWorkspace && !activeLoadState ? 'flex' : 'none' }}>
           {Object.entries(workspaceStores).map(([wsId, handle]) => {
             const ws = workspaces[wsId]
             if (!handle || !ws) return null

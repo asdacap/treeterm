@@ -4,6 +4,8 @@ import type { SessionDeps, SessionState } from './createSessionStore'
 import type { Workspace, Application, GitInfo } from '../types'
 import type { StoreApi } from 'zustand'
 
+const flushPromises = () => new Promise(r => setTimeout(r, 0))
+
 function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
   return {
     git: {
@@ -223,7 +225,8 @@ describe('createSessionStore', () => {
     })
 
     it('addWorkspace queries git info', async () => {
-      await store.getState().addWorkspace('/my/repo')
+      store.getState().addWorkspace('/my/repo')
+      await flushPromises()
       expect(deps.git.getInfo).toHaveBeenCalledWith('/my/repo')
       const ws = Object.values(store.getState().workspaces)[0]
       expect(ws.isGitRepo).toBe(true)
@@ -269,12 +272,14 @@ describe('createSessionStore', () => {
     let parentId: string
 
     beforeEach(async () => {
-      parentId = await store.getState().addWorkspace('/repo')
+      parentId = store.getState().addWorkspace('/repo')
+      await flushPromises()
     })
 
     it('addChildWorkspace creates worktree child', async () => {
-      const result = await store.getState().addChildWorkspace(parentId, 'feature')
+      const result = store.getState().addChildWorkspace(parentId, 'feature')
       expect(result).toEqual({ success: true })
+      await flushPromises()
       expect(deps.git.createWorktree).toHaveBeenCalled()
 
       const workspaces = store.getState().workspaces
@@ -291,15 +296,20 @@ describe('createSessionStore', () => {
 
     it('addChildWorkspace fails when parent is not a git repo', async () => {
       vi.mocked(deps.git.getInfo).mockResolvedValue({ isRepo: false, branch: null, rootPath: null })
-      const id = await store.getState().addWorkspace('/no-git')
-      const result = await store.getState().addChildWorkspace(id, 'feat')
+      const id = store.getState().addWorkspace('/no-git')
+      await flushPromises()
+      const result = store.getState().addChildWorkspace(id, 'feat')
       expect(result).toEqual({ success: false, error: 'Parent workspace is not a git repository' })
     })
 
-    it('addChildWorkspace fails when git operation fails', async () => {
+    it('addChildWorkspace sets error state when git operation fails', async () => {
       vi.mocked(deps.git.createWorktree).mockResolvedValue({ success: false, error: 'git error' })
-      const result = await store.getState().addChildWorkspace(parentId, 'feat')
-      expect(result).toEqual({ success: false, error: 'git error' })
+      const result = store.getState().addChildWorkspace(parentId, 'feat')
+      expect(result).toEqual({ success: true })
+      await flushPromises()
+      const loadStates = store.getState().workspaceLoadStates
+      const errorState = Object.values(loadStates).find(s => s.status === 'error')
+      expect(errorState).toEqual({ status: 'error', error: 'git error' })
     })
 
     it('adoptExistingWorktree adds existing worktree', async () => {
@@ -321,22 +331,25 @@ describe('createSessionStore', () => {
     })
 
     it('createWorktreeFromBranch creates child from branch', async () => {
-      const result = await store.getState().createWorktreeFromBranch(parentId, 'feature/my-feat', false)
+      const result = store.getState().createWorktreeFromBranch(parentId, 'feature/my-feat', false)
       expect(result).toEqual({ success: true })
-      expect(deps.git.createWorktreeFromBranch).toHaveBeenCalledWith('/repo', 'feature/my-feat', 'my-feat')
+      await flushPromises()
+      expect(deps.git.createWorktreeFromBranch).toHaveBeenCalledWith('/repo', 'feature/my-feat', 'my-feat', expect.any(String))
     })
 
     it('createWorktreeFromBranch fails for non-git parent', async () => {
       vi.mocked(deps.git.getInfo).mockResolvedValue({ isRepo: false, branch: null, rootPath: null })
-      const id = await store.getState().addWorkspace('/no-git')
-      const result = await store.getState().createWorktreeFromBranch(id, 'feat', false)
+      const id = store.getState().addWorkspace('/no-git')
+      await flushPromises()
+      const result = store.getState().createWorktreeFromBranch(id, 'feat', false)
       expect(result).toEqual({ success: false, error: 'Parent workspace is not a git repository' })
     })
 
     it('createWorktreeFromRemote creates child from remote branch', async () => {
-      const result = await store.getState().createWorktreeFromRemote(parentId, 'origin/feature', false)
+      const result = store.getState().createWorktreeFromRemote(parentId, 'origin/feature', false)
       expect(result).toEqual({ success: true })
-      expect(deps.git.createWorktreeFromRemote).toHaveBeenCalledWith('/repo', 'origin/feature', 'feature')
+      await flushPromises()
+      expect(deps.git.createWorktreeFromRemote).toHaveBeenCalledWith('/repo', 'origin/feature', 'feature', expect.any(String))
     })
 
     it('createWorktreeFromRemote fails for non-existent parent', async () => {
@@ -350,8 +363,10 @@ describe('createSessionStore', () => {
     let childId: string
 
     beforeEach(async () => {
-      parentId = await store.getState().addWorkspace('/repo')
-      await store.getState().addChildWorkspace(parentId, 'child')
+      parentId = store.getState().addWorkspace('/repo')
+      await flushPromises()
+      store.getState().addChildWorkspace(parentId, 'child')
+      await flushPromises()
       const childWs = Object.values(store.getState().workspaces).find((ws) => ws.name === 'child')!
       childId = childWs.id
     })
@@ -438,8 +453,10 @@ describe('createSessionStore', () => {
     let childId: string
 
     beforeEach(async () => {
-      parentId = await store.getState().addWorkspace('/repo')
-      await store.getState().addChildWorkspace(parentId, 'child')
+      parentId = store.getState().addWorkspace('/repo')
+      await flushPromises()
+      store.getState().addChildWorkspace(parentId, 'child')
+      await flushPromises()
       const childWs = Object.values(store.getState().workspaces).find((ws) => ws.name === 'child')!
       childId = childWs.id
     })
@@ -493,10 +510,12 @@ describe('createSessionStore', () => {
 
   describe('quickForkWorkspace', () => {
     it('creates a new child workspace with generated name', async () => {
-      const parentId = await store.getState().addWorkspace('/repo')
+      const parentId = store.getState().addWorkspace('/repo')
+      await flushPromises()
       const result = await store.getState().quickForkWorkspace(parentId)
       expect(result.success).toBe(true)
       expect(deps.git.listLocalBranches).toHaveBeenCalled()
+      await flushPromises()
       expect(deps.git.createWorktree).toHaveBeenCalled()
     })
 
@@ -507,7 +526,8 @@ describe('createSessionStore', () => {
 
     it('fails when workspace has no git root', async () => {
       vi.mocked(deps.git.getInfo).mockResolvedValue({ isRepo: false, branch: null, rootPath: null })
-      const id = await store.getState().addWorkspace('/no-git')
+      const id = store.getState().addWorkspace('/no-git')
+      await flushPromises()
       const result = await store.getState().quickForkWorkspace(id)
       expect(result).toEqual({ success: false, error: 'Workspace has no git root path' })
     })
@@ -515,7 +535,8 @@ describe('createSessionStore', () => {
 
   describe('syncToDaemon', () => {
     it('syncs session to daemon', async () => {
-      await store.getState().addWorkspace('/test')
+      store.getState().addWorkspace('/test')
+      await flushPromises()
       await store.getState().syncToDaemon()
       expect(deps.sessionApi.update).toHaveBeenCalled()
     })
@@ -554,14 +575,16 @@ describe('createSessionStore', () => {
   describe('syncToDaemon error handling', () => {
     it('handles sync failure gracefully', async () => {
       vi.mocked(deps.sessionApi.update).mockResolvedValue({ success: false, error: 'sync failed' })
-      await store.getState().addWorkspace('/test')
+      store.getState().addWorkspace('/test')
+      await flushPromises()
       await store.getState().syncToDaemon()
       // Should not throw
     })
 
     it('handles sync exception gracefully', async () => {
       vi.mocked(deps.sessionApi.update).mockRejectedValue(new Error('network error'))
-      await store.getState().addWorkspace('/test')
+      store.getState().addWorkspace('/test')
+      await flushPromises()
       await store.getState().syncToDaemon()
       // Should not throw
     })
@@ -587,7 +610,8 @@ describe('createSessionStore', () => {
 
     it('handleExternalUpdate applies external changes', async () => {
       // First add a workspace
-      await store.getState().addWorkspace('/existing')
+      store.getState().addWorkspace('/existing')
+      await flushPromises()
       const existingId = Object.keys(store.getState().workspaces)[0]
 
       const daemonSession = {

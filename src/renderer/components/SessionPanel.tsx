@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
-import { GitFork, GitBranch, Folder, ChevronDown, ChevronRight } from 'lucide-react'
+import { GitFork, GitBranch, Folder, ChevronDown, ChevronRight, Loader2, AlertCircle } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { SessionState } from '../store/createSessionStore'
@@ -39,6 +39,7 @@ export default function SessionPanel({
     createWorktreeFromRemote,
     quickForkWorkspace,
     setActiveWorkspace,
+    workspaceLoadStates,
   } = useStore(sessionStore)
   const { activeView, setActiveView } = useNavigationStore()
   const {
@@ -119,8 +120,8 @@ export default function SessionPanel({
     setIsOpenWorkspaceDialogOpen(true)
   }
 
-  const handleOpenWorkspaceSubmit = async (path: string, settings?: WorktreeSettings) => {
-    await addWorkspace(path, { settings })
+  const handleOpenWorkspaceSubmit = (path: string, settings?: WorktreeSettings) => {
+    addWorkspace(path, { settings })
     setIsOpenWorkspaceDialogOpen(false)
   }
 
@@ -156,10 +157,10 @@ export default function SessionPanel({
     }
   }
 
-  const handleCreateChildSubmit = async (name: string, isDetached: boolean, settings?: WorktreeSettings) => {
+  const handleCreateChildSubmit = (name: string, isDetached: boolean, settings?: WorktreeSettings) => {
     if (!createChildDialogParentId) return { success: false, error: 'No parent selected' }
 
-    const result = await addChildWorkspace(createChildDialogParentId, name, isDetached, settings)
+    const result = addChildWorkspace(createChildDialogParentId, name, isDetached, settings)
     if (result.success) {
       setExpanded((prev) => new Set([...Array.from(prev), createChildDialogParentId]))
       setCreateChildDialogParentId(null)
@@ -189,10 +190,10 @@ export default function SessionPanel({
     return result
   }
 
-  const handleCreateFromBranchSubmit = async (branch: string, isDetached: boolean, settings?: WorktreeSettings) => {
+  const handleCreateFromBranchSubmit = (branch: string, isDetached: boolean, settings?: WorktreeSettings) => {
     if (!createChildDialogParentId) return { success: false, error: 'No parent selected' }
 
-    const result = await createWorktreeFromBranch(createChildDialogParentId, branch, isDetached, settings)
+    const result = createWorktreeFromBranch(createChildDialogParentId, branch, isDetached, settings)
     if (result.success) {
       setExpanded((prev) => new Set([...Array.from(prev), createChildDialogParentId]))
       setCreateChildDialogParentId(null)
@@ -200,10 +201,10 @@ export default function SessionPanel({
     return result
   }
 
-  const handleCreateFromRemoteSubmit = async (remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings) => {
+  const handleCreateFromRemoteSubmit = (remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings) => {
     if (!createChildDialogParentId) return { success: false, error: 'No parent selected' }
 
-    const result = await createWorktreeFromRemote(createChildDialogParentId, remoteBranch, isDetached, settings)
+    const result = createWorktreeFromRemote(createChildDialogParentId, remoteBranch, isDetached, settings)
     if (result.success) {
       setExpanded((prev) => new Set([...Array.from(prev), createChildDialogParentId]))
       setCreateChildDialogParentId(null)
@@ -292,7 +293,11 @@ export default function SessionPanel({
           ) : (
             <span className="tree-item-expand-placeholder" />
           )}
-          <span className="tree-item-icon">{ws.isWorktree ? <GitBranch size={16} /> : <Folder size={16} />}</span>
+          <span className="tree-item-icon">
+            {workspaceLoadStates[ws.id]?.status === 'loading' ? <Loader2 size={16} className="spinning" /> :
+             workspaceLoadStates[ws.id]?.status === 'error' ? <AlertCircle size={16} className="tree-item-error-icon" /> :
+             ws.isWorktree ? <GitBranch size={16} /> : <Folder size={16} />}
+          </span>
           <span className="tree-item-name">
             {ws.metadata?.displayName || ws.name}
           </span>
