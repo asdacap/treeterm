@@ -215,6 +215,18 @@ export class DaemonPtyManager {
       if (process.platform !== 'win32') args = ['-l']
     }
 
+    log.info({
+      shell,
+      args,
+      envShell: env.SHELL,
+      envTerm: env.TERM,
+      envPS1: env.PS1,
+      envPromptCommand: env.PROMPT_COMMAND,
+      envBashEnv: env.BASH_ENV,
+      envHome: env.HOME,
+      envLang: env.LANG,
+    }, 'PTY spawn environment')
+
     const ptyProcess = pty.spawn(shell, args, {
       name: 'xterm-256color',
       cols,
@@ -238,8 +250,22 @@ export class DaemonPtyManager {
       sandbox: config.sandbox
     }
 
+    // Debug: log first few data chunks to see raw PTY output including prompt
+    let debugChunks = 0
     ptyProcess.onData((data) => {
       session.lastActivity = Date.now()
+      if (debugChunks < 5) {
+        debugChunks++
+        const hex = Buffer.from(data).toString('hex')
+        const printable = data.replace(/[\x00-\x1f]/g, (c: string) => {
+          const code = c.charCodeAt(0)
+          if (code === 0x1b) return '\\x1b'
+          if (code === 0x0a) return '\\n'
+          if (code === 0x0d) return '\\r'
+          return `\\x${code.toString(16).padStart(2, '0')}`
+        })
+        log.info({ sessionId: id, chunk: debugChunks, printable, hex: hex.slice(0, 400) }, 'PTY raw output')
+      }
       this.appendScrollback(session, data)
       this.broadcastData(id, data)
     })
