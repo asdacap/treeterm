@@ -50,8 +50,10 @@ export function MonacoDiffViewer({
   const diffEditorRef = useRef<editor.IStandaloneDiffEditor | null>(null)
   const [lineChanges, setLineChanges] = useState<editor.ILineChange[] | null>(null)
   const [currentChangeIndex, setCurrentChangeIndex] = useState<number>(-1)
-  const [isSplitView, setIsSplitView] = useState<boolean>(true)
+  const [isSplitView, setIsSplitView] = useState<boolean>(false)
+  const [isWordWrap, setIsWordWrap] = useState<boolean>(true)
   const decorationsRef = useRef<{ original: string[]; modified: string[] }>({ original: [], modified: [] })
+  const changeHighlightRef = useRef<{ original: string[]; modified: string[] }>({ original: [], modified: [] })
   const viewZoneIdRef = useRef<string | null>(null)
   const [commentContainer, setCommentContainer] = useState<HTMLDivElement | null>(null)
   // Inline comment display zones
@@ -378,12 +380,49 @@ export function MonacoDiffViewer({
     }
   }, [inlineCommentInput])
 
+  // Highlight current change range
+  useEffect(() => {
+    if (!diffEditorRef.current) return
+
+    const modifiedEditor = diffEditorRef.current.getModifiedEditor()
+    const originalEditor = diffEditorRef.current.getOriginalEditor()
+
+    if (!lineChanges || lineChanges.length === 0 || currentChangeIndex < 0) {
+      changeHighlightRef.current.modified = modifiedEditor.deltaDecorations(changeHighlightRef.current.modified, [])
+      changeHighlightRef.current.original = originalEditor.deltaDecorations(changeHighlightRef.current.original, [])
+      return
+    }
+
+    const change = lineChanges[currentChangeIndex]
+    const highlightOpts = { isWholeLine: true, className: 'current-change-highlight' }
+
+    const modifiedDecs = change.modifiedStartLineNumber > 0 ? [{
+      range: { startLineNumber: change.modifiedStartLineNumber, startColumn: 1, endLineNumber: change.modifiedEndLineNumber || change.modifiedStartLineNumber, endColumn: 1 },
+      options: highlightOpts
+    }] : []
+
+    const originalDecs = change.originalStartLineNumber > 0 ? [{
+      range: { startLineNumber: change.originalStartLineNumber, startColumn: 1, endLineNumber: change.originalEndLineNumber || change.originalStartLineNumber, endColumn: 1 },
+      options: highlightOpts
+    }] : []
+
+    changeHighlightRef.current.modified = modifiedEditor.deltaDecorations(changeHighlightRef.current.modified, modifiedDecs)
+    changeHighlightRef.current.original = originalEditor.deltaDecorations(changeHighlightRef.current.original, originalDecs)
+  }, [currentChangeIndex, lineChanges])
+
   // Update editor options when split view changes
   useEffect(() => {
     if (diffEditorRef.current) {
       diffEditorRef.current.updateOptions({ renderSideBySide: isSplitView })
     }
   }, [isSplitView])
+
+  // Update editor options when word wrap changes
+  useEffect(() => {
+    if (diffEditorRef.current) {
+      diffEditorRef.current.updateOptions({ diffWordWrap: isWordWrap ? 'on' : 'off' } as Record<string, unknown>)
+    }
+  }, [isWordWrap])
 
   useEffect(() => {
     return () => {
@@ -425,6 +464,13 @@ export function MonacoDiffViewer({
         >
           {isSplitView ? '⇔' : '⇕'}
         </button>
+        <button
+          className={`monaco-diff-nav-btn monaco-diff-view-toggle${isWordWrap ? ' active' : ''}`}
+          onClick={() => setIsWordWrap(prev => !prev)}
+          title={isWordWrap ? 'Disable word wrap' : 'Enable word wrap'}
+        >
+          ↩
+        </button>
       </div>
       <div className="monaco-diff-editor-container">
         <DiffEditor
@@ -436,7 +482,7 @@ export function MonacoDiffViewer({
           onMount={handleEditorMount}
           options={{
             readOnly: true,
-            renderSideBySide: isSplitView,
+            renderSideBySide: false,
             ...({ renderSideBySideMinWidthOverride: 0 } as Record<string, unknown>),
             minimap: { enabled: false },
             lineNumbers: 'on',
@@ -448,7 +494,7 @@ export function MonacoDiffViewer({
               vertical: 'auto',
               horizontal: 'auto'
             },
-            diffWordWrap: 'off',
+            diffWordWrap: 'on',
             enableSplitViewResizing: true,
             renderIndicators: true,
             originalEditable: false,
