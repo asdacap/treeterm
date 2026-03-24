@@ -76,6 +76,9 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
     // Clean up any previous listener
     cleanupListener?.()
 
+    // Guard for non-browser environments (e.g. Node tests)
+    if (typeof window === 'undefined') return
+
     const handleKeyDown = (e: KeyboardEvent): void => {
       const { settings } = useSettingsStore.getState()
       const { prefixState, handlers } = get()

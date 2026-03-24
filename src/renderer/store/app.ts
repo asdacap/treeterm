@@ -4,6 +4,7 @@ import { createSessionStore } from './createSessionStore'
 import type { SessionState } from './createSessionStore'
 import { getUnmergedSubWorkspaces } from './createSessionStore'
 import { useSettingsStore } from './settings'
+import { useKeybindingStore } from './keybinding'
 import { useNavigationStore } from './navigation'
 import { useActivityStateStore } from './activityState'
 import { createTerminalApplication, createTerminalVariant } from '../../applications/terminal/renderer'
@@ -214,6 +215,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
     get().initializeApplications()
     useSettingsStore.getState().init(settingsApi, terminal.kill.bind(terminal))
+    useKeybindingStore.getState().init()
 
     // Fetch this window's UUID
     try {

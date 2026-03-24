@@ -3,9 +3,8 @@ import { ChevronDown, Loader2 } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { SessionState } from '../store/createSessionStore'
-import { usePrefixModeStore } from '../store/prefixMode'
 import { useAppStore } from '../store/app'
-import { usePrefixKeybindings } from '../hooks/usePrefixKeybindings'
+import { useKeybindingStore } from '../store/keybinding'
 import FlexLayoutPane from './FlexLayoutPane'
 import TabContentPortals from './TabContentPortals'
 import CreateChildDialog from './CreateChildDialog'
@@ -35,7 +34,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     workspaceLoadStates,
     dismissFailedWorkspace,
   } = useStore(sessionStore)
-  const { enterWorkspaceFocus } = usePrefixModeStore()
+  const enterWorkspaceFocus = useKeybindingStore(s => s.enterWorkspaceFocus)
   const applications = useAppStore((s) => s.applications)
   const getApplication = useCallback((id: string) => applications[id], [applications])
   const menuApplications = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
@@ -296,74 +295,43 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     return result
   }, [workspaces])
 
-  // Keybinding handlers for prefix mode hook
-  const keybindingHandlers = useMemo(
-    () => ({
-      newTab: handleNewDefaultTab,
-      closeTab: () => {
-        if (activeWorkspace?.activeTabId && tabs.length > 1) {
-          handleCloseTab(activeWorkspace.activeTabId)
-        }
-      },
-      nextTab: () => {
-        if (!activeWorkspace) return
-        const currentIndex = tabs.findIndex(
-          (t) => t.id === activeWorkspace.activeTabId
-        )
-        const newIndex = currentIndex < tabs.length - 1 ? currentIndex + 1 : 0
-        handleSelectTab(tabs[newIndex].id)
-      },
-      prevTab: () => {
-        if (!activeWorkspace) return
-        const currentIndex = tabs.findIndex(
-          (t) => t.id === activeWorkspace.activeTabId
-        )
-        const newIndex = currentIndex > 0 ? currentIndex - 1 : tabs.length - 1
-        handleSelectTab(tabs[newIndex].id)
-      },
-      workspaceFocus: () => {
-        const currentIndex = activeWorkspaceId
-          ? flattenedWorkspaceIds.indexOf(activeWorkspaceId)
-          : 0
-        enterWorkspaceFocus(flattenedWorkspaceIds, currentIndex >= 0 ? currentIndex : 0)
-      },
-      setActiveWorkspace
-    }),
-    [
-      activeWorkspace,
-      activeWorkspaceId,
-      flattenedWorkspaceIds,
-      handleNewDefaultTab,
-      handleCloseTab,
-      handleSelectTab,
-      enterWorkspaceFocus,
-      setActiveWorkspace
-    ]
-  )
-
-  // Use the prefix keybindings hook
-  usePrefixKeybindings(keybindingHandlers)
-
-  // Cmd+1-9: Switch to tab by number (keep hardcoded as these are standard)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!activeWorkspace) return
-
-      if ((e.metaKey || e.ctrlKey) && e.key >= '1' && e.key <= '9') {
-        e.preventDefault()
-        const index = parseInt(e.key) - 1
-        if (index < tabs.length) {
-          handleSelectTab(tabs[index].id)
-        }
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activeWorkspace, handleSelectTab])
-
   // Handle legacy workspaces - migrate terminals to tabs format
   const tabs = activeWorkspace ? getTabs(activeWorkspace) : []
+
+  // Set keybinding handlers — called every render so handlers always reference latest closures.
+  // This is a synchronous Zustand setter via getState(), so it doesn't trigger re-renders.
+  useKeybindingStore.getState().setHandlers({
+    newTab: handleNewDefaultTab,
+    closeTab: () => {
+      if (activeWorkspace?.activeTabId && tabs.length > 1) {
+        handleCloseTab(activeWorkspace.activeTabId)
+      }
+    },
+    nextTab: () => {
+      if (!activeWorkspace) return
+      const currentIndex = tabs.findIndex((t) => t.id === activeWorkspace.activeTabId)
+      const newIndex = currentIndex < tabs.length - 1 ? currentIndex + 1 : 0
+      handleSelectTab(tabs[newIndex].id)
+    },
+    prevTab: () => {
+      if (!activeWorkspace) return
+      const currentIndex = tabs.findIndex((t) => t.id === activeWorkspace.activeTabId)
+      const newIndex = currentIndex > 0 ? currentIndex - 1 : tabs.length - 1
+      handleSelectTab(tabs[newIndex].id)
+    },
+    workspaceFocus: () => {
+      const currentIndex = activeWorkspaceId
+        ? flattenedWorkspaceIds.indexOf(activeWorkspaceId) : 0
+      enterWorkspaceFocus(flattenedWorkspaceIds, currentIndex >= 0 ? currentIndex : 0)
+    },
+    setActiveWorkspace,
+    switchToTab: (index: number) => {
+      if (!activeWorkspace) return
+      if (index < tabs.length) {
+        handleSelectTab(tabs[index].id)
+      }
+    }
+  })
   const activeTabId = activeWorkspace?.activeTabId || tabs[0]?.id
 
   // Prompt description: show button next to description for AI harness tabs that haven't been prompted yet

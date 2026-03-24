@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { usePrefixModeStore } from '../store/prefixMode'
+import { useKeybindingStore } from '../store/keybinding'
 import { useSettingsStore } from '../store/settings'
 import type { Settings, Platform } from '../types'
 
@@ -67,15 +67,15 @@ function TimeoutProgress({ timeout, activatedAt }: { timeout: number; activatedA
 }
 
 export default function KeybindingOverlay({ platform }: { platform: Platform }): JSX.Element | null {
-  const { state, activatedAt, focusedWorkspaceIndex, workspaceIds } = usePrefixModeStore()
+  const { prefixState, activatedAt, focusedWorkspaceIndex, workspaceIds } = useKeybindingStore()
   const { settings } = useSettingsStore()
 
-  if (state === 'idle') {
+  if (prefixState === 'idle') {
     return null
   }
 
   // Workspace focus mode
-  if (state === 'workspace_focus') {
+  if (prefixState === 'workspace_focus') {
     return (
       <div className="keybinding-overlay">
         <div className="keybinding-overlay-header">

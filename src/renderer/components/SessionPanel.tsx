@@ -7,7 +7,7 @@ import type { StoreApi } from 'zustand'
 import type { SessionState } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import { useNavigationStore } from '../store/navigation'
-import { usePrefixModeStore } from '../store/prefixMode'
+import { useKeybindingStore } from '../store/keybinding'
 import { useSessionNamesStore } from '../store/sessionNames'
 import CreateChildDialog from './CreateChildDialog'
 import OpenWorkspaceDialog from './OpenWorkspaceDialog'
@@ -43,10 +43,10 @@ export default function SessionPanel({
   } = useStore(sessionStore)
   const { activeView, setActiveView } = useNavigationStore()
   const {
-    state: prefixState,
+    prefixState,
     focusedWorkspaceIndex,
     workspaceIds: focusedWorkspaceIds
-  } = usePrefixModeStore()
+  } = useKeybindingStore()
 
   const disconnectSession = useAppStore(s => s.disconnectSession)
 
