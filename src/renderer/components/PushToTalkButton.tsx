@@ -1,6 +1,8 @@
-import { useCallback, useState, useEffect } from 'react'
-import { usePushToTalk } from '../hooks/usePushToTalk'
+import { useCallback, useState, useEffect, useRef } from 'react'
 import { useSettingsStore } from '../store/settings'
+import { useSTTApi } from '../contexts/STTApiContext'
+import { createSTTProvider } from '../stt'
+import type { STTProvider } from '../stt/types'
 
 interface PushToTalkButtonProps {
   onTranscript: (text: string) => void
@@ -8,14 +10,29 @@ interface PushToTalkButtonProps {
 }
 
 export default function PushToTalkButton({ onTranscript, onSubmit }: PushToTalkButtonProps) {
+  const [isRecording, setIsRecording] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [interimText, setInterimText] = useState('')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const providerRef = useRef<STTProvider | null>(null)
   const { settings } = useSettingsStore()
-  const pushToTalkKey = settings.stt?.pushToTalkKey || 'Shift+Space'
+  const stt = useSTTApi()
+
+  useEffect(() => {
+    if (settings.stt.enabled) {
+      providerRef.current = createSTTProvider(
+        stt,
+        settings.stt.provider,
+        settings.stt.openaiApiKey,
+        settings.stt.localWhisperModelPath,
+        settings.stt.language
+      )
+    }
+  }, [settings.stt])
 
   const handleTranscript = useCallback(
     (text: string) => {
       onTranscript(text)
-      // Small delay then submit
       setTimeout(() => onSubmit(), 50)
     },
     [onTranscript, onSubmit]
@@ -24,22 +41,75 @@ export default function PushToTalkButton({ onTranscript, onSubmit }: PushToTalkB
   const handleError = useCallback((error: Error) => {
     console.error('Push-to-talk error:', error)
     setErrorMessage(error.message)
-    // Auto-hide after 5 seconds
     setTimeout(() => setErrorMessage(null), 5000)
   }, [])
 
-  // Clear error when starting a new recording
-  useEffect(() => {
-    if (errorMessage) {
-      const timer = setTimeout(() => setErrorMessage(null), 5000)
-      return () => clearTimeout(timer)
+  const startRecording = useCallback(async () => {
+    if (!providerRef.current) {
+      handleError(new Error('STT provider not initialized'))
+      return
     }
-  }, [errorMessage])
 
-  const { isRecording, isProcessing, startRecording, stopRecording, interimText } = usePushToTalk({
-    onTranscript: handleTranscript,
-    onError: handleError
-  })
+    if (!settings.stt.enabled) {
+      handleError(new Error('Push-to-talk is disabled in settings'))
+      return
+    }
+
+    try {
+      const available = await providerRef.current.isAvailable()
+      if (!available) {
+        handleError(
+          new Error(
+            `${providerRef.current.name} is not available. Please check your settings.`
+          )
+        )
+        return
+      }
+
+      setIsRecording(true)
+      setInterimText('')
+
+      if (providerRef.current.onInterimResult) {
+        providerRef.current.onInterimResult(setInterimText)
+      }
+
+      if (providerRef.current.onError) {
+        providerRef.current.onError((error) => {
+          console.error('Error during recording:', error)
+          setIsRecording(false)
+          setIsProcessing(false)
+          handleError(error)
+        })
+      }
+
+      await providerRef.current.startListening()
+    } catch (error) {
+      console.error('Failed to start recording:', error)
+      handleError(error as Error)
+      setIsRecording(false)
+    }
+  }, [settings.stt.enabled, handleError])
+
+  const stopRecording = useCallback(async () => {
+    if (!providerRef.current || !isRecording) return
+
+    try {
+      setIsRecording(false)
+      setIsProcessing(true)
+
+      const result = await providerRef.current.stopListening()
+
+      if (result.text) {
+        handleTranscript(result.text)
+      }
+    } catch (error) {
+      console.error('Failed to stop recording:', error)
+      handleError(error as Error)
+    } finally {
+      setIsProcessing(false)
+      setInterimText('')
+    }
+  }, [isRecording, handleTranscript, handleError])
 
   return (
     <>
@@ -55,14 +125,12 @@ export default function PushToTalkButton({ onTranscript, onSubmit }: PushToTalkB
         }}
         onClick={(e) => {
           e.preventDefault()
-          // If recording, clicking should stop it
           if (isRecording) stopRecording()
         }}
         onMouseLeave={() => {
-          // Stop recording if mouse leaves while recording
           if (isRecording) stopRecording()
         }}
-        title={isRecording ? 'Recording... (release to stop)' : `Push to talk (click and hold)`}
+        title={isRecording ? 'Recording... (release to stop)' : 'Push to talk (click and hold)'}
       >
         {isProcessing ? '⋯' : isRecording ? '🎤' : '🎙️'}
       </button>
