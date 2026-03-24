@@ -106,6 +106,20 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     setIsEditingDescription(false)
   }, [activeWorkspaceId])
 
+  // Focus active tab content after workspace switch (keyboard navigation)
+  useEffect(() => {
+    if (!activeWorkspaceId || !activeTabId) return
+    const timer = setTimeout(() => {
+      const slot = document.getElementById(`flexlayout-slot-${activeTabId}`)
+      if (!slot) return
+      const focusable = slot.querySelector<HTMLElement>(
+        '.xterm-helper-textarea, input, textarea, [tabindex]'
+      )
+      focusable?.focus()
+    }, 50)
+    return () => clearTimeout(timer)
+  }, [activeWorkspaceId])
+
   // Auto-scroll loading output
   const outputLength = activeLoadState?.status === 'loading' ? activeLoadState.output.length : 0
   useEffect(() => {
