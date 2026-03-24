@@ -11,7 +11,6 @@ export const analyzerHistoryApplication: Application = {
   canClose: true,
   canHaveMultiple: true,
   showInNewTabMenu: false,
-  keepAlive: false,
   displayStyle: 'flex',
   isDefault: false
 }

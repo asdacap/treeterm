@@ -51,7 +51,6 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
     canClose: true,
     canHaveMultiple: true,
     showInNewTabMenu: true,
-    keepAlive: true,
     displayStyle: 'flex',
     isDefault: instance.isDefault
   }

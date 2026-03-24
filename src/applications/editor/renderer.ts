@@ -36,7 +36,6 @@ export const editorApplication: Application<EditorState> = {
   canClose: true,
   canHaveMultiple: true,
   showInNewTabMenu: false,
-  keepAlive: false,
   displayStyle: 'flex',
   isDefault: false
 }

@@ -12,7 +12,6 @@ const testApp: Application = {
   canClose: true,
   canHaveMultiple: true,
   showInNewTabMenu: true,
-  keepAlive: true,
   displayStyle: 'flex',
   isDefault: true,
 }

@@ -67,7 +67,6 @@ function makeFakeApp(overrides: Partial<Application> = {}): Application {
     canClose: true,
     canHaveMultiple: true,
     showInNewTabMenu: true,
-    keepAlive: false,
     displayStyle: 'block',
     isDefault: false,
     render: () => null,

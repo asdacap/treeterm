@@ -23,7 +23,6 @@ export const commentsApplication: Application<CommentsState> = {
   canClose: true,
   canHaveMultiple: false,
   showInNewTabMenu: true,
-  keepAlive: false,
   displayStyle: 'flex',
   isDefault: false
 }

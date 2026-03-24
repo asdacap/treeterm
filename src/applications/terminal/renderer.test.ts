@@ -80,7 +80,6 @@ describe('Terminal Renderer', () => {
       expect(app.canClose).toBe(true)
       expect(app.canHaveMultiple).toBe(true)
       expect(app.showInNewTabMenu).toBe(true)
-      expect(app.keepAlive).toBe(true)
       expect(app.displayStyle).toBe('flex')
     })
 
@@ -348,7 +347,6 @@ describe('Terminal Renderer', () => {
       expect(variant.canClose).toBe(true)
       expect(variant.canHaveMultiple).toBe(true)
       expect(variant.showInNewTabMenu).toBe(true)
-      expect(variant.keepAlive).toBe(true)
       expect(variant.displayStyle).toBe('flex')
     })
 

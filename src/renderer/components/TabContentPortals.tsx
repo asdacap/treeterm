@@ -15,11 +15,11 @@ interface TabContentPortalsProps {
 }
 
 /**
- * Renders all tab content as sibling divs (keepAlive pattern),
- * then portals visible tabs into their FlexLayout slot elements.
+ * Renders tab content, portaling visible tabs into their FlexLayout slot elements.
  *
  * Visibility is determined by portal slot presence in the DOM —
  * FlexLayout creates these slots when a tab is selected/visible.
+ * Tabs in inactive workspaces are unmounted and remounted when reopened.
  */
 export default function TabContentPortals({ sessionStore, activeWorkspaceId }: TabContentPortalsProps) {
   const workspaces = useStore(sessionStore, s => s.workspaces)
@@ -108,14 +108,8 @@ export default function TabContentPortals({ sessionStore, activeWorkspaceId }: T
             return createPortal(content, portalTarget, `${workspace.id}-${tab.id}`)
           }
 
-          // Render hidden for tabs in inactive workspaces
-          if (!isActiveWorkspace) {
-            return (
-              <div key={`${workspace.id}-${tab.id}`} style={{ display: 'none' }}>
-                {content}
-              </div>
-            )
-          }
+          // Tabs in inactive workspaces are unmounted
+          if (!isActiveWorkspace) return null
 
           return null
         })

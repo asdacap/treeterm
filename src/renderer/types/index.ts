@@ -65,8 +65,6 @@ export interface Application<TState = unknown> {
   canClose: boolean
   canHaveMultiple: boolean
   showInNewTabMenu: boolean
-  // Whether to keep tabs mounted when workspace is inactive (for PTY persistence)
-  keepAlive: boolean
   // CSS display style when visible: 'block' or 'flex'
   displayStyle: 'block' | 'flex'
   // Whether this app creates tabs automatically in new workspaces

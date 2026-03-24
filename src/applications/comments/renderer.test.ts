@@ -62,7 +62,6 @@ describe('Comments Renderer', () => {
       expect(commentsApplication.canClose).toBe(true)
       expect(commentsApplication.canHaveMultiple).toBe(false)
       expect(commentsApplication.showInNewTabMenu).toBe(true)
-      expect(commentsApplication.keepAlive).toBe(false)
       expect(commentsApplication.displayStyle).toBe('flex')
       expect(commentsApplication.isDefault).toBe(false)
     })

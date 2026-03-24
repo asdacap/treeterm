@@ -5,12 +5,12 @@ vi.mock('../../applications/terminal/renderer', () => ({
   createTerminalApplication: vi.fn().mockReturnValue({
     id: 'terminal', name: 'Terminal', icon: '>', createInitialState: () => ({}),
     render: () => null, canClose: true, canHaveMultiple: true, showInNewTabMenu: true,
-    keepAlive: true, displayStyle: 'flex', isDefault: true
+    displayStyle: 'flex', isDefault: true
   }),
   createTerminalVariant: vi.fn().mockReturnValue({
     id: 'terminal-custom', name: 'Custom', icon: '>', createInitialState: () => ({}),
     render: () => null, canClose: true, canHaveMultiple: true, showInNewTabMenu: true,
-    keepAlive: true, displayStyle: 'flex', isDefault: false
+    displayStyle: 'flex', isDefault: false
   })
 }))
 
@@ -18,7 +18,7 @@ vi.mock('../../applications/filesystem/renderer', () => ({
   filesystemApplication: {
     id: 'filesystem', name: 'Files', icon: 'F', createInitialState: () => ({}),
     render: () => null, canClose: true, canHaveMultiple: false, showInNewTabMenu: true,
-    keepAlive: false, displayStyle: 'flex', isDefault: false
+    displayStyle: 'flex', isDefault: false
   }
 }))
 
@@ -26,7 +26,7 @@ vi.mock('../../applications/aiHarness/renderer', () => ({
   createAiHarnessVariant: vi.fn().mockReturnValue({
     id: 'aiharness-test', name: 'AI', icon: 'A', createInitialState: () => ({}),
     render: () => null, canClose: true, canHaveMultiple: true, showInNewTabMenu: true,
-    keepAlive: true, displayStyle: 'flex', isDefault: false
+    displayStyle: 'flex', isDefault: false
   })
 }))
 
@@ -34,7 +34,7 @@ vi.mock('../../applications/review/renderer', () => ({
   reviewApplication: {
     id: 'review', name: 'Review', icon: 'R', createInitialState: () => ({}),
     render: () => null, canClose: true, canHaveMultiple: false, showInNewTabMenu: false,
-    keepAlive: false, displayStyle: 'flex', isDefault: false
+    displayStyle: 'flex', isDefault: false
   }
 }))
 
@@ -42,7 +42,7 @@ vi.mock('../../applications/editor/renderer', () => ({
   editorApplication: {
     id: 'editor', name: 'Editor', icon: 'E', createInitialState: () => ({}),
     render: () => null, canClose: true, canHaveMultiple: false, showInNewTabMenu: false,
-    keepAlive: false, displayStyle: 'flex', isDefault: false
+    displayStyle: 'flex', isDefault: false
   }
 }))
 
@@ -50,7 +50,7 @@ vi.mock('../../applications/comments/renderer', () => ({
   commentsApplication: {
     id: 'comments', name: 'Comments', icon: 'C', createInitialState: () => ({}),
     render: () => null, canClose: true, canHaveMultiple: false, showInNewTabMenu: false,
-    keepAlive: false, displayStyle: 'flex', isDefault: false
+    displayStyle: 'flex', isDefault: false
   }
 }))
 
@@ -699,7 +699,6 @@ describe('useAppStore', () => {
       canClose: true,
       canHaveMultiple: false,
       showInNewTabMenu: true,
-      keepAlive: false,
       displayStyle: 'flex' as const,
       isDefault: false
     }
