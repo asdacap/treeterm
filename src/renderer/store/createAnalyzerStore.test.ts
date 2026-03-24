@@ -597,6 +597,7 @@ describe('createAnalyzerStore', () => {
 
       const history = store.getState().getHistory()
       expect(history).toHaveLength(1)
+      expect(history[0].kind).toBe('analyzer')
       expect(history[0].state).toBe('idle')
       expect(history[0].reason).toBe('prompt visible')
       expect(history[0].response).toBe(JSON.stringify({ state: 'idle', reason: 'prompt visible' }))
@@ -626,6 +627,7 @@ describe('createAnalyzerStore', () => {
 
       const history = store.getState().getHistory()
       expect(history).toHaveLength(1)
+      expect(history[0].kind).toBe('analyzer')
       expect(history[0].state).toBe('error')
       expect(history[0].reason).toBe('API error')
       expect(history[0].response).toBe(JSON.stringify({ error: 'API error' }))
@@ -655,6 +657,7 @@ describe('createAnalyzerStore', () => {
 
       const history = store.getState().getHistory()
       expect(history).toHaveLength(1)
+      expect(history[0].kind).toBe('analyzer')
       expect(history[0].state).toBe('error')
       expect(history[0].reason).toBe('[exception] Network error')
       expect(history[0].response).toBe('')
@@ -684,6 +687,7 @@ describe('createAnalyzerStore', () => {
 
       const history = store.getState().getHistory()
       expect(history).toHaveLength(1)
+      expect(history[0].kind).toBe('analyzer')
       expect(history[0].state).toBe('error')
       expect(history[0].reason).toBe('[unexpected] no state in result')
       expect(history[0].response).toBe(JSON.stringify({ something: 'unexpected' }))
@@ -717,6 +721,7 @@ describe('createAnalyzerStore', () => {
 
       const history = store.getState().getHistory()
       const titleEntry = history.find(h => h.reason === '[title] generated')!
+      expect(titleEntry.kind).toBe('title')
       expect(titleEntry.state).toBe('idle')
       expect(titleEntry.response).toBe(JSON.stringify({ title: 'Test Title', description: 'Test Description' }))
 
@@ -752,6 +757,7 @@ describe('createAnalyzerStore', () => {
 
       const history = store.getState().getHistory()
       const titleEntry = history.find(h => h.reason === '[title] Title API error')!
+      expect(titleEntry.kind).toBe('title')
       expect(titleEntry.state).toBe('error')
       expect(titleEntry.response).toBe('')
 

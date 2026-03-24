@@ -124,6 +124,18 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
                     </span>
                     <span
                       style={{
+                        background: entry.kind === 'title' ? '#6a0dad' : '#1a5276',
+                        color: '#fff',
+                        padding: '1px 6px',
+                        borderRadius: 3,
+                        fontSize: 11,
+                        fontWeight: 500
+                      }}
+                    >
+                      {entry.kind}
+                    </span>
+                    <span
+                      style={{
                         background: STATE_COLORS[entry.state],
                         color: '#fff',
                         padding: '1px 6px',
