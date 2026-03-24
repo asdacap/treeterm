@@ -4013,9 +4013,6 @@ body,
 
 /* Review Comments Button */
 .review-comments-button {
-  position: absolute;
-  bottom: 96px; /* Above scroll down button and push-to-talk button */
-  right: 16px;
   background: #f0a000;
   border: 1px solid #cc8800;
   color: #1e1e1e;
@@ -4026,8 +4023,9 @@ body,
   font-weight: 600;
   transition: background 0.1s, border-color 0.1s, opacity 0.2s;
   opacity: 0.9;
-  z-index: 10;
   white-space: nowrap;
+  width: auto;
+  height: auto;
 }
 
 .review-comments-button:hover {

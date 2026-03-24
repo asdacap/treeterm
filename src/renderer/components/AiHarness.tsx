@@ -157,10 +157,13 @@ export default function AiHarness({
           tabId={tabId}
           config={config}
           extraButtons={
-            <PushToTalkButton
-              onTranscript={handlePushToTalkTranscript}
-              onSubmit={handlePushToTalkSubmit}
-            />
+            <>
+              <ReviewCommentsButton workspace={workspace} />
+              <PushToTalkButton
+                onTranscript={handlePushToTalkTranscript}
+                onSubmit={handlePushToTalkSubmit}
+              />
+            </>
           }
         />
       </div>
@@ -192,9 +195,6 @@ export default function AiHarness({
           History
         </div>
       </ContextMenu>
-      <ReviewCommentsButton
-        workspace={workspace}
-      />
     </div>
   )
 }
