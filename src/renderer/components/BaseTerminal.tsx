@@ -86,12 +86,14 @@ interface BaseTerminalProps {
   workspace: WorkspaceStore
   tabId: string
   config: BaseTerminalConfig
+  extraButtons?: React.ReactNode
 }
 
 export default function BaseTerminal({
   workspace,
   tabId,
   config,
+  extraButtons,
 }: BaseTerminalProps) {
   const { workspace: wsData, removeTab } = useStore(workspace)
   const workspaceId = wsData.id
@@ -388,9 +390,19 @@ export default function BaseTerminal({
     }
   }
 
+  const floatingButtons = (
+    <>
+      {extraButtons}
+      <button className="reflow-btn" onClick={handleReflow} title="Reflow terminal">
+        ⇔
+      </button>
+    </>
+  )
+
   return (
     <TerminalScrollWrapper
       terminalRef={terminalRef}
+      extraButtons={floatingButtons}
     >
       <div className="terminal-padding-wrapper">
         <div
@@ -399,10 +411,6 @@ export default function BaseTerminal({
           onContextMenu={handleContextMenu}
         />
       </div>
-
-      <button className="reflow-btn" onClick={handleReflow} title="Reflow terminal">
-        ⇔
-      </button>
 
       {loading && (
         <div className="terminal-overlay terminal-overlay-info">
