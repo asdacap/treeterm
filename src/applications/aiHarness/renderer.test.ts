@@ -47,6 +47,7 @@ const mockWorkspaceStoreStateData = {
   getOrCreateAnalyzer: vi.fn(),
   getAnalyzer: vi.fn().mockReturnValue(null),
   removeAnalyzer: vi.fn(),
+  updateSettings: vi.fn(),
 } as WorkspaceStoreState
 
 const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => mockWorkspaceStoreStateData)
