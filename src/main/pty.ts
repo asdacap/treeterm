@@ -110,7 +110,7 @@ class PtyManager {
       // On macOS, use sandbox-exec with a restrictive profile
       shell = '/usr/bin/sandbox-exec'
       const profile = this.generateSandboxProfile(cwd, sandbox!)
-      args = ['-p', profile, process.env.SHELL || '/bin/zsh']
+      args = ['-p', profile, process.env.SHELL || 'zsh']
 
       // Add sandbox indicator to prompt
       env.TREETERM_SANDBOXED = '1'
@@ -120,21 +120,21 @@ class PtyManager {
         // Use bubblewrap for real sandboxing
         const bwrapArgs = generateBwrapArgs(cwd, sandbox!)
         shell = 'bwrap'
-        args = [...bwrapArgs, '--', process.env.SHELL || '/bin/bash']
+        args = [...bwrapArgs, '--', process.env.SHELL || 'bash']
         env.TREETERM_SANDBOXED = '1'
         env.PS1 = '[SANDBOX] ' + (env.PS1 || '\\$ ')
       } else {
         // No sandbox available - warn and run unsandboxed
         console.warn('[sandbox] bwrap not found, sandbox not available on this system')
-        shell = process.env.SHELL || '/bin/bash'
+        shell = process.env.SHELL || 'bash'
         // Do NOT set TREETERM_SANDBOXED - not actually sandboxed
       }
     } else if (isSandboxed) {
       // Windows or other platforms: no sandbox support, run unsandboxed
       console.warn('[sandbox] sandbox not available on this platform')
-      shell = process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/zsh'
+      shell = process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || 'zsh'
     } else {
-      shell = process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/zsh'
+      shell = process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || 'zsh'
     }
 
     const ptyProcess = pty.spawn(shell, args, {
