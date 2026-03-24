@@ -60,7 +60,7 @@ export interface IpcRequests {
     result: WorktreeResult
   }
   gitRemoveWorktree: {
-    params: [repoPath: string, worktreePath: string, deleteBranch?: boolean]
+    params: [repoPath: string, worktreePath: string, deleteBranch?: boolean, operationId?: string]
     result: { success: boolean; error?: string }
   }
   gitListWorktrees: {
@@ -100,7 +100,7 @@ export interface IpcRequests {
     result: { success: boolean; diff?: string; error?: string }
   }
   gitMerge: {
-    params: [targetWorktreePath: string, worktreeBranch: string, squash: boolean]
+    params: [targetWorktreePath: string, worktreeBranch: string, squash: boolean, operationId?: string]
     result: { success: boolean; error?: string }
   }
   gitCheckMergeConflicts: {
@@ -116,7 +116,7 @@ export interface IpcRequests {
     result: { success: boolean; error?: string }
   }
   gitDeleteBranch: {
-    params: [repoPath: string, branchName: string]
+    params: [repoPath: string, branchName: string, operationId?: string]
     result: { success: boolean; error?: string }
   }
   gitGetUncommittedChanges: {

@@ -294,7 +294,7 @@ export interface TerminalApi {
 export interface GitApi {
   getInfo: (dirPath: string) => Promise<GitInfo>
   createWorktree: (repoPath: string, name: string, baseBranch?: string, operationId?: string) => Promise<WorktreeResult>
-  removeWorktree: (repoPath: string, worktreePath: string, deleteBranch?: boolean) => Promise<{ success: boolean; error?: string }>
+  removeWorktree: (repoPath: string, worktreePath: string, deleteBranch?: boolean, operationId?: string) => Promise<{ success: boolean; error?: string }>
   listWorktrees: (repoPath: string) => Promise<WorktreeInfo[]>
   getChildWorktrees: (repoPath: string, parentBranch: string | null) => Promise<ChildWorktreeInfo[]>
   listLocalBranches: (repoPath: string) => Promise<string[]>
@@ -305,10 +305,10 @@ export interface GitApi {
   getDiff: (worktreePath: string, parentBranch: string) => Promise<{ success: boolean; diff?: DiffResult; error?: string }>
   getFileDiff: (worktreePath: string, parentBranch: string, filePath: string) => Promise<{ success: boolean; diff?: string; error?: string }>
   checkMergeConflicts: (repoPath: string, sourceBranch: string, targetBranch: string) => Promise<ConflictCheckResult>
-  merge: (targetWorktreePath: string, worktreeBranch: string, squash?: boolean) => Promise<{ success: boolean; error?: string }>
+  merge: (targetWorktreePath: string, worktreeBranch: string, squash?: boolean, operationId?: string) => Promise<{ success: boolean; error?: string }>
   hasUncommittedChanges: (repoPath: string) => Promise<boolean>
   commitAll: (repoPath: string, message: string) => Promise<{ success: boolean; error?: string }>
-  deleteBranch: (repoPath: string, branchName: string) => Promise<{ success: boolean; error?: string }>
+  deleteBranch: (repoPath: string, branchName: string, operationId?: string) => Promise<{ success: boolean; error?: string }>
   getUncommittedChanges: (repoPath: string) => Promise<{ success: boolean; changes?: UncommittedChanges; error?: string }>
   getUncommittedFileDiff: (repoPath: string, filePath: string, staged: boolean) => Promise<{ success: boolean; diff?: string; error?: string }>
   stageFile: (repoPath: string, filePath: string) => Promise<{ success: boolean; error?: string }>
@@ -326,7 +326,7 @@ export interface GitApi {
 export interface WorkspaceGitApi {
   getInfo: () => Promise<GitInfo>
   createWorktree: (name: string, baseBranch?: string) => Promise<WorktreeResult>
-  removeWorktree: (worktreePath: string, deleteBranch?: boolean) => Promise<{ success: boolean; error?: string }>
+  removeWorktree: (worktreePath: string, deleteBranch?: boolean, operationId?: string) => Promise<{ success: boolean; error?: string }>
   listWorktrees: () => Promise<WorktreeInfo[]>
   getChildWorktrees: (parentBranch: string | null) => Promise<ChildWorktreeInfo[]>
   listLocalBranches: () => Promise<string[]>
@@ -337,10 +337,10 @@ export interface WorkspaceGitApi {
   getDiff: (parentBranch: string) => Promise<{ success: boolean; diff?: DiffResult; error?: string }>
   getFileDiff: (parentBranch: string, filePath: string) => Promise<{ success: boolean; diff?: string; error?: string }>
   checkMergeConflicts: (sourceBranch: string, targetBranch: string) => Promise<ConflictCheckResult>
-  merge: (worktreeBranch: string, squash?: boolean) => Promise<{ success: boolean; error?: string }>
+  merge: (worktreeBranch: string, squash?: boolean, operationId?: string) => Promise<{ success: boolean; error?: string }>
   hasUncommittedChanges: () => Promise<boolean>
   commitAll: (message: string) => Promise<{ success: boolean; error?: string }>
-  deleteBranch: (branchName: string) => Promise<{ success: boolean; error?: string }>
+  deleteBranch: (branchName: string, operationId?: string) => Promise<{ success: boolean; error?: string }>
   getUncommittedChanges: () => Promise<{ success: boolean; changes?: UncommittedChanges; error?: string }>
   getUncommittedFileDiff: (filePath: string, staged: boolean) => Promise<{ success: boolean; diff?: string; error?: string }>
   stageFile: (filePath: string) => Promise<{ success: boolean; error?: string }>

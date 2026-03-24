@@ -548,7 +548,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
             {activeLoadState?.status === 'error' && (
               <div className="workspace-load-error">
                 <div className="workspace-load-error-content">
-                  <h3>Failed to create workspace</h3>
+                  <h3>Operation failed</h3>
                   <p className="workspace-load-error-message">{activeLoadState.error}</p>
                   <div className="workspace-load-error-actions">
                     <button className="workspace-action-btn" onClick={() => dismissFailedWorkspace(activeWorkspaceId!)}>
