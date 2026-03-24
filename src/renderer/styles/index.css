@@ -820,10 +820,37 @@ body,
   opacity: 1;
 }
 
+/* Reflow Button */
+.reflow-btn {
+  position: absolute;
+  bottom: 56px; /* 16px + 32px scroll btn + 8px gap */
+  right: 16px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background 0.1s, border-color 0.1s, opacity 0.2s;
+  opacity: 0.7;
+  z-index: 10;
+}
+
+.reflow-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  opacity: 1;
+}
+
 /* Push to Talk Button */
 .push-to-talk-btn {
   position: absolute;
-  bottom: 56px; /* 16px + 32px scroll btn + 8px gap */
+  bottom: 96px; /* 16px + 32px scroll btn + 8px + 32px reflow btn + 8px gap */
   right: 16px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);

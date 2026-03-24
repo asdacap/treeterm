@@ -317,8 +317,8 @@ export default function BaseTerminal({
       // Debounce initial resize to get settled container dimensions
       if (resizeTimeout) clearTimeout(resizeTimeout)
       resizeTimeout = setTimeout(() => {
-        console.log(`[${config.logPrefix} ${tabId}] resize (initial):`, { cols: terminal!.cols, rows: terminal!.rows })
         fitTerminal(terminal!, resize)
+        console.log(`[${config.logPrefix} ${tabId}] resize (initial):`, { cols: terminal!.cols, rows: terminal!.rows })
         initialResizeDone = true
       }, 100)
     }
@@ -372,6 +372,18 @@ export default function BaseTerminal({
     closeContextMenu()
   }
 
+  const handleReflow = () => {
+    const terminal = terminalRef.current
+    if (terminal && ttyRef.current) {
+      // Force reflow by resizing to 1 col narrower then back
+      const { cols, rows } = terminal
+      const resize = ttyRef.current.getState().resize
+      terminal.resize(cols - 1, rows)
+      terminal.resize(cols, rows)
+      resize(cols, rows)
+    }
+  }
+
   return (
     <TerminalScrollWrapper
       terminalRef={terminalRef}
@@ -383,6 +395,10 @@ export default function BaseTerminal({
           onContextMenu={handleContextMenu}
         />
       </div>
+
+      <button className="reflow-btn" onClick={handleReflow} title="Reflow terminal">
+        ⇔
+      </button>
 
       {loading && (
         <div className="terminal-overlay terminal-overlay-info">
