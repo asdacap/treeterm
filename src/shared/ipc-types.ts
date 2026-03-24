@@ -365,6 +365,9 @@ export interface IpcEvents {
   ptyExit: {
     params: [handle: string, exitCode: number]
   }
+  ptyResizeEvent: {
+    params: [handle: string, cols: number, rows: number]
+  }
   settingsOpen: {
     params: []
   }

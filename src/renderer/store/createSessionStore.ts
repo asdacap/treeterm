@@ -346,6 +346,7 @@ export function createSessionStore(
     isAlive: (id: string) => deps.terminal.isAlive(connectionId, id),
     onData: deps.terminal.onData,
     onExit: deps.terminal.onExit,
+    onResize: deps.terminal.onResize,
   }
 
   const store = createStore<SessionState>()((set, get) => ({

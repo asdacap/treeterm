@@ -24,6 +24,7 @@ function makeMockTty() {
       exitCallback = cb
       return () => { exitCallback = null }
     }),
+    onResize: vi.fn().mockReturnValue(() => {}),
   }
 
   const tty = createStore<TtyState>()(() => ttyState)

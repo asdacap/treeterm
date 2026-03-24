@@ -289,6 +289,7 @@ export interface TerminalApi {
   isAlive: (connectionId: string, id: string) => Promise<boolean>
   onData: (handle: string, callback: (data: string) => void) => () => void
   onExit: (handle: string, callback: (exitCode: number) => void) => () => void
+  onResize: (handle: string, callback: (cols: number, rows: number) => void) => () => void
   onActiveProcessesOpen: (callback: () => void) => () => void
 }
 

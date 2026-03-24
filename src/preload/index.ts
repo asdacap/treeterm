@@ -8,6 +8,9 @@ const dataListeners = new Map<string, DataCallback[]>()
 type ExitCallback = (exitCode: number) => void
 const exitListeners = new Map<string, ExitCallback[]>()
 
+type ResizeEventCallback = (cols: number, rows: number) => void
+const resizeEventListeners = new Map<string, ResizeEventCallback[]>()
+
 // Initialize IPC client
 const client = new IpcClient()
 
@@ -26,6 +29,14 @@ client.onPtyExit((id, exitCode) => {
   }
   dataListeners.delete(id)
   exitListeners.delete(id)
+  resizeEventListeners.delete(id)
+})
+
+client.onPtyResizeEvent((id, cols, rows) => {
+  const listeners = resizeEventListeners.get(id)
+  if (listeners) {
+    listeners.forEach((cb) => cb(cols, rows))
+  }
 })
 
 type SettingsOpenCallback = () => void
@@ -203,6 +214,19 @@ contextBridge.exposeInMainWorld('electron', {
           if (index > -1) {
             listeners.splice(index, 1)
           }
+        }
+      }
+    },
+    onResize: (id: string, callback: ResizeEventCallback): (() => void) => {
+      if (!resizeEventListeners.has(id)) {
+        resizeEventListeners.set(id, [])
+      }
+      resizeEventListeners.get(id)!.push(callback)
+      return () => {
+        const listeners = resizeEventListeners.get(id)
+        if (listeners) {
+          const index = listeners.indexOf(callback)
+          if (index > -1) listeners.splice(index, 1)
         }
       }
     },

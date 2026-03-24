@@ -137,6 +137,7 @@ export interface PtyResizeData {
 export interface PtyOutput {
   data?: PtyData | undefined;
   exit?: PtyExit | undefined;
+  resize?: PtyResizeData | undefined;
 }
 
 export interface PtyData {
@@ -2377,7 +2378,7 @@ export const PtyResizeData: MessageFns<PtyResizeData> = {
 };
 
 function createBasePtyOutput(): PtyOutput {
-  return { data: undefined, exit: undefined };
+  return { data: undefined, exit: undefined, resize: undefined };
 }
 
 export const PtyOutput: MessageFns<PtyOutput> = {
@@ -2387,6 +2388,9 @@ export const PtyOutput: MessageFns<PtyOutput> = {
     }
     if (message.exit !== undefined) {
       PtyExit.encode(message.exit, writer.uint32(18).fork()).join();
+    }
+    if (message.resize !== undefined) {
+      PtyResizeData.encode(message.resize, writer.uint32(26).fork()).join();
     }
     return writer;
   },
@@ -2414,6 +2418,14 @@ export const PtyOutput: MessageFns<PtyOutput> = {
           message.exit = PtyExit.decode(reader, reader.uint32());
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.resize = PtyResizeData.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2427,6 +2439,7 @@ export const PtyOutput: MessageFns<PtyOutput> = {
     return {
       data: isSet(object.data) ? PtyData.fromJSON(object.data) : undefined,
       exit: isSet(object.exit) ? PtyExit.fromJSON(object.exit) : undefined,
+      resize: isSet(object.resize) ? PtyResizeData.fromJSON(object.resize) : undefined,
     };
   },
 
@@ -2438,6 +2451,9 @@ export const PtyOutput: MessageFns<PtyOutput> = {
     if (message.exit !== undefined) {
       obj.exit = PtyExit.toJSON(message.exit);
     }
+    if (message.resize !== undefined) {
+      obj.resize = PtyResizeData.toJSON(message.resize);
+    }
     return obj;
   },
 
@@ -2448,6 +2464,7 @@ export const PtyOutput: MessageFns<PtyOutput> = {
     const message = createBasePtyOutput();
     message.data = (object.data !== undefined && object.data !== null) ? PtyData.fromPartial(object.data) : undefined;
     message.exit = (object.exit !== undefined && object.exit !== null) ? PtyExit.fromPartial(object.exit) : undefined;
+    message.resize = (object.resize !== undefined && object.resize !== null) ? PtyResizeData.fromPartial(object.resize) : undefined;
     return message;
   },
 };

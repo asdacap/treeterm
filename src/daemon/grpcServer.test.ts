@@ -129,6 +129,7 @@ function makeMockPtyManager(): any {
     onExit: vi.fn().mockReturnValue(() => {}),
     onSessionData: vi.fn().mockReturnValue(() => {}),
     onSessionExit: vi.fn().mockReturnValue(() => {}),
+    onSessionResize: vi.fn().mockReturnValue(() => {}),
     shutdown: vi.fn()
   }
 }

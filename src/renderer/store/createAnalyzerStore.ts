@@ -63,6 +63,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
   let unsubscribeData: (() => void) | null = null
   let unsubscribeExit: (() => void) | null = null
+  let unsubscribeResize: (() => void) | null = null
   let running = false
   let titleGenerated = false
 
@@ -247,6 +248,10 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       unsubscribeExit()
       unsubscribeExit = null
     }
+    if (unsubscribeResize) {
+      unsubscribeResize()
+      unsubscribeResize = null
+    }
     if (pollInterval) {
       clearInterval(pollInterval)
       pollInterval = null
@@ -351,6 +356,11 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         // Subscribe to exit
         unsubscribeExit = tty.getState().onExit(() => {
           store.getState().stop()
+        })
+
+        // Subscribe to resize so headless terminal matches PTY dimensions
+        unsubscribeResize = tty.getState().onResize((cols, rows) => {
+          terminal?.resize(cols, rows)
         })
       }).catch((err) => {
         console.error('[analyzer] failed to open TTY stream:', err)

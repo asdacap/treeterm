@@ -89,6 +89,7 @@ const CHANNELS = {
   // Event channels
   ptyData: 'pty:data',
   ptyExit: 'pty:exit',
+  ptyResizeEvent: 'pty:resize-event',
   settingsOpen: 'settings:open',
   appConfirmClose: 'app:confirm-close',
   appReady: 'app:ready',
@@ -498,6 +499,13 @@ export class IpcClient {
       callback(...(args as IpcEvents['ptyExit']['params']))
     ipcRenderer.on(CHANNELS.ptyExit, handler)
     return () => ipcRenderer.removeListener(CHANNELS.ptyExit, handler)
+  }
+
+  onPtyResizeEvent(callback: (...args: IpcEvents['ptyResizeEvent']['params']) => void): () => void {
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
+      callback(...(args as IpcEvents['ptyResizeEvent']['params']))
+    ipcRenderer.on(CHANNELS.ptyResizeEvent, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.ptyResizeEvent, handler)
   }
 
   onSettingsOpen(callback: () => void): () => void {
