@@ -599,6 +599,7 @@ describe('createAnalyzerStore', () => {
       expect(history).toHaveLength(1)
       expect(history[0].kind).toBe('analyzer')
       expect(history[0].error).toBeUndefined()
+      expect(history[0].model).toBe('test-model')
       expect(history[0].response).toBe(JSON.stringify({ state: 'idle', reason: 'prompt visible' }))
 
       store.getState().stop()

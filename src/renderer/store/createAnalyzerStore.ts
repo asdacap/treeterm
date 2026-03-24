@@ -18,6 +18,7 @@ export interface AnalyzerDeps {
 export interface AnalyzerHistoryEntry {
   timestamp: number
   kind: 'analyzer' | 'title'
+  model: string
   bufferText: string
   response: string
   error?: string
@@ -168,7 +169,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
       if (dataVersion !== requestVersion) {
         console.debug('[terminal-analyzer] discarding stale response')
-        history.push({ timestamp: Date.now(), kind: 'analyzer', bufferText: buffer, response: JSON.stringify(result), error: '[discarded]' })
+        history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), error: '[discarded]' })
         if (history.length > MAX_HISTORY) history.shift()
         inFlightBuffer = null
         store.setState({ analyzing: false })
@@ -186,20 +187,20 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         inFlightBuffer = null
         store.setState({ analyzing: false })
         updateAiState(result.state as ActivityState, result.reason)
-        history.push({ timestamp: Date.now(), kind: 'analyzer', bufferText: buffer, response: JSON.stringify(result) })
+        history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result) })
         if (history.length > MAX_HISTORY) history.shift()
       } else if ('error' in result) {
         console.error('[terminal-analyzer] error:', result.error)
         inFlightBuffer = null
         store.setState({ analyzing: false })
         updateAiState('error')
-        history.push({ timestamp: Date.now(), kind: 'analyzer', bufferText: buffer, response: JSON.stringify(result), error: result.error })
+        history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), error: result.error })
         if (history.length > MAX_HISTORY) history.shift()
       } else {
         console.debug('[terminal-analyzer] ignored (no state in result)')
         inFlightBuffer = null
         store.setState({ analyzing: false })
-        history.push({ timestamp: Date.now(), kind: 'analyzer', bufferText: buffer, response: JSON.stringify(result), error: '[unexpected] no state in result' })
+        history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), error: '[unexpected] no state in result' })
         if (history.length > MAX_HISTORY) history.shift()
       }
 
@@ -212,7 +213,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       console.error('[terminal-analyzer] LLM call failed:', err)
       store.setState({ analyzing: false })
       updateAiState('error')
-      history.push({ timestamp: Date.now(), kind: 'analyzer', bufferText: buffer, response: '', error: err instanceof Error ? err.message : String(err) })
+      history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: '', error: err instanceof Error ? err.message : String(err) })
       if (history.length > MAX_HISTORY) history.shift()
       if (pendingAnalyze) {
         pendingAnalyze = false
@@ -301,11 +302,11 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
           deps.updateMetadata('description', result.description)
         }
       }
-      history.push({ timestamp: Date.now(), kind: 'title', bufferText: buffer, response: JSON.stringify(result) })
+      history.push({ timestamp: Date.now(), kind: 'title', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result) })
       if (history.length > MAX_HISTORY) history.shift()
     } catch (err) {
       console.error('[analyzer] title generation failed:', err)
-      history.push({ timestamp: Date.now(), kind: 'title', bufferText: buffer, response: '', error: err instanceof Error ? err.message : String(err) })
+      history.push({ timestamp: Date.now(), kind: 'title', model: settings.terminalAnalyzer.model, bufferText: buffer, response: '', error: err instanceof Error ? err.message : String(err) })
       if (history.length > MAX_HISTORY) history.shift()
     }
   }

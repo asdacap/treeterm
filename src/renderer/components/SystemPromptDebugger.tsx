@@ -71,7 +71,7 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
           setError(response.error)
           setTabState(tab.id, 'error')
         } else {
-          setResult(JSON.stringify(response, null, 2))
+          setResult(JSON.stringify(response))
           setTabState(tab.id, response.state as ActivityState)
         }
       } else {
@@ -87,7 +87,7 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
           setError(response.error)
           setTabState(tab.id, 'error')
         } else {
-          setResult(`Title: ${response.title}\nDescription: ${response.description}`)
+          setResult(JSON.stringify(response))
           setTabState(tab.id, 'completed')
         }
       }

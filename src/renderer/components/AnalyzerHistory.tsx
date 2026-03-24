@@ -67,10 +67,6 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
     })
   }
 
-  function formatResponse(response: string): string {
-    try { return JSON.stringify(JSON.parse(response), null, 2) } catch { return response }
-  }
-
   const reversed = [...entries].reverse()
 
   return (
@@ -129,6 +125,9 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
                     >
                       {entry.kind}
                     </span>
+                    <span style={{ color: '#888', fontSize: 11, fontFamily: 'monospace' }}>
+                      {entry.model}
+                    </span>
                     {entry.error && (
                       <span
                         style={{
@@ -179,7 +178,7 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
                         borderRadius: 3
                       }}
                     >
-                      {expandedResponses.has(entries.length - 1 - i) ? formatResponse(entry.response) : entry.response.slice(0, 80) + (entry.response.length > 80 ? '...' : '')}
+                      {expandedResponses.has(entries.length - 1 - i) ? entry.response : entry.response.slice(0, 80) + (entry.response.length > 80 ? '...' : '')}
                     </pre>
                   )}
                 </div>
