@@ -401,7 +401,7 @@ export function createSessionStore(
   // Shared helper: removes a workspace with configurable git cleanup behavior
   async function removeWorkspaceInternal(
     id: string,
-    options: { keepBranch: boolean; keepWorktree: boolean }
+    options: { keepBranch: boolean; keepWorktree: boolean; operationId?: string }
   ): Promise<void> {
     const state = store.getState()
     const workspace = state.workspaces[id]
@@ -428,10 +428,11 @@ export function createSessionStore(
         await deps.git.removeWorktree(
           workspace.gitRootPath,
           workspace.path,
-          deleteBranch
+          deleteBranch,
+          options.operationId
         )
       } else if (!options.keepBranch && !workspace.isDetached && workspace.gitBranch) {
-        await deps.git.deleteBranch(workspace.gitRootPath, workspace.gitBranch)
+        await deps.git.deleteBranch(workspace.gitRootPath, workspace.gitBranch, options.operationId)
       }
     }
 
@@ -458,6 +459,35 @@ export function createSessionStore(
     })
 
     await syncSessionToDaemon(store.getState().isRestoring)
+  }
+
+  // Helper: wraps removeWorkspaceInternal with loading state + output streaming
+  async function removeWorkspaceWithLoading(
+    id: string,
+    options: { keepBranch: boolean; keepWorktree: boolean }
+  ): Promise<void> {
+    const operationId = generateId()
+    store.setState(s => ({
+      workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'loading' as const, message: 'Removing workspace...', output: [] } }
+    }))
+    const unsubOutput = deps.git.onOutput((opId, data) => {
+      if (opId !== operationId) return
+      const loadState = store.getState().workspaceLoadStates[id]
+      if (loadState?.status === 'loading') {
+        store.setState(s => ({
+          workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { ...loadState, output: [...loadState.output, data] } }
+        }))
+      }
+    })
+    try {
+      await removeWorkspaceInternal(id, { ...options, operationId })
+    } catch (err) {
+      store.setState(s => ({
+        workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: err instanceof Error ? err.message : String(err) } }
+      }))
+    } finally {
+      unsubOutput()
+    }
   }
 
   const connectionId = config.connection?.id ?? 'local'
@@ -706,21 +736,17 @@ export function createSessionStore(
       })
     },
 
-    removeWorkspace: async (id: string) => {
-      await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: false })
-    },
+    removeWorkspace: (id: string) =>
+      removeWorkspaceWithLoading(id, { keepBranch: false, keepWorktree: false }),
 
-    removeWorkspaceKeepBranch: async (id: string) => {
-      await removeWorkspaceInternal(id, { keepBranch: true, keepWorktree: false })
-    },
+    removeWorkspaceKeepBranch: (id: string) =>
+      removeWorkspaceWithLoading(id, { keepBranch: true, keepWorktree: false }),
 
-    removeWorkspaceKeepWorktree: async (id: string) => {
-      await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: true })
-    },
+    removeWorkspaceKeepWorktree: (id: string) =>
+      removeWorkspaceWithLoading(id, { keepBranch: false, keepWorktree: true }),
 
-    removeWorkspaceKeepBoth: async (id: string) => {
-      await removeWorkspaceInternal(id, { keepBranch: true, keepWorktree: true })
-    },
+    removeWorkspaceKeepBoth: (id: string) =>
+      removeWorkspaceWithLoading(id, { keepBranch: true, keepWorktree: true }),
 
     removeOrphanWorkspace: (id: string) => {
       const state = get()
@@ -791,35 +817,65 @@ export function createSessionStore(
         return { success: false, error: 'Parent workspace not found or not a git repo' }
       }
 
-      const hasChanges = await deps.git.hasUncommittedChanges(workspace.path)
-      if (hasChanges) {
-        const commitResult = await deps.git.commitAll(
-          workspace.path,
-          `WIP: Auto-commit before merge from ${workspace.name}`
-        )
-        if (!commitResult.success) {
-          return { success: false, error: `Failed to commit changes: ${commitResult.error}` }
+      const operationId = generateId()
+      store.setState(s => ({
+        workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'loading' as const, message: squash ? 'Squash merging workspace...' : 'Merging workspace...', output: [] } }
+      }))
+      const unsubOutput = deps.git.onOutput((opId, data) => {
+        if (opId !== operationId) return
+        const loadState = store.getState().workspaceLoadStates[id]
+        if (loadState?.status === 'loading') {
+          store.setState(s => ({
+            workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { ...loadState, output: [...loadState.output, data] } }
+          }))
         }
+      })
+
+      try {
+        const hasChanges = await deps.git.hasUncommittedChanges(workspace.path)
+        if (hasChanges) {
+          const commitResult = await deps.git.commitAll(
+            workspace.path,
+            `WIP: Auto-commit before merge from ${workspace.name}`
+          )
+          if (!commitResult.success) {
+            store.setState(s => ({
+              workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: `Failed to commit changes: ${commitResult.error}` } }
+            }))
+            return { success: false, error: `Failed to commit changes: ${commitResult.error}` }
+          }
+        }
+
+        const mergeResult = await deps.git.merge(
+          parent.path,
+          workspace.gitBranch!,
+          squash,
+          operationId
+        )
+
+        if (!mergeResult.success) {
+          store.setState(s => ({
+            workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: `Merge failed: ${mergeResult.error}` } }
+          }))
+          return { success: false, error: `Merge failed: ${mergeResult.error}` }
+        }
+
+        // Update status on the handle
+        const handle = get().workspaceStores[id]
+        if (handle) {
+          handle.getState().updateStatus('merged')
+        }
+        await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: false, operationId })
+
+        return { success: true }
+      } catch (err) {
+        store.setState(s => ({
+          workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: err instanceof Error ? err.message : String(err) } }
+        }))
+        return { success: false, error: err instanceof Error ? err.message : String(err) }
+      } finally {
+        unsubOutput()
       }
-
-      const mergeResult = await deps.git.merge(
-        parent.path,
-        workspace.gitBranch!,
-        squash
-      )
-
-      if (!mergeResult.success) {
-        return { success: false, error: `Merge failed: ${mergeResult.error}` }
-      }
-
-      // Update status on the handle
-      const handle = get().workspaceStores[id]
-      if (handle) {
-        handle.getState().updateStatus('merged')
-      }
-      await get().removeWorkspace(id)
-
-      return { success: true }
     },
 
     closeAndCleanWorkspace: async (id: string) => {

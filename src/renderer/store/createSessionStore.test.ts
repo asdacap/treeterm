@@ -380,7 +380,7 @@ describe('createSessionStore', () => {
       await store.getState().removeWorkspaceKeepBranch(childId)
       expect(store.getState().workspaces[childId]).toBeUndefined()
       // removeWorktree called with deleteBranch=false
-      expect(deps.git.removeWorktree).toHaveBeenCalledWith('/repo', expect.any(String), false)
+      expect(deps.git.removeWorktree).toHaveBeenCalledWith('/repo', expect.any(String), false, expect.any(String))
     })
 
     it('removeWorkspaceKeepWorktree skips worktree removal but deletes branch', async () => {

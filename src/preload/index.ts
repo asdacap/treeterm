@@ -258,8 +258,8 @@ contextBridge.exposeInMainWorld('electron', {
     createWorktree: (repoPath: string, name: string, baseBranch?: string, operationId?: string) => {
       return client.gitCreateWorktree(repoPath, name, baseBranch, operationId)
     },
-    removeWorktree: (repoPath: string, worktreePath: string, deleteBranch: boolean = true) => {
-      return client.gitRemoveWorktree(repoPath, worktreePath, deleteBranch)
+    removeWorktree: (repoPath: string, worktreePath: string, deleteBranch: boolean = true, operationId?: string) => {
+      return client.gitRemoveWorktree(repoPath, worktreePath, deleteBranch, operationId)
     },
     listWorktrees: (repoPath: string) => {
       return client.gitListWorktrees(repoPath)
@@ -288,8 +288,8 @@ contextBridge.exposeInMainWorld('electron', {
     getFileDiff: (worktreePath: string, parentBranch: string, filePath: string) => {
       return client.gitGetFileDiff(worktreePath, parentBranch, filePath)
     },
-    merge: (targetWorktreePath: string, worktreeBranch: string, squash: boolean = false) => {
-      return client.gitMerge(targetWorktreePath, worktreeBranch, squash)
+    merge: (targetWorktreePath: string, worktreeBranch: string, squash: boolean = false, operationId?: string) => {
+      return client.gitMerge(targetWorktreePath, worktreeBranch, squash, operationId)
     },
     checkMergeConflicts: (repoPath: string, sourceBranch: string, targetBranch: string) => {
       return client.gitCheckMergeConflicts(repoPath, sourceBranch, targetBranch)
@@ -300,8 +300,8 @@ contextBridge.exposeInMainWorld('electron', {
     commitAll: (repoPath: string, message: string) => {
       return client.gitCommitAll(repoPath, message)
     },
-    deleteBranch: (repoPath: string, branchName: string) => {
-      return client.gitDeleteBranch(repoPath, branchName)
+    deleteBranch: (repoPath: string, branchName: string, operationId?: string) => {
+      return client.gitDeleteBranch(repoPath, branchName, operationId)
     },
     getUncommittedChanges: (repoPath: string) => {
       return client.gitGetUncommittedChanges(repoPath)

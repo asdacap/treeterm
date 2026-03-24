@@ -593,11 +593,14 @@ server.onGitCreateWorktree(async (repoPath, name, baseBranch, operationId) => {
   }
 })
 
-server.onGitRemoveWorktree(async (repoPath, worktreePath, deleteBranch) => {
+server.onGitRemoveWorktree(async (repoPath, worktreePath, deleteBranch, operationId) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
   initializeGitClient()
   if (!gitClient) throw new Error('Git client not initialized')
-  await gitClient.removeWorktree(repoPath, worktreePath, deleteBranch)
+  const onProgress = operationId
+    ? (data: string) => server.gitOutput(operationId, data)
+    : undefined
+  await gitClient.removeWorktree(repoPath, worktreePath, deleteBranch, onProgress)
   return { success: true }
 })
 
@@ -686,11 +689,14 @@ server.onGitGetFileDiff(async (worktreePath, parentBranch, filePath) => {
   return { success: true, diff }
 })
 
-server.onGitMerge(async (targetWorktreePath, worktreeBranch, squash) => {
+server.onGitMerge(async (targetWorktreePath, worktreeBranch, squash, operationId) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
   initializeGitClient()
   if (!gitClient) throw new Error('Git client not initialized')
-  await gitClient.mergeWorktree(targetWorktreePath, worktreeBranch, squash)
+  const onProgress = operationId
+    ? (data: string) => server.gitOutput(operationId, data)
+    : undefined
+  await gitClient.mergeWorktree(targetWorktreePath, worktreeBranch, squash, onProgress)
   return { success: true }
 })
 
@@ -724,11 +730,14 @@ server.onGitCommitAll(async (repoPath, message) => {
   return { success: true, hash }
 })
 
-server.onGitDeleteBranch(async (repoPath, branchName) => {
+server.onGitDeleteBranch(async (repoPath, branchName, operationId) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
   initializeGitClient()
   if (!gitClient) throw new Error('Git client not initialized')
-  await gitClient.deleteBranch(repoPath, branchName)
+  const onProgress = operationId
+    ? (data: string) => server.gitOutput(operationId, data)
+    : undefined
+  await gitClient.deleteBranch(repoPath, branchName, false, onProgress)
   return { success: true }
 })
 

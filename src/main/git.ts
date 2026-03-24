@@ -343,10 +343,10 @@ export class GitClient {
   /**
    * Delete a branch
    */
-  async deleteBranch(dirPath: string, branchName: string, force: boolean = false): Promise<void> {
+  async deleteBranch(dirPath: string, branchName: string, force: boolean = false, onProgress?: (data: string) => void): Promise<void> {
     const args = force ? ['branch', '-D', branchName] : ['branch', '-d', branchName]
-    const result = await this.exec(dirPath, args)
-    
+    const result = await this.exec(dirPath, args, { onProgress })
+
     if (result.exitCode !== 0) {
       throw this.interpretError(result)
     }
@@ -508,7 +508,8 @@ export class GitClient {
   async removeWorktree(
     repoPath: string,
     worktreePath: string,
-    deleteBranch: boolean = false
+    deleteBranch: boolean = false,
+    onProgress?: (data: string) => void
   ): Promise<void> {
     let branchName: string | null = null
 
@@ -525,7 +526,7 @@ export class GitClient {
     }
 
     // Remove worktree
-    const result = await this.exec(repoPath, ['worktree', 'remove', worktreePath, '--force'])
+    const result = await this.exec(repoPath, ['worktree', 'remove', worktreePath, '--force'], { onProgress })
     if (result.exitCode !== 0) {
       throw this.interpretError(result)
     }
@@ -533,7 +534,7 @@ export class GitClient {
     // Delete branch if requested
     if (deleteBranch && branchName) {
       try {
-        await this.deleteBranch(repoPath, branchName, true)
+        await this.deleteBranch(repoPath, branchName, true, onProgress)
       } catch (error) {
         console.warn('[git] branch deletion after worktree removal failed:', error)
       }
@@ -712,14 +713,15 @@ export class GitClient {
   async mergeWorktree(
     targetWorktreePath: string,
     worktreeBranch: string,
-    squash: boolean = false
+    squash: boolean = false,
+    onProgress?: (data: string) => void
   ): Promise<void> {
     // Merge into the target worktree directory where the target branch is already checked out
     const args = squash
       ? ['merge', '--squash', worktreeBranch]
       : ['merge', worktreeBranch]
 
-    const result = await this.exec(targetWorktreePath, args)
+    const result = await this.exec(targetWorktreePath, args, { onProgress })
     if (result.exitCode !== 0) {
       throw this.interpretError(result)
     }
