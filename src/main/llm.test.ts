@@ -33,7 +33,7 @@ vi.mock('openai', () => {
 })
 
 import { APIError } from 'openai'
-import { formatLlmError, startChatStream, completeChatCall, cancelChatStream } from './llm'
+import { formatLlmError, startChatStream, completeChatCall, cancelChatStream, parseLlmJson } from './llm'
 
 const mockSettings = {
   baseUrl: 'https://api.openai.com/v1',
@@ -182,5 +182,33 @@ describe('completeChatCall', () => {
 describe('cancelChatStream', () => {
   it('does nothing for unknown request id', () => {
     cancelChatStream('nonexistent')
+  })
+})
+
+describe('parseLlmJson', () => {
+  it.each([
+    ['plain JSON', '{"state":"idle","reason":"waiting"}', { state: 'idle', reason: 'waiting' }],
+    ['markdown-fenced JSON', '```json\n{"state":"idle","reason":"waiting"}\n```', { state: 'idle', reason: 'waiting' }],
+    [
+      'nested markdown JSON in field value (title case)',
+      '{"title":"```json\\n{\\"title\\": \\"TrieNodeCache Partition Removal\\", \\"description\\": \\"Convert partitioned cache\\"}\\n```","description":""}',
+      { title: 'TrieNodeCache Partition Removal', description: 'Convert partitioned cache' },
+    ],
+    [
+      'nested markdown JSON in field value (state case)',
+      '{"state":"```json\\n{\\"state\\": \\"safe\\", \\"reason\\": \\"just ls\\"}\\n```","reason":""}',
+      { state: 'safe', reason: 'just ls' },
+    ],
+    [
+      'field value that looks like JSON but is not markdown-wrapped',
+      '{"title":"My Title","description":"A description"}',
+      { title: 'My Title', description: 'A description' },
+    ],
+  ])('handles %s', (_name, input, expected) => {
+    expect(parseLlmJson(input)).toEqual(expected)
+  })
+
+  it('throws on invalid JSON', () => {
+    expect(() => parseLlmJson('not json')).toThrow()
   })
 })

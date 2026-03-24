@@ -88,6 +88,31 @@ export async function completeChatCall(
   return response.choices[0]?.message?.content ?? ''
 }
 
+/** Strip markdown fences and parse JSON. If a field value is itself a markdown-wrapped JSON string, re-parse and merge. */
+export function parseLlmJson(raw: string): Record<string, unknown> {
+  const stripped = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+  const parsed = JSON.parse(stripped)
+  if (typeof parsed !== 'object' || parsed === null) return parsed
+
+  for (const [key, value] of Object.entries(parsed)) {
+    if (typeof value !== 'string') continue
+    const inner = value.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+    if (inner.startsWith('{')) {
+      try {
+        const innerParsed = JSON.parse(inner)
+        if (typeof innerParsed === 'object' && innerParsed !== null) {
+          // Merge inner fields, preferring non-empty inner values
+          for (const [ik, iv] of Object.entries(innerParsed)) {
+            if (iv !== '' && iv !== null && iv !== undefined) parsed[ik] = iv
+          }
+        }
+      } catch { /* not JSON, leave as-is */ }
+    }
+  }
+
+  return parsed
+}
+
 export function cancelChatStream(requestId: string): void {
   const controller = activeStreams.get(requestId)
   if (controller) {

@@ -24,7 +24,7 @@ for (const arg of process.argv) {
 import { loadSettings, saveSettings, Settings, addRecentDirectory } from './settings'
 import { createApplicationMenu } from './menu'
 import { registerSTTHandlers } from './stt'
-import { startChatStream, cancelChatStream, completeChatCall, formatLlmError } from './llm'
+import { startChatStream, cancelChatStream, completeChatCall, formatLlmError, parseLlmJson } from './llm'
 
 let mainWindow: BrowserWindow | null = null
 let loadingWindow: BrowserWindow | null = null
@@ -381,9 +381,8 @@ ipcMain.handle('llm:analyzeTerminal', async (_event, buffer: string, cwd: string
       model: settings.model,
       reasoning: settings.reasoningEffort
     })
-    const cleaned = response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    const parsed = JSON.parse(cleaned)
-    const result = { state: parsed.state, reason: parsed.reason ?? '' }
+    const parsed = parseLlmJson(response)
+    const result = { state: parsed.state as string, reason: (parsed.reason as string) ?? '' }
     analyzerCache.push({ buffer, result })
     if (analyzerCache.length > ANALYZER_CACHE_SIZE) {
       analyzerCache.shift()
@@ -410,8 +409,8 @@ ipcMain.handle('llm:generateTitle', async (_event, buffer: string, settings: { b
       model: settings.model,
       reasoning: settings.reasoningEffort
     })
-    const parsed = JSON.parse(response)
-    return { title: parsed.title || '', description: parsed.description || '' }
+    const parsed = parseLlmJson(response)
+    return { title: (parsed.title as string) || '', description: (parsed.description as string) || '' }
   } catch (error) {
     return { error: formatLlmError(error) }
   }
