@@ -9,6 +9,7 @@ export interface TtyTerminalDeps {
   isAlive: (id: string) => Promise<boolean>
   onData: (handle: string, callback: (data: string) => void) => () => void
   onExit: (handle: string, callback: (exitCode: number) => void) => () => void
+  onResize: (handle: string, callback: (cols: number, rows: number) => void) => () => void
 }
 
 export interface TtyState {
@@ -19,6 +20,7 @@ export interface TtyState {
   isAlive(): Promise<boolean>
   onData(cb: (data: string) => void): () => void
   onExit(cb: (exitCode: number) => void): () => void
+  onResize(cb: (cols: number, rows: number) => void): () => void
 }
 
 export type Tty = StoreApi<TtyState>
@@ -32,6 +34,7 @@ export function createTtyStore(ptyId: string, handle: string, terminal: TtyTermi
     isAlive: () => terminal.isAlive(ptyId),
     onData: (cb: (data: string) => void) => terminal.onData(handle, cb),
     onExit: (cb: (exitCode: number) => void) => terminal.onExit(handle, cb),
+    onResize: (cb: (cols: number, rows: number) => void) => terminal.onResize(handle, cb),
   }))
 }
 

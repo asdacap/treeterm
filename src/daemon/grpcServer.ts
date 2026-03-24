@@ -254,12 +254,15 @@ export class GrpcServer {
     let sessionId: string | null = null
     let dataUnsubscribe: (() => void) | null = null
     let exitUnsubscribe: (() => void) | null = null
+    let resizeUnsubscribe: (() => void) | null = null
 
     const cleanup = (): void => {
       dataUnsubscribe?.()
       exitUnsubscribe?.()
+      resizeUnsubscribe?.()
       dataUnsubscribe = null
       exitUnsubscribe = null
+      resizeUnsubscribe = null
     }
 
     call.on('data', (input: PtyInput) => {
@@ -289,6 +292,10 @@ export class GrpcServer {
             call.write({ exit: { exitCode, signal } })
             call.end()
             cleanup()
+          })
+
+          resizeUnsubscribe = this.ptyManager.onSessionResize(sessionId, (cols, rows) => {
+            call.write({ resize: { cols, rows } })
           })
         } else if (sessionId && input.write) {
           this.ptyManager.write(sessionId, input.write.data.toString('utf-8'))

@@ -109,6 +109,7 @@ message PtyOutput {
   oneof output {
     PtyData data = 1;
     PtyExit exit = 2;
+    PtyResizeData resize = 3;
   }
 }
 

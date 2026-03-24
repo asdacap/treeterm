@@ -171,6 +171,7 @@ export class DaemonPtyManager {
   private exitCallbacks: Set<ExitCallback> = new Set()
   private sessionDataCallbacks: Map<string, Set<(data: string) => void>> = new Map()
   private sessionExitCallbacks: Map<string, Set<(exitCode: number, signal?: number) => void>> = new Map()
+  private sessionResizeCallbacks: Map<string, Set<(cols: number, rows: number) => void>> = new Map()
   constructor(private scrollbackLimit: number = 1024 * 1024) {
     // scrollbackLimit is now in bytes (default 1 MB)
   }
@@ -308,6 +309,7 @@ export class DaemonPtyManager {
     session.cols = cols
     session.rows = rows
     session.lastActivity = Date.now()
+    this.broadcastResize(sessionId, cols, rows)
   }
 
   kill(sessionId: string): void {
@@ -366,6 +368,20 @@ export class DaemonPtyManager {
     }
   }
 
+  onSessionResize(sessionId: string, callback: (cols: number, rows: number) => void): () => void {
+    if (!this.sessionResizeCallbacks.has(sessionId)) {
+      this.sessionResizeCallbacks.set(sessionId, new Set())
+    }
+    this.sessionResizeCallbacks.get(sessionId)!.add(callback)
+    return () => {
+      const cbs = this.sessionResizeCallbacks.get(sessionId)
+      if (cbs) {
+        cbs.delete(callback)
+        if (cbs.size === 0) this.sessionResizeCallbacks.delete(sessionId)
+      }
+    }
+  }
+
   private appendScrollback(session: PtySession, data: string): void {
     session.scrollback.push(data)
     session.scrollbackSize += Buffer.byteLength(data, 'utf-8')
@@ -397,6 +413,15 @@ export class DaemonPtyManager {
     if (sessionCbs) {
       for (const callback of sessionCbs) {
         callback(exitCode, signal)
+      }
+    }
+  }
+
+  private broadcastResize(sessionId: string, cols: number, rows: number): void {
+    const sessionCbs = this.sessionResizeCallbacks.get(sessionId)
+    if (sessionCbs) {
+      for (const callback of sessionCbs) {
+        callback(cols, rows)
       }
     }
   }

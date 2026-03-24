@@ -262,6 +262,9 @@ ipcMain.handle('pty:create', async (event, connectionId: string, cwd: string, sa
       event.sender.send('pty:exit', ptyStream.handle, exitCode)
       ptyStreams.delete(ptyStream.handle)
     })
+    ptyStream.onResize((cols, rows) => {
+      event.sender.send('pty:resize-event', ptyStream.handle, cols, rows)
+    })
 
     return { sessionId, handle: ptyStream.handle }
   } catch (error) {
@@ -287,6 +290,9 @@ ipcMain.handle('pty:attach', async (_event, connectionId: string, sessionId: str
     ptyStream.onExit(exitCode => {
       _event.sender.send('pty:exit', ptyStream.handle, exitCode)
       ptyStreams.delete(ptyStream.handle)
+    })
+    ptyStream.onResize((cols, rows) => {
+      _event.sender.send('pty:resize-event', ptyStream.handle, cols, rows)
     })
 
     return { success: true, handle: ptyStream.handle, scrollback, exitCode }

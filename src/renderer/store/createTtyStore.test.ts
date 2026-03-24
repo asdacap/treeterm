@@ -9,6 +9,7 @@ function makeMockTerminalDeps(): TtyTerminalDeps {
     isAlive: vi.fn().mockResolvedValue(true),
     onData: vi.fn().mockReturnValue(() => {}),
     onExit: vi.fn().mockReturnValue(() => {}),
+    onResize: vi.fn().mockReturnValue(() => {}),
   }
 }
 

@@ -48,6 +48,7 @@ export class PtyStream {
   private stream: grpc.ClientDuplexStream<PtyInput, PtyOutput>
   private onDataCb: ((data: string) => void) | null = null
   private onExitCb: ((exitCode: number, signal?: number) => void) | null = null
+  private onResizeCb: ((cols: number, rows: number) => void) | null = null
   private closed: boolean = false
 
   constructor(client: TreeTermDaemonClient, sessionId: string) {
@@ -64,6 +65,8 @@ export class PtyStream {
       } else if (output.exit) {
         const { exitCode, signal } = output.exit
         this.onExitCb?.(exitCode, signal)
+      } else if (output.resize) {
+        this.onResizeCb?.(output.resize.cols, output.resize.rows)
       }
     })
 
@@ -82,6 +85,10 @@ export class PtyStream {
 
   onExit(cb: (exitCode: number, signal?: number) => void): void {
     this.onExitCb = cb
+  }
+
+  onResize(cb: (cols: number, rows: number) => void): void {
+    this.onResizeCb = cb
   }
 
   write(data: string): void {

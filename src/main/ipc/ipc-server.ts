@@ -89,6 +89,7 @@ const CHANNELS = {
   // Event channels
   ptyData: 'pty:data',
   ptyExit: 'pty:exit',
+  ptyResizeEvent: 'pty:resize-event',
   settingsOpen: 'settings:open',
   appConfirmClose: 'app:confirm-close',
   appReady: 'app:ready',
