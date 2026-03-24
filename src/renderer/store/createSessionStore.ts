@@ -262,12 +262,23 @@ export function createSessionStore(
 
     const handle = createHandleForWorkspace(childWorkspace)
 
-    store.setState((s) => ({
-      workspaceStores: { ...s.workspaceStores, [id]: handle },
-      workspaces: { ...s.workspaces, [id]: childWorkspace },
-      activeWorkspaceId: id,
-      workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'loading' as const, message: options.message, output: [] } }
-    }))
+    store.setState((s) => {
+      const parentWs = s.workspaces[parentId]
+      const parentHandle = s.workspaceStores[parentId]
+      if (parentWs && parentHandle) {
+        parentHandle.setState({ workspace: { ...parentWs, children: [...parentWs.children, id] } })
+      }
+      return {
+        workspaceStores: { ...s.workspaceStores, [id]: handle },
+        workspaces: {
+          ...s.workspaces,
+          [id]: childWorkspace,
+          ...(parentWs ? { [parentId]: { ...parentWs, children: [...parentWs.children, id] } } : {})
+        },
+        activeWorkspaceId: id,
+        workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'loading' as const, message: options.message, output: [] } }
+      }
+    })
 
     const unsubOutput = deps.git.onOutput((opId, data) => {
       if (opId !== operationId) return
@@ -302,12 +313,6 @@ export function createSessionStore(
         }
 
         store.setState(s => {
-          const parentWs = s.workspaces[parentId]
-          const parentHandle = s.workspaceStores[parentId]
-          if (parentWs && parentHandle) {
-            const updatedParent = { ...parentWs, children: [...parentWs.children, id] }
-            parentHandle.setState({ workspace: updatedParent })
-          }
           const { [id]: _, ...rest } = s.workspaceLoadStates
           return { workspaceLoadStates: rest }
         })
