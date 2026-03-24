@@ -59,7 +59,6 @@ describe('Review Renderer', () => {
       expect(reviewApplication.canClose).toBe(true)
       expect(reviewApplication.canHaveMultiple).toBe(false)
       expect(reviewApplication.showInNewTabMenu).toBe(true)
-      expect(reviewApplication.keepAlive).toBe(false)
       expect(reviewApplication.displayStyle).toBe('flex')
       expect(reviewApplication.isDefault).toBe(false)
     })

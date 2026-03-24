@@ -13,7 +13,6 @@ export const chatApplication: Application<ChatState> = {
   canClose: true,
   canHaveMultiple: true,
   showInNewTabMenu: true,
-  keepAlive: false,
   displayStyle: 'flex',
   isDefault: false
 }

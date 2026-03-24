@@ -59,7 +59,6 @@ describe('Filesystem Renderer', () => {
       expect(filesystemApplication.canClose).toBe(true)
       expect(filesystemApplication.canHaveMultiple).toBe(true)
       expect(filesystemApplication.showInNewTabMenu).toBe(true)
-      expect(filesystemApplication.keepAlive).toBe(false)
       expect(filesystemApplication.displayStyle).toBe('flex')
       expect(filesystemApplication.isDefault).toBe(true)
     })

@@ -39,7 +39,6 @@ export function createTerminalApplication(deps: TerminalDeps): Application<Termi
     canClose: true,
     canHaveMultiple: true,
     showInNewTabMenu: true,
-    keepAlive: true,
     displayStyle: 'flex',
     isDefault: true
   }
@@ -78,7 +77,6 @@ export function createTerminalVariant(instance: TerminalInstance, deps: Terminal
     canClose: true,
     canHaveMultiple: true,
     showInNewTabMenu: true,
-    keepAlive: true,
     displayStyle: 'flex',
     isDefault: instance.isDefault
   }

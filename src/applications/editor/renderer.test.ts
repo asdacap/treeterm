@@ -61,7 +61,6 @@ describe('Editor Renderer', () => {
       expect(editorApplication.canClose).toBe(true)
       expect(editorApplication.canHaveMultiple).toBe(true)
       expect(editorApplication.showInNewTabMenu).toBe(false)
-      expect(editorApplication.keepAlive).toBe(false)
       expect(editorApplication.displayStyle).toBe('flex')
       expect(editorApplication.isDefault).toBe(false)
     })

@@ -11,7 +11,6 @@ export const systemPromptDebuggerApplication: Application = {
   canClose: true,
   canHaveMultiple: false,
   showInNewTabMenu: true,
-  keepAlive: false,
   displayStyle: 'flex',
   isDefault: false
 }

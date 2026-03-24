@@ -79,7 +79,6 @@ describe('AI Harness Renderer', () => {
       expect(app.canClose).toBe(true)
       expect(app.canHaveMultiple).toBe(true)
       expect(app.showInNewTabMenu).toBe(true)
-      expect(app.keepAlive).toBe(true)
       expect(app.displayStyle).toBe('flex')
     })
 
