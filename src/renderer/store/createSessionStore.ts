@@ -12,6 +12,10 @@ import type {
   Application, SandboxConfig, SessionInfo, LlmApi
 } from '../types'
 
+export type WorkspaceLoadState =
+  | { status: 'loading'; message: string; output: string[] }
+  | { status: 'error'; error: string }
+
 export interface AppRegistryApi {
   get: (id: string) => Application | undefined
   getDefaultApp: (appId?: string) => Application | null
@@ -47,13 +51,15 @@ export interface SessionState {
   workspaces: Record<string, Workspace>
   activeWorkspaceId: string | null
   isRestoring: boolean
+  workspaceLoadStates: Record<string, WorkspaceLoadState>
 
   getWorkspace: (id: string) => WorkspaceStore | null
-  addWorkspace: (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => Promise<string>
-  addChildWorkspace: (parentId: string, name: string, isDetached?: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
+  dismissFailedWorkspace: (id: string) => void
+  addWorkspace: (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => string
+  addChildWorkspace: (parentId: string, name: string, isDetached?: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
   adoptExistingWorktree: (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
-  createWorktreeFromBranch: (parentId: string, branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
-  createWorktreeFromRemote: (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
+  createWorktreeFromBranch: (parentId: string, branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
+  createWorktreeFromRemote: (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
   removeWorkspace: (id: string) => Promise<void>
   removeWorkspaceKeepBranch: (id: string) => Promise<void>
   removeWorkspaceKeepWorktree: (id: string) => Promise<void>
@@ -131,7 +137,8 @@ export function createSessionStore(
         return
       }
 
-      const daemonWorkspaces = Object.values(workspaces).map(({ createdAt, lastActivity, ...ws }) => ws)
+      const loadStates = store.getState().workspaceLoadStates
+      const daemonWorkspaces = Object.values(workspaces).filter(ws => !loadStates[ws.id]).map(({ createdAt, lastActivity, ...ws }) => ws)
 
       console.log('[session] syncing to daemon:', daemonWorkspaces.length, 'workspaces')
 
@@ -200,7 +207,124 @@ export function createSessionStore(
     return handle
   }
 
-  // Shared helper: creates a child workspace from a git operation result
+  // Shared helper: creates a placeholder child workspace with loading state and fires a git operation
+  function createChildWithLoading(
+    parentId: string,
+    worktreeName: string,
+    options: {
+      isDetached?: boolean
+      settings?: WorktreeSettings
+      description?: string
+      initialBranch?: string | null
+      message: string
+      gitOperation: (operationId: string) => Promise<{ success: boolean; path?: string; branch?: string; error?: string }>
+      preOperation?: () => Promise<void>
+    }
+  ): { success: true } {
+    const state = store.getState()
+    const parent = state.workspaces[parentId]
+
+    const id = generateId()
+    const operationId = generateId()
+
+    const appStates: Record<string, AppState> = {}
+    let activeTabId: string | null = null
+    const defaultApp = getDefaultAppForWorktree(deps, options.settings, parent?.settings)
+    if (defaultApp) {
+      const tabId = generateTabId()
+      appStates[tabId] = {
+        applicationId: defaultApp.id,
+        title: defaultApp.name,
+        state: defaultApp.createInitialState()
+      }
+      activeTabId = tabId
+    }
+
+    const childWorkspace: Workspace = {
+      id,
+      name: worktreeName,
+      path: `${parent?.gitRootPath}/.worktrees/${worktreeName}`,
+      parentId,
+      children: [],
+      status: 'active',
+      isGitRepo: true,
+      gitBranch: options.initialBranch ?? null,
+      gitRootPath: parent?.gitRootPath ?? null,
+      isWorktree: true,
+      isDetached: options.isDetached,
+      appStates,
+      activeTabId,
+      settings: options.settings,
+      metadata: options.description ? { description: options.description } : {},
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+    }
+
+    const handle = createHandleForWorkspace(childWorkspace)
+
+    store.setState((s) => ({
+      workspaceStores: { ...s.workspaceStores, [id]: handle },
+      workspaces: { ...s.workspaces, [id]: childWorkspace },
+      activeWorkspaceId: id,
+      workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'loading' as const, message: options.message, output: [] } }
+    }))
+
+    const unsubOutput = deps.git.onOutput((opId, data) => {
+      if (opId !== operationId) return
+      const loadState = store.getState().workspaceLoadStates[id]
+      if (loadState?.status === 'loading') {
+        store.setState(s => ({
+          workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { ...loadState, output: [...loadState.output, data] } }
+        }))
+      }
+    })
+
+    ;(async () => {
+      try {
+        if (options.preOperation) {
+          await options.preOperation()
+        }
+
+        const result = await options.gitOperation(operationId)
+
+        if (!result.success) {
+          store.setState(s => ({
+            workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: result.error || 'Operation failed' } }
+          }))
+          return
+        }
+
+        const wsHandle = store.getState().workspaceStores[id]
+        if (wsHandle) {
+          wsHandle.setState(s => ({
+            workspace: { ...s.workspace, path: result.path!, gitBranch: result.branch! }
+          }))
+        }
+
+        store.setState(s => {
+          const parentWs = s.workspaces[parentId]
+          const parentHandle = s.workspaceStores[parentId]
+          if (parentWs && parentHandle) {
+            const updatedParent = { ...parentWs, children: [...parentWs.children, id] }
+            parentHandle.setState({ workspace: updatedParent })
+          }
+          const { [id]: _, ...rest } = s.workspaceLoadStates
+          return { workspaceLoadStates: rest }
+        })
+        await syncSessionToDaemon(store.getState().isRestoring)
+      } catch (err) {
+        store.setState(s => ({
+          workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: err instanceof Error ? err.message : String(err) } }
+        }))
+      } finally {
+        unsubOutput()
+      }
+    })()
+
+    return { success: true }
+  }
+
+  // Shared helper: creates a child workspace from a git operation result (used by adoptExistingWorktree)
   async function addChildWorkspaceFromResult(
     parentId: string,
     name: string,
@@ -356,6 +480,7 @@ export function createSessionStore(
     workspaces: {},
     activeWorkspaceId: null,
     isRestoring: false,
+    workspaceLoadStates: {},
 
     connection: config.connection ?? null,
 
@@ -392,15 +517,21 @@ export function createSessionStore(
       return deps.terminal.list(connectionId)
     },
 
+    dismissFailedWorkspace: (id: string): void => {
+      get().removeOrphanWorkspace(id)
+      set((s) => {
+        const { [id]: _, ...rest } = s.workspaceLoadStates
+        return { workspaceLoadStates: rest }
+      })
+    },
+
     getWorkspace: (id: string): WorkspaceStore | null => {
       return get().workspaceStores[id] ?? null
     },
 
-    addWorkspace: async (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => {
+    addWorkspace: (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => {
       console.log('[session] addWorkspace called for path:', path)
       const id = generateId()
-
-      const gitInfo = await deps.git.getInfo(path)
 
       const appStates: Record<string, AppState> = {}
       let activeTabId: string | null = null
@@ -425,9 +556,9 @@ export function createSessionStore(
         parentId: null,
         children: [],
         status: 'active',
-        isGitRepo: gitInfo.isRepo,
-        gitBranch: gitInfo.branch,
-        gitRootPath: gitInfo.rootPath,
+        isGitRepo: false,
+        gitBranch: null,
+        gitRootPath: null,
         isWorktree: false,
         appStates,
         activeTabId,
@@ -442,14 +573,33 @@ export function createSessionStore(
       set((s) => ({
         workspaceStores: { ...s.workspaceStores, [id]: handle },
         workspaces: { ...s.workspaces, [id]: workspace },
-        activeWorkspaceId: id
+        activeWorkspaceId: id,
+        workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'loading' as const, message: 'Loading workspace...', output: [] } }
       }))
 
-      await syncSessionToDaemon(get().isRestoring)
+      // Fire-and-forget: resolve git info
+      deps.git.getInfo(path).then(gitInfo => {
+        const wsHandle = get().workspaceStores[id]
+        if (wsHandle) {
+          wsHandle.setState(s => ({
+            workspace: { ...s.workspace, isGitRepo: gitInfo.isRepo, gitBranch: gitInfo.branch, gitRootPath: gitInfo.rootPath }
+          }))
+        }
+        set(s => {
+          const { [id]: _, ...rest } = s.workspaceLoadStates
+          return { workspaceLoadStates: rest }
+        })
+        syncSessionToDaemon(get().isRestoring)
+      }).catch(err => {
+        set(s => ({
+          workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: err instanceof Error ? err.message : String(err) } }
+        }))
+      })
+
       return id
     },
 
-    addChildWorkspace: async (parentId: string, name: string, isDetached: boolean = false, settings?: WorktreeSettings, description?: string) => {
+    addChildWorkspace: (parentId: string, name: string, isDetached: boolean = false, settings?: WorktreeSettings, description?: string) => {
       const state = get()
       const parent = state.workspaces[parentId]
 
@@ -461,26 +611,25 @@ export function createSessionStore(
         return { success: false, error: 'Parent workspace is not a git repository' }
       }
 
-      const currentGitInfo = await deps.git.getInfo(parent.path)
-      const currentBranch = currentGitInfo.branch
-
-      const result = await deps.git.createWorktree(
-        parent.gitRootPath,
-        name,
-        currentBranch || undefined
-      )
-
-      if (!result.success) {
-        return { success: false, error: result.error }
-      }
-
-      if (currentBranch && currentBranch !== parent.gitBranch) {
-        get().updateGitInfo(parentId, currentGitInfo)
-      }
-
-      const metadata = description ? { description } : undefined
-      await addChildWorkspaceFromResult(parentId, name, result.path!, result.branch!, { isDetached, settings, metadata })
-      return { success: true }
+      return createChildWithLoading(parentId, name, {
+        isDetached, settings, description,
+        message: 'Creating worktree...',
+        preOperation: async () => {
+          const currentGitInfo = await deps.git.getInfo(parent.path)
+          if (currentGitInfo.branch && currentGitInfo.branch !== parent.gitBranch) {
+            get().updateGitInfo(parentId, currentGitInfo)
+          }
+        },
+        gitOperation: (operationId) => {
+          const currentParent = get().workspaces[parentId]
+          return deps.git.createWorktree(
+            parent.gitRootPath!,
+            name,
+            currentParent?.gitBranch || undefined,
+            operationId
+          )
+        },
+      })
     },
 
     adoptExistingWorktree: async (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => {
@@ -503,7 +652,7 @@ export function createSessionStore(
       return { success: true }
     },
 
-    createWorktreeFromBranch: async (parentId: string, branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => {
+    createWorktreeFromBranch: (parentId: string, branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => {
       console.log('[session] createWorktreeFromBranch called:', { parentId, branch, isDetached })
       const state = get()
       const parent = state.workspaces[parentId]
@@ -517,22 +666,20 @@ export function createSessionStore(
       }
 
       const worktreeName = branch.split('/').pop() || branch
-      const result = await deps.git.createWorktreeFromBranch(
-        parent.gitRootPath,
-        branch,
-        worktreeName
-      )
-
-      if (!result.success) {
-        return { success: false, error: result.error }
-      }
-
-      const metadata = description ? { description } : undefined
-      await addChildWorkspaceFromResult(parentId, worktreeName, result.path!, result.branch!, { isDetached, settings, metadata })
-      return { success: true }
+      return createChildWithLoading(parentId, worktreeName, {
+        isDetached, settings, description,
+        initialBranch: branch,
+        message: 'Creating worktree from branch...',
+        gitOperation: (operationId) => deps.git.createWorktreeFromBranch(
+          parent.gitRootPath!,
+          branch,
+          worktreeName,
+          operationId
+        ),
+      })
     },
 
-    createWorktreeFromRemote: async (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => {
+    createWorktreeFromRemote: (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => {
       console.log('[session] createWorktreeFromRemote called:', { parentId, remoteBranch, isDetached })
       const state = get()
       const parent = state.workspaces[parentId]
@@ -546,19 +693,17 @@ export function createSessionStore(
       }
 
       const worktreeName = remoteBranch.split('/').pop() || remoteBranch
-      const result = await deps.git.createWorktreeFromRemote(
-        parent.gitRootPath,
-        remoteBranch,
-        worktreeName
-      )
-
-      if (!result.success) {
-        return { success: false, error: result.error }
-      }
-
-      const metadata = description ? { description } : undefined
-      await addChildWorkspaceFromResult(parentId, worktreeName, result.path!, result.branch!, { isDetached, settings, metadata })
-      return { success: true }
+      return createChildWithLoading(parentId, worktreeName, {
+        isDetached, settings, description,
+        initialBranch: remoteBranch,
+        message: 'Creating worktree from remote...',
+        gitOperation: (operationId) => deps.git.createWorktreeFromRemote(
+          parent.gitRootPath!,
+          remoteBranch,
+          worktreeName,
+          operationId
+        ),
+      })
     },
 
     removeWorkspace: async (id: string) => {
@@ -753,11 +898,11 @@ export function createSessionStore(
       set({ isRestoring: true })
       applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: false })
 
-      // Remove workspaces not present in daemon session
+      // Remove workspaces not present in daemon session (skip loading workspaces)
       const incomingPaths = new Set(daemonSession.workspaces.map(ws => ws.path))
       const updatedState = get()
       for (const [id, ws] of Object.entries(updatedState.workspaces)) {
-        if (!incomingPaths.has(ws.path)) {
+        if (!incomingPaths.has(ws.path) && !updatedState.workspaceLoadStates[id]) {
           get().removeOrphanWorkspace(id)
         }
       }

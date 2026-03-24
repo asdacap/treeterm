@@ -5,10 +5,10 @@ import { useAppStore } from '../store/app'
 
 interface CreateChildDialogProps {
   parentWorkspace: WorkspaceStore
-  onCreate: (name: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
+  onCreate: (name: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
   onAdopt: (worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
-  onCreateFromBranch: (branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
-  onCreateFromRemote: (remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
+  onCreateFromBranch: (branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
+  onCreateFromRemote: (remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
   onCancel: () => void
   openWorktreePaths: string[]
   initialMode?: TabMode
@@ -189,7 +189,7 @@ export default function CreateChildDialog({
     return undefined
   }
 
-  const handleCreateSubmit = async () => {
+  const handleCreateSubmit = () => {
     if (!name.trim()) {
       setError('Please enter a workspace name')
       return
@@ -200,21 +200,15 @@ export default function CreateChildDialog({
       return
     }
 
-    setIsProcessing(true)
-    setProcessingMessage('Creating worktree... This may take a while for large repositories.')
     setError(null)
 
     console.log('[CreateChildDialog] Creating new worktree:', name.trim())
     const settings = buildSettings()
     const desc = description.trim() || undefined
-    const result = await onCreate(name.trim(), isDetached, settings, desc)
+    const result = onCreate(name.trim(), isDetached, settings, desc)
     if (!result.success) {
       console.error('[CreateChildDialog] Failed to create worktree:', result.error)
       setError(result.error || 'Failed to create workspace')
-      setIsProcessing(false)
-      setProcessingMessage('')
-    } else {
-      console.log('[CreateChildDialog] Successfully created worktree')
     }
   }
 
@@ -248,58 +242,39 @@ export default function CreateChildDialog({
     }
   }
 
-  const handleBranchSubmit = async () => {
+  const handleBranchSubmit = () => {
     if (!selectedBranch) {
       setError('Please select a branch')
       return
     }
 
-    setIsProcessing(true)
-    setProcessingMessage('Creating worktree from branch... This may take a while for large repositories.')
     setError(null)
 
     console.log('[CreateChildDialog] Creating worktree from branch:', selectedBranch.name)
     const settings = buildSettings()
     const desc = description.trim() || undefined
-    const result = await onCreateFromBranch(selectedBranch.name, isDetached, settings, desc)
+    const result = onCreateFromBranch(selectedBranch.name, isDetached, settings, desc)
     if (!result.success) {
       console.error('[CreateChildDialog] Failed to create worktree from branch:', result.error)
       setError(result.error || 'Failed to create worktree from branch')
-      setIsProcessing(false)
-      setProcessingMessage('')
-    } else {
-      console.log('[CreateChildDialog] Successfully created worktree from branch')
     }
   }
 
-  const handleRemoteSubmit = async () => {
+  const handleRemoteSubmit = () => {
     if (!selectedRemoteBranch) {
       setError('Please select a remote branch')
       return
     }
 
-    // Defensive check for function availability
-    if (typeof onCreateFromRemote !== 'function') {
-      console.error('[CreateChildDialog] onCreateFromRemote is not a function:', onCreateFromRemote)
-      setError('Internal error: handler not available. Please reload the application.')
-      return
-    }
-
-    setIsProcessing(true)
-    setProcessingMessage('Creating worktree from remote branch... This may take a while for large repositories.')
     setError(null)
 
     console.log('[CreateChildDialog] Creating worktree from remote branch:', selectedRemoteBranch.name)
     const settings = buildSettings()
     const desc = description.trim() || undefined
-    const result = await onCreateFromRemote(selectedRemoteBranch.name, isDetached, settings, desc)
+    const result = onCreateFromRemote(selectedRemoteBranch.name, isDetached, settings, desc)
     if (!result.success) {
       console.error('[CreateChildDialog] Failed to create worktree:', result.error)
       setError(result.error || 'Failed to create worktree from remote branch')
-      setIsProcessing(false)
-      setProcessingMessage('')
-    } else {
-      console.log('[CreateChildDialog] Successfully created worktree from remote branch')
     }
   }
 

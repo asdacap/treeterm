@@ -295,15 +295,15 @@ export interface TerminalApi {
 
 export interface GitApi {
   getInfo: (dirPath: string) => Promise<GitInfo>
-  createWorktree: (repoPath: string, name: string, baseBranch?: string) => Promise<WorktreeResult>
+  createWorktree: (repoPath: string, name: string, baseBranch?: string, operationId?: string) => Promise<WorktreeResult>
   removeWorktree: (repoPath: string, worktreePath: string, deleteBranch?: boolean) => Promise<{ success: boolean; error?: string }>
   listWorktrees: (repoPath: string) => Promise<WorktreeInfo[]>
   getChildWorktrees: (repoPath: string, parentBranch: string | null) => Promise<ChildWorktreeInfo[]>
   listLocalBranches: (repoPath: string) => Promise<string[]>
   listRemoteBranches: (repoPath: string) => Promise<string[]>
   getBranchesInWorktrees: (repoPath: string) => Promise<string[]>
-  createWorktreeFromBranch: (repoPath: string, branch: string, worktreeName: string) => Promise<WorktreeResult>
-  createWorktreeFromRemote: (repoPath: string, remoteBranch: string, worktreeName: string) => Promise<WorktreeResult>
+  createWorktreeFromBranch: (repoPath: string, branch: string, worktreeName: string, operationId?: string) => Promise<WorktreeResult>
+  createWorktreeFromRemote: (repoPath: string, remoteBranch: string, worktreeName: string, operationId?: string) => Promise<WorktreeResult>
   getDiff: (worktreePath: string, parentBranch: string) => Promise<{ success: boolean; diff?: DiffResult; error?: string }>
   getFileDiff: (worktreePath: string, parentBranch: string, filePath: string) => Promise<{ success: boolean; diff?: string; error?: string }>
   checkMergeConflicts: (repoPath: string, sourceBranch: string, targetBranch: string) => Promise<ConflictCheckResult>
@@ -321,6 +321,7 @@ export interface GitApi {
   getFileContentsForDiff: (worktreePath: string, parentBranch: string, filePath: string) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
   getUncommittedFileContentsForDiff: (repoPath: string, filePath: string, staged: boolean) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
   getHeadCommitHash: (repoPath: string) => Promise<{ success: boolean; hash?: string; error?: string }>
+  onOutput: (callback: (operationId: string, data: string) => void) => () => void
 }
 
 /** Workspace-scoped GitApi with path pre-bound */

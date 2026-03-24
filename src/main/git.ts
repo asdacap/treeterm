@@ -57,7 +57,7 @@ export class GitClient {
   private async exec(
     cwd: string,
     args: string[],
-    options: { timeoutMs?: number; env?: Record<string, string> } = {}
+    options: { timeoutMs?: number; env?: Record<string, string>; onProgress?: (data: string) => void } = {}
   ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
       const stdout: Buffer[] = []
@@ -86,8 +86,14 @@ export class GitClient {
         stream.on('data', (output: ExecOutput) => {
           if (output.stdout) {
             stdout.push(output.stdout.data)
+            if (options.onProgress) {
+              options.onProgress(output.stdout.data.toString('utf-8'))
+            }
           } else if (output.stderr) {
             stderr.push(output.stderr.data)
+            if (options.onProgress) {
+              options.onProgress(output.stderr.data.toString('utf-8'))
+            }
           } else if (output.result) {
             resultReceived = true
             resolve({
@@ -378,7 +384,8 @@ export class GitClient {
   async createWorktree(
     repoPath: string,
     worktreeName: string,
-    baseBranch?: string
+    baseBranch?: string,
+    onProgress?: (data: string) => void
   ): Promise<{ path: string; branch: string }> {
     // Get repo root
     const rootResult = await this.exec(repoPath, ['rev-parse', '--show-toplevel'])
@@ -412,7 +419,7 @@ export class GitClient {
       args.push(baseBranch)
     }
 
-    const result = await this.exec(repoPath, args)
+    const result = await this.exec(repoPath, args, { onProgress })
     if (result.exitCode !== 0) {
       throw this.interpretError(result)
     }
@@ -426,7 +433,8 @@ export class GitClient {
   async createWorktreeFromBranch(
     repoPath: string,
     branch: string,
-    worktreeName: string
+    worktreeName: string,
+    onProgress?: (data: string) => void
   ): Promise<{ path: string; branch: string }> {
     // Get repo root
     const rootResult = await this.exec(repoPath, ['rev-parse', '--show-toplevel'])
@@ -447,7 +455,7 @@ export class GitClient {
     }
 
     // Create worktree from existing branch
-    const result = await this.exec(repoPath, ['worktree', 'add', worktreePath, branch])
+    const result = await this.exec(repoPath, ['worktree', 'add', worktreePath, branch], { onProgress })
     if (result.exitCode !== 0) {
       throw this.interpretError(result)
     }
@@ -461,7 +469,8 @@ export class GitClient {
   async createWorktreeFromRemote(
     repoPath: string,
     remoteBranch: string,
-    worktreeName: string
+    worktreeName: string,
+    onProgress?: (data: string) => void
   ): Promise<{ path: string; branch: string }> {
     // Extract branch name from remote (e.g., "origin/main" -> "main")
     const branchName = remoteBranch.replace(/^[^/]+\//, '')
@@ -485,7 +494,7 @@ export class GitClient {
     }
 
     // Create worktree with new branch tracking remote
-    const result = await this.exec(repoPath, ['worktree', 'add', '-b', branchName, worktreePath, remoteBranch])
+    const result = await this.exec(repoPath, ['worktree', 'add', '-b', branchName, worktreePath, remoteBranch], { onProgress })
     if (result.exitCode !== 0) {
       throw this.interpretError(result)
     }

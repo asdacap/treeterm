@@ -56,7 +56,7 @@ export interface IpcRequests {
     result: GitInfo
   }
   gitCreateWorktree: {
-    params: [repoPath: string, name: string, baseBranch?: string]
+    params: [repoPath: string, name: string, baseBranch?: string, operationId?: string]
     result: WorktreeResult
   }
   gitRemoveWorktree: {
@@ -84,11 +84,11 @@ export interface IpcRequests {
     result: string[]
   }
   gitCreateWorktreeFromBranch: {
-    params: [repoPath: string, branch: string, worktreeName: string]
+    params: [repoPath: string, branch: string, worktreeName: string, operationId?: string]
     result: WorktreeResult
   }
   gitCreateWorktreeFromRemote: {
-    params: [repoPath: string, remoteBranch: string, worktreeName: string]
+    params: [repoPath: string, remoteBranch: string, worktreeName: string, operationId?: string]
     result: WorktreeResult
   }
   gitGetDiff: {
@@ -409,6 +409,9 @@ export interface IpcEvents {
   }
   llmChatError: {
     params: [requestId: string, error: string]
+  }
+  gitOutput: {
+    params: [operationId: string, data: string]
   }
 }
 
