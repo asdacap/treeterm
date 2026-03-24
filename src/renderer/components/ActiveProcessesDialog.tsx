@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Terminal } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
+import { fitTerminal } from '../utils/fitTerminal'
 import { useAppStore } from '../store/app'
 import type { TerminalApi, SessionInfo, Workspace } from '../types'
 
@@ -29,7 +29,6 @@ function lastSegment(cwd: string): string {
 function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connectionId: string; terminalApi: TerminalApi }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
-  const fitAddonRef = useRef<FitAddon | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
@@ -51,16 +50,21 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
       scrollback: 5000,
     })
 
-    const fitAddon = new FitAddon()
-    term.loadAddon(fitAddon)
+    let handleRef: string | null = null
+
+    const resizePty = (cols: number, rows: number) => {
+      if (handleRef) {
+        terminalApi.resize(handleRef, cols, rows)
+      }
+    }
+
     term.open(container)
-    fitAddon.fit()
+    fitTerminal(term, resizePty)
 
     termRef.current = term
-    fitAddonRef.current = fitAddon
 
     const resizeObserver = new ResizeObserver(() => {
-      fitAddon.fit()
+      fitTerminal(term, resizePty)
     })
     resizeObserver.observe(container)
     cleanups.push(() => resizeObserver.disconnect())
@@ -81,6 +85,8 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
         setErrorMessage(`Attach succeeded but no handle returned for session ${ptyId}`)
         return
       }
+
+      handleRef = handle
 
       if (result.scrollback) {
         for (const line of result.scrollback) {
@@ -106,12 +112,6 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
       })
       cleanups.push(() => onDataDisposable.dispose())
 
-      // Handle resize using handle
-      const onResizeDisposable = term.onResize(({ cols, rows }) => {
-        terminalApi.resize(handle, cols, rows)
-      })
-      cleanups.push(() => onResizeDisposable.dispose())
-
       setStatus('ready')
     }).catch((err: unknown) => {
       if (cancelled) return
@@ -124,7 +124,6 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
       for (const cleanup of cleanups) cleanup()
       term.dispose()
       termRef.current = null
-      fitAddonRef.current = null
     }
   }, [ptyId, terminalApi])
 

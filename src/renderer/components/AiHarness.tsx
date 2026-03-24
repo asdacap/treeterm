@@ -155,7 +155,6 @@ export default function AiHarness({
         <BaseTerminal
           workspace={workspace}
           tabId={tabId}
-          isVisible={isVisible}
           config={config}
         />
       </div>

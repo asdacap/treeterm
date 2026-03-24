@@ -49,7 +49,6 @@ export default function Terminal({ cwd, workspace, tabId, startupCommand, sandbo
     <BaseTerminal
       workspace={workspace}
       tabId={tabId}
-      isVisible={isVisible}
       config={terminalConfig}
     />
   )

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
 import { useStore } from 'zustand'
+import { fitTerminal } from '../utils/fitTerminal'
 import { useSettingsStore } from '../store/settings'
 import { useAppStore } from '../store/app'
 import { useActivityStateStore } from '../store/activityState'
@@ -85,29 +85,22 @@ export interface BaseTerminalConfig {
 interface BaseTerminalProps {
   workspace: WorkspaceStore
   tabId: string
-  isVisible?: boolean
   config: BaseTerminalConfig
 }
 
 export default function BaseTerminal({
   workspace,
   tabId,
-  isVisible,
   config,
 }: BaseTerminalProps) {
   const { workspace: wsData, removeTab } = useStore(workspace)
   const workspaceId = wsData.id
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
-  const fitAddonRef = useRef<FitAddon | null>(null)
-  const isVisibleRef = useRef(isVisible)
-  isVisibleRef.current = isVisible
   const ttyRef = useRef<Tty | null>(null)
-  const unsubscribeRef = useRef<(() => void) | null>(null)
-  const detectorRef = useRef<ReturnType<typeof createActivityStateDetector> | null>(null)
-  const rawCharsRef = useRef<string>('')
   const dataVersionRef = useRef(0)
   const [overlay, setOverlay] = useState<{ message: string; type: 'info' | 'error' } | null>(null)
+  const [loading, setLoading] = useState(true)
 
   const sessionStore = useSessionApi()
   const setTabState = useActivityStateStore((state) => state.setTabState)
@@ -127,66 +120,122 @@ export default function BaseTerminal({
     if (!containerRef.current) return
 
     let cancelled = false
+    let terminal: XTerm | null = null
     let resizeTimeout: ReturnType<typeof setTimeout> | null = null
+    let inputDisposable: { dispose(): void } | null = null
+    let resizeObserver: ResizeObserver | null = null
+    let detector: ReturnType<typeof createActivityStateDetector> | null = null
+    let unsubscribe: (() => void) | null = null
+    let rawChars = ''
 
-    // Create terminal with configurable theme
-    const terminal = new XTerm({
-      cursorBlink: true,
-      fontSize: 14,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      scrollback: 50000, // Increase scrollback buffer to handle long outputs
-      theme: {
-        background: config.themeBackground,
-        foreground: '#d4d4d4',
-        cursor: '#d4d4d4',
-        cursorAccent: config.themeBackground,
-        selectionBackground: '#264f78',
-        black: '#000000',
-        red: '#cd3131',
-        green: '#0dbc79',
-        yellow: '#e5e510',
-        blue: '#2472c8',
-        magenta: '#bc3fbc',
-        cyan: '#11a8cd',
-        white: '#e5e5e5',
-        brightBlack: '#666666',
-        brightRed: '#f14c4c',
-        brightGreen: '#23d18b',
-        brightYellow: '#f5f543',
-        brightBlue: '#3b8eea',
-        brightMagenta: '#d670d6',
-        brightCyan: '#29b8db',
-        brightWhite: '#ffffff'
+    const setupResizeObserver = (term: XTerm, resize: (cols: number, rows: number) => void) => {
+      resizeObserver = new ResizeObserver((entries) => {
+        const entry = entries[0]
+        if (!entry) return
+
+        console.log(`[${config.logPrefix} ${tabId}] resize (observer):`, { cols: term.cols, rows: term.rows })
+        fitTerminal(term, resize)
+      })
+      resizeObserver.observe(containerRef.current!)
+    }
+
+    const session = sessionStore.getState()
+
+    const init = async () => {
+      // Phase 1: Resolve TTY
+      if (!existingPtyId) {
+        setLoading(false)
+        setOverlay({ message: 'No PTY available for this terminal', type: 'error' })
+        return
       }
-    })
 
-    const fitAddon = new FitAddon()
-    terminal.loadAddon(fitAddon)
-    terminal.open(containerRef.current)
-    fitAddon.fit()
-    console.log(`[${config.logPrefix} ${tabId}] initial terminal size:`, {
-      cols: terminal.cols,
-      rows: terminal.rows
-    })
+      let tty: Tty
+      let scrollback: string[] | undefined
+      let exitCode: number | undefined
+      try {
+        const result = await session.openTtyStream(existingPtyId)
+        console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, existingPtyId)
+        tty = result.tty
+        scrollback = result.scrollback
+        exitCode = result.exitCode
+      } catch (error) {
+        console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, existingPtyId, error)
+        if (cancelled) return
+        setLoading(false)
+        setOverlay({ message: `Failed to reattach terminal: ${error instanceof Error ? error.message : 'Unknown error'}`, type: 'error' })
+        return
+      }
 
-    terminalRef.current = terminal
-    fitAddonRef.current = fitAddon
+      if (cancelled) return
+      if (!containerRef.current) return
 
-    // Notify parent that terminal is ready
-    config.onTerminalReady?.(terminal, dataVersionRef)
+      // Phase 2: Create terminal
+      setLoading(false)
+      terminal = new XTerm({
+        cursorBlink: true,
+        fontSize: 14,
+        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+        scrollback: 50000,
+        theme: {
+          background: config.themeBackground,
+          foreground: '#d4d4d4',
+          cursor: '#d4d4d4',
+          cursorAccent: config.themeBackground,
+          selectionBackground: '#264f78',
+          black: '#000000',
+          red: '#cd3131',
+          green: '#0dbc79',
+          yellow: '#e5e510',
+          blue: '#2472c8',
+          magenta: '#bc3fbc',
+          cyan: '#11a8cd',
+          white: '#e5e5e5',
+          brightBlack: '#666666',
+          brightRed: '#f14c4c',
+          brightGreen: '#23d18b',
+          brightYellow: '#f5f543',
+          brightBlue: '#3b8eea',
+          brightMagenta: '#d670d6',
+          brightCyan: '#29b8db',
+          brightWhite: '#ffffff'
+        }
+      })
 
-    // Create activity state detector with optional custom patterns
-    // Skip when LLM-based analysis handles state (disableActivityDetector)
-    const detector = config.disableActivityDetector
-      ? null
-      : createActivityStateDetector(
-          (state) => setTabState(tabId, state),
-          config.promptPatterns ? { promptPatterns: config.promptPatterns } : undefined
-        )
-    detectorRef.current = detector
+      terminal.open(containerRef.current)
 
-    // Helper to subscribe to Tty sub-store and set up refs
-    const connectToTty = (tty: Tty) => {
+      const resize = tty.getState().resize
+
+      terminalRef.current = terminal
+
+      // Create activity state detector with optional custom patterns
+      // Skip when LLM-based analysis handles state (disableActivityDetector)
+      detector = config.disableActivityDetector
+        ? null
+        : createActivityStateDetector(
+            (state) => setTabState(tabId, state),
+            config.promptPatterns ? { promptPatterns: config.promptPatterns } : undefined
+          )
+      // Notify parent that terminal is ready
+      config.onTerminalReady?.(terminal, dataVersionRef)
+
+      // Restore scrollback buffer
+      if (scrollback && scrollback.length > 0) {
+        console.log(`[${config.logPrefix} ${tabId}] restoring ${scrollback.length} scrollback chunks`)
+        for (const chunk of scrollback) {
+          terminal.write(chunk)
+        }
+      } else {
+        setOverlay({ message: 'No scrollback buffer available', type: 'info' })
+      }
+
+      // If session already exited, show exit message and don't subscribe for live data
+      if (exitCode !== undefined) {
+        terminal.write(`\r\n\x1b[2mProcess exited with exit code ${exitCode}\x1b[0m\r\n`)
+        setupResizeObserver(terminal, resize)
+        return
+      }
+
+      // Phase 3: Connect live TTY
       ttyRef.current = tty
       const ttyState = tty.getState()
       const connectedAt = Date.now()
@@ -204,15 +253,15 @@ export default function BaseTerminal({
         const scrollMatches = detectScrollManipulation(data)
         if (scrollMatches.length > 0) {
           const bufBefore = {
-            baseY: terminal.buffer.active.baseY,
-            viewportY: terminal.buffer.active.viewportY,
-            length: terminal.buffer.active.length,
+            baseY: terminal!.buffer.active.baseY,
+            viewportY: terminal!.buffer.active.viewportY,
+            length: terminal!.buffer.active.length,
           }
-          terminal.write(dataToWrite)
+          terminal!.write(dataToWrite)
           const bufAfter = {
-            baseY: terminal.buffer.active.baseY,
-            viewportY: terminal.buffer.active.viewportY,
-            length: terminal.buffer.active.length,
+            baseY: terminal!.buffer.active.baseY,
+            viewportY: terminal!.buffer.active.viewportY,
+            length: terminal!.buffer.active.length,
           }
           for (const { name, match } of scrollMatches) {
             console.warn(`[SCROLL-MANIP] ${name}`, {
@@ -223,14 +272,14 @@ export default function BaseTerminal({
             })
           }
         } else {
-          terminal.write(dataToWrite)
+          terminal!.write(dataToWrite)
         }
         // Process data for activity state detection
         if (detector) detector.processData(data)
         // Log raw characters to console for debugging
         if (settings.terminal.showRawChars) {
-          rawCharsRef.current = (rawCharsRef.current + data).slice(-50)
-          console.log('[RAW]', formatRawChars(rawCharsRef.current))
+          rawChars = (rawChars + data).slice(-50)
+          console.log('[RAW]', formatRawChars(rawChars))
         }
       })
 
@@ -243,112 +292,34 @@ export default function BaseTerminal({
           if (immediateFailure) {
             setOverlay({ message: `Process exited immediately with code ${exitCode}`, type: 'error' })
           } else if (keepOnExit) {
-            terminal.write(`\r\n\x1b[2mProcess exited with exit code ${exitCode}\x1b[0m\r\n`)
+            terminal!.write(`\r\n\x1b[2mProcess exited with exit code ${exitCode}\x1b[0m\r\n`)
           } else {
             removeTab(tabId)
           }
         }
       })
 
-      unsubscribeRef.current = () => {
+      unsubscribe = () => {
         unsubscribeData()
         unsubscribeExit()
       }
 
-      // Debounce resize to avoid sending transient tiny dimensions during workspace switch
-      // Re-fit inside timeout so we get the settled container dimensions, not the stale mount-time ones
+      // Forward terminal input to PTY
+      inputDisposable = terminal.onData((data) => {
+        ttyRef.current!.getState().write(data)
+      })
+
+      setupResizeObserver(terminal, resize)
+
+      // Debounce initial resize to get settled container dimensions
       if (resizeTimeout) clearTimeout(resizeTimeout)
       resizeTimeout = setTimeout(() => {
-        // Skip if container is not laid out (display:none gives zero dimensions)
-        const rect = containerRef.current?.getBoundingClientRect()
-        if (!rect || rect.width === 0 || rect.height === 0) return
-        fitAddon.fit()
-        ttyState.resize(terminal.cols, terminal.rows)
+        console.log(`[${config.logPrefix} ${tabId}] resize (initial):`, { cols: terminal!.cols, rows: terminal!.rows })
+        fitTerminal(terminal!, resize)
       }, 100)
     }
 
-    const session = sessionStore.getState()
-
-    // Attach to existing PTY
-    const initPty = async () => {
-      if (!existingPtyId) {
-        setOverlay({ message: 'No PTY available for this terminal', type: 'error' })
-        return
-      }
-
-      try {
-        const { tty, scrollback, exitCode } = await session.openTtyStream(existingPtyId)
-        console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, existingPtyId)
-        if (cancelled) return
-
-        // Restore scrollback buffer
-        if (scrollback && scrollback.length > 0) {
-          console.log(`[${config.logPrefix} ${tabId}] restoring ${scrollback.length} scrollback chunks`)
-          for (const chunk of scrollback) {
-            terminal.write(chunk)
-          }
-        } else {
-          setOverlay({ message: 'No scrollback buffer available', type: 'info' })
-        }
-
-        // If session already exited, show exit message and don't subscribe for live data
-        if (exitCode !== undefined) {
-          terminal.write(`\r\n\x1b[2mProcess exited with exit code ${exitCode}\x1b[0m\r\n`)
-          return
-        }
-
-        connectToTty(tty)
-      } catch (error) {
-        console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, existingPtyId, error)
-        setOverlay({ message: `Failed to reattach terminal: ${error instanceof Error ? error.message : 'Unknown error'}`, type: 'error' })
-      }
-    }
-
-    initPty()
-
-    // Forward terminal input to PTY
-    const inputDisposable = terminal.onData((data) => {
-      if (ttyRef.current) {
-        ttyRef.current.getState().write(data)
-      }
-    })
-
-    // Handle resize
-    const resizeObserver = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      if (!entry) return
-
-      // Skip resize when terminal is not visible (e.g. during workspace switch)
-      // to prevent transient small dimensions from reflowing the buffer
-      if (!isVisibleRef.current) return
-
-      // Save scroll position as ratio before fit to prevent scroll jumping
-      const prevViewportY = terminal.buffer.active.viewportY
-      const prevBaseY = terminal.buffer.active.baseY
-      // Consider "at bottom" if within 3 lines of the bottom (accounts for partial scrolls)
-      const wasAtBottom = prevBaseY - prevViewportY <= 3
-      const scrollRatio = prevBaseY > 0 ? prevViewportY / prevBaseY : 0
-
-      fitAddon.fit()
-
-      // Restore scroll position after fit (unless user was at bottom, then stay at bottom)
-      if (wasAtBottom) {
-        terminal.scrollToBottom()
-      } else {
-        // Use ratio to calculate new scroll position after buffer reflow
-        const newScrollLine = Math.round(terminal.buffer.active.baseY * scrollRatio)
-        terminal.scrollToLine(newScrollLine)
-      }
-
-      // Debounce resize to avoid sending transient tiny dimensions during workspace switch
-      if (resizeTimeout) clearTimeout(resizeTimeout)
-      resizeTimeout = setTimeout(() => {
-        if (ttyRef.current) {
-          ttyRef.current.getState().resize(terminal.cols, terminal.rows)
-        }
-      }, 100)
-    })
-    resizeObserver.observe(containerRef.current)
+    init()
 
     // Cleanup - DON'T kill PTY here, just unsubscribe
     // PTY is explicitly killed in removeWorkspace/removeTab
@@ -359,51 +330,18 @@ export default function BaseTerminal({
       })
       cancelled = true
       if (resizeTimeout) clearTimeout(resizeTimeout)
-      inputDisposable.dispose()
-      resizeObserver.disconnect()
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current()
-      }
-      if (detectorRef.current) {
-        detectorRef.current.destroy()
-      }
+      inputDisposable?.dispose()
+      resizeObserver?.disconnect()
+      unsubscribe?.()
+      detector?.destroy()
+      terminalRef.current = null
+      ttyRef.current = null
       // Note: We intentionally don't kill the PTY here
       // The PTY lifecycle is managed by removeWorkspace/removeTab in workspace.ts
-      terminal.dispose()
+      terminal?.dispose()
     }
     // Note: existingPtyId is intentionally NOT in deps - we only check it on mount/re-run
   }, [tabId, workspaceId, config.themeBackground])
-
-  // Refresh terminal when tab becomes visible to fix blank screen issue
-  useEffect(() => {
-    if (isVisible && terminalRef.current && fitAddonRef.current) {
-      const terminal = terminalRef.current
-
-      // Save scroll position as ratio before fit to prevent scroll jumping
-      const prevViewportY = terminal.buffer.active.viewportY
-      const prevBaseY = terminal.buffer.active.baseY
-      // Consider "at bottom" if within 3 lines of the bottom (accounts for partial scrolls)
-      const wasAtBottom = prevBaseY - prevViewportY <= 3
-      const scrollRatio = prevBaseY > 0 ? prevViewportY / prevBaseY : 0
-
-      // Re-fit and refresh the terminal when becoming visible
-      fitAddonRef.current.fit()
-      terminal.refresh(0, terminal.rows)
-
-      // Restore scroll position after fit
-      if (wasAtBottom) {
-        terminal.scrollToBottom()
-      } else {
-        // Use ratio to calculate new scroll position after buffer reflow
-        const newScrollLine = Math.round(terminal.buffer.active.baseY * scrollRatio)
-        terminal.scrollToLine(newScrollLine)
-      }
-
-      // Focus the terminal so keyboard input works immediately
-      terminal.focus()
-    }
-  }, [isVisible])
-
 
   const openContextMenu = useContextMenuStore((s) => s.open)
   const closeContextMenu = useContextMenuStore((s) => s.close)
@@ -441,6 +379,12 @@ export default function BaseTerminal({
           onContextMenu={handleContextMenu}
         />
       </div>
+
+      {loading && (
+        <div className="terminal-overlay terminal-overlay-info">
+          Loading terminal...
+        </div>
+      )}
 
       {overlay && (
         <div
