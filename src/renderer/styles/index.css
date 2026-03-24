@@ -260,7 +260,7 @@ body,
 
 /* Activity State Indicator */
 .tree-item-activity {
-  font-size: 10px;
+  font-size: 14px;
   margin-left: 4px;
   flex-shrink: 0;
   display: flex;
@@ -278,8 +278,8 @@ body,
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
