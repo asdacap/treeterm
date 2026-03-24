@@ -103,7 +103,8 @@ const CHANNELS = {
   sshOutput: 'ssh:output',
   llmChatDelta: 'llm:chat:delta',
   llmChatDone: 'llm:chat:done',
-  llmChatError: 'llm:chat:error'
+  llmChatError: 'llm:chat:error',
+  gitOutput: 'git:output'
 } as const
 
 export class IpcClient {
@@ -599,5 +600,12 @@ export class IpcClient {
       callback(...(args as IpcEvents['llmChatError']['params']))
     ipcRenderer.on(CHANNELS.llmChatError, handler)
     return () => ipcRenderer.removeListener(CHANNELS.llmChatError, handler)
+  }
+
+  onGitOutput(callback: (...args: IpcEvents['gitOutput']['params']) => void): () => void {
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
+      callback(...(args as IpcEvents['gitOutput']['params']))
+    ipcRenderer.on(CHANNELS.gitOutput, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.gitOutput, handler)
   }
 }

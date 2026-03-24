@@ -142,6 +142,13 @@ client.onSshOutput((connectionId, line) => {
   sshOutputListeners.forEach((cb) => cb(connectionId, line))
 })
 
+type GitOutputCallback = (operationId: string, data: string) => void
+const gitOutputListeners: GitOutputCallback[] = []
+
+client.onGitOutput((operationId, data) => {
+  gitOutputListeners.forEach((cb) => cb(operationId, data))
+})
+
 type SshOutputWatchCallback = (line: string) => void
 const sshOutputWatchCallbacks = new Map<string, SshOutputWatchCallback>()
 
@@ -248,8 +255,8 @@ contextBridge.exposeInMainWorld('electron', {
     getInfo: (dirPath: string) => {
       return client.gitGetInfo(dirPath)
     },
-    createWorktree: (repoPath: string, name: string, baseBranch?: string) => {
-      return client.gitCreateWorktree(repoPath, name, baseBranch)
+    createWorktree: (repoPath: string, name: string, baseBranch?: string, operationId?: string) => {
+      return client.gitCreateWorktree(repoPath, name, baseBranch, operationId)
     },
     removeWorktree: (repoPath: string, worktreePath: string, deleteBranch: boolean = true) => {
       return client.gitRemoveWorktree(repoPath, worktreePath, deleteBranch)
@@ -269,11 +276,11 @@ contextBridge.exposeInMainWorld('electron', {
     getBranchesInWorktrees: (repoPath: string) => {
       return client.gitGetBranchesInWorktrees(repoPath)
     },
-    createWorktreeFromBranch: (repoPath: string, branch: string, worktreeName: string) => {
-      return client.gitCreateWorktreeFromBranch(repoPath, branch, worktreeName)
+    createWorktreeFromBranch: (repoPath: string, branch: string, worktreeName: string, operationId?: string) => {
+      return client.gitCreateWorktreeFromBranch(repoPath, branch, worktreeName, operationId)
     },
-    createWorktreeFromRemote: (repoPath: string, remoteBranch: string, worktreeName: string) => {
-      return client.gitCreateWorktreeFromRemote(repoPath, remoteBranch, worktreeName)
+    createWorktreeFromRemote: (repoPath: string, remoteBranch: string, worktreeName: string, operationId?: string) => {
+      return client.gitCreateWorktreeFromRemote(repoPath, remoteBranch, worktreeName, operationId)
     },
     getDiff: (worktreePath: string, parentBranch: string) => {
       return client.gitGetDiff(worktreePath, parentBranch)
@@ -325,6 +332,13 @@ contextBridge.exposeInMainWorld('electron', {
     },
     getHeadCommitHash: (repoPath: string) => {
       return client.gitGetHeadCommitHash(repoPath)
+    },
+    onOutput: (callback: GitOutputCallback): (() => void) => {
+      gitOutputListeners.push(callback)
+      return () => {
+        const index = gitOutputListeners.indexOf(callback)
+        if (index > -1) gitOutputListeners.splice(index, 1)
+      }
     }
   },
   settings: {

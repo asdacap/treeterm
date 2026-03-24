@@ -103,7 +103,8 @@ const CHANNELS = {
   sshOutput: 'ssh:output',
   llmChatDelta: 'llm:chat:delta',
   llmChatDone: 'llm:chat:done',
-  llmChatError: 'llm:chat:error'
+  llmChatError: 'llm:chat:error',
+  gitOutput: 'git:output'
 } as const
 
 export class IpcServer {
@@ -816,5 +817,9 @@ export class IpcServer {
 
   sshOutput(...args: IpcEvents['sshOutput']['params']): void {
     this.window?.webContents.send(CHANNELS.sshOutput, ...args)
+  }
+
+  gitOutput(...args: IpcEvents['gitOutput']['params']): void {
+    this.window?.webContents.send(CHANNELS.gitOutput, ...args)
   }
 }

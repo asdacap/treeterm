@@ -320,6 +320,15 @@ describe('IpcServer', () => {
       server.sshOutput('conn-1', 'log line')
       expect(mockSend).toHaveBeenCalledWith('ssh:output', 'conn-1', 'log line')
     })
+
+    it('gitOutput sends to window webContents', () => {
+      const mockSend = vi.fn()
+      const mockWindow = { webContents: { send: mockSend } } as any
+      server.setWindow(mockWindow)
+
+      server.gitOutput('op-1', 'Preparing worktree')
+      expect(mockSend).toHaveBeenCalledWith('git:output', 'op-1', 'Preparing worktree')
+    })
   })
 
   describe('setWindow', () => {
