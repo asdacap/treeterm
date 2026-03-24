@@ -221,105 +221,107 @@ export default function BaseTerminal({
       // Notify parent that terminal is ready
       config.onTerminalReady?.(terminal, dataVersionRef)
 
-      // Restore scrollback buffer
-      if (scrollback && scrollback.length > 0) {
-        console.log(`[${config.logPrefix} ${tabId}] restoring ${scrollback.length} scrollback chunks`)
-        for (const chunk of scrollback) {
-          terminal.write(chunk)
-        }
-      } else {
-        setOverlay({ message: 'No scrollback buffer available', type: 'info' })
-      }
-
-      // If session already exited, show exit message and don't subscribe for live data
-      if (exitCode !== undefined) {
-        terminal.write(`\r\n\x1b[2mProcess exited with exit code ${exitCode}\x1b[0m\r\n`)
-        setupResizeObserver(terminal, resize)
-        return
-      }
-
-      // Phase 3: Connect live TTY
-      ttyRef.current = tty
-      const ttyState = tty.getState()
-      const connectedAt = Date.now()
-
-      const unsubscribeData = ttyState.onData((data) => {
-        // Track data version for terminal analyzer
-        dataVersionRef.current++
-        // Dismiss overlay once live data starts flowing
-        setOverlay(null)
-        // Strip CSI 3J (clear scrollback) if configured
-        const dataToWrite = config.stripScrollbackClear
-          ? data.replace(/\x1b\[3J/g, '')
-          : data
-        // Detect ANSI sequences that manipulate scrollback/screen
-        const scrollMatches = detectScrollManipulation(data)
-        if (scrollMatches.length > 0) {
-          const bufBefore = {
-            baseY: terminal!.buffer.active.baseY,
-            viewportY: terminal!.buffer.active.viewportY,
-            length: terminal!.buffer.active.length,
-          }
-          terminal!.write(dataToWrite)
-          const bufAfter = {
-            baseY: terminal!.buffer.active.baseY,
-            viewportY: terminal!.buffer.active.viewportY,
-            length: terminal!.buffer.active.length,
-          }
-          for (const { name, match } of scrollMatches) {
-            console.warn(`[SCROLL-MANIP] ${name}`, {
-              rawSequence: formatRawChars(match),
-              dataContext: formatRawChars(data.slice(0, 200)),
-              bufferBefore: bufBefore,
-              bufferAfter: bufAfter,
-            })
-          }
-        } else {
-          terminal!.write(dataToWrite)
-        }
-        // Process data for activity state detection
-        if (detector) detector.processData(data)
-        // Log raw characters to console for debugging
-        if (settings.terminal.showRawChars) {
-          rawChars = (rawChars + data).slice(-50)
-          console.log('[RAW]', formatRawChars(rawChars))
-        }
-      })
-
-      const unsubscribeExit = ttyState.onExit((exitCode) => {
-        console.log(`[${config.logPrefix} ${tabId}] PTY exited with code:`, exitCode)
-        if (!cancelled) {
-          const currentTab = wsData?.appStates[tabId]
-          const keepOnExit = (currentTab?.state as BaseTerminalState | undefined)?.keepOnExit
-          const immediateFailure = exitCode !== 0 && (Date.now() - connectedAt) < 1000
-          if (immediateFailure) {
-            setOverlay({ message: `Process exited immediately with code ${exitCode}`, type: 'error' })
-          } else if (keepOnExit) {
-            terminal!.write(`\r\n\x1b[2mProcess exited with exit code ${exitCode}\x1b[0m\r\n`)
-          } else {
-            removeTab(tabId)
-          }
-        }
-      })
-
-      unsubscribe = () => {
-        unsubscribeData()
-        unsubscribeExit()
-      }
-
-      // Forward terminal input to PTY
-      inputDisposable = terminal.onData((data) => {
-        ttyRef.current!.getState().write(data)
-      })
-
       setupResizeObserver(terminal, resize)
 
-      // Debounce initial resize to get settled container dimensions
+      // Debounce initial resize to get settled container dimensions,
+      // then restore scrollback and connect live data AFTER resize
+      // so xterm never receives data at the wrong dimensions
       if (resizeTimeout) clearTimeout(resizeTimeout)
       resizeTimeout = setTimeout(() => {
+        if (cancelled) return
         fitTerminal(terminal!, resize)
         console.log(`[${config.logPrefix} ${tabId}] resize (initial):`, { cols: terminal!.cols, rows: terminal!.rows })
         initialResizeDone = true
+
+        // Restore scrollback buffer
+        if (scrollback && scrollback.length > 0) {
+          console.log(`[${config.logPrefix} ${tabId}] restoring ${scrollback.length} scrollback chunks`)
+          for (const chunk of scrollback) {
+            terminal!.write(chunk)
+          }
+        } else {
+          setOverlay({ message: 'No scrollback buffer available', type: 'info' })
+        }
+
+        // If session already exited, show exit message and don't subscribe for live data
+        if (exitCode !== undefined) {
+          terminal!.write(`\r\n\x1b[2mProcess exited with exit code ${exitCode}\x1b[0m\r\n`)
+          return
+        }
+
+        // Phase 3: Connect live TTY
+        ttyRef.current = tty
+        const ttyState = tty.getState()
+        const connectedAt = Date.now()
+
+        const unsubscribeData = ttyState.onData((data) => {
+          // Track data version for terminal analyzer
+          dataVersionRef.current++
+          // Dismiss overlay once live data starts flowing
+          setOverlay(null)
+          // Strip CSI 3J (clear scrollback) if configured
+          const dataToWrite = config.stripScrollbackClear
+            ? data.replace(/\x1b\[3J/g, '')
+            : data
+          // Detect ANSI sequences that manipulate scrollback/screen
+          const scrollMatches = detectScrollManipulation(data)
+          if (scrollMatches.length > 0) {
+            const bufBefore = {
+              baseY: terminal!.buffer.active.baseY,
+              viewportY: terminal!.buffer.active.viewportY,
+              length: terminal!.buffer.active.length,
+            }
+            terminal!.write(dataToWrite)
+            const bufAfter = {
+              baseY: terminal!.buffer.active.baseY,
+              viewportY: terminal!.buffer.active.viewportY,
+              length: terminal!.buffer.active.length,
+            }
+            for (const { name, match } of scrollMatches) {
+              console.warn(`[SCROLL-MANIP] ${name}`, {
+                rawSequence: formatRawChars(match),
+                dataContext: formatRawChars(data.slice(0, 200)),
+                bufferBefore: bufBefore,
+                bufferAfter: bufAfter,
+              })
+            }
+          } else {
+            terminal!.write(dataToWrite)
+          }
+          // Process data for activity state detection
+          if (detector) detector.processData(data)
+          // Log raw characters to console for debugging
+          if (settings.terminal.showRawChars) {
+            rawChars = (rawChars + data).slice(-50)
+            console.log('[RAW]', formatRawChars(rawChars))
+          }
+        })
+
+        const unsubscribeExit = ttyState.onExit((exitCode) => {
+          console.log(`[${config.logPrefix} ${tabId}] PTY exited with code:`, exitCode)
+          if (!cancelled) {
+            const currentTab = wsData?.appStates[tabId]
+            const keepOnExit = (currentTab?.state as BaseTerminalState | undefined)?.keepOnExit
+            const immediateFailure = exitCode !== 0 && (Date.now() - connectedAt) < 1000
+            if (immediateFailure) {
+              setOverlay({ message: `Process exited immediately with code ${exitCode}`, type: 'error' })
+            } else if (keepOnExit) {
+              terminal!.write(`\r\n\x1b[2mProcess exited with exit code ${exitCode}\x1b[0m\r\n`)
+            } else {
+              removeTab(tabId)
+            }
+          }
+        })
+
+        unsubscribe = () => {
+          unsubscribeData()
+          unsubscribeExit()
+        }
+
+        // Forward terminal input to PTY
+        inputDisposable = terminal!.onData((data) => {
+          ttyRef.current!.getState().write(data)
+        })
       }, 100)
     }
 
