@@ -358,6 +358,7 @@ export default function BaseTerminal({
 
   const handleCopy = () => {
     const selection = terminalRef.current?.getSelection()
+    console.log(`[${config.logPrefix} ${tabId}] copy:`, { selection: selection ?? '(no selection)', hasTerminal: !!terminalRef.current })
     if (selection) {
       clipboard.writeText(selection)
     }
@@ -366,6 +367,7 @@ export default function BaseTerminal({
 
   const handlePaste = () => {
     const text = clipboard.readText()
+    console.log(`[${config.logPrefix} ${tabId}] paste:`, { clipboardText: text ?? '(empty)', hasTty: !!ttyRef.current })
     if (text && ttyRef.current) {
       ttyRef.current.getState().write(text)
     }
