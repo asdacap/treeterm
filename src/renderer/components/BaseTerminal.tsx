@@ -106,6 +106,7 @@ export default function BaseTerminal({
   const [overlay, setOverlay] = useState<{ message: string; type: 'info' | 'error' } | null>(null)
   const [loading, setLoading] = useState(true)
   const [scrollPosition, setScrollPosition] = useState<'top' | 'bottom' | 'middle'>('middle')
+  const [isAlternateScreen, setIsAlternateScreen] = useState(false)
 
   const sessionStore = useSessionApi()
   const setTabState = useActivityStateStore((state) => state.setTabState)
@@ -129,6 +130,7 @@ export default function BaseTerminal({
     let resizeTimeout: ReturnType<typeof setTimeout> | null = null
     let inputDisposable: { dispose(): void } | null = null
     let scrollDisposable: { dispose(): void } | null = null
+    let bufferChangeDisposable: { dispose(): void } | null = null
     let resizeObserver: ResizeObserver | null = null
     let detector: ReturnType<typeof createActivityStateDetector> | null = null
     let unsubscribe: (() => void) | null = null
@@ -226,6 +228,10 @@ export default function BaseTerminal({
         }
       })
 
+      bufferChangeDisposable = terminal.buffer.onBufferChange((buf) => {
+        setIsAlternateScreen(buf.type === 'alternate')
+      })
+
       const resize = tty.getState().resize
 
       terminalRef.current = terminal
@@ -287,6 +293,9 @@ export default function BaseTerminal({
         } else {
           setOverlay({ message: 'No scrollback buffer available', type: 'info' })
         }
+
+        // Set initial alternate screen state after scrollback restore
+        setIsAlternateScreen(terminal!.buffer.active.type === 'alternate')
 
         // If session already exited, show exit message and don't subscribe for live data
         if (exitCode !== undefined) {
@@ -394,6 +403,7 @@ export default function BaseTerminal({
       if (resizeTimeout) clearTimeout(resizeTimeout)
       inputDisposable?.dispose()
       scrollDisposable?.dispose()
+      bufferChangeDisposable?.dispose()
       resizeObserver?.disconnect()
       unsubscribe?.()
       unsubscribeFocus?.()
@@ -438,6 +448,7 @@ export default function BaseTerminal({
     <TerminalScrollWrapper
       terminalRef={terminalRef}
       scrollPosition={scrollPosition}
+      isAlternateScreen={isAlternateScreen}
       extraButtons={extraButtons}
     >
       <div className="terminal-padding-wrapper">
