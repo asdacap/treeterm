@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, RefreshCw, Loader2 } from 'lucide-react'
 import { useStore } from 'zustand'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
 import { getTabs } from '../types'
@@ -603,8 +603,110 @@ export default function ReviewBrowser({
             disabled={refreshing}
             title="Refresh changes"
           >
-            {refreshing ? 'Refreshing...' : 'Refresh'}
+            {refreshing ? <Loader2 size={14} className="spinning" /> : <RefreshCw size={14} />}
           </button>
+          {!hasParent ? (
+            <>
+              <span className="review-top-level-message">Top-level worktree - review only</span>
+              <button
+                className="review-action-btn review-cancel-btn"
+                onClick={handleCancel}
+                disabled={isProcessing}
+              >
+                Close Review
+              </button>
+            </>
+          ) : wsData?.isDetached ? (
+            <>
+              {hasUncommitted && runningHarness && (
+                <button
+                  className="review-action-btn review-prompt-commit-btn"
+                  onClick={handlePromptCommit}
+                  disabled={isProcessing}
+                  title="Send commit command to the AI harness"
+                >
+                  Prompt Commit
+                </button>
+              )}
+              <button
+                className="review-action-btn review-close-and-clean-btn"
+                onClick={handleCloseAndClean}
+                disabled={isProcessing}
+                title="Remove worktree but keep the branch"
+              >
+                {isProcessing ? <><span className="btn-spinner" />Closing...</> : 'Close and Clean'}
+              </button>
+              <button
+                className="review-action-btn review-cancel-btn"
+                onClick={handleCancel}
+                disabled={isProcessing}
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              {hasUncommitted && runningHarness && (
+                <button
+                  className="review-action-btn review-prompt-commit-btn"
+                  onClick={handlePromptCommit}
+                  disabled={isProcessing}
+                  title="Send commit command to the AI harness"
+                >
+                  Prompt Commit
+                </button>
+              )}
+              {hasConflicts && runningHarness && parentWorkspace?.gitBranch && (
+                <button
+                  className="review-action-btn review-prompt-rebase-btn"
+                  onClick={handlePromptRebase}
+                  disabled={isProcessing}
+                  title="Send rebase command to the AI harness"
+                >
+                  Prompt Rebase
+                </button>
+              )}
+              <div className="merge-btn-group" ref={mergeDropdownRef}>
+                <button
+                  className="review-action-btn review-merge-btn merge-btn-main"
+                  onClick={() => handleMerge(false)}
+                  disabled={isProcessing}
+                  title={hasConflicts ? 'Merge (conflicts will need to be resolved)' : 'Merge changes into parent branch'}
+                >
+                  {processingAction === 'merge' ? <><span className="btn-spinner" />Merging...</> : 'Merge'}
+                  {hasConflicts && ' (has conflicts)'}
+                </button>
+                <button
+                  className="review-action-btn review-merge-btn merge-btn-dropdown-toggle"
+                  onClick={() => setMergeDropdownOpen(!mergeDropdownOpen)}
+                  disabled={isProcessing}
+                  title="More merge options"
+                >
+                  <ChevronDown size={14} />
+                </button>
+                {mergeDropdownOpen && (
+                  <div className="merge-dropdown-menu">
+                    <button
+                      className="merge-dropdown-item"
+                      onClick={() => { setMergeDropdownOpen(false); handleMerge(true) }}
+                      disabled={isProcessing}
+                      title={hasConflicts ? 'Squash merge (conflicts will need to be resolved)' : 'Squash all commits into one'}
+                    >
+                      {processingAction === 'squash' ? <><span className="btn-spinner" />Squashing...</> : 'Squash Merge'}
+                      {hasConflicts && ' (has conflicts)'}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <button
+                className="review-action-btn review-cancel-btn"
+                onClick={handleCancel}
+                disabled={isProcessing}
+              >
+                Cancel
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -953,111 +1055,6 @@ export default function ReviewBrowser({
         </>
       )}
 
-      {/* Action Bar */}
-      <div className="review-actions">
-        {!hasParent ? (
-          <>
-            <span className="review-top-level-message">Top-level worktree - review only</span>
-            <button
-              className="review-action-btn review-cancel-btn"
-              onClick={handleCancel}
-              disabled={isProcessing}
-            >
-              Close Review
-            </button>
-          </>
-        ) : wsData?.isDetached ? (
-          <>
-            {hasUncommitted && runningHarness && (
-              <button
-                className="review-action-btn review-prompt-commit-btn"
-                onClick={handlePromptCommit}
-                disabled={isProcessing}
-                title="Send commit command to the AI harness"
-              >
-                Prompt Commit
-              </button>
-            )}
-            <button
-              className="review-action-btn review-close-and-clean-btn"
-              onClick={handleCloseAndClean}
-              disabled={isProcessing}
-              title="Remove worktree but keep the branch"
-            >
-              {isProcessing ? <><span className="btn-spinner" />Closing...</> : 'Close and Clean'}
-            </button>
-            <button
-              className="review-action-btn review-cancel-btn"
-              onClick={handleCancel}
-              disabled={isProcessing}
-            >
-              Cancel
-            </button>
-          </>
-        ) : (
-          <>
-            {hasUncommitted && runningHarness && (
-              <button
-                className="review-action-btn review-prompt-commit-btn"
-                onClick={handlePromptCommit}
-                disabled={isProcessing}
-                title="Send commit command to the AI harness"
-              >
-                Prompt Commit
-              </button>
-            )}
-            {hasConflicts && runningHarness && parentWorkspace?.gitBranch && (
-              <button
-                className="review-action-btn review-prompt-rebase-btn"
-                onClick={handlePromptRebase}
-                disabled={isProcessing}
-                title="Send rebase command to the AI harness"
-              >
-                Prompt Rebase
-              </button>
-            )}
-            <div className="merge-btn-group" ref={mergeDropdownRef}>
-              <button
-                className="review-action-btn review-merge-btn merge-btn-main"
-                onClick={() => handleMerge(false)}
-                disabled={isProcessing}
-                title={hasConflicts ? 'Merge (conflicts will need to be resolved)' : 'Merge changes into parent branch'}
-              >
-                {processingAction === 'merge' ? <><span className="btn-spinner" />Merging...</> : 'Merge'}
-                {hasConflicts && ' (has conflicts)'}
-              </button>
-              <button
-                className="review-action-btn review-merge-btn merge-btn-dropdown-toggle"
-                onClick={() => setMergeDropdownOpen(!mergeDropdownOpen)}
-                disabled={isProcessing}
-                title="More merge options"
-              >
-                <ChevronDown size={14} />
-              </button>
-              {mergeDropdownOpen && (
-                <div className="merge-dropdown-menu">
-                  <button
-                    className="merge-dropdown-item"
-                    onClick={() => { setMergeDropdownOpen(false); handleMerge(true) }}
-                    disabled={isProcessing}
-                    title={hasConflicts ? 'Squash merge (conflicts will need to be resolved)' : 'Squash all commits into one'}
-                  >
-                    {processingAction === 'squash' ? <><span className="btn-spinner" />Squashing...</> : 'Squash Merge'}
-                    {hasConflicts && ' (has conflicts)'}
-                  </button>
-                </div>
-              )}
-            </div>
-            <button
-              className="review-action-btn review-cancel-btn"
-              onClick={handleCancel}
-              disabled={isProcessing}
-            >
-              Cancel
-            </button>
-          </>
-        )}
-      </div>
     </div>
   )
 }

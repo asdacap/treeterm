@@ -2896,13 +2896,19 @@ body,
 }
 
 .review-refresh-btn {
-  padding: 4px 12px;
+  padding: 4px 6px;
   font-size: 12px;
   background: var(--bg-tertiary);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
   border-radius: 4px;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.spinning {
+  animation: spin 0.6s linear infinite;
 }
 
 .review-refresh-btn:hover:not(:disabled) {
@@ -3013,16 +3019,14 @@ body,
 .review-actions {
   display: flex;
   gap: 8px;
-  padding: 16px 20px;
-  border-top: 1px solid var(--border-color);
-  background: var(--bg-secondary);
+  align-items: center;
   justify-content: flex-end;
 }
 
 .review-action-btn {
-  padding: 8px 16px;
+  padding: 4px 12px;
   border-radius: 4px;
-  font-size: 13px;
+  font-size: 12px;
   cursor: pointer;
   border: none;
   transition: background 0.1s;
@@ -3065,7 +3069,7 @@ body,
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
   border-left: 1px solid rgba(255, 255, 255, 0.3);
-  padding: 8px 6px;
+  padding: 4px 6px;
   display: flex;
   align-items: center;
 }
