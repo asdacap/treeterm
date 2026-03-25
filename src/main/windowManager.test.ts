@@ -49,12 +49,17 @@ describe('WindowManager', () => {
       expect(info?.uuid).toMatch(/^win-/)
     })
 
-    it('sets up closed event handler', () => {
+    it('sets up closed event handler that removes window', () => {
       const win = { ...mockBrowserWindow, id: 4, webContents: { id: 104 }, on: vi.fn() }
 
       windowManager.registerWindow(win as any, mockIpcServer as any)
+      expect(windowManager.getWindow(4)).toBeDefined()
 
-      expect(win.on).toHaveBeenCalledWith('closed', expect.any(Function))
+      // Simulate the closed event
+      const closedHandler = win.on.mock.calls.find((c: any[]) => c[0] === 'closed')?.[1]
+      closedHandler()
+
+      expect(windowManager.getWindow(4)).toBeUndefined()
     })
   })
 

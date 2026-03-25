@@ -208,6 +208,62 @@ describe('GrpcDaemonClient', () => {
       expect(mockStream.end).toHaveBeenCalled()
     })
 
+    it('PtyStream.close is idempotent', () => {
+      const mockStream = makeMockSessionStream()
+      mockClientInstance.ptyStream.mockReturnValue(mockStream)
+      mockStream.on.mockReturnValue(mockStream)
+
+      const ptyStream = client.openPtyStream('pty-1')
+      ptyStream.close()
+      ptyStream.close()
+      expect(mockStream.end).toHaveBeenCalledTimes(1)
+    })
+
+    it.each(['write', 'resize'] as const)('PtyStream.%s is no-op after close', (method) => {
+      const mockStream = makeMockSessionStream()
+      mockClientInstance.ptyStream.mockReturnValue(mockStream)
+      mockStream.on.mockReturnValue(mockStream)
+
+      const ptyStream = client.openPtyStream('pty-1')
+      ptyStream.close()
+      mockStream.write.mockClear()
+
+      if (method === 'write') ptyStream.write('data')
+      else ptyStream.resize(80, 24)
+
+      expect(mockStream.write).not.toHaveBeenCalled()
+    })
+
+    it.each(['write', 'resize'] as const)('PtyStream.%s catches stream errors', (method) => {
+      const mockStream = makeMockSessionStream()
+      mockClientInstance.ptyStream.mockReturnValue(mockStream)
+      mockStream.on.mockReturnValue(mockStream)
+
+      const ptyStream = client.openPtyStream('pty-1')
+      mockStream.write.mockImplementation(() => { throw new Error('broken pipe') })
+
+      if (method === 'write') expect(() => ptyStream.write('data')).not.toThrow()
+      else expect(() => ptyStream.resize(80, 24)).not.toThrow()
+    })
+
+    it('PtyStream.onResize receives resize events from stream', () => {
+      const mockStream = makeMockSessionStream()
+      mockClientInstance.ptyStream.mockReturnValue(mockStream)
+
+      const dataHandlers: Function[] = []
+      mockStream.on.mockImplementation((event: string, handler: Function) => {
+        if (event === 'data') dataHandlers.push(handler)
+        return mockStream
+      })
+
+      const ptyStream = client.openPtyStream('pty-1')
+      const cb = vi.fn()
+      ptyStream.onResize(cb)
+
+      dataHandlers[0]?.({ resize: { cols: 120, rows: 40 } })
+      expect(cb).toHaveBeenCalledWith(120, 40)
+    })
+
     it('killPtySession resolves on success', async () => {
       mockClientInstance.killPty.mockImplementation((req: any, cb: any) => cb(null))
       await client.killPtySession('pty-1')
@@ -540,6 +596,23 @@ describe('GrpcDaemonClient', () => {
       expect(result.entries).toHaveLength(1)
     })
 
+    it('readFile rejects when stream returns success=false', async () => {
+      mockClientInstance.readFile.mockImplementation(() => {
+        const stream = {
+          on: (event: string, handler: Function) => {
+            if (event === 'data') {
+              setTimeout(() => handler({ end: { success: false, error: 'not found' } }), 0)
+            }
+            return stream
+          }
+        }
+        return stream
+      })
+
+      const result = await client.readFile('/ws', '/missing.txt')
+      expect(result.success).toBe(false)
+    })
+
     it('filesystem methods throw when not connected', async () => {
       client.disconnect()
       await expect(client.readDirectory('/ws', '.')).rejects.toThrow('Not connected')
@@ -569,6 +642,69 @@ describe('GrpcDaemonClient', () => {
       const result = client.watchSession('session-1', 'listener-1', vi.fn())
       result.unsubscribe()
       expect(mockStream.cancel).toHaveBeenCalled()
+    })
+
+    it('resolves initial with session on first data event', async () => {
+      const mockStream = { on: vi.fn(), cancel: vi.fn() }
+      mockClientInstance.sessionWatch.mockReturnValue(mockStream)
+
+      const handlers: Record<string, Function> = {}
+      mockStream.on.mockImplementation((event: string, handler: Function) => {
+        handlers[event] = handler
+        return mockStream
+      })
+
+      const onUpdate = vi.fn()
+      const result = client.watchSession('session-1', 'listener-1', onUpdate)
+
+      const mockProto = { id: 'session-1', workspaces: [], createdAt: 1000, lastActivity: 2000 }
+      handlers.data({ session: mockProto })
+
+      const session = await result.initial
+      expect(session.id).toBe('session-1')
+    })
+
+    it('calls onUpdate for subsequent data events after initial', async () => {
+      const mockStream = { on: vi.fn(), cancel: vi.fn() }
+      mockClientInstance.sessionWatch.mockReturnValue(mockStream)
+
+      const handlers: Record<string, Function> = {}
+      mockStream.on.mockImplementation((event: string, handler: Function) => {
+        handlers[event] = handler
+        return mockStream
+      })
+
+      const onUpdate = vi.fn()
+      const result = client.watchSession('session-1', 'listener-1', onUpdate)
+
+      const mockProto = { id: 'session-1', workspaces: [], createdAt: 1000, lastActivity: 2000 }
+      handlers.data({ session: mockProto }) // first = initial
+      await result.initial
+
+      handlers.data({ session: mockProto }) // second = onUpdate
+      expect(onUpdate).toHaveBeenCalledTimes(1)
+    })
+
+    it('calls onError when stream errors after initial', async () => {
+      const mockStream = { on: vi.fn(), cancel: vi.fn() }
+      mockClientInstance.sessionWatch.mockReturnValue(mockStream)
+
+      const handlers: Record<string, Function> = {}
+      mockStream.on.mockImplementation((event: string, handler: Function) => {
+        handlers[event] = handler
+        return mockStream
+      })
+
+      const onUpdate = vi.fn()
+      const onError = vi.fn()
+      const result = client.watchSession('session-1', 'listener-1', onUpdate, onError)
+
+      const mockProto = { id: 'session-1', workspaces: [], createdAt: 1000, lastActivity: 2000 }
+      handlers.data({ session: mockProto })
+      await result.initial
+
+      handlers.error(new Error('stream broken'))
+      expect(onError).toHaveBeenCalledWith(expect.any(Error))
     })
 
     it('returns rejected initial when not connected', async () => {

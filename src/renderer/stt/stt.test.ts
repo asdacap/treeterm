@@ -95,6 +95,21 @@ describe('OpenAIWhisperProvider', () => {
       expect(await provider.isAvailable()).toBe(false)
     })
 
+    it('returns false when getUserMedia not available', async () => {
+      Object.defineProperty(globalThis, 'window', {
+        value: { MediaRecorder: class {} },
+        writable: true,
+        configurable: true
+      })
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { mediaDevices: {} },
+        writable: true,
+        configurable: true
+      })
+      const provider = new OpenAIWhisperProvider(api, 'key-123')
+      expect(await provider.isAvailable()).toBe(false)
+    })
+
     it('returns true when apiKey present and browser APIs available', async () => {
       setupBrowserMocks()
       const provider = new OpenAIWhisperProvider(api, 'key-123')

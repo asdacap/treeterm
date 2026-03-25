@@ -88,10 +88,39 @@ describe('ActivityStateStore', () => {
     it('returns working over user_input_required', () => {
       useActivityStateStore.getState().setTabState('tab1', 'working')
       useActivityStateStore.getState().setTabState('tab2', 'user_input_required')
-      
+
       const state = useActivityStateStore.getState().getWorkspaceState(['tab1', 'tab2'])
-      
+
       expect(state).toBe('working')
+    })
+
+    it('returns permission_request over safe_permission_requested', () => {
+      useActivityStateStore.getState().setTabState('tab1', 'safe_permission_requested')
+      useActivityStateStore.getState().setTabState('tab2', 'permission_request')
+
+      expect(useActivityStateStore.getState().getWorkspaceState(['tab1', 'tab2'])).toBe('permission_request')
+    })
+
+    it('returns safe_permission_requested over user_input_required', () => {
+      useActivityStateStore.getState().setTabState('tab1', 'user_input_required')
+      useActivityStateStore.getState().setTabState('tab2', 'safe_permission_requested')
+
+      expect(useActivityStateStore.getState().getWorkspaceState(['tab1', 'tab2'])).toBe('safe_permission_requested')
+    })
+
+    it('returns error over completed and idle', () => {
+      useActivityStateStore.getState().setTabState('tab1', 'completed')
+      useActivityStateStore.getState().setTabState('tab2', 'error')
+      useActivityStateStore.getState().setTabState('tab3', 'idle')
+
+      expect(useActivityStateStore.getState().getWorkspaceState(['tab1', 'tab2', 'tab3'])).toBe('error')
+    })
+
+    it('returns completed over idle', () => {
+      useActivityStateStore.getState().setTabState('tab1', 'idle')
+      useActivityStateStore.getState().setTabState('tab2', 'completed')
+
+      expect(useActivityStateStore.getState().getWorkspaceState(['tab1', 'tab2'])).toBe('completed')
     })
 
     it('ignores tabs not in the provided list', () => {

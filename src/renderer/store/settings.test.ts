@@ -180,6 +180,20 @@ describe('SettingsStore', () => {
     })
   })
 
+  describe('init', () => {
+    it('sets settingsApi and terminalKill then loads settings', async () => {
+      mockLoadSettings.mockResolvedValue(useSettingsStore.getState().settings)
+      useSettingsStore.setState({ settingsApi: null, terminalKill: null })
+
+      useSettingsStore.getState().init(mockSettingsApi as any, mockTerminalKill)
+
+      expect(useSettingsStore.getState().settingsApi).toBe(mockSettingsApi)
+      expect(useSettingsStore.getState().terminalKill).toBe(mockTerminalKill)
+      await new Promise(resolve => setTimeout(resolve, 10))
+      expect(mockLoadSettings).toHaveBeenCalled()
+    })
+  })
+
   describe('updateSetting', () => {
     it('updates nested setting and saves', async () => {
       mockSaveSettings.mockResolvedValue(undefined)

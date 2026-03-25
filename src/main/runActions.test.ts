@@ -152,6 +152,11 @@ describe('parseVscodeLaunch', () => {
     })
   })
 
+  it('returns empty description when config has no type', () => {
+    const actions = parseVscodeLaunch('{"configurations": [{"name": "Run"}]}')
+    expect(actions[0].description).toBe('')
+  })
+
   it('returns empty for no configurations', () => {
     const actions = parseVscodeLaunch('{"version": "0.2.0"}')
     expect(actions).toEqual([])
@@ -186,6 +191,12 @@ describe('parseVscodeTasks', () => {
 
   it('returns empty for no tasks', () => {
     expect(parseVscodeTasks('{"version": "2.0.0"}')).toEqual([])
+  })
+
+  it('uses type as description when no command', () => {
+    const content = '{"tasks": [{"label": "Watch", "type": "typescript"}]}'
+    const actions = parseVscodeTasks(content)
+    expect(actions[0].description).toBe('typescript')
   })
 
   it('filters tasks without labels', () => {
@@ -263,6 +274,71 @@ describe('RunActionsClient', () => {
   it('run throws for unknown provider', async () => {
     const client = new RunActionsClient({} as any, [])
     await expect(client.run('/workspace', 'unknown:action')).rejects.toThrow('No provider found')
+  })
+
+  it('detect returns empty when package.json has no scripts', async () => {
+    const mockDaemonClient = {
+      readFile: vi.fn().mockResolvedValue({
+        success: true,
+        file: { content: '{"name": "test"}' },
+      }),
+      createPtySession: vi.fn(),
+    }
+
+    const client = createRunActionsClient(mockDaemonClient as any)
+    const actions = await client.detect('/workspace')
+    const npmActions = actions.filter(a => a.source === 'npm')
+    expect(npmActions).toHaveLength(0)
+  })
+
+  it('detect returns empty when package.json scripts is not an object', async () => {
+    const mockDaemonClient = {
+      readFile: vi.fn().mockResolvedValue({
+        success: true,
+        file: { content: '{"scripts": "invalid"}' },
+      }),
+      createPtySession: vi.fn(),
+    }
+
+    const client = createRunActionsClient(mockDaemonClient as any)
+    const actions = await client.detect('/workspace')
+    const npmActions = actions.filter(a => a.source === 'npm')
+    expect(npmActions).toHaveLength(0)
+  })
+
+  it('detect finds Taskfile.yaml when Taskfile.yml missing', async () => {
+    const taskfileContent = 'version: \'3\'\n\ntasks:\n  build:\n    cmds:\n      - echo build\n'
+    const mockDaemonClient = {
+      readFile: vi.fn().mockImplementation((_ws: string, absPath: string) => {
+        if (absPath.endsWith('Taskfile.yml')) return Promise.resolve({ success: false })
+        if (absPath.endsWith('Taskfile.yaml')) return Promise.resolve({ success: true, file: { content: taskfileContent } })
+        return Promise.resolve({ success: false })
+      }),
+      createPtySession: vi.fn(),
+    }
+
+    const client = createRunActionsClient(mockDaemonClient as any)
+    const actions = await client.detect('/workspace')
+    const taskActions = actions.filter(a => a.source === 'task')
+    expect(taskActions.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('detect finds Justfile with lowercase fallback', async () => {
+    let callCount = 0
+    const mockDaemonClient = {
+      readFile: vi.fn().mockImplementation((_ws: string, absPath: string) => {
+        // Return null for Justfile (uppercase), content for justfile (lowercase)
+        if (absPath.endsWith('Justfile')) return Promise.resolve({ success: false })
+        if (absPath.endsWith('justfile')) return Promise.resolve({ success: true, file: { content: 'build:\n  echo build\n' } })
+        return Promise.resolve({ success: false })
+      }),
+      createPtySession: vi.fn(),
+    }
+
+    const client = createRunActionsClient(mockDaemonClient as any)
+    const actions = await client.detect('/workspace')
+    const justActions = actions.filter(a => a.source === 'just')
+    expect(justActions.length).toBeGreaterThanOrEqual(1)
   })
 
   it('detect reads files via daemonClient', async () => {
@@ -359,6 +435,78 @@ describe('RunActionsClient', () => {
     expect(mockDaemonClient.createPtySession).toHaveBeenCalledWith({
       cwd: '/workspace',
       startupCommand: 'task lint',
+    })
+  })
+
+  it('run vscode-launch action creates pty with echo message', async () => {
+    const mockDaemonClient = {
+      readFile: vi.fn(),
+      createPtySession: vi.fn().mockResolvedValue('pty-launch'),
+    }
+
+    const client = createRunActionsClient(mockDaemonClient as any)
+    await client.run('/workspace', 'vscode-launch:Debug App')
+    expect(mockDaemonClient.createPtySession).toHaveBeenCalledWith({
+      cwd: '/workspace',
+      startupCommand: 'echo "Launch config: Debug App (not directly runnable)"',
+    })
+  })
+
+  it('run vscode-task action re-reads tasks.json and runs command', async () => {
+    const tasksJson = JSON.stringify({
+      version: '2.0.0',
+      tasks: [{ label: 'Build', command: 'npm', args: ['run', 'build'] }]
+    })
+    const mockDaemonClient = {
+      readFile: vi.fn().mockResolvedValue({ success: true, file: { content: tasksJson } }),
+      createPtySession: vi.fn().mockResolvedValue('pty-vscode'),
+    }
+
+    const client = createRunActionsClient(mockDaemonClient as any)
+    await client.run('/workspace', 'vscode-task:Build')
+    expect(mockDaemonClient.createPtySession).toHaveBeenCalledWith({
+      cwd: '/workspace',
+      startupCommand: 'npm run build',
+    })
+  })
+
+  it('run vscode-task throws when tasks.json not found', async () => {
+    const mockDaemonClient = {
+      readFile: vi.fn().mockResolvedValue({ success: false }),
+      createPtySession: vi.fn(),
+    }
+
+    const client = createRunActionsClient(mockDaemonClient as any)
+    await expect(client.run('/workspace', 'vscode-task:Build')).rejects.toThrow('tasks.json not found')
+  })
+
+  it('run vscode-task throws when task has no command', async () => {
+    const tasksJson = JSON.stringify({
+      tasks: [{ label: 'NoCmd' }]
+    })
+    const mockDaemonClient = {
+      readFile: vi.fn().mockResolvedValue({ success: true, file: { content: tasksJson } }),
+      createPtySession: vi.fn(),
+    }
+
+    const client = createRunActionsClient(mockDaemonClient as any)
+    await expect(client.run('/workspace', 'vscode-task:NoCmd')).rejects.toThrow('Task "NoCmd" has no command')
+  })
+
+  it('run vscode-task runs command without args when no args specified', async () => {
+    const tasksJson = JSON.stringify({
+      tasks: [{ label: 'Lint', command: 'eslint .' }]
+    })
+    const mockDaemonClient = {
+      readFile: vi.fn().mockResolvedValue({ success: true, file: { content: tasksJson } }),
+      createPtySession: vi.fn().mockResolvedValue('pty-lint'),
+    }
+
+    const client = createRunActionsClient(mockDaemonClient as any)
+    await client.run('/workspace', 'vscode-task:Lint')
+    expect(mockDaemonClient.createPtySession).toHaveBeenCalledWith({
+      cwd: '/workspace',
+      startupCommand: 'eslint .',
     })
   })
 })
