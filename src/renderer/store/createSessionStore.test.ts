@@ -194,15 +194,22 @@ describe('createSessionStore', () => {
       await expect(store.getState().openTtyStream('pty-x')).rejects.toThrow('not found')
     })
 
-    it('getWriter returns null for non-existent PTY', () => {
-      expect(store.getState().getWriter('nonexistent')).toBeNull()
+    it('getTtyWriter auto-creates writer by attaching', async () => {
+      const writer = await store.getState().getTtyWriter('pty-1')
+      expect(writer.write).toBeDefined()
+      expect(deps.terminal.attach).toHaveBeenCalledWith('local', 'pty-1')
     })
 
-    it('getWriter returns writer after createTty', async () => {
+    it('getTtyWriter returns cached writer after createTty', async () => {
       await store.getState().createTty('/home')
-      const writer = store.getState().getWriter('pty-1')
-      expect(writer).not.toBeNull()
-      expect(writer!.write).toBeDefined()
+      const writer = await store.getState().getTtyWriter('pty-1')
+      expect(writer.write).toBeDefined()
+      expect(deps.terminal.attach).not.toHaveBeenCalled()
+    })
+
+    it('getTtyWriter throws when attach fails', async () => {
+      vi.mocked(deps.terminal.attach).mockResolvedValue({ success: false, error: 'not found' })
+      await expect(store.getState().getTtyWriter('pty-x')).rejects.toThrow('not found')
     })
 
     it('killTty kills the PTY', () => {

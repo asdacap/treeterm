@@ -67,17 +67,17 @@ export default function AiHarness({
     ? useStore(analyzer)
     : { aiState: 'idle' as ActivityState, analyzing: false, reason: '', autoApprove: false }
 
-  const handlePushToTalkTranscript = useCallback((text: string) => {
+  const handlePushToTalkTranscript = useCallback(async (text: string) => {
     if (ptyId) {
-      const writer = sessionStore.getState().getWriter(ptyId)
-      if (writer) writer.write(text)
+      const writer = await sessionStore.getState().getTtyWriter(ptyId)
+      writer.write(text)
     }
   }, [ptyId, sessionStore])
 
-  const handlePushToTalkSubmit = useCallback(() => {
+  const handlePushToTalkSubmit = useCallback(async () => {
     if (ptyId) {
-      const writer = sessionStore.getState().getWriter(ptyId)
-      if (writer) writer.write('\r')
+      const writer = await sessionStore.getState().getTtyWriter(ptyId)
+      writer.write('\r')
     }
   }, [ptyId, sessionStore])
 

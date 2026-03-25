@@ -9,7 +9,7 @@ import type { Analyzer } from './createAnalyzerStore'
 export interface WorkspaceStoreDeps {
   appRegistry: AppRegistryApi
   openTtyStream: (ptyId: string) => Promise<{ tty: Tty; scrollback?: string[]; exitCode?: number }>
-  getWriter: (ptyId: string) => TtyWriter | null
+  getTtyWriter: (ptyId: string) => Promise<TtyWriter>
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
   connectionId: string
   git: GitApi
@@ -60,7 +60,7 @@ export interface WorkspaceStoreState {
   connectionId: string
 
   // Other per-workspace
-  promptHarness: (text: string) => boolean
+  promptHarness: (text: string) => Promise<boolean>
   updateMetadata: (key: string, value: string) => void
   updateSettings: (settings: Partial<WorktreeSettings>) => void
   updateStatus: (status: Workspace['status']) => void
@@ -336,7 +336,7 @@ export function createWorkspaceStore(
       get().updateMetadata('reviewComments', serializeReviewComments([]))
     },
 
-    promptHarness: (text: string): boolean => {
+    promptHarness: async (text: string): Promise<boolean> => {
       const ws = get().workspace
       const tabs = getTabs(ws)
       let ptyId: string | null = null
@@ -351,9 +351,7 @@ export function createWorkspaceStore(
 
       if (!ptyId || !tabId) return false
 
-      const writer = deps.getWriter(ptyId)
-      if (!writer) return false
-
+      const writer = await deps.getTtyWriter(ptyId)
       writer.write(text + '\r')
       get().setActiveTab(tabId)
       return true

@@ -42,7 +42,7 @@ export interface SessionState {
   ttyWriters: Record<string, TtyWriter>
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
   openTtyStream: (ptyId: string) => Promise<{ tty: Tty; scrollback?: string[]; exitCode?: number }>
-  getWriter: (ptyId: string) => TtyWriter | null
+  getTtyWriter: (ptyId: string) => Promise<TtyWriter>
   killTty: (ptyId: string) => void
   listTty: () => Promise<SessionInfo[]>
 
@@ -175,7 +175,7 @@ export function createSessionStore(
     return {
       appRegistry: deps.appRegistry,
       openTtyStream: (ptyId: string) => store.getState().openTtyStream(ptyId),
-      getWriter: (ptyId: string) => store.getState().getWriter(ptyId),
+      getTtyWriter: (ptyId: string) => store.getState().getTtyWriter(ptyId),
       createTty: (cwd, sandbox?, startupCommand?) => store.getState().createTty(cwd, sandbox, startupCommand),
       connectionId: config.connection?.id ?? 'local',
       git: deps.git,
@@ -549,8 +549,18 @@ export function createSessionStore(
       return { tty, scrollback: result.scrollback, exitCode: result.exitCode }
     },
 
-    getWriter: (ptyId: string): TtyWriter | null => {
-      return get().ttyWriters[ptyId] ?? null
+    getTtyWriter: async (ptyId: string): Promise<TtyWriter> => {
+      const cached = get().ttyWriters[ptyId]
+      if (cached) return cached
+      const result = await deps.terminal.attach(connectionId, ptyId)
+      if (!result.success || !result.handle) {
+        throw new Error(result.error || 'Failed to attach to PTY')
+      }
+      const writer = createTtyWriter(ptyId, result.handle, boundTerminal)
+      set((s) => ({
+        ttyWriters: { ...s.ttyWriters, [ptyId]: writer }
+      }))
+      return writer
     },
 
     killTty: (ptyId: string): void => {
