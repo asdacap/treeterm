@@ -23,6 +23,8 @@ export interface AnalyzerHistoryEntry {
   response: string
   cached?: boolean
   error?: string
+  systemPrompt?: string
+  durationMs?: number
 }
 
 export interface AnalyzerState {
@@ -155,6 +157,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       requestInFlight = true
       store.setState({ analyzing: true })
 
+      const startTime = Date.now()
       const result = await deps.llm.analyzeTerminal(buffer, deps.cwd, {
         baseUrl: settings.llm.baseUrl,
         apiKey: settings.llm.apiKey,
@@ -163,6 +166,8 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         reasoningEffort: settings.terminalAnalyzer.reasoningEffort,
         safePaths: settings.terminalAnalyzer.safePaths,
       })
+      const durationMs = Date.now() - startTime
+      const systemPrompt = 'systemPrompt' in result ? result.systemPrompt : undefined
 
       requestInFlight = false
 
@@ -170,7 +175,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
       if (dataVersion !== requestVersion) {
         console.debug('[terminal-analyzer] discarding stale response')
-        history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), error: '[discarded]' })
+        history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), error: '[discarded]', systemPrompt, durationMs })
         if (history.length > MAX_HISTORY) history.shift()
         inFlightBuffer = null
         store.setState({ analyzing: false })
@@ -188,20 +193,20 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         inFlightBuffer = null
         store.setState({ analyzing: false })
         updateAiState(result.state as ActivityState, result.reason)
-        history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), cached: result.cached })
+        history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), cached: result.cached, systemPrompt, durationMs })
         if (history.length > MAX_HISTORY) history.shift()
       } else if ('error' in result) {
         console.error('[terminal-analyzer] error:', result.error)
         inFlightBuffer = null
         store.setState({ analyzing: false })
         updateAiState('error')
-        history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), error: result.error })
+        history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), error: result.error, systemPrompt, durationMs })
         if (history.length > MAX_HISTORY) history.shift()
       } else {
         console.debug('[terminal-analyzer] ignored (no state in result)')
         inFlightBuffer = null
         store.setState({ analyzing: false })
-        history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), error: '[unexpected] no state in result' })
+        history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), error: '[unexpected] no state in result', systemPrompt, durationMs })
         if (history.length > MAX_HISTORY) history.shift()
       }
 
@@ -287,6 +292,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     }
 
     try {
+      const startTime = Date.now()
       const result = await deps.llm.generateTitle(buffer, {
         baseUrl: settings.llm.baseUrl,
         apiKey: settings.llm.apiKey,
@@ -294,6 +300,8 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         titleSystemPrompt: settings.terminalAnalyzer.titleSystemPrompt,
         reasoningEffort: settings.terminalAnalyzer.reasoningEffort,
       })
+      const durationMs = Date.now() - startTime
+      const systemPrompt = 'systemPrompt' in result ? result.systemPrompt : undefined
 
       if ('title' in result && result.title) {
         if (!deps.getDisplayName()) {
@@ -304,7 +312,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
           deps.updateMetadata('descriptionPrompted', 'true')
         }
       }
-      history.push({ timestamp: Date.now(), kind: 'title', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result) })
+      history.push({ timestamp: Date.now(), kind: 'title', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), systemPrompt, durationMs })
       if (history.length > MAX_HISTORY) history.shift()
     } catch (err) {
       console.error('[analyzer] title generation failed:', err)

@@ -42,6 +42,7 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
   const [entries, setEntries] = useState<AnalyzerHistoryEntry[]>(() => analyzer.getState().getHistory())
   const [expandedEntries, setExpandedEntries] = useState<Set<number>>(new Set())
   const [expandedResponses, setExpandedResponses] = useState<Set<number>>(new Set())
+  const [expandedPrompts, setExpandedPrompts] = useState<Set<number>>(new Set())
 
   const handleRefresh = () => {
     setEntries(analyzer.getState().getHistory())
@@ -62,6 +63,15 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
 
   const toggleResponse = (index: number) => {
     setExpandedResponses(prev => {
+      const next = new Set(prev)
+      if (next.has(index)) next.delete(index)
+      else next.add(index)
+      return next
+    })
+  }
+
+  const togglePrompt = (index: number) => {
+    setExpandedPrompts(prev => {
       const next = new Set(prev)
       if (next.has(index)) next.delete(index)
       else next.add(index)
@@ -144,6 +154,21 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
                         cached
                       </span>
                     )}
+                    {entry.durationMs !== undefined && (
+                      <span
+                        style={{
+                          background: '#555',
+                          color: '#ddd',
+                          padding: '1px 6px',
+                          borderRadius: 3,
+                          fontSize: 11,
+                          fontWeight: 500,
+                          fontFamily: 'monospace'
+                        }}
+                      >
+                        {entry.durationMs}ms
+                      </span>
+                    )}
                     {entry.error && (
                       <span
                         style={{
@@ -195,6 +220,26 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
                       }}
                     >
                       {expandedResponses.has(entries.length - 1 - i) ? entry.response : entry.response.slice(0, 80) + (entry.response.length > 80 ? '...' : '')}
+                    </pre>
+                  )}
+                  {entry.systemPrompt && (
+                    <pre
+                      onClick={() => togglePrompt(entries.length - 1 - i)}
+                      style={{
+                        margin: 0,
+                        color: '#b5cea8',
+                        fontSize: 11,
+                        fontFamily: 'monospace',
+                        whiteSpace: 'pre-wrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        cursor: 'pointer',
+                        background: '#1a1a1a',
+                        padding: 4,
+                        borderRadius: 3
+                      }}
+                    >
+                      {expandedPrompts.has(entries.length - 1 - i) ? entry.systemPrompt : 'system prompt (click to expand)'}
                     </pre>
                   )}
                 </div>
