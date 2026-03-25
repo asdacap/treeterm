@@ -106,18 +106,10 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     setIsEditingDescription(false)
   }, [activeWorkspaceId])
 
-  // Focus active tab content after workspace switch (keyboard navigation)
+  // Signal active tab to focus after workspace switch (keyboard navigation)
   useEffect(() => {
-    if (!activeWorkspaceId || !activeTabId) return
-    const timer = setTimeout(() => {
-      const slot = document.getElementById(`flexlayout-slot-${activeTabId}`)
-      if (!slot) return
-      const focusable = slot.querySelector<HTMLElement>(
-        '.xterm-helper-textarea, input, textarea, [tabindex]'
-      )
-      focusable?.focus()
-    }, 50)
-    return () => clearTimeout(timer)
+    if (!activeHandle) return
+    activeHandle.getState().requestFocus()
   }, [activeWorkspaceId])
 
   // Auto-scroll loading output

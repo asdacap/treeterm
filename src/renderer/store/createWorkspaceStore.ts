@@ -64,6 +64,11 @@ export interface WorkspaceStoreState {
   isDiffCleanFromParent: boolean
   disposeGitController: () => void
 
+  // Focus signal (ephemeral, not persisted)
+  focusTabId: string | null
+  requestFocus: () => void
+  clearFocusRequest: () => void
+
   // Other per-workspace
   promptHarness: (text: string) => Promise<boolean>
   updateMetadata: (key: string, value: string) => void
@@ -282,6 +287,10 @@ export function createWorkspaceStore(
       updateWorkspace((ws) => ({ ...ws, activeTabId: tabId }))
       deps.syncToDaemon()
     },
+
+    focusTabId: null,
+    requestFocus: (): void => set({ focusTabId: get().workspace.activeTabId }),
+    clearFocusRequest: (): void => set({ focusTabId: null }),
 
     updateTabTitle: (tabId: string, title: string): void => {
       updateWorkspace((ws) => {
