@@ -9,6 +9,8 @@ export const workspaceSettingsApplication: Application = {
 
   createInitialState: () => ({}),
 
+  onWorkspaceLoad: () => ({ dispose: () => {} }),
+
   render: ({ tab, workspace }) =>
     createElement(WorkspaceSettings, { key: tab.id, workspace }),
 

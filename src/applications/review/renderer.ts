@@ -12,6 +12,8 @@ export const reviewApplication: Application<ReviewState> = {
     // parentWorkspaceId is optional - null means top-level worktree (no merge parent)
   }),
 
+  onWorkspaceLoad: () => ({ dispose: () => {} }),
+
   render: ({ tab, workspace, isVisible }) => {
     if (!isReviewState(tab.state)) {
       return null

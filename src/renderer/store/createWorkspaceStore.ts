@@ -1,6 +1,6 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, Tab, AppState, ReviewComment, AppRegistryApi, GitApi, FilesystemApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings } from '../types'
+import type { Workspace, Tab, AppState, AppRef, ReviewComment, AppRegistryApi, GitApi, FilesystemApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig } from '../types'
 import { getTabs, isAiHarnessState } from '../types'
 import type { Tty, TtyWriter } from './createTtyStore'
 import { createAnalyzerStore } from './createAnalyzerStore'
@@ -10,6 +10,8 @@ export interface WorkspaceStoreDeps {
   appRegistry: AppRegistryApi
   openTtyStream: (ptyId: string) => Promise<{ tty: Tty; scrollback?: string[]; exitCode?: number }>
   getWriter: (ptyId: string) => TtyWriter | null
+  createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
+  connectionId: string
   git: GitApi
   filesystem: FilesystemApi
   getSettings: () => Settings
@@ -46,10 +48,16 @@ export interface WorkspaceStoreState {
   updateOutdatedReviewComments: (currentCommitHash: string) => void
   clearReviewComments: () => void
 
-  // Analyzer stores (per-tab)
-  getOrCreateAnalyzer: (tabId: string) => Analyzer
-  getAnalyzer: (tabId: string) => Analyzer | null
-  removeAnalyzer: (tabId: string) => void
+  // Tab lifecycle
+  initTab: (tabId: string) => void
+  getTabRef: (tabId: string) => AppRef | null
+
+  // Analyzer factory (used by applications in onWorkspaceLoad)
+  initAnalyzer: (tabId: string) => Analyzer
+
+  // PTY creation (delegated from session)
+  createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
+  connectionId: string
 
   // Other per-workspace
   promptHarness: (text: string) => boolean
@@ -104,41 +112,37 @@ export function createWorkspaceStore(
     store.setState((state) => ({ workspace: updater(state.workspace) }))
   }
 
-  // Closure-level analyzer store registry (no need for reactivity on the map itself)
-  const analyzerStores: Record<string, Analyzer> = {}
+  // Closure-level tab ref registry (non-serialized per-tab runtime state)
+  const tabRefs: Record<string, AppRef> = {}
 
   const store = createStore<WorkspaceStoreState>()((set, get) => ({
     workspace,
 
-    getOrCreateAnalyzer: (tabId: string): Analyzer => {
-      const existing = analyzerStores[tabId]
-      if (existing) return existing
-
-      const analyzer = createAnalyzerStore(tabId, {
-        getSettings: deps.getSettings,
-        llm: deps.llm,
-        updateMetadata: (key, value) => get().updateMetadata(key, value),
-        getDisplayName: () => get().workspace.metadata?.displayName,
-        getDescription: () => get().workspace.metadata?.description,
-        setActivityTabState: deps.setActivityTabState,
-        openTtyStream: deps.openTtyStream,
-        cwd: get().workspace.path,
-      })
-      analyzerStores[tabId] = analyzer
-      return analyzer
+    initTab: (tabId: string): void => {
+      const appState = get().workspace.appStates[tabId]
+      if (!appState) return
+      const app = deps.appRegistry.get(appState.applicationId)
+      if (!app) return
+      tabRefs[tabId] = app.onWorkspaceLoad({ ...appState, id: tabId }, store)
     },
 
-    getAnalyzer: (tabId: string): Analyzer | null => {
-      return analyzerStores[tabId] ?? null
-    },
+    getTabRef: (tabId: string): AppRef | null => tabRefs[tabId] ?? null,
 
-    removeAnalyzer: (tabId: string): void => {
-      const analyzer = analyzerStores[tabId]
-      if (analyzer) {
-        analyzer.getState().stop()
-        delete analyzerStores[tabId]
-      }
-    },
+    initAnalyzer: (tabId: string): Analyzer => createAnalyzerStore(tabId, {
+      getSettings: deps.getSettings,
+      llm: deps.llm,
+      updateMetadata: (key, value) => get().updateMetadata(key, value),
+      getDisplayName: () => get().workspace.metadata?.displayName,
+      getDescription: () => get().workspace.metadata?.description,
+      setActivityTabState: deps.setActivityTabState,
+      openTtyStream: deps.openTtyStream,
+      cwd: get().workspace.path,
+    }),
+
+    createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) =>
+      deps.createTty(cwd, sandbox, startupCommand),
+
+    connectionId: deps.connectionId,
 
     addTab: <T,>(applicationId: string, initialState?: Partial<T>): string => {
       const tabId = generateTabId()
@@ -185,6 +189,7 @@ export function createWorkspaceStore(
       })
 
       deps.syncToDaemon()
+      get().initTab(tabId)
       return tabId
     },
 
@@ -197,12 +202,11 @@ export function createWorkspaceStore(
       if (!app) return
       if (!app.canClose) return
 
-      // Clean up analyzer store if exists
-      get().removeAnalyzer(tabId)
-
-      if (app.cleanup) {
-        const tab: Tab = { ...appState, id: tabId }
-        await app.cleanup(tab, ws)
+      // Dispose tab ref (stops analyzer, kills PTY, etc.)
+      const ref = tabRefs[tabId]
+      if (ref) {
+        ref.dispose()
+        delete tabRefs[tabId]
       }
 
       updateWorkspace((ws) => {

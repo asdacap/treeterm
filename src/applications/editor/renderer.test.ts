@@ -40,6 +40,11 @@ function createMockWorkspaceStoreStateData(overrides?: Partial<WorkspaceStoreSta
     removeKeepBranch: vi.fn(),
     removeKeepWorktree: vi.fn(),
     removeKeepBoth: vi.fn(),
+    initTab: vi.fn(),
+    getTabRef: vi.fn().mockReturnValue(null),
+    initAnalyzer: vi.fn(),
+    createTty: vi.fn().mockResolvedValue('pty-1'),
+    connectionId: 'local',
     ...overrides,
   } as WorkspaceStoreState
 }
@@ -90,9 +95,8 @@ describe('Editor Renderer', () => {
       })
     })
 
-    describe('cleanup', () => {
-      it('logs warning when closing tab with unsaved changes', async () => {
-        const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    describe('onWorkspaceLoad', () => {
+      it('returns an AppRef with dispose', () => {
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'editor',
@@ -108,133 +112,12 @@ describe('Editor Renderer', () => {
             error: null
           }
         }
-        const workspace: Workspace = {
-          id: 'ws-1',
-          path: '/test',
-          name: 'Test',
-          parentId: null,
-          children: [],
-          status: 'active',
-          isGitRepo: true,
-          gitBranch: 'main',
-          gitRootPath: '/test',
-          isWorktree: false,
-          appStates: {},
-          activeTabId: null,
-          metadata: {},
-          createdAt: Date.now(),
-          lastActivity: Date.now()
-        }
 
-        await editorApplication.cleanup?.(tab, workspace)
+        const ref = editorApplication.onWorkspaceLoad(tab, mockWorkspaceStore)
 
-        expect(consoleSpy).toHaveBeenCalledWith('Editor tab closed with unsaved changes')
-        consoleSpy.mockRestore()
-      })
-
-      it('does not log warning when tab has no unsaved changes', async () => {
-        const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-        const tab: Tab = {
-          id: 'tab-1',
-          applicationId: 'editor',
-          title: 'test.txt',
-          state: {
-            filePath: '/test/file.txt',
-            originalContent: 'content',
-            currentContent: 'content',
-            language: 'plaintext',
-            isDirty: false,
-            viewMode: 'editor',
-            isLoading: false,
-            error: null
-          }
-        }
-        const workspace: Workspace = {
-          id: 'ws-1',
-          path: '/test',
-          name: 'Test',
-          parentId: null,
-          children: [],
-          status: 'active',
-          isGitRepo: true,
-          gitBranch: 'main',
-          gitRootPath: '/test',
-          isWorktree: false,
-          appStates: {},
-          activeTabId: null,
-          metadata: {},
-          createdAt: Date.now(),
-          lastActivity: Date.now()
-        }
-
-        await editorApplication.cleanup?.(tab, workspace)
-
-        expect(consoleSpy).not.toHaveBeenCalled()
-        consoleSpy.mockRestore()
-      })
-
-      it('does not log warning when state is not editor state', async () => {
-        const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-        const tab: Tab = {
-          id: 'tab-1',
-          applicationId: 'editor',
-          title: 'test.txt',
-          state: { someOtherState: true }
-        }
-        const workspace: Workspace = {
-          id: 'ws-1',
-          path: '/test',
-          name: 'Test',
-          parentId: null,
-          children: [],
-          status: 'active',
-          isGitRepo: true,
-          gitBranch: 'main',
-          gitRootPath: '/test',
-          isWorktree: false,
-          appStates: {},
-          activeTabId: null,
-          metadata: {},
-          createdAt: Date.now(),
-          lastActivity: Date.now()
-        }
-
-        await editorApplication.cleanup?.(tab, workspace)
-
-        expect(consoleSpy).not.toHaveBeenCalled()
-        consoleSpy.mockRestore()
-      })
-
-      it('handles null state gracefully', async () => {
-        const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-        const tab: Tab = {
-          id: 'tab-1',
-          applicationId: 'editor',
-          title: 'test.txt',
-          state: null
-        }
-        const workspace: Workspace = {
-          id: 'ws-1',
-          path: '/test',
-          name: 'Test',
-          parentId: null,
-          children: [],
-          status: 'active',
-          isGitRepo: true,
-          gitBranch: 'main',
-          gitRootPath: '/test',
-          isWorktree: false,
-          appStates: {},
-          activeTabId: null,
-          metadata: {},
-          createdAt: Date.now(),
-          lastActivity: Date.now()
-        }
-
-        await editorApplication.cleanup?.(tab, workspace)
-
-        expect(consoleSpy).not.toHaveBeenCalled()
-        consoleSpy.mockRestore()
+        expect(typeof ref.dispose).toBe('function')
+        // dispose is a no-op for editor
+        ref.dispose()
       })
     })
 

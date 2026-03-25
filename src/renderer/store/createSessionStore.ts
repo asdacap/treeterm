@@ -176,6 +176,8 @@ export function createSessionStore(
       appRegistry: deps.appRegistry,
       openTtyStream: (ptyId: string) => store.getState().openTtyStream(ptyId),
       getWriter: (ptyId: string) => store.getState().getWriter(ptyId),
+      createTty: (cwd, sandbox?, startupCommand?) => store.getState().createTty(cwd, sandbox, startupCommand),
+      connectionId: config.connection?.id ?? 'local',
       git: deps.git,
       filesystem: deps.filesystem,
       getSettings: deps.getSettings,
@@ -417,12 +419,12 @@ export function createSessionStore(
       await removeWorkspaceInternal(childId, options)
     }
 
-    // Cleanup tabs
-    for (const [tabId, appState] of Object.entries(workspace.appStates)) {
-      const tab = { ...appState, id: tabId }
-      const app = deps.appRegistry.get(tab.applicationId)
-      if (app?.cleanup) {
-        await app.cleanup(tab, workspace)
+    // Dispose tab refs (stops analyzers, kills PTYs, etc.)
+    const handle = state.workspaceStores[id]
+    if (handle) {
+      for (const tabId of Object.keys(workspace.appStates)) {
+        const ref = handle.getState().getTabRef(tabId)
+        if (ref) ref.dispose()
       }
     }
 
@@ -1050,6 +1052,10 @@ function restoreWorkspaceTabs(
       activeTabId: daemonWorkspace.activeTabId || Object.keys(daemonWorkspace.appStates)[0] || null
     }
   })
+
+  for (const tabId of Object.keys(daemonWorkspace.appStates)) {
+    handle.getState().initTab(tabId)
+  }
 }
 
 // Helper: reconstruct workspace preserving daemon IDs
@@ -1092,6 +1098,10 @@ function reconstructWorkspace(
       activeWorkspaceId: id
     }
   })
+
+  for (const tabId of Object.keys(daemonWorkspace.appStates)) {
+    handle.getState().initTab(tabId)
+  }
 
   console.log('[Session] Reconstructed workspace:', daemonWorkspace.name, 'parentId:', parentId)
   return id

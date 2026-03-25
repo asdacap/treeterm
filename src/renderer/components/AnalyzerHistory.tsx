@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ApplicationRenderProps } from '../types'
 import type { AnalyzerHistoryEntry } from '../store/createAnalyzerStore'
+import type { AiHarnessRef } from '../../applications/aiHarness/renderer'
 
 const KIND_COLORS: Record<string, string> = {
   analyzer: '#1a5276',
@@ -32,7 +33,8 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
     return <div style={{ padding: 16, color: '#f14c4c' }}>Invalid state: missing sourceTabId</div>
   }
 
-  const analyzer = workspace.getState().getAnalyzer(state.sourceTabId)
+  const ref = workspace.getState().getTabRef(state.sourceTabId) as AiHarnessRef | null
+  const analyzer = ref?.analyzer ?? null
   if (!analyzer) {
     return <div style={{ padding: 16, color: '#f14c4c' }}>Analyzer not found for tab {state.sourceTabId}</div>
   }

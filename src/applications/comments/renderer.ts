@@ -10,6 +10,8 @@ export const commentsApplication: Application<CommentsState> = {
 
   createInitialState: () => ({}),
 
+  onWorkspaceLoad: () => ({ dispose: () => {} }),
+
   render: ({ tab, workspace }) => {
     if (!isCommentsState(tab.state)) {
       return null

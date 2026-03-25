@@ -54,13 +54,18 @@ export type ActivityState =
   | 'completed'
   | 'error'
 
+// Base interface for application runtime refs (non-serialized per-tab state)
+export interface AppRef {
+  dispose: () => void
+}
+
 // Application - code-defined, registered at runtime
-export interface Application<TState = unknown> {
+export interface Application<TState = unknown, TRef extends AppRef = AppRef> {
   id: string
   name: string
   icon: string
   createInitialState: () => TState
-  cleanup?: (tab: Tab, workspace: Workspace) => void | Promise<void>
+  onWorkspaceLoad: (tab: Tab, workspaceStore: WorkspaceStore) => TRef
   render: (props: ApplicationRenderProps) => ReactNode
   canClose: boolean
   canHaveMultiple: boolean

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createAiHarnessVariant } from './renderer'
+import { createAiHarnessVariant, type AiHarnessRef } from './renderer'
 import type { Tab, Workspace, AiHarnessInstance, AiHarnessState } from '../../renderer/types'
 import { createStore } from 'zustand/vanilla'
 import type { WorkspaceStoreState } from '../../renderer/store/createWorkspaceStore'
@@ -44,9 +44,11 @@ const mockWorkspaceStoreStateData = {
   removeKeepBoth: vi.fn(),
   getGitApi: vi.fn(),
   getFilesystemApi: vi.fn(),
-  getOrCreateAnalyzer: vi.fn(),
-  getAnalyzer: vi.fn().mockReturnValue(null),
-  removeAnalyzer: vi.fn(),
+  initTab: vi.fn(),
+  getTabRef: vi.fn().mockReturnValue(null),
+  initAnalyzer: vi.fn(),
+  createTty: vi.fn().mockResolvedValue('pty-1'),
+  connectionId: 'local',
   updateSettings: vi.fn(),
 } as WorkspaceStoreState
 
@@ -129,8 +131,11 @@ describe('AI Harness Renderer', () => {
       })
     })
 
-    describe('cleanup', () => {
-      it('kills PTY when tab has ptyId', async () => {
+    describe('onWorkspaceLoad and dispose', () => {
+      const mockAnalyzerState = { start: vi.fn(), stop: vi.fn(), getHistory: vi.fn().mockReturnValue([]) }
+      const mockAnalyzer = { getState: vi.fn().mockReturnValue(mockAnalyzerState), setState: vi.fn(), subscribe: vi.fn() }
+
+      it('dispose kills PTY when tab has ptyId', () => {
         const app = createAiHarnessVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
@@ -141,30 +146,19 @@ describe('AI Harness Renderer', () => {
             sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] }
           }
         }
-        const workspace: Workspace = {
-          id: 'ws-1',
-          path: '/test',
-          name: 'Test',
-          parentId: null,
-          children: [],
-          status: 'active',
-          isGitRepo: true,
-          gitBranch: 'main',
-          gitRootPath: '/test',
-          isWorktree: false,
-          appStates: {},
-          activeTabId: null,
-          metadata: {},
-          createdAt: Date.now(),
-          lastActivity: Date.now()
-        }
 
-        await app.cleanup?.(tab, workspace)
+        const store = createStore<WorkspaceStoreState>()(() => ({
+          ...mockWorkspaceStoreStateData,
+          initAnalyzer: vi.fn().mockReturnValue(mockAnalyzer),
+        }))
+
+        const ref = app.onWorkspaceLoad(tab, store)
+        ref.dispose()
 
         expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-789')
       })
 
-      it('does not kill PTY when tab has no ptyId', async () => {
+      it('dispose does not kill PTY when tab has no ptyId', () => {
         const app = createAiHarnessVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
@@ -175,58 +169,39 @@ describe('AI Harness Renderer', () => {
             sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] }
           }
         }
-        const workspace: Workspace = {
-          id: 'ws-1',
-          path: '/test',
-          name: 'Test',
-          parentId: null,
-          children: [],
-          status: 'active',
-          isGitRepo: true,
-          gitBranch: 'main',
-          gitRootPath: '/test',
-          isWorktree: false,
-          appStates: {},
-          activeTabId: null,
-          metadata: {},
-          createdAt: Date.now(),
-          lastActivity: Date.now()
-        }
 
-        await app.cleanup?.(tab, workspace)
+        const store = createStore<WorkspaceStoreState>()(() => ({
+          ...mockWorkspaceStoreStateData,
+          initAnalyzer: vi.fn().mockReturnValue(mockAnalyzer),
+        }))
+
+        const ref = app.onWorkspaceLoad(tab, store)
+        ref.dispose()
 
         expect(mockTerminalKill).not.toHaveBeenCalled()
       })
 
-      it('does not kill PTY when state is not AI Harness state', async () => {
+      it('returns ref with analyzer', () => {
         const app = createAiHarnessVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'aiharness-claude',
           title: 'Claude',
-          state: { ptyId: 'pty-789' } // Missing sandbox property
-        }
-        const workspace: Workspace = {
-          id: 'ws-1',
-          path: '/test',
-          name: 'Test',
-          parentId: null,
-          children: [],
-          status: 'active',
-          isGitRepo: true,
-          gitBranch: 'main',
-          gitRootPath: '/test',
-          isWorktree: false,
-          appStates: {},
-          activeTabId: null,
-          metadata: {},
-          createdAt: Date.now(),
-          lastActivity: Date.now()
+          state: {
+            ptyId: null,
+            sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] }
+          }
         }
 
-        await app.cleanup?.(tab, workspace)
+        const store = createStore<WorkspaceStoreState>()(() => ({
+          ...mockWorkspaceStoreStateData,
+          initAnalyzer: vi.fn().mockReturnValue(mockAnalyzer),
+        }))
 
-        expect(mockTerminalKill).not.toHaveBeenCalled()
+        const ref = app.onWorkspaceLoad(tab, store) as AiHarnessRef
+
+        expect(typeof ref.dispose).toBe('function')
+        expect(ref.analyzer).toBe(mockAnalyzer)
       })
     })
 

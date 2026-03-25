@@ -40,6 +40,11 @@ function createMockWorkspaceStoreStateData(overrides?: Partial<WorkspaceStoreSta
     removeKeepBranch: vi.fn(),
     removeKeepWorktree: vi.fn(),
     removeKeepBoth: vi.fn(),
+    initTab: vi.fn(),
+    getTabRef: vi.fn().mockReturnValue(null),
+    initAnalyzer: vi.fn(),
+    createTty: vi.fn().mockResolvedValue('pty-1'),
+    connectionId: 'local',
     ...overrides,
   } as WorkspaceStoreState
 }
@@ -264,10 +269,12 @@ describe('Review Renderer', () => {
       })
     })
 
-    describe('cleanup', () => {
-      it('cleanup is undefined for review application', () => {
-        // Review application doesn't need cleanup
-        expect(reviewApplication.cleanup).toBeUndefined()
+    describe('onWorkspaceLoad', () => {
+      it('returns an AppRef with no-op dispose', () => {
+        const tab: Tab = { id: 'tab-1', applicationId: 'review', title: 'Review', state: {} }
+        const ref = reviewApplication.onWorkspaceLoad(tab, mockWorkspaceStore)
+        expect(typeof ref.dispose).toBe('function')
+        ref.dispose() // should not throw
       })
     })
   })
