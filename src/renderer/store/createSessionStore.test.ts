@@ -471,11 +471,12 @@ describe('createSessionStore', () => {
       childId = childWs.id
     })
 
-    it('mergeAndRemoveWorkspace merges and removes', async () => {
+    it('mergeAndRemoveWorkspace merges, removes, and cleans up load state', async () => {
       const result = await store.getState().mergeAndRemoveWorkspace(childId, false)
       expect(result).toEqual({ success: true })
       expect(deps.git.merge).toHaveBeenCalled()
       expect(store.getState().workspaces[childId]).toBeUndefined()
+      expect(store.getState().workspaceLoadStates[childId]).toBeUndefined()
     })
 
     it('mergeAndRemoveWorkspace auto-commits uncommitted changes', async () => {
