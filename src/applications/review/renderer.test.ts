@@ -62,7 +62,6 @@ describe('Review Renderer', () => {
       expect(reviewApplication.name).toBe('Review')
       expect(reviewApplication.icon).toBe('\u{1F4CB}')
       expect(reviewApplication.canClose).toBe(true)
-      expect(reviewApplication.canHaveMultiple).toBe(false)
       expect(reviewApplication.showInNewTabMenu).toBe(true)
       expect(reviewApplication.displayStyle).toBe('flex')
       expect(reviewApplication.isDefault).toBe(false)

@@ -85,7 +85,6 @@ describe('AI Harness Renderer', () => {
       expect(app.name).toBe('Claude')
       expect(app.icon).toBe('\u2726')
       expect(app.canClose).toBe(true)
-      expect(app.canHaveMultiple).toBe(true)
       expect(app.showInNewTabMenu).toBe(true)
       expect(app.displayStyle).toBe('flex')
     })

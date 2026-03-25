@@ -28,7 +28,6 @@ export const reviewApplication: Application<ReviewState> = {
   },
 
   canClose: true,
-  canHaveMultiple: false,
   showInNewTabMenu: true,
   displayStyle: 'flex',
   isDefault: false

@@ -68,7 +68,6 @@ describe('Comments Renderer', () => {
       expect(commentsApplication.name).toBe('Comments')
       expect(commentsApplication.icon).toBe('\u{1F4AC}')
       expect(commentsApplication.canClose).toBe(true)
-      expect(commentsApplication.canHaveMultiple).toBe(false)
       expect(commentsApplication.showInNewTabMenu).toBe(true)
       expect(commentsApplication.displayStyle).toBe('flex')
       expect(commentsApplication.isDefault).toBe(false)

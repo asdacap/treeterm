@@ -11,7 +11,6 @@ const testApp: Application = {
   onWorkspaceLoad: () => ({ dispose: () => {} }),
   render: () => null,
   canClose: true,
-  canHaveMultiple: true,
   showInNewTabMenu: true,
   displayStyle: 'flex',
   isDefault: true,
@@ -134,18 +133,6 @@ describe('tabToFlexNode', () => {
     expect(node.name).toBe('My Terminal')
     expect(node.component).toBe('test-terminal')
     expect(node.enableClose).toBe(true)
-  })
-
-  it('allows close for non-default single-instance app', () => {
-    const app: Application = { ...testApp, canHaveMultiple: false, isDefault: false }
-    const tab: Tab = { id: 'tab-1', applicationId: 'test', title: 'T', state: {} }
-    expect(tabToFlexNode(tab, app).enableClose).toBe(true)
-  })
-
-  it('allows close for default single-instance app', () => {
-    const app: Application = { ...testApp, canHaveMultiple: false, isDefault: true }
-    const tab: Tab = { id: 'tab-1', applicationId: 'test', title: 'T', state: {} }
-    expect(tabToFlexNode(tab, app).enableClose).toBe(true)
   })
 
   it('handles missing application gracefully', () => {

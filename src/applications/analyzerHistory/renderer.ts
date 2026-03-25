@@ -10,7 +10,6 @@ export const analyzerHistoryApplication: Application = {
   onWorkspaceLoad: () => ({ dispose: () => {} }),
   render: (props: ApplicationRenderProps) => createElement(AnalyzerHistory, props),
   canClose: true,
-  canHaveMultiple: true,
   showInNewTabMenu: false,
   displayStyle: 'flex',
   isDefault: false

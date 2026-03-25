@@ -15,7 +15,6 @@ export const workspaceSettingsApplication: Application = {
     createElement(WorkspaceSettings, { key: tab.id, workspace }),
 
   canClose: true,
-  canHaveMultiple: false,
   showInNewTabMenu: true,
   displayStyle: 'flex',
   isDefault: false

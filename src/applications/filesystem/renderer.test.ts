@@ -62,7 +62,6 @@ describe('Filesystem Renderer', () => {
       expect(filesystemApplication.name).toBe('Files')
       expect(filesystemApplication.icon).toBe('\uD83D\uDCC2')
       expect(filesystemApplication.canClose).toBe(true)
-      expect(filesystemApplication.canHaveMultiple).toBe(true)
       expect(filesystemApplication.showInNewTabMenu).toBe(true)
       expect(filesystemApplication.displayStyle).toBe('flex')
       expect(filesystemApplication.isDefault).toBe(true)

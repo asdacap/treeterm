@@ -64,7 +64,6 @@ describe('Editor Renderer', () => {
       expect(editorApplication.name).toBe('Editor')
       expect(editorApplication.icon).toBe('\u270F')
       expect(editorApplication.canClose).toBe(true)
-      expect(editorApplication.canHaveMultiple).toBe(true)
       expect(editorApplication.showInNewTabMenu).toBe(false)
       expect(editorApplication.displayStyle).toBe('flex')
       expect(editorApplication.isDefault).toBe(false)
