@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import type { Settings, ReasoningEffort } from '../types'
-import { useSettingsStore } from '../store/settings'
+import { useSettingsStore, defaultSettings } from '../store/settings'
 import { useAppStore } from '../store/app'
 import type { SandboxApi, Platform } from '../types'
 
@@ -646,6 +646,17 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                   <p className="settings-hint">
                     {'System prompt for the analyzer. Supports {{cwd}} and {{safe_paths}} template variables.'}
                   </p>
+                  <button
+                    className="settings-reset-btn"
+                    onClick={() =>
+                      setLocalSettings((prev) => ({
+                        ...prev,
+                        terminalAnalyzer: { ...prev.terminalAnalyzer, systemPrompt: defaultSettings.terminalAnalyzer.systemPrompt }
+                      }))
+                    }
+                  >
+                    Reset to default
+                  </button>
                 </div>
 
                 <div className="settings-group">
@@ -665,6 +676,17 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                   <p className="settings-hint">
                     System prompt for auto-generating workspace titles from terminal output.
                   </p>
+                  <button
+                    className="settings-reset-btn"
+                    onClick={() =>
+                      setLocalSettings((prev) => ({
+                        ...prev,
+                        terminalAnalyzer: { ...prev.terminalAnalyzer, titleSystemPrompt: defaultSettings.terminalAnalyzer.titleSystemPrompt }
+                      }))
+                    }
+                  >
+                    Reset to default
+                  </button>
                 </div>
 
                 <div className="settings-group">

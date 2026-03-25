@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { Settings, SettingsApi, ReasoningEffort } from '../types'
 import { useAppStore } from './app'
 
-const defaultSettings: Settings = {
+export const defaultSettings: Settings = {
   terminal: {
     fontSize: 14,
     fontFamily: 'Menlo, Monaco, Consolas, monospace',
