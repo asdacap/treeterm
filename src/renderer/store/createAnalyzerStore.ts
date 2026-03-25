@@ -16,6 +16,7 @@ export interface AnalyzerDeps {
   renameBranch: (oldName: string, newName: string) => Promise<void>
   getGitBranch: () => string | null
   getBranchIsUserDefined: () => boolean
+  refreshGitInfo: () => Promise<void>
 }
 
 export interface AnalyzerHistoryEntry {
@@ -425,6 +426,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     if (state.aiState !== prevAiState) {
       prevAiState = state.aiState
       handleAutoApprove()
+      deps.refreshGitInfo().catch(() => {})
     }
   })
 

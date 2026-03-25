@@ -63,6 +63,7 @@ function makeDeps(overrides?: Partial<AnalyzerDeps>): AnalyzerDeps {
     renameBranch: vi.fn().mockResolvedValue(undefined),
     getGitBranch: vi.fn().mockReturnValue('old-branch'),
     getBranchIsUserDefined: vi.fn().mockReturnValue(false),
+    refreshGitInfo: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }
