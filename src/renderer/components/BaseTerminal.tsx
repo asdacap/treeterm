@@ -103,6 +103,7 @@ export default function BaseTerminal({
   const dataVersionRef = useRef(0)
   const [overlay, setOverlay] = useState<{ message: string; type: 'info' | 'error' } | null>(null)
   const [loading, setLoading] = useState(true)
+  const [scrollPosition, setScrollPosition] = useState<'top' | 'bottom' | 'middle'>('middle')
 
   const sessionStore = useSessionApi()
   const setTabState = useActivityStateStore((state) => state.setTabState)
@@ -125,6 +126,7 @@ export default function BaseTerminal({
     let terminal: XTerm | null = null
     let resizeTimeout: ReturnType<typeof setTimeout> | null = null
     let inputDisposable: { dispose(): void } | null = null
+    let scrollDisposable: { dispose(): void } | null = null
     let resizeObserver: ResizeObserver | null = null
     let detector: ReturnType<typeof createActivityStateDetector> | null = null
     let unsubscribe: (() => void) | null = null
@@ -208,6 +210,19 @@ export default function BaseTerminal({
 
       terminal.open(containerRef.current)
 
+      scrollDisposable = terminal.onScroll(() => {
+        const buf = terminal!.buffer.active
+        if (buf.baseY === 0) {
+          setScrollPosition('middle')
+        } else if (buf.viewportY === 0) {
+          setScrollPosition('top')
+        } else if (buf.baseY - buf.viewportY <= 1) {
+          setScrollPosition('bottom')
+        } else {
+          setScrollPosition('middle')
+        }
+      })
+
       const resize = tty.getState().resize
 
       terminalRef.current = terminal
@@ -265,13 +280,18 @@ export default function BaseTerminal({
           const dataToWrite = config.stripScrollbackClear
             ? data.replace(/\x1b\[3J/g, '')
             : data
+
+          // Pin-to-bottom: if user was at bottom before write, stay at bottom after
+          const buf = terminal!.buffer.active
+          const wasAtBottom = buf.baseY - buf.viewportY <= 1
+
           // Detect ANSI sequences that manipulate scrollback/screen
           const scrollMatches = detectScrollManipulation(data)
           if (scrollMatches.length > 0) {
             const bufBefore = {
-              baseY: terminal!.buffer.active.baseY,
-              viewportY: terminal!.buffer.active.viewportY,
-              length: terminal!.buffer.active.length,
+              baseY: buf.baseY,
+              viewportY: buf.viewportY,
+              length: buf.length,
             }
             terminal!.write(dataToWrite)
             const bufAfter = {
@@ -290,6 +310,12 @@ export default function BaseTerminal({
           } else {
             terminal!.write(dataToWrite)
           }
+
+          // If was at bottom but write displaced viewport, snap back
+          if (wasAtBottom && terminal!.buffer.active.baseY - terminal!.buffer.active.viewportY > 1) {
+            terminal!.scrollToBottom()
+          }
+
           // Process data for activity state detection
           if (detector) detector.processData(data)
           // Log raw characters to console for debugging
@@ -339,6 +365,7 @@ export default function BaseTerminal({
       cancelled = true
       if (resizeTimeout) clearTimeout(resizeTimeout)
       inputDisposable?.dispose()
+      scrollDisposable?.dispose()
       resizeObserver?.disconnect()
       unsubscribe?.()
       detector?.destroy()
@@ -402,6 +429,7 @@ export default function BaseTerminal({
   return (
     <TerminalScrollWrapper
       terminalRef={terminalRef}
+      scrollPosition={scrollPosition}
       extraButtons={floatingButtons}
     >
       <div className="terminal-padding-wrapper">
