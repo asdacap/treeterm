@@ -62,6 +62,7 @@ export interface WorkspaceStoreState {
   // Git controller (polling)
   hasUncommittedChanges: boolean
   isDiffCleanFromParent: boolean
+  hasConflictsWithParent: boolean
   disposeGitController: () => void
 
   // Focus signal (ephemeral, not persisted)
@@ -149,6 +150,17 @@ export function createWorkspaceStore(
           }
         }
       } catch { /* ignore */ }
+
+      try {
+        const ws = store.getState().workspace
+        if (ws.isWorktree && ws.parentId && ws.gitBranch) {
+          const parent = deps.lookupWorkspace(ws.parentId)
+          if (parent?.gitBranch) {
+            const result = await deps.git.checkMergeConflicts(ws.path, ws.gitBranch, parent.gitBranch)
+            store.setState({ hasConflictsWithParent: result.conflicts?.hasConflicts ?? false })
+          }
+        }
+      } catch { /* ignore */ }
     }
 
     poll()
@@ -168,6 +180,7 @@ export function createWorkspaceStore(
     // Git controller state
     hasUncommittedChanges: false,
     isDiffCleanFromParent: false,
+    hasConflictsWithParent: false,
     disposeGitController: () => stopGitController(),
 
     initTab: (tabId: string): void => {

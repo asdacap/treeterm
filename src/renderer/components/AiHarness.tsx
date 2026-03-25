@@ -4,6 +4,7 @@ import type { Terminal as XTerm } from '@xterm/xterm'
 import BaseTerminal, { type BaseTerminalConfig } from './BaseTerminal'
 import PushToTalkButton from './PushToTalkButton'
 import { PromptCommitButton } from './PromptCommitButton'
+import { PromptRebaseButton } from './PromptRebaseButton'
 import { ReviewCommentsButton } from './ReviewCommentsButton'
 import { useSessionApi } from '../contexts/SessionStoreContext'
 import type { ActivityState, AiHarnessState, SandboxConfig, WorkspaceStore } from '../types'
@@ -138,6 +139,7 @@ export default function AiHarness({
           extraButtons={
             <>
               <PromptCommitButton workspace={workspace} />
+              <PromptRebaseButton workspace={workspace} />
               <ReviewCommentsButton workspace={workspace} />
               <PushToTalkButton
                 onTranscript={handlePushToTalkTranscript}
