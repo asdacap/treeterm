@@ -135,7 +135,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
 
   // Create new tab using the first available application
   const handleNewDefaultTab = useCallback(() => {
-    const defaultApp = menuApplications.find((app) => app.canHaveMultiple)
+    const defaultApp = menuApplications[0]
     if (activeHandle && defaultApp) {
       activeHandle.getState().addTab(defaultApp.id)
     }

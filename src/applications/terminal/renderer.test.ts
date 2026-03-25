@@ -86,7 +86,6 @@ describe('Terminal Renderer', () => {
       expect(app.name).toBe('Terminal')
       expect(app.icon).toBe('>')
       expect(app.canClose).toBe(true)
-      expect(app.canHaveMultiple).toBe(true)
       expect(app.showInNewTabMenu).toBe(true)
       expect(app.displayStyle).toBe('flex')
     })
@@ -255,7 +254,6 @@ describe('Terminal Renderer', () => {
       const variant = createTerminalVariant(mockInstance, mockDeps)
 
       expect(variant.canClose).toBe(true)
-      expect(variant.canHaveMultiple).toBe(true)
       expect(variant.showInNewTabMenu).toBe(true)
       expect(variant.displayStyle).toBe('flex')
     })

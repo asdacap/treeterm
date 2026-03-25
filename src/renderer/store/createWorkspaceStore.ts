@@ -208,24 +208,6 @@ export function createWorkspaceStore(
       if (!app) return tabId
 
       updateWorkspace((ws) => {
-        if (!app.canHaveMultiple) {
-          const existingEntry = Object.entries(ws.appStates).find(([, s]) => s.applicationId === applicationId)
-          if (existingEntry) {
-            if (initialState) {
-              const [existingId, existingState] = existingEntry
-              return {
-                ...ws,
-                appStates: {
-                  ...ws.appStates,
-                  [existingId]: { ...existingState, state: { ...(existingState.state || {}), ...initialState } }
-                },
-                activeTabId: existingId
-              }
-            }
-            return ws
-          }
-        }
-
         const existingCount = Object.values(ws.appStates).filter(
           (s) => s.applicationId === applicationId
         ).length

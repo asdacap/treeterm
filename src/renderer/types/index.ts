@@ -68,7 +68,6 @@ export interface Application<TState = unknown, TRef extends AppRef = AppRef> {
   onWorkspaceLoad: (tab: Tab, workspaceStore: WorkspaceStore) => TRef
   render: (props: ApplicationRenderProps) => ReactNode
   canClose: boolean
-  canHaveMultiple: boolean
   showInNewTabMenu: boolean
   // CSS display style when visible: 'block' or 'flex'
   displayStyle: 'block' | 'flex'

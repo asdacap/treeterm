@@ -23,7 +23,6 @@ export const filesystemApplication: Application<FilesystemState> = {
   },
 
   canClose: true,
-  canHaveMultiple: true,
   showInNewTabMenu: true,
   displayStyle: 'flex',
   isDefault: true

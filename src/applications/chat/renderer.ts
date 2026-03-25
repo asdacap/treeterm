@@ -12,7 +12,6 @@ export const chatApplication: Application<ChatState> = {
   onWorkspaceLoad: () => ({ dispose: () => {} }),
   render: (props: ApplicationRenderProps) => createElement(Chat, props),
   canClose: true,
-  canHaveMultiple: true,
   showInNewTabMenu: true,
   displayStyle: 'flex',
   isDefault: false

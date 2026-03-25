@@ -10,7 +10,6 @@ export const systemPromptDebuggerApplication: Application = {
   onWorkspaceLoad: () => ({ dispose: () => {} }),
   render: (props: ApplicationRenderProps) => createElement(SystemPromptDebugger, props),
   canClose: true,
-  canHaveMultiple: false,
   showInNewTabMenu: true,
   displayStyle: 'flex',
   isDefault: false

@@ -4,12 +4,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('../../applications/terminal/renderer', () => ({
   createTerminalApplication: vi.fn().mockReturnValue({
     id: 'terminal', name: 'Terminal', icon: '>', createInitialState: () => ({}),
-    render: () => null, onWorkspaceLoad: () => ({ dispose: () => {} }), canClose: true, canHaveMultiple: true, showInNewTabMenu: true,
+    render: () => null, onWorkspaceLoad: () => ({ dispose: () => {} }), canClose: true, showInNewTabMenu: true,
     displayStyle: 'flex', isDefault: true
   }),
   createTerminalVariant: vi.fn().mockReturnValue({
     id: 'terminal-custom', name: 'Custom', icon: '>', createInitialState: () => ({}),
-    render: () => null, onWorkspaceLoad: () => ({ dispose: () => {} }), canClose: true, canHaveMultiple: true, showInNewTabMenu: true,
+    render: () => null, onWorkspaceLoad: () => ({ dispose: () => {} }), canClose: true, showInNewTabMenu: true,
     displayStyle: 'flex', isDefault: false
   })
 }))
@@ -17,7 +17,7 @@ vi.mock('../../applications/terminal/renderer', () => ({
 vi.mock('../../applications/filesystem/renderer', () => ({
   filesystemApplication: {
     id: 'filesystem', name: 'Files', icon: 'F', createInitialState: () => ({}),
-    render: () => null, onWorkspaceLoad: () => ({ dispose: () => {} }), canClose: true, canHaveMultiple: false, showInNewTabMenu: true,
+    render: () => null, onWorkspaceLoad: () => ({ dispose: () => {} }), canClose: true, showInNewTabMenu: true,
     displayStyle: 'flex', isDefault: false
   }
 }))
@@ -25,7 +25,7 @@ vi.mock('../../applications/filesystem/renderer', () => ({
 vi.mock('../../applications/aiHarness/renderer', () => ({
   createAiHarnessVariant: vi.fn().mockReturnValue({
     id: 'aiharness-test', name: 'AI', icon: 'A', createInitialState: () => ({}),
-    render: () => null, onWorkspaceLoad: () => ({ dispose: () => {} }), canClose: true, canHaveMultiple: true, showInNewTabMenu: true,
+    render: () => null, onWorkspaceLoad: () => ({ dispose: () => {} }), canClose: true, showInNewTabMenu: true,
     displayStyle: 'flex', isDefault: false
   })
 }))
@@ -33,7 +33,7 @@ vi.mock('../../applications/aiHarness/renderer', () => ({
 vi.mock('../../applications/review/renderer', () => ({
   reviewApplication: {
     id: 'review', name: 'Review', icon: 'R', createInitialState: () => ({}),
-    render: () => null, onWorkspaceLoad: () => ({ dispose: () => {} }), canClose: true, canHaveMultiple: false, showInNewTabMenu: false,
+    render: () => null, onWorkspaceLoad: () => ({ dispose: () => {} }), canClose: true, showInNewTabMenu: false,
     displayStyle: 'flex', isDefault: false
   }
 }))
@@ -41,7 +41,7 @@ vi.mock('../../applications/review/renderer', () => ({
 vi.mock('../../applications/editor/renderer', () => ({
   editorApplication: {
     id: 'editor', name: 'Editor', icon: 'E', createInitialState: () => ({}),
-    render: () => null, onWorkspaceLoad: () => ({ dispose: () => {} }), canClose: true, canHaveMultiple: false, showInNewTabMenu: false,
+    render: () => null, onWorkspaceLoad: () => ({ dispose: () => {} }), canClose: true, showInNewTabMenu: false,
     displayStyle: 'flex', isDefault: false
   }
 }))
@@ -49,7 +49,7 @@ vi.mock('../../applications/editor/renderer', () => ({
 vi.mock('../../applications/comments/renderer', () => ({
   commentsApplication: {
     id: 'comments', name: 'Comments', icon: 'C', createInitialState: () => ({}),
-    render: () => null, onWorkspaceLoad: () => ({ dispose: () => {} }), canClose: true, canHaveMultiple: false, showInNewTabMenu: false,
+    render: () => null, onWorkspaceLoad: () => ({ dispose: () => {} }), canClose: true, showInNewTabMenu: false,
     displayStyle: 'flex', isDefault: false
   }
 }))
@@ -698,7 +698,6 @@ describe('useAppStore', () => {
       onWorkspaceLoad: () => ({ dispose: () => {} }),
       render: () => null,
       canClose: true,
-      canHaveMultiple: false,
       showInNewTabMenu: true,
       displayStyle: 'flex' as const,
       isDefault: false

@@ -113,7 +113,7 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
 
     // Reconcile: ensure all store tabs exist in the model
     // Handles tabs that exist in syncedTabIdsRef but were never added to the model
-    // (e.g. canHaveMultiple:false reuse, or initial add failed)
+    // (e.g. initial add failed)
     let reconciled = false
     for (const tab of tabs) {
       if (!model.getNodeById(tab.id)) {

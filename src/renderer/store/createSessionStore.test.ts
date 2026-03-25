@@ -118,7 +118,6 @@ function makeFakeApp(overrides: Partial<Application> = {}): Application {
     createInitialState: () => ({ ptyId: null }),
     onWorkspaceLoad: () => ({ dispose: () => {} }),
     canClose: true,
-    canHaveMultiple: true,
     showInNewTabMenu: true,
     displayStyle: 'block',
     isDefault: false,

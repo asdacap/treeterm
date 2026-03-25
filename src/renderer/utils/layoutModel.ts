@@ -53,10 +53,5 @@ export function tabToFlexNode(tab: Tab, app?: Application): IJsonTabNode {
 }
 
 function canCloseTabInLayout(app?: Application): boolean {
-  if (!app?.canClose) return false
-  if (app.canHaveMultiple) return true
-  if (!app.isDefault) return true
-  // For default single-instance apps, we allow close in the layout model
-  // but the store's removeTab will handle the actual close validation
-  return true
+  return app?.canClose ?? false
 }
