@@ -81,6 +81,10 @@ const CHANNELS = {
   llmClearAnalyzerCache: 'llm:clearAnalyzerCache',
   llmGenerateTitle: 'llm:generateTitle',
 
+  // Clipboard operations
+  clipboardReadText: 'clipboard:readText',
+  clipboardWriteText: 'clipboard:writeText',
+
   // Send channels
   ptyWrite: 'pty:write',
   ptyResize: 'pty:resize',
@@ -505,6 +509,14 @@ export class IpcClient {
 
   llmChatCancel(...args: IpcSends['llmChatCancel']['params']): void {
     ipcRenderer.send(CHANNELS.llmChatCancel, ...args)
+  }
+
+  clipboardWriteText(...args: IpcSends['clipboardWriteText']['params']): void {
+    ipcRenderer.send(CHANNELS.clipboardWriteText, ...args)
+  }
+
+  clipboardReadText(): Promise<IpcRequests['clipboardReadText']['result']> {
+    return ipcRenderer.invoke(CHANNELS.clipboardReadText)
   }
 
   // ==================== Event Listeners (on pattern, returns unsubscribe function) ====================

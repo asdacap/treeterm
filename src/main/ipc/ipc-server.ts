@@ -81,6 +81,10 @@ const CHANNELS = {
   llmChatSend: 'llm:chat:send',
   llmAnalyzeTerminal: 'llm:analyzeTerminal',
 
+  // Clipboard operations
+  clipboardReadText: 'clipboard:readText',
+  clipboardWriteText: 'clipboard:writeText',
+
   // Send channels
   ptyWrite: 'pty:write',
   ptyResize: 'pty:resize',
@@ -796,6 +800,18 @@ export class IpcServer {
     ipcMain.on(CHANNELS.llmChatCancel, (_event: IpcMainEvent, ...args: unknown[]) =>
       handler(...(args as IpcSends['llmChatCancel']['params']))
     )
+  }
+
+  onClipboardWriteText(handler: (...args: IpcSends['clipboardWriteText']['params']) => void): void {
+    ipcMain.on(CHANNELS.clipboardWriteText, (_event: IpcMainEvent, ...args: unknown[]) =>
+      handler(...(args as IpcSends['clipboardWriteText']['params']))
+    )
+  }
+
+  onClipboardReadText(
+    handler: () => IpcRequests['clipboardReadText']['result'] | Promise<IpcRequests['clipboardReadText']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.clipboardReadText, () => handler())
   }
 
   // ==================== Event Emitters (main → renderer) ====================

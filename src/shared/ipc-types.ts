@@ -345,6 +345,12 @@ export interface IpcRequests {
     params: [buffer: string, settings: { baseUrl: string; apiKey: string; model: string; titleSystemPrompt: string; reasoningEffort: ReasoningEffort }]
     result: { title: string; description: string } | { error: string }
   }
+
+  // Clipboard operations
+  clipboardReadText: {
+    params: []
+    result: string
+  }
 }
 
 // === Fire-and-Forget Types (renderer sends, no response) ===
@@ -367,6 +373,9 @@ export interface IpcSends {
   }
   llmChatCancel: {
     params: [requestId: string]
+  }
+  clipboardWriteText: {
+    params: [text: string]
   }
 }
 

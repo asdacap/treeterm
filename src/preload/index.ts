@@ -1,4 +1,4 @@
-import { contextBridge, clipboard } from 'electron'
+import { contextBridge } from 'electron'
 import type { SandboxConfig, Session, SessionInfo, WorkspaceInput, Settings, SSHConnectionConfig, ConnectionInfo, ReasoningEffort } from '../shared/types'
 import { IpcClient } from './ipc-client'
 
@@ -523,8 +523,8 @@ contextBridge.exposeInMainWorld('electron', {
     }
   },
   clipboard: {
-    writeText: (text: string): void => { clipboard.writeText(text) },
-    readText: (): string => clipboard.readText(),
+    writeText: (text: string): void => { client.clipboardWriteText(text) },
+    readText: (): Promise<string> => client.clipboardReadText(),
   },
   getWindowUuid: (): Promise<string> => {
     return client.appGetWindowUuid()

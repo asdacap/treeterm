@@ -396,8 +396,8 @@ export default function BaseTerminal({
     closeContextMenu()
   }
 
-  const handlePaste = () => {
-    const text = clipboard.readText()
+  const handlePaste = async () => {
+    const text = await clipboard.readText()
     console.log(`[${config.logPrefix} ${tabId}] paste:`, { clipboardText: text ?? '(empty)', hasTty: !!ttyRef.current })
     if (text && ttyRef.current) {
       ttyRef.current.getState().write(text)

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, shell, ipcMain } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, shell, ipcMain } from 'electron'
 import { execSync } from 'child_process'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
@@ -523,6 +523,9 @@ server.onSessionOpenInNewWindow(async (sessionId) => {
     return { success: false, error: errorMessage }
   }
 })
+
+server.onClipboardWriteText((text) => { clipboard.writeText(text) })
+server.onClipboardReadText(() => clipboard.readText())
 
 server.onDialogSelectFolder(async () => {
   if (!mainWindow) return null
