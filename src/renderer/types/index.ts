@@ -293,7 +293,7 @@ export interface ConflictCheckResult {
 
 export interface ClipboardApi {
   writeText: (text: string) => void
-  readText: () => string
+  readText: () => Promise<string>
 }
 
 export interface TerminalApi {
