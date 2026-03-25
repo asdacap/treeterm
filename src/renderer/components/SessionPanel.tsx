@@ -274,7 +274,7 @@ export default function SessionPanel({
     return (
       <div key={ws.id}>
         <div
-          className={`tree-item ${isActiveSession && activeWorkspaceId === ws.id ? 'active' : ''} ${isFocused ? 'focused' : ''}`}
+          className={`tree-item ${depth === 0 ? 'tree-item-root' : ''} ${isActiveSession && activeWorkspaceId === ws.id ? 'active' : ''} ${isFocused ? 'focused' : ''}`}
           style={{ paddingLeft: 4 + depth * 4 }}
           onClick={() => handleWorkspaceClick(ws)}
           onContextMenu={(e) => handleContextMenu(e, ws.id)}

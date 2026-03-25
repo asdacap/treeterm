@@ -271,7 +271,8 @@ body,
   gap: 2px;
 }
 
-.tree-item:hover .tree-item-actions {
+.tree-item:hover .tree-item-actions,
+.tree-item-root .tree-item-actions {
   display: flex;
 }
 
