@@ -642,6 +642,9 @@ export function createSessionStore(
           wsHandle.setState(s => ({
             workspace: { ...s.workspace, isGitRepo: gitInfo.isRepo, gitBranch: gitInfo.branch, gitRootPath: gitInfo.rootPath }
           }))
+          for (const tabId of Object.keys(appStates)) {
+            wsHandle.getState().initTab(tabId)
+          }
         }
         set(s => {
           const { [id]: _, ...rest } = s.workspaceLoadStates
