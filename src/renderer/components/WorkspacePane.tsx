@@ -12,7 +12,7 @@ import CreateChildDialog from './CreateChildDialog'
 import KeybindingOverlay from './KeybindingOverlay'
 import { ErrorBoundary } from './ErrorBoundary'
 import WorkspaceErrorFallback from './WorkspaceErrorFallback'
-import type { ReviewState, Platform } from '../types'
+import type { ReviewState, Platform, WorkspaceStore } from '../types'
 import { getTabs } from '../types'
 import { PromptDescriptionButton } from './PromptDescriptionButton'
 import RunActionDropdown from './RunActionDropdown'
@@ -438,56 +438,19 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                       }
                     }}
                   />
-                  {activeWorkspace.isWorktree && activeWorkspace.parentId && (
-                    <div className="abandon-dropdown-container">
-                      <button
-                        className="workspace-action-btn workspace-action-btn-merge abandon-split-btn"
-                        onClick={handleOpenReview}
-                        title="Review & Merge: Review changes and merge this workspace"
-                      >
-                        Review & Merge
-                      </button>
-                      <button
-                        ref={abandonButtonRef}
-                        className="workspace-action-btn workspace-action-btn-merge abandon-dropdown-btn"
-                        onClick={() => setAbandonMenuOpen(!abandonMenuOpen)}
-                        title="More options"
-                      >
-                        <ChevronDown size={14} />
-                      </button>
-                      {abandonMenuOpen && (
-                        <div className="abandon-menu" ref={abandonMenuRef}>
-                          <div
-                            className="abandon-menu-item"
-                            onClick={handleAbandon}
-                          >
-                            Abandon
-                            <span className="abandon-menu-hint">Delete worktree and branch</span>
-                          </div>
-                          <div
-                            className="abandon-menu-item"
-                            onClick={handleAbandonKeepBranch}
-                          >
-                            Abandon (Keep Branch)
-                            <span className="abandon-menu-hint">Delete worktree, keep branch</span>
-                          </div>
-                          <div
-                            className="abandon-menu-item"
-                            onClick={handleAbandonKeepWorktree}
-                          >
-                            Abandon (Keep Worktree)
-                            <span className="abandon-menu-hint">Keep worktree, delete branch</span>
-                          </div>
-                          <div
-                            className="abandon-menu-item"
-                            onClick={handleAbandonKeepBoth}
-                          >
-                            Abandon (Keep Both)
-                            <span className="abandon-menu-hint">Keep worktree and branch</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                  {activeWorkspace.isWorktree && activeWorkspace.parentId && activeHandle && (
+                    <MergeAbandonButton
+                      workspace={activeHandle}
+                      abandonMenuOpen={abandonMenuOpen}
+                      abandonMenuRef={abandonMenuRef}
+                      abandonButtonRef={abandonButtonRef}
+                      onToggleMenu={() => setAbandonMenuOpen(!abandonMenuOpen)}
+                      onOpenReview={handleOpenReview}
+                      onAbandon={handleAbandon}
+                      onAbandonKeepBranch={handleAbandonKeepBranch}
+                      onAbandonKeepWorktree={handleAbandonKeepWorktree}
+                      onAbandonKeepBoth={handleAbandonKeepBoth}
+                    />
                   )}
                 </div>
               </div>
@@ -619,5 +582,79 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
         <KeybindingOverlay platform={platform} />
       </div>
     </ErrorBoundary>
+  )
+}
+
+interface MergeAbandonButtonProps {
+  workspace: WorkspaceStore
+  abandonMenuOpen: boolean
+  abandonMenuRef: React.Ref<HTMLDivElement>
+  abandonButtonRef: React.Ref<HTMLButtonElement>
+  onToggleMenu: () => void
+  onOpenReview: () => void
+  onAbandon: () => void
+  onAbandonKeepBranch: () => void
+  onAbandonKeepWorktree: () => void
+  onAbandonKeepBoth: () => void
+}
+
+function MergeAbandonButton({
+  workspace, abandonMenuOpen, abandonMenuRef, abandonButtonRef,
+  onToggleMenu, onOpenReview, onAbandon, onAbandonKeepBranch, onAbandonKeepWorktree, onAbandonKeepBoth,
+}: MergeAbandonButtonProps) {
+  const { isDiffCleanFromParent } = useStore(workspace)
+
+  const mainLabel = isDiffCleanFromParent ? 'Abandon' : 'Review & Merge'
+  const mainAction = isDiffCleanFromParent ? onAbandon : onOpenReview
+  const mainTitle = isDiffCleanFromParent
+    ? 'Abandon: No changes to merge — delete worktree and branch'
+    : 'Review & Merge: Review changes and merge this workspace'
+
+  return (
+    <div className="abandon-dropdown-container">
+      <button
+        className="workspace-action-btn workspace-action-btn-merge abandon-split-btn"
+        onClick={mainAction}
+        title={mainTitle}
+      >
+        {mainLabel}
+      </button>
+      <button
+        ref={abandonButtonRef}
+        className="workspace-action-btn workspace-action-btn-merge abandon-dropdown-btn"
+        onClick={onToggleMenu}
+        title="More options"
+      >
+        <ChevronDown size={14} />
+      </button>
+      {abandonMenuOpen && (
+        <div className="abandon-menu" ref={abandonMenuRef}>
+          {isDiffCleanFromParent && (
+            <div className="abandon-menu-item" onClick={onOpenReview}>
+              Review & Merge
+              <span className="abandon-menu-hint">Review changes and merge</span>
+            </div>
+          )}
+          {!isDiffCleanFromParent && (
+            <div className="abandon-menu-item" onClick={onAbandon}>
+              Abandon
+              <span className="abandon-menu-hint">Delete worktree and branch</span>
+            </div>
+          )}
+          <div className="abandon-menu-item" onClick={onAbandonKeepBranch}>
+            Abandon (Keep Branch)
+            <span className="abandon-menu-hint">Delete worktree, keep branch</span>
+          </div>
+          <div className="abandon-menu-item" onClick={onAbandonKeepWorktree}>
+            Abandon (Keep Worktree)
+            <span className="abandon-menu-hint">Keep worktree, delete branch</span>
+          </div>
+          <div className="abandon-menu-item" onClick={onAbandonKeepBoth}>
+            Abandon (Keep Both)
+            <span className="abandon-menu-hint">Keep worktree and branch</span>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

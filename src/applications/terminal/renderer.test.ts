@@ -63,6 +63,9 @@ const mockWorkspaceStoreStateData = {
   createTty: vi.fn().mockResolvedValue('pty-1'),
   connectionId: 'local',
   updateSettings: vi.fn(),
+  hasUncommittedChanges: false,
+  isDiffCleanFromParent: false,
+  disposeGitController: vi.fn(),
 } as WorkspaceStoreState
 
 const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => mockWorkspaceStoreStateData)

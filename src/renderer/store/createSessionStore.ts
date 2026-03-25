@@ -429,6 +429,7 @@ export function createSessionStore(
     // Dispose tab refs (stops analyzers, kills PTYs, etc.)
     const handle = state.workspaceStores[id]
     if (handle) {
+      handle.getState().disposeGitController()
       for (const tabId of Object.keys(workspace.appStates)) {
         const ref = handle.getState().getTabRef(tabId)
         if (ref) ref.dispose()

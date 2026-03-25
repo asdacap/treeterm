@@ -59,6 +59,11 @@ export interface WorkspaceStoreState {
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
   connectionId: string
 
+  // Git controller (polling)
+  hasUncommittedChanges: boolean
+  isDiffCleanFromParent: boolean
+  disposeGitController: () => void
+
   // Other per-workspace
   promptHarness: (text: string) => boolean
   updateMetadata: (key: string, value: string) => void
@@ -115,8 +120,50 @@ export function createWorkspaceStore(
   // Closure-level tab ref registry (non-serialized per-tab runtime state)
   const tabRefs: Record<string, AppRef> = {}
 
+  // Git controller — polls git status every 10s
+  let gitControllerInterval: ReturnType<typeof setInterval> | null = null
+
+  function startGitController(): void {
+    if (!workspace.isGitRepo) return
+
+    const poll = async () => {
+      try {
+        const uncommitted = await deps.git.hasUncommittedChanges(workspace.path)
+        store.setState({ hasUncommittedChanges: uncommitted })
+      } catch { /* ignore — workspace may be removed */ }
+
+      try {
+        const ws = store.getState().workspace
+        if (ws.isWorktree && ws.parentId) {
+          const parent = deps.lookupWorkspace(ws.parentId)
+          if (parent?.gitBranch) {
+            const result = await deps.git.getDiff(ws.path, parent.gitBranch)
+            const clean = result.success && result.diff ? result.diff.files.length === 0 : false
+            const uncommitted = store.getState().hasUncommittedChanges
+            store.setState({ isDiffCleanFromParent: clean && !uncommitted })
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
+    poll()
+    gitControllerInterval = setInterval(poll, 10_000)
+  }
+
+  function stopGitController(): void {
+    if (gitControllerInterval) {
+      clearInterval(gitControllerInterval)
+      gitControllerInterval = null
+    }
+  }
+
   const store = createStore<WorkspaceStoreState>()((set, get) => ({
     workspace,
+
+    // Git controller state
+    hasUncommittedChanges: false,
+    isDiffCleanFromParent: false,
+    disposeGitController: () => stopGitController(),
 
     initTab: (tabId: string): void => {
       const appState = get().workspace.appStates[tabId]
@@ -416,6 +463,8 @@ export function createWorkspaceStore(
     removeKeepBoth: () => deps.removeWorkspaceKeepBoth(id),
     lookupWorkspace: (otherId: string) => deps.lookupWorkspace(otherId),
   }))
+
+  startGitController()
 
   return store
 }
