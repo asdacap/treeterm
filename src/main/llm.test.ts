@@ -183,6 +183,34 @@ describe('cancelChatStream', () => {
   it('does nothing for unknown request id', () => {
     cancelChatStream('nonexistent')
   })
+
+  it('aborts an active stream', async () => {
+    mockCreate.mockResolvedValue({
+      [Symbol.asyncIterator]: async function* () {
+        yield { choices: [{ delta: { content: 'hi' } }] }
+      },
+    })
+
+    const sender = makeMockSender()
+    // Start and complete the stream to register the request
+    await startChatStream('cancel-me', [], mockSettings, sender)
+    // Stream is done, activeStreams is cleaned up in finally — but we can test the abort path
+    // by starting a new stream and immediately canceling
+    let abortCalled = false
+    const realAbort = AbortController.prototype.abort
+    AbortController.prototype.abort = function() { abortCalled = true; realAbort.call(this) }
+
+    mockCreate.mockResolvedValue({
+      [Symbol.asyncIterator]: async function* () {
+        yield { choices: [{ delta: { content: 'data' } }] }
+      },
+    })
+    const promise = startChatStream('cancel-2', [], mockSettings, sender)
+    cancelChatStream('cancel-2')
+    await promise
+    expect(abortCalled).toBe(true)
+    AbortController.prototype.abort = realAbort
+  })
 })
 
 describe('parseLlmJson', () => {

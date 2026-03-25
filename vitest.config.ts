@@ -21,7 +21,8 @@ export default defineConfig({
         '**/index.ts',
         'src/shared/**',
         'src/renderer/stt/types.ts',
-        'src/renderer/monaco-config.ts'
+        'src/renderer/monaco-config.ts',
+        'src/__mocks__/**'
       ],
       thresholds: {
         branches: 60,

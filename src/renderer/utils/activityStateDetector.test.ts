@@ -99,9 +99,8 @@ describe('createActivityStateDetector', () => {
     const onStateChange = vi.fn()
     const { processData } = createActivityStateDetector(onStateChange, { idleTimeout: 100, debounceMs: 0 })
 
-    // Send 600 chars (more than 500 MAX_BUFFER_SIZE), ending with a prompt
-    const bigData = 'a'.repeat(480)
-    processData(bigData)
+    // Send >500 chars to trigger truncation, ending with a prompt
+    processData('a'.repeat(510))
     processData('$ ')  // append prompt — should be in truncated buffer
 
     vi.advanceTimersByTime(200)
@@ -174,6 +173,19 @@ describe('createActivityStateDetector', () => {
       // Should not have emitted user_input_required after destroy
       const stateCalls = onStateChange.mock.calls.filter(c => c[0] === 'user_input_required')
       expect(stateCalls).toHaveLength(0)
+    })
+
+    it('clears debounce timer on destroy', () => {
+      const onStateChange = vi.fn()
+      const { processData, destroy } = createActivityStateDetector(onStateChange, { idleTimeout: 100, debounceMs: 500 })
+
+      processData('user@host:~$ ')
+      vi.advanceTimersByTime(150) // idle timer fires, starts debounce for user_input_required
+      destroy() // should clear debounce timer
+
+      vi.advanceTimersByTime(600) // past debounce period
+      const waitingCalls = onStateChange.mock.calls.filter(c => c[0] === 'user_input_required')
+      expect(waitingCalls).toHaveLength(0)
     })
 
     it('can be called multiple times without error', () => {

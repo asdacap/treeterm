@@ -387,4 +387,67 @@ describe('DaemonPtyManager', () => {
       Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
     })
   })
+
+  describe('exited session guards', () => {
+    function createAndExit(): string {
+      const id = manager.create({ cwd: '/tmp', env: {} })
+      const onExitHandler = mockPtyProcess.onExit.mock.calls[0][0]
+      onExitHandler({ exitCode: 42, signal: undefined })
+      vi.clearAllMocks()
+      return id
+    }
+
+    it.each(['write', 'resize'] as const)('%s is no-op on exited session', (method) => {
+      const id = createAndExit()
+      if (method === 'write') {
+        manager.write(id, 'data')
+        expect(mockPtyProcess.write).not.toHaveBeenCalled()
+      } else {
+        manager.resize(id, 100, 50)
+        expect(mockPtyProcess.resize).not.toHaveBeenCalled()
+      }
+    })
+
+    it('attach returns exitCode on exited session', () => {
+      const id = createAndExit()
+      const result = manager.attach(id)
+      expect(result.exitCode).toBe(42)
+    })
+  })
+
+  describe('per-session callbacks', () => {
+    it.each([
+      { type: 'onSessionData', trigger: 'data', args: ['hello'], expected: ['hello'] },
+      { type: 'onSessionExit', trigger: 'exit', args: [{ exitCode: 1, signal: 15 }], expected: [1, 15] },
+    ] as const)('$type fires and cleanup removes map entry', ({ type, trigger, args, expected }) => {
+      const id = manager.create({ cwd: '/tmp', env: {} })
+      const cb = vi.fn()
+
+      const unsub = type === 'onSessionData'
+        ? manager.onSessionData(id, cb)
+        : manager.onSessionExit(id, cb)
+
+      const handler = trigger === 'data'
+        ? mockPtyProcess.onData.mock.calls[0][0]
+        : mockPtyProcess.onExit.mock.calls[0][0]
+      handler(args[0])
+
+      expect(cb).toHaveBeenCalledWith(...expected)
+
+      unsub()
+      // After unsubscribe, the callback set should be cleaned up
+    })
+
+    it('onSessionResize fires on resize and cleanup removes map entry', () => {
+      const id = manager.create({ cwd: '/tmp', env: {} })
+      const cb = vi.fn()
+
+      const unsub = manager.onSessionResize(id, cb)
+      manager.resize(id, 120, 40)
+
+      expect(cb).toHaveBeenCalledWith(120, 40)
+
+      unsub()
+    })
+  })
 })

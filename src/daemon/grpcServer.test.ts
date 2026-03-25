@@ -984,4 +984,61 @@ describe('GrpcServer', () => {
     })
   })
 
+  describe('error paths', () => {
+    it('readFile catches thrown errors from filesystem', async () => {
+      vi.mocked(filesystem.readFile).mockRejectedValue(new Error('disk failure'))
+
+      const writes: any[] = []
+      const mockStream = {
+        request: { workspacePath: '/ws', filePath: '/file.txt' },
+        write: vi.fn().mockImplementation((data: any) => writes.push(data)),
+        end: vi.fn()
+      }
+
+      await capturedServiceImpl.readFile(mockStream)
+
+      expect(writes[0].end.success).toBe(false)
+      expect(writes[0].end.error).toBe('disk failure')
+    })
+
+    it('writeFile catches thrown errors from filesystem', async () => {
+      vi.mocked(filesystem.writeFile).mockRejectedValue(new Error('permission denied'))
+
+      const handlers: Record<string, Function> = {}
+      const mockStream = {
+        on: vi.fn().mockImplementation((event: string, handler: Function) => {
+          handlers[event] = handler
+        })
+      }
+      const callback = makeCallback()
+
+      capturedServiceImpl.writeFile(mockStream, callback)
+
+      handlers.data({ header: { workspacePath: '/ws', filePath: '/file.txt' } })
+      handlers.data({ data: { data: Buffer.from('content') } })
+      await handlers.end()
+
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'permission denied' })
+      )
+    })
+
+    it('writeFile handles stream error event', () => {
+      const handlers: Record<string, Function> = {}
+      const mockStream = {
+        on: vi.fn().mockImplementation((event: string, handler: Function) => {
+          handlers[event] = handler
+        })
+      }
+      const callback = makeCallback()
+
+      capturedServiceImpl.writeFile(mockStream, callback)
+      handlers.error(new Error('stream reset'))
+
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'stream reset' })
+      )
+    })
+  })
+
 })

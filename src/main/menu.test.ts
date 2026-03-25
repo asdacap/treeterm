@@ -23,13 +23,15 @@ vi.mock('./windowManager', () => ({
   }
 }))
 
-import { Menu, app, shell } from 'electron'
+import { Menu, app, shell, BrowserWindow } from 'electron'
+import { windowManager } from './windowManager'
 import { createApplicationMenu } from './menu'
 
 describe('menu', () => {
   const mockServer = {
     settingsOpen: vi.fn(),
-    sessionShowSessions: vi.fn()
+    sessionShowSessions: vi.fn(),
+    activeProcessesOpen: vi.fn()
   }
 
   beforeEach(() => {
@@ -115,6 +117,50 @@ describe('menu', () => {
       exitItem.click()
       
       expect(app.quit).toHaveBeenCalled()
+    })
+
+    it('uses focused window ipcServer when available', () => {
+      const focusedServer = { settingsOpen: vi.fn(), sessionShowSessions: vi.fn(), activeProcessesOpen: vi.fn() }
+      ;(BrowserWindow.getFocusedWindow as any).mockReturnValue({ id: 1 })
+      ;(windowManager.getWindow as any).mockReturnValue({ ipcServer: focusedServer })
+
+      Object.defineProperty(process, 'platform', { value: 'darwin' })
+      createApplicationMenu(null, mockServer as any)
+
+      const template = (Menu.buildFromTemplate as any).mock.calls[0][0]
+      const appMenu = template[0]
+      const preferencesItem = appMenu.submenu.find((item: any) => item.label === 'Preferences...')
+      preferencesItem.click()
+
+      expect(focusedServer.settingsOpen).toHaveBeenCalled()
+      expect(mockServer.settingsOpen).not.toHaveBeenCalled()
+
+      ;(BrowserWindow.getFocusedWindow as any).mockReturnValue(null)
+      ;(windowManager.getWindow as any).mockReturnValue(undefined)
+    })
+
+    it('calls settingsOpen when Settings clicked on non-macOS', () => {
+      Object.defineProperty(process, 'platform', { value: 'linux' })
+
+      createApplicationMenu(null, mockServer as any)
+
+      const template = (Menu.buildFromTemplate as any).mock.calls[0][0]
+      const fileMenu = template.find((item: any) => item.label === 'File')
+      const settingsItem = fileMenu.submenu.find((item: any) => item.label === 'Settings')
+      settingsItem.click()
+
+      expect(mockServer.settingsOpen).toHaveBeenCalled()
+    })
+
+    it('calls activeProcessesOpen when Active Processes clicked', () => {
+      createApplicationMenu(null, mockServer as any)
+
+      const template = (Menu.buildFromTemplate as any).mock.calls[0][0]
+      const windowMenu = template.find((item: any) => item.label === 'Window')
+      const activeProcessesItem = windowMenu.submenu.find((item: any) => item.label === 'Active Processes')
+      activeProcessesItem.click()
+
+      expect(mockServer.activeProcessesOpen).toHaveBeenCalled()
     })
 
     it('opens external link when Learn More clicked', async () => {
