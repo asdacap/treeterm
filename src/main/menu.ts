@@ -127,7 +127,18 @@ export function createApplicationMenu(
         { role: 'zoomIn' as const },
         { role: 'zoomOut' as const },
         { type: 'separator' as const },
-        { role: 'togglefullscreen' as const }
+        { role: 'togglefullscreen' as const },
+        { type: 'separator' as const },
+        {
+          label: 'Reset Input',
+          click: () => {
+            const focused = BrowserWindow.getFocusedWindow()
+            if (focused) {
+              focused.blur()
+              focused.focus()
+            }
+          }
+        }
       ]
     },
 

@@ -187,6 +187,14 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
         e.preventDefault()
         handlers.switchToTab?.(parseInt(e.key) - 1)
       }
+
+      // Diagnostic: detect if Shift/Enter are being unexpectedly blocked in idle mode
+      if (prefixState === 'idle' && (e.key === 'Shift' || e.key === 'Enter') && e.defaultPrevented) {
+        console.error('[KeyDiag] Shift/Enter was preventDefault in idle mode!', {
+          key: e.key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey,
+          activeElement: document.activeElement?.tagName,
+        })
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown, true)
@@ -230,6 +238,11 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
 
   enterWorkspaceFocus: (workspaceIds: string[], currentIndex: number) => {
     if (timeoutId) clearTimeout(timeoutId)
+
+    const timeout = useSettingsStore.getState().settings.prefixMode.timeout
+    timeoutId = window.setTimeout(() => {
+      get().deactivate()
+    }, timeout)
 
     set({
       prefixState: 'workspace_focus',
