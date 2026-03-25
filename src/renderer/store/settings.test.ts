@@ -76,7 +76,9 @@ describe('SettingsStore', () => {
           language: 'en'
         },
         daemon: {
-          scrollbackLimit: 10000
+          mergeThreshold: 50 * 1024,
+          compactedLimit: 1024 * 1024,
+          scrollbackLines: 10000
         },
         globalDefaultApplicationId: 'terminal',
         recentDirectories: []
@@ -128,7 +130,9 @@ describe('SettingsStore', () => {
           language: 'en'
         },
         daemon: {
-          scrollbackLimit: 10000
+          mergeThreshold: 50 * 1024,
+          compactedLimit: 1024 * 1024,
+          scrollbackLines: 10000
         },
         globalDefaultApplicationId: 'terminal',
         recentDirectories: []

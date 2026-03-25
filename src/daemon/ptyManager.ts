@@ -8,6 +8,7 @@ import * as path from 'path'
 import * as os from 'os'
 import * as fs from 'fs'
 import { execSync } from 'child_process'
+import { Terminal } from '@xterm/headless'
 import type { CreateSessionConfig, SessionInfo } from './protocol'
 import type { SandboxConfig } from '../main/pty'
 import { createModuleLogger } from './logger'
@@ -21,9 +22,10 @@ export interface PtySession {
   env: Record<string, string>
   cols: number
   rows: number
-  scrollback: string[]
-  scrollbackLimit: number
-  scrollbackSize: number // Track current size in bytes
+  buffer1: string[]      // compacted scrollback buffer
+  buffer1Size: number    // bytes
+  buffer2: string[]      // accumulator buffer
+  buffer2Size: number    // bytes
   createdAt: number
   lastActivity: number
   sandbox?: SandboxConfig
@@ -172,9 +174,11 @@ export class DaemonPtyManager {
   private sessionDataCallbacks: Map<string, Set<(data: string) => void>> = new Map()
   private sessionExitCallbacks: Map<string, Set<(exitCode: number, signal?: number) => void>> = new Map()
   private sessionResizeCallbacks: Map<string, Set<(cols: number, rows: number) => void>> = new Map()
-  constructor(private scrollbackLimit: number = 1024 * 1024) {
-    // scrollbackLimit is now in bytes (default 1 MB)
-  }
+  constructor(
+    private mergeThreshold: number = 50 * 1024,         // 50KB - triggers compaction when buffer2 exceeds this
+    private compactedLimit: number = 1024 * 1024,        // 1MB - max buffer1 size after compaction
+    private scrollbackLines: number = 10000              // headless xterm line limit for compaction measurement
+  ) {}
 
   create(config: CreateSessionConfig): string {
     const id = `pty-${++this.counter}`
@@ -242,9 +246,10 @@ export class DaemonPtyManager {
       env,
       cols,
       rows,
-      scrollback: [],
-      scrollbackLimit: this.scrollbackLimit,
-      scrollbackSize: 0,
+      buffer1: [],
+      buffer1Size: 0,
+      buffer2: [],
+      buffer2Size: 0,
       createdAt: Date.now(),
       lastActivity: Date.now(),
       sandbox: config.sandbox
@@ -303,7 +308,7 @@ export class DaemonPtyManager {
     session.lastActivity = Date.now()
 
     return {
-      scrollback: [...session.scrollback],
+      scrollback: [...session.buffer1, ...session.buffer2],
       session: this.getSessionInfo(session),
       exitCode: session.exitCode
     }
@@ -409,14 +414,66 @@ export class DaemonPtyManager {
   }
 
   private appendScrollback(session: PtySession, data: string): void {
-    session.scrollback.push(data)
-    session.scrollbackSize += Buffer.byteLength(data, 'utf-8')
+    session.buffer2.push(data)
+    session.buffer2Size += Buffer.byteLength(data, 'utf-8')
 
-    // Truncate if exceeds size limit (in bytes)
-    while (session.scrollbackSize > session.scrollbackLimit && session.scrollback.length > 0) {
-      const removed = session.scrollback.shift()!
-      session.scrollbackSize -= Buffer.byteLength(removed, 'utf-8')
+    if (session.buffer2Size > this.mergeThreshold) {
+      this.compactScrollback(session)
     }
+  }
+
+  private countTerminalLines(chunks: string[], cols: number, rows: number): number {
+    const terminal = new Terminal({ cols, rows, scrollback: this.scrollbackLines, allowProposedApi: true })
+    for (const chunk of chunks) {
+      terminal.write(chunk)
+    }
+    // Force synchronous flush of all pending writes
+    // Terminal.write() is async internally; we need to read buffer after all data is parsed
+    // Use a synchronous write to flush the queue
+    terminal.write('', () => {})
+    const lines = terminal.buffer.normal.length
+    terminal.dispose()
+    return lines
+  }
+
+  private compactScrollback(session: PtySession): void {
+    const { cols, rows } = session
+
+    // Measure combined buffer1 + buffer2
+    const combinedLines = this.countTerminalLines(
+      [...session.buffer1, ...session.buffer2], cols, rows
+    )
+
+    // Measure buffer2 alone
+    const buffer2Lines = this.countTerminalLines(session.buffer2, cols, rows)
+
+    if (buffer2Lines < combinedLines) {
+      // buffer1 contributes meaningful scrollback history — merge both into buffer1
+      session.buffer1 = [...session.buffer1, ...session.buffer2]
+      session.buffer1Size += session.buffer2Size
+    } else {
+      // buffer1 is redundant — buffer2 alone captures all visible state
+      session.buffer1 = [...session.buffer2]
+      session.buffer1Size = session.buffer2Size
+    }
+
+    // Clear buffer2
+    session.buffer2 = []
+    session.buffer2Size = 0
+
+    // Truncate buffer1 if exceeds compacted limit
+    while (session.buffer1Size > this.compactedLimit && session.buffer1.length > 0) {
+      const removed = session.buffer1.shift()!
+      session.buffer1Size -= Buffer.byteLength(removed, 'utf-8')
+    }
+
+    log.debug({
+      sessionId: session.id,
+      buffer1Chunks: session.buffer1.length,
+      buffer1Size: session.buffer1Size,
+      combinedLines,
+      buffer2Lines,
+    }, 'scrollback compacted')
   }
 
   private broadcastData(sessionId: string, data: string): void {

@@ -170,7 +170,9 @@ export interface Settings {
     language: string // ISO-639-1 code (e.g., 'en', 'ms', 'zh')
   }
   daemon: {
-    scrollbackLimit: number
+    mergeThreshold: number
+    compactedLimit: number
+    scrollbackLines: number
   }
   // SSH saved connections
   ssh: {
