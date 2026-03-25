@@ -10,7 +10,7 @@ export default [
     languageOptions: {
       parser: tsparser,
       parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.web.json', './tsconfig.daemon.json']
+        project: ['./tsconfig.node.json', './tsconfig.web.json']
       }
     },
     plugins: {

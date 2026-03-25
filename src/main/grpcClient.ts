@@ -27,14 +27,24 @@ import {
   type DirectoryContents,
   type FileEntry
 } from '../generated/treeterm'
-import { getDefaultSocketPath } from '../daemon/socketPath'
+import { getDefaultSocketPath } from './socketPath'
 import type {
-  CreateSessionConfig,
+  SandboxConfig,
   SessionInfo,
   Workspace,
   Session,
   AppState
-} from '../daemon/protocol'
+} from '../shared/types'
+
+// Alias for backward compat
+type CreateSessionConfig = {
+  cwd: string
+  env?: Record<string, string>
+  cols?: number
+  rows?: number
+  sandbox?: SandboxConfig
+  startupCommand?: string
+}
 
 type DisconnectListener = () => void
 
@@ -669,8 +679,8 @@ export class GrpcDaemonClient {
 
   private async spawnDaemon(): Promise<void> {
     const daemonPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'daemon', 'daemon', 'index.js')
-      : path.join(__dirname, '../daemon/daemon/index.js')
+      ? path.join(process.resourcesPath, 'daemon-rs', 'treeterm-daemon')
+      : path.join(__dirname, '../daemon-rs/treeterm-daemon')
 
     if (!fs.existsSync(daemonPath)) {
       throw new Error(`Daemon executable not found at ${daemonPath}`)
@@ -678,19 +688,14 @@ export class GrpcDaemonClient {
 
     const logPath = path.join(app.getPath('userData'), 'daemon.log')
 
-    // Derive PID file path from socket path (replace .sock with .pid)
-    const pidPath = this.socketPath.replace(/\.sock$/, '.pid')
-
     console.log('[grpcDaemonClient] spawning daemon at', daemonPath)
 
-    const child = spawn(process.execPath, [daemonPath], {
+    const child = spawn(daemonPath, [], {
       detached: true,
       stdio: ['ignore', fs.openSync(logPath, 'a'), fs.openSync(logPath, 'a')],
       env: {
         ...process.env,
-        TREETERM_DAEMON: '1',
-        TREETERM_SOCKET_PATH: this.socketPath,
-        TREETERM_PID_FILE: pidPath
+        TREETERM_SOCKET_PATH: this.socketPath
       }
     })
 

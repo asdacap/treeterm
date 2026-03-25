@@ -14,7 +14,7 @@ vi.mock('fs', () => ({
 }))
 
 // Mock socketPath
-vi.mock('../daemon/socketPath', () => ({
+vi.mock('./socketPath', () => ({
   getRemoteForwardSocketPath: vi.fn().mockReturnValue('/tmp/treeterm-remote/daemon.sock'),
 }))
 

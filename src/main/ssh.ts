@@ -3,12 +3,13 @@
  * Manages SSH tunnel processes for forwarding remote daemon sockets to local.
  */
 
-import { spawn, ChildProcess } from 'child_process'
+import { spawn, execSync, ChildProcess } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
+import { app } from 'electron'
 import type { SSHConnectionConfig } from '../shared/types'
-import { getRemoteForwardSocketPath } from '../daemon/socketPath'
+import { getRemoteForwardSocketPath } from './socketPath'
 
 type OutputCallback = (line: string) => void
 type DisconnectCallback = (error?: string) => void
@@ -102,70 +103,107 @@ export class SSHTunnel {
     }
   }
 
+  /**
+   * Get the local path to the daemon binary for the given remote architecture.
+   */
+  private getDaemonBinaryPath(): string {
+    const daemonPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'daemon-rs', 'treeterm-daemon')
+      : path.join(__dirname, '../daemon-rs/treeterm-daemon')
+    return daemonPath
+  }
+
+  /**
+   * Upload the daemon binary to the remote host via scp.
+   */
+  private async uploadDaemon(remotePath: string): Promise<void> {
+    const localPath = this.getDaemonBinaryPath()
+    if (!fs.existsSync(localPath)) {
+      throw new Error(`Daemon binary not found at ${localPath}`)
+    }
+
+    const scpArgs = [
+      '-o', 'StrictHostKeyChecking=accept-new',
+      '-o', 'BatchMode=yes',
+      '-P', String(this.config.port),
+    ]
+    if (this.config.identityFile) {
+      scpArgs.push('-i', this.config.identityFile)
+    }
+    scpArgs.push(localPath, `${this.config.user}@${this.config.host}:${remotePath}`)
+
+    this.appendOutput(`[ssh] Uploading daemon binary to ${remotePath}...`)
+
+    return new Promise<void>((resolve, reject) => {
+      const proc = spawn('scp', scpArgs, { stdio: ['pipe', 'pipe', 'pipe'] })
+      let stderr = ''
+      proc.stderr?.on('data', (data: Buffer) => { stderr += data.toString() })
+      proc.on('close', (code) => {
+        if (code !== 0) {
+          reject(new Error(`scp failed (exit ${code}): ${stderr}`))
+        } else {
+          this.appendOutput(`[ssh] Upload complete`)
+          resolve()
+        }
+      })
+      proc.on('error', (err) => reject(new Error(`scp spawn error: ${err.message}`)))
+    })
+  }
+
   private async bootstrapRemoteDaemon(): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       const sshArgs = this.buildBaseSSHArgs()
 
-      // Bootstrap script: check for treeterm, clone+build if needed, start daemon, print socket path
       const refreshDaemon = this.options.refreshDaemon ? '1' : '0'
       const bootstrapScript = [
         'set -e',
-        'TREETERM_DIR="$HOME/.treeterm/repo"',
+        'DAEMON_BIN="$HOME/.treeterm/treeterm-daemon"',
         'DAEMON_SOCKET="/tmp/treeterm-$(id -u)/daemon.sock"',
         `REFRESH_DAEMON=${refreshDaemon}`,
         '',
-        '# Clone or update the repo',
-        'NEEDS_BUILD=0',
-        'if [ ! -d "$TREETERM_DIR/.git" ]; then',
-        '  git clone --depth 1 https://github.com/asdacap/treeterm.git "$TREETERM_DIR"',
-        '  NEEDS_BUILD=1',
-        'else',
-        '  cd "$TREETERM_DIR"',
-        '  git fetch --depth 1 origin',
-        '  LOCAL=$(git rev-parse HEAD)',
-        '  REMOTE=$(git rev-parse origin/master)',
-        '  if [ "$LOCAL" != "$REMOTE" ]; then',
-        '    git reset --hard origin/master',
-        '    NEEDS_BUILD=1',
-        '  fi',
-        'fi',
-        '',
-        'cd "$TREETERM_DIR"',
-        '',
-        '# Build only if needed (new clone, updated, or out/ missing)',
-        'if [ "$NEEDS_BUILD" = "1" ] || [ ! -f "$TREETERM_DIR/out/daemon/daemon/index.js" ]; then',
-        '  npm install',
-        '  npm run build:daemon',
+        '# Check if daemon binary exists and get its version',
+        'NEEDS_UPLOAD=0',
+        'if [ ! -x "$DAEMON_BIN" ]; then',
+        '  NEEDS_UPLOAD=1',
         'fi',
         '',
         '# Kill old daemon if refresh requested',
         'if [ "$REFRESH_DAEMON" = "1" ] && [ -S "$DAEMON_SOCKET" ]; then',
         '  echo "Refreshing daemon: killing old process..."',
-        '  pkill -f "node.*treeterm.*daemon/index.js" 2>/dev/null || true',
+        '  pkill -f "treeterm-daemon" 2>/dev/null || true',
         '  rm -f "$DAEMON_SOCKET"',
         '  sleep 0.5',
         'fi',
         '',
+        '# Report if upload is needed',
+        'echo "TREETERM_NEEDS_UPLOAD:$NEEDS_UPLOAD"',
+        '',
         '# Start daemon if not already running',
         'mkdir -p "$HOME/.treeterm"',
-        'if [ ! -S "$DAEMON_SOCKET" ]; then',
+        'mkdir -p "/tmp/treeterm-$(id -u)"',
+        'if [ -x "$DAEMON_BIN" ] && [ ! -S "$DAEMON_SOCKET" ]; then',
         '  DAEMON_LOG="$HOME/.treeterm/daemon.log"',
-        '  node "$TREETERM_DIR/out/daemon/daemon/index.js" >> "$DAEMON_LOG" 2>&1 &',
+        '  "$DAEMON_BIN" >> "$DAEMON_LOG" 2>&1 &',
         'fi',
         '',
-        '# Wait for socket to appear',
-        'for i in $(seq 1 40); do',
-        '  [ -S "$DAEMON_SOCKET" ] && break',
-        '  sleep 0.25',
-        'done',
+        '# Wait for socket to appear (only if binary exists)',
+        'if [ -x "$DAEMON_BIN" ]; then',
+        '  for i in $(seq 1 40); do',
+        '    [ -S "$DAEMON_SOCKET" ] && break',
+        '    sleep 0.25',
+        '  done',
+        'fi',
         '',
         'if [ ! -S "$DAEMON_SOCKET" ]; then',
-        '  echo "TREETERM_ERROR: Daemon failed to start — socket not found at $DAEMON_SOCKET" >&2',
-        '  exit 1',
+        '  if [ "$NEEDS_UPLOAD" = "1" ]; then',
+        '    echo "TREETERM_SOCKET:NEEDS_UPLOAD"',
+        '  else',
+        '    echo "TREETERM_ERROR: Daemon failed to start" >&2',
+        '    exit 1',
+        '  fi',
+        'else',
+        '  echo "TREETERM_SOCKET:$DAEMON_SOCKET"',
         'fi',
-        '',
-        '# Print socket path',
-        'echo "TREETERM_SOCKET:$DAEMON_SOCKET"',
       ].join('\n')
 
       sshArgs.push(bootstrapScript)
@@ -193,7 +231,7 @@ export class SSHTunnel {
         }
       })
 
-      proc.on('close', (code) => {
+      proc.on('close', async (code) => {
         if (code !== 0) {
           reject(new Error(`SSH bootstrap failed (exit ${code}): ${stderr}`))
           return
@@ -202,18 +240,56 @@ export class SSHTunnel {
         // Parse socket path from stdout
         const match = stdout.match(/TREETERM_SOCKET:(.+)/)
         if (match) {
-          resolve(match[1].trim())
+          const socketPath = match[1].trim()
+
+          if (socketPath === 'NEEDS_UPLOAD') {
+            // Binary not on remote — upload it and retry
+            try {
+              this.appendOutput('[ssh] Daemon binary not found on remote, uploading...')
+              await this.uploadDaemon('~/.treeterm/treeterm-daemon')
+
+              // Make executable and start via ssh
+              const startArgs = this.buildBaseSSHArgs()
+              startArgs.push('chmod +x ~/.treeterm/treeterm-daemon && ~/.treeterm/treeterm-daemon >> ~/.treeterm/daemon.log 2>&1 & sleep 1 && echo "TREETERM_SOCKET:/tmp/treeterm-$(id -u)/daemon.sock"')
+              const startResult = await this.runSSHCommand(startArgs)
+              const startMatch = startResult.match(/TREETERM_SOCKET:(.+)/)
+              resolve(startMatch ? startMatch[1].trim() : `/tmp/treeterm-${1000}/daemon.sock`)
+            } catch (uploadErr) {
+              reject(new Error(`Failed to upload daemon: ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}`))
+            }
+            return
+          }
+
+          resolve(socketPath)
         } else {
-          // Fall back to default path pattern
-          const uid = stdout.match(/uid=(\d+)/)
-          const uidNum = uid ? uid[1] : '1000'
-          resolve(`/tmp/treeterm-${uidNum}/daemon.sock`)
+          reject(new Error('Failed to parse daemon socket path from bootstrap output'))
         }
       })
 
       proc.on('error', (err) => {
         reject(new Error(`Failed to spawn ssh: ${err.message}`))
       })
+    })
+  }
+
+  private runSSHCommand(sshArgs: string[]): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn('ssh', sshArgs, { stdio: ['pipe', 'pipe', 'pipe'] })
+      let stdout = ''
+      let stderr = ''
+      proc.stdout?.on('data', (d: Buffer) => {
+        const text = d.toString()
+        stdout += text
+        for (const line of text.split('\n').filter(Boolean)) {
+          this.appendOutput(`[ssh] ${line}`)
+        }
+      })
+      proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
+      proc.on('close', (code) => {
+        if (code !== 0) reject(new Error(`SSH command failed (exit ${code}): ${stderr}`))
+        else resolve(stdout)
+      })
+      proc.on('error', (err) => reject(err))
     })
   }
 

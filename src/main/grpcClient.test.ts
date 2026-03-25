@@ -62,7 +62,7 @@ vi.mock('electron', () => ({
   }
 }))
 
-vi.mock('../daemon/socketPath', () => ({
+vi.mock('./socketPath', () => ({
   getDefaultSocketPath: vi.fn().mockReturnValue('/tmp/test.sock')
 }))
 

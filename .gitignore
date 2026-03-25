@@ -7,6 +7,9 @@ dist/
 .worktrees
 *.tsbuildinfo
 
+# Rust daemon build
+daemon-rs/target/
+
 # Nix
 result
 result-*

@@ -19,12 +19,17 @@
         # fails when loaded via direnv.
         nodejs = pkgs.nodejs;
 
-        # Build inputs needed for native dependencies (node-pty, etc.)
+        # Build inputs needed for native dependencies and Rust daemon
         nativeBuildInputs = with pkgs; [
           nodejs
           (python3.withPackages (ps: [ ps.setuptools ])) # Required by node-gyp for native modules
           pkg-config
           makeWrapper
+
+          # Rust toolchain for daemon-rs
+          rustc
+          cargo
+          protobuf # protoc for tonic-build
         ];
 
         buildInputs = with pkgs; [

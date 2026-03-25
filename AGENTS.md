@@ -8,22 +8,23 @@ Three-layer architecture connected by IPC and gRPC:
 
 - **Renderer** (React): UI components, Zustand state, thin orchestration layer
 - **Main** (Electron): High-level business logic, Git operations, IPC handlers, orchestrates daemon
-- **Daemon** (persistent process): Low-level primitives — PTY, exec, file I/O, session persistence, reviews
+- **Daemon** (Rust, persistent process): Low-level primitives — PTY, exec, file I/O, session persistence
 
 Communication: Renderer ↔ Main via Electron IPC; Main ↔ Daemon via gRPC over Unix socket.
 
 The daemon survives app restarts; terminal sessions and state persist when Electron closes.
 
-## Daemon Modules (`src/daemon/`)
+## Daemon (`daemon-rs/`)
+
+The daemon is a standalone Rust binary. Built with `npm run build:daemon-rs` (or `cargo build --release` in `daemon-rs/`).
 
 | Module | Path | Responsibility |
 |--------|------|---------------|
-| PTY Manager | `ptyManager.ts` | PTY lifecycle (create, attach, resize, kill, I/O) |
-| Exec Manager | `execManager.ts` | One-shot command execution with streaming I/O |
-| Filesystem | `filesystem.ts` | Secure file I/O scoped to workspace boundaries |
-| Session Store | `sessionStore.ts` | In-memory session persistence |
-| Reviews | `reviews.ts` | Code review comment management |
-| gRPC Server | `grpcServer.ts` | Exposes all operations via gRPC |
+| PTY Manager | `pty_manager.rs` | PTY lifecycle via `forkpty()`, async I/O, scrollback compaction |
+| Exec Manager | `exec_manager.rs` | One-shot command execution with streaming I/O |
+| Filesystem | `filesystem.rs` | Secure file I/O scoped to workspace boundaries |
+| Session Store | `session_store.rs` | In-memory session persistence + watch broadcasting |
+| gRPC Server | `grpc_server.rs` | Exposes all 15 operations via gRPC (tonic) |
 
 **Git ops are NOT in the daemon** — they live in `src/main/git.ts` using `ExecStream`.
 
@@ -38,8 +39,11 @@ The daemon survives app restarts; terminal sessions and state persist when Elect
 ## Directory Structure
 
 ```
+daemon-rs/              # Rust daemon (standalone binary)
+├── crates/
+│   ├── treeterm-proto/ # Generated gRPC stubs from treeterm.proto
+│   └── treeterm-daemon/# Daemon logic + binary
 src/
-├── daemon/         # Low-level primitives
 ├── main/           # Electron main — git.ts, ipc.ts, grpcClient.ts
 ├── renderer/       # React UI — components/, store/, hooks/
 ├── proto/          # treeterm.proto (gRPC definitions)
