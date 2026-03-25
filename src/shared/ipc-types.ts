@@ -21,9 +21,11 @@ import type {
   WorktreeInfo,
   ChildWorktreeInfo,
   DiffResult,
+  DiffFile,
   ConflictCheckResult,
   UncommittedChanges,
   FileDiffContents,
+  GitLogResult,
   DirectoryContents,
   FileContents,
   FileEntry
@@ -158,6 +160,18 @@ export interface IpcRequests {
   gitGetHeadCommitHash: {
     params: [repoPath: string]
     result: { success: boolean; hash?: string; error?: string }
+  }
+  gitGetLog: {
+    params: [repoPath: string, parentBranch: string | null, skip: number, limit: number]
+    result: { success: boolean; result?: GitLogResult; error?: string }
+  }
+  gitGetCommitDiff: {
+    params: [repoPath: string, commitHash: string]
+    result: { success: boolean; files?: DiffFile[]; error?: string }
+  }
+  gitGetCommitFileDiff: {
+    params: [repoPath: string, commitHash: string, filePath: string]
+    result: { success: boolean; contents?: FileDiffContents; error?: string }
   }
 
   // Settings operations

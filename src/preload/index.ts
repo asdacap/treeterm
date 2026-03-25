@@ -349,6 +349,15 @@ contextBridge.exposeInMainWorld('electron', {
     getHeadCommitHash: (repoPath: string) => {
       return client.gitGetHeadCommitHash(repoPath)
     },
+    getLog: (repoPath: string, parentBranch: string | null, skip: number, limit: number) => {
+      return client.gitGetLog(repoPath, parentBranch, skip, limit)
+    },
+    getCommitDiff: (repoPath: string, commitHash: string) => {
+      return client.gitGetCommitDiff(repoPath, commitHash)
+    },
+    getCommitFileDiff: (repoPath: string, commitHash: string, filePath: string) => {
+      return client.gitGetCommitFileDiff(repoPath, commitHash, filePath)
+    },
     onOutput: (callback: GitOutputCallback): (() => void) => {
       gitOutputListeners.push(callback)
       return () => {

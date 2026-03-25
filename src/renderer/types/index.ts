@@ -249,6 +249,20 @@ export interface FileDiffContents {
   language: string
 }
 
+export interface GitLogCommit {
+  hash: string
+  shortHash: string
+  author: string
+  date: string
+  message: string
+  parentHashes: string[]
+}
+
+export interface GitLogResult {
+  commits: GitLogCommit[]
+  hasMore: boolean
+}
+
 export interface ReviewComment {
   id: string
   filePath: string
@@ -319,6 +333,9 @@ export interface GitApi {
   getFileContentsForDiff: (worktreePath: string, parentBranch: string, filePath: string) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
   getUncommittedFileContentsForDiff: (repoPath: string, filePath: string, staged: boolean) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
   getHeadCommitHash: (repoPath: string) => Promise<{ success: boolean; hash?: string; error?: string }>
+  getLog: (repoPath: string, parentBranch: string | null, skip: number, limit: number) => Promise<{ success: boolean; result?: GitLogResult; error?: string }>
+  getCommitDiff: (repoPath: string, commitHash: string) => Promise<{ success: boolean; files?: DiffFile[]; error?: string }>
+  getCommitFileDiff: (repoPath: string, commitHash: string, filePath: string) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
   onOutput: (callback: (operationId: string, data: string) => void) => () => void
 }
 
@@ -351,6 +368,9 @@ export interface WorkspaceGitApi {
   getFileContentsForDiff: (parentBranch: string, filePath: string) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
   getUncommittedFileContentsForDiff: (filePath: string, staged: boolean) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
   getHeadCommitHash: () => Promise<{ success: boolean; hash?: string; error?: string }>
+  getLog: (parentBranch: string | null, skip: number, limit: number) => Promise<{ success: boolean; result?: GitLogResult; error?: string }>
+  getCommitDiff: (commitHash: string) => Promise<{ success: boolean; files?: DiffFile[]; error?: string }>
+  getCommitFileDiff: (commitHash: string, filePath: string) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
 }
 
 export interface SettingsApi {
