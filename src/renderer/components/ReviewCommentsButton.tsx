@@ -7,15 +7,16 @@ interface ReviewCommentsButtonProps {
 }
 
 export function ReviewCommentsButton({ workspace }: ReviewCommentsButtonProps): JSX.Element | null {
-  const { getReviewComments, promptHarness } = useStore(workspace)
+  const { getReviewComments, promptHarness, markAllReviewCommentsAddressed } = useStore(workspace)
   const comments = getReviewComments()
+  const prompt = generateReviewPrompt(comments)
 
-  if (comments.length === 0) return null
+  if (!prompt) return null
 
-  const handleClick = () => {
-    const prompt = generateReviewPrompt(comments)
-    if (prompt) {
-      promptHarness(prompt)
+  const handleClick = async () => {
+    const sent = await promptHarness(prompt)
+    if (sent) {
+      markAllReviewCommentsAddressed()
     }
   }
 

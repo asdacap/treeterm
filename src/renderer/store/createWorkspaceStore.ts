@@ -47,6 +47,7 @@ export interface WorkspaceStoreState {
   toggleReviewCommentAddressed: (commentId: string) => void
   updateOutdatedReviewComments: (currentCommitHash: string) => void
   clearReviewComments: () => void
+  markAllReviewCommentsAddressed: () => void
 
   // Tab lifecycle
   initTab: (tabId: string) => void
@@ -392,6 +393,12 @@ export function createWorkspaceStore(
 
     clearReviewComments: (): void => {
       get().updateMetadata('reviewComments', serializeReviewComments([]))
+    },
+
+    markAllReviewCommentsAddressed: (): void => {
+      const comments = parseReviewComments(get().workspace.metadata)
+      const updated = comments.map(c => c.addressed ? c : { ...c, addressed: true })
+      get().updateMetadata('reviewComments', serializeReviewComments(updated))
     },
 
     promptHarness: async (text: string): Promise<boolean> => {

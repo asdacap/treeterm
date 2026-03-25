@@ -28,6 +28,7 @@ function createMockWorkspaceStoreStateData(overrides?: Partial<WorkspaceStoreSta
     toggleReviewCommentAddressed: vi.fn(),
     updateOutdatedReviewComments: vi.fn(),
     clearReviewComments: vi.fn(),
+    markAllReviewCommentsAddressed: vi.fn(),
     promptHarness: vi.fn(),
     quickForkWorkspace: vi.fn(),
     updateMetadata: vi.fn(),
