@@ -130,6 +130,7 @@ export default function BaseTerminal({
     let resizeObserver: ResizeObserver | null = null
     let detector: ReturnType<typeof createActivityStateDetector> | null = null
     let unsubscribe: (() => void) | null = null
+    let unsubscribeFocus: (() => void) | null = null
     let rawChars = ''
 
     let initialResizeDone = false
@@ -238,9 +239,21 @@ export default function BaseTerminal({
       // Notify parent that terminal is ready
       config.onTerminalReady?.(terminal, dataVersionRef)
 
-      setupResizeObserver(terminal, resize)
+      // Subscribe to focus requests — focuses terminal when focusTabId matches
+      unsubscribeFocus = workspace.subscribe((state) => {
+        if (state.focusTabId === tabId && terminalRef.current) {
+          terminalRef.current.focus()
+          state.clearFocusRequest()
+        }
+      })
+      // Check if focus was already requested before subscribing
+      const wsState = workspace.getState()
+      if (wsState.focusTabId === tabId) {
+        terminal.focus()
+        wsState.clearFocusRequest()
+      }
 
-      // Debounce initial resize to get settled container dimensions,
+      setupResizeObserver(terminal, resize)
       // then restore scrollback and connect live data AFTER resize
       // so xterm never receives data at the wrong dimensions
       if (resizeTimeout) clearTimeout(resizeTimeout)
@@ -368,6 +381,7 @@ export default function BaseTerminal({
       scrollDisposable?.dispose()
       resizeObserver?.disconnect()
       unsubscribe?.()
+      unsubscribeFocus?.()
       detector?.destroy()
       terminalRef.current = null
       ttyRef.current = null

@@ -66,6 +66,9 @@ const mockWorkspaceStoreStateData = {
   hasUncommittedChanges: false,
   isDiffCleanFromParent: false,
   disposeGitController: vi.fn(),
+  focusTabId: null,
+  requestFocus: vi.fn(),
+  clearFocusRequest: vi.fn(),
 } as WorkspaceStoreState
 
 const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => mockWorkspaceStoreStateData)
