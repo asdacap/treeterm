@@ -62,6 +62,7 @@ function makeDeps(overrides?: Partial<AnalyzerDeps>): AnalyzerDeps {
     cwd: '/test',
     renameBranch: vi.fn().mockResolvedValue(undefined),
     getGitBranch: vi.fn().mockReturnValue('old-branch'),
+    getBranchIsUserDefined: vi.fn().mockReturnValue(false),
     ...overrides,
   }
 }
@@ -722,6 +723,34 @@ describe('createAnalyzerStore', () => {
       const titleEntry = history.find(h => h.kind === 'title')!
       expect(titleEntry.error).toBeUndefined()
       expect(titleEntry.response).toBe(JSON.stringify({ title: 'Test Title', description: 'Test Description', branchName: 'test-title' }))
+
+      store.getState().stop()
+    })
+
+    it('skips branch rename when branch is user-defined', async () => {
+      const mock = makeMockTty()
+      deps = makeDeps({
+        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }),
+        getBranchIsUserDefined: vi.fn().mockReturnValue(true),
+      })
+      const store = createAnalyzerStore('tab-1', deps)
+
+      store.getState().start('pty-1')
+      await vi.waitFor(() => {
+        expect(store.getState().getBufferText()).not.toBeNull()
+      })
+
+      store.getState().onUserInput('hello\r')
+
+      await vi.waitFor(() => {
+        expect(deps.llm.generateTitle).toHaveBeenCalled()
+      })
+
+      await vi.waitFor(() => {
+        expect(deps.updateMetadata).toHaveBeenCalledWith('displayName', 'Test Title')
+      })
+
+      expect(deps.renameBranch).not.toHaveBeenCalled()
 
       store.getState().stop()
     })

@@ -15,6 +15,7 @@ export interface AnalyzerDeps {
   cwd: string
   renameBranch: (oldName: string, newName: string) => Promise<void>
   getGitBranch: () => string | null
+  getBranchIsUserDefined: () => boolean
 }
 
 export interface AnalyzerHistoryEntry {
@@ -317,7 +318,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
           deps.updateMetadata('description', result.description)
           deps.updateMetadata('descriptionPrompted', 'true')
         }
-        if (result.branchName && isValidBranchName(result.branchName) && deps.getGitBranch()) {
+        if (result.branchName && isValidBranchName(result.branchName) && deps.getGitBranch() && !deps.getBranchIsUserDefined()) {
           try {
             await deps.renameBranch(deps.getGitBranch()!, result.branchName)
           } catch (err) {

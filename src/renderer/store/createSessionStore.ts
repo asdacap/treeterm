@@ -257,7 +257,10 @@ export function createSessionStore(
       appStates,
       activeTabId,
       settings: options.settings,
-      metadata: options.description ? { description: options.description } : {},
+      metadata: {
+        ...(options.description ? { description: options.description } : {}),
+        ...(options.initialBranch ? { branchIsUserDefined: 'true' } : {}),
+      },
       createdAt: Date.now(),
       lastActivity: Date.now(),
     }
@@ -702,7 +705,7 @@ export function createSessionStore(
         return { success: false, error: 'This worktree is already open' }
       }
 
-      const metadata = description ? { description } : undefined
+      const metadata: Record<string, string> = { branchIsUserDefined: 'true', ...(description ? { description } : {}) }
       await addChildWorkspaceFromResult(parentId, name, worktreePath, branch, { settings, metadata })
       return { success: true }
     },

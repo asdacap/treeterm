@@ -194,6 +194,7 @@ export function createWorkspaceStore(
         await deps.refreshGitInfo(id)
       },
       getGitBranch: () => get().workspace.gitBranch,
+      getBranchIsUserDefined: () => get().workspace.metadata?.branchIsUserDefined === 'true',
     }),
 
     createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) =>
