@@ -591,6 +591,7 @@ body,
   background: rgba(0, 120, 212, 0.15);
   border-radius: 4px;
   white-space: nowrap;
+  cursor: pointer;
 }
 
 .workspace-actions {
@@ -3732,6 +3733,7 @@ body,
   background: rgba(0, 120, 212, 0.15);
   padding: 1px 6px;
   border-radius: 4px;
+  cursor: pointer;
 }
 
 .workspace-tabs {

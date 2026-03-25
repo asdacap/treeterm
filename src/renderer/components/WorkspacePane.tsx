@@ -36,6 +36,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   } = useStore(sessionStore)
   const enterWorkspaceFocus = useKeybindingStore(s => s.enterWorkspaceFocus)
   const applications = useAppStore((s) => s.applications)
+  const clipboard = useAppStore((s) => s.clipboard)
   const getApplication = useCallback((id: string) => applications[id], [applications])
   const menuApplications = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
 
@@ -387,7 +388,11 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                 )}
                 <div className="workspace-actions">
                   {activeWorkspace.gitBranch && (
-                    <span className="workspace-branch">{activeWorkspace.gitBranch}</span>
+                    <span
+                      className="workspace-branch"
+                      onClick={() => clipboard.writeText(activeWorkspace.gitBranch!)}
+                      title="Copy branch name"
+                    >{activeWorkspace.gitBranch}</span>
                   )}
                   <RunActionDropdown
                     workspacePath={activeWorkspace.path}
