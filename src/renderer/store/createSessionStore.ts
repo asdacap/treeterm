@@ -465,13 +465,15 @@ export function createSessionStore(
       }
     }
 
-    // Remove handle and workspace
+    // Remove handle, workspace, and any stale load state
     store.setState((s) => {
       const { [id]: _removedHandle, ...remainingHandles } = s.workspaceStores
       const { [id]: _removedWs, ...remainingWorkspaces } = s.workspaces
+      const { [id]: _removedLoadState, ...remainingLoadStates } = s.workspaceLoadStates
       return {
         workspaceStores: remainingHandles,
         workspaces: remainingWorkspaces,
+        workspaceLoadStates: remainingLoadStates,
         activeWorkspaceId: s.activeWorkspaceId === id ? null : s.activeWorkspaceId
       }
     })
