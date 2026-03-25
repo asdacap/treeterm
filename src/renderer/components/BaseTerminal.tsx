@@ -405,32 +405,11 @@ export default function BaseTerminal({
     closeContextMenu()
   }
 
-  const handleReflow = () => {
-    const terminal = terminalRef.current
-    if (terminal && ttyRef.current) {
-      // Force reflow by resizing to 1 col narrower then back
-      const { cols, rows } = terminal
-      const resize = ttyRef.current.getState().resize
-      terminal.resize(cols - 1, rows)
-      terminal.resize(cols, rows)
-      resize(cols, rows)
-    }
-  }
-
-  const floatingButtons = (
-    <>
-      {extraButtons}
-      <button className="reflow-btn" onClick={handleReflow} title="Reflow terminal">
-        ⇔
-      </button>
-    </>
-  )
-
   return (
     <TerminalScrollWrapper
       terminalRef={terminalRef}
       scrollPosition={scrollPosition}
-      extraButtons={floatingButtons}
+      extraButtons={extraButtons}
     >
       <div className="terminal-padding-wrapper">
         <div
