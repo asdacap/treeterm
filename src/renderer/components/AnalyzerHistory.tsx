@@ -128,6 +128,20 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
                     <span style={{ color: '#888', fontSize: 11, fontFamily: 'monospace' }}>
                       {entry.model}
                     </span>
+                    {entry.cached && (
+                      <span
+                        style={{
+                          background: '#2e7d32',
+                          color: '#fff',
+                          padding: '1px 6px',
+                          borderRadius: 3,
+                          fontSize: 11,
+                          fontWeight: 500
+                        }}
+                      >
+                        cached
+                      </span>
+                    )}
                     {entry.error && (
                       <span
                         style={{

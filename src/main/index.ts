@@ -363,7 +363,7 @@ const ANALYZER_CACHE_SIZE = 10
 ipcMain.handle('llm:analyzeTerminal', async (_event, buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; reasoningEffort: ReasoningEffort; safePaths: string[] }) => {
   const cached = analyzerCache.find((entry) => entry.buffer === buffer)
   if (cached) {
-    return cached.result
+    return { ...cached.result, cached: true }
   }
 
   const allSafePaths = [...new Set([...settings.safePaths, cwd])]

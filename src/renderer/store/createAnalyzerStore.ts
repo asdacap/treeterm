@@ -21,6 +21,7 @@ export interface AnalyzerHistoryEntry {
   model: string
   bufferText: string
   response: string
+  cached?: boolean
   error?: string
 }
 
@@ -187,7 +188,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         inFlightBuffer = null
         store.setState({ analyzing: false })
         updateAiState(result.state as ActivityState, result.reason)
-        history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result) })
+        history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), cached: result.cached })
         if (history.length > MAX_HISTORY) history.shift()
       } else if ('error' in result) {
         console.error('[terminal-analyzer] error:', result.error)
