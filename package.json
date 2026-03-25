@@ -29,7 +29,7 @@
     "test:e2e:ui": "playwright test --ui",
     "test:all": "vitest run && playwright test",
     "lint": "eslint src/",
-    "daemon:stop": "test -f ~/.treeterm/daemon.pid && kill $(cat ~/.treeterm/daemon.pid) || echo 'No daemon running'"
+    "daemon:stop": "pkill -f 'out/daemon/daemon/index.js' || echo 'No daemon running'"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

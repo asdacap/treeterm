@@ -102,24 +102,23 @@
         };
 
         # Package definition
-        packages.default = pkgs.stdenv.mkDerivation {
+        packages.default = pkgs.buildNpmPackage {
           pname = "treeterm";
           version = "0.1.0";
 
           src = ./.;
 
+          npmDepsHash = "sha256-/6esp6OPZkomSm1eltNKtk23PYYJehOdHUll3XRUfhE=";
+          npmFlags = [ "--legacy-peer-deps" ];
+
           inherit nativeBuildInputs buildInputs;
+
+          # node-pty needs to compile native code
+          makeCacheWritable = true;
 
           buildPhase = ''
             runHook preBuild
-
-            # Install dependencies
-            export HOME=$TMPDIR
-            npm ci --legacy-peer-deps
-
-            # Build the application
             npm run build
-
             runHook postBuild
           '';
 

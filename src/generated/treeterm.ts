@@ -2464,7 +2464,9 @@ export const PtyOutput: MessageFns<PtyOutput> = {
     const message = createBasePtyOutput();
     message.data = (object.data !== undefined && object.data !== null) ? PtyData.fromPartial(object.data) : undefined;
     message.exit = (object.exit !== undefined && object.exit !== null) ? PtyExit.fromPartial(object.exit) : undefined;
-    message.resize = (object.resize !== undefined && object.resize !== null) ? PtyResizeData.fromPartial(object.resize) : undefined;
+    message.resize = (object.resize !== undefined && object.resize !== null)
+      ? PtyResizeData.fromPartial(object.resize)
+      : undefined;
     return message;
   },
 };
