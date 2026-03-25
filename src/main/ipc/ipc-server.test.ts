@@ -107,6 +107,7 @@ describe('IpcServer', () => {
       ['onGitHasUncommittedChanges', 'git:hasUncommittedChanges'],
       ['onGitCommitAll', 'git:commitAll'],
       ['onGitDeleteBranch', 'git:deleteBranch'],
+      ['onGitRenameBranch', 'git:renameBranch'],
       ['onGitGetUncommittedChanges', 'git:getUncommittedChanges'],
       ['onGitGetUncommittedFileDiff', 'git:getUncommittedFileDiff'],
       ['onGitStageFile', 'git:stageFile'],

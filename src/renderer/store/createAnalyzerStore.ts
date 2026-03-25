@@ -13,6 +13,8 @@ export interface AnalyzerDeps {
   setActivityTabState: (tabId: string, state: ActivityState) => void
   openTtyStream: (ptyId: string) => Promise<{ tty: Tty; scrollback?: string[]; exitCode?: number }>
   cwd: string
+  renameBranch: (oldName: string, newName: string) => Promise<void>
+  getGitBranch: () => string | null
 }
 
 export interface AnalyzerHistoryEntry {
@@ -56,6 +58,10 @@ type BufferCheckResult =
   | { action: 'skip' }
   | { action: 'reuse'; result: AnalyzerResult }
   | { action: 'analyze' }
+
+function isValidBranchName(name: string): boolean {
+  return /^[a-z0-9]+(-[a-z0-9]+)*$/.test(name)
+}
 
 export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer {
   // Internal closure state — not part of Zustand state
@@ -310,6 +316,13 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         if (!deps.getDescription() && result.description) {
           deps.updateMetadata('description', result.description)
           deps.updateMetadata('descriptionPrompted', 'true')
+        }
+        if (result.branchName && isValidBranchName(result.branchName) && deps.getGitBranch()) {
+          try {
+            await deps.renameBranch(deps.getGitBranch()!, result.branchName)
+          } catch (err) {
+            console.error('[analyzer] branch rename failed:', err)
+          }
         }
       }
       history.push({ timestamp: Date.now(), kind: 'title', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), systemPrompt, durationMs })

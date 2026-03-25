@@ -367,6 +367,14 @@ export class GitClient {
   }
 
   /**
+   * Rename a branch
+   */
+  async renameBranch(dirPath: string, oldName: string, newName: string): Promise<void> {
+    const result = await this.exec(dirPath, ['branch', '-m', oldName, newName])
+    if (result.exitCode !== 0) throw this.interpretError(result)
+  }
+
+  /**
    * Get HEAD commit hash
    */
   async getHeadCommitHash(dirPath: string): Promise<string> {

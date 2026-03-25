@@ -319,6 +319,9 @@ contextBridge.exposeInMainWorld('electron', {
     deleteBranch: (repoPath: string, branchName: string, operationId?: string) => {
       return client.gitDeleteBranch(repoPath, branchName, operationId)
     },
+    renameBranch: (repoPath: string, oldName: string, newName: string) => {
+      return client.gitRenameBranch(repoPath, oldName, newName)
+    },
     getUncommittedChanges: (repoPath: string) => {
       return client.gitGetUncommittedChanges(repoPath)
     },
@@ -542,7 +545,7 @@ contextBridge.exposeInMainWorld('electron', {
     clearAnalyzerCache: (): Promise<void> => {
       return client.llmClearAnalyzerCache()
     },
-    generateTitle: (buffer: string, settings: { baseUrl: string; apiKey: string; model: string; titleSystemPrompt: string; reasoningEffort: ReasoningEffort }): Promise<{ title: string; description: string } | { error: string }> => {
+    generateTitle: (buffer: string, settings: { baseUrl: string; apiKey: string; model: string; titleSystemPrompt: string; reasoningEffort: ReasoningEffort }): Promise<{ title: string; description: string; branchName: string } | { error: string }> => {
       return client.llmGenerateTitle(buffer, settings)
     },
     onDelta: (callback: LlmDeltaCallback): (() => void) => {

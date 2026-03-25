@@ -32,7 +32,7 @@ function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStore
     }),
     llm: {
       analyzeTerminal: vi.fn().mockResolvedValue({ state: 'idle', reason: '' }),
-      generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
+      generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
     },
     setActivityTabState: vi.fn(),
     ...overrides,

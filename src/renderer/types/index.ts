@@ -328,6 +328,7 @@ export interface GitApi {
   hasUncommittedChanges: (repoPath: string) => Promise<boolean>
   commitAll: (repoPath: string, message: string) => Promise<{ success: boolean; error?: string }>
   deleteBranch: (repoPath: string, branchName: string, operationId?: string) => Promise<{ success: boolean; error?: string }>
+  renameBranch: (repoPath: string, oldName: string, newName: string) => Promise<{ success: boolean; error?: string }>
   getUncommittedChanges: (repoPath: string) => Promise<{ success: boolean; changes?: UncommittedChanges; error?: string }>
   getUncommittedFileDiff: (repoPath: string, filePath: string, staged: boolean) => Promise<{ success: boolean; diff?: string; error?: string }>
   stageFile: (repoPath: string, filePath: string) => Promise<{ success: boolean; error?: string }>
@@ -422,7 +423,7 @@ export interface LlmApi {
   send: (requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string; reasoning: ReasoningEffort }) => Promise<void>
   analyzeTerminal: (buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; reasoningEffort: ReasoningEffort; safePaths: string[] }) => Promise<{ state: string; reason: string; cached?: boolean; systemPrompt?: string } | { error: string; systemPrompt?: string }>
   clearAnalyzerCache: () => Promise<void>
-  generateTitle: (buffer: string, settings: { baseUrl: string; apiKey: string; model: string; titleSystemPrompt: string; reasoningEffort: ReasoningEffort }) => Promise<{ title: string; description: string; systemPrompt?: string } | { error: string; systemPrompt?: string }>
+  generateTitle: (buffer: string, settings: { baseUrl: string; apiKey: string; model: string; titleSystemPrompt: string; reasoningEffort: ReasoningEffort }) => Promise<{ title: string; description: string; branchName: string; systemPrompt?: string } | { error: string; systemPrompt?: string }>
   cancel: (requestId: string) => void
   onDelta: (callback: (requestId: string, text: string) => void) => () => void
   onDone: (callback: (requestId: string) => void) => () => void

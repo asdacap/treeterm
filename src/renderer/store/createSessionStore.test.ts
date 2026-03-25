@@ -26,6 +26,7 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       hasUncommittedChanges: vi.fn().mockResolvedValue(false),
       commitAll: vi.fn().mockResolvedValue({ success: true }),
       deleteBranch: vi.fn().mockResolvedValue({ success: true }),
+      renameBranch: vi.fn().mockResolvedValue({ success: true }),
       getUncommittedChanges: vi.fn().mockResolvedValue({ success: true }),
       getUncommittedFileDiff: vi.fn().mockResolvedValue({ success: true }),
       stageFile: vi.fn().mockResolvedValue({ success: true }),
@@ -81,7 +82,7 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
     },
     llm: {
       analyzeTerminal: vi.fn().mockResolvedValue({ state: 'idle', reason: '' }),
-      generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
+      generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
     },
     setActivityTabState: vi.fn(),
     ...overrides,

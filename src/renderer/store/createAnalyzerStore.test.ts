@@ -52,7 +52,7 @@ function makeDeps(overrides?: Partial<AnalyzerDeps>): AnalyzerDeps {
     } as unknown as Settings),
     llm: {
       analyzeTerminal: vi.fn().mockResolvedValue({ state: 'idle', reason: 'prompt visible' }),
-      generateTitle: vi.fn().mockResolvedValue({ title: 'Test Title', description: 'Test Description' }),
+      generateTitle: vi.fn().mockResolvedValue({ title: 'Test Title', description: 'Test Description', branchName: 'test-title' }),
     },
     updateMetadata: vi.fn(),
     getDisplayName: vi.fn().mockReturnValue(undefined),
@@ -60,6 +60,8 @@ function makeDeps(overrides?: Partial<AnalyzerDeps>): AnalyzerDeps {
     setActivityTabState: vi.fn(),
     openTtyStream: vi.fn().mockResolvedValue({ tty: makeMockTty().tty, scrollback: [], exitCode: undefined }),
     cwd: '/test',
+    renameBranch: vi.fn().mockResolvedValue(undefined),
+    getGitBranch: vi.fn().mockReturnValue('old-branch'),
     ...overrides,
   }
 }
@@ -196,7 +198,7 @@ describe('createAnalyzerStore', () => {
     deps = makeDeps({
       llm: {
         analyzeTerminal: vi.fn().mockResolvedValue({ error: 'API error' }),
-        generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
+        generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
       },
       openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
     })
@@ -222,7 +224,7 @@ describe('createAnalyzerStore', () => {
     deps = makeDeps({
       llm: {
         analyzeTerminal: vi.fn().mockRejectedValue(new Error('Network error')),
-        generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
+        generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
       },
       openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
     })
@@ -250,7 +252,7 @@ describe('createAnalyzerStore', () => {
     deps = makeDeps({
       llm: {
         analyzeTerminal: vi.fn().mockImplementation(() => new Promise(r => { calls.push(r) })),
-        generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
+        generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
       },
       openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
     })
@@ -294,7 +296,7 @@ describe('createAnalyzerStore', () => {
     deps = makeDeps({
       llm: {
         analyzeTerminal: vi.fn().mockImplementation(() => new Promise(r => { resolveAnalysis = r })),
-        generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
+        generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
       },
       openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
     })
@@ -612,7 +614,7 @@ describe('createAnalyzerStore', () => {
       deps = makeDeps({
         llm: {
           analyzeTerminal: vi.fn().mockResolvedValue({ error: 'API error' }),
-          generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
+          generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
         },
         openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
       })
@@ -641,7 +643,7 @@ describe('createAnalyzerStore', () => {
       deps = makeDeps({
         llm: {
           analyzeTerminal: vi.fn().mockRejectedValue(new Error('Network error')),
-          generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
+          generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
         },
         openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
       })
@@ -670,7 +672,7 @@ describe('createAnalyzerStore', () => {
       deps = makeDeps({
         llm: {
           analyzeTerminal: vi.fn().mockResolvedValue({ something: 'unexpected' }),
-          generateTitle: vi.fn().mockResolvedValue({ title: '', description: '' }),
+          generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
         },
         openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
       })
@@ -719,7 +721,7 @@ describe('createAnalyzerStore', () => {
       const history = store.getState().getHistory()
       const titleEntry = history.find(h => h.kind === 'title')!
       expect(titleEntry.error).toBeUndefined()
-      expect(titleEntry.response).toBe(JSON.stringify({ title: 'Test Title', description: 'Test Description' }))
+      expect(titleEntry.response).toBe(JSON.stringify({ title: 'Test Title', description: 'Test Description', branchName: 'test-title' }))
 
       store.getState().stop()
     })

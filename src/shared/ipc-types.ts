@@ -121,6 +121,10 @@ export interface IpcRequests {
     params: [repoPath: string, branchName: string, operationId?: string]
     result: { success: boolean; error?: string }
   }
+  gitRenameBranch: {
+    params: [repoPath: string, oldName: string, newName: string]
+    result: { success: boolean; error?: string }
+  }
   gitGetUncommittedChanges: {
     params: [repoPath: string]
     result: { success: boolean; changes?: UncommittedChanges; error?: string }
@@ -343,7 +347,7 @@ export interface IpcRequests {
   }
   llmGenerateTitle: {
     params: [buffer: string, settings: { baseUrl: string; apiKey: string; model: string; titleSystemPrompt: string; reasoningEffort: ReasoningEffort }]
-    result: { title: string; description: string } | { error: string }
+    result: { title: string; description: string; branchName: string } | { error: string }
   }
 
   // Clipboard operations

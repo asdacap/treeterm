@@ -184,6 +184,11 @@ export function createWorkspaceStore(
       setActivityTabState: deps.setActivityTabState,
       openTtyStream: deps.openTtyStream,
       cwd: get().workspace.path,
+      renameBranch: async (oldName, newName) => {
+        await deps.git.renameBranch(get().workspace.gitRootPath!, oldName, newName)
+        await deps.refreshGitInfo(id)
+      },
+      getGitBranch: () => get().workspace.gitBranch,
     }),
 
     createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) =>

@@ -97,6 +97,7 @@ describe('IpcClient', () => {
       ['gitHasUncommittedChanges', 'git:hasUncommittedChanges'],
       ['gitCommitAll', 'git:commitAll'],
       ['gitDeleteBranch', 'git:deleteBranch'],
+      ['gitRenameBranch', 'git:renameBranch'],
       ['gitGetUncommittedChanges', 'git:getUncommittedChanges'],
       ['gitGetUncommittedFileDiff', 'git:getUncommittedFileDiff'],
       ['gitStageFile', 'git:stageFile'],

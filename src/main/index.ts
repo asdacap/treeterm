@@ -410,7 +410,7 @@ ipcMain.handle('llm:generateTitle', async (_event, buffer: string, settings: { b
       reasoning: settings.reasoningEffort
     })
     const parsed = parseLlmJson(response)
-    return { title: (parsed.title as string) || '', description: (parsed.description as string) || '', systemPrompt: settings.titleSystemPrompt }
+    return { title: (parsed.title as string) || '', description: (parsed.description as string) || '', branchName: (parsed.branchName as string) || '', systemPrompt: settings.titleSystemPrompt }
   } catch (error) {
     return { error: formatLlmError(error), systemPrompt: settings.titleSystemPrompt }
   }
@@ -741,6 +741,14 @@ server.onGitDeleteBranch(async (repoPath, branchName, operationId) => {
     ? (data: string) => server.gitOutput(operationId, data)
     : undefined
   await gitClient.deleteBranch(repoPath, branchName, false, onProgress)
+  return { success: true }
+})
+
+server.onGitRenameBranch(async (repoPath, oldName, newName) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  initializeGitClient()
+  if (!gitClient) throw new Error('Git client not initialized')
+  await gitClient.renameBranch(repoPath, oldName, newName)
   return { success: true }
 })
 

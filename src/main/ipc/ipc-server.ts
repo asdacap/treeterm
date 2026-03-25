@@ -30,6 +30,7 @@ const CHANNELS = {
   gitHasUncommittedChanges: 'git:hasUncommittedChanges',
   gitCommitAll: 'git:commitAll',
   gitDeleteBranch: 'git:deleteBranch',
+  gitRenameBranch: 'git:renameBranch',
   gitGetUncommittedChanges: 'git:getUncommittedChanges',
   gitGetUncommittedFileDiff: 'git:getUncommittedFileDiff',
   gitStageFile: 'git:stageFile',
@@ -315,6 +316,16 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.gitDeleteBranch, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['gitDeleteBranch']['params']))
+    )
+  }
+
+  onGitRenameBranch(
+    handler: (
+      ...args: IpcRequests['gitRenameBranch']['params']
+    ) => IpcRequests['gitRenameBranch']['result'] | Promise<IpcRequests['gitRenameBranch']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.gitRenameBranch, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['gitRenameBranch']['params']))
     )
   }
 
