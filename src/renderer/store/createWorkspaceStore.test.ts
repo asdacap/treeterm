@@ -12,6 +12,8 @@ function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStore
     },
     openTtyStream: vi.fn().mockResolvedValue({ tty: null, scrollback: [], exitCode: undefined }),
     getWriter: vi.fn().mockReturnValue(null),
+    createTty: vi.fn().mockResolvedValue('pty-1'),
+    connectionId: 'local',
     git: {} as any,
     filesystem: {} as any,
     syncToDaemon: vi.fn(),
@@ -64,7 +66,7 @@ function makeFakeApp(overrides: Partial<Application> = {}): Application {
     name: 'Terminal',
     icon: 'terminal',
     createInitialState: () => ({ ptyId: null }),
-    onWorkspaceLoad: () => {},
+    onWorkspaceLoad: () => ({ dispose: () => {} }),
     canClose: true,
     canHaveMultiple: true,
     showInNewTabMenu: true,
@@ -296,9 +298,9 @@ describe('createWorkspaceStore', () => {
       expect(wsState.activeTabId).toBe('tab-2')
     })
 
-    it('calls app cleanup', async () => {
-      const cleanup = vi.fn()
-      const app = makeFakeApp({ canClose: true, cleanup })
+    it('calls dispose on tab ref when removing', async () => {
+      const dispose = vi.fn()
+      const app = makeFakeApp({ canClose: true, onWorkspaceLoad: () => ({ dispose }) })
       const deps = makeHandleDeps({
         appRegistry: {
           get: vi.fn().mockReturnValue(app),
@@ -312,9 +314,11 @@ describe('createWorkspaceStore', () => {
       })
       const store = createWorkspaceStore(ws, deps)
 
+      // initTab to create the ref
+      store.getState().initTab('tab-1')
       await store.getState().removeTab('tab-1')
 
-      expect(cleanup).toHaveBeenCalledTimes(1)
+      expect(dispose).toHaveBeenCalledTimes(1)
     })
 
     it('no-ops when canClose is false', async () => {

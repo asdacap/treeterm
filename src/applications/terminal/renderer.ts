@@ -1,10 +1,38 @@
-import type { Application, TerminalState, TerminalApi, TerminalInstance, Tab, Workspace } from '../../renderer/types'
-import { isTerminalState } from '../../renderer/types'
+import type { Application, TerminalState, TerminalInstance, Tab, AppRef, WorkspaceStore } from '../../renderer/types'
 import Terminal from '../../renderer/components/Terminal'
 import { createElement } from 'react'
 import { useActivityStateStore } from '../../renderer/store/activityState'
 
 type TerminalDeps = { terminal: { kill: (connectionId: string, sessionId: string) => void } }
+
+function makeTerminalOnWorkspaceLoad(
+  deps: TerminalDeps,
+  startupCommand?: string
+): (tab: Tab, workspaceStore: WorkspaceStore) => AppRef {
+  return (tab: Tab, workspaceStore: WorkspaceStore): AppRef => {
+    const ws = workspaceStore.getState()
+    const state = tab.state as TerminalState
+    if (!state.ptyId) {
+      ws.createTty(ws.workspace.path, undefined, startupCommand).then((ptyId) => {
+        workspaceStore.getState().updateTabState<TerminalState>(tab.id, (s) => ({
+          ...s,
+          ptyId,
+          connectionId: ws.connectionId,
+        }))
+      })
+    }
+    return {
+      dispose: () => {
+        const current = workspaceStore.getState().workspace?.appStates?.[tab.id]?.state as TerminalState | undefined
+        const ptyId = current?.ptyId ?? state.ptyId
+        if (ptyId) {
+          deps.terminal.kill(current?.connectionId ?? ws.connectionId, ptyId)
+        }
+        useActivityStateStore.getState().removeTabState(tab.id)
+      },
+    }
+  }
+}
 
 // Factory function to create the base terminal application
 export function createTerminalApplication(deps: TerminalDeps): Application<TerminalState> {
@@ -18,25 +46,15 @@ export function createTerminalApplication(deps: TerminalDeps): Application<Termi
       ptyHandle: null
     }),
 
-    cleanup: async (tab: Tab, _workspace: Workspace) => {
-      if (isTerminalState(tab.state) && tab.state.ptyId) {
-        deps.terminal.kill(tab.state.connectionId ?? 'local', tab.state.ptyId)
-      }
-      // Remove activity state for this tab
-      useActivityStateStore.getState().removeTabState(tab.id)
-    },
+    onWorkspaceLoad: makeTerminalOnWorkspaceLoad(deps),
 
-    onWorkspaceLoad: () => {},
-
-    render: ({ tab, workspace, isVisible }) => {
-      return createElement(Terminal, {
-        key: tab.id,
-        cwd: workspace.getState().workspace.path,
-        workspace,
-        tabId: tab.id,
-        isVisible,
-      })
-    },
+    render: ({ tab, workspace, isVisible }) => createElement(Terminal, {
+      key: tab.id,
+      cwd: workspace.getState().workspace.path,
+      workspace,
+      tabId: tab.id,
+      isVisible,
+    }),
 
     canClose: true,
     canHaveMultiple: true,
@@ -58,25 +76,16 @@ export function createTerminalVariant(instance: TerminalInstance, deps: Terminal
       ptyHandle: null
     }),
 
-    cleanup: async (tab: Tab, _workspace: Workspace) => {
-      if (isTerminalState(tab.state) && tab.state.ptyId) {
-        deps.terminal.kill(tab.state.connectionId ?? 'local', tab.state.ptyId)
-      }
-      useActivityStateStore.getState().removeTabState(tab.id)
-    },
+    onWorkspaceLoad: makeTerminalOnWorkspaceLoad(deps, instance.startupCommand),
 
-    onWorkspaceLoad: () => {},
-
-    render: ({ tab, workspace, isVisible }) => {
-      return createElement(Terminal, {
-        key: tab.id,
-        cwd: workspace.getState().workspace.path,
-        workspace,
-        tabId: tab.id,
-        isVisible,
-        startupCommand: instance.startupCommand,
-      })
-    },
+    render: ({ tab, workspace, isVisible }) => createElement(Terminal, {
+      key: tab.id,
+      cwd: workspace.getState().workspace.path,
+      workspace,
+      tabId: tab.id,
+      isVisible,
+      startupCommand: instance.startupCommand,
+    }),
 
     canClose: true,
     canHaveMultiple: true,

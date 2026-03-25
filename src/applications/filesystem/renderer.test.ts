@@ -40,6 +40,11 @@ function createMockWorkspaceStoreStateData(overrides?: Partial<WorkspaceStoreSta
     removeKeepBranch: vi.fn(),
     removeKeepWorktree: vi.fn(),
     removeKeepBoth: vi.fn(),
+    initTab: vi.fn(),
+    getTabRef: vi.fn().mockReturnValue(null),
+    initAnalyzer: vi.fn(),
+    createTty: vi.fn().mockResolvedValue('pty-1'),
+    connectionId: 'local',
     ...overrides,
   } as WorkspaceStoreState
 }
@@ -298,10 +303,12 @@ describe('Filesystem Renderer', () => {
       })
     })
 
-    describe('cleanup', () => {
-      it('cleanup is undefined for filesystem application', () => {
-        // Filesystem application doesn't need cleanup
-        expect(filesystemApplication.cleanup).toBeUndefined()
+    describe('onWorkspaceLoad', () => {
+      it('returns an AppRef with no-op dispose', () => {
+        const tab: Tab = { id: 'tab-1', applicationId: 'filesystem', title: 'Files', state: {} }
+        const ref = filesystemApplication.onWorkspaceLoad(tab, mockWorkspaceStore)
+        expect(typeof ref.dispose).toBe('function')
+        ref.dispose() // should not throw
       })
     })
 

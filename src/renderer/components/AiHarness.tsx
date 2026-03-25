@@ -1,13 +1,12 @@
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useStore } from 'zustand'
 import type { Terminal as XTerm } from '@xterm/xterm'
-import BaseTerminal, { type BaseTerminalConfig, type BaseTerminalState } from './BaseTerminal'
+import BaseTerminal, { type BaseTerminalConfig } from './BaseTerminal'
 import PushToTalkButton from './PushToTalkButton'
 import { ReviewCommentsButton } from './ReviewCommentsButton'
 import { useSessionApi } from '../contexts/SessionStoreContext'
-import { useTtyCreation } from '../hooks/useTtyConnection'
 import type { ActivityState, AiHarnessState, SandboxConfig, WorkspaceStore } from '../types'
-import type { Analyzer } from '../store/createAnalyzerStore'
+import type { AiHarnessRef } from '../../applications/aiHarness/renderer'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
 
@@ -55,30 +54,18 @@ export default function AiHarness({
   stripScrollbackClear,
 }: AiHarnessProps) {
   const sessionStore = useSessionApi()
-  const { workspace: wsData, updateTabState } = useStore(workspace)
+  const { workspace: wsData } = useStore(workspace)
   const appState = wsData?.appStates[tabId]
   const state = appState?.state as AiHarnessState | undefined
   const ptyId = state?.ptyId ?? null
 
-  // Create or get the analyzer store for this tab
-  const analyzerRef = useRef<Analyzer | null>(null)
-  if (!analyzerRef.current) {
-    analyzerRef.current = workspace.getState().getOrCreateAnalyzer(tabId)
-  }
-  const analyzer = analyzerRef.current
+  // Read analyzer from tab ref (created by onWorkspaceLoad)
+  const ref = workspace.getState().getTabRef(tabId) as AiHarnessRef | null
+  const analyzer = ref?.analyzer ?? null
 
-  const { aiState, analyzing, reason, autoApprove } = useStore(analyzer)
-
-  const onCreated = useCallback((newPtyId: string) => {
-    const connId = sessionStore.getState().connection?.id ?? 'local'
-    updateTabState<BaseTerminalState>(tabId, (state) => ({
-      ...state,
-      ptyId: newPtyId,
-      connectionId: connId,
-    }))
-  }, [tabId, updateTabState, sessionStore])
-
-  const { loading, error } = useTtyCreation(ptyId, cwd, sandbox, command, onCreated)
+  const { aiState, analyzing, reason, autoApprove } = analyzer
+    ? useStore(analyzer)
+    : { aiState: 'idle' as ActivityState, analyzing: false, reason: '', autoApprove: false }
 
   const handlePushToTalkTranscript = useCallback((text: string) => {
     if (ptyId) {
@@ -96,9 +83,11 @@ export default function AiHarness({
 
   const handleTerminalReady = useCallback((term: XTerm) => {
     // Intercept user input for title generation
-    term.onData((data) => {
-      analyzer.getState().onUserInput(data)
-    })
+    if (analyzer) {
+      term.onData((data) => {
+        analyzer.getState().onUserInput(data)
+      })
+    }
   }, [analyzer])
 
   const openContextMenu = useContextMenuStore((s) => s.open)
@@ -113,7 +102,7 @@ export default function AiHarness({
 
   const handleDebugAnalyzer = () => {
     closeContextMenu()
-    const bufferText = analyzer.getState().getBufferText()
+    const bufferText = analyzer?.getState().getBufferText()
     if (!bufferText) return
     workspace.getState().addTab<{ bufferText: string }>('system-prompt-debugger', { bufferText })
   }
@@ -134,12 +123,8 @@ export default function AiHarness({
     onTerminalReady: handleTerminalReady
   }), [backgroundColor, disableScrollbar, stripScrollbackClear, handleTerminalReady])
 
-  if (loading) {
+  if (!ptyId) {
     return <div style={{ padding: 16, color: '#888' }}>Starting AI harness...</div>
-  }
-
-  if (error) {
-    return <div style={{ padding: 16, color: '#f14c4c' }}>Failed to start AI harness: {error.message}</div>
   }
 
   return (
@@ -174,7 +159,7 @@ export default function AiHarness({
           <input
             type="checkbox"
             checked={autoApprove}
-            onChange={(e) => analyzer.getState().setAutoApprove(e.target.checked)}
+            onChange={(e) => analyzer?.getState().setAutoApprove(e.target.checked)}
           />
           <span className="ai-harness-toggle-slider" />
           <span className="ai-harness-toggle-label">Auto-approve safe</span>

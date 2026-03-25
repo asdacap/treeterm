@@ -41,9 +41,11 @@ const mockWorkspaceStoreStateData = {
   removeKeepBoth: vi.fn(),
   getGitApi: vi.fn(),
   getFilesystemApi: vi.fn(),
-  getOrCreateAnalyzer: vi.fn(),
-  getAnalyzer: vi.fn().mockReturnValue(null),
-  removeAnalyzer: vi.fn(),
+  initTab: vi.fn(),
+  getTabRef: vi.fn().mockReturnValue(null),
+  initAnalyzer: vi.fn(),
+  createTty: vi.fn().mockResolvedValue('pty-1'),
+  connectionId: 'local',
   updateSettings: vi.fn(),
 } as WorkspaceStoreState
 

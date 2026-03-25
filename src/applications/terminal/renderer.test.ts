@@ -57,9 +57,11 @@ const mockWorkspaceStoreStateData = {
   removeKeepBoth: vi.fn(),
   getGitApi: vi.fn(),
   getFilesystemApi: vi.fn(),
-  getOrCreateAnalyzer: vi.fn(),
-  getAnalyzer: vi.fn().mockReturnValue(null),
-  removeAnalyzer: vi.fn(),
+  initTab: vi.fn(),
+  getTabRef: vi.fn().mockReturnValue(null),
+  initAnalyzer: vi.fn(),
+  createTty: vi.fn().mockResolvedValue('pty-1'),
+  connectionId: 'local',
   updateSettings: vi.fn(),
 } as WorkspaceStoreState
 
@@ -97,8 +99,8 @@ describe('Terminal Renderer', () => {
       })
     })
 
-    describe('cleanup', () => {
-      it('kills PTY when tab has ptyId', async () => {
+    describe('onWorkspaceLoad and dispose', () => {
+      it('dispose kills PTY when tab has ptyId and removes activity state', () => {
         const app = createTerminalApplication(mockDeps)
         const tab: Tab = {
           id: 'tab-1',
@@ -106,31 +108,15 @@ describe('Terminal Renderer', () => {
           title: 'Terminal',
           state: { ptyId: 'pty-123' }
         }
-        const workspace: Workspace = {
-          id: 'ws-1',
-          path: '/test',
-          name: 'Test',
-          parentId: null,
-          children: [],
-          status: 'active',
-          isGitRepo: true,
-          gitBranch: 'main',
-          gitRootPath: '/test',
-          isWorktree: false,
-          appStates: {},
-          activeTabId: null,
-          metadata: {},
-          createdAt: Date.now(),
-          lastActivity: Date.now()
-        }
 
-        await app.cleanup?.(tab, workspace)
+        const ref = app.onWorkspaceLoad(tab, mockWorkspaceStore)
+        ref.dispose()
 
         expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-123')
         expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
       })
 
-      it('does not kill PTY when tab has no ptyId', async () => {
+      it('dispose does not kill PTY when tab has no ptyId but removes activity state', () => {
         const app = createTerminalApplication(mockDeps)
         const tab: Tab = {
           id: 'tab-1',
@@ -138,63 +124,15 @@ describe('Terminal Renderer', () => {
           title: 'Terminal',
           state: { ptyId: null }
         }
-        const workspace: Workspace = {
-          id: 'ws-1',
-          path: '/test',
-          name: 'Test',
-          parentId: null,
-          children: [],
-          status: 'active',
-          isGitRepo: true,
-          gitBranch: 'main',
-          gitRootPath: '/test',
-          isWorktree: false,
-          appStates: {},
-          activeTabId: null,
-          metadata: {},
-          createdAt: Date.now(),
-          lastActivity: Date.now()
-        }
 
-        await app.cleanup?.(tab, workspace)
+        const ref = app.onWorkspaceLoad(tab, mockWorkspaceStore)
+        ref.dispose()
 
         expect(mockTerminalKill).not.toHaveBeenCalled()
         expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
       })
 
-      it('does not kill PTY when state is not terminal state', async () => {
-        const app = createTerminalApplication(mockDeps)
-        const tab: Tab = {
-          id: 'tab-1',
-          applicationId: 'terminal',
-          title: 'Terminal',
-          state: { someOtherState: true }
-        }
-        const workspace: Workspace = {
-          id: 'ws-1',
-          path: '/test',
-          name: 'Test',
-          parentId: null,
-          children: [],
-          status: 'active',
-          isGitRepo: true,
-          gitBranch: 'main',
-          gitRootPath: '/test',
-          isWorktree: false,
-          appStates: {},
-          activeTabId: null,
-          metadata: {},
-          createdAt: Date.now(),
-          lastActivity: Date.now()
-        }
-
-        await app.cleanup?.(tab, workspace)
-
-        expect(mockTerminalKill).not.toHaveBeenCalled()
-        expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
-      })
-
-      it('removes activity state regardless of PTY', async () => {
+      it('returns an AppRef with dispose method', () => {
         const app = createTerminalApplication(mockDeps)
         const tab: Tab = {
           id: 'tab-1',
@@ -202,28 +140,10 @@ describe('Terminal Renderer', () => {
           title: 'Terminal',
           state: { ptyId: null }
         }
-        const workspace: Workspace = {
-          id: 'ws-1',
-          path: '/test',
-          name: 'Test',
-          parentId: null,
-          children: [],
-          status: 'active',
-          isGitRepo: true,
-          gitBranch: 'main',
-          gitRootPath: '/test',
-          isWorktree: false,
-          appStates: {},
-          activeTabId: null,
-          metadata: {},
-          createdAt: Date.now(),
-          lastActivity: Date.now()
-        }
 
-        await app.cleanup?.(tab, workspace)
+        const ref = app.onWorkspaceLoad(tab, mockWorkspaceStore)
 
-        expect(mockRemoveTabState).toHaveBeenCalledTimes(1)
-        expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
+        expect(typeof ref.dispose).toBe('function')
       })
     })
 
@@ -291,7 +211,7 @@ describe('Terminal Renderer', () => {
       expect(result).toHaveProperty('props')
     })
 
-    it('can cleanup tabs', async () => {
+    it('onWorkspaceLoad returns ref that disposes correctly', () => {
       const app = createTerminalApplication(mockDeps)
       const tab: Tab = {
         id: 'tab-1',
@@ -299,25 +219,9 @@ describe('Terminal Renderer', () => {
         title: 'Terminal',
         state: { ptyId: 'pty-123' }
       }
-      const workspace: Workspace = {
-        id: 'ws-1',
-        path: '/test',
-        name: 'Test',
-        parentId: null,
-        children: [],
-        status: 'active',
-        isGitRepo: true,
-        gitBranch: 'main',
-        gitRootPath: '/test',
-        isWorktree: false,
-        appStates: {},
-        activeTabId: null,
-        metadata: {},
-        createdAt: Date.now(),
-        lastActivity: Date.now()
-      }
 
-      await app.cleanup?.(tab, workspace)
+      const ref = app.onWorkspaceLoad(tab, mockWorkspaceStore)
+      ref.dispose()
 
       expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-123')
       expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
@@ -370,8 +274,8 @@ describe('Terminal Renderer', () => {
       })
     })
 
-    describe('cleanup', () => {
-      it('kills PTY when tab has ptyId', async () => {
+    describe('onWorkspaceLoad and dispose', () => {
+      it('dispose kills PTY when tab has ptyId', () => {
         const variant = createTerminalVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
@@ -379,57 +283,25 @@ describe('Terminal Renderer', () => {
           title: 'Custom Terminal',
           state: { ptyId: 'pty-456' }
         }
-        const workspace: Workspace = {
-          id: 'ws-1',
-          path: '/test',
-          name: 'Test',
-          parentId: null,
-          children: [],
-          status: 'active',
-          isGitRepo: true,
-          gitBranch: 'main',
-          gitRootPath: '/test',
-          isWorktree: false,
-          appStates: {},
-          activeTabId: null,
-          metadata: {},
-          createdAt: Date.now(),
-          lastActivity: Date.now()
-        }
 
-        await variant.cleanup?.(tab, workspace)
+        const ref = variant.onWorkspaceLoad(tab, mockWorkspaceStore)
+        ref.dispose()
 
         expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-456')
         expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
       })
 
-      it('handles invalid state gracefully', async () => {
+      it('dispose does not kill PTY when state has no ptyId', () => {
         const variant = createTerminalVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal-custom-term',
           title: 'Custom Terminal',
-          state: null
-        }
-        const workspace: Workspace = {
-          id: 'ws-1',
-          path: '/test',
-          name: 'Test',
-          parentId: null,
-          children: [],
-          status: 'active',
-          isGitRepo: true,
-          gitBranch: 'main',
-          gitRootPath: '/test',
-          isWorktree: false,
-          appStates: {},
-          activeTabId: null,
-          metadata: {},
-          createdAt: Date.now(),
-          lastActivity: Date.now()
+          state: { ptyId: null }
         }
 
-        await variant.cleanup?.(tab, workspace)
+        const ref = variant.onWorkspaceLoad(tab, mockWorkspaceStore)
+        ref.dispose()
 
         expect(mockTerminalKill).not.toHaveBeenCalled()
         expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')

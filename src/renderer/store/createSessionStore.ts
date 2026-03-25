@@ -176,6 +176,8 @@ export function createSessionStore(
       appRegistry: deps.appRegistry,
       openTtyStream: (ptyId: string) => store.getState().openTtyStream(ptyId),
       getWriter: (ptyId: string) => store.getState().getWriter(ptyId),
+      createTty: (cwd, sandbox?, startupCommand?) => store.getState().createTty(cwd, sandbox, startupCommand),
+      connectionId: config.connection?.id ?? 'local',
       git: deps.git,
       filesystem: deps.filesystem,
       getSettings: deps.getSettings,
@@ -417,12 +419,12 @@ export function createSessionStore(
       await removeWorkspaceInternal(childId, options)
     }
 
-    // Cleanup tabs
-    for (const [tabId, appState] of Object.entries(workspace.appStates)) {
-      const tab = { ...appState, id: tabId }
-      const app = deps.appRegistry.get(tab.applicationId)
-      if (app?.cleanup) {
-        await app.cleanup(tab, workspace)
+    // Dispose tab refs (stops analyzers, kills PTYs, etc.)
+    const handle = state.workspaceStores[id]
+    if (handle) {
+      for (const tabId of Object.keys(workspace.appStates)) {
+        const ref = handle.getState().getTabRef(tabId)
+        if (ref) ref.dispose()
       }
     }
 
@@ -944,7 +946,7 @@ export function createSessionStore(
       console.log('[Session] Restoring session', daemonSession.id, 'with', daemonSession.workspaces.length, 'workspaces')
 
       set({ isRestoring: true })
-      applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, deps.appRegistry, { restoreExisting: true })
+      applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: true })
       set({ isRestoring: false })
 
       console.log('[Session] Session restore complete, workspace count:', Object.keys(get().workspaces).length)
@@ -957,7 +959,7 @@ export function createSessionStore(
       })
 
       set({ isRestoring: true })
-      applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, deps.appRegistry, { restoreExisting: false })
+      applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: false })
 
       // Remove workspaces not present in daemon session (skip loading workspaces)
       const incomingPaths = new Set(daemonSession.workspaces.map(ws => ws.path))
@@ -995,7 +997,6 @@ function applySessionWorkspaces(
   store: StoreApi<SessionState>,
   daemonWorkspaces: Workspace[],
   createHandleForWorkspace: (ws: Workspace) => WorkspaceStore,
-  appRegistry: AppRegistryApi,
   options: { restoreExisting: boolean }
 ): void {
   const rootWorkspaces = daemonWorkspaces.filter(w => !w.parentId)
@@ -1009,12 +1010,12 @@ function applySessionWorkspaces(
     if (existing) {
       if (options.restoreExisting) {
         store.getState().setActiveWorkspace(existing.id)
-        restoreWorkspaceTabs(store, existing.id, daemonWorkspace, appRegistry)
+        restoreWorkspaceTabs(store, existing.id, daemonWorkspace)
       } else {
         updateWorkspaceFields(store, existing.id, daemonWorkspace)
       }
     } else {
-      reconstructWorkspace(store, daemonWorkspace, createHandleForWorkspace, appRegistry)
+      reconstructWorkspace(store, daemonWorkspace, createHandleForWorkspace)
     }
   }
 
@@ -1025,12 +1026,12 @@ function applySessionWorkspaces(
 
     if (existing) {
       if (options.restoreExisting) {
-        restoreWorkspaceTabs(store, existing.id, daemonWorkspace, appRegistry)
+        restoreWorkspaceTabs(store, existing.id, daemonWorkspace)
       } else {
         updateWorkspaceFields(store, existing.id, daemonWorkspace)
       }
     } else {
-      reconstructWorkspace(store, daemonWorkspace, createHandleForWorkspace, appRegistry)
+      reconstructWorkspace(store, daemonWorkspace, createHandleForWorkspace)
     }
   }
 }
@@ -1039,8 +1040,7 @@ function applySessionWorkspaces(
 function restoreWorkspaceTabs(
   store: StoreApi<SessionState>,
   workspaceId: string,
-  daemonWorkspace: Workspace,
-  appRegistry: AppRegistryApi
+  daemonWorkspace: Workspace
 ): void {
   const handle = store.getState().workspaceStores[workspaceId]
   if (!handle) return
@@ -1053,9 +1053,8 @@ function restoreWorkspaceTabs(
     }
   })
 
-  for (const [tabId, appState] of Object.entries(daemonWorkspace.appStates)) {
-    const app = appRegistry.get(appState.applicationId)
-    if (app) app.onWorkspaceLoad({ ...appState, id: tabId }, handle)
+  for (const tabId of Object.keys(daemonWorkspace.appStates)) {
+    handle.getState().initTab(tabId)
   }
 }
 
@@ -1063,8 +1062,7 @@ function restoreWorkspaceTabs(
 function reconstructWorkspace(
   store: StoreApi<SessionState>,
   daemonWorkspace: Workspace,
-  createHandleForWorkspace: (ws: Workspace) => WorkspaceStore,
-  appRegistry: AppRegistryApi
+  createHandleForWorkspace: (ws: Workspace) => WorkspaceStore
 ): string {
   const id = daemonWorkspace.id
   const parentId = daemonWorkspace.parentId
@@ -1101,9 +1099,8 @@ function reconstructWorkspace(
     }
   })
 
-  for (const [tabId, appState] of Object.entries(daemonWorkspace.appStates)) {
-    const app = appRegistry.get(appState.applicationId)
-    if (app) app.onWorkspaceLoad({ ...appState, id: tabId }, handle)
+  for (const tabId of Object.keys(daemonWorkspace.appStates)) {
+    handle.getState().initTab(tabId)
   }
 
   console.log('[Session] Reconstructed workspace:', daemonWorkspace.name, 'parentId:', parentId)

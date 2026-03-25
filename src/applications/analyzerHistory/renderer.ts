@@ -7,7 +7,7 @@ export const analyzerHistoryApplication: Application = {
   name: 'Analyzer History',
   icon: '📊',
   createInitialState: () => ({}),
-  onWorkspaceLoad: () => {},
+  onWorkspaceLoad: () => ({ dispose: () => {} }),
   render: (props: ApplicationRenderProps) => createElement(AnalyzerHistory, props),
   canClose: true,
   canHaveMultiple: true,
