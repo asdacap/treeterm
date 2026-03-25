@@ -40,6 +40,9 @@ const CHANNELS = {
   gitGetFileContentsForDiff: 'git:getFileContentsForDiff',
   gitGetUncommittedFileContentsForDiff: 'git:getUncommittedFileContentsForDiff',
   gitGetHeadCommitHash: 'git:getHeadCommitHash',
+  gitGetLog: 'git:getLog',
+  gitGetCommitDiff: 'git:getCommitDiff',
+  gitGetCommitFileDiff: 'git:getCommitFileDiff',
   settingsLoad: 'settings:load',
   settingsSave: 'settings:save',
   fsReadDirectory: 'fs:readDirectory',
@@ -408,6 +411,36 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.gitGetHeadCommitHash, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['gitGetHeadCommitHash']['params']))
+    )
+  }
+
+  onGitGetLog(
+    handler: (
+      ...args: IpcRequests['gitGetLog']['params']
+    ) => IpcRequests['gitGetLog']['result'] | Promise<IpcRequests['gitGetLog']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.gitGetLog, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['gitGetLog']['params']))
+    )
+  }
+
+  onGitGetCommitDiff(
+    handler: (
+      ...args: IpcRequests['gitGetCommitDiff']['params']
+    ) => IpcRequests['gitGetCommitDiff']['result'] | Promise<IpcRequests['gitGetCommitDiff']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.gitGetCommitDiff, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['gitGetCommitDiff']['params']))
+    )
+  }
+
+  onGitGetCommitFileDiff(
+    handler: (
+      ...args: IpcRequests['gitGetCommitFileDiff']['params']
+    ) => IpcRequests['gitGetCommitFileDiff']['result'] | Promise<IpcRequests['gitGetCommitFileDiff']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.gitGetCommitFileDiff, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['gitGetCommitFileDiff']['params']))
     )
   }
 

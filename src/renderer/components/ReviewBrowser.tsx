@@ -3,7 +3,7 @@ import { ChevronDown } from 'lucide-react'
 import { useStore } from 'zustand'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
 import { getTabs } from '../types'
-import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, WorkspaceStore } from '../types'
+import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, GitLogCommit, WorkspaceStore } from '../types'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
 import { CommittedDiffFileTree, UncommittedDiffFileTree, getSortedFilePaths } from './DiffFileTree'
 import { CommentInput } from './CommentInput'
@@ -17,7 +17,7 @@ interface ReviewBrowserProps {
   isVisible: boolean
 }
 
-type ViewMode = 'committed' | 'uncommitted'
+type ViewMode = 'committed' | 'uncommitted' | 'commits'
 
 export default function ReviewBrowser({
   workspace,
@@ -84,6 +84,16 @@ export default function ReviewBrowser({
   // Resize state
   const [fileListWidth, setFileListWidth] = useState(250)
   const [isResizing, setIsResizing] = useState(false)
+
+  // Commits state
+  const [commits, setCommits] = useState<GitLogCommit[]>([])
+  const [commitsLoading, setCommitsLoading] = useState(false)
+  const [commitsError, setCommitsError] = useState<string | null>(null)
+  const [commitsHasMore, setCommitsHasMore] = useState(false)
+  const [selectedCommit, setSelectedCommit] = useState<GitLogCommit | null>(null)
+  const [commitDiffFiles, setCommitDiffFiles] = useState<DiffFile[]>([])
+  const [commitDiffLoading, setCommitDiffLoading] = useState(false)
+  const [selectedCommitFile, setSelectedCommitFile] = useState<string | null>(null)
 
   // AI harness prompt support
   const runningHarness = wsData ? findRunningHarness(getTabs(wsData)) : null
@@ -210,6 +220,59 @@ export default function ReviewBrowser({
     } catch (err) {
       setLoadError(`Failed to load uncommitted changes: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
+  }
+
+  const loadCommits = async (skip: number = 0) => {
+    setCommitsLoading(true)
+    setCommitsError(null)
+    try {
+      const parentBranch = parentWorkspace?.gitBranch || null
+      const result = await git.getLog(parentBranch, skip, 50)
+      if (result.success && result.result) {
+        setCommits(prev => skip === 0 ? result.result!.commits : [...prev, ...result.result!.commits])
+        setCommitsHasMore(result.result.hasMore)
+      } else {
+        setCommitsError(result.error || 'Failed to load commits')
+      }
+    } catch (err) {
+      setCommitsError(`Failed to load commits: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    }
+    setCommitsLoading(false)
+  }
+
+  const loadCommitDiff = async (commit: GitLogCommit) => {
+    setSelectedCommit(commit)
+    setCommitDiffFiles([])
+    setSelectedCommitFile(null)
+    setFileDiffContents(null)
+    setCommitDiffLoading(true)
+    try {
+      const result = await git.getCommitDiff(commit.hash)
+      if (result.success && result.files) {
+        setCommitDiffFiles(result.files)
+      }
+    } catch (err) {
+      setLoadError(`Failed to load commit diff: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    }
+    setCommitDiffLoading(false)
+  }
+
+  const loadCommitFileDiff = async (commitHash: string, filePath: string) => {
+    setSelectedCommitFile(filePath)
+    setLoadingFileDiff(true)
+    setFileDiffContents(null)
+    setLoadError(null)
+    try {
+      const result = await git.getCommitFileDiff(commitHash, filePath)
+      if (result.success && result.contents) {
+        setFileDiffContents(result.contents)
+      } else {
+        setLoadError(result.error || 'Failed to load commit file diff')
+      }
+    } catch (err) {
+      setLoadError(`Failed to load commit file diff: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    }
+    setLoadingFileDiff(false)
   }
 
   const checkConflicts = async () => {
@@ -595,6 +658,15 @@ export default function ReviewBrowser({
             <span className="diff-tab-count">{uncommitted.files.length}</span>
           )}
         </button>
+        <button
+          className={`diff-tab ${viewMode === 'commits' ? 'active' : ''}`}
+          onClick={() => { setViewMode('commits'); if (commits.length === 0) loadCommits() }}
+        >
+          Commits
+          {commits.length > 0 && (
+            <span className="diff-tab-count">{commits.length}{commitsHasMore ? '+' : ''}</span>
+          )}
+        </button>
       </div>
 
       {loading ? (
@@ -603,7 +675,87 @@ export default function ReviewBrowser({
         <div className="review-error">{error}</div>
       ) : (
         <>
-          {viewMode === 'committed' ? (
+          {viewMode === 'commits' ? (
+            <div className="commits-view">
+              <div className="commits-pane">
+                {commitsLoading && commits.length === 0 ? (
+                  <div className="review-loading">Loading commits...</div>
+                ) : commitsError ? (
+                  <div className="review-error">{commitsError}</div>
+                ) : commits.length === 0 ? (
+                  <div className="diff-empty">No commits on this branch</div>
+                ) : (
+                  <div className="commits-list">
+                    {commits.map(commit => (
+                      <div
+                        key={commit.hash}
+                        className={`commit-row ${selectedCommit?.hash === commit.hash ? 'selected' : ''}`}
+                        onClick={() => loadCommitDiff(commit)}
+                      >
+                        <span className="commit-hash">{commit.shortHash}</span>
+                        <span className="commit-message">{commit.message}</span>
+                        <span className="commit-author">{commit.author}</span>
+                        <span className="commit-date">{new Date(commit.date).toLocaleDateString()}</span>
+                      </div>
+                    ))}
+                    {commitsHasMore && (
+                      <button
+                        className="commits-load-more"
+                        onClick={() => loadCommits(commits.length)}
+                        disabled={commitsLoading}
+                      >
+                        {commitsLoading ? 'Loading...' : 'Load more'}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+              {selectedCommit && (
+                <div
+                  className="diff-content"
+                  onMouseMove={handleResizeMouseMove}
+                  onMouseUp={handleResizeMouseUp}
+                  onMouseLeave={handleResizeMouseUp}
+                >
+                  <div className="diff-file-list" style={{ width: fileListWidth }}>
+                    {commitDiffLoading ? (
+                      <div className="diff-loading">Loading...</div>
+                    ) : (
+                      <CommittedDiffFileTree
+                        files={commitDiffFiles}
+                        selectedFile={selectedCommitFile}
+                        onSelectFile={(path) => loadCommitFileDiff(selectedCommit.hash, path)}
+                        getStatusIcon={getStatusIcon}
+                      />
+                    )}
+                  </div>
+                  <div
+                    className={`divider ${isResizing ? 'active' : ''}`}
+                    onMouseDown={handleResizeMouseDown}
+                  />
+                  <div className="diff-file-content">
+                    {selectedCommitFile ? (
+                      loadingFileDiff ? (
+                        <div className="diff-loading">Loading...</div>
+                      ) : fileDiffContents ? (
+                        <MonacoDiffViewer
+                          originalContent={fileDiffContents.originalContent}
+                          modifiedContent={fileDiffContents.modifiedContent}
+                          language={fileDiffContents.language}
+                          originalLabel={`${selectedCommit.shortHash}~1`}
+                          modifiedLabel={selectedCommit.shortHash}
+                        />
+                      ) : (
+                        <div className="diff-placeholder">Failed to load diff contents</div>
+                      )
+                    ) : (
+                      <div className="diff-placeholder">Select a file to view changes</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : viewMode === 'committed' ? (
             !hasParent ? (
               <div className="diff-empty">Top-level worktree - no parent branch to compare committed changes against</div>
             ) : !hasCommittedChanges ? (

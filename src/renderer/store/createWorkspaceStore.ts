@@ -385,6 +385,9 @@ export function createWorkspaceStore(
         getFileContentsForDiff: (parentBranch, filePath) => deps.git.getFileContentsForDiff(path, parentBranch, filePath),
         getUncommittedFileContentsForDiff: (filePath, staged) => deps.git.getUncommittedFileContentsForDiff(path, filePath, staged),
         getHeadCommitHash: () => deps.git.getHeadCommitHash(path),
+        getLog: (parentBranch, skip, limit) => deps.git.getLog(path, parentBranch, skip, limit),
+        getCommitDiff: (commitHash) => deps.git.getCommitDiff(path, commitHash),
+        getCommitFileDiff: (commitHash, filePath) => deps.git.getCommitFileDiff(path, commitHash, filePath),
       }
     },
 

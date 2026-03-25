@@ -33,6 +33,20 @@ export interface GitDiffResult {
   headBranch: string
 }
 
+export interface GitLogCommit {
+  hash: string
+  shortHash: string
+  author: string
+  date: string
+  message: string
+  parentHashes: string[]
+}
+
+export interface GitLogResult {
+  commits: GitLogCommit[]
+  hasMore: boolean
+}
+
 export interface GitInfo {
   isRepo: boolean
   branch: string | null
@@ -917,6 +931,106 @@ export class GitClient {
       }
       
       return { originalContent, modifiedContent, language }
+    }
+  }
+
+  /**
+   * Get commit log for a branch
+   */
+  async getLog(
+    dirPath: string,
+    parentBranch: string | null,
+    skip: number,
+    limit: number
+  ): Promise<GitLogResult> {
+    const format = '%H%x1e%h%x1e%an%x1e%aI%x1e%s%x1e%P'
+    const args = ['log', `--format=${format}`, `--skip=${skip}`, `--max-count=${limit + 1}`]
+
+    if (parentBranch) {
+      args.push(`${parentBranch}..HEAD`)
+    }
+
+    const result = await this.exec(dirPath, args)
+    if (result.exitCode !== 0) {
+      throw this.interpretError(result)
+    }
+
+    const lines = result.stdout.trim().split('\n').filter(Boolean)
+    const hasMore = lines.length > limit
+    const commitLines = hasMore ? lines.slice(0, limit) : lines
+
+    const commits: GitLogCommit[] = commitLines.map(line => {
+      const [hash, shortHash, author, date, message, parents] = line.split('\x1e')
+      return {
+        hash,
+        shortHash,
+        author,
+        date,
+        message,
+        parentHashes: parents ? parents.split(' ').filter(Boolean) : []
+      }
+    })
+
+    return { commits, hasMore }
+  }
+
+  /**
+   * Get changed files for a specific commit
+   */
+  async getCommitDiff(dirPath: string, commitHash: string): Promise<GitDiffFile[]> {
+    const [statResult, nameStatusResult] = await Promise.all([
+      this.exec(dirPath, ['diff-tree', '--no-commit-id', '--root', '-r', '--numstat', commitHash]),
+      this.exec(dirPath, ['diff-tree', '--no-commit-id', '--root', '-r', '--name-status', commitHash])
+    ])
+
+    if (statResult.exitCode !== 0) {
+      throw this.interpretError(statResult)
+    }
+
+    const statusMap = new Map<string, GitDiffFile['status']>()
+    for (const line of nameStatusResult.stdout.trim().split('\n').filter(Boolean)) {
+      const [status, ...pathParts] = line.split('\t')
+      const filePath = pathParts[pathParts.length - 1]
+      if (status.startsWith('A')) statusMap.set(filePath, 'added')
+      else if (status.startsWith('M')) statusMap.set(filePath, 'modified')
+      else if (status.startsWith('D')) statusMap.set(filePath, 'deleted')
+      else if (status.startsWith('R')) statusMap.set(filePath, 'renamed')
+    }
+
+    const files: GitDiffFile[] = []
+    for (const line of statResult.stdout.trim().split('\n').filter(Boolean)) {
+      const [add, del, filePath] = line.split('\t')
+      files.push({
+        path: filePath,
+        status: statusMap.get(filePath) || 'modified',
+        additions: add === '-' ? 0 : parseInt(add, 10) || 0,
+        deletions: del === '-' ? 0 : parseInt(del, 10) || 0
+      })
+    }
+
+    return files
+  }
+
+  /**
+   * Get file contents for a commit diff (original vs modified)
+   */
+  async getCommitFileDiff(
+    dirPath: string,
+    commitHash: string,
+    filePath: string
+  ): Promise<{ originalContent: string; modifiedContent: string; language: string }> {
+    const [modifiedResult, originalResult] = await Promise.all([
+      this.exec(dirPath, ['show', `${commitHash}:${filePath}`]),
+      this.exec(dirPath, ['show', `${commitHash}~1:${filePath}`])
+    ])
+
+    const ext = filePath.split('.').pop() || ''
+    const language = this.detectLanguage(ext)
+
+    return {
+      originalContent: originalResult.exitCode === 0 ? originalResult.stdout : '',
+      modifiedContent: modifiedResult.exitCode === 0 ? modifiedResult.stdout : '',
+      language
     }
   }
 

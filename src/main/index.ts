@@ -842,6 +842,42 @@ server.onGitGetHeadCommitHash(async (repoPath) => {
   return { success: true, hash }
 })
 
+server.onGitGetLog(async (repoPath, parentBranch, skip, limit) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  initializeGitClient()
+  if (!gitClient) throw new Error('Git client not initialized')
+  try {
+    const result = await gitClient.getLog(repoPath, parentBranch, skip, limit)
+    return { success: true, result }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+})
+
+server.onGitGetCommitDiff(async (repoPath, commitHash) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  initializeGitClient()
+  if (!gitClient) throw new Error('Git client not initialized')
+  try {
+    const files = await gitClient.getCommitDiff(repoPath, commitHash)
+    return { success: true, files }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+})
+
+server.onGitGetCommitFileDiff(async (repoPath, commitHash, filePath) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  initializeGitClient()
+  if (!gitClient) throw new Error('Git client not initialized')
+  try {
+    const contents = await gitClient.getCommitFileDiff(repoPath, commitHash, filePath)
+    return { success: true, contents }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+})
+
 // Run Actions IPC Handlers
 server.onRunActionsDetect(async (workspacePath) => {
   if (!daemonClient) throw new Error('Daemon not initialized')

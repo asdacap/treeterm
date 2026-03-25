@@ -1917,6 +1917,90 @@ body,
   text-align: center;
 }
 
+/* Commits Tab */
+.commits-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.commits-pane {
+  max-height: 160px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.commits-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.commit-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,0.05));
+}
+
+.commit-row:hover {
+  background: var(--bg-hover);
+}
+
+.commit-row.selected {
+  background: var(--bg-active);
+}
+
+.commit-hash {
+  font-family: monospace;
+  color: var(--accent);
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.commit-message {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.commit-author {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.commit-date {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.commits-load-more {
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: center;
+}
+
+.commits-load-more:hover {
+  background: var(--bg-hover);
+}
+
+.commits-load-more:disabled {
+  color: var(--text-secondary);
+  cursor: default;
+}
+
 /* Commit Section */
 .commit-section {
   padding: 12px 16px;
