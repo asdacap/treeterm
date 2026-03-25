@@ -36,7 +36,7 @@ export default function TerminalScrollWrapper({
       </button>
       <div className="terminal-floating-buttons">
         {extraButtons}
-        <button className="scroll-down-btn" onClick={handleScrollDown} title="Scroll to bottom">
+        <button className="scroll-down-btn terminal-circle-btn" onClick={handleScrollDown} title="Scroll to bottom">
           ↓
         </button>
       </div>

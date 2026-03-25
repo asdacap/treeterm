@@ -114,7 +114,7 @@ export default function PushToTalkButton({ onTranscript, onSubmit }: PushToTalkB
   return (
     <>
       <button
-        className={`push-to-talk-btn ${isRecording ? 'recording' : ''} ${isProcessing ? 'processing' : ''}`}
+        className={`push-to-talk-btn terminal-circle-btn ${isRecording ? 'recording' : ''} ${isProcessing ? 'processing' : ''}`}
         onMouseDown={(e) => {
           e.preventDefault()
           if (!isRecording) startRecording()
