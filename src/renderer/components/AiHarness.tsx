@@ -138,9 +138,9 @@ export default function AiHarness({
           config={config}
           extraButtons={
             <>
-              <PromptCommitButton workspace={workspace} />
-              <PromptRebaseButton workspace={workspace} />
-              <ReviewCommentsButton workspace={workspace} />
+              {aiState !== 'working' && <PromptCommitButton workspace={workspace} />}
+              {aiState !== 'working' && <PromptRebaseButton workspace={workspace} />}
+              {aiState !== 'working' && <ReviewCommentsButton workspace={workspace} />}
               <PushToTalkButton
                 onTranscript={handlePushToTalkTranscript}
                 onSubmit={handlePushToTalkSubmit}
