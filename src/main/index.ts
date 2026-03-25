@@ -387,9 +387,9 @@ ipcMain.handle('llm:analyzeTerminal', async (_event, buffer: string, cwd: string
     if (analyzerCache.length > ANALYZER_CACHE_SIZE) {
       analyzerCache.shift()
     }
-    return result
+    return { ...result, systemPrompt }
   } catch (error) {
-    return { error: formatLlmError(error) }
+    return { error: formatLlmError(error), systemPrompt }
   }
 })
 
@@ -410,9 +410,9 @@ ipcMain.handle('llm:generateTitle', async (_event, buffer: string, settings: { b
       reasoning: settings.reasoningEffort
     })
     const parsed = parseLlmJson(response)
-    return { title: (parsed.title as string) || '', description: (parsed.description as string) || '' }
+    return { title: (parsed.title as string) || '', description: (parsed.description as string) || '', systemPrompt: settings.titleSystemPrompt }
   } catch (error) {
-    return { error: formatLlmError(error) }
+    return { error: formatLlmError(error), systemPrompt: settings.titleSystemPrompt }
   }
 })
 
