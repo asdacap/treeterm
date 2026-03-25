@@ -18,7 +18,9 @@ const DAEMON_LOG_FILE = path.join(TREETERM_DATA_DIR, 'daemon.log')
 interface DaemonConfig {
   socketPath: string
   pidFile: string
-  scrollbackLimit: number
+  mergeThreshold: number
+  compactedLimit: number
+  scrollbackLines: number
   logFile: string
   logLevel: string
   logPretty: boolean
@@ -28,7 +30,9 @@ function getConfig(): DaemonConfig {
   return {
     socketPath: process.env.TREETERM_SOCKET_PATH || getDefaultSocketPath(),
     pidFile: process.env.TREETERM_PID_FILE || DEFAULT_DAEMON_PID_FILE,
-    scrollbackLimit: parseInt(process.env.TREETERM_SCROLLBACK_LIMIT || '50000', 10),
+    mergeThreshold: parseInt(process.env.TREETERM_MERGE_THRESHOLD || String(50 * 1024), 10),
+    compactedLimit: parseInt(process.env.TREETERM_COMPACTED_LIMIT || String(1024 * 1024), 10),
+    scrollbackLines: parseInt(process.env.TREETERM_SCROLLBACK_LINES || '10000', 10),
     logFile: process.env.TREETERM_LOG_FILE || DAEMON_LOG_FILE,
     logLevel: process.env.TREETERM_LOG_LEVEL || 'info',
     logPretty: process.env.TREETERM_LOG_PRETTY === '1'
@@ -67,7 +71,7 @@ async function main(): Promise<void> {
   log.info('TreeTerm Daemon Starting')
   log.info('========================================')
   log.info({ socketPath: config.socketPath }, 'socket path')
-  log.info({ scrollbackLimit: config.scrollbackLimit }, 'scrollback limit (lines)')
+  log.info({ mergeThreshold: config.mergeThreshold, compactedLimit: config.compactedLimit, scrollbackLines: config.scrollbackLines }, 'scrollback config')
   log.info({ logFile: config.logFile }, 'log file')
   log.info({ logLevel: config.logLevel }, 'log level')
   log.info('========================================')
@@ -81,7 +85,7 @@ async function main(): Promise<void> {
   const { SessionStore } = await import('./sessionStore')
 
   // Initialize components
-  const ptyManager = new DaemonPtyManager(config.scrollbackLimit)
+  const ptyManager = new DaemonPtyManager(config.mergeThreshold, config.compactedLimit, config.scrollbackLines)
   const sessionStore = new SessionStore()
 
   // Initialize default session on daemon startup

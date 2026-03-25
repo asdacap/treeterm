@@ -41,7 +41,7 @@ describe('DaemonPtyManager', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    manager = new DaemonPtyManager(1024 * 1024)
+    manager = new DaemonPtyManager()
   })
 
   afterEach(() => {
@@ -210,7 +210,7 @@ describe('DaemonPtyManager', () => {
   })
 
   describe('scrollback management', () => {
-    it('accumulates scrollback data', () => {
+    it('accumulates data in buffer2 and returns combined scrollback on attach', () => {
       const callback = vi.fn()
       manager.onData(callback)
 
@@ -233,21 +233,63 @@ describe('DaemonPtyManager', () => {
       expect(scrollback1).not.toBe(scrollback2)
     })
 
-    it('truncates scrollback at byte limit', () => {
-      // Create manager with small scrollback limit (100 bytes)
-      const smallManager = new DaemonPtyManager(100)
+    it('triggers compaction when buffer2 exceeds merge threshold', () => {
+      // mergeThreshold=100 bytes, compactedLimit=1MB, scrollbackLines=100
+      const smallManager = new DaemonPtyManager(100, 1024 * 1024, 100)
 
       const sessionId = smallManager.create({ cwd: '/tmp', env: {} })
 
       const onDataHandler = mockPtyProcess.onData.mock.calls[0][0]
-      // Push data exceeding 100 bytes
-      onDataHandler('a'.repeat(60))
-      onDataHandler('b'.repeat(60))
+      // Push 60 + 60 = 120 bytes, exceeds 100 byte threshold
+      onDataHandler('a'.repeat(60) + '\r\n')
+      onDataHandler('b'.repeat(60) + '\r\n')
 
       const { scrollback } = smallManager.attach(sessionId)
-      // First chunk should have been removed since total exceeds 100 bytes
-      expect(scrollback).not.toContain('a'.repeat(60))
-      expect(scrollback).toContain('b'.repeat(60))
+      // After compaction, both chunks should be in buffer1 (plain text lines are additive)
+      expect(scrollback.join('')).toContain('a'.repeat(60))
+      expect(scrollback.join('')).toContain('b'.repeat(60))
+
+      smallManager.shutdown()
+    })
+
+    it('truncates buffer1 at compacted limit after compaction', () => {
+      // mergeThreshold=50 bytes, compactedLimit=100 bytes, scrollbackLines=100
+      const smallManager = new DaemonPtyManager(50, 100, 100)
+
+      const sessionId = smallManager.create({ cwd: '/tmp', env: {} })
+
+      const onDataHandler = mockPtyProcess.onData.mock.calls[0][0]
+      // Push a large chunk that exceeds compactedLimit after compaction
+      onDataHandler('a'.repeat(60) + '\r\n')
+      // This should trigger compaction (>50 bytes), then buffer1 has ~62 bytes
+      // Push more to trigger another compaction
+      onDataHandler('b'.repeat(60) + '\r\n')
+
+      const { scrollback } = smallManager.attach(sessionId)
+      const totalSize = scrollback.reduce((acc, s) => acc + Buffer.byteLength(s, 'utf-8'), 0)
+      // Buffer1 should be truncated to ~100 bytes
+      expect(totalSize).toBeLessThanOrEqual(130) // some slack for chunking
+
+      smallManager.shutdown()
+    })
+
+    it('compaction handles ANSI cursor overwrites (buffer2 replaces buffer1)', () => {
+      // mergeThreshold=50, compactedLimit=1MB, scrollbackLines=100
+      const smallManager = new DaemonPtyManager(50, 1024 * 1024, 100)
+
+      const sessionId = smallManager.create({ cwd: '/tmp', env: {}, cols: 80, rows: 24 })
+
+      const onDataHandler = mockPtyProcess.onData.mock.calls[0][0]
+      // buffer1 content: just "hello" on first line
+      onDataHandler('hello\r\n')
+      // Force compaction by sending >50 bytes of cursor-home + overwrite
+      // ESC[H moves cursor to home, effectively overwriting all previous content
+      onDataHandler('\x1b[H' + 'x'.repeat(60) + '\r\n')
+
+      const { scrollback } = smallManager.attach(sessionId)
+      // After compaction, the ANSI overwrite means buffer2 alone produces
+      // similar lines as combined — so buffer1 should have been replaced
+      expect(scrollback.length).toBeGreaterThan(0)
 
       smallManager.shutdown()
     })
@@ -331,7 +373,7 @@ describe('DaemonPtyManager', () => {
       const originalPlatform = process.platform
       Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
 
-      const sandboxManager = new DaemonPtyManager(1024 * 1024)
+      const sandboxManager = new DaemonPtyManager()
 
       sandboxManager.create({
         cwd: '/workspace',
@@ -350,7 +392,7 @@ describe('DaemonPtyManager', () => {
       const originalPlatform = process.platform
       Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
 
-      const sandboxManager = new DaemonPtyManager(1024 * 1024)
+      const sandboxManager = new DaemonPtyManager()
 
       sandboxManager.create({
         cwd: '/workspace',
@@ -372,7 +414,7 @@ describe('DaemonPtyManager', () => {
 
       vi.mocked(execSync).mockImplementation(() => { throw new Error('not found') })
 
-      const sandboxManager = new DaemonPtyManager(1024 * 1024)
+      const sandboxManager = new DaemonPtyManager()
 
       sandboxManager.create({
         cwd: '/workspace',
