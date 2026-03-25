@@ -312,6 +312,9 @@ export function createSessionStore(
           wsHandle.setState(s => ({
             workspace: { ...s.workspace, path: result.path!, gitBranch: result.branch! }
           }))
+          for (const tabId of Object.keys(appStates)) {
+            wsHandle.getState().initTab(tabId)
+          }
         }
 
         store.setState(s => {
@@ -400,6 +403,10 @@ export function createSessionStore(
         activeWorkspaceId: id
       }
     })
+
+    for (const tabId of Object.keys(appStates)) {
+      handle.getState().initTab(tabId)
+    }
 
     await syncSessionToDaemon(store.getState().isRestoring)
     return id
