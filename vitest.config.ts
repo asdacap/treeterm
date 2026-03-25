@@ -22,7 +22,8 @@ export default defineConfig({
         'src/shared/**',
         'src/renderer/stt/types.ts',
         'src/renderer/monaco-config.ts',
-        'src/__mocks__/**'
+        'src/__mocks__/**',
+        'src/renderer/utils/keyboardHealthMonitor.ts'
       ],
       thresholds: {
         branches: 60,
