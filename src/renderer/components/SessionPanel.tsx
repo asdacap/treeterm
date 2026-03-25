@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
-import { GitFork, GitBranch, Folder, ChevronDown, ChevronRight, Loader2, AlertCircle } from 'lucide-react'
+import { GitFork, ChevronDown, ChevronRight } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { SessionState } from '../store/createSessionStore'
@@ -13,8 +13,8 @@ import CreateChildDialog from './CreateChildDialog'
 import OpenWorkspaceDialog from './OpenWorkspaceDialog'
 import type { Workspace, ReviewState, WorktreeSettings } from '../types'
 
-// Import WorkspaceActivityIndicator from TreePane
-import { WorkspaceActivityIndicator } from './TreePane'
+// Import WorkspaceIcon from TreePane
+import { WorkspaceIcon } from './TreePane'
 
 interface SessionPanelProps {
   sessionId: string
@@ -294,15 +294,11 @@ export default function SessionPanel({
             <span className="tree-item-expand-placeholder" />
           )}
           <span className="tree-item-icon">
-            {workspaceLoadStates[ws.id]?.status === 'loading' ? <Loader2 size={16} className="spinning" /> :
-             workspaceLoadStates[ws.id]?.status === 'error' ? <AlertCircle size={16} className="tree-item-error-icon" /> :
-             ws.isWorktree ? <GitBranch size={16} /> : <Folder size={16} />}
+            <WorkspaceIcon tabIds={tabIds} loadStatus={workspaceLoadStates[ws.id]?.status} isWorktree={ws.isWorktree} />
           </span>
           <span className="tree-item-name">
             {ws.metadata?.displayName || ws.name}
           </span>
-
-          <WorkspaceActivityIndicator tabIds={tabIds} />
           <span className="tree-item-actions">
             {ws.isGitRepo && (
               <button

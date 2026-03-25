@@ -258,19 +258,20 @@ body,
   margin-left: 4px;
 }
 
-/* Activity State Indicator */
-.tree-item-activity {
+.tree-item-icon-activity {
   font-size: 14px;
-  margin-left: 4px;
-  flex-shrink: 0;
   display: flex;
   align-items: center;
 }
 
 .tree-item-actions {
-  display: flex;
+  display: none;
   margin-left: auto;
   gap: 2px;
+}
+
+.tree-item:hover .tree-item-actions {
+  display: flex;
 }
 
 .tree-item-action {

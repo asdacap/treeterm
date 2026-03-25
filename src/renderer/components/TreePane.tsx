@@ -1,18 +1,23 @@
-import { Monitor } from 'lucide-react'
+import { Monitor, Loader2, AlertCircle, GitBranch, Folder } from 'lucide-react'
 import { useActivityStateStore } from '../store/activityState'
 import { useAppStore } from '../store/app'
 import SessionPanel from './SessionPanel'
 import { ActivityIndicator } from './ActivityIndicator'
 
-// Exported so SessionPanel can use it
-export function WorkspaceActivityIndicator({ tabIds }: { tabIds: string[] }) {
+// Shows activity indicator in icon slot when active, otherwise shows workspace icon
+export function WorkspaceIcon({ tabIds, loadStatus, isWorktree }: {
+  tabIds: string[]
+  loadStatus?: string
+  isWorktree: boolean
+}) {
   const activityState = useActivityStateStore((state) =>
     state.getWorkspaceState(tabIds)
   )
 
-  if (activityState === 'idle') return null
-
-  return <ActivityIndicator activityState={activityState} className="tree-item-activity" />
+  if (loadStatus === 'loading') return <Loader2 size={16} className="spinning" />
+  if (loadStatus === 'error') return <AlertCircle size={16} className="tree-item-error-icon" />
+  if (activityState !== 'idle') return <ActivityIndicator activityState={activityState} className="tree-item-icon-activity" />
+  return isWorktree ? <GitBranch size={16} /> : <Folder size={16} />
 }
 
 interface TreePaneProps {
