@@ -1,4 +1,4 @@
-import type { Application, Tab, Workspace, AiHarnessState, AiHarnessInstance, TerminalApi } from '../../renderer/types'
+import type { Application, Tab, Workspace, AiHarnessState, AiHarnessInstance, TerminalApi, WorkspaceStore } from '../../renderer/types'
 import { isAiHarnessState } from '../../renderer/types'
 import AiHarness from '../../renderer/components/AiHarness'
 import { createElement } from 'react'
@@ -27,6 +27,13 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
     cleanup: async (tab: Tab, _workspace: Workspace) => {
       if (isAiHarnessState(tab.state) && tab.state.ptyId) {
         deps.terminal.kill(tab.state.connectionId ?? 'local', tab.state.ptyId)
+      }
+    },
+
+    onWorkspaceLoad: (tab: Tab, workspaceStore: WorkspaceStore) => {
+      const ptyId = (tab.state as AiHarnessState).ptyId
+      if (ptyId) {
+        workspaceStore.getState().getOrCreateAnalyzer(tab.id).getState().start(ptyId)
       }
     },
 

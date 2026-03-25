@@ -25,6 +25,8 @@ export const editorApplication: Application<EditorState> = {
     }
   },
 
+  onWorkspaceLoad: () => {},
+
   render: ({ tab, workspace }) => {
     return createElement(FileEditor, {
       key: tab.id,

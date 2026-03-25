@@ -8,6 +8,7 @@ const testApp: Application = {
   name: 'Terminal',
   icon: '>_',
   createInitialState: () => ({}),
+  onWorkspaceLoad: () => {},
   render: () => null,
   canClose: true,
   canHaveMultiple: true,

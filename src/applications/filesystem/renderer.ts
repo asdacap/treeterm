@@ -12,6 +12,8 @@ export const filesystemApplication: Application<FilesystemState> = {
     expandedDirs: []
   }),
 
+  onWorkspaceLoad: () => {},
+
   render: ({ tab, workspace }) => {
     return createElement(FilesystemBrowser, {
       key: tab.id,

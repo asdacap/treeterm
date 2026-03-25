@@ -944,7 +944,7 @@ export function createSessionStore(
       console.log('[Session] Restoring session', daemonSession.id, 'with', daemonSession.workspaces.length, 'workspaces')
 
       set({ isRestoring: true })
-      applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: true })
+      applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, deps.appRegistry, { restoreExisting: true })
       set({ isRestoring: false })
 
       console.log('[Session] Session restore complete, workspace count:', Object.keys(get().workspaces).length)
@@ -957,7 +957,7 @@ export function createSessionStore(
       })
 
       set({ isRestoring: true })
-      applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: false })
+      applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, deps.appRegistry, { restoreExisting: false })
 
       // Remove workspaces not present in daemon session (skip loading workspaces)
       const incomingPaths = new Set(daemonSession.workspaces.map(ws => ws.path))
@@ -995,6 +995,7 @@ function applySessionWorkspaces(
   store: StoreApi<SessionState>,
   daemonWorkspaces: Workspace[],
   createHandleForWorkspace: (ws: Workspace) => WorkspaceStore,
+  appRegistry: AppRegistryApi,
   options: { restoreExisting: boolean }
 ): void {
   const rootWorkspaces = daemonWorkspaces.filter(w => !w.parentId)
@@ -1008,12 +1009,12 @@ function applySessionWorkspaces(
     if (existing) {
       if (options.restoreExisting) {
         store.getState().setActiveWorkspace(existing.id)
-        restoreWorkspaceTabs(store, existing.id, daemonWorkspace)
+        restoreWorkspaceTabs(store, existing.id, daemonWorkspace, appRegistry)
       } else {
         updateWorkspaceFields(store, existing.id, daemonWorkspace)
       }
     } else {
-      reconstructWorkspace(store, daemonWorkspace, createHandleForWorkspace)
+      reconstructWorkspace(store, daemonWorkspace, createHandleForWorkspace, appRegistry)
     }
   }
 
@@ -1024,12 +1025,12 @@ function applySessionWorkspaces(
 
     if (existing) {
       if (options.restoreExisting) {
-        restoreWorkspaceTabs(store, existing.id, daemonWorkspace)
+        restoreWorkspaceTabs(store, existing.id, daemonWorkspace, appRegistry)
       } else {
         updateWorkspaceFields(store, existing.id, daemonWorkspace)
       }
     } else {
-      reconstructWorkspace(store, daemonWorkspace, createHandleForWorkspace)
+      reconstructWorkspace(store, daemonWorkspace, createHandleForWorkspace, appRegistry)
     }
   }
 }
@@ -1038,7 +1039,8 @@ function applySessionWorkspaces(
 function restoreWorkspaceTabs(
   store: StoreApi<SessionState>,
   workspaceId: string,
-  daemonWorkspace: Workspace
+  daemonWorkspace: Workspace,
+  appRegistry: AppRegistryApi
 ): void {
   const handle = store.getState().workspaceStores[workspaceId]
   if (!handle) return
@@ -1050,13 +1052,19 @@ function restoreWorkspaceTabs(
       activeTabId: daemonWorkspace.activeTabId || Object.keys(daemonWorkspace.appStates)[0] || null
     }
   })
+
+  for (const [tabId, appState] of Object.entries(daemonWorkspace.appStates)) {
+    const app = appRegistry.get(appState.applicationId)
+    if (app) app.onWorkspaceLoad({ ...appState, id: tabId }, handle)
+  }
 }
 
 // Helper: reconstruct workspace preserving daemon IDs
 function reconstructWorkspace(
   store: StoreApi<SessionState>,
   daemonWorkspace: Workspace,
-  createHandleForWorkspace: (ws: Workspace) => WorkspaceStore
+  createHandleForWorkspace: (ws: Workspace) => WorkspaceStore,
+  appRegistry: AppRegistryApi
 ): string {
   const id = daemonWorkspace.id
   const parentId = daemonWorkspace.parentId
@@ -1092,6 +1100,11 @@ function reconstructWorkspace(
       activeWorkspaceId: id
     }
   })
+
+  for (const [tabId, appState] of Object.entries(daemonWorkspace.appStates)) {
+    const app = appRegistry.get(appState.applicationId)
+    if (app) app.onWorkspaceLoad({ ...appState, id: tabId }, handle)
+  }
 
   console.log('[Session] Reconstructed workspace:', daemonWorkspace.name, 'parentId:', parentId)
   return id

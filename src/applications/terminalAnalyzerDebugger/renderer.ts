@@ -7,6 +7,7 @@ export const systemPromptDebuggerApplication: Application = {
   name: 'System Prompt Debugger',
   icon: '🔬',
   createInitialState: () => ({}),
+  onWorkspaceLoad: () => {},
   render: (props: ApplicationRenderProps) => createElement(SystemPromptDebugger, props),
   canClose: true,
   canHaveMultiple: false,

@@ -61,6 +61,7 @@ export interface Application<TState = unknown> {
   icon: string
   createInitialState: () => TState
   cleanup?: (tab: Tab, workspace: Workspace) => void | Promise<void>
+  onWorkspaceLoad: (tab: Tab, workspaceStore: WorkspaceStore) => void
   render: (props: ApplicationRenderProps) => ReactNode
   canClose: boolean
   canHaveMultiple: boolean

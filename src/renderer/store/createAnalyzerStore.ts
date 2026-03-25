@@ -343,6 +343,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
           for (const chunk of scrollback) {
             terminal!.write(chunk)
           }
+          dataVersion++ // trigger initial analysis from scrollback
         }
 
         // If already exited, don't start polling

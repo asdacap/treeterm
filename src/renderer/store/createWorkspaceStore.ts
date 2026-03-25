@@ -262,6 +262,9 @@ export function createWorkspaceStore(
       const appState = get().workspace.appStates[tabId]
       if (appState?.state && (appState.state as { ptyId?: string }).ptyId) {
         deps.syncToDaemon()
+        // Notify application of workspace load (e.g. start analyzer)
+        const app = deps.appRegistry.get(appState.applicationId)
+        if (app) app.onWorkspaceLoad({ ...appState, id: tabId }, store)
       }
     },
 

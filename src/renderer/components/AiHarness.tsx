@@ -80,13 +80,6 @@ export default function AiHarness({
 
   const { loading, error } = useTtyCreation(ptyId, cwd, sandbox, command, onCreated)
 
-  // Start analyzer when ptyId becomes available
-  const analyzerStartedRef = useRef(false)
-  if (ptyId && !analyzerStartedRef.current) {
-    analyzerStartedRef.current = true
-    analyzer.getState().start(ptyId)
-  }
-
   const handlePushToTalkTranscript = useCallback((text: string) => {
     if (ptyId) {
       const writer = sessionStore.getState().getWriter(ptyId)

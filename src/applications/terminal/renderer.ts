@@ -26,6 +26,8 @@ export function createTerminalApplication(deps: TerminalDeps): Application<Termi
       useActivityStateStore.getState().removeTabState(tab.id)
     },
 
+    onWorkspaceLoad: () => {},
+
     render: ({ tab, workspace, isVisible }) => {
       return createElement(Terminal, {
         key: tab.id,
@@ -62,6 +64,8 @@ export function createTerminalVariant(instance: TerminalInstance, deps: Terminal
       }
       useActivityStateStore.getState().removeTabState(tab.id)
     },
+
+    onWorkspaceLoad: () => {},
 
     render: ({ tab, workspace, isVisible }) => {
       return createElement(Terminal, {

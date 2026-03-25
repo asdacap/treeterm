@@ -64,6 +64,7 @@ function makeFakeApp(overrides: Partial<Application> = {}): Application {
     name: 'Terminal',
     icon: 'terminal',
     createInitialState: () => ({ ptyId: null }),
+    onWorkspaceLoad: () => {},
     canClose: true,
     canHaveMultiple: true,
     showInNewTabMenu: true,
