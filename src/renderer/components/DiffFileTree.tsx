@@ -77,6 +77,19 @@ function buildTree(files: (DiffFile | UncommittedFile)[]): TreeNode[] {
   return sort(collapsed)
 }
 
+export function getSortedFilePaths(files: (DiffFile | UncommittedFile)[]): string[] {
+  const tree = buildTree(files)
+  const paths: string[] = []
+  function walk(nodes: TreeNode[]) {
+    for (const node of nodes) {
+      if (node.file !== null) paths.push(node.path)
+      else walk(node.children)
+    }
+  }
+  walk(tree)
+  return paths
+}
+
 function getAllDirPaths(nodes: TreeNode[]): Set<string> {
   const paths = new Set<string>()
   function walk(node: TreeNode) {

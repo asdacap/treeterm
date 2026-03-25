@@ -5,7 +5,7 @@ import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
 import { getTabs } from '../types'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, WorkspaceStore } from '../types'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
-import { CommittedDiffFileTree, UncommittedDiffFileTree } from './DiffFileTree'
+import { CommittedDiffFileTree, UncommittedDiffFileTree, getSortedFilePaths } from './DiffFileTree'
 import { CommentInput } from './CommentInput'
 
 interface ReviewBrowserProps {
@@ -447,8 +447,8 @@ export default function ReviewBrowser({
   const hasConflicts = conflictInfo?.hasConflicts || false
 
   const fileList = viewMode === 'committed'
-    ? diff?.files.map(f => f.path) || []
-    : [...stagedFiles, ...unstagedFiles].map(f => f.path)
+    ? getSortedFilePaths(diff?.files || [])
+    : getSortedFilePaths([...stagedFiles, ...unstagedFiles])
 
   const currentFileIndex = selectedFile
     ? fileList.indexOf(selectedFile)
