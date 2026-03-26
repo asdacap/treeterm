@@ -139,7 +139,7 @@ export function createSessionStore(
       const loadStates = store.getState().workspaceLoadStates
       const daemonWorkspaces = Object.values(workspaces).filter(ws => !loadStates[ws.id]).map(({ createdAt, lastActivity, ...ws }) => ws)
 
-      console.log('[session] syncing to daemon:', daemonWorkspaces.length, 'workspaces')
+      console.log('[session] syncing to daemon:', daemonWorkspaces.length, 'workspaces', JSON.stringify(daemonWorkspaces))
 
       if (daemonWorkspaces.length === 0) {
         if (config.sessionId) {
@@ -926,10 +926,7 @@ export function createSessionStore(
     },
 
     handleExternalUpdate: async (daemonSession: Session) => {
-      console.log('[Session] External session update received', {
-        sessionId: daemonSession.id,
-        workspaces: daemonSession.workspaces.map(ws => ({ path: ws.path, metadata: ws.metadata })),
-      })
+      console.log('[Session] External session update received', JSON.stringify(daemonSession))
 
       set({ isRestoring: true })
       applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: false })

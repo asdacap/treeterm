@@ -14,30 +14,6 @@ import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
 import '@xterm/xterm/css/xterm.css'
 
-// ANSI sequences that manipulate scrollback or clear the screen
-const SCROLL_MANIPULATION_PATTERNS: { pattern: RegExp; name: string }[] = [
-  { pattern: /\x1b\[3J/g, name: 'Clear scrollback buffer (CSI 3J)' },
-  { pattern: /\x1b\[2J/g, name: 'Clear entire screen (CSI 2J)' },
-  { pattern: /\x1b\[0?J/g, name: 'Clear cursor to end of screen (CSI J / CSI 0J)' },
-  { pattern: /\x1b\[1J/g, name: 'Clear cursor to beginning of screen (CSI 1J)' },
-  { pattern: /\x1b\[\d+;\d+r/g, name: 'Set scroll region (CSI n;m r)' },
-  { pattern: /\x1b\[\d*S/g, name: 'Scroll up (CSI S)' },
-  { pattern: /\x1b\[\d*T/g, name: 'Scroll down (CSI T)' },
-]
-
-function detectScrollManipulation(data: string): { name: string; match: string }[] {
-  const matches: { name: string; match: string }[] = []
-  for (const { pattern, name } of SCROLL_MANIPULATION_PATTERNS) {
-    // Reset lastIndex since we reuse the regex
-    pattern.lastIndex = 0
-    let m: RegExpExecArray | null
-    while ((m = pattern.exec(data)) !== null) {
-      matches.push({ name, match: m[0] })
-    }
-  }
-  return matches
-}
-
 // Utility to format raw chars for console debugging
 function formatRawChars(str: string): string {
   let result = ''
@@ -327,31 +303,7 @@ export default function BaseTerminal({
           const buf = terminal!.buffer.active
           const wasAtBottom = buf.baseY - buf.viewportY <= 1
 
-          // Detect ANSI sequences that manipulate scrollback/screen
-          const scrollMatches = detectScrollManipulation(data)
-          if (scrollMatches.length > 0) {
-            const bufBefore = {
-              baseY: buf.baseY,
-              viewportY: buf.viewportY,
-              length: buf.length,
-            }
-            terminal!.write(dataToWrite)
-            const bufAfter = {
-              baseY: terminal!.buffer.active.baseY,
-              viewportY: terminal!.buffer.active.viewportY,
-              length: terminal!.buffer.active.length,
-            }
-            for (const { name, match } of scrollMatches) {
-              console.warn(`[SCROLL-MANIP] ${name}`, {
-                rawSequence: formatRawChars(match),
-                dataContext: formatRawChars(data.slice(0, 200)),
-                bufferBefore: bufBefore,
-                bufferAfter: bufAfter,
-              })
-            }
-          } else {
-            terminal!.write(dataToWrite)
-          }
+          terminal!.write(dataToWrite)
 
           // If was at bottom but write displaced viewport, snap back
           if (wasAtBottom && terminal!.buffer.active.baseY - terminal!.buffer.active.viewportY > 1) {
