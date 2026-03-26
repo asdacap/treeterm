@@ -188,6 +188,9 @@ export default function BaseTerminal({
         fontSize: 14,
         fontFamily: 'Menlo, Monaco, "Courier New", monospace',
         scrollback: 50000,
+        linkHandler: {
+          activate: (_event, uri) => window.open(uri, '_blank')
+        },
         theme: {
           background: config.themeBackground,
           foreground: '#d4d4d4',

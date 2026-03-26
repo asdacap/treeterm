@@ -148,7 +148,9 @@ function createWindow(initialSessionId?: string): BrowserWindow {
   })
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    if (url && url !== 'about:blank') {
+      shell.openExternal(url)
+    }
     return { action: 'deny' }
   })
 
