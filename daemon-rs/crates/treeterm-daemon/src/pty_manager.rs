@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -34,6 +34,20 @@ pub struct PtySession {
 pub struct PtyManager {
     sessions: Arc<Mutex<HashMap<String, PtySession>>>,
     counter: Arc<AtomicUsize>,
+}
+
+fn get_login_shell() -> String {
+    unsafe {
+        let pw = libc::getpwuid(libc::getuid());
+        if !pw.is_null() {
+            if let Ok(s) = CStr::from_ptr((*pw).pw_shell).to_str() {
+                if !s.is_empty() {
+                    return s.to_string();
+                }
+            }
+        }
+    }
+    std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
 }
 
 impl PtyManager {
@@ -79,7 +93,7 @@ impl PtyManager {
                 std::env::set_var("TERM", "xterm-256color");
                 let _ = std::env::set_current_dir(&cwd);
 
-                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+                let shell = get_login_shell();
                 let c_shell = CString::new(shell).unwrap();
                 let c_arg = CString::new("-l").unwrap();
                 libc::execvp(
