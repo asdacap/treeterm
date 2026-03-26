@@ -289,7 +289,9 @@ export default function BaseTerminal({
 
         // Restore scrollback buffer
         if (scrollback && scrollback.length > 0) {
-          console.log(`[${config.logPrefix} ${tabId}] restoring ${scrollback.length} scrollback chunks`)
+          const totalBytes = scrollback.reduce((sum, chunk) => sum + chunk.length, 0)
+          const totalLines = scrollback.reduce((sum, chunk) => sum + (chunk.match(/\n/g) || []).length, 0)
+          console.log(`[${config.logPrefix} ${tabId}] restoring scrollback: ${scrollback.length} chunks, ${totalLines} lines, ${totalBytes} bytes`)
           for (const chunk of scrollback) {
             terminal!.write(chunk)
           }
