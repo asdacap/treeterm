@@ -39,7 +39,6 @@ function createMockWorkspaceStoreStateData(overrides?: Partial<WorkspaceStoreSta
     lookupWorkspace: vi.fn(),
     remove: vi.fn(),
     removeKeepBranch: vi.fn(),
-    removeKeepWorktree: vi.fn(),
     removeKeepBoth: vi.fn(),
     initTab: vi.fn(),
     getTabRef: vi.fn().mockReturnValue(null),

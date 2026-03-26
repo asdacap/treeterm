@@ -21,7 +21,6 @@ export interface WorkspaceStoreDeps {
   syncToDaemon: () => void
   removeWorkspace: (id: string) => Promise<void>
   removeWorkspaceKeepBranch: (id: string) => Promise<void>
-  removeWorkspaceKeepWorktree: (id: string) => Promise<void>
   removeWorkspaceKeepBoth: (id: string) => Promise<void>
   mergeAndRemoveWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
   closeAndCleanWorkspace: (id: string) => Promise<{ success: boolean; error?: string }>
@@ -90,7 +89,6 @@ export interface WorkspaceStoreState {
   closeAndClean: () => Promise<{ success: boolean; error?: string }>
   remove: () => Promise<void>
   removeKeepBranch: () => Promise<void>
-  removeKeepWorktree: () => Promise<void>
   removeKeepBoth: () => Promise<void>
   lookupWorkspace: (id: string) => Workspace | undefined
 }
@@ -475,7 +473,6 @@ export function createWorkspaceStore(
     closeAndClean: () => deps.closeAndCleanWorkspace(id),
     remove: () => deps.removeWorkspace(id),
     removeKeepBranch: () => deps.removeWorkspaceKeepBranch(id),
-    removeKeepWorktree: () => deps.removeWorkspaceKeepWorktree(id),
     removeKeepBoth: () => deps.removeWorkspaceKeepBoth(id),
     lookupWorkspace: (otherId: string) => deps.lookupWorkspace(otherId),
   }))

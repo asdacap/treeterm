@@ -41,7 +41,6 @@ const mockWorkspaceStoreStateData = {
   lookupWorkspace: vi.fn(),
   remove: vi.fn(),
   removeKeepBranch: vi.fn(),
-  removeKeepWorktree: vi.fn(),
   removeKeepBoth: vi.fn(),
   getGitApi: vi.fn(),
   getFilesystemApi: vi.fn(),
