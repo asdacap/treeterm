@@ -207,6 +207,7 @@ export function createWorkspaceStore(
       },
       getGitBranch: () => get().workspace.gitBranch,
       getBranchIsUserDefined: () => get().workspace.metadata?.branchIsUserDefined === 'true',
+      getParentId: () => get().workspace.parentId,
       refreshGitInfo: () => deps.refreshGitInfo(id),
     }),
 

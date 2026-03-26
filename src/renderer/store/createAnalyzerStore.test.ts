@@ -63,6 +63,7 @@ function makeDeps(overrides?: Partial<AnalyzerDeps>): AnalyzerDeps {
     renameBranch: vi.fn().mockResolvedValue(undefined),
     getGitBranch: vi.fn().mockReturnValue('old-branch'),
     getBranchIsUserDefined: vi.fn().mockReturnValue(false),
+    getParentId: vi.fn().mockReturnValue('parent-1'),
     refreshGitInfo: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
@@ -733,6 +734,34 @@ describe('createAnalyzerStore', () => {
       deps = makeDeps({
         openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }),
         getBranchIsUserDefined: vi.fn().mockReturnValue(true),
+      })
+      const store = createAnalyzerStore('tab-1', deps)
+
+      store.getState().start('pty-1')
+      await vi.waitFor(() => {
+        expect(store.getState().getBufferText()).not.toBeNull()
+      })
+
+      store.getState().onUserInput('hello\r')
+
+      await vi.waitFor(() => {
+        expect(deps.llm.generateTitle).toHaveBeenCalled()
+      })
+
+      await vi.waitFor(() => {
+        expect(deps.updateMetadata).toHaveBeenCalledWith('displayName', 'Test Title')
+      })
+
+      expect(deps.renameBranch).not.toHaveBeenCalled()
+
+      store.getState().stop()
+    })
+
+    it('skips branch rename when workspace has no parent', async () => {
+      const mock = makeMockTty()
+      deps = makeDeps({
+        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }),
+        getParentId: vi.fn().mockReturnValue(null),
       })
       const store = createAnalyzerStore('tab-1', deps)
 
