@@ -188,15 +188,6 @@ export class IpcServer {
     )
   }
 
-  onGitGetChildWorktrees(
-    handler: (
-      ...args: IpcRequests['gitGetChildWorktrees']['params']
-    ) => IpcRequests['gitGetChildWorktrees']['result'] | Promise<IpcRequests['gitGetChildWorktrees']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.gitGetChildWorktrees, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['gitGetChildWorktrees']['params']))
-    )
-  }
 
   onGitListLocalBranches(
     handler: (

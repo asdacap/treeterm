@@ -157,11 +157,6 @@ export class IpcClient {
     return ipcRenderer.invoke(CHANNELS.gitListWorktrees, ...args)
   }
 
-  gitGetChildWorktrees(
-    ...args: IpcRequests['gitGetChildWorktrees']['params']
-  ): Promise<IpcRequests['gitGetChildWorktrees']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitGetChildWorktrees, ...args)
-  }
 
   gitListLocalBranches(
     ...args: IpcRequests['gitListLocalBranches']['params']
