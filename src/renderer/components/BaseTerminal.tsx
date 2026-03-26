@@ -216,14 +216,13 @@ export default function BaseTerminal({
       terminalRef.current = terminal
 
       // Populate triggerResize ref — shrinks cols by 1 then restores to flush buffered PTY output
+      // Only sends to daemon; xterm.js resize happens when daemon echoes back
       if (config.triggerResizeRef) {
         config.triggerResizeRef.current = () => {
           if (!terminalRef.current || !ttyRef.current) return
           const { cols, rows } = terminalRef.current
           const ptyResize = ttyRef.current.getState().resize
-          terminalRef.current.resize(cols - 1, rows)
           ptyResize(cols - 1, rows)
-          terminalRef.current.resize(cols, rows)
           ptyResize(cols, rows)
         }
       }
@@ -334,6 +333,23 @@ export default function BaseTerminal({
                 } else {
                   removeTab(tabId)
                 }
+              }
+              break
+            }
+            case 'resize': {
+              const buf = terminal!.buffer.active
+              const prevViewportY = buf.viewportY
+              const prevBaseY = buf.baseY
+              const wasAtBottom = prevBaseY - prevViewportY <= 3
+              const scrollRatio = prevBaseY > 0 ? prevViewportY / prevBaseY : 0
+
+              terminal!.resize(event.cols, event.rows)
+
+              if (wasAtBottom) {
+                terminal!.scrollToBottom()
+              } else {
+                const newScrollLine = Math.round(terminal!.buffer.active.baseY * scrollRatio)
+                terminal!.scrollToLine(newScrollLine)
               }
               break
             }
