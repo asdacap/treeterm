@@ -134,6 +134,14 @@ function createWindow(initialSessionId?: string): BrowserWindow {
     }
   })
 
+  // Reset keyboard modifier state on window focus to prevent stuck keys
+  // (Chromium can lose keyUp events when window is unfocused, corrupting input state)
+  window.on('focus', () => {
+    for (const keyCode of ['Shift', 'Control', 'Alt', 'Meta'] as const) {
+      window.webContents.sendInputEvent({ type: 'keyUp', keyCode })
+    }
+  })
+
   // Open external links in the default browser instead of within Electron
   window.webContents.on('will-navigate', (event, url) => {
     const parsedUrl = new URL(url)
