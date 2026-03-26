@@ -1,48 +1,29 @@
 import { contextBridge } from 'electron'
 import type { SandboxConfig, Session, SessionInfo, WorkspaceInput, Settings, SSHConnectionConfig, ConnectionInfo, ReasoningEffort } from '../shared/types'
+import type { PtyEvent } from '../shared/ipc-types'
 import { IpcClient } from './ipc-client'
 
-type DataCallback = (data: string) => void
-const dataListeners = new Map<string, DataCallback[]>()
-const dataBuffer = new Map<string, string[]>()
-
-type ExitCallback = (exitCode: number) => void
-const exitListeners = new Map<string, ExitCallback[]>()
-
-type ResizeEventCallback = (cols: number, rows: number) => void
-const resizeEventListeners = new Map<string, ResizeEventCallback[]>()
+type PtyEventCallback = (event: PtyEvent) => void
+const ptyEventListeners = new Map<string, PtyEventCallback[]>()
+const ptyEventBuffer = new Map<string, PtyEvent[]>()
 
 // Initialize IPC client
 const client = new IpcClient()
 
-// Listen for pty data from main process
-client.onPtyData((id, data) => {
-  const listeners = dataListeners.get(id)
+// Listen for pty events from main process (unified stream)
+client.onPtyEvent((handle, event) => {
+  const listeners = ptyEventListeners.get(handle)
   if (listeners) {
-    listeners.forEach((cb) => cb(data))
+    listeners.forEach((cb) => cb(event))
   } else {
-    // Buffer data until a listener registers (covers the gap between
+    // Buffer events until a listener registers (covers the gap between
     // main forwarding live data and renderer subscribing after resize debounce)
-    if (!dataBuffer.has(id)) dataBuffer.set(id, [])
-    dataBuffer.get(id)!.push(data)
+    if (!ptyEventBuffer.has(handle)) ptyEventBuffer.set(handle, [])
+    ptyEventBuffer.get(handle)!.push(event)
   }
-})
-
-client.onPtyExit((id, exitCode) => {
-  const listeners = exitListeners.get(id)
-  if (listeners) {
-    listeners.forEach((cb) => cb(exitCode))
-  }
-  dataListeners.delete(id)
-  dataBuffer.delete(id)
-  exitListeners.delete(id)
-  resizeEventListeners.delete(id)
-})
-
-client.onPtyResizeEvent((id, cols, rows) => {
-  const listeners = resizeEventListeners.get(id)
-  if (listeners) {
-    listeners.forEach((cb) => cb(cols, rows))
+  if (event.type === 'exit') {
+    ptyEventListeners.delete(handle)
+    ptyEventBuffer.delete(handle)
   }
 })
 
@@ -197,56 +178,23 @@ contextBridge.exposeInMainWorld('electron', {
     isAlive: (connectionId: string, id: string): Promise<boolean> => {
       return client.ptyIsAlive(connectionId, id)
     },
-    onData: (id: string, callback: DataCallback): (() => void) => {
-      if (!dataListeners.has(id)) {
-        dataListeners.set(id, [])
+    onEvent: (id: string, callback: PtyEventCallback): (() => void) => {
+      if (!ptyEventListeners.has(id)) {
+        ptyEventListeners.set(id, [])
       }
-      dataListeners.get(id)!.push(callback)
+      ptyEventListeners.get(id)!.push(callback)
 
-      // Flush any data that arrived before the listener registered
-      const buffered = dataBuffer.get(id)
+      // Flush any events that arrived before the listener registered
+      const buffered = ptyEventBuffer.get(id)
       if (buffered) {
-        dataBuffer.delete(id)
-        for (const data of buffered) {
-          callback(data)
+        ptyEventBuffer.delete(id)
+        for (const event of buffered) {
+          callback(event)
         }
       }
 
-      // Return unsubscribe function
       return () => {
-        const listeners = dataListeners.get(id)
-        if (listeners) {
-          const index = listeners.indexOf(callback)
-          if (index > -1) {
-            listeners.splice(index, 1)
-          }
-        }
-      }
-    },
-    onExit: (id: string, callback: ExitCallback): (() => void) => {
-      if (!exitListeners.has(id)) {
-        exitListeners.set(id, [])
-      }
-      exitListeners.get(id)!.push(callback)
-
-      // Return unsubscribe function
-      return () => {
-        const listeners = exitListeners.get(id)
-        if (listeners) {
-          const index = listeners.indexOf(callback)
-          if (index > -1) {
-            listeners.splice(index, 1)
-          }
-        }
-      }
-    },
-    onResize: (id: string, callback: ResizeEventCallback): (() => void) => {
-      if (!resizeEventListeners.has(id)) {
-        resizeEventListeners.set(id, [])
-      }
-      resizeEventListeners.get(id)!.push(callback)
-      return () => {
-        const listeners = resizeEventListeners.get(id)
+        const listeners = ptyEventListeners.get(id)
         if (listeners) {
           const index = listeners.indexOf(callback)
           if (index > -1) listeners.splice(index, 1)

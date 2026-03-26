@@ -94,9 +94,7 @@ const CHANNELS = {
   llmChatCancel: 'llm:chat:cancel',
 
   // Event channels
-  ptyData: 'pty:data',
-  ptyExit: 'pty:exit',
-  ptyResizeEvent: 'pty:resize-event',
+  ptyEvent: 'pty:event',
   settingsOpen: 'settings:open',
   appConfirmClose: 'app:confirm-close',
   appReady: 'app:ready',
@@ -817,12 +815,8 @@ export class IpcServer {
 
   // ==================== Event Emitters (main → renderer) ====================
 
-  ptyData(...args: IpcEvents['ptyData']['params']): void {
-    this.window?.webContents.send(CHANNELS.ptyData, ...args)
-  }
-
-  ptyExit(...args: IpcEvents['ptyExit']['params']): void {
-    this.window?.webContents.send(CHANNELS.ptyExit, ...args)
+  ptyEvent(...args: IpcEvents['ptyEvent']['params']): void {
+    this.window?.webContents.send(CHANNELS.ptyEvent, ...args)
   }
 
   settingsOpen(): void {

@@ -289,56 +289,56 @@ export default function BaseTerminal({
         const ttyState = tty.getState()
         const connectedAt = Date.now()
 
-        const unsubscribeData = ttyState.onData((data) => {
-          // Track data version for terminal analyzer
-          dataVersionRef.current++
-          // Dismiss overlay once live data starts flowing
-          setOverlay(null)
-          // Strip CSI 3J (clear scrollback) if configured
-          const dataToWrite = config.stripScrollbackClear
-            ? data.replace(/\x1b\[3J/g, '')
-            : data
+        unsubscribe = ttyState.onEvent((event) => {
+          switch (event.type) {
+            case 'data': {
+              // Track data version for terminal analyzer
+              dataVersionRef.current++
+              // Dismiss overlay once live data starts flowing
+              setOverlay(null)
+              // Strip CSI 3J (clear scrollback) if configured
+              const dataToWrite = config.stripScrollbackClear
+                ? event.data.replace(/\x1b\[3J/g, '')
+                : event.data
 
-          // Pin-to-bottom: if user was at bottom before write, stay at bottom after
-          const buf = terminal!.buffer.active
-          const wasAtBottom = buf.baseY - buf.viewportY <= 1
+              // Pin-to-bottom: if user was at bottom before write, stay at bottom after
+              const buf = terminal!.buffer.active
+              const wasAtBottom = buf.baseY - buf.viewportY <= 1
 
-          terminal!.write(dataToWrite)
+              terminal!.write(dataToWrite)
 
-          // If was at bottom but write displaced viewport, snap back
-          if (wasAtBottom && terminal!.buffer.active.baseY - terminal!.buffer.active.viewportY > 1) {
-            terminal!.scrollToBottom()
-          }
+              // If was at bottom but write displaced viewport, snap back
+              if (wasAtBottom && terminal!.buffer.active.baseY - terminal!.buffer.active.viewportY > 1) {
+                terminal!.scrollToBottom()
+              }
 
-          // Process data for activity state detection
-          if (detector) detector.processData(data)
-          // Log raw characters to console for debugging
-          if (settings.terminal.showRawChars) {
-            rawChars = (rawChars + data).slice(-50)
-            console.log('[RAW]', formatRawChars(rawChars))
-          }
-        })
-
-        const unsubscribeExit = ttyState.onExit((exitCode) => {
-          console.log(`[${config.logPrefix} ${tabId}] PTY exited with code:`, exitCode)
-          if (!cancelled) {
-            const currentTab = wsData?.appStates[tabId]
-            const keepOnExit = (currentTab?.state as BaseTerminalState | undefined)?.keepOnExit
-            const immediateFailure = exitCode !== 0 && (Date.now() - connectedAt) < 1000
-            if (immediateFailure) {
-              setOverlay({ message: `Process exited immediately with code ${exitCode}`, type: 'error' })
-            } else if (keepOnExit) {
-              terminal!.write(`\r\n\x1b[2mProcess exited with exit code ${exitCode}\x1b[0m\r\n`)
-            } else {
-              removeTab(tabId)
+              // Process data for activity state detection
+              if (detector) detector.processData(event.data)
+              // Log raw characters to console for debugging
+              if (settings.terminal.showRawChars) {
+                rawChars = (rawChars + event.data).slice(-50)
+                console.log('[RAW]', formatRawChars(rawChars))
+              }
+              break
+            }
+            case 'exit': {
+              console.log(`[${config.logPrefix} ${tabId}] PTY exited with code:`, event.exitCode)
+              if (!cancelled) {
+                const currentTab = wsData?.appStates[tabId]
+                const keepOnExit = (currentTab?.state as BaseTerminalState | undefined)?.keepOnExit
+                const immediateFailure = event.exitCode !== 0 && (Date.now() - connectedAt) < 1000
+                if (immediateFailure) {
+                  setOverlay({ message: `Process exited immediately with code ${event.exitCode}`, type: 'error' })
+                } else if (keepOnExit) {
+                  terminal!.write(`\r\n\x1b[2mProcess exited with exit code ${event.exitCode}\x1b[0m\r\n`)
+                } else {
+                  removeTab(tabId)
+                }
+              }
+              break
             }
           }
         })
-
-        unsubscribe = () => {
-          unsubscribeData()
-          unsubscribeExit()
-        }
 
         // Forward terminal input to PTY
         inputDisposable = terminal!.onData((data) => {

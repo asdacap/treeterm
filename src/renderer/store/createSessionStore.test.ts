@@ -65,9 +65,7 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       resize: vi.fn(),
       kill: vi.fn(),
       isAlive: vi.fn().mockResolvedValue(true),
-      onData: vi.fn().mockReturnValue(() => {}),
-      onExit: vi.fn().mockReturnValue(() => {}),
-      onResize: vi.fn().mockReturnValue(() => {}),
+      onEvent: vi.fn().mockReturnValue(() => {}),
       onActiveProcessesOpen: vi.fn().mockReturnValue(() => {}),
     },
     getSettings: vi.fn().mockReturnValue({

@@ -1,5 +1,6 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
+import type { PtyEvent } from '../../shared/ipc-types'
 
 /** Subset of TerminalApi needed by TtyStore (without connectionId params — bound by session store) */
 export interface TtyTerminalDeps {
@@ -7,9 +8,7 @@ export interface TtyTerminalDeps {
   resize: (handle: string, cols: number, rows: number) => void
   kill: (sessionId: string) => void
   isAlive: (id: string) => Promise<boolean>
-  onData: (handle: string, callback: (data: string) => void) => () => void
-  onExit: (handle: string, callback: (exitCode: number) => void) => () => void
-  onResize: (handle: string, callback: (cols: number, rows: number) => void) => () => void
+  onEvent: (handle: string, callback: (event: PtyEvent) => void) => () => void
 }
 
 export interface TtyState {
@@ -18,9 +17,7 @@ export interface TtyState {
   resize(cols: number, rows: number): void
   kill(): void
   isAlive(): Promise<boolean>
-  onData(cb: (data: string) => void): () => void
-  onExit(cb: (exitCode: number) => void): () => void
-  onResize(cb: (cols: number, rows: number) => void): () => void
+  onEvent(cb: (event: PtyEvent) => void): () => void
 }
 
 export type Tty = StoreApi<TtyState>
@@ -32,9 +29,7 @@ export function createTtyStore(ptyId: string, handle: string, terminal: TtyTermi
     resize: (cols: number, rows: number) => terminal.resize(handle, cols, rows),
     kill: () => terminal.kill(ptyId),
     isAlive: () => terminal.isAlive(ptyId),
-    onData: (cb: (data: string) => void) => terminal.onData(handle, cb),
-    onExit: (cb: (exitCode: number) => void) => terminal.onExit(handle, cb),
-    onResize: (cb: (cols: number, rows: number) => void) => terminal.onResize(handle, cb),
+    onEvent: (cb: (event: PtyEvent) => void) => terminal.onEvent(handle, cb),
   }))
 }
 

@@ -479,9 +479,7 @@ export function createSessionStore(
     resize: deps.terminal.resize,
     kill: (sessionId: string) => deps.terminal.kill(connectionId, sessionId),
     isAlive: (id: string) => deps.terminal.isAlive(connectionId, id),
-    onData: deps.terminal.onData,
-    onExit: deps.terminal.onExit,
-    onResize: deps.terminal.onResize,
+    onEvent: deps.terminal.onEvent,
   }
 
   const store = createStore<SessionState>()((set, get) => ({

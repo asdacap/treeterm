@@ -267,13 +267,9 @@ ipcMain.handle('pty:create', async (event, connectionId: string, cwd: string, sa
     const ptyStream = client.openPtyStream(sessionId)
     ptyStreams.set(ptyStream.handle, ptyStream)
 
-    ptyStream.onData(data => event.sender.send('pty:data', ptyStream.handle, data))
-    ptyStream.onExit(exitCode => {
-      event.sender.send('pty:exit', ptyStream.handle, exitCode)
-      ptyStreams.delete(ptyStream.handle)
-    })
-    ptyStream.onResize((cols, rows) => {
-      event.sender.send('pty:resize-event', ptyStream.handle, cols, rows)
+    ptyStream.onEvent((evt) => {
+      event.sender.send('pty:event', ptyStream.handle, evt)
+      if (evt.type === 'exit') ptyStreams.delete(ptyStream.handle)
     })
 
     return { sessionId, handle: ptyStream.handle }
@@ -296,13 +292,9 @@ ipcMain.handle('pty:attach', async (_event, connectionId: string, sessionId: str
 
     const { scrollback, exitCode } = await ptyStream.collectScrollback()
 
-    ptyStream.onData(data => _event.sender.send('pty:data', ptyStream.handle, data))
-    ptyStream.onExit(exitCode => {
-      _event.sender.send('pty:exit', ptyStream.handle, exitCode)
-      ptyStreams.delete(ptyStream.handle)
-    })
-    ptyStream.onResize((cols, rows) => {
-      _event.sender.send('pty:resize-event', ptyStream.handle, cols, rows)
+    ptyStream.onEvent((evt) => {
+      _event.sender.send('pty:event', ptyStream.handle, evt)
+      if (evt.type === 'exit') ptyStreams.delete(ptyStream.handle)
     })
 
     return { success: true, handle: ptyStream.handle, scrollback, exitCode }

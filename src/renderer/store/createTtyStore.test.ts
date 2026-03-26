@@ -7,9 +7,7 @@ function makeMockTerminalDeps(): TtyTerminalDeps {
     resize: vi.fn(),
     kill: vi.fn(),
     isAlive: vi.fn().mockResolvedValue(true),
-    onData: vi.fn().mockReturnValue(() => {}),
-    onExit: vi.fn().mockReturnValue(() => {}),
-    onResize: vi.fn().mockReturnValue(() => {}),
+    onEvent: vi.fn().mockReturnValue(() => {}),
   }
 }
 
@@ -49,19 +47,11 @@ describe('createTtyStore', () => {
     expect(terminal.isAlive).toHaveBeenCalledWith('pty-1')
   })
 
-  it('onData delegates to terminal.onData with handle', () => {
+  it('onEvent delegates to terminal.onEvent with handle', () => {
     const terminal = makeMockTerminalDeps()
     const tty = createTtyStore('pty-1', 'handle-1', terminal)
     const cb = vi.fn()
-    tty.getState().onData(cb)
-    expect(terminal.onData).toHaveBeenCalledWith('handle-1', cb)
-  })
-
-  it('onExit delegates to terminal.onExit with handle', () => {
-    const terminal = makeMockTerminalDeps()
-    const tty = createTtyStore('pty-1', 'handle-1', terminal)
-    const cb = vi.fn()
-    tty.getState().onExit(cb)
-    expect(terminal.onExit).toHaveBeenCalledWith('handle-1', cb)
+    tty.getState().onEvent(cb)
+    expect(terminal.onEvent).toHaveBeenCalledWith('handle-1', cb)
   })
 })

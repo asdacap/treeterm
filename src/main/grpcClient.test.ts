@@ -258,10 +258,10 @@ describe('GrpcDaemonClient', () => {
 
       const ptyStream = client.openPtyStream('pty-1')
       const cb = vi.fn()
-      ptyStream.onResize(cb)
+      ptyStream.onEvent(cb)
 
       dataHandlers[0]?.({ resize: { cols: 120, rows: 40 } })
-      expect(cb).toHaveBeenCalledWith(120, 40)
+      expect(cb).toHaveBeenCalledWith({ type: 'resize', cols: 120, rows: 40 })
     })
 
     it('killPtySession resolves on success', async () => {
@@ -302,7 +302,7 @@ describe('GrpcDaemonClient', () => {
       unsub()
     })
 
-    it('PtyStream.onData receives data from stream', () => {
+    it('PtyStream.onEvent receives data from stream', () => {
       const mockStream = makeMockSessionStream()
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
 
@@ -314,14 +314,14 @@ describe('GrpcDaemonClient', () => {
 
       const ptyStream = client.openPtyStream('pty-1')
       const cb = vi.fn()
-      ptyStream.onData(cb)
+      ptyStream.onEvent(cb)
 
       // Simulate stream data event
       dataHandlers[0]?.({ data: { data: Buffer.from('hello') } })
-      expect(cb).toHaveBeenCalledWith('hello')
+      expect(cb).toHaveBeenCalledWith({ type: 'data', data: 'hello' })
     })
 
-    it('PtyStream.onExit receives exit from stream', () => {
+    it('PtyStream.onEvent receives exit from stream', () => {
       const mockStream = makeMockSessionStream()
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
 
@@ -333,11 +333,11 @@ describe('GrpcDaemonClient', () => {
 
       const ptyStream = client.openPtyStream('pty-1')
       const cb = vi.fn()
-      ptyStream.onExit(cb)
+      ptyStream.onEvent(cb)
 
       // Simulate stream exit event
       dataHandlers[0]?.({ exit: { exitCode: 0, signal: undefined } })
-      expect(cb).toHaveBeenCalledWith(0, undefined)
+      expect(cb).toHaveBeenCalledWith({ type: 'exit', exitCode: 0, signal: undefined })
     })
   })
 

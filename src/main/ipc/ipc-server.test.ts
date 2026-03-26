@@ -201,22 +201,22 @@ describe('IpcServer', () => {
   })
 
   describe('event emitters (main → renderer)', () => {
-    it('ptyData sends to window webContents with correct channel and args', () => {
+    it('ptyEvent sends to window webContents with correct channel and args', () => {
       const mockSend = vi.fn()
       const mockWindow = { webContents: { send: mockSend } } as any
       server.setWindow(mockWindow)
 
-      server.ptyData('pty-1', 'hello-data')
-      expect(mockSend).toHaveBeenCalledWith('pty:data', 'pty-1', 'hello-data')
+      server.ptyEvent('pty-1', { type: 'data', data: 'hello-data' })
+      expect(mockSend).toHaveBeenCalledWith('pty:event', 'pty-1', { type: 'data', data: 'hello-data' })
     })
 
-    it('ptyExit sends to window webContents with correct channel and args', () => {
+    it('ptyEvent sends exit to window webContents with correct channel and args', () => {
       const mockSend = vi.fn()
       const mockWindow = { webContents: { send: mockSend } } as any
       server.setWindow(mockWindow)
 
-      server.ptyExit('pty-1', 0)
-      expect(mockSend).toHaveBeenCalledWith('pty:exit', 'pty-1', 0)
+      server.ptyEvent('pty-1', { type: 'exit', exitCode: 0 })
+      expect(mockSend).toHaveBeenCalledWith('pty:event', 'pty-1', { type: 'exit', exitCode: 0 })
     })
 
     it('settingsOpen sends to window webContents with correct channel', () => {
@@ -337,19 +337,19 @@ describe('IpcServer', () => {
       const mockWindow = { webContents: { send: mockSend } } as any
       server.setWindow(mockWindow)
 
-      server.ptyData('pty-1', 'data')
+      server.ptyEvent('pty-1', { type: 'data', data: 'data' })
       expect(mockSend).toHaveBeenCalled()
     })
 
     it('null window does not throw on emit', () => {
       server.setWindow(null)
-      expect(() => server.ptyData('pty-1', 'data')).not.toThrow()
+      expect(() => server.ptyEvent('pty-1', { type: 'data', data: 'data' })).not.toThrow()
       expect(() => server.settingsOpen()).not.toThrow()
       expect(() => server.daemonDisconnected()).not.toThrow()
     })
 
     it('no window set (default) does not throw on emit', () => {
-      expect(() => server.ptyData('pty-1', 'data')).not.toThrow()
+      expect(() => server.ptyEvent('pty-1', { type: 'data', data: 'data' })).not.toThrow()
     })
   })
 })

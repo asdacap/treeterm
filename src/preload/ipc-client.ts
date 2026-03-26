@@ -94,9 +94,7 @@ const CHANNELS = {
   llmChatCancel: 'llm:chat:cancel',
 
   // Event channels
-  ptyData: 'pty:data',
-  ptyExit: 'pty:exit',
-  ptyResizeEvent: 'pty:resize-event',
+  ptyEvent: 'pty:event',
   settingsOpen: 'settings:open',
   appConfirmClose: 'app:confirm-close',
   appReady: 'app:ready',
@@ -522,25 +520,11 @@ export class IpcClient {
 
   // ==================== Event Listeners (on pattern, returns unsubscribe function) ====================
 
-  onPtyData(callback: (...args: IpcEvents['ptyData']['params']) => void): () => void {
+  onPtyEvent(callback: (...args: IpcEvents['ptyEvent']['params']) => void): () => void {
     const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      callback(...(args as IpcEvents['ptyData']['params']))
-    ipcRenderer.on(CHANNELS.ptyData, handler)
-    return () => ipcRenderer.removeListener(CHANNELS.ptyData, handler)
-  }
-
-  onPtyExit(callback: (...args: IpcEvents['ptyExit']['params']) => void): () => void {
-    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      callback(...(args as IpcEvents['ptyExit']['params']))
-    ipcRenderer.on(CHANNELS.ptyExit, handler)
-    return () => ipcRenderer.removeListener(CHANNELS.ptyExit, handler)
-  }
-
-  onPtyResizeEvent(callback: (...args: IpcEvents['ptyResizeEvent']['params']) => void): () => void {
-    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      callback(...(args as IpcEvents['ptyResizeEvent']['params']))
-    ipcRenderer.on(CHANNELS.ptyResizeEvent, handler)
-    return () => ipcRenderer.removeListener(CHANNELS.ptyResizeEvent, handler)
+      callback(...(args as IpcEvents['ptyEvent']['params']))
+    ipcRenderer.on(CHANNELS.ptyEvent, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.ptyEvent, handler)
   }
 
   onSettingsOpen(callback: () => void): () => void {

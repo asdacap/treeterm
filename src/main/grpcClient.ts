@@ -28,6 +28,7 @@ import {
   type FileEntry
 } from '../generated/treeterm'
 import { getDefaultSocketPath } from './socketPath'
+import type { PtyEvent } from '../shared/ipc-types'
 import type {
   SandboxConfig,
   SessionInfo,
@@ -56,9 +57,7 @@ export class PtyStream {
   readonly handle: string
   readonly sessionId: string
   private stream: grpc.ClientDuplexStream<PtyInput, PtyOutput>
-  private onDataCb: ((data: string) => void) | null = null
-  private onExitCb: ((exitCode: number, signal?: number) => void) | null = null
-  private onResizeCb: ((cols: number, rows: number) => void) | null = null
+  private onEventCb: ((event: PtyEvent) => void) | null = null
   private closed: boolean = false
 
   constructor(client: TreeTermDaemonClient, sessionId: string) {
@@ -70,13 +69,11 @@ export class PtyStream {
 
     this.stream.on('data', (output: PtyOutput) => {
       if (output.data) {
-        const dataStr = output.data.data.toString('utf-8')
-        this.onDataCb?.(dataStr)
+        this.onEventCb?.({ type: 'data', data: output.data.data.toString('utf-8') })
       } else if (output.exit) {
-        const { exitCode, signal } = output.exit
-        this.onExitCb?.(exitCode, signal)
+        this.onEventCb?.({ type: 'exit', exitCode: output.exit.exitCode, signal: output.exit.signal })
       } else if (output.resize) {
-        this.onResizeCb?.(output.resize.cols, output.resize.rows)
+        this.onEventCb?.({ type: 'resize', cols: output.resize.cols, rows: output.resize.rows })
       }
     })
 
@@ -89,16 +86,8 @@ export class PtyStream {
     })
   }
 
-  onData(cb: (data: string) => void): void {
-    this.onDataCb = cb
-  }
-
-  onExit(cb: (exitCode: number, signal?: number) => void): void {
-    this.onExitCb = cb
-  }
-
-  onResize(cb: (cols: number, rows: number) => void): void {
-    this.onResizeCb = cb
+  onEvent(cb: (event: PtyEvent) => void): void {
+    this.onEventCb = cb
   }
 
   write(data: string): void {

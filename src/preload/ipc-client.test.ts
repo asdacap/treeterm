@@ -158,41 +158,27 @@ describe('IpcClient', () => {
   })
 
   describe('event listener pattern (on methods)', () => {
-    it('onPtyData registers listener on correct channel', () => {
+    it('onPtyEvent registers listener on correct channel', () => {
       const callback = vi.fn()
-      client.onPtyData(callback)
-      expect(mockOn).toHaveBeenCalledWith('pty:data', expect.any(Function))
+      client.onPtyEvent(callback)
+      expect(mockOn).toHaveBeenCalledWith('pty:event', expect.any(Function))
     })
 
-    it('onPtyData callback strips IpcRendererEvent arg', () => {
+    it('onPtyEvent callback strips IpcRendererEvent arg', () => {
       const callback = vi.fn()
-      client.onPtyData(callback)
+      client.onPtyEvent(callback)
       const registeredHandler = mockOn.mock.calls[0][1]
       const fakeEvent = {} // IpcRendererEvent
-      registeredHandler(fakeEvent, 'pty-1', 'data-chunk')
-      expect(callback).toHaveBeenCalledWith('pty-1', 'data-chunk')
+      registeredHandler(fakeEvent, 'pty-1', { type: 'data', data: 'data-chunk' })
+      expect(callback).toHaveBeenCalledWith('pty-1', { type: 'data', data: 'data-chunk' })
     })
 
-    it('onPtyData unsubscribe calls removeListener', () => {
+    it('onPtyEvent unsubscribe calls removeListener', () => {
       const callback = vi.fn()
-      const unsubscribe = client.onPtyData(callback)
+      const unsubscribe = client.onPtyEvent(callback)
       const registeredHandler = mockOn.mock.calls[0][1]
       unsubscribe()
-      expect(mockRemoveListener).toHaveBeenCalledWith('pty:data', registeredHandler)
-    })
-
-    it('onPtyExit registers listener on correct channel', () => {
-      const callback = vi.fn()
-      client.onPtyExit(callback)
-      expect(mockOn).toHaveBeenCalledWith('pty:exit', expect.any(Function))
-    })
-
-    it('onPtyExit callback strips IpcRendererEvent arg', () => {
-      const callback = vi.fn()
-      client.onPtyExit(callback)
-      const registeredHandler = mockOn.mock.calls[0][1]
-      registeredHandler({}, 'pty-1', 0)
-      expect(callback).toHaveBeenCalledWith('pty-1', 0)
+      expect(mockRemoveListener).toHaveBeenCalledWith('pty:event', registeredHandler)
     })
 
     it('onSessionSync registers and forwards correctly', () => {

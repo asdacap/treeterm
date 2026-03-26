@@ -5,10 +5,10 @@ import type { Settings } from '../types'
 import type { TtyState } from './createTtyStore'
 import { createStore } from 'zustand/vanilla'
 
-/** Creates a mock Tty with controllable onData/onExit callbacks */
+/** Creates a mock Tty with controllable onEvent callback */
 function makeMockTty() {
-  let dataCallback: ((data: string) => void) | null = null
-  let exitCallback: ((exitCode: number) => void) | null = null
+  type PtyEvent = import('../../shared/ipc-types').PtyEvent
+  let eventCallback: ((event: PtyEvent) => void) | null = null
 
   const ttyState: TtyState = {
     ptyId: 'pty-1',
@@ -16,15 +16,10 @@ function makeMockTty() {
     resize: vi.fn(),
     kill: vi.fn(),
     isAlive: vi.fn().mockResolvedValue(true),
-    onData: vi.fn((cb) => {
-      dataCallback = cb
-      return () => { dataCallback = null }
+    onEvent: vi.fn((cb) => {
+      eventCallback = cb
+      return () => { eventCallback = null }
     }),
-    onExit: vi.fn((cb) => {
-      exitCallback = cb
-      return () => { exitCallback = null }
-    }),
-    onResize: vi.fn().mockReturnValue(() => {}),
   }
 
   const tty = createStore<TtyState>()(() => ttyState)
@@ -32,8 +27,8 @@ function makeMockTty() {
   return {
     tty,
     ttyState,
-    emitData: (data: string) => dataCallback?.(data),
-    emitExit: (code: number) => exitCallback?.(code),
+    emitData: (data: string) => eventCallback?.({ type: 'data', data }),
+    emitExit: (code: number) => eventCallback?.({ type: 'exit', exitCode: code }),
   }
 }
 

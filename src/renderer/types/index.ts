@@ -21,6 +21,8 @@ import type {
   ConnectionInfo,
   ReasoningEffort
 } from '../../shared/types'
+import type { PtyEvent } from '../../shared/ipc-types'
+export type { PtyEvent }
 
 export type {
   SandboxConfig,
@@ -299,9 +301,7 @@ export interface TerminalApi {
   resize: (handle: string, cols: number, rows: number) => void
   kill: (connectionId: string, sessionId: string) => void
   isAlive: (connectionId: string, id: string) => Promise<boolean>
-  onData: (handle: string, callback: (data: string) => void) => () => void
-  onExit: (handle: string, callback: (exitCode: number) => void) => () => void
-  onResize: (handle: string, callback: (cols: number, rows: number) => void) => () => void
+  onEvent: (handle: string, callback: (event: PtyEvent) => void) => () => void
   onActiveProcessesOpen: (callback: () => void) => () => void
 }
 

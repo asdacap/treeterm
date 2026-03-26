@@ -74,9 +74,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   let lastVersion = 0
   let pollInterval: ReturnType<typeof setInterval> | null = null
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
-  let unsubscribeData: (() => void) | null = null
-  let unsubscribeExit: (() => void) | null = null
-  let unsubscribeResize: (() => void) | null = null
+  let unsubscribeEvents: (() => void) | null = null
   let running = false
   let titleGenerated = false
 
@@ -254,17 +252,9 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
   function stopPolling(): void {
     running = false
-    if (unsubscribeData) {
-      unsubscribeData()
-      unsubscribeData = null
-    }
-    if (unsubscribeExit) {
-      unsubscribeExit()
-      unsubscribeExit = null
-    }
-    if (unsubscribeResize) {
-      unsubscribeResize()
-      unsubscribeResize = null
+    if (unsubscribeEvents) {
+      unsubscribeEvents()
+      unsubscribeEvents = null
     }
     if (pollInterval) {
       clearInterval(pollInterval)
@@ -373,20 +363,20 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         // If already exited, don't start polling
         if (exitCode !== undefined) return
 
-        // Subscribe to live data
-        unsubscribeData = tty.getState().onData((data) => {
-          terminal?.write(data)
-          dataVersion++
-        })
-
-        // Subscribe to exit
-        unsubscribeExit = tty.getState().onExit(() => {
-          store.getState().stop()
-        })
-
-        // Subscribe to resize so headless terminal matches PTY dimensions
-        unsubscribeResize = tty.getState().onResize((cols, rows) => {
-          terminal?.resize(cols, rows)
+        // Subscribe to live events
+        unsubscribeEvents = tty.getState().onEvent((event) => {
+          switch (event.type) {
+            case 'data':
+              terminal?.write(event.data)
+              dataVersion++
+              break
+            case 'exit':
+              store.getState().stop()
+              break
+            case 'resize':
+              terminal?.resize(event.cols, event.rows)
+              break
+          }
         })
       }).catch((err) => {
         console.error('[analyzer] failed to open TTY stream:', err)

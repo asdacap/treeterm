@@ -15,6 +15,12 @@ import type {
   ReasoningEffort
 } from './types'
 
+/** Discriminated union for PTY output events (mirrors gRPC PtyOutput) */
+export type PtyEvent =
+  | { type: 'data'; data: string }
+  | { type: 'exit'; exitCode: number; signal?: number }
+  | { type: 'resize'; cols: number; rows: number }
+
 import type {
   GitInfo,
   WorktreeResult,
@@ -381,14 +387,8 @@ export interface IpcSends {
 // === Event Types (server emits, client listens) ===
 
 export interface IpcEvents {
-  ptyData: {
-    params: [handle: string, data: string]
-  }
-  ptyExit: {
-    params: [handle: string, exitCode: number]
-  }
-  ptyResizeEvent: {
-    params: [handle: string, cols: number, rows: number]
+  ptyEvent: {
+    params: [handle: string, event: PtyEvent]
   }
   settingsOpen: {
     params: []

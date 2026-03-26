@@ -94,17 +94,15 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
         }
       }
 
-      // Subscribe to data using handle
-      const unsubData = terminalApi.onData(handle, (data) => {
-        term.write(data)
+      // Subscribe to events using handle
+      const unsubEvent = terminalApi.onEvent(handle, (event) => {
+        if (event.type === 'data') {
+          term.write(event.data)
+        } else if (event.type === 'exit') {
+          term.write('\r\n\x1b[90m[Process exited]\x1b[0m\r\n')
+        }
       })
-      cleanups.push(unsubData)
-
-      // Subscribe to exit using handle
-      const unsubExit = terminalApi.onExit(handle, () => {
-        term.write('\r\n\x1b[90m[Process exited]\x1b[0m\r\n')
-      })
-      cleanups.push(unsubExit)
+      cleanups.push(unsubEvent)
 
       // Forward input using handle
       const onDataDisposable = term.onData((data) => {
