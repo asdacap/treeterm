@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useStore } from 'zustand'
-import type { ChildWorktreeInfo, BranchInfo, WorktreeSettings, WorkspaceStore } from '../types'
+import type { WorktreeInfo, BranchInfo, WorktreeSettings, WorkspaceStore } from '../types'
 import { useAppStore } from '../store/app'
 
 interface CreateChildDialogProps {
@@ -37,9 +37,9 @@ export default function CreateChildDialog({
   const [isDetached, setIsDetached] = useState(false)
 
   // For existing worktrees tab
-  const [existingWorktrees, setExistingWorktrees] = useState<ChildWorktreeInfo[]>([])
+  const [existingWorktrees, setExistingWorktrees] = useState<WorktreeInfo[]>([])
   const [isLoadingWorktrees, setIsLoadingWorktrees] = useState(false)
-  const [selectedWorktree, setSelectedWorktree] = useState<ChildWorktreeInfo | null>(null)
+  const [selectedWorktree, setSelectedWorktree] = useState<WorktreeInfo | null>(null)
 
   // For branch tab
   const [branches, setBranches] = useState<BranchInfo[]>([])
@@ -81,9 +81,7 @@ export default function CreateChildDialog({
         openWorktreePaths
       })
       setIsLoadingWorktrees(true)
-      git.getChildWorktrees(
-        parentWsData.parentId === null ? null : parentWsData.gitBranch
-      ).then(worktrees => {
+      git.listWorktrees().then(worktrees => {
         console.log('[CreateChildDialog] Received worktrees:', worktrees)
         // Filter out worktrees that are already open
         const available = worktrees.filter(wt => !openWorktreePaths.includes(wt.path))
@@ -228,7 +226,7 @@ export default function CreateChildDialog({
     const result = await onAdopt(
       selectedWorktree.path,
       selectedWorktree.branch,
-      selectedWorktree.displayName,
+      selectedWorktree.branch,
       settings,
       desc
     )
@@ -374,7 +372,7 @@ export default function CreateChildDialog({
                     className={`create-child-worktree-item ${selectedWorktree?.path === wt.path ? 'selected' : ''}`}
                     onClick={() => setSelectedWorktree(wt)}
                   >
-                    <span className="worktree-name">{wt.displayName}</span>
+                    <span className="worktree-name">{wt.branch}</span>
                     <span className="worktree-branch">{wt.branch}</span>
                   </div>
                 ))

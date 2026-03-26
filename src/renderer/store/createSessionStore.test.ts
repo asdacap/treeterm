@@ -13,7 +13,6 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       createWorktree: vi.fn().mockResolvedValue({ success: true, path: '/repo/.worktrees/test', branch: 'test' }),
       removeWorktree: vi.fn().mockResolvedValue({ success: true }),
       listWorktrees: vi.fn().mockResolvedValue([]),
-      getChildWorktrees: vi.fn().mockResolvedValue([]),
       listLocalBranches: vi.fn().mockResolvedValue(['main']),
       listRemoteBranches: vi.fn().mockResolvedValue([]),
       getBranchesInWorktrees: vi.fn().mockResolvedValue([]),
@@ -95,7 +94,6 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     name: 'test',
     path: '/test',
     parentId: null,
-    children: [],
     status: 'active',
     isGitRepo: false,
     gitBranch: null,
@@ -425,10 +423,9 @@ describe('createSessionStore', () => {
       // Should not throw
     })
 
-    it('removeOrphanWorkspace updates parent children list', () => {
+    it('removeOrphanWorkspace removes workspace from state', () => {
       store.getState().removeOrphanWorkspace(childId)
-      const parent = store.getState().workspaces[parentId]
-      expect(parent.children).not.toContain(childId)
+      expect(store.getState().workspaces[childId]).toBeUndefined()
     })
   })
 
@@ -647,7 +644,7 @@ describe('createSessionStore', () => {
       const daemonSession = {
         id: 'session-1',
         workspaces: [
-          makeWorkspace({ id: 'ws-parent', name: 'parent', path: '/parent', children: [] }),
+          makeWorkspace({ id: 'ws-parent', name: 'parent', path: '/parent' }),
           makeWorkspace({ id: 'ws-child', name: 'child', path: '/child', parentId: 'ws-parent', isWorktree: true }),
         ],
         createdAt: Date.now(),
@@ -658,7 +655,7 @@ describe('createSessionStore', () => {
 
       expect(store.getState().workspaces['ws-parent']).toBeDefined()
       expect(store.getState().workspaces['ws-child']).toBeDefined()
-      expect(store.getState().workspaces['ws-parent'].children).toContain('ws-child')
+      expect(store.getState().workspaces['ws-child'].parentId).toBe('ws-parent')
     })
   })
 })

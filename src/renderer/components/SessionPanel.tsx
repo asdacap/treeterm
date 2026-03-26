@@ -53,10 +53,13 @@ export default function SessionPanel({
   const openContextMenu = useContextMenuStore((s) => s.open)
   const closeContextMenu = useContextMenuStore((s) => s.close)
   const [contextMenuWorkspaceId, setContextMenuWorkspaceId] = useState('')
+  const getChildren = (parentId: string) =>
+    Object.values(workspaces).filter((ws) => ws.parentId === parentId)
+
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     return new Set(
       Object.values(workspaces)
-        .filter((ws) => ws.children.length > 0)
+        .filter((ws) => getChildren(ws.id).length > 0)
         .map((ws) => ws.id)
     )
   })
@@ -98,7 +101,7 @@ export default function SessionPanel({
   // Expand any workspace that gains children after mount
   useEffect(() => {
     const parentIds = Object.values(workspaces)
-      .filter((ws) => ws.children.length > 0)
+      .filter((ws) => getChildren(ws.id).length > 0)
       .map((ws) => ws.id)
     if (parentIds.length > 0) {
       setExpanded((prev) => {
@@ -260,9 +263,9 @@ export default function SessionPanel({
   }
 
   const renderWorkspace = (ws: Workspace, depth: number = 0) => {
-    const hasChildren = ws.children.length > 0
+    const children = getChildren(ws.id)
+    const hasChildren = children.length > 0
     const isExpanded = expanded.has(ws.id)
-    const children = ws.children.map((id) => workspaces[id]).filter(Boolean)
     const tabIds = Object.keys(ws.appStates)
 
     // Check if this workspace is focused in workspace_focus mode

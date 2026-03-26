@@ -45,7 +45,6 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     name: 'test',
     path: '/test',
     parentId: null,
-    children: [],
     status: 'active',
     isGitRepo: false,
     gitBranch: null,

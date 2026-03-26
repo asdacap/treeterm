@@ -58,10 +58,6 @@ export interface WorktreeInfo {
   branch: string
 }
 
-export type ChildWorktreeInfo = WorktreeInfo & {
-  displayName: string
-}
-
 export class GitClient {
   constructor(private daemonClient: GrpcDaemonClient) {}
 
@@ -427,13 +423,7 @@ export class GitClient {
       worktreePath = join(worktreesDir, worktreeName)
     }
 
-    // Determine branch name (hierarchical if base has '/')
-    let branchName: string
-    if (baseBranch && baseBranch.includes('/')) {
-      branchName = `${baseBranch}/${worktreeName}`
-    } else {
-      branchName = worktreeName
-    }
+    const branchName = worktreeName
 
     // Create worktree with new branch
     const args = ['worktree', 'add', '-b', branchName, worktreePath]
@@ -591,37 +581,6 @@ export class GitClient {
     }
 
     return worktrees
-  }
-
-  /**
-   * Get child worktrees of a parent branch
-   */
-  async getChildWorktrees(
-    repoPath: string,
-    parentBranch: string | null
-  ): Promise<ChildWorktreeInfo[]> {
-    const allWorktrees = await this.listWorktrees(repoPath)
-
-    if (!parentBranch) {
-      // Return top-level worktrees (branches without '/')
-      return allWorktrees
-        .filter(wt => !wt.branch.includes('/'))
-        .map(wt => ({ ...wt, displayName: wt.branch }))
-    }
-
-    // Find child worktrees
-    const branchPrefix = `${parentBranch}/`
-    
-    return allWorktrees
-      .filter(wt => {
-        if (!wt.branch.startsWith(branchPrefix)) return false
-        const remainder = wt.branch.slice(branchPrefix.length)
-        return remainder.length > 0 && !remainder.includes('/')
-      })
-      .map(wt => ({
-        ...wt,
-        displayName: wt.branch.slice(branchPrefix.length)
-      }))
   }
 
   /**

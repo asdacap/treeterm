@@ -280,9 +280,6 @@ contextBridge.exposeInMainWorld('electron', {
     listWorktrees: (repoPath: string) => {
       return client.gitListWorktrees(repoPath)
     },
-    getChildWorktrees: (repoPath: string, parentBranch: string | null) => {
-      return client.gitGetChildWorktrees(repoPath, parentBranch)
-    },
     listLocalBranches: (repoPath: string) => {
       return client.gitListLocalBranches(repoPath)
     },

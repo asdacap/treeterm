@@ -61,7 +61,6 @@ export interface Workspace {
   createdAt: number;
   lastActivity: number;
   id: string;
-  children: string[];
   /** JSON-encoded arbitrary dictionary */
   metadata: Buffer;
 }
@@ -928,7 +927,6 @@ function createBaseWorkspace(): Workspace {
     createdAt: 0,
     lastActivity: 0,
     id: "",
-    children: [],
     metadata: Buffer.alloc(0),
   };
 }
@@ -976,9 +974,6 @@ export const Workspace: MessageFns<Workspace> = {
     }
     if (message.id !== "") {
       writer.uint32(122).string(message.id);
-    }
-    for (const v of message.children) {
-      writer.uint32(130).string(v!);
     }
     if (message.metadata.length !== 0) {
       writer.uint32(138).bytes(message.metadata);
@@ -1108,14 +1103,6 @@ export const Workspace: MessageFns<Workspace> = {
           message.id = reader.string();
           continue;
         }
-        case 16: {
-          if (tag !== 130) {
-            break;
-          }
-
-          message.children.push(reader.string());
-          continue;
-        }
         case 17: {
           if (tag !== 138) {
             break;
@@ -1201,9 +1188,6 @@ export const Workspace: MessageFns<Workspace> = {
         ? globalThis.Number(object.last_activity)
         : 0,
       id: isSet(object.id) ? globalThis.String(object.id) : "",
-      children: globalThis.Array.isArray(object?.children)
-        ? object.children.map((e: any) => globalThis.String(e))
-        : [],
       metadata: isSet(object.metadata) ? Buffer.from(bytesFromBase64(object.metadata)) : Buffer.alloc(0),
     };
   },
@@ -1258,9 +1242,6 @@ export const Workspace: MessageFns<Workspace> = {
     if (message.id !== "") {
       obj.id = message.id;
     }
-    if (message.children?.length) {
-      obj.children = message.children;
-    }
     if (message.metadata.length !== 0) {
       obj.metadata = base64FromBytes(message.metadata);
     }
@@ -1294,7 +1275,6 @@ export const Workspace: MessageFns<Workspace> = {
     message.createdAt = object.createdAt ?? 0;
     message.lastActivity = object.lastActivity ?? 0;
     message.id = object.id ?? "";
-    message.children = object.children?.map((e) => e) || [];
     message.metadata = object.metadata ?? Buffer.alloc(0);
     return message;
   },

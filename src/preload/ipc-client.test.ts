@@ -84,7 +84,6 @@ describe('IpcClient', () => {
       ['gitCreateWorktree', 'git:createWorktree'],
       ['gitRemoveWorktree', 'git:removeWorktree'],
       ['gitListWorktrees', 'git:listWorktrees'],
-      ['gitGetChildWorktrees', 'git:getChildWorktrees'],
       ['gitListLocalBranches', 'git:listLocalBranches'],
       ['gitListRemoteBranches', 'git:listRemoteBranches'],
       ['gitGetBranchesInWorktrees', 'git:getBranchesInWorktrees'],
