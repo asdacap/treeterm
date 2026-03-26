@@ -52,7 +52,7 @@ export default function SessionPanel({
 
   const openContextMenu = useContextMenuStore((s) => s.open)
   const closeContextMenu = useContextMenuStore((s) => s.close)
-  const contextMenuWorkspaceRef = useRef<string>('')
+  const [contextMenuWorkspaceId, setContextMenuWorkspaceId] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     return new Set(
       Object.values(workspaces)
@@ -128,7 +128,7 @@ export default function SessionPanel({
   const handleContextMenu = (e: React.MouseEvent, id: string) => {
     e.preventDefault()
     e.stopPropagation()
-    contextMenuWorkspaceRef.current = id
+    setContextMenuWorkspaceId(id)
     openContextMenu('session-ws-context', e.clientX, e.clientY)
   }
 
@@ -148,7 +148,6 @@ export default function SessionPanel({
     setCreateChildDialogParentId(parentId)
   }
 
-  const contextMenuWorkspaceId = contextMenuWorkspaceRef.current
 
   const handleQuickFork = async (wsId: string) => {
     const result = await quickForkWorkspace(wsId)
