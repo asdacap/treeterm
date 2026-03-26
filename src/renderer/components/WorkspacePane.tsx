@@ -263,14 +263,6 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     await activeHandle!.getState().removeKeepBranch()
   }
 
-  const handleAbandonKeepWorktree = async () => {
-    if (!confirm('Abandon this workspace but keep the worktree on disk? The worktree will remain but the branch will be deleted.')) {
-      return
-    }
-    setAbandonMenuOpen(false)
-    await activeHandle!.getState().removeKeepWorktree()
-  }
-
   const handleAbandonKeepBoth = async () => {
     if (!confirm('Abandon this workspace but keep both the worktree and branch? They will remain but will no longer be tracked in TreeTerm.')) {
       return
@@ -412,7 +404,6 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                       onOpenReview={handleOpenReview}
                       onAbandon={handleAbandon}
                       onAbandonKeepBranch={handleAbandonKeepBranch}
-                      onAbandonKeepWorktree={handleAbandonKeepWorktree}
                       onAbandonKeepBoth={handleAbandonKeepBoth}
                     />
                   )}
@@ -558,13 +549,12 @@ interface MergeAbandonButtonProps {
   onOpenReview: () => void
   onAbandon: () => void
   onAbandonKeepBranch: () => void
-  onAbandonKeepWorktree: () => void
   onAbandonKeepBoth: () => void
 }
 
 function MergeAbandonButton({
   workspace, abandonMenuOpen, abandonMenuRef, abandonButtonRef,
-  onToggleMenu, onOpenReview, onAbandon, onAbandonKeepBranch, onAbandonKeepWorktree, onAbandonKeepBoth,
+  onToggleMenu, onOpenReview, onAbandon, onAbandonKeepBranch, onAbandonKeepBoth,
 }: MergeAbandonButtonProps) {
   const { isDiffCleanFromParent } = useStore(workspace)
 
@@ -608,10 +598,6 @@ function MergeAbandonButton({
           <div className="abandon-menu-item" onClick={onAbandonKeepBranch}>
             Abandon (Keep Branch)
             <span className="abandon-menu-hint">Delete worktree, keep branch</span>
-          </div>
-          <div className="abandon-menu-item" onClick={onAbandonKeepWorktree}>
-            Abandon (Keep Worktree)
-            <span className="abandon-menu-hint">Keep worktree, delete branch</span>
           </div>
           <div className="abandon-menu-item" onClick={onAbandonKeepBoth}>
             Abandon (Keep Both)

@@ -62,7 +62,6 @@ export interface SessionState {
   createWorktreeFromRemote: (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
   removeWorkspace: (id: string) => Promise<void>
   removeWorkspaceKeepBranch: (id: string) => Promise<void>
-  removeWorkspaceKeepWorktree: (id: string) => Promise<void>
   removeWorkspaceKeepBoth: (id: string) => Promise<void>
   removeOrphanWorkspace: (id: string) => void
   mergeAndRemoveWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
@@ -186,7 +185,6 @@ export function createSessionStore(
       syncToDaemon: () => debouncedSyncToDaemon(),
       removeWorkspace: (id) => store.getState().removeWorkspace(id),
       removeWorkspaceKeepBranch: (id) => store.getState().removeWorkspaceKeepBranch(id),
-      removeWorkspaceKeepWorktree: (id) => store.getState().removeWorkspaceKeepWorktree(id),
       removeWorkspaceKeepBoth: (id) => store.getState().removeWorkspaceKeepBoth(id),
       mergeAndRemoveWorkspace: (id, squash) => store.getState().mergeAndRemoveWorkspace(id, squash),
       closeAndCleanWorkspace: (id) => store.getState().closeAndCleanWorkspace(id),
@@ -736,9 +734,6 @@ export function createSessionStore(
 
     removeWorkspaceKeepBranch: (id: string) =>
       removeWorkspaceWithLoading(id, { keepBranch: true, keepWorktree: false }),
-
-    removeWorkspaceKeepWorktree: (id: string) =>
-      removeWorkspaceWithLoading(id, { keepBranch: false, keepWorktree: true }),
 
     removeWorkspaceKeepBoth: (id: string) =>
       removeWorkspaceWithLoading(id, { keepBranch: true, keepWorktree: true }),
