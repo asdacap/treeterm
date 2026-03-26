@@ -7,8 +7,8 @@ use tokio::io::unix::AsyncFd;
 use tokio::sync::{broadcast, Mutex};
 use treeterm_proto::treeterm::*;
 
-const MERGE_THRESHOLD: usize = 50 * 1024; // 50KB
-const COMPACTED_LIMIT: usize = 1024 * 1024; // 1MB
+const MERGE_THRESHOLD: usize = 500 * 1024; // 500KB
+const COMPACTED_LIMIT: usize = 5 * 1024 * 1024; // 5MB
 const SCROLLBACK_LINES: u16 = 10000;
 
 pub struct PtySession {
