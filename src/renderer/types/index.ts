@@ -202,10 +202,6 @@ export interface WorktreeInfo {
   branch: string
 }
 
-export type ChildWorktreeInfo = WorktreeInfo & {
-  displayName: string
-}
-
 export interface BranchInfo {
   name: string
   isInWorktree: boolean
@@ -314,7 +310,6 @@ export interface GitApi {
   createWorktree: (repoPath: string, name: string, baseBranch?: string, operationId?: string) => Promise<WorktreeResult>
   removeWorktree: (repoPath: string, worktreePath: string, deleteBranch?: boolean, operationId?: string) => Promise<{ success: boolean; error?: string }>
   listWorktrees: (repoPath: string) => Promise<WorktreeInfo[]>
-  getChildWorktrees: (repoPath: string, parentBranch: string | null) => Promise<ChildWorktreeInfo[]>
   listLocalBranches: (repoPath: string) => Promise<string[]>
   listRemoteBranches: (repoPath: string) => Promise<string[]>
   getBranchesInWorktrees: (repoPath: string) => Promise<string[]>
@@ -350,7 +345,6 @@ export interface WorkspaceGitApi {
   createWorktree: (name: string, baseBranch?: string) => Promise<WorktreeResult>
   removeWorktree: (worktreePath: string, deleteBranch?: boolean, operationId?: string) => Promise<{ success: boolean; error?: string }>
   listWorktrees: () => Promise<WorktreeInfo[]>
-  getChildWorktrees: (parentBranch: string | null) => Promise<ChildWorktreeInfo[]>
   listLocalBranches: () => Promise<string[]>
   listRemoteBranches: () => Promise<string[]>
   getBranchesInWorktrees: () => Promise<string[]>

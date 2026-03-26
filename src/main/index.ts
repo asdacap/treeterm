@@ -624,13 +624,6 @@ server.onGitListWorktrees(async (repoPath) => {
   return gitClient.listWorktrees(repoPath)
 })
 
-server.onGitGetChildWorktrees(async (repoPath, parentBranch) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  return gitClient.getChildWorktrees(repoPath, parentBranch)
-})
-
 server.onGitListLocalBranches(async (repoPath) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
   initializeGitClient()

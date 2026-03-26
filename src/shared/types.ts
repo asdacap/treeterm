@@ -55,7 +55,6 @@ export interface Workspace {
   path: string
   name: string
   parentId: string | null
-  children: string[]
   status: 'active' | 'merged' | 'abandoned'
   isGitRepo: boolean
   gitBranch: string | null

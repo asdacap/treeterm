@@ -247,7 +247,6 @@ export function createSessionStore(
       name: worktreeName,
       path: `${parent?.gitRootPath}/.worktrees/${worktreeName}`,
       parentId,
-      children: [],
       status: 'active',
       isGitRepo: true,
       gitBranch: options.initialBranch ?? null,
@@ -267,23 +266,12 @@ export function createSessionStore(
 
     const handle = createHandleForWorkspace(childWorkspace)
 
-    store.setState((s) => {
-      const parentWs = s.workspaces[parentId]
-      const parentHandle = s.workspaceStores[parentId]
-      if (parentWs && parentHandle) {
-        parentHandle.setState({ workspace: { ...parentWs, children: [...parentWs.children, id] } })
-      }
-      return {
-        workspaceStores: { ...s.workspaceStores, [id]: handle },
-        workspaces: {
-          ...s.workspaces,
-          [id]: childWorkspace,
-          ...(parentWs ? { [parentId]: { ...parentWs, children: [...parentWs.children, id] } } : {})
-        },
-        activeWorkspaceId: id,
-        workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'loading' as const, message: options.message, output: [] } }
-      }
-    })
+    store.setState((s) => ({
+      workspaceStores: { ...s.workspaceStores, [id]: handle },
+      workspaces: { ...s.workspaces, [id]: childWorkspace },
+      activeWorkspaceId: id,
+      workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'loading' as const, message: options.message, output: [] } }
+    }))
 
     const unsubOutput = deps.git.onOutput((opId, data) => {
       if (opId !== operationId) return
@@ -368,7 +356,6 @@ export function createSessionStore(
       name,
       path,
       parentId,
-      children: [],
       status: 'active',
       isGitRepo: true,
       gitBranch: branch,
@@ -385,27 +372,11 @@ export function createSessionStore(
 
     const handle = createHandleForWorkspace(childWorkspace)
 
-    // Update parent children and add handle
-    store.setState((s) => {
-      const parentWs = s.workspaces[parentId]
-      const updatedWorkspaces = {
-        ...s.workspaces,
-        [id]: childWorkspace,
-        ...(parentWs ? {
-          [parentId]: { ...parentWs, children: [...parentWs.children, id] }
-        } : {})
-      }
-      // Also update the parent handle's workspace data
-      const parentHandle = s.workspaceStores[parentId]
-      if (parentHandle && parentWs) {
-        parentHandle.setState({ workspace: { ...parentWs, children: [...parentWs.children, id] } })
-      }
-      return {
-        workspaceStores: { ...s.workspaceStores, [id]: handle },
-        workspaces: updatedWorkspaces,
-        activeWorkspaceId: id
-      }
-    })
+    store.setState((s) => ({
+      workspaceStores: { ...s.workspaceStores, [id]: handle },
+      workspaces: { ...s.workspaces, [id]: childWorkspace },
+      activeWorkspaceId: id
+    }))
 
     for (const tabId of Object.keys(appStates)) {
       handle.getState().initTab(tabId)
@@ -424,8 +395,11 @@ export function createSessionStore(
     const workspace = state.workspaces[id]
     if (!workspace) return
 
-    // Recursively remove children first
-    for (const childId of workspace.children) {
+    // Recursively remove children first (derived from parentId)
+    const childIds = Object.values(state.workspaces)
+      .filter(ws => ws.parentId === id)
+      .map(ws => ws.id)
+    for (const childId of childIds) {
       await removeWorkspaceInternal(childId, options)
     }
 
@@ -451,17 +425,6 @@ export function createSessionStore(
         )
       } else if (!options.keepBranch && !workspace.isDetached && workspace.gitBranch) {
         await deps.git.deleteBranch(workspace.gitRootPath, workspace.gitBranch, options.operationId)
-      }
-    }
-
-    // Update parent's children list
-    if (workspace.parentId) {
-      const parentHandle = store.getState().workspaceStores[workspace.parentId]
-      if (parentHandle) {
-        const parentWs = parentHandle.getState().workspace
-        parentHandle.setState({
-          workspace: { ...parentWs, children: parentWs.children.filter((cid) => cid !== id) }
-        })
       }
     }
 
@@ -614,7 +577,6 @@ export function createSessionStore(
         name: getNameFromPath(path),
         path,
         parentId: null,
-        children: [],
         status: 'active',
         isGitRepo: false,
         gitBranch: null,
@@ -785,16 +747,6 @@ export function createSessionStore(
       const state = get()
       const workspace = state.workspaces[id]
       if (!workspace) return
-
-      if (workspace.parentId) {
-        const parentHandle = state.workspaceStores[workspace.parentId]
-        if (parentHandle) {
-          const parentWs = parentHandle.getState().workspace
-          parentHandle.setState({
-            workspace: { ...parentWs, children: parentWs.children.filter((cid) => cid !== id) }
-          })
-        }
-      }
 
       set((s) => {
         const { [id]: _removedHandle, ...remainingHandles } = s.workspaceStores
@@ -1096,34 +1048,16 @@ function reconstructWorkspace(
   const workspace: Workspace = {
     ...daemonWorkspace,
     id,
-    children: [],
     activeTabId: daemonWorkspace.activeTabId || (Object.keys(daemonWorkspace.appStates).length > 0 ? Object.keys(daemonWorkspace.appStates)[0] : null)
   }
 
   const handle = createHandleForWorkspace(workspace)
 
-  store.setState((s) => {
-    const newWorkspaces = { ...s.workspaces, [id]: workspace }
-    const newHandles = { ...s.workspaceStores, [id]: handle }
-
-    if (parentId && s.workspaces[parentId]) {
-      newWorkspaces[parentId] = {
-        ...s.workspaces[parentId],
-        children: [...s.workspaces[parentId].children, id]
-      }
-      // Update parent handle too
-      const parentHandle = s.workspaceStores[parentId]
-      if (parentHandle) {
-        parentHandle.setState({ workspace: newWorkspaces[parentId] })
-      }
-    }
-
-    return {
-      workspaceStores: newHandles,
-      workspaces: newWorkspaces,
-      activeWorkspaceId: id
-    }
-  })
+  store.setState((s) => ({
+    workspaceStores: { ...s.workspaceStores, [id]: handle },
+    workspaces: { ...s.workspaces, [id]: workspace },
+    activeWorkspaceId: id
+  }))
 
   for (const tabId of Object.keys(daemonWorkspace.appStates)) {
     handle.getState().initTab(tabId)

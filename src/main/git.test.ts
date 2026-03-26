@@ -506,49 +506,6 @@ describe('GitClient', () => {
     })
   })
 
-  describe('getChildWorktrees', () => {
-    const worktreeOutput = [
-      'worktree /repo',
-      'HEAD abc123',
-      'branch refs/heads/main',
-      '',
-      'worktree /repo/.worktrees/feature/sub1',
-      'HEAD def456',
-      'branch refs/heads/feature/sub1',
-      '',
-      'worktree /repo/.worktrees/other',
-      'HEAD ghi789',
-      'branch refs/heads/other',
-      '',
-    ].join('\n')
-
-    it('returns top-level worktrees when parentBranch is null', async () => {
-      const client = makeMockClient([resultStream(worktreeOutput)])
-      const git = new GitClient(client)
-      const children = await git.getChildWorktrees('/repo', null)
-      const branches = children.map(c => c.branch)
-      expect(branches).toContain('main')
-      expect(branches).toContain('other')
-      expect(branches).not.toContain('feature/sub1')
-    })
-
-    it('returns children of parent branch with displayName', async () => {
-      const client = makeMockClient([resultStream(worktreeOutput)])
-      const git = new GitClient(client)
-      const children = await git.getChildWorktrees('/repo', 'feature')
-      expect(children).toHaveLength(1)
-      expect(children[0].branch).toBe('feature/sub1')
-      expect(children[0].displayName).toBe('sub1')
-    })
-
-    it('returns empty array when parent has no children', async () => {
-      const client = makeMockClient([resultStream(worktreeOutput)])
-      const git = new GitClient(client)
-      const children = await git.getChildWorktrees('/repo', 'nonexistent')
-      expect(children).toHaveLength(0)
-    })
-  })
-
   describe('getUncommittedChanges', () => {
     it('returns files with add/delete stats', async () => {
       const client = makeMockClient([

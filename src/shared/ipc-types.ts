@@ -19,7 +19,6 @@ import type {
   GitInfo,
   WorktreeResult,
   WorktreeInfo,
-  ChildWorktreeInfo,
   DiffResult,
   DiffFile,
   ConflictCheckResult,
@@ -68,10 +67,6 @@ export interface IpcRequests {
   gitListWorktrees: {
     params: [repoPath: string]
     result: WorktreeInfo[]
-  }
-  gitGetChildWorktrees: {
-    params: [repoPath: string, parentBranch: string | null]
-    result: ChildWorktreeInfo[]
   }
   gitListLocalBranches: {
     params: [repoPath: string]

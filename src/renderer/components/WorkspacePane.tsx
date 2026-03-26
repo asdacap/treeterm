@@ -284,10 +284,9 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     const result: string[] = []
     const traverse = (wsId: string) => {
       result.push(wsId)
-      const ws = workspaces[wsId]
-      if (ws) {
-        ws.children.forEach(traverse)
-      }
+      Object.values(workspaces)
+        .filter((ws) => ws.parentId === wsId)
+        .forEach((ws) => traverse(ws.id))
     }
     // Get root workspaces (those without parents)
     Object.values(workspaces)

@@ -247,7 +247,6 @@ describe('useAppStore', () => {
             path: '/projects/root',
             name: 'root',
             parentId: null,
-            children: ['child-ws'],
             appStates: {},
             activeTabId: null
           },
@@ -256,7 +255,6 @@ describe('useAppStore', () => {
             path: '/projects/root/child',
             name: 'child',
             parentId: 'root-ws',
-            children: [],
             appStates: {},
             activeTabId: null
           }
@@ -281,7 +279,6 @@ describe('useAppStore', () => {
             path: '/projects/orphan',
             name: 'orphan',
             parentId: 'nonexistent-parent',
-            children: [],
             appStates: { 'tab-1': { applicationId: 'terminal', title: 'Term', state: { ptyId: 'pty-1' } } },
             activeTabId: 'tab-1'
           }
@@ -304,7 +301,6 @@ describe('useAppStore', () => {
             path: '/projects/test',
             name: 'test',
             parentId: null,
-            children: [],
             appStates: {
               'tab-1': { applicationId: 'terminal', title: 'Term', state: { ptyId: 'pty-maybe-dead' } },
               'tab-2': { applicationId: 'ai-harness', title: 'AI', state: { ptyId: 'pty-unknown' } }
@@ -331,7 +327,6 @@ describe('useAppStore', () => {
             path: '/projects/no-parent',
             name: 'no-parent',
             parentId: null,
-            children: [],
             appStates: { 'tab-1': { applicationId: 'terminal', title: 'Term', state: { ptyId: 'pty-1' } } },
             activeTabId: 'tab-1'
           }
@@ -354,7 +349,6 @@ describe('useAppStore', () => {
             path: '/projects/test',
             name: 'test',
             parentId: null,
-            children: [],
             appStates: {},
             activeTabId: null
           }
@@ -415,7 +409,7 @@ describe('useAppStore', () => {
 
     it('onCloseConfirm shows confirm dialog when unmerged workspaces exist', async () => {
       const { createSessionStore, getUnmergedSubWorkspaces } = await import('./createSessionStore')
-      const mockWs = { id: 'ws-1', name: 'unmerged', path: '/test', parentId: 'p', children: [], appStates: {}, activeTabId: null, metadata: {} }
+      const mockWs = { id: 'ws-1', name: 'unmerged', path: '/test', parentId: 'p', appStates: {}, activeTabId: null, metadata: {} }
       vi.mocked(getUnmergedSubWorkspaces).mockReturnValue([mockWs as any])
 
       const mockStore = {
@@ -471,7 +465,7 @@ describe('useAppStore', () => {
         id: 'session-ready',
         workspaces: [{
           id: 'ws-1', path: '/test', name: 'test',
-          parentId: null, children: [], appStates: {}, activeTabId: null
+          parentId: null, appStates: {}, activeTabId: null
         }]
       }
       readyCallback(session)
@@ -662,7 +656,7 @@ describe('useAppStore', () => {
         id: 'sync-session',
         workspaces: [{
           id: 'ws-new', path: '/new', name: 'new',
-          parentId: null, children: [], appStates: {}, activeTabId: null
+          parentId: null, appStates: {}, activeTabId: null
         }]
       }
 

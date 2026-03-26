@@ -429,7 +429,6 @@ export function createWorkspaceStore(
         createWorktree: (name, baseBranch?) => deps.git.createWorktree(path, name, baseBranch),
         removeWorktree: (worktreePath, deleteBranch?) => deps.git.removeWorktree(path, worktreePath, deleteBranch),
         listWorktrees: () => deps.git.listWorktrees(path),
-        getChildWorktrees: (parentBranch) => deps.git.getChildWorktrees(path, parentBranch),
         listLocalBranches: () => deps.git.listLocalBranches(path),
         listRemoteBranches: () => deps.git.listRemoteBranches(path),
         getBranchesInWorktrees: () => deps.git.getBranchesInWorktrees(path),

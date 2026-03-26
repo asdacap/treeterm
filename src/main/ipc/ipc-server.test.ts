@@ -94,7 +94,6 @@ describe('IpcServer', () => {
       ['onGitCreateWorktree', 'git:createWorktree'],
       ['onGitRemoveWorktree', 'git:removeWorktree'],
       ['onGitListWorktrees', 'git:listWorktrees'],
-      ['onGitGetChildWorktrees', 'git:getChildWorktrees'],
       ['onGitListLocalBranches', 'git:listLocalBranches'],
       ['onGitListRemoteBranches', 'git:listRemoteBranches'],
       ['onGitGetBranchesInWorktrees', 'git:getBranchesInWorktrees'],
