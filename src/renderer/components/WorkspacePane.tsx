@@ -40,6 +40,8 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const getApplication = useCallback((id: string) => applications[id], [applications])
   const menuApplications = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
 
+  const [branchCopied, setBranchCopied] = useState(false)
+
   const activeWorkspace = activeWorkspaceId ? workspaces[activeWorkspaceId] : null
   const activeHandle = activeWorkspaceId ? (workspaceStores[activeWorkspaceId] ?? null) : null
   const activeLoadState = activeWorkspaceId ? workspaceLoadStates[activeWorkspaceId] : undefined
@@ -380,10 +382,14 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                 <div className="workspace-actions">
                   {activeWorkspace.gitBranch && (
                     <span
-                      className="workspace-branch"
-                      onClick={() => clipboard.writeText(activeWorkspace.gitBranch!)}
+                      className={`workspace-branch${branchCopied ? ' copied' : ''}`}
+                      onClick={() => {
+                        clipboard.writeText(activeWorkspace.gitBranch!)
+                        setBranchCopied(true)
+                        setTimeout(() => setBranchCopied(false), 1500)
+                      }}
                       title="Copy branch name"
-                    >{activeWorkspace.gitBranch}</span>
+                    >{branchCopied ? 'Copied!' : activeWorkspace.gitBranch}</span>
                   )}
                   <RunActionDropdown
                     workspacePath={activeWorkspace.path}
