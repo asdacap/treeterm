@@ -314,9 +314,9 @@ describe('GrpcDaemonClient', () => {
       const cb = vi.fn()
       client.openPtyStream('pty-1', cb)
 
-      // Simulate stream data event
-      dataHandlers[0]?.({ data: { data: Buffer.from('hello') } })
-      expect(cb).toHaveBeenCalledWith({ type: 'data', data: 'hello' })
+      const expectedData = Buffer.from('hello')
+      dataHandlers[0]?.({ data: { data: expectedData } })
+      expect(cb).toHaveBeenCalledWith({ type: 'data', data: expectedData })
     })
 
     it('PtyStream receives exit from stream via constructor callback', () => {

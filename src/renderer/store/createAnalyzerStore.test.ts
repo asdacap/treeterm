@@ -27,7 +27,7 @@ function makeMockTty() {
   return {
     tty,
     ttyState,
-    emitData: (data: string) => eventCallback?.({ type: 'data', data }),
+    emitData: (data: string) => eventCallback?.({ type: 'data', data: new TextEncoder().encode(data) }),
     emitExit: (code: number) => eventCallback?.({ type: 'exit', exitCode: code }),
   }
 }

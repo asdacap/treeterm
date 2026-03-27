@@ -68,7 +68,7 @@ export class PtyStream {
     // Set up event forwarding BEFORE sending start so no events are dropped
     this.stream.on('data', (output: PtyOutput) => {
       if (output.data) {
-        onEvent({ type: 'data', data: output.data.data.toString('utf-8') })
+        onEvent({ type: 'data', data: output.data.data })
       } else if (output.exit) {
         onEvent({ type: 'exit', exitCode: output.exit.exitCode, signal: output.exit.signal })
       } else if (output.resize) {

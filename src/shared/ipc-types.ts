@@ -17,7 +17,7 @@ import type {
 
 /** Discriminated union for PTY output events (mirrors gRPC PtyOutput) */
 export type PtyEvent =
-  | { type: 'data'; data: string }
+  | { type: 'data'; data: Uint8Array }
   | { type: 'exit'; exitCode: number; signal?: number }
   | { type: 'resize'; cols: number; rows: number }
 

@@ -206,8 +206,9 @@ describe('IpcServer', () => {
       const mockWindow = { webContents: { send: mockSend } } as any
       server.setWindow(mockWindow)
 
-      server.ptyEvent('pty-1', { type: 'data', data: 'hello-data' })
-      expect(mockSend).toHaveBeenCalledWith('pty:event', 'pty-1', { type: 'data', data: 'hello-data' })
+      const dataBytes = new TextEncoder().encode('hello-data')
+      server.ptyEvent('pty-1', { type: 'data', data: dataBytes })
+      expect(mockSend).toHaveBeenCalledWith('pty:event', 'pty-1', { type: 'data', data: dataBytes })
     })
 
     it('ptyEvent sends exit to window webContents with correct channel and args', () => {
@@ -337,19 +338,20 @@ describe('IpcServer', () => {
       const mockWindow = { webContents: { send: mockSend } } as any
       server.setWindow(mockWindow)
 
-      server.ptyEvent('pty-1', { type: 'data', data: 'data' })
+      server.ptyEvent('pty-1', { type: 'data', data: new TextEncoder().encode('data') })
       expect(mockSend).toHaveBeenCalled()
     })
 
     it('null window does not throw on emit', () => {
+      const dataBytes = new TextEncoder().encode('data')
       server.setWindow(null)
-      expect(() => server.ptyEvent('pty-1', { type: 'data', data: 'data' })).not.toThrow()
+      expect(() => server.ptyEvent('pty-1', { type: 'data', data: dataBytes })).not.toThrow()
       expect(() => server.settingsOpen()).not.toThrow()
       expect(() => server.daemonDisconnected()).not.toThrow()
     })
 
     it('no window set (default) does not throw on emit', () => {
-      expect(() => server.ptyEvent('pty-1', { type: 'data', data: 'data' })).not.toThrow()
+      expect(() => server.ptyEvent('pty-1', { type: 'data', data: new TextEncoder().encode('data') })).not.toThrow()
     })
   })
 })

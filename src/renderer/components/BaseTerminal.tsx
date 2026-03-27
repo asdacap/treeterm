@@ -274,34 +274,34 @@ export default function BaseTerminal({
         unsubscribe = ttyState.onEvent((event) => {
           switch (event.type) {
             case 'data': {
-              // Track data version for terminal analyzer
               dataVersionRef.current++
-              // Dismiss overlay once data starts flowing
               setOverlay(null)
-              // Strip CSI 3J (clear scrollback) if configured
-              const dataToWrite = config.stripScrollbackClear
-                ? event.data.replace(/\x1b\[3J/g, '')
-                : event.data
 
-              // Pin-to-bottom: if user was at bottom before write, stay at bottom after
               const buf = terminal!.buffer.active
               const wasAtBottom = buf.baseY - buf.viewportY <= 1
 
-              terminal!.write(dataToWrite)
+              if (config.stripScrollbackClear) {
+                const decoder = new TextDecoder('utf-8', { fatal: false })
+                const dataStr = decoder.decode(event.data)
+                const stripped = dataStr.replace(/\x1b\[3J/g, '')
+                terminal!.write(stripped)
+              } else {
+                terminal!.write(event.data)
+              }
 
-              // If was at bottom but write displaced viewport, snap back
               if (wasAtBottom && terminal!.buffer.active.baseY - terminal!.buffer.active.viewportY > 1) {
                 terminal!.scrollToBottom()
               }
 
-              // Update alternate screen state after data write
               setIsAlternateScreen(terminal!.buffer.active.type === 'alternate')
 
-              // Process data for activity state detection
-              if (detector) detector.processData(event.data)
-              // Log raw characters to console for debugging
+              if (detector) {
+                const decoder = new TextDecoder('utf-8', { fatal: false })
+                detector.processData(decoder.decode(event.data))
+              }
               if (settings.terminal.showRawChars) {
-                rawChars = (rawChars + event.data).slice(-50)
+                const decoder = new TextDecoder('utf-8', { fatal: false })
+                rawChars = (rawChars + decoder.decode(event.data)).slice(-50)
                 console.log('[RAW]', formatRawChars(rawChars))
               }
               break
