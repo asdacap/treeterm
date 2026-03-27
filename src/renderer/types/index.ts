@@ -295,7 +295,7 @@ export interface ClipboardApi {
 
 export interface TerminalApi {
   create: (connectionId: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<{ sessionId: string; handle: string } | null>
-  attach: (connectionId: string, sessionId: string) => Promise<{ success: boolean; handle?: string; scrollback?: string[]; exitCode?: number; error?: string }>
+  attach: (connectionId: string, sessionId: string) => Promise<{ success: boolean; handle?: string; scrollback?: string[]; exitCode?: number; cols?: number; rows?: number; error?: string }>
   list: (connectionId: string) => Promise<SessionInfo[]>
   write: (handle: string, data: string) => void
   resize: (handle: string, cols: number, rows: number) => void

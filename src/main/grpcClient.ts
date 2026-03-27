@@ -118,13 +118,15 @@ export class PtyStream {
    * Collect initial scrollback burst (for attach), then switch to live mode.
    * The daemon sends scrollback synchronously, then live data follows.
    */
-  collectScrollback(): Promise<{ scrollback: string[]; exitCode?: number }> {
+  collectScrollback(): Promise<{ scrollback: string[]; exitCode?: number; cols?: number; rows?: number }> {
     const scrollback: string[] = []
+    let cols: number | undefined
+    let rows: number | undefined
 
     return new Promise((resolve, reject) => {
       let resolved = false
 
-      const finish = (result: { scrollback: string[]; exitCode?: number }): void => {
+      const finish = (result: { scrollback: string[]; exitCode?: number; cols?: number; rows?: number }): void => {
         if (resolved) return
         resolved = true
         this.stream.removeListener('data', onData)
@@ -136,7 +138,10 @@ export class PtyStream {
         if (output.data) {
           scrollback.push(output.data.data.toString('utf-8'))
         } else if (output.exit) {
-          finish({ scrollback, exitCode: output.exit.exitCode })
+          finish({ scrollback, exitCode: output.exit.exitCode, cols, rows })
+        } else if (output.resize) {
+          cols = output.resize.cols
+          rows = output.resize.rows
         }
       }
 
@@ -144,7 +149,7 @@ export class PtyStream {
 
       // Use setTimeout instead of queueMicrotask so I/O events
       // (gRPC data/error) can arrive before we resolve
-      setTimeout(() => finish({ scrollback }), 50)
+      setTimeout(() => finish({ scrollback, cols, rows }), 50)
 
       this.stream.on('error', (error) => {
         if (!resolved) {
@@ -155,7 +160,7 @@ export class PtyStream {
       })
 
       this.stream.on('end', () => {
-        finish({ scrollback })
+        finish({ scrollback, cols, rows })
       })
     })
   }

@@ -96,6 +96,16 @@ impl TreeTermDaemon for DaemonService {
                 _ => return,
             };
 
+            // Send current size first so client can render scrollback at correct dimensions
+            if let Ok((cols, rows)) = pty_mgr.get_size(&session_id).await {
+                let msg = PtyOutput {
+                    output: Some(pty_output::Output::Resize(PtyResizeData { cols, rows })),
+                };
+                if tx.send(Ok(msg)).await.is_err() {
+                    return;
+                }
+            }
+
             // Send scrollback
             if let Ok(scrollback) = pty_mgr.get_scrollback(&session_id).await {
                 for chunk in scrollback {
