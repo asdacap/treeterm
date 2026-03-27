@@ -7,6 +7,7 @@ import WorkspacePickerDialog from './components/WorkspacePickerDialog'
 import ActiveProcessesDialog from './components/ActiveProcessesDialog'
 import ConnectionPicker from './components/ConnectionPicker'
 import SessionInfoPane from './components/SessionInfoPane'
+import ConnectingPane from './components/ConnectingPane'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import AppErrorFallback from './components/AppErrorFallback'
 import { useAppStore } from './store/app'
@@ -130,7 +131,9 @@ export default function App() {
             onMouseDown={handleMouseDown}
           />
           <div className="workspace-pane">
-            {activeSessionStore ? (
+            {activeView?.type === 'connecting' ? (
+              <ConnectingPane connectionId={activeView.connectionId} />
+            ) : activeSessionStore ? (
               <>
                 <div style={{ display: activeView?.type === 'workspace' ? 'contents' : 'none' }}>
                   <WorkspacePane sessionStore={activeSessionStore} platform={platform} />

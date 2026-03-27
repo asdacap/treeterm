@@ -1,6 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useAppStore } from '../store/app'
-import { useNavigationStore } from '../store/navigation'
 import type { SSHConnectionConfig } from '../types'
 
 interface ConnectionPickerProps {
@@ -11,14 +10,14 @@ interface ConnectionPickerProps {
 export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerProps) {
   const ssh = useAppStore(s => s.ssh)
   const addRemoteSession = useAppStore(s => s.addRemoteSession)
-  const { setActiveView } = useNavigationStore()
+  const startRemoteConnect = useAppStore(s => s.startRemoteConnect)
+  const clearConnectingRemote = useAppStore(s => s.clearConnectingRemote)
   const [savedConnections, setSavedConnections] = useState<SSHConnectionConfig[]>([])
   const [host, setHost] = useState('')
   const [user, setUser] = useState('')
   const [port, setPort] = useState('22')
   const [identityFile, setIdentityFile] = useState('')
   const [label, setLabel] = useState('')
-  const [connecting, setConnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [refreshDaemon, setRefreshDaemon] = useState(false)
 
@@ -30,27 +29,34 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
 
   if (!isOpen) return null
 
-  const connectAndCreateSession = async (config: SSHConnectionConfig) => {
-    // 1. Show SSH pane for connection progress
+  const connectAndCreateSession = (config: SSHConnectionConfig) => {
     console.log(`[renderer:ConnectionPicker] Initiating SSH connection to ${config.host}:${config.port} (id=${config.id})`)
-    // Navigate to session view after connection is established (handled in addRemoteSession)
-    // 2. Connect to remote daemon and get session
-    const { info, session } = await ssh.connect(config, { refreshDaemon })
-    console.log(`[renderer:ConnectionPicker] ssh.connect returned: status=${info.status}, session=${session ? session.id : 'undefined'}`)
-    if (info.status !== 'connected') {
-      throw new Error(info.error || 'SSH connection failed')
-    }
-    // 3. Add remote session to store and switch to it
-    if (session) {
+
+    // 1. Immediately navigate to connecting view and close modal
+    startRemoteConnect(config)
+    onClose()
+
+    // 2. Fire SSH connection in the background
+    ssh.connect(config, { refreshDaemon }).then(({ info, session }) => {
+      console.log(`[renderer:ConnectionPicker] ssh.connect returned: status=${info.status}, session=${session ? session.id : 'undefined'}`)
+
+      if (info.status !== 'connected' || !session) {
+        // Error is already visible in ConnectingPane via watchConnectionStatus
+        console.error(`[renderer:ConnectionPicker] SSH connection failed: ${info.error || 'No session returned'}`)
+        return
+      }
+
+      // 3. Clear connecting state and add real session
+      clearConnectingRemote()
       console.log(`[renderer:ConnectionPicker] Adding remote session to store: session=${session.id}`)
       addRemoteSession(session, info)
-    } else {
-      throw new Error('SSH connected but no session was returned from remote daemon')
-    }
-    onClose()
+    }).catch((err) => {
+      console.error(`[renderer:ConnectionPicker] SSH connection error:`, err)
+      // Error is visible in ConnectingPane via watchConnectionStatus
+    })
   }
 
-  const handleConnect = async () => {
+  const handleConnect = () => {
     if (!host || !user) {
       setError('Host and user are required')
       return
@@ -65,35 +71,21 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
       label: label || `${user}@${host}`
     }
 
-    setConnecting(true)
     setError(null)
-    try {
-      await connectAndCreateSession(config)
-      // Save connection for future use
-      await ssh.saveConnection(config)
-      // Reset form
-      setHost('')
-      setUser('')
-      setPort('22')
-      setIdentityFile('')
-      setLabel('')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Connection failed')
-    } finally {
-      setConnecting(false)
-    }
+    connectAndCreateSession(config)
+    // Save connection for future use
+    ssh.saveConnection(config).catch(console.error)
+    // Reset form
+    setHost('')
+    setUser('')
+    setPort('22')
+    setIdentityFile('')
+    setLabel('')
   }
 
-  const handleConnectSaved = async (config: SSHConnectionConfig) => {
-    setConnecting(true)
+  const handleConnectSaved = (config: SSHConnectionConfig) => {
     setError(null)
-    try {
-      await connectAndCreateSession(config)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Connection failed')
-    } finally {
-      setConnecting(false)
-    }
+    connectAndCreateSession(config)
   }
 
   const handleRemoveSaved = async (id: string) => {
@@ -103,7 +95,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') onClose()
-    if (e.key === 'Enter' && !connecting) handleConnect()
+    if (e.key === 'Enter') handleConnect()
   }
 
   return (
@@ -149,7 +141,6 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
                   >Fill</button>
                   <button
                     onClick={() => handleConnectSaved(config)}
-                    disabled={connecting}
                     style={smallButtonStyle}
                   >Connect</button>
                   <button
@@ -217,13 +208,13 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
 
         <button
           onClick={handleConnect}
-          disabled={connecting || !host || !user}
+          disabled={!host || !user}
           style={{
             ...connectButtonStyle,
-            opacity: connecting || !host || !user ? 0.5 : 1
+            opacity: !host || !user ? 0.5 : 1
           }}
         >
-          {connecting ? 'Connecting...' : 'Connect'}
+          Connect
         </button>
       </div>
     </div>

@@ -23,7 +23,7 @@ import type {
   Platform, TerminalApi, GitApi, SessionApi, AppApi, DaemonApi,
   FilesystemApi, STTApi, SandboxApi, SettingsApi, RunActionsApi,
   TerminalInstance, AiHarnessInstance,
-  ConnectionInfo, SSHApi, LlmApi, ClipboardApi
+  ConnectionInfo, SSHConnectionConfig, SSHApi, LlmApi, ClipboardApi
 } from '../types'
 
 export interface AppDeps {
@@ -74,10 +74,15 @@ interface AppState extends AppDeps {
   // Session management
   sessionStores: Record<string, StoreApi<SessionState>>
 
+  // SSH connecting state (before session is established)
+  connectingRemote: { connectionId: string; config: SSHConnectionConfig } | null
+
   // Actions
   initialize: (deps: AppDeps) => Promise<() => void>
   disconnectSession: (sessionId: string) => void
   addRemoteSession: (session: Session, connection: ConnectionInfo) => Promise<void>
+  startRemoteConnect: (config: SSHConnectionConfig) => void
+  clearConnectingRemote: () => void
 
   // Internal
   createNewSession: () => Promise<void>
@@ -117,6 +122,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   daemonSessions: [],
   showConnectionPicker: false,
   sessionStores: {},
+  connectingRemote: null,
 
   // Application registry
   applications: {},
@@ -350,6 +356,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
     } else {
       console.log(`[renderer:app] No workspaces to restore for session=${session.id}`)
     }
+  },
+
+  startRemoteConnect: (config: SSHConnectionConfig) => {
+    set({ connectingRemote: { connectionId: config.id, config } })
+    useNavigationStore.getState().setActiveView({ type: 'connecting', connectionId: config.id })
+  },
+
+  clearConnectingRemote: () => {
+    set({ connectingRemote: null })
   },
 
   createNewSession: async () => {
