@@ -431,6 +431,19 @@ export default function ReviewBrowser({
   }
 
   const handleMerge = async (squash: boolean) => {
+    // Dry-run: re-check conflicts before merging to catch stale state
+    if (wsData?.gitBranch && parentWorkspace?.gitBranch) {
+      const freshCheck = await git.checkMergeConflicts(
+        wsData.gitBranch,
+        parentWorkspace.gitBranch
+      )
+      if (freshCheck.success && freshCheck.conflicts?.hasConflicts) {
+        setConflictInfo(freshCheck.conflicts)
+        alert(`Cannot merge: ${freshCheck.conflicts.conflictedFiles.length} conflict(s) detected. Resolve conflicts first.`)
+        return
+      }
+    }
+
     if (hasUncommitted) {
       const fileCount = uncommitted!.files.length
       const confirmed = confirm(
@@ -670,8 +683,8 @@ export default function ReviewBrowser({
                 <button
                   className="review-action-btn review-merge-btn merge-btn-main"
                   onClick={() => handleMerge(false)}
-                  disabled={isProcessing}
-                  title={hasConflicts ? 'Merge (conflicts will need to be resolved)' : 'Merge changes into parent branch'}
+                  disabled={isProcessing || hasConflicts}
+                  title={hasConflicts ? 'Cannot merge: resolve conflicts first' : 'Merge changes into parent branch'}
                 >
                   {processingAction === 'merge' ? <><span className="btn-spinner" />Merging...</> : 'Merge'}
                   {hasConflicts && ' (has conflicts)'}
@@ -679,7 +692,7 @@ export default function ReviewBrowser({
                 <button
                   className="review-action-btn review-merge-btn merge-btn-dropdown-toggle"
                   onClick={() => setMergeDropdownOpen(!mergeDropdownOpen)}
-                  disabled={isProcessing}
+                  disabled={isProcessing || hasConflicts}
                   title="More merge options"
                 >
                   <ChevronDown size={14} />
@@ -689,8 +702,8 @@ export default function ReviewBrowser({
                     <button
                       className="merge-dropdown-item"
                       onClick={() => { setMergeDropdownOpen(false); handleMerge(true) }}
-                      disabled={isProcessing}
-                      title={hasConflicts ? 'Squash merge (conflicts will need to be resolved)' : 'Squash all commits into one'}
+                      disabled={isProcessing || hasConflicts}
+                      title={hasConflicts ? 'Cannot merge: resolve conflicts first' : 'Squash all commits into one'}
                     >
                       {processingAction === 'squash' ? <><span className="btn-spinner" />Squashing...</> : 'Squash Merge'}
                       {hasConflicts && ' (has conflicts)'}
