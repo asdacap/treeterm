@@ -618,11 +618,34 @@ body,
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
+  display: flex;
+  align-items: center;
+  line-height: 14px;
 }
 
 .workspace-action-btn:hover {
   background: var(--bg-primary);
   border-color: var(--accent);
+}
+
+.workspace-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.workspace-action-btn-git-clean {
+  color: #2ea043;
+  border-color: rgba(46, 160, 67, 0.4);
+}
+
+.workspace-action-btn-git-dirty {
+  color: #d29922;
+  border-color: rgba(210, 153, 34, 0.4);
+}
+
+.workspace-action-btn-git-conflict {
+  color: #cf3536;
+  border-color: rgba(207, 53, 54, 0.4);
 }
 
 .workspace-action-btn-merge {
@@ -636,8 +659,6 @@ body,
 }
 
 .workspace-action-btn-pull {
-  display: flex;
-  align-items: center;
   gap: 4px;
   background: var(--accent);
   border-color: var(--accent);
@@ -5180,8 +5201,6 @@ body,
 }
 
 .run-action-trigger-btn {
-  display: flex;
-  align-items: center;
   gap: 4px;
 }
 

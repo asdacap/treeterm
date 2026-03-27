@@ -65,6 +65,7 @@ export interface WorkspaceStoreState {
   hasConflictsWithParent: boolean
   behindCount: number
   pullLoading: boolean
+  gitRefreshing: boolean
   refreshRemoteStatus: () => Promise<void>
   pullFromRemote: () => Promise<{ success: boolean; error?: string }>
   refreshDiffStatus: () => Promise<void>
@@ -134,34 +135,39 @@ export function createWorkspaceStore(
   let gitControllerInterval: ReturnType<typeof setInterval> | null = null
 
   async function refreshDiffStatus(): Promise<void> {
+    store.setState({ gitRefreshing: true })
     try {
-      const uncommitted = await deps.git.hasUncommittedChanges(workspace.path)
-      store.setState({ hasUncommittedChanges: uncommitted })
-    } catch { /* ignore — workspace may be removed */ }
+      try {
+        const uncommitted = await deps.git.hasUncommittedChanges(workspace.path)
+        store.setState({ hasUncommittedChanges: uncommitted })
+      } catch { /* ignore — workspace may be removed */ }
 
-    try {
-      const ws = store.getState().workspace
-      if (ws.isWorktree && ws.parentId) {
-        const parent = deps.lookupWorkspace(ws.parentId)
-        if (parent?.gitBranch) {
-          const result = await deps.git.getDiff(ws.path, parent.gitBranch)
-          const clean = result.success && result.diff ? result.diff.files.length === 0 : false
-          const uncommitted = store.getState().hasUncommittedChanges
-          store.setState({ isDiffCleanFromParent: clean && !uncommitted })
+      try {
+        const ws = store.getState().workspace
+        if (ws.isWorktree && ws.parentId) {
+          const parent = deps.lookupWorkspace(ws.parentId)
+          if (parent?.gitBranch) {
+            const result = await deps.git.getDiff(ws.path, parent.gitBranch)
+            const clean = result.success && result.diff ? result.diff.files.length === 0 : false
+            const uncommitted = store.getState().hasUncommittedChanges
+            store.setState({ isDiffCleanFromParent: clean && !uncommitted })
+          }
         }
-      }
-    } catch { /* ignore */ }
+      } catch { /* ignore */ }
 
-    try {
-      const ws = store.getState().workspace
-      if (ws.isWorktree && ws.parentId && ws.gitBranch) {
-        const parent = deps.lookupWorkspace(ws.parentId)
-        if (parent?.gitBranch) {
-          const result = await deps.git.checkMergeConflicts(ws.path, ws.gitBranch, parent.gitBranch)
-          store.setState({ hasConflictsWithParent: result.conflicts?.hasConflicts ?? false })
+      try {
+        const ws = store.getState().workspace
+        if (ws.isWorktree && ws.parentId && ws.gitBranch) {
+          const parent = deps.lookupWorkspace(ws.parentId)
+          if (parent?.gitBranch) {
+            const result = await deps.git.checkMergeConflicts(ws.path, ws.gitBranch, parent.gitBranch)
+            store.setState({ hasConflictsWithParent: result.conflicts?.hasConflicts ?? false })
+          }
         }
-      }
-    } catch { /* ignore */ }
+      } catch { /* ignore */ }
+    } finally {
+      store.setState({ gitRefreshing: false })
+    }
   }
 
   function startGitController(): void {
@@ -187,6 +193,7 @@ export function createWorkspaceStore(
     hasConflictsWithParent: false,
     behindCount: 0,
     pullLoading: false,
+    gitRefreshing: false,
     refreshRemoteStatus: async () => {
       const ws = get().workspace
       if (!ws.isGitRepo) return

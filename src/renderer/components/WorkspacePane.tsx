@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState, useRef, useMemo } from 'react'
-import { ChevronDown, Github, Loader2, ArrowDownToLine, RefreshCw } from 'lucide-react'
+import { ChevronDown, Github, Loader2, ArrowDownToLine, RefreshCw, AlertTriangle, CircleDot, Check } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { SessionState } from '../store/createSessionStore'
@@ -420,6 +420,9 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                     >{branchCopied ? 'Copied!' : activeWorkspace.gitBranch}</span>
                   )}
                   {activeWorkspace.isGitRepo && activeHandle && (
+                    <GitStatusButton workspace={activeHandle} />
+                  )}
+                  {activeWorkspace.isGitRepo && activeHandle && (
                     <GitPullButton workspace={activeHandle} />
                   )}
                   <RunActionDropdown
@@ -653,6 +656,51 @@ function MergeAbandonButton({
         </div>
       )}
     </div>
+  )
+}
+
+interface GitStatusButtonProps {
+  workspace: WorkspaceStore
+}
+
+function GitStatusButton({ workspace }: GitStatusButtonProps) {
+  const { gitRefreshing, hasUncommittedChanges, hasConflictsWithParent, isDiffCleanFromParent, refreshDiffStatus } = useStore(workspace)
+
+  const handleRefresh = async () => {
+    await refreshDiffStatus()
+  }
+
+  let icon: React.ReactNode
+  let statusClass: string
+  let title: string
+
+  if (gitRefreshing) {
+    icon = <Loader2 size={14} className="spinning" />
+    statusClass = ''
+    title = 'Checking git status...'
+  } else if (hasConflictsWithParent) {
+    icon = <AlertTriangle size={14} />
+    statusClass = 'workspace-action-btn-git-conflict'
+    title = 'Merge conflicts with parent'
+  } else if (hasUncommittedChanges) {
+    icon = <CircleDot size={14} />
+    statusClass = 'workspace-action-btn-git-dirty'
+    title = 'Uncommitted changes'
+  } else {
+    icon = <Check size={14} />
+    statusClass = 'workspace-action-btn-git-clean'
+    title = 'Working tree clean'
+  }
+
+  return (
+    <button
+      className={`workspace-action-btn ${statusClass}`}
+      onClick={handleRefresh}
+      disabled={gitRefreshing}
+      title={title}
+    >
+      {icon}
+    </button>
   )
 }
 
