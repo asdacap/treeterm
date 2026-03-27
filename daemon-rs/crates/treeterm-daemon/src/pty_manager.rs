@@ -296,6 +296,15 @@ impl PtyManager {
         Ok(session.resize_tx.subscribe())
     }
 
+    /// Get the current terminal size for a session.
+    pub async fn get_size(&self, session_id: &str) -> Result<(i32, i32), String> {
+        let sessions = self.sessions.lock().await;
+        let session = sessions
+            .get(session_id)
+            .ok_or_else(|| format!("session {} not found", session_id))?;
+        Ok((session.cols as i32, session.rows as i32))
+    }
+
     /// Get the exit code for a session (if already exited).
     pub async fn get_exit_code(&self, session_id: &str) -> Result<Option<i32>, String> {
         let sessions = self.sessions.lock().await;

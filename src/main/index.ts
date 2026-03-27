@@ -291,14 +291,14 @@ ipcMain.handle('pty:attach', async (_event, connectionId: string, sessionId: str
     const ptyStream = client.openPtyStream(sessionId)
     ptyStreams.set(ptyStream.handle, ptyStream)
 
-    const { scrollback, exitCode } = await ptyStream.collectScrollback()
+    const { scrollback, exitCode, cols, rows } = await ptyStream.collectScrollback()
 
     ptyStream.onEvent((evt) => {
       _event.sender.send('pty:event', ptyStream.handle, evt)
       if (evt.type === 'exit') ptyStreams.delete(ptyStream.handle)
     })
 
-    return { success: true, handle: ptyStream.handle, scrollback, exitCode }
+    return { success: true, handle: ptyStream.handle, scrollback, exitCode, cols, rows }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     console.error('[main] failed to attach to PTY session:', errorMessage)

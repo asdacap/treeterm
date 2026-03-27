@@ -142,12 +142,16 @@ export default function BaseTerminal({
       let tty: Tty
       let scrollback: string[] | undefined
       let exitCode: number | undefined
+      let daemonCols: number | undefined
+      let daemonRows: number | undefined
       try {
         const result = await session.openTtyStream(existingPtyId)
         console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, existingPtyId)
         tty = result.tty
         scrollback = result.scrollback
         exitCode = result.exitCode
+        daemonCols = result.cols
+        daemonRows = result.rows
       } catch (error) {
         console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, existingPtyId, error)
         if (cancelled) return
@@ -265,6 +269,10 @@ export default function BaseTerminal({
       if (resizeTimeout) clearTimeout(resizeTimeout)
       resizeTimeout = setTimeout(() => {
         if (cancelled) return
+        // Apply daemon's stored size before scrollback so xterm renders at correct dimensions
+        if (daemonCols && daemonRows) {
+          terminal!.resize(daemonCols, daemonRows)
+        }
         fitTerminal(terminal!, resize)
         console.log(`[${config.logPrefix} ${tabId}] resize (initial):`, { cols: terminal!.cols, rows: terminal!.rows })
         initialResizeDone = true
