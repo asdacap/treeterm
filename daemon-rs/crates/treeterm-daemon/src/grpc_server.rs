@@ -10,7 +10,7 @@ use treeterm_proto::treeterm::tree_term_daemon_server::TreeTermDaemon;
 
 use crate::exec_manager;
 use crate::filesystem;
-use crate::pty_manager::PtyManager;
+use crate::pty_manager::{PtyManager, ScrollbackEntry};
 use crate::session_store::SessionStore;
 
 pub struct DaemonService {
@@ -96,21 +96,19 @@ impl TreeTermDaemon for DaemonService {
                 _ => return,
             };
 
-            // Send current size first so client can render scrollback at correct dimensions
-            if let Ok((cols, rows)) = pty_mgr.get_size(&session_id).await {
-                let msg = PtyOutput {
-                    output: Some(pty_output::Output::Resize(PtyResizeData { cols, rows })),
-                };
-                if tx.send(Ok(msg)).await.is_err() {
-                    return;
-                }
-            }
-
-            // Send scrollback
+            // Send scrollback (includes resize entries inline for correct dimensions)
             if let Ok(scrollback) = pty_mgr.get_scrollback(&session_id).await {
-                for chunk in scrollback {
-                    let msg = PtyOutput {
-                        output: Some(pty_output::Output::Data(PtyData { data: chunk })),
+                for entry in scrollback {
+                    let msg = match entry {
+                        ScrollbackEntry::Data(data) => PtyOutput {
+                            output: Some(pty_output::Output::Data(PtyData { data })),
+                        },
+                        ScrollbackEntry::Resize { cols, rows } => PtyOutput {
+                            output: Some(pty_output::Output::Resize(PtyResizeData {
+                                cols: cols as i32,
+                                rows: rows as i32,
+                            })),
+                        },
                     };
                     if tx.send(Ok(msg)).await.is_err() {
                         return;

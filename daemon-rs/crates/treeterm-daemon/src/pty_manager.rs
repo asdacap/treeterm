@@ -11,6 +11,12 @@ const MERGE_THRESHOLD: usize = 500 * 1024; // 500KB
 const COMPACTED_LIMIT: usize = 5 * 1024 * 1024; // 5MB
 const SCROLLBACK_LINES: u16 = 10000;
 
+#[derive(Clone, Debug)]
+pub enum ScrollbackEntry {
+    Data(Vec<u8>),
+    Resize { cols: u16, rows: u16 },
+}
+
 pub struct PtySession {
     pub id: String,
     pub master_fd: RawFd,
@@ -18,9 +24,9 @@ pub struct PtySession {
     pub cwd: String,
     pub cols: u16,
     pub rows: u16,
-    pub buffer1: Vec<Vec<u8>>,
+    pub buffer1: Vec<ScrollbackEntry>,
     pub buffer1_size: usize,
-    pub buffer2: Vec<Vec<u8>>,
+    pub buffer2: Vec<ScrollbackEntry>,
     pub buffer2_size: usize,
     pub created_at: i64,
     pub last_activity: i64,
@@ -125,7 +131,7 @@ impl PtyManager {
             rows,
             buffer1: Vec::new(),
             buffer1_size: 0,
-            buffer2: Vec::new(),
+            buffer2: vec![ScrollbackEntry::Resize { cols, rows }],
             buffer2_size: 0,
             created_at: now,
             last_activity: now,
@@ -175,7 +181,7 @@ impl PtyManager {
         Ok(id)
     }
 
-    pub async fn get_scrollback(&self, session_id: &str) -> Result<Vec<Vec<u8>>, String> {
+    pub async fn get_scrollback(&self, session_id: &str) -> Result<Vec<ScrollbackEntry>, String> {
         let sessions = self.sessions.lock().await;
         let session = sessions
             .get(session_id)
@@ -227,6 +233,7 @@ impl PtyManager {
         }
         session.cols = cols;
         session.rows = rows;
+        session.buffer2.push(ScrollbackEntry::Resize { cols, rows });
         session.last_activity = chrono_now_millis();
         let _ = session.resize_tx.send((cols as i32, rows as i32));
         Ok(())
@@ -326,12 +333,15 @@ impl PtyManager {
     }
 }
 
-/// Count the number of terminal lines that chunks would produce
+/// Count the number of terminal lines that entries would produce
 /// when processed through a terminal emulator.
-fn count_terminal_lines(chunks: &[Vec<u8>], cols: u16, rows: u16) -> usize {
+fn count_terminal_lines(entries: &[ScrollbackEntry], cols: u16, rows: u16) -> usize {
     let mut parser = vt100::Parser::new(rows, cols, SCROLLBACK_LINES as usize);
-    for chunk in chunks {
-        parser.process(chunk);
+    for entry in entries {
+        match entry {
+            ScrollbackEntry::Data(chunk) => parser.process(chunk),
+            ScrollbackEntry::Resize { cols, rows } => parser.set_size(*rows, *cols),
+        }
     }
     let screen = parser.screen();
     // scrollback lines + visible terminal rows
@@ -339,7 +349,7 @@ fn count_terminal_lines(chunks: &[Vec<u8>], cols: u16, rows: u16) -> usize {
 }
 
 fn append_scrollback(session: &mut PtySession, data: &[u8]) {
-    session.buffer2.push(data.to_vec());
+    session.buffer2.push(ScrollbackEntry::Data(data.to_vec()));
     session.buffer2_size += data.len();
 
     if session.buffer2_size > MERGE_THRESHOLD {
@@ -352,7 +362,7 @@ fn compact_scrollback(session: &mut PtySession) {
     let rows = session.rows;
 
     // Measure combined buffer1 + buffer2
-    let combined: Vec<Vec<u8>> = session.buffer1.iter().chain(session.buffer2.iter()).cloned().collect();
+    let combined: Vec<ScrollbackEntry> = session.buffer1.iter().chain(session.buffer2.iter()).cloned().collect();
     let combined_lines = count_terminal_lines(&combined, cols, rows);
 
     // Measure buffer2 alone
@@ -373,9 +383,19 @@ fn compact_scrollback(session: &mut PtySession) {
     session.buffer2_size = 0;
 
     // Truncate buffer1 if exceeds compacted limit
+    let mut last_removed_resize: Option<ScrollbackEntry> = None;
     while session.buffer1_size > COMPACTED_LIMIT && !session.buffer1.is_empty() {
         let removed = session.buffer1.remove(0);
-        session.buffer1_size -= removed.len();
+        match &removed {
+            ScrollbackEntry::Data(d) => session.buffer1_size -= d.len(),
+            ScrollbackEntry::Resize { .. } => { last_removed_resize = Some(removed); }
+        }
+    }
+
+    // Ensure buffer1 starts with a Resize entry so replay begins at correct dimensions
+    if !matches!(session.buffer1.first(), Some(ScrollbackEntry::Resize { .. })) {
+        let resize_entry = last_removed_resize.unwrap_or(ScrollbackEntry::Resize { cols, rows });
+        session.buffer1.insert(0, resize_entry);
     }
 
     tracing::debug!(
