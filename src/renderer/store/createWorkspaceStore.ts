@@ -243,6 +243,7 @@ export function createWorkspaceStore(
       getBranchIsUserDefined: () => get().workspace.metadata?.branchIsUserDefined === 'true',
       getParentId: () => get().workspace.parentId,
       refreshGitInfo: () => deps.refreshGitInfo(id),
+      refreshDiffStatus,
     }),
 
     createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) =>

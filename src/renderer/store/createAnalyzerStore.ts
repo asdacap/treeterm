@@ -18,6 +18,7 @@ export interface AnalyzerDeps {
   getBranchIsUserDefined: () => boolean
   getParentId: () => string | null
   refreshGitInfo: () => Promise<void>
+  refreshDiffStatus: () => Promise<void>
 }
 
 export interface AnalyzerHistoryEntry {
@@ -411,13 +412,17 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     },
   }))
 
-  // Subscribe to own state changes for auto-approve
+  // Subscribe to own state changes for auto-approve and git refresh
   let prevAiState: ActivityState = 'idle'
   store.subscribe((state) => {
     if (state.aiState !== prevAiState) {
+      const wasWorking = prevAiState === 'working'
       prevAiState = state.aiState
       handleAutoApprove()
-      deps.refreshGitInfo().catch(() => {})
+      if (wasWorking) {
+        deps.refreshGitInfo().catch(() => {})
+        deps.refreshDiffStatus().catch(() => {})
+      }
     }
   })
 

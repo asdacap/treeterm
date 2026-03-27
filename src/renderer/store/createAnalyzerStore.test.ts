@@ -60,6 +60,7 @@ function makeDeps(overrides?: Partial<AnalyzerDeps>): AnalyzerDeps {
     getBranchIsUserDefined: vi.fn().mockReturnValue(false),
     getParentId: vi.fn().mockReturnValue('parent-1'),
     refreshGitInfo: vi.fn().mockResolvedValue(undefined),
+    refreshDiffStatus: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }
