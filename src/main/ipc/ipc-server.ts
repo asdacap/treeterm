@@ -43,6 +43,9 @@ const CHANNELS = {
   gitGetLog: 'git:getLog',
   gitGetCommitDiff: 'git:getCommitDiff',
   gitGetCommitFileDiff: 'git:getCommitFileDiff',
+  gitFetch: 'git:fetch',
+  gitPull: 'git:pull',
+  gitGetBehindCount: 'git:getBehindCount',
   gitGetRemoteUrl: 'git:getRemoteUrl',
   githubGetPrUrl: 'github:getPrUrl',
   settingsLoad: 'settings:load',
@@ -446,6 +449,37 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.gitGetCommitFileDiff, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['gitGetCommitFileDiff']['params']))
+    )
+  }
+
+  // Git fetch/pull request handlers
+  onGitFetch(
+    handler: (
+      ...args: IpcRequests['gitFetch']['params']
+    ) => IpcRequests['gitFetch']['result'] | Promise<IpcRequests['gitFetch']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.gitFetch, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['gitFetch']['params']))
+    )
+  }
+
+  onGitPull(
+    handler: (
+      ...args: IpcRequests['gitPull']['params']
+    ) => IpcRequests['gitPull']['result'] | Promise<IpcRequests['gitPull']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.gitPull, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['gitPull']['params']))
+    )
+  }
+
+  onGitGetBehindCount(
+    handler: (
+      ...args: IpcRequests['gitGetBehindCount']['params']
+    ) => IpcRequests['gitGetBehindCount']['result'] | Promise<IpcRequests['gitGetBehindCount']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.gitGetBehindCount, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['gitGetBehindCount']['params']))
     )
   }
 

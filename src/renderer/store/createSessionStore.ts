@@ -845,6 +845,12 @@ export function createSessionStore(
         }
         await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: false, operationId })
 
+        // Refresh parent's remote status after merge
+        const parentHandle = get().workspaceStores[workspace.parentId]
+        if (parentHandle) {
+          parentHandle.getState().refreshRemoteStatus()
+        }
+
         return { success: true }
       } catch (err) {
         store.setState(s => ({

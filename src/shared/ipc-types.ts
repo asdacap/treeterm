@@ -179,6 +179,20 @@ export interface IpcRequests {
     result: { success: boolean; contents?: FileDiffContents; error?: string }
   }
 
+  // Git fetch/pull operations
+  gitFetch: {
+    params: [repoPath: string]
+    result: { success: boolean; error?: string }
+  }
+  gitPull: {
+    params: [repoPath: string]
+    result: { success: boolean; error?: string }
+  }
+  gitGetBehindCount: {
+    params: [repoPath: string]
+    result: number
+  }
+
   // GitHub operations
   gitGetRemoteUrl: {
     params: [repoPath: string]

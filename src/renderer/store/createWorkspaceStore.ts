@@ -63,6 +63,10 @@ export interface WorkspaceStoreState {
   hasUncommittedChanges: boolean
   isDiffCleanFromParent: boolean
   hasConflictsWithParent: boolean
+  behindCount: number
+  pullLoading: boolean
+  refreshRemoteStatus: () => Promise<void>
+  pullFromRemote: () => Promise<{ success: boolean; error?: string }>
   disposeGitController: () => void
 
   // Focus signal (ephemeral, not persisted)
@@ -180,6 +184,34 @@ export function createWorkspaceStore(
     hasUncommittedChanges: false,
     isDiffCleanFromParent: false,
     hasConflictsWithParent: false,
+    behindCount: 0,
+    pullLoading: false,
+    refreshRemoteStatus: async () => {
+      const ws = get().workspace
+      if (!ws.isGitRepo) return
+      try {
+        await deps.git.fetch(ws.path)
+        const count = await deps.git.getBehindCount(ws.path)
+        set({ behindCount: count })
+      } catch { /* ignore — no remote or network issue */ }
+    },
+    pullFromRemote: async () => {
+      const ws = get().workspace
+      if (!ws.isGitRepo) return { success: false, error: 'Not a git repo' }
+      set({ pullLoading: true })
+      try {
+        const result = await deps.git.pull(ws.path)
+        if (result.success) {
+          set({ behindCount: 0 })
+          await deps.refreshGitInfo(id)
+        }
+        return result
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+      } finally {
+        set({ pullLoading: false })
+      }
+    },
     disposeGitController: () => stopGitController(),
 
     initTab: (tabId: string): void => {
@@ -453,6 +485,9 @@ export function createWorkspaceStore(
         getLog: (parentBranch, skip, limit) => deps.git.getLog(path, parentBranch, skip, limit),
         getCommitDiff: (commitHash) => deps.git.getCommitDiff(path, commitHash),
         getCommitFileDiff: (commitHash, filePath) => deps.git.getCommitFileDiff(path, commitHash, filePath),
+        fetch: () => deps.git.fetch(path),
+        pull: () => deps.git.pull(path),
+        getBehindCount: () => deps.git.getBehindCount(path),
       }
     },
 
@@ -478,6 +513,11 @@ export function createWorkspaceStore(
   }))
 
   startGitController()
+
+  // Auto-refresh remote status on workspace open
+  if (workspace.isGitRepo) {
+    store.getState().refreshRemoteStatus()
+  }
 
   return store
 }
