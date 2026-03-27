@@ -27,7 +27,7 @@ export default function ReviewBrowser({
 }: ReviewBrowserProps) {
   const {
     workspace: wsData, lookupWorkspace, getReviewComments, getGitApi,
-    promptHarness, mergeAndRemove, closeAndClean, removeTab,
+    promptHarness, mergeAndRemove, mergeAndKeep, closeAndClean, removeTab,
     addReviewComment, deleteReviewComment, updateOutdatedReviewComments, refreshGitInfo,
     refreshDiffStatus,
   } = useStore(workspace)
@@ -69,7 +69,7 @@ export default function ReviewBrowser({
 
   // Action state
   const [isProcessing, setIsProcessing] = useState(false)
-  const [processingAction, setProcessingAction] = useState<'merge' | 'squash' | null>(null)
+  const [processingAction, setProcessingAction] = useState<'merge' | 'squash' | 'merge-keep' | 'squash-keep' | null>(null)
   const [mergeDropdownOpen, setMergeDropdownOpen] = useState(false)
   const mergeDropdownRef = useRef<HTMLDivElement>(null)
 
@@ -480,6 +480,52 @@ export default function ReviewBrowser({
     }
   }
 
+  const handleMergeAndKeep = async (squash: boolean) => {
+    if (wsData?.gitBranch && parentWorkspace?.gitBranch) {
+      const freshCheck = await git.checkMergeConflicts(
+        wsData.gitBranch,
+        parentWorkspace.gitBranch
+      )
+      if (freshCheck.success && freshCheck.conflicts?.hasConflicts) {
+        setConflictInfo(freshCheck.conflicts)
+        alert(`Cannot merge: ${freshCheck.conflicts.conflictedFiles.length} conflict(s) detected. Resolve conflicts first.`)
+        return
+      }
+    }
+
+    if (hasUncommitted) {
+      const fileCount = uncommitted!.files.length
+      const confirmed = confirm(
+        `You have ${fileCount} uncommitted file${fileCount !== 1 ? 's' : ''}. ` +
+        `These changes will be auto-committed before merging. Continue?`
+      )
+      if (!confirmed) {
+        return
+      }
+    }
+
+    setIsProcessing(true)
+    setProcessingAction(squash ? 'squash-keep' : 'merge-keep')
+
+    try {
+      const result = await mergeAndKeep(squash)
+      if (!result.success) {
+        alert(`Merge failed: ${result.error}`)
+        setIsProcessing(false)
+        setProcessingAction(null)
+        return
+      }
+      // Workspace still alive — refresh the review view
+      await Promise.all([loadDiff(), loadUncommittedChanges()])
+      refreshDiffStatus()
+    } catch (err) {
+      alert(`Merge failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    }
+
+    setIsProcessing(false)
+    setProcessingAction(null)
+  }
+
   const handleCloseAndClean = async () => {
     if (!confirm('Close this workspace? The worktree will be removed but the branch will be kept.')) {
       return
@@ -713,6 +759,24 @@ export default function ReviewBrowser({
                       title={hasConflicts ? 'Cannot merge: resolve conflicts first' : 'Squash all commits into one'}
                     >
                       {processingAction === 'squash' ? <><span className="btn-spinner" />Squashing...</> : 'Squash Merge'}
+                      {hasConflicts && ' (has conflicts)'}
+                    </button>
+                    <button
+                      className="merge-dropdown-item"
+                      onClick={() => { setMergeDropdownOpen(false); handleMergeAndKeep(false) }}
+                      disabled={isProcessing || hasConflicts}
+                      title={hasConflicts ? 'Cannot merge: resolve conflicts first' : 'Merge into parent but keep this workspace'}
+                    >
+                      {processingAction === 'merge-keep' ? <><span className="btn-spinner" />Merging...</> : 'Merge and Keep'}
+                      {hasConflicts && ' (has conflicts)'}
+                    </button>
+                    <button
+                      className="merge-dropdown-item"
+                      onClick={() => { setMergeDropdownOpen(false); handleMergeAndKeep(true) }}
+                      disabled={isProcessing || hasConflicts}
+                      title={hasConflicts ? 'Cannot merge: resolve conflicts first' : 'Squash merge into parent but keep this workspace'}
+                    >
+                      {processingAction === 'squash-keep' ? <><span className="btn-spinner" />Squashing...</> : 'Squash Merge and Keep'}
                       {hasConflicts && ' (has conflicts)'}
                     </button>
                   </div>

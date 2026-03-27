@@ -65,6 +65,7 @@ export interface SessionState {
   removeWorkspaceKeepBoth: (id: string) => Promise<void>
   removeOrphanWorkspace: (id: string) => void
   mergeAndRemoveWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
+  mergeAndKeepWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
   closeAndCleanWorkspace: (id: string) => Promise<{ success: boolean; error?: string }>
   setActiveWorkspace: (id: string | null) => void
   updateGitInfo: (id: string, gitInfo: GitInfo) => void
@@ -187,6 +188,7 @@ export function createSessionStore(
       removeWorkspaceKeepBranch: (id) => store.getState().removeWorkspaceKeepBranch(id),
       removeWorkspaceKeepBoth: (id) => store.getState().removeWorkspaceKeepBoth(id),
       mergeAndRemoveWorkspace: (id, squash) => store.getState().mergeAndRemoveWorkspace(id, squash),
+      mergeAndKeepWorkspace: (id, squash) => store.getState().mergeAndKeepWorkspace(id, squash),
       closeAndCleanWorkspace: (id) => store.getState().closeAndCleanWorkspace(id),
       quickForkWorkspace: (id) => store.getState().quickForkWorkspace(id),
       refreshGitInfo: (id) => store.getState().refreshGitInfo(id),
@@ -466,6 +468,82 @@ export function createSessionStore(
       store.setState(s => ({
         workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: err instanceof Error ? err.message : String(err) } }
       }))
+    } finally {
+      unsubOutput()
+    }
+  }
+
+  // Shared helper: validates workspace, sets loading state, auto-commits, and performs git merge.
+  // Returns { success, error, operationId } — caller decides post-merge behavior.
+  async function mergeWorkspaceCore(
+    id: string,
+    squash: boolean
+  ): Promise<{ success: boolean; error?: string; operationId?: string }> {
+    const state = store.getState()
+    const workspace = state.workspaces[id]
+
+    if (!workspace) {
+      return { success: false, error: 'Workspace not found' }
+    }
+
+    if (!workspace.isWorktree || !workspace.parentId) {
+      return { success: false, error: 'Not a worktree workspace' }
+    }
+
+    const parent = state.workspaces[workspace.parentId]
+    if (!parent || !parent.gitRootPath || !parent.gitBranch) {
+      return { success: false, error: 'Parent workspace not found or not a git repo' }
+    }
+
+    const operationId = generateId()
+    store.setState(s => ({
+      workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'loading' as const, message: squash ? 'Squash merging workspace...' : 'Merging workspace...', output: [] } }
+    }))
+    const unsubOutput = deps.git.onOutput((opId, data) => {
+      if (opId !== operationId) return
+      const loadState = store.getState().workspaceLoadStates[id]
+      if (loadState?.status === 'loading') {
+        store.setState(s => ({
+          workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { ...loadState, output: [...loadState.output, data] } }
+        }))
+      }
+    })
+
+    try {
+      const hasChanges = await deps.git.hasUncommittedChanges(workspace.path)
+      if (hasChanges) {
+        const commitResult = await deps.git.commitAll(
+          workspace.path,
+          `WIP: Auto-commit before merge from ${workspace.name}`
+        )
+        if (!commitResult.success) {
+          store.setState(s => ({
+            workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: `Failed to commit changes: ${commitResult.error}` } }
+          }))
+          return { success: false, error: `Failed to commit changes: ${commitResult.error}` }
+        }
+      }
+
+      const mergeResult = await deps.git.merge(
+        parent.path,
+        workspace.gitBranch!,
+        squash,
+        operationId
+      )
+
+      if (!mergeResult.success) {
+        store.setState(s => ({
+          workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: `Merge failed: ${mergeResult.error}` } }
+        }))
+        return { success: false, error: `Merge failed: ${mergeResult.error}` }
+      }
+
+      return { success: true, operationId }
+    } catch (err) {
+      store.setState(s => ({
+        workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: err instanceof Error ? err.message : String(err) } }
+      }))
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
     } finally {
       unsubOutput()
     }
@@ -779,87 +857,51 @@ export function createSessionStore(
     },
 
     mergeAndRemoveWorkspace: async (id: string, squash: boolean) => {
-      const state = get()
-      const workspace = state.workspaces[id]
+      const result = await mergeWorkspaceCore(id, squash)
+      if (!result.success) return result
 
-      if (!workspace) {
-        return { success: false, error: 'Workspace not found' }
+      const workspace = get().workspaces[id]!
+      const handle = get().workspaceStores[id]
+      if (handle) {
+        handle.getState().updateStatus('merged')
+      }
+      await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: false, operationId: result.operationId })
+
+      // Refresh parent's remote status after merge
+      const parentHandle = get().workspaceStores[workspace.parentId!]
+      if (parentHandle) {
+        parentHandle.getState().refreshRemoteStatus()
       }
 
-      if (!workspace.isWorktree || !workspace.parentId) {
-        return { success: false, error: 'Not a worktree workspace' }
-      }
+      return { success: true }
+    },
 
-      const parent = state.workspaces[workspace.parentId]
-      if (!parent || !parent.gitRootPath || !parent.gitBranch) {
-        return { success: false, error: 'Parent workspace not found or not a git repo' }
-      }
+    mergeAndKeepWorkspace: async (id: string, squash: boolean) => {
+      const result = await mergeWorkspaceCore(id, squash)
+      if (!result.success) return result
 
-      const operationId = generateId()
-      store.setState(s => ({
-        workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'loading' as const, message: squash ? 'Squash merging workspace...' : 'Merging workspace...', output: [] } }
-      }))
-      const unsubOutput = deps.git.onOutput((opId, data) => {
-        if (opId !== operationId) return
-        const loadState = store.getState().workspaceLoadStates[id]
-        if (loadState?.status === 'loading') {
-          store.setState(s => ({
-            workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { ...loadState, output: [...loadState.output, data] } }
-          }))
-        }
+      const workspace = get().workspaces[id]!
+
+      // Clear loading state
+      store.setState(s => {
+        const { [id]: _, ...rest } = s.workspaceLoadStates
+        return { workspaceLoadStates: rest }
       })
 
-      try {
-        const hasChanges = await deps.git.hasUncommittedChanges(workspace.path)
-        if (hasChanges) {
-          const commitResult = await deps.git.commitAll(
-            workspace.path,
-            `WIP: Auto-commit before merge from ${workspace.name}`
-          )
-          if (!commitResult.success) {
-            store.setState(s => ({
-              workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: `Failed to commit changes: ${commitResult.error}` } }
-            }))
-            return { success: false, error: `Failed to commit changes: ${commitResult.error}` }
-          }
-        }
-
-        const mergeResult = await deps.git.merge(
-          parent.path,
-          workspace.gitBranch!,
-          squash,
-          operationId
-        )
-
-        if (!mergeResult.success) {
-          store.setState(s => ({
-            workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: `Merge failed: ${mergeResult.error}` } }
-          }))
-          return { success: false, error: `Merge failed: ${mergeResult.error}` }
-        }
-
-        // Update status on the handle
-        const handle = get().workspaceStores[id]
-        if (handle) {
-          handle.getState().updateStatus('merged')
-        }
-        await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: false, operationId })
-
-        // Refresh parent's remote status after merge
-        const parentHandle = get().workspaceStores[workspace.parentId]
-        if (parentHandle) {
-          parentHandle.getState().refreshRemoteStatus()
-        }
-
-        return { success: true }
-      } catch (err) {
-        store.setState(s => ({
-          workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: err instanceof Error ? err.message : String(err) } }
-        }))
-        return { success: false, error: err instanceof Error ? err.message : String(err) }
-      } finally {
-        unsubOutput()
+      // Refresh workspace diff status and git info
+      const handle = get().workspaceStores[id]
+      if (handle) {
+        handle.getState().refreshDiffStatus()
       }
+      get().refreshGitInfo(id)
+
+      // Refresh parent's remote status after merge
+      const parentHandle = get().workspaceStores[workspace.parentId!]
+      if (parentHandle) {
+        parentHandle.getState().refreshRemoteStatus()
+      }
+
+      return { success: true }
     },
 
     closeAndCleanWorkspace: async (id: string) => {

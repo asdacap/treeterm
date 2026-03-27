@@ -21,6 +21,7 @@ function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStore
     removeWorkspaceKeepBranch: vi.fn().mockResolvedValue(undefined),
     removeWorkspaceKeepBoth: vi.fn().mockResolvedValue(undefined),
     mergeAndRemoveWorkspace: vi.fn().mockResolvedValue({ success: true }),
+    mergeAndKeepWorkspace: vi.fn().mockResolvedValue({ success: true }),
     closeAndCleanWorkspace: vi.fn().mockResolvedValue({ success: true }),
     quickForkWorkspace: vi.fn().mockResolvedValue({ success: true }),
     refreshGitInfo: vi.fn().mockResolvedValue(undefined),
@@ -478,6 +479,16 @@ describe('createWorkspaceStore', () => {
       await store.getState().mergeAndRemove(true)
 
       expect(deps.mergeAndRemoveWorkspace).toHaveBeenCalledWith('ws-1', true)
+    })
+
+    it('mergeAndKeep delegates to deps', async () => {
+      const deps = makeHandleDeps()
+      const ws = makeWorkspace({ id: 'ws-1' })
+      const store = createWorkspaceStore(ws, deps)
+
+      await store.getState().mergeAndKeep(true)
+
+      expect(deps.mergeAndKeepWorkspace).toHaveBeenCalledWith('ws-1', true)
     })
 
     it('closeAndClean delegates to deps', async () => {
