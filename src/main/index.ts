@@ -885,6 +885,37 @@ server.onGitGetCommitFileDiff(async (repoPath, commitHash, filePath) => {
   }
 })
 
+// Git fetch/pull IPC Handlers
+server.onGitFetch(async (repoPath) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  initializeGitClient()
+  if (!gitClient) throw new Error('Git client not initialized')
+  try {
+    await gitClient.fetch(repoPath)
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+})
+
+server.onGitPull(async (repoPath) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  initializeGitClient()
+  if (!gitClient) throw new Error('Git client not initialized')
+  try {
+    return await gitClient.pull(repoPath)
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+})
+
+server.onGitGetBehindCount(async (repoPath) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  initializeGitClient()
+  if (!gitClient) throw new Error('Git client not initialized')
+  return await gitClient.getBehindCount(repoPath)
+})
+
 // GitHub IPC Handlers
 server.onGitGetRemoteUrl(async (repoPath) => {
   if (!daemonClient) throw new Error('Daemon not initialized')

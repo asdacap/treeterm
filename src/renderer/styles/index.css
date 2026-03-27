@@ -635,6 +635,24 @@ body,
   background: rgba(0, 120, 212, 0.85);
 }
 
+.workspace-action-btn-pull {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.workspace-action-btn-pull:hover {
+  background: rgba(0, 120, 212, 0.85);
+}
+
+.workspace-action-btn-pull .pull-count {
+  font-size: 10px;
+  font-weight: 600;
+}
+
 .workspace-action-btn-abandon {
   background: rgba(182, 35, 36, 0.15);
   border-color: #b62324;

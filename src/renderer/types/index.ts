@@ -336,6 +336,9 @@ export interface GitApi {
   getLog: (repoPath: string, parentBranch: string | null, skip: number, limit: number) => Promise<{ success: boolean; result?: GitLogResult; error?: string }>
   getCommitDiff: (repoPath: string, commitHash: string) => Promise<{ success: boolean; files?: DiffFile[]; error?: string }>
   getCommitFileDiff: (repoPath: string, commitHash: string, filePath: string) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
+  fetch: (repoPath: string) => Promise<{ success: boolean; error?: string }>
+  pull: (repoPath: string) => Promise<{ success: boolean; error?: string }>
+  getBehindCount: (repoPath: string) => Promise<number>
   getRemoteUrl: (repoPath: string) => Promise<{ url?: string; error?: string }>
   onOutput: (callback: (operationId: string, data: string) => void) => () => void
 }
@@ -375,6 +378,9 @@ export interface WorkspaceGitApi {
   getLog: (parentBranch: string | null, skip: number, limit: number) => Promise<{ success: boolean; result?: GitLogResult; error?: string }>
   getCommitDiff: (commitHash: string) => Promise<{ success: boolean; files?: DiffFile[]; error?: string }>
   getCommitFileDiff: (commitHash: string, filePath: string) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
+  fetch: () => Promise<{ success: boolean; error?: string }>
+  pull: () => Promise<{ success: boolean; error?: string }>
+  getBehindCount: () => Promise<number>
 }
 
 export interface SettingsApi {

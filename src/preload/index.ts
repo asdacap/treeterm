@@ -306,6 +306,15 @@ contextBridge.exposeInMainWorld('electron', {
     getCommitFileDiff: (repoPath: string, commitHash: string, filePath: string) => {
       return client.gitGetCommitFileDiff(repoPath, commitHash, filePath)
     },
+    fetch: (repoPath: string) => {
+      return client.gitFetch(repoPath)
+    },
+    pull: (repoPath: string) => {
+      return client.gitPull(repoPath)
+    },
+    getBehindCount: (repoPath: string) => {
+      return client.gitGetBehindCount(repoPath)
+    },
     getRemoteUrl: (repoPath: string) => {
       return client.gitGetRemoteUrl(repoPath)
     },

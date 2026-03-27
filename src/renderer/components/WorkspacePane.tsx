@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState, useRef, useMemo } from 'react'
-import { ChevronDown, Github, Loader2 } from 'lucide-react'
+import { ChevronDown, Github, Loader2, ArrowDownToLine, RefreshCw } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { SessionState } from '../store/createSessionStore'
@@ -418,6 +418,9 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                       title="Copy branch name"
                     >{branchCopied ? 'Copied!' : activeWorkspace.gitBranch}</span>
                   )}
+                  {activeWorkspace.isGitRepo && activeHandle && (
+                    <GitPullButton workspace={activeHandle} />
+                  )}
                   <RunActionDropdown
                     workspacePath={activeWorkspace.path}
                     onRun={async (ptyId, actionId) => {
@@ -649,5 +652,48 @@ function MergeAbandonButton({
         </div>
       )}
     </div>
+  )
+}
+
+interface GitPullButtonProps {
+  workspace: WorkspaceStore
+}
+
+function GitPullButton({ workspace }: GitPullButtonProps) {
+  const { behindCount, pullLoading, refreshRemoteStatus, pullFromRemote } = useStore(workspace)
+
+  const handleRefresh = async () => {
+    await refreshRemoteStatus()
+  }
+
+  const handlePull = async () => {
+    const result = await pullFromRemote()
+    if (!result.success) {
+      alert(result.error)
+    }
+  }
+
+  if (behindCount > 0) {
+    return (
+      <button
+        className="workspace-action-btn workspace-action-btn-pull"
+        onClick={handlePull}
+        disabled={pullLoading}
+        title={`Pull ${behindCount} commit${behindCount > 1 ? 's' : ''} from remote`}
+      >
+        {pullLoading ? <Loader2 size={14} className="spinning" /> : <ArrowDownToLine size={14} />}
+        <span className="pull-count">{behindCount}</span>
+      </button>
+    )
+  }
+
+  return (
+    <button
+      className="workspace-action-btn"
+      onClick={handleRefresh}
+      title="Check for remote updates"
+    >
+      <RefreshCw size={14} />
+    </button>
   )
 }

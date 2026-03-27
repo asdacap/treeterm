@@ -135,6 +135,38 @@ export class GitClient {
   }
 
   /**
+   * Fetch from remote (git fetch)
+   */
+  async fetch(repoPath: string): Promise<void> {
+    const result = await this.exec(repoPath, ['fetch'], { timeoutMs: 60000 })
+    if (result.exitCode !== 0) {
+      throw new Error(`git fetch failed: ${result.stderr}`)
+    }
+  }
+
+  /**
+   * Pull from remote (git pull)
+   */
+  async pull(repoPath: string): Promise<{ success: boolean; error?: string }> {
+    const result = await this.exec(repoPath, ['pull'], { timeoutMs: 60000 })
+    if (result.exitCode !== 0) {
+      return { success: false, error: result.stderr.trim() || 'git pull failed' }
+    }
+    return { success: true }
+  }
+
+  /**
+   * Check how many commits the local branch is behind its upstream
+   */
+  async getBehindCount(repoPath: string): Promise<number> {
+    const result = await this.exec(repoPath, ['rev-list', '--count', 'HEAD..@{upstream}'])
+    if (result.exitCode !== 0) {
+      return 0  // no upstream or other error — treat as "not behind"
+    }
+    return parseInt(result.stdout.trim(), 10) || 0
+  }
+
+  /**
    * Get the remote URL for origin
    */
   async getRemoteUrl(repoPath: string): Promise<string> {

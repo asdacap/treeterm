@@ -43,6 +43,9 @@ const CHANNELS = {
   gitGetLog: 'git:getLog',
   gitGetCommitDiff: 'git:getCommitDiff',
   gitGetCommitFileDiff: 'git:getCommitFileDiff',
+  gitFetch: 'git:fetch',
+  gitPull: 'git:pull',
+  gitGetBehindCount: 'git:getBehindCount',
   gitGetRemoteUrl: 'git:getRemoteUrl',
   githubGetPrUrl: 'github:getPrUrl',
   settingsLoad: 'settings:load',
@@ -300,6 +303,19 @@ export class IpcClient {
     ...args: IpcRequests['gitGetCommitFileDiff']['params']
   ): Promise<IpcRequests['gitGetCommitFileDiff']['result']> {
     return ipcRenderer.invoke(CHANNELS.gitGetCommitFileDiff, ...args)
+  }
+
+  // Git fetch/pull requests
+  gitFetch(...args: IpcRequests['gitFetch']['params']): Promise<IpcRequests['gitFetch']['result']> {
+    return ipcRenderer.invoke(CHANNELS.gitFetch, ...args)
+  }
+
+  gitPull(...args: IpcRequests['gitPull']['params']): Promise<IpcRequests['gitPull']['result']> {
+    return ipcRenderer.invoke(CHANNELS.gitPull, ...args)
+  }
+
+  gitGetBehindCount(...args: IpcRequests['gitGetBehindCount']['params']): Promise<IpcRequests['gitGetBehindCount']['result']> {
+    return ipcRenderer.invoke(CHANNELS.gitGetBehindCount, ...args)
   }
 
   // GitHub requests

@@ -54,6 +54,10 @@ const mockWorkspaceStoreStateData = {
   focusTabId: null,
   requestFocus: vi.fn(),
   clearFocusRequest: vi.fn(),
+  behindCount: 0,
+  pullLoading: false,
+  refreshRemoteStatus: vi.fn(),
+  pullFromRemote: vi.fn(),
 } as WorkspaceStoreState
 
 const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => mockWorkspaceStoreStateData)
