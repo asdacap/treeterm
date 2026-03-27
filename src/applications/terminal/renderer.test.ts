@@ -74,6 +74,7 @@ const mockWorkspaceStoreStateData = {
   pullLoading: false,
   refreshRemoteStatus: vi.fn(),
   pullFromRemote: vi.fn(),
+  refreshDiffStatus: vi.fn(),
 } as WorkspaceStoreState
 
 const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => mockWorkspaceStoreStateData)

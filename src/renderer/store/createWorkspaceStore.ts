@@ -67,6 +67,7 @@ export interface WorkspaceStoreState {
   pullLoading: boolean
   refreshRemoteStatus: () => Promise<void>
   pullFromRemote: () => Promise<{ success: boolean; error?: string }>
+  refreshDiffStatus: () => Promise<void>
   disposeGitController: () => void
 
   // Focus signal (ephemeral, not persisted)
@@ -132,42 +133,42 @@ export function createWorkspaceStore(
   // Git controller — polls git status every 10s
   let gitControllerInterval: ReturnType<typeof setInterval> | null = null
 
+  async function refreshDiffStatus(): Promise<void> {
+    try {
+      const uncommitted = await deps.git.hasUncommittedChanges(workspace.path)
+      store.setState({ hasUncommittedChanges: uncommitted })
+    } catch { /* ignore — workspace may be removed */ }
+
+    try {
+      const ws = store.getState().workspace
+      if (ws.isWorktree && ws.parentId) {
+        const parent = deps.lookupWorkspace(ws.parentId)
+        if (parent?.gitBranch) {
+          const result = await deps.git.getDiff(ws.path, parent.gitBranch)
+          const clean = result.success && result.diff ? result.diff.files.length === 0 : false
+          const uncommitted = store.getState().hasUncommittedChanges
+          store.setState({ isDiffCleanFromParent: clean && !uncommitted })
+        }
+      }
+    } catch { /* ignore */ }
+
+    try {
+      const ws = store.getState().workspace
+      if (ws.isWorktree && ws.parentId && ws.gitBranch) {
+        const parent = deps.lookupWorkspace(ws.parentId)
+        if (parent?.gitBranch) {
+          const result = await deps.git.checkMergeConflicts(ws.path, ws.gitBranch, parent.gitBranch)
+          store.setState({ hasConflictsWithParent: result.conflicts?.hasConflicts ?? false })
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
   function startGitController(): void {
     if (!workspace.isGitRepo) return
 
-    const poll = async () => {
-      try {
-        const uncommitted = await deps.git.hasUncommittedChanges(workspace.path)
-        store.setState({ hasUncommittedChanges: uncommitted })
-      } catch { /* ignore — workspace may be removed */ }
-
-      try {
-        const ws = store.getState().workspace
-        if (ws.isWorktree && ws.parentId) {
-          const parent = deps.lookupWorkspace(ws.parentId)
-          if (parent?.gitBranch) {
-            const result = await deps.git.getDiff(ws.path, parent.gitBranch)
-            const clean = result.success && result.diff ? result.diff.files.length === 0 : false
-            const uncommitted = store.getState().hasUncommittedChanges
-            store.setState({ isDiffCleanFromParent: clean && !uncommitted })
-          }
-        }
-      } catch { /* ignore */ }
-
-      try {
-        const ws = store.getState().workspace
-        if (ws.isWorktree && ws.parentId && ws.gitBranch) {
-          const parent = deps.lookupWorkspace(ws.parentId)
-          if (parent?.gitBranch) {
-            const result = await deps.git.checkMergeConflicts(ws.path, ws.gitBranch, parent.gitBranch)
-            store.setState({ hasConflictsWithParent: result.conflicts?.hasConflicts ?? false })
-          }
-        }
-      } catch { /* ignore */ }
-    }
-
-    poll()
-    gitControllerInterval = setInterval(poll, 10_000)
+    refreshDiffStatus()
+    gitControllerInterval = setInterval(refreshDiffStatus, 10_000)
   }
 
   function stopGitController(): void {
@@ -212,6 +213,7 @@ export function createWorkspaceStore(
         set({ pullLoading: false })
       }
     },
+    refreshDiffStatus,
     disposeGitController: () => stopGitController(),
 
     initTab: (tabId: string): void => {

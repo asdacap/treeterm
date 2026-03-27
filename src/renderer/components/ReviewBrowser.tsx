@@ -29,6 +29,7 @@ export default function ReviewBrowser({
     workspace: wsData, lookupWorkspace, getReviewComments, getGitApi,
     promptHarness, mergeAndRemove, closeAndClean, removeTab,
     addReviewComment, deleteReviewComment, updateOutdatedReviewComments, refreshGitInfo,
+    refreshDiffStatus,
   } = useStore(workspace)
   const git = getGitApi()
   const workspaceId = wsData.id
@@ -108,6 +109,7 @@ export default function ReviewBrowser({
         loadReviews(),
         ...(parentWorkspace ? [loadDiff(), checkConflicts()] : []),
       ])
+      refreshDiffStatus()
     } finally {
       setRefreshing(false)
     }
@@ -348,6 +350,7 @@ export default function ReviewBrowser({
       const result = await git.stageFile(filePath)
       if (result.success) {
         await loadUncommittedChanges()
+        refreshDiffStatus()
       } else {
         setStageError(result.error || `Failed to stage ${filePath}`)
       }
@@ -364,6 +367,7 @@ export default function ReviewBrowser({
       const result = await git.unstageFile(filePath)
       if (result.success) {
         await loadUncommittedChanges()
+        refreshDiffStatus()
       } else {
         setStageError(result.error || `Failed to unstage ${filePath}`)
       }
@@ -380,6 +384,7 @@ export default function ReviewBrowser({
       const result = await git.stageAll()
       if (result.success) {
         await loadUncommittedChanges()
+        refreshDiffStatus()
       } else {
         setStageError(result.error || 'Failed to stage all files')
       }
@@ -396,6 +401,7 @@ export default function ReviewBrowser({
       const result = await git.unstageAll()
       if (result.success) {
         await loadUncommittedChanges()
+        refreshDiffStatus()
       } else {
         setStageError(result.error || 'Failed to unstage all files')
       }
@@ -420,6 +426,7 @@ export default function ReviewBrowser({
         setCommitMessage('')
         await loadUncommittedChanges()
         await loadDiff()
+        refreshDiffStatus()
       } else {
         setCommitError(result.error || 'Failed to commit')
       }
