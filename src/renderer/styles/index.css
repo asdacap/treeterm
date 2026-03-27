@@ -876,6 +876,22 @@ body,
   opacity: 0.6;
 }
 
+/* Size Mismatch Badge */
+.size-mismatch-badge {
+  position: absolute;
+  top: 8px;
+  right: 200px;
+  z-index: 10;
+  background: rgba(180, 40, 40, 0.7);
+  border: 1px solid #b42828;
+  color: #ff9090;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: monospace;
+  opacity: 0.6;
+}
+
 /* Scroll Down Button */
 .scroll-down-btn {
   font-size: 16px;

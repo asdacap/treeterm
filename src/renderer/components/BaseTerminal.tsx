@@ -83,6 +83,8 @@ export default function BaseTerminal({
   const [loading, setLoading] = useState(true)
   const [scrollPosition, setScrollPosition] = useState<'top' | 'bottom' | 'middle'>('middle')
   const [isAlternateScreen, setIsAlternateScreen] = useState(false)
+  const [sizeMismatch, setSizeMismatch] = useState<{ requested: { cols: number; rows: number }; actual: { cols: number; rows: number } } | null>(null)
+  const requestedSizeRef = useRef<{ cols: number; rows: number } | null>(null)
 
   const sessionStore = useSessionApi()
   const setTabState = useActivityStateStore((state) => state.setTabState)
@@ -211,7 +213,11 @@ export default function BaseTerminal({
         setIsAlternateScreen(buf.type === 'alternate')
       })
 
-      const resize = tty.getState().resize
+      const rawResize = tty.getState().resize
+      const resize = (cols: number, rows: number) => {
+        requestedSizeRef.current = { cols, rows }
+        rawResize(cols, rows)
+      }
 
       terminalRef.current = terminal
 
@@ -345,6 +351,14 @@ export default function BaseTerminal({
 
               terminal!.resize(event.cols, event.rows)
 
+              // Check if daemon-echoed size matches what we requested
+              const req = requestedSizeRef.current
+              if (req && (req.cols !== event.cols || req.rows !== event.rows)) {
+                setSizeMismatch({ requested: req, actual: { cols: event.cols, rows: event.rows } })
+              } else {
+                setSizeMismatch(null)
+              }
+
               if (wasAtBottom) {
                 terminal!.scrollToBottom()
               } else {
@@ -422,6 +436,7 @@ export default function BaseTerminal({
       terminalRef={terminalRef}
       scrollPosition={scrollPosition}
       isAlternateScreen={isAlternateScreen}
+      sizeMismatch={sizeMismatch}
       extraButtons={extraButtons}
     >
       <div className="terminal-padding-wrapper">

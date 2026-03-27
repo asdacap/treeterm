@@ -5,6 +5,7 @@ interface TerminalScrollWrapperProps {
   terminalRef: React.RefObject<XTerm | null>
   scrollPosition: 'top' | 'bottom' | 'middle'
   isAlternateScreen?: boolean
+  sizeMismatch?: { requested: { cols: number; rows: number }; actual: { cols: number; rows: number } } | null
   extraButtons?: React.ReactNode
   children: React.ReactNode
 }
@@ -13,6 +14,7 @@ export default function TerminalScrollWrapper({
   terminalRef,
   scrollPosition,
   isAlternateScreen,
+  sizeMismatch,
   extraButtons,
   children,
 }: TerminalScrollWrapperProps) {
@@ -39,6 +41,14 @@ export default function TerminalScrollWrapper({
       {isAlternateScreen && (
         <span className="alt-screen-badge" title="Terminal is in alternate screen mode (no scrollback)">
           ALT SCREEN
+        </span>
+      )}
+      {sizeMismatch && (
+        <span
+          className="size-mismatch-badge"
+          title={`Requested: ${sizeMismatch.requested.cols}x${sizeMismatch.requested.rows}, Stream: ${sizeMismatch.actual.cols}x${sizeMismatch.actual.rows}`}
+        >
+          {sizeMismatch.actual.cols}x{sizeMismatch.actual.rows}
         </span>
       )}
       <div className="terminal-floating-buttons">
