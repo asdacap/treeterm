@@ -63,7 +63,7 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
     },
     terminal: {
       create: vi.fn().mockResolvedValue({ sessionId: 'pty-1', handle: 'handle-1' }),
-      attach: vi.fn().mockResolvedValue({ success: true, handle: 'handle-1', scrollback: [] }),
+      attach: vi.fn().mockResolvedValue({ success: true, handle: 'handle-1' }),
       list: vi.fn().mockResolvedValue([]),
       write: vi.fn(),
       resize: vi.fn(),
@@ -183,8 +183,6 @@ describe('createSessionStore', () => {
     it('openTtyStream opens a stream and returns Tty without storing', async () => {
       const result = await store.getState().openTtyStream('pty-2')
       expect(result.tty).toBeDefined()
-      expect(result.scrollback).toEqual([])
-      expect(result.exitCode).toBeUndefined()
       // Should NOT be stored in ttyWriters
       expect(store.getState().ttyWriters['pty-2']).toBeUndefined()
     })

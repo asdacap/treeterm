@@ -57,23 +57,22 @@ export class PtyStream {
   readonly handle: string
   readonly sessionId: string
   private stream: grpc.ClientDuplexStream<PtyInput, PtyOutput>
-  private onEventCb: ((event: PtyEvent) => void) | null = null
   private closed: boolean = false
 
-  constructor(client: TreeTermDaemonClient, sessionId: string) {
+  constructor(client: TreeTermDaemonClient, sessionId: string, onEvent: (event: PtyEvent) => void) {
     this.handle = randomUUID()
     this.sessionId = sessionId
     const metadata = new grpc.Metadata()
     this.stream = client.ptyStream(metadata)
-    this.stream.write({ start: { sessionId } })
 
+    // Set up event forwarding BEFORE sending start so no events are dropped
     this.stream.on('data', (output: PtyOutput) => {
       if (output.data) {
-        this.onEventCb?.({ type: 'data', data: output.data.data.toString('utf-8') })
+        onEvent({ type: 'data', data: output.data.data.toString('utf-8') })
       } else if (output.exit) {
-        this.onEventCb?.({ type: 'exit', exitCode: output.exit.exitCode, signal: output.exit.signal })
+        onEvent({ type: 'exit', exitCode: output.exit.exitCode, signal: output.exit.signal })
       } else if (output.resize) {
-        this.onEventCb?.({ type: 'resize', cols: output.resize.cols, rows: output.resize.rows })
+        onEvent({ type: 'resize', cols: output.resize.cols, rows: output.resize.rows })
       }
     })
 
@@ -84,10 +83,8 @@ export class PtyStream {
     this.stream.on('end', () => {
       this.closed = true
     })
-  }
 
-  onEvent(cb: (event: PtyEvent) => void): void {
-    this.onEventCb = cb
+    this.stream.write({ start: { sessionId } })
   }
 
   write(data: string): void {
@@ -112,57 +109,6 @@ export class PtyStream {
     if (this.closed) return
     this.closed = true
     this.stream.end()
-  }
-
-  /**
-   * Collect initial scrollback burst (for attach), then switch to live mode.
-   * The daemon sends scrollback synchronously, then live data follows.
-   */
-  collectScrollback(): Promise<{ scrollback: string[]; exitCode?: number; cols?: number; rows?: number }> {
-    const scrollback: string[] = []
-    let cols: number | undefined
-    let rows: number | undefined
-
-    return new Promise((resolve, reject) => {
-      let resolved = false
-
-      const finish = (result: { scrollback: string[]; exitCode?: number; cols?: number; rows?: number }): void => {
-        if (resolved) return
-        resolved = true
-        this.stream.removeListener('data', onData)
-        resolve(result)
-      }
-
-      const onData = (output: PtyOutput): void => {
-        if (resolved) return
-        if (output.data) {
-          scrollback.push(output.data.data.toString('utf-8'))
-        } else if (output.exit) {
-          finish({ scrollback, exitCode: output.exit.exitCode, cols, rows })
-        } else if (output.resize) {
-          cols = output.resize.cols
-          rows = output.resize.rows
-        }
-      }
-
-      this.stream.on('data', onData)
-
-      // Use setTimeout instead of queueMicrotask so I/O events
-      // (gRPC data/error) can arrive before we resolve
-      setTimeout(() => finish({ scrollback, cols, rows }), 50)
-
-      this.stream.on('error', (error) => {
-        if (!resolved) {
-          resolved = true
-          this.stream.removeListener('data', onData)
-          reject(error)
-        }
-      })
-
-      this.stream.on('end', () => {
-        finish({ scrollback, cols, rows })
-      })
-    })
   }
 }
 
@@ -216,11 +162,11 @@ export class GrpcDaemonClient {
    * Open a new independent PtyStream for a given session.
    * Each caller gets its own gRPC duplex stream — no shared state.
    */
-  openPtyStream(sessionId: string): PtyStream {
+  openPtyStream(sessionId: string, onEvent: (event: PtyEvent) => void): PtyStream {
     if (!this.client) {
       throw new Error('Not connected to daemon')
     }
-    return new PtyStream(this.client, sessionId)
+    return new PtyStream(this.client, sessionId, onEvent)
   }
 
   onDisconnect(listener: DisconnectListener): () => void {

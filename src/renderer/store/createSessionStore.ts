@@ -41,7 +41,7 @@ export interface SessionState {
   // TTY writers (write-only, keyed by ptyId)
   ttyWriters: Record<string, TtyWriter>
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
-  openTtyStream: (ptyId: string) => Promise<{ tty: Tty; scrollback?: string[]; exitCode?: number; cols?: number; rows?: number }>
+  openTtyStream: (ptyId: string) => Promise<{ tty: Tty }>
   getTtyWriter: (ptyId: string) => Promise<TtyWriter>
   killTty: (ptyId: string) => void
   listTty: () => Promise<SessionInfo[]>
@@ -505,13 +505,13 @@ export function createSessionStore(
       return result.sessionId
     },
 
-    openTtyStream: async (ptyId: string): Promise<{ tty: Tty; scrollback?: string[]; exitCode?: number; cols?: number; rows?: number }> => {
+    openTtyStream: async (ptyId: string): Promise<{ tty: Tty }> => {
       const result = await deps.terminal.attach(connectionId, ptyId)
       if (!result.success || !result.handle) {
         throw new Error(result.error || 'Failed to attach to PTY')
       }
       const tty = createTtyStore(ptyId, result.handle, boundTerminal)
-      return { tty, scrollback: result.scrollback, exitCode: result.exitCode, cols: result.cols, rows: result.rows }
+      return { tty }
     },
 
     getTtyWriter: async (ptyId: string): Promise<TtyWriter> => {

@@ -37,6 +37,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const enterWorkspaceFocus = useKeybindingStore(s => s.enterWorkspaceFocus)
   const applications = useAppStore((s) => s.applications)
   const clipboard = useAppStore((s) => s.clipboard)
+  const github = useAppStore((s) => s.github)
   const getApplication = useCallback((id: string) => applications[id], [applications])
   const menuApplications = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
 
@@ -234,7 +235,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     if (!parent?.gitBranch) return
     setGithubLoading(true)
     try {
-      const result = await window.electron.github.getPrUrl(
+      const result = await github.getPrUrl(
         activeWorkspace.gitRootPath,
         activeWorkspace.gitBranch,
         parent.gitBranch
@@ -250,7 +251,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     } finally {
       setGithubLoading(false)
     }
-  }, [activeWorkspace, workspaces])
+  }, [activeWorkspace, workspaces, github])
 
   // Abandon dropdown state
   const [abandonMenuOpen, setAbandonMenuOpen] = useState(false)

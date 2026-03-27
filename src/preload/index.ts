@@ -160,7 +160,7 @@ contextBridge.exposeInMainWorld('electron', {
     create: (connectionId: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string): Promise<{ sessionId: string; handle: string } | null> => {
       return client.ptyCreate(connectionId, cwd, sandbox, startupCommand)
     },
-    attach: (connectionId: string, sessionId: string): Promise<{ success: boolean; handle?: string; scrollback?: string[]; exitCode?: number; error?: string }> => {
+    attach: (connectionId: string, sessionId: string): Promise<{ success: boolean; handle?: string; error?: string }> => {
       return client.ptyAttach(connectionId, sessionId)
     },
     list: (connectionId: string): Promise<SessionInfo[]> => {

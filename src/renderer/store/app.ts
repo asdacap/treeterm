@@ -23,7 +23,7 @@ import type {
   Platform, TerminalApi, GitApi, SessionApi, AppApi, DaemonApi,
   FilesystemApi, STTApi, SandboxApi, SettingsApi, RunActionsApi,
   TerminalInstance, AiHarnessInstance,
-  ConnectionInfo, SSHConnectionConfig, SSHApi, LlmApi, ClipboardApi
+  ConnectionInfo, SSHConnectionConfig, SSHApi, LlmApi, ClipboardApi, GitHubApi
 } from '../types'
 
 export interface AppDeps {
@@ -41,6 +41,7 @@ export interface AppDeps {
   ssh: SSHApi
   llm: LlmApi
   clipboard: ClipboardApi
+  github: GitHubApi
   selectFolder: () => Promise<string | null>
   getWindowUuid: () => Promise<string>
   getInitialWorkspace: () => Promise<string | null>
@@ -108,6 +109,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   ssh: UNINITIALIZED,
   llm: UNINITIALIZED,
   clipboard: UNINITIALIZED,
+  github: UNINITIALIZED,
   selectFolder: UNINITIALIZED,
   getWindowUuid: UNINITIALIZED,
   getInitialWorkspace: UNINITIALIZED,

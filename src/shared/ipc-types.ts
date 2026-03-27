@@ -46,7 +46,7 @@ export interface IpcRequests {
   }
   ptyAttach: {
     params: [connectionId: string, sessionId: string]
-    result: { success: boolean; handle?: string; scrollback?: string[]; exitCode?: number; error?: string }
+    result: { success: boolean; handle?: string; error?: string }
   }
   ptyList: {
     params: [connectionId: string]

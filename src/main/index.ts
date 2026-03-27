@@ -265,13 +265,11 @@ ipcMain.handle('pty:create', async (event, connectionId: string, cwd: string, sa
     const client = getClientForConnection(connectionId)
     await client.ensureDaemonRunning()
     const sessionId = await client.createPtySession({ cwd, sandbox: sandbox as SandboxConfig | undefined, startupCommand })
-    const ptyStream = client.openPtyStream(sessionId)
-    ptyStreams.set(ptyStream.handle, ptyStream)
-
-    ptyStream.onEvent((evt) => {
+    const ptyStream = client.openPtyStream(sessionId, (evt) => {
       event.sender.send('pty:event', ptyStream.handle, evt)
       if (evt.type === 'exit') ptyStreams.delete(ptyStream.handle)
     })
+    ptyStreams.set(ptyStream.handle, ptyStream)
 
     return { sessionId, handle: ptyStream.handle }
   } catch (error) {
@@ -288,17 +286,13 @@ ipcMain.handle('pty:attach', async (_event, connectionId: string, sessionId: str
   try {
     const client = getClientForConnection(connectionId)
     await client.ensureDaemonRunning()
-    const ptyStream = client.openPtyStream(sessionId)
-    ptyStreams.set(ptyStream.handle, ptyStream)
-
-    const { scrollback, exitCode, cols, rows } = await ptyStream.collectScrollback()
-
-    ptyStream.onEvent((evt) => {
+    const ptyStream = client.openPtyStream(sessionId, (evt) => {
       _event.sender.send('pty:event', ptyStream.handle, evt)
       if (evt.type === 'exit') ptyStreams.delete(ptyStream.handle)
     })
+    ptyStreams.set(ptyStream.handle, ptyStream)
 
-    return { success: true, handle: ptyStream.handle, scrollback, exitCode, cols, rows }
+    return { success: true, handle: ptyStream.handle }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     console.error('[main] failed to attach to PTY session:', errorMessage)

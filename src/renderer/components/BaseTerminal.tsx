@@ -140,18 +140,10 @@ export default function BaseTerminal({
       }
 
       let tty: Tty
-      let scrollback: string[] | undefined
-      let exitCode: number | undefined
-      let daemonCols: number | undefined
-      let daemonRows: number | undefined
       try {
         const result = await session.openTtyStream(existingPtyId)
         console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, existingPtyId)
         tty = result.tty
-        scrollback = result.scrollback
-        exitCode = result.exitCode
-        daemonCols = result.cols
-        daemonRows = result.rows
       } catch (error) {
         console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, existingPtyId, error)
         if (cancelled) return
@@ -264,41 +256,17 @@ export default function BaseTerminal({
       }
 
       setupResizeObserver(terminal, resize)
-      // then restore scrollback and connect live data AFTER resize
-      // so xterm never receives data at the wrong dimensions
+      // Wait for layout to settle before fitting and connecting the stream.
+      // All events (scrollback, resize, exit, live data) flow through onEvent uniformly —
+      // the preload layer buffers them until we subscribe.
       if (resizeTimeout) clearTimeout(resizeTimeout)
       resizeTimeout = setTimeout(() => {
         if (cancelled) return
-        // Apply daemon's stored size before scrollback so xterm renders at correct dimensions
-        if (daemonCols && daemonRows) {
-          terminal!.resize(daemonCols, daemonRows)
-        }
         fitTerminal(terminal!, resize)
         console.log(`[${config.logPrefix} ${tabId}] resize (initial):`, { cols: terminal!.cols, rows: terminal!.rows })
         initialResizeDone = true
 
-        // Restore scrollback buffer
-        if (scrollback && scrollback.length > 0) {
-          const totalBytes = scrollback.reduce((sum, chunk) => sum + chunk.length, 0)
-          const totalLines = scrollback.reduce((sum, chunk) => sum + (chunk.match(/\n/g) || []).length, 0)
-          console.log(`[${config.logPrefix} ${tabId}] restoring scrollback: ${scrollback.length} chunks, ${totalLines} lines, ${totalBytes} bytes`)
-          for (const chunk of scrollback) {
-            terminal!.write(chunk)
-          }
-        } else {
-          setOverlay({ message: 'No scrollback buffer available', type: 'info' })
-        }
-
-        // Set initial alternate screen state after scrollback restore
-        setIsAlternateScreen(terminal!.buffer.active.type === 'alternate')
-
-        // If session already exited, show exit message and don't subscribe for live data
-        if (exitCode !== undefined) {
-          terminal!.write(`\r\n\x1b[2mProcess exited with exit code ${exitCode}\x1b[0m\r\n`)
-          return
-        }
-
-        // Phase 3: Connect live TTY
+        // Connect TTY — buffered events (scrollback, resize, possibly exit) flush immediately
         ttyRef.current = tty
         const ttyState = tty.getState()
         const connectedAt = Date.now()
@@ -308,7 +276,7 @@ export default function BaseTerminal({
             case 'data': {
               // Track data version for terminal analyzer
               dataVersionRef.current++
-              // Dismiss overlay once live data starts flowing
+              // Dismiss overlay once data starts flowing
               setOverlay(null)
               // Strip CSI 3J (clear scrollback) if configured
               const dataToWrite = config.stripScrollbackClear
@@ -325,6 +293,9 @@ export default function BaseTerminal({
               if (wasAtBottom && terminal!.buffer.active.baseY - terminal!.buffer.active.viewportY > 1) {
                 terminal!.scrollToBottom()
               }
+
+              // Update alternate screen state after data write
+              setIsAlternateScreen(terminal!.buffer.active.type === 'alternate')
 
               // Process data for activity state detection
               if (detector) detector.processData(event.data)

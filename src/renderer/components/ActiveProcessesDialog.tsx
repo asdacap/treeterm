@@ -69,7 +69,7 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
     resizeObserver.observe(container)
     cleanups.push(() => resizeObserver.disconnect())
 
-    // Attach to PTY and get scrollback
+    // Attach to PTY — scrollback, resize, and live data all arrive via onEvent
     terminalApi.attach(connectionId, ptyId).then((result) => {
       if (cancelled) return
 
@@ -88,18 +88,14 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
 
       handleRef = handle
 
-      if (result.scrollback) {
-        for (const line of result.scrollback) {
-          term.write(line)
-        }
-      }
-
-      // Subscribe to events using handle
+      // Subscribe to events — buffered scrollback flushes immediately
       const unsubEvent = terminalApi.onEvent(handle, (event) => {
         if (event.type === 'data') {
           term.write(event.data)
         } else if (event.type === 'exit') {
           term.write('\r\n\x1b[90m[Process exited]\x1b[0m\r\n')
+        } else if (event.type === 'resize') {
+          term.resize(event.cols, event.rows)
         }
       })
       cleanups.push(unsubEvent)

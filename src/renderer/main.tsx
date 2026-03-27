@@ -22,6 +22,7 @@ window.electron.app.onReady(() => {
     ssh: e.ssh,
     llm: e.llm,
     clipboard: e.clipboard,
+    github: e.github,
     sessionApi: e.session,
     settingsApi: e.settings,
     appApi: e.app,

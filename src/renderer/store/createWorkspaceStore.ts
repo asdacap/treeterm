@@ -8,7 +8,7 @@ import type { Analyzer } from './createAnalyzerStore'
 
 export interface WorkspaceStoreDeps {
   appRegistry: AppRegistryApi
-  openTtyStream: (ptyId: string) => Promise<{ tty: Tty; scrollback?: string[]; exitCode?: number }>
+  openTtyStream: (ptyId: string) => Promise<{ tty: Tty }>
   getTtyWriter: (ptyId: string) => Promise<TtyWriter>
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
   connectionId: string
