@@ -76,6 +76,10 @@ const defaultSettings: Settings = {
     safePaths: ['/tmp'],
     bufferLines: 30
   },
+  github: {
+    pat: '',
+    autodetectViaGh: true
+  },
   globalDefaultApplicationId: 'terminal',
   recentDirectories: []
 }
@@ -254,6 +258,10 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
     terminalAnalyzer: {
       ...defaults.terminalAnalyzer,
       ...loaded.terminalAnalyzer
+    },
+    github: {
+      ...defaults.github,
+      ...loaded.github
     },
     globalDefaultApplicationId: loaded.globalDefaultApplicationId || defaults.globalDefaultApplicationId,
     recentDirectories: loaded.recentDirectories || defaults.recentDirectories

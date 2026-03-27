@@ -306,12 +306,20 @@ contextBridge.exposeInMainWorld('electron', {
     getCommitFileDiff: (repoPath: string, commitHash: string, filePath: string) => {
       return client.gitGetCommitFileDiff(repoPath, commitHash, filePath)
     },
+    getRemoteUrl: (repoPath: string) => {
+      return client.gitGetRemoteUrl(repoPath)
+    },
     onOutput: (callback: GitOutputCallback): (() => void) => {
       gitOutputListeners.push(callback)
       return () => {
         const index = gitOutputListeners.indexOf(callback)
         if (index > -1) gitOutputListeners.splice(index, 1)
       }
+    }
+  },
+  github: {
+    getPrUrl: (repoPath: string, head: string, base: string) => {
+      return client.githubGetPrUrl(repoPath, head, base)
     }
   },
   settings: {

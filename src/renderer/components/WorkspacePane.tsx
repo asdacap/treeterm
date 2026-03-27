@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState, useRef, useMemo } from 'react'
-import { ChevronDown, Loader2 } from 'lucide-react'
+import { ChevronDown, Github, Loader2 } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { SessionState } from '../store/createSessionStore'
@@ -223,6 +223,33 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     })
   }
 
+  // GitHub button state
+  const [githubLoading, setGithubLoading] = useState(false)
+
+  const handleOpenGitHub = useCallback(async () => {
+    if (!activeWorkspace?.parentId || !activeWorkspace.gitBranch || !activeWorkspace.gitRootPath) return
+    const parent = workspaces[activeWorkspace.parentId]
+    if (!parent?.gitBranch) return
+    setGithubLoading(true)
+    try {
+      const result = await window.electron.github.getPrUrl(
+        activeWorkspace.gitRootPath,
+        activeWorkspace.gitBranch,
+        parent.gitBranch
+      )
+      if ('url' in result) {
+        window.open(result.url, '_blank')
+      } else {
+        console.error('[WorkspacePane] GitHub PR URL error:', result.error)
+        alert(result.error)
+      }
+    } catch (error) {
+      console.error('[WorkspacePane] GitHub error:', error)
+    } finally {
+      setGithubLoading(false)
+    }
+  }, [activeWorkspace, workspaces])
+
   // Abandon dropdown state
   const [abandonMenuOpen, setAbandonMenuOpen] = useState(false)
   const abandonMenuRef = useRef<HTMLDivElement>(null)
@@ -394,6 +421,16 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                       }
                     }}
                   />
+                  {activeWorkspace.isWorktree && activeWorkspace.parentId && activeWorkspace.gitBranch && (
+                    <button
+                      className="workspace-action-btn"
+                      onClick={handleOpenGitHub}
+                      disabled={githubLoading}
+                      title="Open GitHub PR"
+                    >
+                      <Github size={14} />
+                    </button>
+                  )}
                   {activeWorkspace.isWorktree && activeWorkspace.parentId && activeHandle && (
                     <MergeAbandonButton
                       workspace={activeHandle}

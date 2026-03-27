@@ -135,6 +135,17 @@ export class GitClient {
   }
 
   /**
+   * Get the remote URL for origin
+   */
+  async getRemoteUrl(repoPath: string): Promise<string> {
+    const result = await this.exec(repoPath, ['remote', 'get-url', 'origin'])
+    if (result.exitCode !== 0) {
+      throw new Error(`Failed to get remote URL: ${result.stderr}`)
+    }
+    return result.stdout.trim()
+  }
+
+  /**
    * Check if a directory is a git repository and get basic info
    */
   async getGitInfo(dirPath: string): Promise<GitInfo> {

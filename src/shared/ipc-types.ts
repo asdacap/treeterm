@@ -179,6 +179,16 @@ export interface IpcRequests {
     result: { success: boolean; contents?: FileDiffContents; error?: string }
   }
 
+  // GitHub operations
+  gitGetRemoteUrl: {
+    params: [repoPath: string]
+    result: { url?: string; error?: string }
+  }
+  githubGetPrUrl: {
+    params: [repoPath: string, head: string, base: string]
+    result: { url: string } | { error: string }
+  }
+
   // Settings operations
   settingsLoad: {
     params: []

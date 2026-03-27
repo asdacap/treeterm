@@ -43,6 +43,8 @@ const CHANNELS = {
   gitGetLog: 'git:getLog',
   gitGetCommitDiff: 'git:getCommitDiff',
   gitGetCommitFileDiff: 'git:getCommitFileDiff',
+  gitGetRemoteUrl: 'git:getRemoteUrl',
+  githubGetPrUrl: 'github:getPrUrl',
   settingsLoad: 'settings:load',
   settingsSave: 'settings:save',
   fsReadDirectory: 'fs:readDirectory',
@@ -298,6 +300,19 @@ export class IpcClient {
     ...args: IpcRequests['gitGetCommitFileDiff']['params']
   ): Promise<IpcRequests['gitGetCommitFileDiff']['result']> {
     return ipcRenderer.invoke(CHANNELS.gitGetCommitFileDiff, ...args)
+  }
+
+  // GitHub requests
+  gitGetRemoteUrl(
+    ...args: IpcRequests['gitGetRemoteUrl']['params']
+  ): Promise<IpcRequests['gitGetRemoteUrl']['result']> {
+    return ipcRenderer.invoke(CHANNELS.gitGetRemoteUrl, ...args)
+  }
+
+  githubGetPrUrl(
+    ...args: IpcRequests['githubGetPrUrl']['params']
+  ): Promise<IpcRequests['githubGetPrUrl']['result']> {
+    return ipcRenderer.invoke(CHANNELS.githubGetPrUrl, ...args)
   }
 
   // Settings requests
