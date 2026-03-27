@@ -492,6 +492,37 @@ describe('createSessionStore', () => {
       expect(result.error).toContain('conflict')
     })
 
+    it('mergeAndKeepWorkspace merges but keeps workspace alive', async () => {
+      const result = await store.getState().mergeAndKeepWorkspace(childId, false)
+      expect(result).toEqual({ success: true })
+      expect(deps.git.merge).toHaveBeenCalled()
+      expect(store.getState().workspaces[childId]).toBeDefined()
+      expect(store.getState().workspaceLoadStates[childId]).toBeUndefined()
+    })
+
+    it('mergeAndKeepWorkspace auto-commits uncommitted changes', async () => {
+      vi.mocked(deps.git.hasUncommittedChanges).mockResolvedValue(true)
+      await store.getState().mergeAndKeepWorkspace(childId, false)
+      expect(deps.git.commitAll).toHaveBeenCalled()
+    })
+
+    it('mergeAndKeepWorkspace fails when workspace not found', async () => {
+      const result = await store.getState().mergeAndKeepWorkspace('bad', false)
+      expect(result).toEqual({ success: false, error: 'Workspace not found' })
+    })
+
+    it('mergeAndKeepWorkspace fails for non-worktree', async () => {
+      const result = await store.getState().mergeAndKeepWorkspace(parentId, false)
+      expect(result).toEqual({ success: false, error: 'Not a worktree workspace' })
+    })
+
+    it('mergeAndKeepWorkspace fails when merge fails', async () => {
+      vi.mocked(deps.git.merge).mockResolvedValue({ success: false, error: 'conflict' })
+      const result = await store.getState().mergeAndKeepWorkspace(childId, false)
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('conflict')
+    })
+
     it('closeAndCleanWorkspace removes worktree', async () => {
       const result = await store.getState().closeAndCleanWorkspace(childId)
       expect(result).toEqual({ success: true })

@@ -50,6 +50,7 @@ const mockWorkspaceStoreStateData = {
   updateStatus: vi.fn(),
   refreshGitInfo: vi.fn(),
   mergeAndRemove: vi.fn(),
+  mergeAndKeep: vi.fn(),
   closeAndClean: vi.fn(),
   lookupWorkspace: vi.fn(),
   remove: vi.fn(),
