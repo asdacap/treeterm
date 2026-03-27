@@ -684,6 +684,16 @@ body,
   background: rgba(182, 35, 36, 0.25);
 }
 
+.workspace-action-btn-github {
+  background: rgba(35, 134, 54, 0.15);
+  border-color: #238636;
+  color: #238636;
+}
+
+.workspace-action-btn-github:hover {
+  background: rgba(35, 134, 54, 0.25);
+}
+
 /* Tab Bar */
 .tab-bar {
   display: flex;

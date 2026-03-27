@@ -344,7 +344,7 @@ export interface GitApi {
 }
 
 export interface GitHubApi {
-  getPrUrl: (repoPath: string, head: string, base: string) => Promise<{ url: string } | { error: string }>
+  getPrUrl: (repoPath: string, head: string, base: string) => Promise<{ url: string; hasPr: boolean } | { error: string }>
 }
 
 /** Workspace-scoped GitApi with path pre-bound */

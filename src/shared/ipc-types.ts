@@ -200,7 +200,7 @@ export interface IpcRequests {
   }
   githubGetPrUrl: {
     params: [repoPath: string, head: string, base: string]
-    result: { url: string } | { error: string }
+    result: { url: string; hasPr: boolean } | { error: string }
   }
 
   // Settings operations

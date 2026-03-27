@@ -35,6 +35,9 @@ function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStore
       generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
     },
     setActivityTabState: vi.fn(),
+    github: {
+      getPrUrl: vi.fn().mockResolvedValue({ url: 'https://github.com/test/repo/compare/main...feat?expand=1', hasPr: false }),
+    },
     ...overrides,
   }
 }

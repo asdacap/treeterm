@@ -37,7 +37,6 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const enterWorkspaceFocus = useKeybindingStore(s => s.enterWorkspaceFocus)
   const applications = useAppStore((s) => s.applications)
   const clipboard = useAppStore((s) => s.clipboard)
-  const github = useAppStore((s) => s.github)
   const getApplication = useCallback((id: string) => applications[id], [applications])
   const menuApplications = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
 
@@ -226,33 +225,6 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     })
   }
 
-  // GitHub button state
-  const [githubLoading, setGithubLoading] = useState(false)
-
-  const handleOpenGitHub = useCallback(async () => {
-    if (!activeWorkspace?.parentId || !activeWorkspace.gitBranch || !activeWorkspace.gitRootPath) return
-    const parent = workspaces[activeWorkspace.parentId]
-    if (!parent?.gitBranch) return
-    setGithubLoading(true)
-    try {
-      const result = await github.getPrUrl(
-        activeWorkspace.gitRootPath,
-        activeWorkspace.gitBranch,
-        parent.gitBranch
-      )
-      if ('url' in result) {
-        window.open(result.url, '_blank')
-      } else {
-        console.error('[WorkspacePane] GitHub PR URL error:', result.error)
-        alert(result.error)
-      }
-    } catch (error) {
-      console.error('[WorkspacePane] GitHub error:', error)
-    } finally {
-      setGithubLoading(false)
-    }
-  }, [activeWorkspace, workspaces, github])
-
   // Abandon dropdown state
   const [abandonMenuOpen, setAbandonMenuOpen] = useState(false)
   const abandonMenuRef = useRef<HTMLDivElement>(null)
@@ -434,15 +406,8 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                       }
                     }}
                   />
-                  {activeWorkspace.isWorktree && activeWorkspace.parentId && activeWorkspace.gitBranch && (
-                    <button
-                      className="workspace-action-btn"
-                      onClick={handleOpenGitHub}
-                      disabled={githubLoading}
-                      title="Open GitHub PR"
-                    >
-                      <Github size={14} />
-                    </button>
+                  {activeWorkspace.isWorktree && activeWorkspace.parentId && activeWorkspace.gitBranch && activeHandle && (
+                    <GitHubButton workspace={activeHandle} />
                   )}
                   {activeWorkspace.isWorktree && activeWorkspace.parentId && activeHandle && (
                     <MergeAbandonButton
@@ -700,6 +665,43 @@ function GitStatusButton({ workspace }: GitStatusButtonProps) {
       title={title}
     >
       {icon}
+    </button>
+  )
+}
+
+interface GitHubButtonProps {
+  workspace: WorkspaceStore
+}
+
+function GitHubButton({ workspace }: GitHubButtonProps) {
+  const { hasPr, openGitHub } = useStore(workspace)
+  const [loading, setLoading] = useState(false)
+
+  const handleClick = async () => {
+    setLoading(true)
+    try {
+      const result = await openGitHub()
+      if ('url' in result) {
+        window.open(result.url, '_blank')
+      } else {
+        console.error('[GitHubButton] error:', result.error)
+        alert(result.error)
+      }
+    } catch (error) {
+      console.error('[GitHubButton] error:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <button
+      className={`workspace-action-btn${hasPr ? ' workspace-action-btn-github' : ''}`}
+      onClick={handleClick}
+      disabled={loading}
+      title={hasPr ? 'Open GitHub PR' : 'Create GitHub PR'}
+    >
+      <Github size={14} />
     </button>
   )
 }

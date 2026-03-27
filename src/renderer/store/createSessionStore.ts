@@ -9,7 +9,7 @@ import type {
   Workspace, Session, AppState, GitInfo,
   ConnectionInfo, ActivityState,
   TerminalApi, GitApi, FilesystemApi, SessionApi, Settings, WorktreeSettings,
-  Application, SandboxConfig, SessionInfo, LlmApi
+  Application, SandboxConfig, SessionInfo, LlmApi, GitHubApi
 } from '../types'
 
 export type WorkspaceLoadState =
@@ -26,6 +26,7 @@ export interface SessionDeps {
   filesystem: FilesystemApi
   sessionApi: SessionApi
   terminal: TerminalApi
+  github: GitHubApi
   getSettings: () => Settings
   appRegistry: AppRegistryApi
   llm: Pick<LlmApi, 'analyzeTerminal' | 'generateTitle'>
@@ -193,6 +194,7 @@ export function createSessionStore(
       quickForkWorkspace: (id) => store.getState().quickForkWorkspace(id),
       refreshGitInfo: (id) => store.getState().refreshGitInfo(id),
       lookupWorkspace: (id) => store.getState().workspaces[id],
+      github: deps.github,
     }
   }
 

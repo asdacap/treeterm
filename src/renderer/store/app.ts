@@ -391,7 +391,7 @@ function getOrCreateSession(
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
   connection?: ConnectionInfo
 ): StoreApi<SessionState> {
-  const { sessionStores, windowUuid, git, filesystem, sessionApi, terminal, llm } = get()
+  const { sessionStores, windowUuid, git, filesystem, sessionApi, terminal, llm, github } = get()
   let store = sessionStores[sessionId]
   if (!store) {
     console.log(`[renderer:app] getOrCreateSession: creating new session store for session=${sessionId}, connection=${connection?.id ?? 'local'}`)
@@ -407,6 +407,7 @@ function getOrCreateSession(
           get: (id: string) => get().applications[id],
           getDefaultApp: (appId?: string) => get().getDefaultApplication(appId),
         },
+        github,
         llm: { analyzeTerminal: llm.analyzeTerminal, generateTitle: llm.generateTitle },
         setActivityTabState: (tabId, state) => useActivityStateStore.getState().setTabState(tabId, state),
       }

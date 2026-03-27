@@ -1009,10 +1009,10 @@ server.onGithubGetPrUrl(async (repoPath, head, base) => {
     const prs = await response.json() as Array<{ number: number }>
 
     if (prs.length > 0) {
-      return { url: `https://github.com/${owner}/${repo}/pull/${prs[0].number}` }
+      return { url: `https://github.com/${owner}/${repo}/pull/${prs[0].number}`, hasPr: true }
     }
     // No PR found — return compare URL to create one
-    return { url: `https://github.com/${owner}/${repo}/compare/${base}...${head}?expand=1` }
+    return { url: `https://github.com/${owner}/${repo}/compare/${base}...${head}?expand=1`, hasPr: false }
   } catch (error) {
     return { error: error instanceof Error ? error.message : 'Unknown error' }
   }

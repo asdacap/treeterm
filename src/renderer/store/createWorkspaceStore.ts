@@ -1,6 +1,6 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, Tab, AppState, AppRef, ReviewComment, AppRegistryApi, GitApi, FilesystemApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig } from '../types'
+import type { Workspace, Tab, AppState, AppRef, ReviewComment, AppRegistryApi, GitApi, FilesystemApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi } from '../types'
 import { getTabs, isAiHarnessState } from '../types'
 import type { Tty, TtyWriter } from './createTtyStore'
 import { createAnalyzerStore } from './createAnalyzerStore'
@@ -28,6 +28,7 @@ export interface WorkspaceStoreDeps {
   quickForkWorkspace: (id: string) => Promise<{ success: boolean; error?: string }>
   refreshGitInfo: (id: string) => Promise<void>
   lookupWorkspace: (id: string) => Workspace | undefined
+  github: GitHubApi
 }
 
 export interface WorkspaceStoreState {
@@ -71,6 +72,11 @@ export interface WorkspaceStoreState {
   pullFromRemote: () => Promise<{ success: boolean; error?: string }>
   refreshDiffStatus: () => Promise<void>
   disposeGitController: () => void
+
+  // GitHub PR status (cached, checked on workspace open)
+  hasPr: boolean
+  refreshPrStatus: () => Promise<void>
+  openGitHub: () => Promise<{ url: string; hasPr: boolean } | { error: string }>
 
   // Focus signal (ephemeral, not persisted)
   focusTabId: string | null
@@ -179,6 +185,19 @@ export function createWorkspaceStore(
     gitControllerInterval = setInterval(refreshDiffStatus, 10_000)
   }
 
+  async function refreshPrStatus(): Promise<void> {
+    const ws = store.getState().workspace
+    if (!ws.isWorktree || !ws.parentId || !ws.gitBranch || !ws.gitRootPath) return
+    const parent = deps.lookupWorkspace(ws.parentId)
+    if (!parent?.gitBranch) return
+    try {
+      const result = await deps.github.getPrUrl(ws.gitRootPath, ws.gitBranch, parent.gitBranch)
+      if ('hasPr' in result) {
+        store.setState({ hasPr: result.hasPr })
+      }
+    } catch { /* ignore — network/auth issues */ }
+  }
+
   function stopGitController(): void {
     if (gitControllerInterval) {
       clearInterval(gitControllerInterval)
@@ -224,6 +243,21 @@ export function createWorkspaceStore(
     },
     refreshDiffStatus,
     disposeGitController: () => stopGitController(),
+
+    // GitHub PR status
+    hasPr: false,
+    refreshPrStatus,
+    openGitHub: async () => {
+      const ws = get().workspace
+      if (!ws.parentId || !ws.gitBranch || !ws.gitRootPath) return { error: 'Missing workspace info' }
+      const parent = deps.lookupWorkspace(ws.parentId)
+      if (!parent?.gitBranch) return { error: 'Parent branch not found' }
+      const result = await deps.github.getPrUrl(ws.gitRootPath, ws.gitBranch, parent.gitBranch)
+      if ('hasPr' in result) {
+        set({ hasPr: result.hasPr })
+      }
+      return result
+    },
 
     initTab: (tabId: string): void => {
       const appState = get().workspace.appStates[tabId]
@@ -530,6 +564,11 @@ export function createWorkspaceStore(
   // Auto-refresh remote status on workspace open
   if (workspace.isGitRepo) {
     store.getState().refreshRemoteStatus()
+  }
+
+  // Auto-check PR status on workspace open
+  if (workspace.isWorktree && workspace.parentId) {
+    refreshPrStatus()
   }
 
   return store
