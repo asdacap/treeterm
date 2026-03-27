@@ -262,7 +262,13 @@ export class SSHTunnel {
 
           resolve(socketPath)
         } else {
-          reject(new Error('Failed to parse daemon socket path from bootstrap output'))
+          // Fall back to default socket path using uid from output
+          const uidMatch = stdout.match(/uid=(\d+)/)
+          if (uidMatch) {
+            resolve(`/tmp/treeterm-${uidMatch[1]}/daemon.sock`)
+          } else {
+            reject(new Error('Failed to parse daemon socket path from bootstrap output'))
+          }
         }
       })
 
