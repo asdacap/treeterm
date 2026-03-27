@@ -43,6 +43,8 @@ const CHANNELS = {
   gitGetLog: 'git:getLog',
   gitGetCommitDiff: 'git:getCommitDiff',
   gitGetCommitFileDiff: 'git:getCommitFileDiff',
+  gitGetRemoteUrl: 'git:getRemoteUrl',
+  githubGetPrUrl: 'github:getPrUrl',
   settingsLoad: 'settings:load',
   settingsSave: 'settings:save',
   fsReadDirectory: 'fs:readDirectory',
@@ -444,6 +446,27 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.gitGetCommitFileDiff, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['gitGetCommitFileDiff']['params']))
+    )
+  }
+
+  // GitHub request handlers
+  onGitGetRemoteUrl(
+    handler: (
+      ...args: IpcRequests['gitGetRemoteUrl']['params']
+    ) => IpcRequests['gitGetRemoteUrl']['result'] | Promise<IpcRequests['gitGetRemoteUrl']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.gitGetRemoteUrl, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['gitGetRemoteUrl']['params']))
+    )
+  }
+
+  onGithubGetPrUrl(
+    handler: (
+      ...args: IpcRequests['githubGetPrUrl']['params']
+    ) => IpcRequests['githubGetPrUrl']['result'] | Promise<IpcRequests['githubGetPrUrl']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.githubGetPrUrl, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['githubGetPrUrl']['params']))
     )
   }
 

@@ -73,6 +73,10 @@ export const defaultSettings: Settings = {
     safePaths: ['/tmp'],
     bufferLines: 30
   },
+  github: {
+    pat: '',
+    autodetectViaGh: true
+  },
   globalDefaultApplicationId: 'terminal',
   recentDirectories: []
 }

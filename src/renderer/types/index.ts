@@ -336,7 +336,12 @@ export interface GitApi {
   getLog: (repoPath: string, parentBranch: string | null, skip: number, limit: number) => Promise<{ success: boolean; result?: GitLogResult; error?: string }>
   getCommitDiff: (repoPath: string, commitHash: string) => Promise<{ success: boolean; files?: DiffFile[]; error?: string }>
   getCommitFileDiff: (repoPath: string, commitHash: string, filePath: string) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
+  getRemoteUrl: (repoPath: string) => Promise<{ url?: string; error?: string }>
   onOutput: (callback: (operationId: string, data: string) => void) => () => void
+}
+
+export interface GitHubApi {
+  getPrUrl: (repoPath: string, head: string, base: string) => Promise<{ url: string } | { error: string }>
 }
 
 /** Workspace-scoped GitApi with path pre-bound */
@@ -459,6 +464,7 @@ declare global {
       terminal: TerminalApi
       selectFolder: () => Promise<string | null>
       git: GitApi
+      github: GitHubApi
       settings: SettingsApi
       filesystem: FilesystemApi
       runActions: RunActionsApi

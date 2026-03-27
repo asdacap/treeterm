@@ -39,6 +39,7 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       getLog: vi.fn().mockResolvedValue({ success: true, result: { commits: [], hasMore: false } }),
       getCommitDiff: vi.fn().mockResolvedValue({ success: true, files: [] }),
       getCommitFileDiff: vi.fn().mockResolvedValue({ success: true, contents: null }),
+      getRemoteUrl: vi.fn().mockResolvedValue({ url: 'https://github.com/test/repo.git' }),
       onOutput: vi.fn().mockReturnValue(() => {}),
     },
     filesystem: {

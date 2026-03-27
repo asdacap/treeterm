@@ -8,6 +8,7 @@ import { GitClient } from './git'
 import { createRunActionsClient, RunActionsClient } from './runActions'
 import { ConnectionManager } from './connectionManager'
 import { windowManager } from './windowManager'
+import type { ExecInput, ExecOutput } from '../generated/treeterm'
 import type { ReasoningEffort, SandboxConfig, SSHConnectionConfig } from '../shared/types'
 
 // Parse initial workspace and SSH target from command line
@@ -881,6 +882,114 @@ server.onGitGetCommitFileDiff(async (repoPath, commitHash, filePath) => {
     return { success: true, contents }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+})
+
+// GitHub IPC Handlers
+server.onGitGetRemoteUrl(async (repoPath) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  initializeGitClient()
+  if (!gitClient) throw new Error('Git client not initialized')
+  try {
+    const url = await gitClient.getRemoteUrl(repoPath)
+    return { url }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+})
+
+function execCommand(
+  client: GrpcDaemonClient,
+  cwd: string,
+  command: string,
+  args: string[]
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const stdout: Buffer[] = []
+    const stderr: Buffer[] = []
+    let resultReceived = false
+    try {
+      const stream = client.execStream()
+      const startInput: ExecInput = {
+        start: { cwd, command, args, env: {}, timeoutMs: 10000 }
+      }
+      stream.write(startInput)
+      stream.end()
+      stream.on('data', (output: ExecOutput) => {
+        if (output.stdout) stdout.push(output.stdout.data)
+        else if (output.stderr) stderr.push(output.stderr.data)
+        else if (output.result) {
+          resultReceived = true
+          resolve({
+            exitCode: output.result.exitCode,
+            stdout: Buffer.concat(stdout).toString('utf-8'),
+            stderr: Buffer.concat(stderr).toString('utf-8')
+          })
+        }
+      })
+      stream.on('error', (error: Error) => reject(error))
+      stream.on('end', () => {
+        if (!resultReceived) resolve({ exitCode: -1, stdout: '', stderr: 'Stream ended unexpectedly' })
+      })
+    } catch (error) {
+      reject(error)
+    }
+  })
+}
+
+function parseGitHubOwnerRepo(remoteUrl: string): { owner: string; repo: string } | null {
+  // Handle SSH: git@github.com:owner/repo.git
+  const sshMatch = remoteUrl.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/)
+  if (sshMatch) return { owner: sshMatch[1], repo: sshMatch[2] }
+  // Handle HTTPS: https://github.com/owner/repo.git
+  const httpsMatch = remoteUrl.match(/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?$/)
+  if (httpsMatch) return { owner: httpsMatch[1], repo: httpsMatch[2] }
+  return null
+}
+
+server.onGithubGetPrUrl(async (repoPath, head, base) => {
+  if (!daemonClient) throw new Error('Daemon not initialized')
+  initializeGitClient()
+  if (!gitClient) throw new Error('Git client not initialized')
+  try {
+    // Get GitHub token
+    const settings = loadSettings()
+    let token: string
+    if (settings.github?.autodetectViaGh !== false) {
+      const result = await execCommand(daemonClient, repoPath, 'gh', ['auth', 'token'])
+      if (result.exitCode !== 0) {
+        return { error: 'Failed to get token from gh CLI. Is gh installed and authenticated?' }
+      }
+      token = result.stdout.trim()
+    } else {
+      token = settings.github?.pat || ''
+      if (!token) return { error: 'No GitHub PAT configured. Set one in Settings > GitHub.' }
+    }
+
+    // Get remote URL and parse owner/repo
+    const remoteUrl = await gitClient.getRemoteUrl(repoPath)
+    const parsed = parseGitHubOwnerRepo(remoteUrl)
+    if (!parsed) return { error: `Could not parse GitHub owner/repo from remote URL: ${remoteUrl}` }
+    const { owner, repo } = parsed
+
+    // Search for existing PR
+    const { net } = await import('electron')
+    const response = await net.fetch(
+      `https://api.github.com/repos/${owner}/${repo}/pulls?head=${owner}:${head}&base=${base}&state=open`,
+      { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } }
+    )
+    if (!response.ok) {
+      return { error: `GitHub API error: ${response.status} ${response.statusText}` }
+    }
+    const prs = await response.json() as Array<{ number: number }>
+
+    if (prs.length > 0) {
+      return { url: `https://github.com/${owner}/${repo}/pull/${prs[0].number}` }
+    }
+    // No PR found — return compare URL to create one
+    return { url: `https://github.com/${owner}/${repo}/compare/${base}...${head}?expand=1` }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Unknown error' }
   }
 })
 

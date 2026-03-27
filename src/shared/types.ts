@@ -192,6 +192,11 @@ export interface Settings {
     safePaths: string[]     // Paths considered safe for permission_request classification
     bufferLines: number     // Number of lines to read from terminal buffer
   }
+  // GitHub integration
+  github: {
+    pat: string
+    autodetectViaGh: boolean
+  }
   // Global default application for new worktrees
   // If not set, falls back to 'terminal' or first available app
   globalDefaultApplicationId: string
