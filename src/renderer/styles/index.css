@@ -1087,9 +1087,11 @@ body,
   background: var(--bg-hover);
 }
 
-/* Hide scrollbar when disabled (for AI tools with own scrolling) */
-.disable-scrollbar .xterm-viewport::-webkit-scrollbar {
-  display: none;
+/* Disable viewport scrolling when scrollbar is disabled (for AI tools with own scrolling).
+   overflow: hidden prevents the viewport from consuming wheel events,
+   allowing xterm.js mouse handler to forward them to the PTY application. */
+.disable-scrollbar .xterm-viewport {
+  overflow: hidden !important;
 }
 
 /* Dialog Overlay */
