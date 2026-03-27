@@ -11,7 +11,7 @@ interface SettingsDialogProps {
   platform: Platform
 }
 
-type TabId = 'general' | 'terminal' | 'sandbox' | 'ai-harness' | 'llm' | 'appearance' | 'keybindings' | 'terminal-profiles' | 'speech' | 'github'
+type TabId = 'general' | 'terminal' | 'sandbox' | 'ai-harness' | 'llm' | 'appearance' | 'keybindings' | 'terminal-profiles' | 'speech' | 'github' | 'debug'
 
 const tabs: { id: TabId; label: string }[] = [
   { id: 'general', label: 'General' },
@@ -23,7 +23,8 @@ const tabs: { id: TabId; label: string }[] = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'keybindings', label: 'Keybindings' },
   { id: 'speech', label: 'Speech' },
-  { id: 'github', label: 'GitHub' }
+  { id: 'github', label: 'GitHub' },
+  { id: 'debug', label: 'Debug' }
 ]
 
 // Recording state type - can be for keybinding or prefix key
@@ -1174,6 +1175,29 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                   />
                   <p className="settings-hint">
                     Used when &quot;Autodetect via gh CLI&quot; is off. Generate a token at GitHub → Settings → Developer Settings → Personal Access Tokens.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'debug' && (
+              <div className="settings-section">
+                <div className="settings-group">
+                  <label className="settings-checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={localSettings.debug.showBadge}
+                      onChange={(e) =>
+                        setLocalSettings((prev) => ({
+                          ...prev,
+                          debug: { ...prev.debug, showBadge: e.target.checked }
+                        }))
+                      }
+                    />
+                    Show Debug Badge
+                  </label>
+                  <p className="settings-hint">
+                    Shows a purple DEBUG badge on all terminals. Useful for testing settings reactivity.
                   </p>
                 </div>
               </div>

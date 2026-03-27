@@ -78,7 +78,10 @@ export const defaultSettings: Settings = {
     autodetectViaGh: true
   },
   globalDefaultApplicationId: 'terminal',
-  recentDirectories: []
+  recentDirectories: [],
+  debug: {
+    showBadge: false
+  }
 }
 
 interface SettingsState {

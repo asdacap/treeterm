@@ -892,6 +892,22 @@ body,
   opacity: 0.6;
 }
 
+/* Debug Badge */
+.debug-badge {
+  position: absolute;
+  top: 8px;
+  right: 300px;
+  z-index: 10;
+  background: rgba(140, 40, 180, 0.7);
+  border: 1px solid #8c28b4;
+  color: #e0a0ff;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: monospace;
+  opacity: 0.8;
+}
+
 /* Scroll Down Button */
 .scroll-down-btn {
   font-size: 16px;

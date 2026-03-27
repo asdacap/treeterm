@@ -202,4 +202,8 @@ export interface Settings {
   globalDefaultApplicationId: string
   // Recently opened directories (max 10)
   recentDirectories: string[]
+  // Debug settings
+  debug: {
+    showBadge: boolean
+  }
 }

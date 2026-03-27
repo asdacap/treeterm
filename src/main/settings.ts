@@ -81,7 +81,10 @@ const defaultSettings: Settings = {
     autodetectViaGh: true
   },
   globalDefaultApplicationId: 'terminal',
-  recentDirectories: []
+  recentDirectories: [],
+  debug: {
+    showBadge: false
+  }
 }
 
 // Helper to add a directory to recent directories list
@@ -264,7 +267,11 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
       ...loaded.github
     },
     globalDefaultApplicationId: loaded.globalDefaultApplicationId || defaults.globalDefaultApplicationId,
-    recentDirectories: loaded.recentDirectories || defaults.recentDirectories
+    recentDirectories: loaded.recentDirectories || defaults.recentDirectories,
+    debug: {
+      ...defaults.debug,
+      ...loaded.debug
+    }
   }
 }
 

@@ -162,9 +162,10 @@ export default function BaseTerminal({
       // Phase 2: Create terminal
       setLoading(false)
       terminal = new XTerm({
-        cursorBlink: true,
-        fontSize: 14,
-        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+        cursorBlink: settings.terminal.cursorBlink,
+        cursorStyle: settings.terminal.cursorStyle,
+        fontSize: settings.terminal.fontSize,
+        fontFamily: settings.terminal.fontFamily,
         scrollback: 50000,
         linkHandler: {
           activate: (_event, uri) => window.open(uri, '_blank')
@@ -402,7 +403,7 @@ export default function BaseTerminal({
       terminal?.dispose()
     }
     // Note: existingPtyId is intentionally NOT in deps - we only check it on mount/re-run
-  }, [tabId, workspaceId, config.themeBackground])
+  }, [tabId, workspaceId, config.themeBackground, settings])
 
   const openContextMenu = useContextMenuStore((s) => s.open)
   const closeContextMenu = useContextMenuStore((s) => s.close)
@@ -460,6 +461,10 @@ export default function BaseTerminal({
         >
           {overlay.message}
         </div>
+      )}
+
+      {settings.debug.showBadge && (
+        <span className="debug-badge">DEBUG</span>
       )}
 
       <ContextMenu menuId={contextMenuId}>
