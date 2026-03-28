@@ -21,6 +21,9 @@ interface FileViewerProps {
   // Scroll to a specific line after file loads
   scrollToLine?: number
   onScrollToLineUsed?: () => void
+  // Scroll position persistence
+  initialScrollTop?: number
+  onScrollPositionChange?: (scrollTop: number) => void
 }
 
 interface FileState {
@@ -49,7 +52,9 @@ export function FileViewer({
   onCommentCancel,
   onCommentDelete,
   scrollToLine,
-  onScrollToLineUsed
+  onScrollToLineUsed,
+  initialScrollTop,
+  onScrollPositionChange
 }: FileViewerProps): JSX.Element {
   const { workspace: wsData, addTab, getFilesystemApi } = useStore(workspace)
   const filesystem = getFilesystemApi()
@@ -60,6 +65,7 @@ export function FileViewer({
     error: null
   })
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
+  const lastScrollTopRef = useRef<number>(initialScrollTop ?? 0)
   const decorationsRef = useRef<string[]>([])
   const viewZoneIdRef = useRef<string | null>(null)
   const [commentContainer, setCommentContainer] = useState<HTMLDivElement | null>(null)
@@ -110,6 +116,10 @@ export function FileViewer({
   const handleEditorMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor
 
+    editor.onDidScrollChange((e) => {
+      lastScrollTopRef.current = e.scrollTop
+    })
+
     if (onLineClick) {
       editor.onMouseDown((e) => {
         if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
@@ -122,11 +132,22 @@ export function FileViewer({
     }
   }, [onLineClick])
 
-  // Scroll to a specific line when requested
+  // Persist scroll position on unmount
   useEffect(() => {
-    if (!editorRef.current || !scrollToLine || fileState.loading) return
-    editorRef.current.revealLineInCenter(scrollToLine)
-    onScrollToLineUsed?.()
+    return () => {
+      onScrollPositionChange?.(lastScrollTopRef.current)
+    }
+  }, [])
+
+  // Scroll to a specific line when requested, or restore scroll position
+  useEffect(() => {
+    if (!editorRef.current || fileState.loading) return
+    if (scrollToLine) {
+      editorRef.current.revealLineInCenter(scrollToLine)
+      onScrollToLineUsed?.()
+    } else if (initialScrollTop) {
+      editorRef.current.setScrollTop(initialScrollTop)
+    }
   }, [scrollToLine, fileState.loading])
 
   // Add decorations for lines with comments

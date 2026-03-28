@@ -3,7 +3,7 @@ import { ChevronDown, RefreshCw, Loader2 } from 'lucide-react'
 import { useStore } from 'zustand'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
 import { getTabs } from '../types'
-import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, GitLogCommit, WorkspaceStore } from '../types'
+import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, GitLogCommit, WorkspaceStore, ReviewState } from '../types'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
 import { CommittedDiffFileTree, UncommittedDiffFileTree, getSortedFilePaths } from './DiffFileTree'
 import { CommentInput } from './CommentInput'
@@ -29,12 +29,13 @@ export default function ReviewBrowser({
     workspace: wsData, lookupWorkspace, getReviewComments, getGitApi,
     promptHarness, mergeAndRemove, mergeAndKeep, closeAndClean, removeTab,
     addReviewComment, deleteReviewComment, updateOutdatedReviewComments, refreshGitInfo,
-    refreshDiffStatus,
+    refreshDiffStatus, updateTabState,
   } = useStore(workspace)
   const git = getGitApi()
   const workspaceId = wsData.id
   const workspacePath = wsData.path
   const parentWorkspace = parentWorkspaceId ? lookupWorkspace(parentWorkspaceId) : undefined
+  const reviewState = wsData?.appStates[tabId]?.state as ReviewState | undefined
 
   // For top-level worktrees, we only show uncommitted changes (no parent to compare against)
   const hasParent = !!parentWorkspaceId
@@ -43,13 +44,13 @@ export default function ReviewBrowser({
   const [diff, setDiff] = useState<DiffResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedFile, setSelectedFile] = useState<string | null>(null)
+  const [selectedFile, setSelectedFile] = useState<string | null>(reviewState?.selectedFilePath ?? null)
   const [fileDiffContents, setFileDiffContents] = useState<FileDiffContents | null>(null)
   const [loadingFileDiff, setLoadingFileDiff] = useState(false)
 
   // Uncommitted changes state
   const [uncommitted, setUncommitted] = useState<UncommittedChanges | null>(null)
-  const [viewMode, setViewMode] = useState<ViewMode>('committed')
+  const [viewMode, setViewMode] = useState<ViewMode>(reviewState?.viewMode ?? 'committed')
   const [selectedUncommittedFile, setSelectedUncommittedFile] = useState<UncommittedFile | null>(null)
 
   // Staging state
@@ -100,6 +101,15 @@ export default function ReviewBrowser({
   const runningHarness = wsData ? findRunningHarness(getTabs(wsData)) : null
 
   const [refreshing, setRefreshing] = useState(false)
+
+  // Persist view state to tab state for restoration across workspace switches
+  const persistViewState = useCallback((updates: Partial<ReviewState>) => {
+    updateTabState<ReviewState>(tabId, (s) => ({ ...s, ...updates }))
+  }, [tabId])
+
+  const handleScrollPositionChange = useCallback((scrollTop: number) => {
+    persistViewState({ scrollTop })
+  }, [persistViewState])
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true)
@@ -154,6 +164,11 @@ export default function ReviewBrowser({
     setIsResizing(false)
   }, [])
 
+  // Track whether we need to restore persisted file selection after initial data load
+  const pendingRestoreRef = useRef<boolean>(
+    !!(reviewState?.selectedFilePath || reviewState?.selectedUncommittedFilePath)
+  )
+
   useEffect(() => {
     if (!wsData) return
 
@@ -166,7 +181,37 @@ export default function ReviewBrowser({
     } else {
       setLoading(false)
     }
+
+    // If commits tab was persisted, load commits on mount
+    if (viewMode === 'commits') {
+      loadCommits()
+    }
   }, [workspaceId, parentWorkspaceId])
+
+  // Auto-restore persisted file selection after initial data load
+  useEffect(() => {
+    if (!pendingRestoreRef.current) return
+
+    if (viewMode === 'committed' && diff && reviewState?.selectedFilePath) {
+      const fileExists = diff.files.some(f => f.path === reviewState.selectedFilePath)
+      if (fileExists) {
+        pendingRestoreRef.current = false
+        loadFileDiff(reviewState.selectedFilePath)
+      }
+    }
+  }, [diff])
+
+  useEffect(() => {
+    if (!pendingRestoreRef.current) return
+
+    if (viewMode === 'uncommitted' && uncommitted && reviewState?.selectedUncommittedFilePath) {
+      const file = uncommitted.files.find(f => f.path === reviewState.selectedUncommittedFilePath)
+      if (file) {
+        pendingRestoreRef.current = false
+        loadUncommittedFileDiff(file)
+      }
+    }
+  }, [uncommitted])
 
   // Close merge dropdown on click outside
   useEffect(() => {
@@ -304,6 +349,10 @@ export default function ReviewBrowser({
 
     setSelectedFile(filePath)
     setSelectedUncommittedFile(null)
+    // Don't clear scrollTop during restore — only on user-initiated file selection
+    if (!pendingRestoreRef.current) {
+      persistViewState({ selectedFilePath: filePath, selectedUncommittedFilePath: undefined, scrollTop: undefined })
+    }
     setLoadingFileDiff(true)
     setFileDiffContents(null)
     setLoadError(null)
@@ -325,6 +374,9 @@ export default function ReviewBrowser({
   const loadUncommittedFileDiff = async (file: UncommittedFile) => {
     setSelectedUncommittedFile(file)
     setSelectedFile(null)
+    if (!pendingRestoreRef.current) {
+      persistViewState({ selectedUncommittedFilePath: file.path, selectedFilePath: undefined, scrollTop: undefined })
+    }
     setLoadingFileDiff(true)
     setFileDiffContents(null)
     setLoadError(null)
@@ -819,7 +871,7 @@ export default function ReviewBrowser({
         {hasParent ? (
           <button
             className={`diff-tab ${viewMode === 'committed' ? 'active' : ''}`}
-            onClick={() => setViewMode('committed')}
+            onClick={() => { setViewMode('committed'); persistViewState({ viewMode: 'committed' }) }}
           >
             Committed Changes
             {hasCommittedChanges && (
@@ -837,7 +889,7 @@ export default function ReviewBrowser({
         )}
         <button
           className={`diff-tab ${viewMode === 'uncommitted' ? 'active' : ''}`}
-          onClick={() => setViewMode('uncommitted')}
+          onClick={() => { setViewMode('uncommitted'); persistViewState({ viewMode: 'uncommitted' }) }}
         >
           Uncommitted
           {hasUncommitted && (
@@ -846,7 +898,7 @@ export default function ReviewBrowser({
         </button>
         <button
           className={`diff-tab ${viewMode === 'commits' ? 'active' : ''}`}
-          onClick={() => { setViewMode('commits'); if (commits.length === 0) loadCommits() }}
+          onClick={() => { setViewMode('commits'); persistViewState({ viewMode: 'commits' }); if (commits.length === 0) loadCommits() }}
         >
           Commits
           {commits.length > 0 && (
@@ -999,6 +1051,8 @@ export default function ReviewBrowser({
                           onCommentSubmit={handleCommentSubmit}
                           onCommentCancel={() => setCommentInput(null)}
                           onCommentDelete={handleCommentDelete}
+                          initialScrollTop={reviewState?.scrollTop}
+                          onScrollPositionChange={handleScrollPositionChange}
                         />
                       ) : (
                         <div className="diff-placeholder">Failed to load diff contents</div>
@@ -1096,6 +1150,8 @@ export default function ReviewBrowser({
                           onCommentSubmit={handleCommentSubmit}
                           onCommentCancel={() => setCommentInput(null)}
                           onCommentDelete={handleCommentDelete}
+                          initialScrollTop={reviewState?.scrollTop}
+                          onScrollPositionChange={handleScrollPositionChange}
                         />
                       ) : (
                         <div className="diff-placeholder">Failed to load diff contents</div>

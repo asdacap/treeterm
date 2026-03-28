@@ -102,12 +102,17 @@ export interface FilesystemState {
   selectedPath: string | null
   expandedDirs: string[]
   scrollToLine?: number
+  scrollTop?: number
 }
 
 export interface ReviewState {
   // parentWorkspaceId identifies the target branch for merging.
   // If undefined/null, this is a top-level worktree - review shows only uncommitted changes
   parentWorkspaceId?: string
+  viewMode?: 'committed' | 'uncommitted' | 'commits'
+  selectedFilePath?: string
+  selectedUncommittedFilePath?: string
+  scrollTop?: number
 }
 
 export interface CommentsState {
@@ -133,6 +138,7 @@ export interface EditorState {
   viewMode: 'editor' | 'preview'
   isLoading: boolean
   error: string | null
+  scrollTop?: number
 }
 
 export interface FileEntry {

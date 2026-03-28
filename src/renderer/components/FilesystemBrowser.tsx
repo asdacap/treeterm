@@ -36,9 +36,17 @@ export function FilesystemBrowser({
   const setSelectedPath = (path: string | null) => {
     updateTabState<FilesystemState>(tabId, (s) => ({
       ...s,
-      selectedPath: path
+      selectedPath: path,
+      scrollTop: undefined
     }))
   }
+
+  const handleScrollPositionChange = useCallback((scrollTop: number) => {
+    updateTabState<FilesystemState>(tabId, (s) => ({
+      ...s,
+      scrollTop
+    }))
+  }, [tabId])
 
   const toggleExpandedDir = (dirPath: string) => {
     updateTabState<FilesystemState>(tabId, (s) => {
@@ -153,6 +161,8 @@ export function FilesystemBrowser({
               scrollToLine: undefined
             }))
           }}
+          initialScrollTop={state.scrollTop}
+          onScrollPositionChange={handleScrollPositionChange}
         />
       </div>
     </div>
