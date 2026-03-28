@@ -879,7 +879,19 @@ export function createSessionStore(
       if (handle) {
         handle.getState().updateStatus('merged')
       }
-      await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: false, operationId: result.operationId })
+
+      try {
+        await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: false, operationId: result.operationId })
+      } catch (err) {
+        // Merge succeeded but removal failed — show dismissable error instead of stuck spinner
+        store.setState(s => ({
+          workspaceLoadStates: {
+            ...s.workspaceLoadStates,
+            [id]: { status: 'error', error: `Merge succeeded but cleanup failed: ${err instanceof Error ? err.message : String(err)}` }
+          }
+        }))
+        return { success: false, error: err instanceof Error ? err.message : String(err) }
+      }
 
       // Refresh parent's remote status after merge
       const parentHandle = get().workspaceStores[workspace.parentId!]

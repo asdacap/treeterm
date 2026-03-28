@@ -521,15 +521,14 @@ export default function ReviewBrowser({
       const result = await mergeAndRemove(squash)
       if (!result.success) {
         alert(`Merge failed: ${result.error}`)
-        setIsProcessing(false)
-        setProcessingAction(null)
         return
       }
     } catch (err) {
       alert(`Merge failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
-      setIsProcessing(false)
-      setProcessingAction(null)
     }
+
+    setIsProcessing(false)
+    setProcessingAction(null)
   }
 
   const handleMergeAndKeep = async (squash: boolean) => {
@@ -589,13 +588,12 @@ export default function ReviewBrowser({
       const result = await closeAndClean()
       if (!result.success) {
         alert(`Close failed: ${result.error}`)
-        setIsProcessing(false)
-        return
       }
     } catch (err) {
       alert(`Close failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
-      setIsProcessing(false)
     }
+
+    setIsProcessing(false)
   }
 
   const handleCancel = () => {
