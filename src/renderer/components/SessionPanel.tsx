@@ -1,10 +1,10 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
-import { GitFork, ChevronDown, ChevronRight } from 'lucide-react'
+import { GitFork, ChevronDown, ChevronRight, Loader2, AlertCircle } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
-import type { SessionState } from '../store/createSessionStore'
+import type { SessionState, SessionEntry } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import { useNavigationStore } from '../store/navigation'
 import { useKeybindingStore } from '../store/keybinding'
@@ -18,15 +18,110 @@ import { WorkspaceIcon } from './TreePane'
 
 interface SessionPanelProps {
   sessionId: string
-  sessionStore: StoreApi<SessionState>
+  sessionEntry: SessionEntry
   selectFolder: () => Promise<string | null>
 }
 
 export default function SessionPanel({
   sessionId,
-  sessionStore,
+  sessionEntry,
   selectFolder,
 }: SessionPanelProps): JSX.Element {
+  if (sessionEntry.status === 'connected') {
+    return (
+      <ConnectedSessionPanel
+        sessionId={sessionId}
+        sessionStore={sessionEntry.store}
+        selectFolder={selectFolder}
+      />
+    )
+  }
+
+  // Connecting or error state — render minimal panel
+  return (
+    <PendingSessionPanel
+      sessionId={sessionId}
+      sessionEntry={sessionEntry}
+    />
+  )
+}
+
+// Minimal panel for connecting/error sessions
+function PendingSessionPanel({
+  sessionId,
+  sessionEntry,
+}: {
+  sessionId: string
+  sessionEntry: Extract<SessionEntry, { status: 'connecting' | 'error' }>
+}) {
+  const { setActiveView } = useNavigationStore()
+  const disconnectSession = useAppStore(s => s.disconnectSession)
+  const removeSession = useAppStore(s => s.removeSession)
+
+  const label = sessionEntry.config.label || `${sessionEntry.config.user}@${sessionEntry.config.host}`
+
+  return (
+    <div className="session-panel">
+      <div
+        className="session-panel-header"
+        onClick={() => setActiveView({ type: 'session', sessionId })}
+      >
+        <span className="tree-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {sessionEntry.status === 'connecting' && <Loader2 size={14} className="spinning" />}
+          {sessionEntry.status === 'error' && <AlertCircle size={14} style={{ color: '#f44336' }} />}
+          {label}
+        </span>
+      </div>
+      <div className="tree-list">
+        <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>
+          {sessionEntry.status === 'connecting' ? 'Connecting...' : sessionEntry.error}
+        </div>
+        {sessionEntry.status === 'error' && (
+          <div style={{ padding: '4px 8px', display: 'flex', gap: 4 }}>
+            <button
+              className="add-button"
+              style={{ fontSize: 11 }}
+              onClick={() => {
+                removeSession(sessionId)
+                const { ssh, startRemoteConnect } = useAppStore.getState()
+                startRemoteConnect(sessionEntry.config)
+                ssh.connect(sessionEntry.config).then(({ info, session }) => {
+                  if (info.status !== 'connected' || !session) {
+                    useAppStore.getState().setSessionError(sessionEntry.config.id, info.error || 'Connection failed')
+                    return
+                  }
+                  useAppStore.getState().addRemoteSession(session, info)
+                }).catch((err) => {
+                  useAppStore.getState().setSessionError(sessionEntry.config.id, err instanceof Error ? err.message : String(err))
+                })
+              }}
+            >
+              Retry
+            </button>
+            <button
+              className="add-button"
+              style={{ fontSize: 11, color: '#f44336' }}
+              onClick={() => disconnectSession(sessionId)}
+            >
+              Remove
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Full panel for connected sessions (original implementation)
+function ConnectedSessionPanel({
+  sessionId,
+  sessionStore,
+  selectFolder,
+}: {
+  sessionId: string
+  sessionStore: StoreApi<SessionState>
+  selectFolder: () => Promise<string | null>
+}): JSX.Element {
   const connection = useStore(sessionStore, s => s.connection)
   const {
     workspaces,
