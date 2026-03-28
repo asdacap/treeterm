@@ -25,6 +25,7 @@ type OutputCallback = (line: string) => void
 
 export class ConnectionManager {
   private connections: Map<string, Connection> = new Map()
+  private connectingPromises: Map<string, Promise<ConnectionInfo>> = new Map()
   private statusListeners: Set<StatusChangeCallback> = new Set()
   private outputWatchers: Map<string, Set<OutputCallback>> = new Map()
   private statusWatchers: Map<string, Set<StatusChangeCallback>> = new Map()
@@ -83,17 +84,10 @@ export class ConnectionManager {
     }
     this.outputWatchers.get(connectionId)!.add(cb)
 
-    // Subscribe to tunnel output if available
-    let tunnelUnsub: (() => void) | undefined
-    if (conn?.tunnel) {
-      tunnelUnsub = conn.tunnel.onOutput(cb)
-    }
-
     return {
       scrollback,
       unsubscribe: () => {
         this.outputWatchers.get(connectionId)?.delete(cb)
-        tunnelUnsub?.()
       }
     }
   }
@@ -125,6 +119,20 @@ export class ConnectionManager {
       }
     }
 
+    // Deduplicate concurrent connection attempts for the same host
+    const pending = this.connectingPromises.get(config.id)
+    if (pending) {
+      return pending
+    }
+
+    const promise = this.doConnectRemote(config, options).finally(() => {
+      this.connectingPromises.delete(config.id)
+    })
+    this.connectingPromises.set(config.id, promise)
+    return promise
+  }
+
+  private async doConnectRemote(config: SSHConnectionConfig, options?: { refreshDaemon?: boolean }): Promise<ConnectionInfo> {
     const tunnel = new SSHTunnel(config, { refreshDaemon: options?.refreshDaemon })
     const target: ConnectionTarget = { type: 'remote', config }
 
