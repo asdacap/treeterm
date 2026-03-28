@@ -27,12 +27,13 @@ fn check_already_running(data_dir: &std::path::Path) -> bool {
     let pid_path = data_dir.join("daemon.pid");
     if let Ok(contents) = fs::read_to_string(&pid_path) {
         if let Ok(pid) = contents.trim().parse::<i32>() {
-            // Check if process is alive
+            // Check if process is alive AND the socket exists — a live PID without a socket
+            // means the PID was recycled by the OS to an unrelated process.
             let alive = unsafe { libc::kill(pid, 0) } == 0;
-            if alive {
+            if alive && socket_path::socket_path().exists() {
                 return true;
             }
-            // Stale PID file, remove it
+            // Stale PID file (process dead or PID recycled), remove it
             let _ = fs::remove_file(&pid_path);
         }
     }

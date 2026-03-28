@@ -105,33 +105,30 @@ export class SSHTunnel {
 
   /**
    * Get the local path to the daemon binary for the given remote architecture.
-   * Looks for arch-specific binaries (e.g., treeterm-daemon-x86_64-linux) first,
-   * falls back to the generic treeterm-daemon.
+   * Requires an arch-specific binary (e.g., treeterm-daemon-x86_64-linux) to exist —
+   * never falls back to the local (macOS) binary, which would silently upload the wrong arch.
    */
-  private getDaemonBinaryPath(remoteArch?: string): string {
+  private getDaemonBinaryPath(remoteArch: string): string {
     const baseDir = app.isPackaged
       ? path.join(process.resourcesPath, 'daemon-rs')
       : path.join(__dirname, '../daemon-rs')
 
-    // Try arch-specific binary for remote Linux hosts
-    if (remoteArch) {
-      const archBinary = path.join(baseDir, `treeterm-daemon-${remoteArch}-linux`)
-      if (fs.existsSync(archBinary)) {
-        return archBinary
-      }
+    const archBinary = path.join(baseDir, `treeterm-daemon-${remoteArch}-linux`)
+    if (fs.existsSync(archBinary)) {
+      return archBinary
     }
 
-    return path.join(baseDir, 'treeterm-daemon')
+    throw new Error(
+      `No daemon binary found for remote arch "${remoteArch}" (looked for ${archBinary}). ` +
+        `Run \`npm run build:daemon-rs:remote\` to cross-compile for Linux.`,
+    )
   }
 
   /**
    * Upload the daemon binary to the remote host via scp.
    */
-  private async uploadDaemon(remotePath: string, remoteArch?: string): Promise<void> {
+  private async uploadDaemon(remotePath: string, remoteArch: string): Promise<void> {
     const localPath = this.getDaemonBinaryPath(remoteArch)
-    if (!fs.existsSync(localPath)) {
-      throw new Error(`Daemon binary not found at ${localPath}`)
-    }
 
     const scpArgs = [
       '-o', 'StrictHostKeyChecking=accept-new',
@@ -267,7 +264,11 @@ export class SSHTunnel {
             try {
               const archMatch = stdout.match(/TREETERM_ARCH:(\S+)/)
               const remoteArch = archMatch ? archMatch[1].trim() : undefined
-              this.appendOutput(`[ssh] Uploading daemon binary (remote arch: ${remoteArch || 'unknown'})...`)
+              if (!remoteArch) {
+                reject(new Error('Could not detect remote architecture (TREETERM_ARCH not reported)'))
+                return
+              }
+              this.appendOutput(`[ssh] Uploading daemon binary (remote arch: ${remoteArch})...`)
               await this.uploadDaemon('~/.treeterm/treeterm-daemon', remoteArch)
 
               // Make executable and start via ssh, waiting for socket to be ready
@@ -299,7 +300,7 @@ export class SSHTunnel {
                 'fi',
               ].join('\n')
               startArgs.push(startScript)
-              const startResult = await this.runSSHCommand(startArgs)
+              const startResult = await this.runSSHCommand(startArgs, 'start')
               const startMatch = startResult.match(/TREETERM_SOCKET:(.+)/)
               if (!startMatch) {
                 reject(new Error('Daemon failed to start after upload — check daemon log on remote'))
@@ -330,7 +331,7 @@ export class SSHTunnel {
     })
   }
 
-  private runSSHCommand(sshArgs: string[]): Promise<string> {
+  private runSSHCommand(sshArgs: string[], prefix = 'ssh'): Promise<string> {
     return new Promise((resolve, reject) => {
       const proc = spawn('ssh', sshArgs, { stdio: ['pipe', 'pipe', 'pipe'] })
       let stdout = ''
@@ -339,14 +340,14 @@ export class SSHTunnel {
         const text = d.toString()
         stdout += text
         for (const line of text.split('\n').filter(Boolean)) {
-          this.appendOutput(`[ssh] ${line}`)
+          this.appendOutput(`[${prefix}] ${line}`)
         }
       })
       proc.stderr?.on('data', (d: Buffer) => {
         const text = d.toString()
         stderr += text
         for (const line of text.split('\n').filter(Boolean)) {
-          this.appendOutput(`[ssh:err] ${line}`)
+          this.appendOutput(`[${prefix}:err] ${line}`)
         }
       })
       proc.on('close', (code) => {

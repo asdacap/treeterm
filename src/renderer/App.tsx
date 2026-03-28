@@ -7,7 +7,6 @@ import WorkspacePickerDialog from './components/WorkspacePickerDialog'
 import ActiveProcessesDialog from './components/ActiveProcessesDialog'
 import ConnectionPicker from './components/ConnectionPicker'
 import SessionInfoPane from './components/SessionInfoPane'
-import ConnectingPane from './components/ConnectingPane'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import AppErrorFallback from './components/AppErrorFallback'
 import { useAppStore } from './store/app'
@@ -131,16 +130,16 @@ export default function App() {
           />
           <div className="workspace-pane">
             {activeSessionEntry?.status === 'connecting' ? (
-              <ConnectingPane connectionId={activeSessionEntry.connectionId} config={activeSessionEntry.config} />
+              <SessionInfoPane status="connecting" sessionId={activeSessionEntry.connectionId} connectionId={activeSessionEntry.connectionId} config={activeSessionEntry.config} />
             ) : activeSessionEntry?.status === 'error' ? (
-              <ConnectingPane connectionId={activeSessionEntry.connectionId} config={activeSessionEntry.config} error={activeSessionEntry.error} />
+              <SessionInfoPane status="error" sessionId={activeSessionEntry.connectionId} connectionId={activeSessionEntry.connectionId} config={activeSessionEntry.config} error={activeSessionEntry.error} />
             ) : activeSessionStore ? (
               <>
                 <div style={{ display: activeView?.type === 'workspace' ? 'contents' : 'none' }}>
                   <WorkspacePane sessionStore={activeSessionStore} platform={platform} />
                 </div>
                 {activeView?.type === 'session' && (
-                  <SessionInfoPane sessionId={activeView.sessionId} sessionStore={activeSessionStore} />
+                  <SessionInfoPane status="connected" sessionId={activeView.sessionId} sessionStore={activeSessionStore} />
                 )}
               </>
             ) : (
