@@ -5,7 +5,7 @@ import type { SessionState } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import { useSessionNamesStore } from '../store/sessionNames'
 
-type TabId = 'info' | 'daemon' | 'proxy'
+type TabId = 'info' | 'daemon' | 'proxy' | 'json'
 
 const DAEMON_PREFIXES = ['[bootstrap]', '[bootstrap:err]', '[ssh]']
 const PROXY_PREFIXES = ['[tunnel]', '[tunnel:err]']
@@ -36,9 +36,30 @@ export default function SessionInfoPane({ sessionId, sessionStore }: SessionInfo
 
   const [activeTab, setActiveTab] = useState<TabId>('info')
   const [output, setOutput] = useState<string[]>([])
+  const [sessionJson, setSessionJson] = useState<string | null>(null)
+  const [jsonLoading, setJsonLoading] = useState(false)
+  const [jsonError, setJsonError] = useState<string | null>(null)
   const ssh = useAppStore(s => s.ssh)
+  const sessionApi = useAppStore(s => s.sessionApi)
   const scrollRef = useRef<HTMLDivElement>(null)
   const displayName = useSessionNamesStore(s => s.names[sessionId]?.name)
+
+  const fetchSessionJson = async () => {
+    setJsonLoading(true)
+    setJsonError(null)
+    try {
+      const result = await sessionApi.get(sessionId)
+      if (result.success && result.session) {
+        setSessionJson(JSON.stringify(result.session, null, 2))
+      } else {
+        setJsonError(result.error || 'Failed to fetch session')
+      }
+    } catch (err) {
+      setJsonError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setJsonLoading(false)
+    }
+  }
 
   // Watch SSH output (only for remote connections)
   useEffect(() => {
@@ -73,8 +94,8 @@ export default function SessionInfoPane({ sessionId, sessionStore }: SessionInfo
     : displayName || sessionId
 
   const tabs: { id: TabId; label: string }[] = isRemote
-    ? [{ id: 'info', label: 'Info' }, { id: 'daemon', label: 'Daemon' }, { id: 'proxy', label: 'Proxy' }]
-    : [{ id: 'info', label: 'Info' }]
+    ? [{ id: 'info', label: 'Info' }, { id: 'daemon', label: 'Daemon' }, { id: 'proxy', label: 'Proxy' }, { id: 'json', label: 'JSON' }]
+    : [{ id: 'info', label: 'Info' }, { id: 'json', label: 'JSON' }]
 
   return (
     <div className="ssh-pane">
@@ -126,6 +147,33 @@ export default function SessionInfoPane({ sessionId, sessionStore }: SessionInfo
             </>
           ) : (
             <div className="ssh-pane-output-line">Connection: Local</div>
+          )}
+        </div>
+      ) : activeTab === 'json' ? (
+        <div className="ssh-pane-output">
+          <div style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
+            <button
+              className="ssh-pane-tab active"
+              onClick={fetchSessionJson}
+              disabled={jsonLoading}
+              style={{ borderBottom: 'none' }}
+            >
+              {jsonLoading ? 'Loading...' : 'Refresh'}
+            </button>
+          </div>
+          {jsonError && (
+            <div className="ssh-pane-output-line" style={{ color: '#f44336' }}>
+              Error: {jsonError}
+            </div>
+          )}
+          {sessionJson ? (
+            <pre style={{ margin: 0, padding: '8px', fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              {sessionJson}
+            </pre>
+          ) : !jsonLoading && !jsonError && (
+            <div className="ssh-pane-output-empty">
+              Click Refresh to load session JSON
+            </div>
           )}
         </div>
       ) : (
