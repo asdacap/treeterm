@@ -108,6 +108,16 @@ impl TreeTermDaemon for DaemonService {
                 }
             }
 
+            // Send current terminal size
+            if let Ok((cols, rows)) = pty_mgr.get_size(&session_id).await {
+                let msg = PtyOutput {
+                    output: Some(pty_output::Output::Resize(PtyResizeData { cols, rows })),
+                };
+                if tx.send(Ok(msg)).await.is_err() {
+                    return;
+                }
+            }
+
             // Check if already exited
             if let Ok(Some(exit_code)) = pty_mgr.get_exit_code(&session_id).await {
                 let _ = tx
