@@ -105,19 +105,30 @@ export class SSHTunnel {
 
   /**
    * Get the local path to the daemon binary for the given remote architecture.
+   * Looks for arch-specific binaries (e.g., treeterm-daemon-x86_64-linux) first,
+   * falls back to the generic treeterm-daemon.
    */
-  private getDaemonBinaryPath(): string {
-    const daemonPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'daemon-rs', 'treeterm-daemon')
-      : path.join(__dirname, '../daemon-rs/treeterm-daemon')
-    return daemonPath
+  private getDaemonBinaryPath(remoteArch?: string): string {
+    const baseDir = app.isPackaged
+      ? path.join(process.resourcesPath, 'daemon-rs')
+      : path.join(__dirname, '../daemon-rs')
+
+    // Try arch-specific binary for remote Linux hosts
+    if (remoteArch) {
+      const archBinary = path.join(baseDir, `treeterm-daemon-${remoteArch}-linux`)
+      if (fs.existsSync(archBinary)) {
+        return archBinary
+      }
+    }
+
+    return path.join(baseDir, 'treeterm-daemon')
   }
 
   /**
    * Upload the daemon binary to the remote host via scp.
    */
-  private async uploadDaemon(remotePath: string): Promise<void> {
-    const localPath = this.getDaemonBinaryPath()
+  private async uploadDaemon(remotePath: string, remoteArch?: string): Promise<void> {
+    const localPath = this.getDaemonBinaryPath(remoteArch)
     if (!fs.existsSync(localPath)) {
       throw new Error(`Daemon binary not found at ${localPath}`)
     }
@@ -161,6 +172,9 @@ export class SSHTunnel {
         'DAEMON_SOCKET="/tmp/treeterm-$(id -u)/daemon.sock"',
         `REFRESH_DAEMON=${refreshDaemon}`,
         '',
+        '# Report system architecture for binary selection',
+        'echo "TREETERM_ARCH:$(uname -m)"',
+        '',
         '# Check if daemon binary exists and get its version',
         'NEEDS_UPLOAD=0',
         'if [ ! -x "$DAEMON_BIN" ]; then',
@@ -201,16 +215,12 @@ export class SSHTunnel {
         'fi',
         '',
         'if [ ! -S "$DAEMON_SOCKET" ]; then',
-        '  if [ "$NEEDS_UPLOAD" = "1" ]; then',
-        '    echo "TREETERM_SOCKET:NEEDS_UPLOAD"',
-        '  else',
-        '    echo "TREETERM_ERROR: Daemon failed to start" >&2',
-        '    if [ -f "$DAEMON_LOG" ]; then',
-        '      echo "TREETERM_ERROR: Last 20 lines of daemon.log:" >&2',
-        '      tail -20 "$DAEMON_LOG" >&2',
-        '    fi',
-        '    exit 1',
+        '  # Log daemon output if binary existed but failed (possibly wrong architecture)',
+        '  if [ "$NEEDS_UPLOAD" = "0" ] && [ -f "$DAEMON_LOG" ]; then',
+        '    echo "Daemon binary exists but failed to start (possibly wrong architecture)" >&2',
+        '    tail -20 "$DAEMON_LOG" >&2',
         '  fi',
+        '  echo "TREETERM_SOCKET:NEEDS_UPLOAD"',
         'else',
         '  echo "TREETERM_SOCKET:$DAEMON_SOCKET"',
         'fi',
@@ -253,10 +263,12 @@ export class SSHTunnel {
           const socketPath = match[1].trim()
 
           if (socketPath === 'NEEDS_UPLOAD') {
-            // Binary not on remote — upload it and retry
+            // Binary not on remote or wrong architecture — upload and retry
             try {
-              this.appendOutput('[ssh] Daemon binary not found on remote, uploading...')
-              await this.uploadDaemon('~/.treeterm/treeterm-daemon')
+              const archMatch = stdout.match(/TREETERM_ARCH:(\S+)/)
+              const remoteArch = archMatch ? archMatch[1].trim() : undefined
+              this.appendOutput(`[ssh] Uploading daemon binary (remote arch: ${remoteArch || 'unknown'})...`)
+              await this.uploadDaemon('~/.treeterm/treeterm-daemon', remoteArch)
 
               // Make executable and start via ssh
               const startArgs = this.buildBaseSSHArgs()

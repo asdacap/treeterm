@@ -29,6 +29,11 @@
         # Proto file path for build.rs
         protoSrc = ../src/proto;
 
+        rustTarget = {
+          "x86_64-linux" = "x86_64-unknown-linux-musl";
+          "aarch64-linux" = "aarch64-unknown-linux-musl";
+        }.${system};
+
         commonArgs = {
           src = craneLib.cleanCargoSource ./.;
           strictDeps = true;
@@ -38,7 +43,7 @@
             mkdir -p src/proto
             cp -r ${protoSrc}/* src/proto/ || true
           '';
-          CARGO_BUILD_TARGET = "x86_64-unknown-linux-musl";
+          CARGO_BUILD_TARGET = rustTarget;
           CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static";
         };
 
