@@ -29,13 +29,22 @@ jobs:
       - name: Run type check
         run: npm run typecheck
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
       - name: Run tests with coverage
         run: npm run test:coverage
+
+      - name: Run daemon tests with coverage
+        run: npm run test:daemon:coverage
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
-          files: ./coverage/coverage-final.json
+          files: ./coverage/coverage-final.json,./coverage/daemon-lcov.info
           fail_ci_if_error: false
 
       - name: Build project

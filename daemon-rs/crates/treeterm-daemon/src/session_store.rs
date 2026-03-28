@@ -232,3 +232,271 @@ impl SessionStore {
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn create_session_generates_id_and_version() {
+        let store = SessionStore::new();
+        let session = store.create_session("test-client", vec![]).await;
+
+        assert!(session.id.starts_with("session-"));
+        assert_eq!(session.version, 1);
+        assert!(session.created_at > 0);
+        assert_eq!(session.workspaces.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn create_session_with_workspaces() {
+        let store = SessionStore::new();
+        let ws = Workspace {
+            id: String::new(), // should be auto-generated
+            path: "/tmp/test".into(),
+            ..Default::default()
+        };
+        let session = store.create_session("c", vec![ws]).await;
+
+        assert_eq!(session.workspaces.len(), 1);
+        assert!(session.workspaces[0].id.starts_with("ws-"));
+        assert_eq!(session.workspaces[0].path, "/tmp/test");
+        assert!(session.workspaces[0].created_at > 0);
+    }
+
+    #[tokio::test]
+    async fn create_session_preserves_provided_workspace_id() {
+        let store = SessionStore::new();
+        let ws = Workspace {
+            id: "my-ws-id".into(),
+            path: "/tmp".into(),
+            ..Default::default()
+        };
+        let session = store.create_session("c", vec![ws]).await;
+        assert_eq!(session.workspaces[0].id, "my-ws-id");
+    }
+
+    #[tokio::test]
+    async fn get_session_returns_created() {
+        let store = SessionStore::new();
+        let session = store.create_session("c", vec![]).await;
+
+        let got = store.get_session(&session.id).await;
+        assert!(got.is_some());
+        assert_eq!(got.unwrap().id, session.id);
+    }
+
+    #[tokio::test]
+    async fn get_session_missing_returns_none() {
+        let store = SessionStore::new();
+        assert!(store.get_session("nonexistent").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_sessions_returns_all() {
+        let store = SessionStore::new();
+        store.create_session("c", vec![]).await;
+        store.create_session("c", vec![]).await;
+
+        let sessions = store.list_sessions().await;
+        assert_eq!(sessions.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn delete_session_removes_it() {
+        let store = SessionStore::new();
+        let session = store.create_session("c", vec![]).await;
+
+        assert!(store.delete_session(&session.id).await);
+        assert!(store.get_session(&session.id).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_nonexistent_returns_false() {
+        let store = SessionStore::new();
+        assert!(!store.delete_session("nope").await);
+    }
+
+    #[tokio::test]
+    async fn update_session_increments_version() {
+        let store = SessionStore::new();
+        let session = store.create_session("c", vec![]).await;
+
+        let result = store
+            .update_session("c", &session.id, vec![], None)
+            .await;
+        let (updated, accepted) = result.unwrap();
+        assert!(accepted);
+        assert_eq!(updated.version, 2);
+    }
+
+    #[tokio::test]
+    async fn update_session_version_match_accepted() {
+        let store = SessionStore::new();
+        let session = store.create_session("c", vec![]).await;
+
+        let result = store
+            .update_session("c", &session.id, vec![], Some(1))
+            .await;
+        let (updated, accepted) = result.unwrap();
+        assert!(accepted);
+        assert_eq!(updated.version, 2);
+    }
+
+    #[tokio::test]
+    async fn update_session_version_mismatch_rejected() {
+        let store = SessionStore::new();
+        let session = store.create_session("c", vec![]).await;
+
+        let result = store
+            .update_session("c", &session.id, vec![], Some(999))
+            .await;
+        let (returned, accepted) = result.unwrap();
+        assert!(!accepted);
+        assert_eq!(returned.version, 1); // unchanged
+    }
+
+    #[tokio::test]
+    async fn update_nonexistent_returns_none() {
+        let store = SessionStore::new();
+        assert!(store.update_session("c", "nope", vec![], None).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn update_preserves_existing_workspace_by_id() {
+        let store = SessionStore::new();
+        let ws = Workspace {
+            id: "ws-1".into(),
+            path: "/a".into(),
+            ..Default::default()
+        };
+        let session = store.create_session("c", vec![ws]).await;
+        let original_created_at = session.workspaces[0].created_at;
+
+        let updated_ws = Workspace {
+            id: "ws-1".into(),
+            path: "/a-updated".into(),
+            ..Default::default()
+        };
+        let (updated, _) = store
+            .update_session("c", &session.id, vec![updated_ws], None)
+            .await
+            .unwrap();
+
+        assert_eq!(updated.workspaces[0].id, "ws-1");
+        assert_eq!(updated.workspaces[0].created_at, original_created_at);
+    }
+
+    #[tokio::test]
+    async fn update_matches_workspace_by_path_when_id_empty() {
+        let store = SessionStore::new();
+        let ws = Workspace {
+            id: "ws-original".into(),
+            path: "/same-path".into(),
+            ..Default::default()
+        };
+        let session = store.create_session("c", vec![ws]).await;
+
+        // Update with empty id but same path
+        let updated_ws = Workspace {
+            id: String::new(),
+            path: "/same-path".into(),
+            ..Default::default()
+        };
+        let (updated, _) = store
+            .update_session("c", &session.id, vec![updated_ws], None)
+            .await
+            .unwrap();
+
+        // Should reuse the original workspace id
+        assert_eq!(updated.workspaces[0].id, "ws-original");
+    }
+
+    #[tokio::test]
+    async fn get_or_create_default_session_creates_once() {
+        let store = SessionStore::new();
+
+        let s1 = store.get_or_create_default_session("c").await;
+        let s2 = store.get_or_create_default_session("c").await;
+
+        assert_eq!(s1.id, s2.id);
+    }
+
+    #[tokio::test]
+    async fn get_default_session_id_initially_none() {
+        let store = SessionStore::new();
+        assert!(store.get_default_session_id().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_default_session_id_after_create() {
+        let store = SessionStore::new();
+        let session = store.get_or_create_default_session("c").await;
+
+        let id = store.get_default_session_id().await;
+        assert_eq!(id.unwrap(), session.id);
+    }
+
+    #[tokio::test]
+    async fn broadcast_sends_to_matching_watchers_not_sender() {
+        let store = SessionStore::new();
+        let session = store.create_session("c", vec![]).await;
+
+        let (tx1, mut rx1) = mpsc::channel(16);
+        let (tx2, mut rx2) = mpsc::channel(16);
+
+        // Watcher for same session, different listener
+        store
+            .add_watcher("listener-1".into(), session.id.clone(), tx1)
+            .await;
+        // Watcher for same session, is the sender
+        store
+            .add_watcher("sender".into(), session.id.clone(), tx2)
+            .await;
+
+        store
+            .broadcast_update(&session.id, &session, "sender")
+            .await;
+
+        // listener-1 should receive
+        let event = rx1.try_recv();
+        assert!(event.is_ok());
+
+        // sender should NOT receive
+        let event = rx2.try_recv();
+        assert!(event.is_err());
+    }
+
+    #[tokio::test]
+    async fn broadcast_skips_other_sessions() {
+        let store = SessionStore::new();
+        let s1 = store.create_session("c", vec![]).await;
+        let s2 = store.create_session("c", vec![]).await;
+
+        let (tx, mut rx) = mpsc::channel(16);
+        store
+            .add_watcher("listener".into(), s2.id.clone(), tx)
+            .await;
+
+        // Broadcast for s1 should not reach s2's watcher
+        store.broadcast_update(&s1.id, &s1, "other").await;
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn remove_watcher_stops_delivery() {
+        let store = SessionStore::new();
+        let session = store.create_session("c", vec![]).await;
+
+        let (tx, mut rx) = mpsc::channel(16);
+        store
+            .add_watcher("listener".into(), session.id.clone(), tx)
+            .await;
+        store.remove_watcher("listener").await;
+
+        store
+            .broadcast_update(&session.id, &session, "other")
+            .await;
+        assert!(rx.try_recv().is_err());
+    }
+}

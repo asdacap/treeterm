@@ -131,11 +131,12 @@ Prefer to validate data at the last minute. Eg: do not check for valid parent id
 
 ## Testing
 
-- Run `npm run lint`, `npm run test:coverage` and `npm run build` when writing or modifying code
+- Run `npm run lint`, `npm run test:coverage`, `npm run test:daemon` and `npm run build` when writing or modifying code
+- Daemon coverage: `npm run test:daemon:coverage` (requires `cargo-llvm-cov` and `llvm-tools-preview`)
 - AlWAYS run `npm run build` and check coverage and test before committing.
   - Just install dependencies if needed to run it.
 - Minimum 10% code and branch coverage for new code
-- Daemon: unit tests in isolation; Main/Renderer: integration tests; gRPC: contract tests
+- Daemon: unit tests in isolation (`#[cfg(test)]` modules in each `.rs` file); Main/Renderer: integration tests; gRPC: contract tests
 
 ## Decision Guide
 

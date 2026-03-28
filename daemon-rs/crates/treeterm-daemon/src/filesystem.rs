@@ -207,3 +207,295 @@ async fn walk_dir_search(workspace_path: &Path, dir: &Path, query: &str, results
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+    use tokio::fs;
+
+    // -- detect_language --
+
+    #[test]
+    fn detect_language_known_extensions() {
+        assert_eq!(detect_language(Path::new("foo.ts")), "typescript");
+        assert_eq!(detect_language(Path::new("foo.tsx")), "typescript");
+        assert_eq!(detect_language(Path::new("foo.js")), "javascript");
+        assert_eq!(detect_language(Path::new("foo.rs")), "rust");
+        assert_eq!(detect_language(Path::new("foo.py")), "python");
+        assert_eq!(detect_language(Path::new("foo.go")), "go");
+        assert_eq!(detect_language(Path::new("foo.json")), "json");
+        assert_eq!(detect_language(Path::new("foo.yaml")), "yaml");
+        assert_eq!(detect_language(Path::new("foo.yml")), "yaml");
+        assert_eq!(detect_language(Path::new("foo.html")), "html");
+        assert_eq!(detect_language(Path::new("foo.css")), "css");
+        assert_eq!(detect_language(Path::new("foo.toml")), "toml");
+        assert_eq!(detect_language(Path::new("foo.sh")), "bash");
+        assert_eq!(detect_language(Path::new("foo.sql")), "sql");
+    }
+
+    #[test]
+    fn detect_language_unknown_extension() {
+        assert_eq!(detect_language(Path::new("foo.xyz")), "plaintext");
+        assert_eq!(detect_language(Path::new("noext")), "plaintext");
+    }
+
+    // -- sort_entries --
+
+    #[test]
+    fn sort_entries_dirs_first_then_alphabetical() {
+        let mut entries = vec![
+            FileEntry { name: "z_file".into(), is_directory: false, ..Default::default() },
+            FileEntry { name: "a_dir".into(), is_directory: true, ..Default::default() },
+            FileEntry { name: "a_file".into(), is_directory: false, ..Default::default() },
+            FileEntry { name: "b_dir".into(), is_directory: true, ..Default::default() },
+        ];
+        sort_entries(&mut entries);
+
+        assert_eq!(entries[0].name, "a_dir");
+        assert_eq!(entries[1].name, "b_dir");
+        assert_eq!(entries[2].name, "a_file");
+        assert_eq!(entries[3].name, "z_file");
+    }
+
+    // -- is_path_within_workspace --
+
+    #[tokio::test]
+    async fn path_within_workspace_valid() {
+        let tmp = TempDir::new().unwrap();
+        let sub = tmp.path().join("sub");
+        fs::create_dir(&sub).await.unwrap();
+
+        assert!(is_path_within_workspace(tmp.path(), &sub).await);
+    }
+
+    #[tokio::test]
+    async fn path_outside_workspace_rejected() {
+        let tmp1 = TempDir::new().unwrap();
+        let tmp2 = TempDir::new().unwrap();
+
+        assert!(!is_path_within_workspace(tmp1.path(), tmp2.path()).await);
+    }
+
+    #[tokio::test]
+    async fn path_traversal_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let escape = tmp.path().join("../../../etc/passwd");
+
+        assert!(!is_path_within_workspace(tmp.path(), &escape).await);
+    }
+
+    #[tokio::test]
+    async fn path_nonexistent_target_within_workspace() {
+        let tmp = TempDir::new().unwrap();
+        // Canonicalize to resolve macOS /var -> /private/var symlink
+        let ws = tmp.path().canonicalize().unwrap();
+        let target = ws.join("does-not-exist.txt");
+
+        assert!(is_path_within_workspace(&ws, &target).await);
+    }
+
+    // -- read_directory --
+
+    #[tokio::test]
+    async fn read_directory_lists_entries() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("hello.txt"), "hi").await.unwrap();
+        fs::create_dir(tmp.path().join("subdir")).await.unwrap();
+
+        let resp = read_directory(tmp.path(), ".").await;
+        assert!(resp.success);
+        let contents = resp.contents.unwrap();
+        assert_eq!(contents.entries.len(), 2);
+        // dirs first
+        assert!(contents.entries[0].is_directory);
+        assert_eq!(contents.entries[0].name, "subdir");
+        assert_eq!(contents.entries[1].name, "hello.txt");
+    }
+
+    #[tokio::test]
+    async fn read_directory_skips_dotfiles() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join(".hidden"), "").await.unwrap();
+        fs::write(tmp.path().join("visible"), "").await.unwrap();
+
+        let resp = read_directory(tmp.path(), ".").await;
+        assert!(resp.success);
+        let entries = &resp.contents.unwrap().entries;
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "visible");
+    }
+
+    #[tokio::test]
+    async fn read_directory_outside_workspace_denied() {
+        let tmp1 = TempDir::new().unwrap();
+        let tmp2 = TempDir::new().unwrap();
+
+        let resp = read_directory(tmp1.path(), tmp2.path().to_str().unwrap()).await;
+        assert!(!resp.success);
+        assert!(resp.error.unwrap().contains("Access denied"));
+    }
+
+    #[tokio::test]
+    async fn read_directory_nonexistent_errors() {
+        let tmp = TempDir::new().unwrap();
+        let resp = read_directory(tmp.path(), "nope").await;
+        assert!(!resp.success);
+        assert!(resp.error.is_some());
+    }
+
+    // -- read_file_streaming --
+
+    #[tokio::test]
+    async fn read_file_streaming_success() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("test.rs"), "fn main() {}").await.unwrap();
+
+        let result = read_file_streaming(tmp.path(), "test.rs").await;
+        assert!(result.is_ok());
+        let (header, content) = result.unwrap();
+        assert_eq!(header.language, "rust");
+        assert_eq!(content, b"fn main() {}");
+    }
+
+    #[tokio::test]
+    async fn read_file_streaming_too_large() {
+        let tmp = TempDir::new().unwrap();
+        let big = vec![0u8; (MAX_FILE_SIZE + 1) as usize];
+        fs::write(tmp.path().join("big.bin"), &big).await.unwrap();
+
+        let result = read_file_streaming(tmp.path(), "big.bin").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("too large"));
+    }
+
+    #[tokio::test]
+    async fn read_file_outside_workspace_denied() {
+        let tmp1 = TempDir::new().unwrap();
+        let tmp2 = TempDir::new().unwrap();
+        fs::write(tmp2.path().join("secret.txt"), "secret").await.unwrap();
+
+        let abs = tmp2.path().join("secret.txt");
+        let result = read_file_streaming(tmp1.path(), abs.to_str().unwrap()).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Access denied"));
+    }
+
+    // -- write_file_streaming --
+
+    #[tokio::test]
+    async fn write_file_streaming_creates_file() {
+        let tmp = TempDir::new().unwrap();
+        let ws = tmp.path().canonicalize().unwrap();
+        let resp = write_file_streaming(&ws, "new.txt", b"hello".to_vec()).await;
+        assert!(resp.success);
+
+        let content = fs::read_to_string(ws.join("new.txt")).await.unwrap();
+        assert_eq!(content, "hello");
+    }
+
+    #[tokio::test]
+    async fn write_file_streaming_creates_parent_dirs() {
+        let tmp = TempDir::new().unwrap();
+        let ws = tmp.path().canonicalize().unwrap();
+        let resp = write_file_streaming(&ws, "a/b/c.txt", b"nested".to_vec()).await;
+        assert!(resp.success);
+
+        let content = fs::read_to_string(ws.join("a/b/c.txt")).await.unwrap();
+        assert_eq!(content, "nested");
+    }
+
+    #[tokio::test]
+    async fn write_file_outside_workspace_denied() {
+        let tmp1 = TempDir::new().unwrap();
+        let tmp2 = TempDir::new().unwrap();
+        let target = tmp2.path().join("evil.txt");
+
+        let resp = write_file_streaming(tmp1.path(), target.to_str().unwrap(), b"hack".to_vec()).await;
+        assert!(!resp.success);
+        assert!(resp.error.unwrap().contains("Access denied"));
+    }
+
+    // -- search_files --
+
+    #[tokio::test]
+    async fn search_files_finds_matching() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("foo.txt"), "").await.unwrap();
+        fs::write(tmp.path().join("bar.txt"), "").await.unwrap();
+        fs::write(tmp.path().join("foobar.rs"), "").await.unwrap();
+
+        let resp = search_files(tmp.path(), "foo").await;
+        assert!(resp.success);
+        assert_eq!(resp.entries.len(), 2);
+        let names: Vec<&str> = resp.entries.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"foo.txt"));
+        assert!(names.contains(&"foobar.rs"));
+    }
+
+    #[tokio::test]
+    async fn search_files_case_insensitive() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("README.md"), "").await.unwrap();
+
+        let resp = search_files(tmp.path(), "readme").await;
+        assert!(resp.success);
+        assert_eq!(resp.entries.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn search_files_empty_query_returns_empty() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("file.txt"), "").await.unwrap();
+
+        let resp = search_files(tmp.path(), "  ").await;
+        assert!(resp.success);
+        assert_eq!(resp.entries.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn search_files_skips_dotfiles_and_node_modules() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join(".hidden_match"), "").await.unwrap();
+        let nm = tmp.path().join("node_modules");
+        fs::create_dir(&nm).await.unwrap();
+        fs::write(nm.join("match.js"), "").await.unwrap();
+        fs::write(tmp.path().join("match.txt"), "").await.unwrap();
+
+        let resp = search_files(tmp.path(), "match").await;
+        assert!(resp.success);
+        assert_eq!(resp.entries.len(), 1);
+        assert_eq!(resp.entries[0].name, "match.txt");
+    }
+
+    #[tokio::test]
+    async fn search_files_recurses_into_subdirs() {
+        let tmp = TempDir::new().unwrap();
+        let sub = tmp.path().join("deep");
+        fs::create_dir(&sub).await.unwrap();
+        fs::write(sub.join("target.txt"), "").await.unwrap();
+
+        let resp = search_files(tmp.path(), "target").await;
+        assert!(resp.success);
+        assert_eq!(resp.entries.len(), 1);
+    }
+
+    // -- file_entry_from --
+
+    #[test]
+    fn file_entry_from_without_metadata() {
+        let entry = file_entry_from(
+            "test.txt".into(),
+            &PathBuf::from("/a/test.txt"),
+            "test.txt".into(),
+            false,
+            None,
+        );
+        assert_eq!(entry.name, "test.txt");
+        assert_eq!(entry.path, "/a/test.txt");
+        assert!(!entry.is_directory);
+        assert!(entry.size.is_none());
+        assert!(entry.modified_time.is_none());
+    }
+}

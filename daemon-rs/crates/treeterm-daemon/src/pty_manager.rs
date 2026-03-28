@@ -397,3 +397,188 @@ fn chrono_now_millis() -> i64 {
         .unwrap_or_default()
         .as_millis() as i64
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_login_shell_returns_nonempty() {
+        let shell = get_login_shell();
+        assert!(!shell.is_empty());
+        // Should be a valid path
+        assert!(shell.starts_with('/'));
+    }
+
+    #[test]
+    fn chrono_now_millis_returns_positive() {
+        let ms = chrono_now_millis();
+        assert!(ms > 0);
+    }
+
+    #[tokio::test]
+    async fn pty_manager_new_has_no_sessions() {
+        let mgr = PtyManager::new();
+        let sessions = mgr.list_sessions().await;
+        assert!(sessions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_pty_returns_id() {
+        let mgr = PtyManager::new();
+        let id = mgr
+            .create_pty("/tmp".into(), HashMap::new(), 80, 24, None)
+            .await
+            .unwrap();
+
+        assert!(id.starts_with("pty-"));
+
+        let sessions = mgr.list_sessions().await;
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, id);
+        assert_eq!(sessions[0].cols, 80);
+        assert_eq!(sessions[0].rows, 24);
+
+        mgr.kill(&id).await;
+    }
+
+    #[tokio::test]
+    async fn create_pty_sequential_ids() {
+        let mgr = PtyManager::new();
+        let id1 = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+        let id2 = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+
+        assert_eq!(id1, "pty-1");
+        assert_eq!(id2, "pty-2");
+
+        mgr.kill(&id1).await;
+        mgr.kill(&id2).await;
+    }
+
+    #[tokio::test]
+    async fn write_to_nonexistent_session_errors() {
+        let mgr = PtyManager::new();
+        let result = mgr.write("nonexistent", b"hello").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn resize_nonexistent_session_errors() {
+        let mgr = PtyManager::new();
+        let result = mgr.resize("nonexistent", 120, 40).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn get_exit_code_nonexistent_errors() {
+        let mgr = PtyManager::new();
+        let result = mgr.get_exit_code("nonexistent").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn get_size_returns_initial_dimensions() {
+        let mgr = PtyManager::new();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 100, 50, None).await.unwrap();
+
+        let (cols, rows) = mgr.get_size(&id).await.unwrap();
+        assert_eq!(cols, 100);
+        assert_eq!(rows, 50);
+
+        mgr.kill(&id).await;
+    }
+
+    #[tokio::test]
+    async fn write_and_get_screen_state() {
+        let mgr = PtyManager::new();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+
+        // Write something to the pty
+        let _ = mgr.write(&id, b"echo hello\n").await;
+
+        // Give the pty a moment to process
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let state = mgr.get_screen_state(&id).await;
+        assert!(state.is_ok());
+
+        mgr.kill(&id).await;
+    }
+
+    #[tokio::test]
+    async fn resize_pty_updates_dimensions() {
+        let mgr = PtyManager::new();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+
+        mgr.resize(&id, 120, 40).await.unwrap();
+        let (cols, rows) = mgr.get_size(&id).await.unwrap();
+        assert_eq!(cols, 120);
+        assert_eq!(rows, 40);
+
+        mgr.kill(&id).await;
+    }
+
+    #[tokio::test]
+    async fn kill_removes_session() {
+        let mgr = PtyManager::new();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+
+        mgr.kill(&id).await;
+
+        let sessions = mgr.list_sessions().await;
+        assert!(sessions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn kill_nonexistent_is_noop() {
+        let mgr = PtyManager::new();
+        mgr.kill("nonexistent").await; // should not panic
+    }
+
+    #[tokio::test]
+    async fn subscribe_data_nonexistent_errors() {
+        let mgr = PtyManager::new();
+        assert!(mgr.subscribe_data("nonexistent").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn subscribe_exit_nonexistent_errors() {
+        let mgr = PtyManager::new();
+        assert!(mgr.subscribe_exit("nonexistent").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn subscribe_resize_nonexistent_errors() {
+        let mgr = PtyManager::new();
+        assert!(mgr.subscribe_resize("nonexistent").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn get_size_nonexistent_errors() {
+        let mgr = PtyManager::new();
+        assert!(mgr.get_size("nonexistent").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn shutdown_clears_all_sessions() {
+        let mgr = PtyManager::new();
+        mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+        mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+
+        assert_eq!(mgr.list_sessions().await.len(), 2);
+
+        mgr.shutdown().await;
+        assert!(mgr.list_sessions().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_exit_code_initially_none() {
+        let mgr = PtyManager::new();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+
+        let exit_code = mgr.get_exit_code(&id).await.unwrap();
+        assert!(exit_code.is_none());
+
+        mgr.kill(&id).await;
+    }
+}
