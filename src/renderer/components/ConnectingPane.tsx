@@ -78,10 +78,14 @@ export default function ConnectingPane({ connectionId, config, error: initialErr
           <Loader2 size={14} className="spinning" style={{ marginLeft: 8 }} />
         )}
         <span className="ssh-pane-status-text">({status})</span>
-        {error && (
-          <span className="ssh-pane-error">{error}</span>
-        )}
       </div>
+      {error && (
+        <div className="ssh-pane-error-banner">
+          <span className="ssh-pane-error-banner-title">Connection failed</span>
+          <span className="ssh-pane-error-banner-message">{error}</span>
+          <span className="ssh-pane-error-banner-hint">See output below for details</span>
+        </div>
+      )}
       <div className="ssh-pane-output" ref={scrollRef}>
         {output.length === 0 && (
           <div className="ssh-pane-output-empty">

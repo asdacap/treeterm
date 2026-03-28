@@ -350,8 +350,12 @@ export class SSHTunnel {
         }
       })
       proc.on('close', (code) => {
-        if (code !== 0) reject(new Error(`SSH command failed (exit ${code}): ${stderr}`))
-        else resolve(stdout)
+        if (code !== 0) {
+          const firstLine = stderr.split('\n').find(l => l.trim()) ?? 'non-zero exit'
+          reject(new Error(`SSH command failed (exit ${code}): ${firstLine}`))
+        } else {
+          resolve(stdout)
+        }
       })
       proc.on('error', (err) => reject(err))
     })

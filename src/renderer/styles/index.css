@@ -5325,6 +5325,33 @@ body,
   font-size: 12px;
 }
 
+.ssh-pane-error-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: rgba(244, 67, 54, 0.1);
+  border-bottom: 1px solid rgba(244, 67, 54, 0.3);
+  flex-shrink: 0;
+}
+
+.ssh-pane-error-banner-title {
+  font-weight: 600;
+  font-size: 12px;
+  color: #f44336;
+}
+
+.ssh-pane-error-banner-message {
+  font-size: 12px;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.ssh-pane-error-banner-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
 .ssh-pane-disconnect {
   margin-left: auto;
   background: transparent;

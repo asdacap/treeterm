@@ -110,9 +110,6 @@ export default function SessionInfoPane({ sessionId, sessionStore }: SessionInfo
         {isRemote && connection?.status && (
           <span className="ssh-pane-status-text">({connection.status})</span>
         )}
-        {isRemote && connection?.error && (
-          <span className="ssh-pane-error">{connection.error}</span>
-        )}
         {!isRemote && (
           <span className="ssh-pane-status-text">(Local)</span>
         )}
