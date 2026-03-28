@@ -270,12 +270,33 @@ export class SSHTunnel {
               this.appendOutput(`[ssh] Uploading daemon binary (remote arch: ${remoteArch || 'unknown'})...`)
               await this.uploadDaemon('~/.treeterm/treeterm-daemon', remoteArch)
 
-              // Make executable and start via ssh
+              // Make executable and start via ssh, waiting for socket to be ready
               const startArgs = this.buildBaseSSHArgs()
-              startArgs.push('chmod +x ~/.treeterm/treeterm-daemon && ~/.treeterm/treeterm-daemon >> ~/.treeterm/daemon.log 2>&1 & sleep 1 && echo "TREETERM_SOCKET:/tmp/treeterm-$(id -u)/daemon.sock"')
+              const startScript = [
+                'chmod +x ~/.treeterm/treeterm-daemon',
+                'DAEMON_SOCKET="/tmp/treeterm-$(id -u)/daemon.sock"',
+                'mkdir -p "/tmp/treeterm-$(id -u)"',
+                '~/.treeterm/treeterm-daemon >> ~/.treeterm/daemon.log 2>&1 &',
+                'DAEMON_PID=$!',
+                'for i in $(seq 1 40); do',
+                '  [ -S "$DAEMON_SOCKET" ] && break',
+                '  kill -0 "$DAEMON_PID" 2>/dev/null || break',
+                '  sleep 0.25',
+                'done',
+                'if [ -S "$DAEMON_SOCKET" ]; then',
+                '  echo "TREETERM_SOCKET:$DAEMON_SOCKET"',
+                'else',
+                '  exit 1',
+                'fi',
+              ].join('\n')
+              startArgs.push(startScript)
               const startResult = await this.runSSHCommand(startArgs)
               const startMatch = startResult.match(/TREETERM_SOCKET:(.+)/)
-              resolve(startMatch ? startMatch[1].trim() : `/tmp/treeterm-${1000}/daemon.sock`)
+              if (!startMatch) {
+                reject(new Error('Daemon failed to start after upload — check daemon log on remote'))
+                return
+              }
+              resolve(startMatch[1].trim())
             } catch (uploadErr) {
               reject(new Error(`Failed to upload daemon: ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}`))
             }
