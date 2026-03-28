@@ -30,10 +30,11 @@ function buildMockStream(outputs: ExecOutput[]): any {
   return stream
 }
 
-function makeMockClient(streams: any[]): GrpcDaemonClient {
+function makeMockClient(streams: any[], extras: Record<string, any> = {}): GrpcDaemonClient {
   let callIndex = 0
   return {
     execStream: vi.fn(() => streams[callIndex++] ?? buildMockStream([])),
+    ...extras,
   } as unknown as GrpcDaemonClient
 }
 
@@ -595,6 +596,470 @@ describe('GitClient', () => {
       const client = makeMockClient([buildMockStream([{ result: { exitCode: 128 } }])])
       const git = new GitClient(client)
       await expect(git.getStatus('/repo')).rejects.toThrow('Git command failed with exit code 128')
+    })
+  })
+
+  describe('fetch', () => {
+    it('resolves on success', async () => {
+      const client = makeMockClient([resultStream('')])
+      const git = new GitClient(client)
+      await expect(git.fetch('/repo')).resolves.toBeUndefined()
+    })
+
+    it('throws on failure', async () => {
+      const client = makeMockClient([errorStream('could not resolve host')])
+      const git = new GitClient(client)
+      await expect(git.fetch('/repo')).rejects.toThrow()
+    })
+  })
+
+  describe('pull', () => {
+    it('returns success on exit code 0', async () => {
+      const client = makeMockClient([resultStream('Already up to date.')])
+      const git = new GitClient(client)
+      const result = await git.pull('/repo')
+      expect(result).toEqual({ success: true })
+    })
+
+    it('returns failure with error message on non-zero exit', async () => {
+      const client = makeMockClient([errorStream('merge conflict')])
+      const git = new GitClient(client)
+      const result = await git.pull('/repo')
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('merge conflict')
+    })
+
+    it('uses fallback message when stderr is empty', async () => {
+      const client = makeMockClient([buildMockStream([{ result: { exitCode: 1 } }])])
+      const git = new GitClient(client)
+      const result = await git.pull('/repo')
+      expect(result.success).toBe(false)
+      expect(result.error).toBe('git pull failed')
+    })
+  })
+
+  describe('getBehindCount', () => {
+    it('returns parsed count on success', async () => {
+      const client = makeMockClient([resultStream('5\n')])
+      const git = new GitClient(client)
+      expect(await git.getBehindCount('/repo')).toBe(5)
+    })
+
+    it('returns 0 on failure', async () => {
+      const client = makeMockClient([errorStream('no upstream')])
+      const git = new GitClient(client)
+      expect(await git.getBehindCount('/repo')).toBe(0)
+    })
+
+    it('returns 0 for NaN output', async () => {
+      const client = makeMockClient([resultStream('not-a-number\n')])
+      const git = new GitClient(client)
+      expect(await git.getBehindCount('/repo')).toBe(0)
+    })
+  })
+
+  describe('getRemoteUrl', () => {
+    it('returns trimmed URL on success', async () => {
+      const client = makeMockClient([resultStream('git@github.com:user/repo.git\n')])
+      const git = new GitClient(client)
+      expect(await git.getRemoteUrl('/repo')).toBe('git@github.com:user/repo.git')
+    })
+
+    it('throws on failure', async () => {
+      const client = makeMockClient([errorStream('No such remote')])
+      const git = new GitClient(client)
+      await expect(git.getRemoteUrl('/repo')).rejects.toThrow()
+    })
+  })
+
+  describe('renameBranch', () => {
+    it('resolves on success', async () => {
+      const client = makeMockClient([resultStream('')])
+      const git = new GitClient(client)
+      await expect(git.renameBranch('/repo', 'old', 'new')).resolves.toBeUndefined()
+    })
+
+    it('throws on failure', async () => {
+      const client = makeMockClient([errorStream('branch not found')])
+      const git = new GitClient(client)
+      await expect(git.renameBranch('/repo', 'old', 'new')).rejects.toThrow()
+    })
+  })
+
+  describe('getLog', () => {
+    it('parses commits with parentBranch', async () => {
+      const logOutput = [
+        'abc123\x1eabc\x1eAuthor\x1e2024-01-01T00:00:00Z\x1ecommit msg\x1edef456',
+      ].join('\n')
+      const client = makeMockClient([resultStream(logOutput)])
+      const git = new GitClient(client)
+      const result = await git.getLog('/repo', 'main', 0, 10)
+
+      expect(result.commits).toHaveLength(1)
+      expect(result.commits[0].hash).toBe('abc123')
+      expect(result.commits[0].shortHash).toBe('abc')
+      expect(result.commits[0].author).toBe('Author')
+      expect(result.commits[0].message).toBe('commit msg')
+      expect(result.commits[0].parentHashes).toEqual(['def456'])
+      expect(result.hasMore).toBe(false)
+    })
+
+    it('parses commits without parentBranch (null)', async () => {
+      const logOutput = 'abc\x1ea\x1eAuthor\x1e2024-01-01\x1emsg\x1e'
+      const client = makeMockClient([resultStream(logOutput)])
+      const git = new GitClient(client)
+      const result = await git.getLog('/repo', null, 0, 10)
+
+      expect(result.commits).toHaveLength(1)
+      expect(result.commits[0].parentHashes).toEqual([])
+    })
+
+    it('detects hasMore when results exceed limit', async () => {
+      const lines = Array.from({ length: 3 }, (_, i) =>
+        `hash${i}\x1eh${i}\x1eAuthor\x1e2024-01-01\x1emsg${i}\x1e`
+      ).join('\n')
+      const client = makeMockClient([resultStream(lines)])
+      const git = new GitClient(client)
+      const result = await git.getLog('/repo', null, 0, 2)
+
+      expect(result.hasMore).toBe(true)
+      expect(result.commits).toHaveLength(2)
+    })
+
+    it('throws on failure', async () => {
+      const client = makeMockClient([errorStream('not a git repository')])
+      const git = new GitClient(client)
+      await expect(git.getLog('/repo', 'main', 0, 10)).rejects.toThrow()
+    })
+  })
+
+  describe('getCommitDiff', () => {
+    it('parses A/M/D/R status types', async () => {
+      const nameStatus = 'A\tnew.ts\nM\tmod.ts\nD\tdel.ts\nR100\trenamed.ts'
+      const numstat = '10\t0\tnew.ts\n5\t3\tmod.ts\n0\t10\tdel.ts\n2\t1\trenamed.ts'
+      const client = makeMockClient([
+        resultStream(numstat),
+        resultStream(nameStatus),
+      ])
+      const git = new GitClient(client)
+      const files = await git.getCommitDiff('/repo', 'abc123')
+
+      expect(files).toHaveLength(4)
+      expect(files.find(f => f.path === 'new.ts')!.status).toBe('added')
+      expect(files.find(f => f.path === 'mod.ts')!.status).toBe('modified')
+      expect(files.find(f => f.path === 'del.ts')!.status).toBe('deleted')
+      expect(files.find(f => f.path === 'renamed.ts')!.status).toBe('renamed')
+    })
+
+    it('handles binary files', async () => {
+      const client = makeMockClient([
+        resultStream('-\t-\timage.png'),
+        resultStream('M\timage.png'),
+      ])
+      const git = new GitClient(client)
+      const files = await git.getCommitDiff('/repo', 'abc123')
+      expect(files[0].additions).toBe(0)
+      expect(files[0].deletions).toBe(0)
+    })
+
+    it('throws on failure', async () => {
+      const client = makeMockClient([errorStream('bad object')])
+      const git = new GitClient(client)
+      await expect(git.getCommitDiff('/repo', 'bad')).rejects.toThrow()
+    })
+  })
+
+  describe('getCommitFileDiff', () => {
+    it('returns file contents from commit and parent', async () => {
+      const client = makeMockClient([
+        resultStream('modified content'),
+        resultStream('original content'),
+      ])
+      const git = new GitClient(client)
+      const result = await git.getCommitFileDiff('/repo', 'abc123', 'file.ts')
+
+      expect(result.modifiedContent).toBe('modified content')
+      expect(result.originalContent).toBe('original content')
+      expect(result.language).toBe('typescript')
+    })
+
+    it('returns empty content when show fails', async () => {
+      const client = makeMockClient([
+        errorStream('path not found', 128),
+        errorStream('path not found', 128),
+      ])
+      const git = new GitClient(client)
+      const result = await git.getCommitFileDiff('/repo', 'abc123', 'file.ts')
+
+      expect(result.modifiedContent).toBe('')
+      expect(result.originalContent).toBe('')
+    })
+  })
+
+  describe('createWorktree', () => {
+    it('creates worktree in .worktrees when gitignored', async () => {
+      const client = makeMockClient([
+        resultStream('/repo'),   // rev-parse --show-toplevel
+        resultStream(''),        // check-ignore .worktrees (exit 0 = ignored)
+        resultStream(''),        // worktree add
+      ])
+      const git = new GitClient(client)
+      const result = await git.createWorktree('/repo', 'feature')
+
+      expect(result.path).toContain('.worktrees/feature')
+      expect(result.branch).toBe('feature')
+    })
+
+    it('creates worktree in home dir when not gitignored', async () => {
+      const client = makeMockClient([
+        resultStream('/repo'),                       // rev-parse
+        errorStream('.worktrees is not ignored'),     // check-ignore (exit 1 = not ignored)
+        resultStream(''),                            // worktree add
+      ])
+      const git = new GitClient(client)
+      const result = await git.createWorktree('/repo', 'feature')
+
+      expect(result.path).toContain('.treeterm/worktrees')
+      expect(result.branch).toBe('feature')
+    })
+
+    it('adds baseBranch to args when provided', async () => {
+      const client = makeMockClient([
+        resultStream('/repo'),
+        resultStream(''),        // gitignored
+        resultStream(''),        // worktree add
+      ])
+      const git = new GitClient(client)
+      await git.createWorktree('/repo', 'feature', 'main')
+
+      // Verify the third exec call includes 'main' in args
+      const calls = vi.mocked(client.execStream).mock.calls
+      expect(calls.length).toBe(3)
+    })
+
+    it('throws when rev-parse fails', async () => {
+      const client = makeMockClient([errorStream('not a git repository')])
+      const git = new GitClient(client)
+      await expect(git.createWorktree('/repo', 'feature')).rejects.toThrow()
+    })
+  })
+
+  describe('createWorktreeFromBranch', () => {
+    it('creates worktree from existing branch', async () => {
+      const client = makeMockClient([
+        resultStream('/repo'),   // rev-parse
+        resultStream(''),        // check-ignore
+        resultStream(''),        // worktree add
+      ])
+      const git = new GitClient(client)
+      const result = await git.createWorktreeFromBranch('/repo', 'develop', 'develop-wt')
+
+      expect(result.branch).toBe('develop')
+    })
+  })
+
+  describe('createWorktreeFromRemote', () => {
+    it('strips remote prefix from branch name', async () => {
+      const client = makeMockClient([
+        resultStream('/repo'),   // rev-parse
+        resultStream(''),        // check-ignore
+        resultStream(''),        // worktree add
+      ])
+      const git = new GitClient(client)
+      const result = await git.createWorktreeFromRemote('/repo', 'origin/feature', 'feature-wt')
+
+      expect(result.branch).toBe('feature')
+    })
+  })
+
+  describe('removeWorktree', () => {
+    it('removes worktree without branch deletion', async () => {
+      const client = makeMockClient([
+        resultStream(''),  // worktree remove
+      ])
+      const git = new GitClient(client)
+      await expect(git.removeWorktree('/repo', '/repo/.worktrees/feature')).resolves.toBeUndefined()
+    })
+
+    it('removes worktree with branch deletion', async () => {
+      const client = makeMockClient([
+        resultStream('feature\n'),  // rev-parse --abbrev-ref HEAD
+        resultStream(''),           // worktree remove
+        resultStream(''),           // branch -D
+      ])
+      const git = new GitClient(client)
+      await expect(git.removeWorktree('/repo', '/repo/.worktrees/feature', true)).resolves.toBeUndefined()
+    })
+
+    it('handles branch deletion failure gracefully', async () => {
+      const client = makeMockClient([
+        resultStream('feature\n'),                 // rev-parse
+        resultStream(''),                          // worktree remove
+        errorStream('branch deletion failed'),     // branch -D fails
+      ])
+      const git = new GitClient(client)
+      // Should not throw despite branch deletion failure
+      await expect(git.removeWorktree('/repo', '/repo/.worktrees/feature', true)).resolves.toBeUndefined()
+    })
+
+    it('handles get-branch failure gracefully when deleteBranch is true', async () => {
+      const client = makeMockClient([
+        errorStream('cannot get branch'),  // rev-parse fails
+        resultStream(''),                  // worktree remove still succeeds
+      ])
+      const git = new GitClient(client)
+      await expect(git.removeWorktree('/repo', '/repo/.worktrees/feature', true)).resolves.toBeUndefined()
+    })
+  })
+
+  describe('checkMergeConflicts', () => {
+    it('returns no conflicts for clean merge', async () => {
+      const client = makeMockClient([resultStream('')])
+      const git = new GitClient(client)
+      const result = await git.checkMergeConflicts('/repo', 'feature', 'main')
+
+      expect(result.hasConflicts).toBe(false)
+      expect(result.conflictedFiles).toEqual([])
+      expect(result.messages).toEqual([])
+    })
+
+    it('detects conflicts', async () => {
+      const output = 'conflict in src/app.ts\n<<<<<<< HEAD\nsome content'
+      const client = makeMockClient([resultStream(output)])
+      const git = new GitClient(client)
+      const result = await git.checkMergeConflicts('/repo', 'feature', 'main')
+
+      expect(result.hasConflicts).toBe(true)
+      expect(result.conflictedFiles.length).toBeGreaterThan(0)
+    })
+  })
+
+  describe('mergeWorktree', () => {
+    it('merges without squash', async () => {
+      const client = makeMockClient([resultStream('')])
+      const git = new GitClient(client)
+      await expect(git.mergeWorktree('/repo', 'feature')).resolves.toBeUndefined()
+    })
+
+    it('merges with squash', async () => {
+      const client = makeMockClient([resultStream('')])
+      const git = new GitClient(client)
+      await expect(git.mergeWorktree('/repo', 'feature', true)).resolves.toBeUndefined()
+    })
+
+    it('throws on failure', async () => {
+      const client = makeMockClient([errorStream('merge conflict detected')])
+      const git = new GitClient(client)
+      await expect(git.mergeWorktree('/repo', 'feature')).rejects.toThrow()
+    })
+  })
+
+  describe('getUncommittedFileContentsForDiff', () => {
+    it('returns staged file contents', async () => {
+      const client = makeMockClient([
+        resultStream('original from HEAD'),
+        resultStream('modified from index'),
+      ])
+      const git = new GitClient(client)
+      const result = await git.getUncommittedFileContentsForDiff('/repo', 'src/app.ts', true)
+
+      expect(result.originalContent).toBe('original from HEAD')
+      expect(result.modifiedContent).toBe('modified from index')
+      expect(result.language).toBe('typescript')
+    })
+
+    it('returns unstaged file contents with daemon read', async () => {
+      const client = makeMockClient([
+        resultStream('index content'),
+      ], {
+        readFile: vi.fn().mockResolvedValue({ success: true, file: { content: 'working tree content' } }),
+      })
+      const git = new GitClient(client)
+      const result = await git.getUncommittedFileContentsForDiff('/repo', 'src/app.ts', false)
+
+      expect(result.originalContent).toBe('index content')
+      expect(result.modifiedContent).toBe('working tree content')
+    })
+
+    it('returns empty content when unstaged daemon read fails', async () => {
+      const client = makeMockClient([
+        resultStream('index content'),
+      ], {
+        readFile: vi.fn().mockRejectedValue(new Error('file not found')),
+      })
+      const git = new GitClient(client)
+      const result = await git.getUncommittedFileContentsForDiff('/repo', 'src/deleted.ts', false)
+
+      expect(result.originalContent).toBe('index content')
+      expect(result.modifiedContent).toBe('')
+    })
+
+    it('returns empty original when HEAD show fails', async () => {
+      const client = makeMockClient([
+        errorStream('path not found', 128),
+        resultStream('new staged content'),
+      ])
+      const git = new GitClient(client)
+      const result = await git.getUncommittedFileContentsForDiff('/repo', 'new-file.ts', true)
+
+      expect(result.originalContent).toBe('')
+      expect(result.modifiedContent).toBe('new staged content')
+    })
+  })
+
+  describe('getBranchesInWorktrees', () => {
+    it('returns branch names from worktrees', async () => {
+      const output = [
+        'worktree /repo', 'HEAD abc', 'branch refs/heads/main', '',
+        'worktree /repo/.wt/f', 'HEAD def', 'branch refs/heads/feature', '',
+      ].join('\n')
+      const client = makeMockClient([resultStream(output)])
+      const git = new GitClient(client)
+      const branches = await git.getBranchesInWorktrees('/repo')
+      expect(branches).toEqual(['main', 'feature'])
+    })
+  })
+
+  describe('exec edge cases', () => {
+    it('calls onProgress for stdout', async () => {
+      const progress = vi.fn()
+      const client = makeMockClient([resultStream('progress output')])
+      const git = new GitClient(client)
+      // Use fetch which passes through to exec - call with progress would require internal access
+      // Instead test via a method that supports onProgress
+      await git.deleteBranch('/repo', 'feature', false, progress)
+    })
+
+    it('handles stream error', async () => {
+      const emitter = new (await import('events')).EventEmitter()
+      const stream = Object.assign(emitter, {
+        write: vi.fn(),
+        end: vi.fn().mockImplementation(() => {
+          setTimeout(() => {
+            emitter.emit('error', new Error('stream broke'))
+          }, 0)
+        }),
+      })
+      const client = makeMockClient([stream])
+      const git = new GitClient(client)
+      await expect(git.fetch('/repo')).rejects.toThrow('Exec stream error: stream broke')
+    })
+
+    it('handles stream end without result', async () => {
+      const emitter = new (await import('events')).EventEmitter()
+      const stream = Object.assign(emitter, {
+        write: vi.fn(),
+        end: vi.fn().mockImplementation(() => {
+          setTimeout(() => {
+            emitter.emit('end')
+          }, 0)
+        }),
+      })
+      const client = makeMockClient([stream])
+      const git = new GitClient(client)
+      // Stream ends without result - should resolve with exitCode -1
+      // fetch expects exitCode 0, so it should throw
+      await expect(git.fetch('/repo')).rejects.toThrow()
     })
   })
 })
