@@ -10,7 +10,7 @@ use treeterm_proto::treeterm::tree_term_daemon_server::TreeTermDaemon;
 
 use crate::exec_manager;
 use crate::filesystem;
-use crate::pty_manager::PtyManager;
+use crate::pty_manager::{BufferEvent, PtyManager};
 use crate::session_store::SessionStore;
 
 pub struct DaemonService {
@@ -96,25 +96,23 @@ impl TreeTermDaemon for DaemonService {
                 _ => return,
             };
 
-            // Send current screen state (self-consistent snapshot via vt100 parser)
-            if let Ok(screen_state) = pty_mgr.get_screen_state(&session_id).await {
-                if !screen_state.is_empty() {
-                    let msg = PtyOutput {
-                        output: Some(pty_output::Output::Data(PtyData { data: screen_state })),
+            // Send initial state (vt100 snapshot + parser size + buffered events)
+            if let Ok(events) = pty_mgr.get_initial_state(&session_id).await {
+                for event in events {
+                    let msg = match event {
+                        BufferEvent::Data(data) => PtyOutput {
+                            output: Some(pty_output::Output::Data(PtyData { data })),
+                        },
+                        BufferEvent::Resize { cols, rows } => PtyOutput {
+                            output: Some(pty_output::Output::Resize(PtyResizeData {
+                                cols: cols as i32,
+                                rows: rows as i32,
+                            })),
+                        },
                     };
                     if tx.send(Ok(msg)).await.is_err() {
                         return;
                     }
-                }
-            }
-
-            // Send current terminal size
-            if let Ok((cols, rows)) = pty_mgr.get_size(&session_id).await {
-                let msg = PtyOutput {
-                    output: Some(pty_output::Output::Resize(PtyResizeData { cols, rows })),
-                };
-                if tx.send(Ok(msg)).await.is_err() {
-                    return;
                 }
             }
 
