@@ -182,7 +182,10 @@ describe('useAppStore', () => {
         setState: vi.fn(),
         subscribe: vi.fn()
       } as never
-      useAppStore.setState({ sessionStores: { 's1': mockStore, 's2': mockStore } })
+      useAppStore.setState({ sessionStores: {
+        's1': { status: 'connected', store: mockStore },
+        's2': { status: 'connected', store: mockStore }
+      } })
       useAppStore.getState().disconnectSession('s1')
       expect(useAppStore.getState().sessionStores['s1']).toBeUndefined()
       expect(useAppStore.getState().sessionStores['s2']).toBeDefined()
@@ -194,7 +197,10 @@ describe('useAppStore', () => {
         setState: vi.fn(),
         subscribe: vi.fn()
       } as never
-      useAppStore.setState({ sessionStores: { 's1': mockStore, 's2': mockStore } })
+      useAppStore.setState({ sessionStores: {
+        's1': { status: 'connected', store: mockStore },
+        's2': { status: 'connected', store: mockStore }
+      } })
       useNavigationStore.setState({ activeView: { type: 'workspace', workspaceId: 'ws-x', sessionId: 's1' } })
       useAppStore.getState().disconnectSession('s1')
       // Should switch to remaining session's first workspace
@@ -546,7 +552,7 @@ describe('useAppStore', () => {
       // Create a mock session store directly
       const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', windowUuid: null }, {} as any) as any
       useAppStore.setState({
-        sessionStores: { 'pre-session': mockSessionStoreInstance }
+        sessionStores: { 'pre-session': { status: 'connected', store: mockSessionStoreInstance } }
       })
 
       const cleanup = await useAppStore.getState().initialize(deps)
@@ -574,7 +580,7 @@ describe('useAppStore', () => {
 
       const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', windowUuid: null }, {} as any) as any
       useAppStore.setState({
-        sessionStores: { 'pre-session': mockSessionStoreInstance }
+        sessionStores: { 'pre-session': { status: 'connected', store: mockSessionStoreInstance } }
       })
 
       const deps = { ...mockDeps, getInitialWorkspace: vi.fn().mockResolvedValue('/new/path') } as any

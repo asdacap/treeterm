@@ -46,13 +46,12 @@ export default function App() {
   const activeView = useNavigationStore(s => s.activeView)
   const sessionStores = useAppStore(s => s.sessionStores)
 
-  // Derive active session store from activeView
-  const activeSessionId = activeView?.type === 'workspace' ? activeView.sessionId
-    : activeView?.type === 'session' ? activeView.sessionId
+  // Derive active session entry from activeView
+  const activeSessionId = activeView && 'sessionId' in activeView ? activeView.sessionId : null
+  const activeSessionEntry = activeSessionId
+    ? sessionStores[activeSessionId] ?? null
     : null
-  const activeSessionStore = activeSessionId
-    ? sessionStores[activeSessionId] || null
-    : null
+  const activeSessionStore = activeSessionEntry?.status === 'connected' ? activeSessionEntry.store : null
 
   const handleConfirmClose = () => {
     useAppStore.setState({ showCloseConfirm: false })
@@ -131,8 +130,10 @@ export default function App() {
             onMouseDown={handleMouseDown}
           />
           <div className="workspace-pane">
-            {activeView?.type === 'connecting' ? (
-              <ConnectingPane connectionId={activeView.connectionId} />
+            {activeSessionEntry?.status === 'connecting' ? (
+              <ConnectingPane connectionId={activeSessionEntry.connectionId} config={activeSessionEntry.config} />
+            ) : activeSessionEntry?.status === 'error' ? (
+              <ConnectingPane connectionId={activeSessionEntry.connectionId} config={activeSessionEntry.config} error={activeSessionEntry.error} />
             ) : activeSessionStore ? (
               <>
                 <div style={{ display: activeView?.type === 'workspace' ? 'contents' : 'none' }}>
@@ -161,14 +162,14 @@ export default function App() {
               onCancel={handleCancelClose}
             />
           )}
-          {isActiveProcessesOpen && (
+          {isActiveProcessesOpen && activeSessionStore && (
             <ActiveProcessesDialog
               workspaces={Object.fromEntries(
-                Object.entries(activeSessionStore?.getState().workspaces ?? {})
+                Object.entries(activeSessionStore.getState().workspaces)
                   .filter(([, e]) => e.status === 'loaded' || e.status === 'operation-error')
                   .map(([id, e]) => [id, (e as Extract<typeof e, { status: 'loaded' | 'operation-error' }>).data])
               )}
-              connectionId={activeSessionStore?.getState().connection?.id ?? 'local'}
+              connectionId={activeSessionStore.getState().connection?.id ?? 'local'}
               onClose={() => useAppStore.setState({ isActiveProcessesOpen: false })}
             />
           )}
@@ -181,10 +182,10 @@ export default function App() {
               sessions={daemonSessions}
               onSelect={(session) => {
                 const store = useAppStore.getState()
-                // If the session store already exists, restore directly
-                const sessionStore = store.sessionStores[session.id]
-                if (sessionStore) {
-                  sessionStore.getState().handleRestore(session)
+                // If the session store already exists and is connected, restore directly
+                const sessionEntry = store.sessionStores[session.id]
+                if (sessionEntry?.status === 'connected') {
+                  sessionEntry.store.getState().handleRestore(session)
                 }
                 // Navigate to first workspace if available
                 if (session.workspaces && session.workspaces.length > 0) {

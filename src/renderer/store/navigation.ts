@@ -3,7 +3,6 @@ import { create } from 'zustand'
 export type ActiveView =
   | { type: 'workspace'; workspaceId: string; sessionId: string }
   | { type: 'session'; sessionId: string }
-  | { type: 'connecting'; connectionId: string }
 
 interface NavigationState {
   activeView: ActiveView | null

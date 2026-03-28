@@ -11,7 +11,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
   const ssh = useAppStore(s => s.ssh)
   const addRemoteSession = useAppStore(s => s.addRemoteSession)
   const startRemoteConnect = useAppStore(s => s.startRemoteConnect)
-  const clearConnectingRemote = useAppStore(s => s.clearConnectingRemote)
+  const setSessionError = useAppStore(s => s.setSessionError)
   const [savedConnections, setSavedConnections] = useState<SSHConnectionConfig[]>([])
   const [host, setHost] = useState('')
   const [user, setUser] = useState('')
@@ -41,18 +41,17 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
       console.log(`[renderer:ConnectionPicker] ssh.connect returned: status=${info.status}, session=${session ? session.id : 'undefined'}`)
 
       if (info.status !== 'connected' || !session) {
-        // Error is already visible in ConnectingPane via watchConnectionStatus
         console.error(`[renderer:ConnectionPicker] SSH connection failed: ${info.error || 'No session returned'}`)
+        setSessionError(config.id, info.error || 'No session returned')
         return
       }
 
-      // 3. Clear connecting state and add real session
-      clearConnectingRemote()
+      // 3. Add real session (replaces connecting entry)
       console.log(`[renderer:ConnectionPicker] Adding remote session to store: session=${session.id}`)
       addRemoteSession(session, info)
     }).catch((err) => {
       console.error(`[renderer:ConnectionPicker] SSH connection error:`, err)
-      // Error is visible in ConnectingPane via watchConnectionStatus
+      setSessionError(config.id, err instanceof Error ? err.message : String(err))
     })
   }
 

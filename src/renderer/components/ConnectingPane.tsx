@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store/app'
 import { Loader2 } from 'lucide-react'
+import type { SSHConnectionConfig } from '../types'
 
 function getStatusColor(status: string | undefined): string {
   switch (status) {
@@ -13,18 +14,18 @@ function getStatusColor(status: string | undefined): string {
 
 interface ConnectingPaneProps {
   connectionId: string
+  config: SSHConnectionConfig
+  error?: string
 }
 
-export default function ConnectingPane({ connectionId }: ConnectingPaneProps) {
-  const connectingRemote = useAppStore(s => s.connectingRemote)
+export default function ConnectingPane({ connectionId, config, error: initialError }: ConnectingPaneProps) {
   const ssh = useAppStore(s => s.ssh)
   const [output, setOutput] = useState<string[]>([])
-  const [status, setStatus] = useState<string>('connecting')
-  const [error, setError] = useState<string | undefined>()
+  const [status, setStatus] = useState<string>(initialError ? 'error' : 'connecting')
+  const [error, setError] = useState<string | undefined>(initialError)
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  const config = connectingRemote?.config
-  const label = config ? `${config.user}@${config.host}` : connectionId
+  const label = config.label || `${config.user}@${config.host}`
 
   // Watch SSH output
   useEffect(() => {

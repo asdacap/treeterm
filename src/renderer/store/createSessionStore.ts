@@ -7,7 +7,7 @@ import { createTtyStore, createTtyWriter } from './createTtyStore'
 import type { Tty, TtyWriter, TtyTerminalDeps } from './createTtyStore'
 import type {
   Workspace, Session, AppState, GitInfo,
-  ConnectionInfo, ActivityState,
+  ConnectionInfo, ActivityState, SSHConnectionConfig,
   TerminalApi, GitApi, FilesystemApi, SessionApi, Settings, WorktreeSettings,
   Application, SandboxConfig, SessionInfo, LlmApi, GitHubApi
 } from '../types'
@@ -17,6 +17,11 @@ export type WorkspaceEntry =
   | { status: 'error'; name: string; error: string }
   | { status: 'loaded'; data: Workspace; store: WorkspaceStore }
   | { status: 'operation-error'; data: Workspace; store: WorkspaceStore; error: string }
+
+export type SessionEntry =
+  | { status: 'connecting'; connectionId: string; config: SSHConnectionConfig }
+  | { status: 'connected'; store: StoreApi<SessionState> }
+  | { status: 'error'; connectionId: string; config: SSHConnectionConfig; error: string }
 
 export interface AppRegistryApi {
   get: (id: string) => Application | undefined
