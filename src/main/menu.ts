@@ -15,7 +15,7 @@ function sendToFocusedWindow(fallbackServer: IpcServer, action: (server: IpcServ
 }
 
 export function createApplicationMenu(
-  mainWindow: BrowserWindow | null,
+  _mainWindow: BrowserWindow | null,
   server: IpcServer,
   onQuitAndKillDaemon?: () => void
 ): void {

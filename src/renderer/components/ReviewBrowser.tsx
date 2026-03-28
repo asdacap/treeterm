@@ -6,7 +6,6 @@ import { getTabs } from '../types'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, GitLogCommit, WorkspaceStore, ReviewState } from '../types'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
 import { CommittedDiffFileTree, UncommittedDiffFileTree, getSortedFilePaths } from './DiffFileTree'
-import { CommentInput } from './CommentInput'
 
 interface ReviewBrowserProps {
   workspace: WorkspaceStore
@@ -28,7 +27,7 @@ export default function ReviewBrowser({
   const {
     workspace: wsData, lookupWorkspace, getReviewComments, getGitApi,
     promptHarness, mergeAndRemove, mergeAndKeep, closeAndClean, removeTab,
-    addReviewComment, deleteReviewComment, updateOutdatedReviewComments, refreshGitInfo,
+    addReviewComment, deleteReviewComment, updateOutdatedReviewComments,
     refreshDiffStatus, updateTabState,
   } = useStore(workspace)
   const git = getGitApi()

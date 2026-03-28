@@ -19,7 +19,6 @@ import {
   type ExecOutput,
   type CreateSessionRequest,
   type UpdateSessionRequest,
-  type GetDefaultSessionIdResponse,
   type DeleteSessionRequest,
   type Session as ProtoSession,
   type Workspace as ProtoWorkspace,

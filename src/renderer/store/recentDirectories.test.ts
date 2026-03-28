@@ -25,7 +25,7 @@ describe('RecentDirectoriesStore', () => {
     })
 
     it('puts most recent first', () => {
-      const { addRecent, getRecent } = useRecentDirectoriesStore.getState()
+      const { addRecent } = useRecentDirectoriesStore.getState()
       addRecent('conn1', '/a')
       addRecent('conn1', '/b')
       expect(useRecentDirectoriesStore.getState().getRecent('conn1')).toEqual(['/b', '/a'])

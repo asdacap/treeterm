@@ -3,7 +3,7 @@ import {
   createTerminalApplication,
   createTerminalVariant
 } from './renderer'
-import type { Tab, Workspace, TerminalInstance, TerminalState } from '../../renderer/types'
+import type { Tab, Workspace, TerminalInstance } from '../../renderer/types'
 import { createStore } from 'zustand/vanilla'
 import type { WorkspaceStoreState } from '../../renderer/store/createWorkspaceStore'
 

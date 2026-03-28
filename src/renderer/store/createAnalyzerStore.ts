@@ -335,7 +335,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     ownTty.getState().write('\r')
   }
 
-  const store = createStore<AnalyzerState>()((set, get) => ({
+  const store = createStore<AnalyzerState>()((set, _get) => ({
     tabId,
     aiState: 'idle',
     analyzing: false,

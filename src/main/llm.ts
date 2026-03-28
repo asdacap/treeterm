@@ -1,5 +1,4 @@
 import OpenAI, { APIError } from 'openai'
-import { BrowserWindow } from 'electron'
 
 import type { ReasoningEffort } from '../shared/types'
 
@@ -94,7 +93,7 @@ export function parseLlmJson(raw: string): Record<string, unknown> {
   const parsed = JSON.parse(stripped)
   if (typeof parsed !== 'object' || parsed === null) return parsed
 
-  for (const [key, value] of Object.entries(parsed)) {
+  for (const [_key, value] of Object.entries(parsed)) {
     if (typeof value !== 'string') continue
     const inner = value.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
     if (inner.startsWith('{')) {

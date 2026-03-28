@@ -246,7 +246,6 @@ describe('createAnalyzerStore', () => {
     vi.useFakeTimers()
     const mock = makeMockTty()
 
-    let resolveFirst!: (value: any) => void
     const calls: Array<(value: any) => void> = []
     deps = makeDeps({
       llm: {

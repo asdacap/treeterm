@@ -15,10 +15,6 @@ const DEFAULT_PROMPT_PATTERNS = [
   /❯\s*$/ // fancy prompt
 ]
 
-const DEFAULT_WORKING_PATTERNS = [
-  /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/ // Braille spinners
-]
-
 export function createActivityStateDetector(
   onStateChange: (state: ActivityState) => void,
   config?: DetectorConfig
@@ -27,7 +23,6 @@ export function createActivityStateDetector(
   destroy: () => void
 } {
   const promptPatterns = config?.promptPatterns ?? DEFAULT_PROMPT_PATTERNS
-  const workingPatterns = config?.workingPatterns ?? DEFAULT_WORKING_PATTERNS
   const idleTimeout = config?.idleTimeout ?? 1000
   const debounceMs = config?.debounceMs ?? 100
 
@@ -35,7 +30,6 @@ export function createActivityStateDetector(
   const MAX_BUFFER_SIZE = 500
 
   let currentState: ActivityState = 'idle'
-  let lastActivityTime = Date.now()
   let idleTimerId: ReturnType<typeof setTimeout> | null = null
   let debounceTimerId: ReturnType<typeof setTimeout> | null = null
 
@@ -86,15 +80,6 @@ export function createActivityStateDetector(
     return false
   }
 
-  const checkForWorking = (data: string): boolean => {
-    for (const pattern of workingPatterns) {
-      if (pattern.test(data)) {
-        return true
-      }
-    }
-    return false
-  }
-
   const scheduleIdleCheck = () => {
     if (idleTimerId) {
       clearTimeout(idleTimerId)
@@ -113,8 +98,6 @@ export function createActivityStateDetector(
   }
 
   const processData = (data: string) => {
-    lastActivityTime = Date.now()
-
     // Update buffer
     buffer += data
     if (buffer.length > MAX_BUFFER_SIZE) {

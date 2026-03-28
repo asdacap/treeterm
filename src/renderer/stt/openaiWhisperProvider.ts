@@ -78,12 +78,12 @@ export class OpenAIWhisperProvider implements STTProvider {
     })
   }
 
-  onInterimResult(callback: (text: string) => void): void {
+  onInterimResult(_callback: (text: string) => void): void {
     // OpenAI Whisper doesn't support interim results
     // Could potentially use Web Speech API for interim and Whisper for final
   }
 
-  onError(callback: (error: Error) => void): void {
+  onError(_callback: (error: Error) => void): void {
     // Errors are propagated via promise rejection
   }
 }

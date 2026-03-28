@@ -22,7 +22,7 @@ for (const arg of process.argv) {
     initialSSHTarget = arg.substring('--ssh='.length)
   }
 }
-import { loadSettings, saveSettings, Settings, addRecentDirectory } from './settings'
+import { loadSettings, saveSettings, addRecentDirectory } from './settings'
 import { createApplicationMenu } from './menu'
 import { registerSTTHandlers } from './stt'
 import { startChatStream, cancelChatStream, completeChatCall, formatLlmError, parseLlmJson } from './llm'
@@ -82,8 +82,6 @@ function createLoadingWindow(): BrowserWindow {
 }
 
 function createWindow(initialSessionId?: string): BrowserWindow {
-  const isTest = process.env.NODE_ENV === 'test'
-
   const window = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -114,7 +112,7 @@ function createWindow(initialSessionId?: string): BrowserWindow {
   let unwatchSession: (() => void) | null = null
 
   // Handle media permissions for speech recognition and microphone
-  window.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+  window.webContents.session.setPermissionRequestHandler((_webContents, permission, callback) => {
     if (permission === 'media') {
       // Always allow microphone access for push-to-talk
       callback(true)
@@ -124,7 +122,7 @@ function createWindow(initialSessionId?: string): BrowserWindow {
   })
 
   // Forward all keyboard events including Caps Lock to renderer
-  window.webContents.on('before-input-event', (event, input) => {
+  window.webContents.on('before-input-event', (_event, input) => {
     // Forward Caps Lock events to renderer via IPC
     if (input.code === 'CapsLock' || input.key === 'CapsLock') {
       windowServer.capsLockEvent({

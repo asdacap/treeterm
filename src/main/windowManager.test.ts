@@ -16,7 +16,7 @@ vi.mock('electron', () => ({
 }))
 
 // Import after mocking
-import { windowManager, WindowInfo } from './windowManager'
+import { windowManager } from './windowManager'
 
 describe('WindowManager', () => {
   beforeEach(() => {

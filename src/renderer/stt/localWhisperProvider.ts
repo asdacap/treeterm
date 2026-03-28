@@ -75,11 +75,11 @@ export class LocalWhisperProvider implements STTProvider {
     })
   }
 
-  onInterimResult(callback: (text: string) => void): void {
+  onInterimResult(_callback: (text: string) => void): void {
     // Local Whisper doesn't support interim results
   }
 
-  onError(callback: (error: Error) => void): void {
+  onError(_callback: (error: Error) => void): void {
     // Errors are propagated via promise rejection
   }
 }

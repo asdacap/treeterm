@@ -1,6 +1,6 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, Tab, AppState, AppRef, ReviewComment, AppRegistryApi, GitApi, FilesystemApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi, GitHubPrInfo } from '../types'
+import type { Workspace, AppRef, ReviewComment, AppRegistryApi, GitApi, FilesystemApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi, GitHubPrInfo } from '../types'
 import { getTabs, isAiHarnessState } from '../types'
 import type { Tty, TtyWriter } from './createTtyStore'
 import { createAnalyzerStore } from './createAnalyzerStore'

@@ -132,7 +132,6 @@ export function createSessionStore(
 
   async function syncSessionToDaemon(isRestoring: boolean = false): Promise<void> {
     try {
-      const settings = deps.getSettings()
       const workspaces = store.getState().workspaces
       console.log('[session] syncSessionToDaemon called - workspaces:', Object.keys(workspaces).length, 'isRestoring:', isRestoring)
 

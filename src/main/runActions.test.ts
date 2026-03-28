@@ -324,7 +324,6 @@ describe('RunActionsClient', () => {
   })
 
   it('detect finds Justfile with lowercase fallback', async () => {
-    let callCount = 0
     const mockDaemonClient = {
       readFile: vi.fn().mockImplementation((_ws: string, absPath: string) => {
         // Return null for Justfile (uppercase), content for justfile (lowercase)
@@ -403,7 +402,7 @@ describe('RunActionsClient', () => {
     }
 
     const client = createRunActionsClient(mockDaemonClient as any)
-    const result = await client.run('/workspace', 'make:test')
+    await client.run('/workspace', 'make:test')
     expect(mockDaemonClient.createPtySession).toHaveBeenCalledWith({
       cwd: '/workspace',
       startupCommand: 'make test',

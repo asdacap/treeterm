@@ -67,7 +67,7 @@ function TimeoutProgress({ timeout, activatedAt }: { timeout: number; activatedA
 }
 
 export default function KeybindingOverlay({ platform }: { platform: Platform }): JSX.Element | null {
-  const { prefixState, activatedAt, focusedWorkspaceIndex, workspaceIds } = useKeybindingStore()
+  const { prefixState, activatedAt } = useKeybindingStore()
   const { settings } = useSettingsStore()
 
   if (prefixState === 'idle') {

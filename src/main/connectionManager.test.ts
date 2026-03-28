@@ -30,7 +30,6 @@ vi.mock('./grpcClient', () => ({
 }))
 
 import { ConnectionManager } from './connectionManager'
-import { SSHTunnel } from './ssh'
 import type { GrpcDaemonClient } from './grpcClient'
 
 function mockClient(overrides: Partial<GrpcDaemonClient> = {}): GrpcDaemonClient {

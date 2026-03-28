@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createSessionStore, getUnmergedSubWorkspaces } from './createSessionStore'
+import { createSessionStore } from './createSessionStore'
 import type { SessionDeps, SessionState } from './createSessionStore'
 import type { Workspace, Application, GitInfo } from '../types'
 import type { StoreApi } from 'zustand'

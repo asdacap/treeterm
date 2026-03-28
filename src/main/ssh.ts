@@ -3,10 +3,10 @@
  * Manages SSH tunnel processes for forwarding remote daemon sockets to local.
  */
 
-import { spawn, execSync, ChildProcess } from 'child_process'
+import { spawn, ChildProcess } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
-import * as os from 'os'
+
 import { app } from 'electron'
 import type { SSHConnectionConfig } from '../shared/types'
 import { getRemoteForwardSocketPath } from './socketPath'

@@ -36,7 +36,6 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const enterWorkspaceFocus = useKeybindingStore(s => s.enterWorkspaceFocus)
   const applications = useAppStore((s) => s.applications)
   const clipboard = useAppStore((s) => s.clipboard)
-  const getApplication = useCallback((id: string) => applications[id], [applications])
   const menuApplications = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
 
   const [branchCopied, setBranchCopied] = useState(false)
@@ -120,20 +119,6 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
       outputRef.current.scrollTop = outputRef.current.scrollHeight
     }
   }, [outputLength])
-
-  const handleNewTab = useCallback(
-    (applicationId: string) => {
-      if (!activeHandle) return
-      if (applicationId === 'review') {
-        activeHandle.getState().addTab<ReviewState>('review', {
-          parentWorkspaceId: activeWorkspace?.parentId ?? undefined
-        })
-      } else {
-        activeHandle.getState().addTab(applicationId)
-      }
-    },
-    [activeHandle, activeWorkspace?.parentId]
-  )
 
   // Create new tab using the first available application
   const handleNewDefaultTab = useCallback(() => {
@@ -640,7 +625,7 @@ interface GitStatusButtonProps {
 }
 
 function GitStatusButton({ workspace }: GitStatusButtonProps) {
-  const { gitRefreshing, hasUncommittedChanges, hasConflictsWithParent, isDiffCleanFromParent, refreshDiffStatus } = useStore(workspace)
+  const { gitRefreshing, hasUncommittedChanges, hasConflictsWithParent, refreshDiffStatus } = useStore(workspace)
 
   const handleRefresh = async () => {
     await refreshDiffStatus()

@@ -6,6 +6,8 @@
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "skipLibCheck": true,
     "noEmit": true,
     "jsx": "react-jsx",

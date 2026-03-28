@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createAiHarnessVariant, type AiHarnessRef } from './renderer'
-import type { Tab, Workspace, AiHarnessInstance, AiHarnessState } from '../../renderer/types'
+import type { Tab, Workspace, AiHarnessInstance } from '../../renderer/types'
 import { createStore } from 'zustand/vanilla'
 import type { WorkspaceStoreState } from '../../renderer/store/createWorkspaceStore'
 

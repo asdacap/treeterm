@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createActivityStateDetector } from './activityStateDetector'
-import type { ActivityState } from '../types'
 
 describe('createActivityStateDetector', () => {
   beforeEach(() => {

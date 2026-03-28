@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useStore } from 'zustand'
 import type { FileEntry, WorkspaceStore } from '../types'
 

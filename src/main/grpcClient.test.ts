@@ -82,7 +82,7 @@ function makeMockSessionStream() {
 }
 
 // Helper to make the client connected
-function connectClient(client: GrpcDaemonClient): void {
+function connectClient(_client: GrpcDaemonClient): void {
   mockClientInstance.ptyStream.mockReturnValue(makeMockSessionStream())
 
   mockClientInstance.waitForReady.mockImplementation((_deadline: number, cb: (err?: Error) => void) => {
@@ -147,13 +147,13 @@ describe('GrpcDaemonClient', () => {
     })
 
     it('createPtySession resolves with sessionId on success', async () => {
-      mockClientInstance.createPty.mockImplementation((req: any, cb: any) => cb(null, { sessionId: 'pty-1' }))
+      mockClientInstance.createPty.mockImplementation((_req: any, cb: any) => cb(null, { sessionId: 'pty-1' }))
       const result = await client.createPtySession({ cwd: '/home' })
       expect(result).toBe('pty-1')
     })
 
     it('createPtySession rejects on error', async () => {
-      mockClientInstance.createPty.mockImplementation((req: any, cb: any) => cb({ message: 'fail' }))
+      mockClientInstance.createPty.mockImplementation((_req: any, cb: any) => cb({ message: 'fail' }))
       await expect(client.createPtySession({ cwd: '/home' })).rejects.toThrow('fail')
     })
 
@@ -264,17 +264,17 @@ describe('GrpcDaemonClient', () => {
     })
 
     it('killPtySession resolves on success', async () => {
-      mockClientInstance.killPty.mockImplementation((req: any, cb: any) => cb(null))
+      mockClientInstance.killPty.mockImplementation((_req: any, cb: any) => cb(null))
       await client.killPtySession('pty-1')
     })
 
     it('killPtySession rejects on error', async () => {
-      mockClientInstance.killPty.mockImplementation((req: any, cb: any) => cb({ message: 'fail' }))
+      mockClientInstance.killPty.mockImplementation((_req: any, cb: any) => cb({ message: 'fail' }))
       await expect(client.killPtySession('pty-1')).rejects.toThrow('fail')
     })
 
     it('listPtySessions resolves with sessions', async () => {
-      mockClientInstance.listPtySessions.mockImplementation((req: any, cb: any) =>
+      mockClientInstance.listPtySessions.mockImplementation((_req: any, cb: any) =>
         cb(null, { sessions: [{ id: 'pty-1', cwd: '/home' }] })
       )
       const result = await client.listPtySessions()
@@ -282,7 +282,7 @@ describe('GrpcDaemonClient', () => {
     })
 
     it('listPtySessions returns empty array when no response', async () => {
-      mockClientInstance.listPtySessions.mockImplementation((req: any, cb: any) => cb(null, null))
+      mockClientInstance.listPtySessions.mockImplementation((_req: any, cb: any) => cb(null, null))
       const result = await client.listPtySessions()
       expect(result).toEqual([])
     })
@@ -374,7 +374,7 @@ describe('GrpcDaemonClient', () => {
     }
 
     it('createSession resolves with converted session', async () => {
-      mockClientInstance.createSession.mockImplementation((req: any, cb: any) => cb(null, mockProtoSession))
+      mockClientInstance.createSession.mockImplementation((_req: any, cb: any) => cb(null, mockProtoSession))
       const result = await client.createSession([{
         id: 'ws-1',
         path: '/test',
@@ -395,23 +395,23 @@ describe('GrpcDaemonClient', () => {
     })
 
     it('createSession rejects on error', async () => {
-      mockClientInstance.createSession.mockImplementation((req: any, cb: any) => cb({ message: 'fail' }))
+      mockClientInstance.createSession.mockImplementation((_req: any, cb: any) => cb({ message: 'fail' }))
       await expect(client.createSession([])).rejects.toThrow('fail')
     })
 
     it('updateSession resolves with converted session', async () => {
-      mockClientInstance.updateSession.mockImplementation((req: any, cb: any) => cb(null, mockProtoSession))
+      mockClientInstance.updateSession.mockImplementation((_req: any, cb: any) => cb(null, mockProtoSession))
       const result = await client.updateSession('session-1', [])
       expect(result.id).toBe('session-1')
     })
 
     it('deleteSession resolves on success', async () => {
-      mockClientInstance.deleteSession.mockImplementation((req: any, cb: any) => cb(null))
+      mockClientInstance.deleteSession.mockImplementation((_req: any, cb: any) => cb(null))
       await expect(client.deleteSession('session-1')).resolves.toBeUndefined()
     })
 
     it('listSessions resolves with session array', async () => {
-      mockClientInstance.listSessions.mockImplementation((req: any, cb: any) =>
+      mockClientInstance.listSessions.mockImplementation((_req: any, cb: any) =>
         cb(null, { sessions: [mockProtoSession] })
       )
       const result = await client.listSessions()
@@ -420,19 +420,19 @@ describe('GrpcDaemonClient', () => {
     })
 
     it('listSessions returns empty array when no response', async () => {
-      mockClientInstance.listSessions.mockImplementation((req: any, cb: any) => cb(null, null))
+      mockClientInstance.listSessions.mockImplementation((_req: any, cb: any) => cb(null, null))
       const result = await client.listSessions()
       expect(result).toEqual([])
     })
 
     it('getDefaultSessionId resolves with session id', async () => {
-      mockClientInstance.getDefaultSessionId.mockImplementation((req: any, cb: any) => cb(null, { sessionId: 'session-1' }))
+      mockClientInstance.getDefaultSessionId.mockImplementation((_req: any, cb: any) => cb(null, { sessionId: 'session-1' }))
       const result = await client.getDefaultSessionId()
       expect(result).toBe('session-1')
     })
 
     it('getDefaultSessionId rejects on error', async () => {
-      mockClientInstance.getDefaultSessionId.mockImplementation((req: any, cb: any) => cb({ message: 'fail' }))
+      mockClientInstance.getDefaultSessionId.mockImplementation((_req: any, cb: any) => cb({ message: 'fail' }))
       await expect(client.getDefaultSessionId()).rejects.toThrow('fail')
     })
 
@@ -482,7 +482,7 @@ describe('GrpcDaemonClient', () => {
         lastActivity: 2000
       }
 
-      mockClientInstance.createSession.mockImplementation((req: any, cb: any) => cb(null, protoSession))
+      mockClientInstance.createSession.mockImplementation((_req: any, cb: any) => cb(null, protoSession))
       const session = await client.createSession([])
       expect(session).not.toBeNull()
       expect(session.workspaces[0].appStates['tab-1'].state).toEqual({ ptyId: 'pty-1' })
@@ -513,7 +513,7 @@ describe('GrpcDaemonClient', () => {
         lastActivity: 2000
       }
 
-      mockClientInstance.createSession.mockImplementation((req: any, cb: any) => cb(null, protoSession))
+      mockClientInstance.createSession.mockImplementation((_req: any, cb: any) => cb(null, protoSession))
       const session = await client.createSession([])
       expect(session.workspaces[0].parentId).toBeNull()
       expect(session.workspaces[0].gitBranch).toBeNull()
@@ -529,7 +529,7 @@ describe('GrpcDaemonClient', () => {
     })
 
     it('readDirectory resolves with result', async () => {
-      mockClientInstance.readDirectory.mockImplementation((req: any, cb: any) =>
+      mockClientInstance.readDirectory.mockImplementation((_req: any, cb: any) =>
         cb(null, { success: true, contents: { files: [] } })
       )
       const result = await client.readDirectory('/ws', '.')
@@ -537,7 +537,7 @@ describe('GrpcDaemonClient', () => {
     })
 
     it('readDirectory rejects on error', async () => {
-      mockClientInstance.readDirectory.mockImplementation((req: any, cb: any) =>
+      mockClientInstance.readDirectory.mockImplementation((_req: any, cb: any) =>
         cb({ message: 'fail' })
       )
       await expect(client.readDirectory('/ws', '.')).rejects.toThrow('fail')
@@ -550,7 +550,7 @@ describe('GrpcDaemonClient', () => {
         { end: { success: true } }
       ]
 
-      mockClientInstance.readFile.mockImplementation((req: any) => {
+      mockClientInstance.readFile.mockImplementation((_req: any) => {
         const stream = {
           on: (event: string, handler: Function) => {
             if (event === 'data') {
@@ -581,7 +581,7 @@ describe('GrpcDaemonClient', () => {
     })
 
     it('searchFiles resolves with result', async () => {
-      mockClientInstance.searchFiles.mockImplementation((req: any, cb: any) =>
+      mockClientInstance.searchFiles.mockImplementation((_req: any, cb: any) =>
         cb(null, { success: true, entries: [{ name: 'file.txt' }] })
       )
       const result = await client.searchFiles('/ws', 'file')

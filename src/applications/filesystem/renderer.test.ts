@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { filesystemApplication } from './renderer'
-import type { Tab, Workspace, FilesystemState } from '../../renderer/types'
+import type { Tab, Workspace } from '../../renderer/types'
 import { createStore } from 'zustand/vanilla'
 import type { WorkspaceStoreState, WorkspaceStore } from '../../renderer/store/createWorkspaceStore'
 

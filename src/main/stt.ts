@@ -36,7 +36,7 @@ export function registerSTTHandlers(server: IpcServer): void {
   })
 
   // Local Whisper transcription (stub for now)
-  server.onSttTranscribeLocal(async (audioBuffer, modelPath) => {
+  server.onSttTranscribeLocal(async (_audioBuffer, _modelPath) => {
     try {
       // TODO: Implement local Whisper using whisper.cpp or whisper-node
       // For now, return an error
