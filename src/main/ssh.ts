@@ -286,6 +286,15 @@ export class SSHTunnel {
                 'if [ -S "$DAEMON_SOCKET" ]; then',
                 '  echo "TREETERM_SOCKET:$DAEMON_SOCKET"',
                 'else',
+                '  echo "Daemon failed to start after upload." >&2',
+                '  if [ -f ~/.treeterm/daemon.log ]; then',
+                '    echo "Last 20 lines of daemon.log:" >&2',
+                '    tail -20 ~/.treeterm/daemon.log >&2',
+                '  fi',
+                '  if [ -n "$DAEMON_PID" ] && ! kill -0 "$DAEMON_PID" 2>/dev/null; then',
+                '    wait "$DAEMON_PID" 2>/dev/null',
+                '    echo "Daemon process $DAEMON_PID exited (died early)." >&2',
+                '  fi',
                 '  exit 1',
                 'fi',
               ].join('\n')
@@ -298,7 +307,7 @@ export class SSHTunnel {
               }
               resolve(startMatch[1].trim())
             } catch (uploadErr) {
-              reject(new Error(`Failed to upload daemon: ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}`))
+              reject(new Error(`Failed to start remote daemon: ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}`))
             }
             return
           }
@@ -333,7 +342,13 @@ export class SSHTunnel {
           this.appendOutput(`[ssh] ${line}`)
         }
       })
-      proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
+      proc.stderr?.on('data', (d: Buffer) => {
+        const text = d.toString()
+        stderr += text
+        for (const line of text.split('\n').filter(Boolean)) {
+          this.appendOutput(`[ssh:err] ${line}`)
+        }
+      })
       proc.on('close', (code) => {
         if (code !== 0) reject(new Error(`SSH command failed (exit ${code}): ${stderr}`))
         else resolve(stdout)
