@@ -674,10 +674,18 @@ interface GitHubButtonProps {
 }
 
 function GitHubButton({ workspace }: GitHubButtonProps) {
-  const { hasPr, openGitHub } = useStore(workspace)
+  const { prInfo, openGitHub, addTab } = useStore(workspace)
   const [loading, setLoading] = useState(false)
 
+  const hasPr = prInfo !== null
+  const unresolvedCount = prInfo?.unresolvedCount ?? 0
+  const hasUnresolved = unresolvedCount > 0
+
   const handleClick = async () => {
+    if (hasUnresolved) {
+      addTab('github')
+      return
+    }
     setLoading(true)
     try {
       const result = await openGitHub()
@@ -694,14 +702,29 @@ function GitHubButton({ workspace }: GitHubButtonProps) {
     }
   }
 
+  let className = 'workspace-action-btn'
+  if (hasUnresolved) {
+    className += ' workspace-action-btn-github-comments'
+  } else if (hasPr) {
+    className += ' workspace-action-btn-github'
+  }
+
+  let title = 'Create GitHub PR'
+  if (hasUnresolved) {
+    title = `Address ${unresolvedCount} comment${unresolvedCount === 1 ? '' : 's'}`
+  } else if (hasPr) {
+    title = 'Open GitHub PR'
+  }
+
   return (
     <button
-      className={`workspace-action-btn${hasPr ? ' workspace-action-btn-github' : ''}`}
+      className={className}
       onClick={handleClick}
       disabled={loading}
-      title={hasPr ? 'Open GitHub PR' : 'Create GitHub PR'}
+      title={title}
     >
       <Github size={14} />
+      {hasUnresolved && <span className="github-comment-count">Address {unresolvedCount} comment{unresolvedCount === 1 ? '' : 's'}</span>}
     </button>
   )
 }

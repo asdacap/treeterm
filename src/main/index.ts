@@ -972,7 +972,7 @@ function parseGitHubOwnerRepo(remoteUrl: string): { owner: string; repo: string 
   return null
 }
 
-server.onGithubGetPrUrl(async (repoPath, head, base) => {
+server.onGithubGetPrInfo(async (repoPath, head, base) => {
   if (!daemonClient) throw new Error('Daemon not initialized')
   initializeGitClient()
   if (!gitClient) throw new Error('Git client not initialized')
@@ -997,22 +997,181 @@ server.onGithubGetPrUrl(async (repoPath, head, base) => {
     if (!parsed) return { error: `Could not parse GitHub owner/repo from remote URL: ${remoteUrl}` }
     const { owner, repo } = parsed
 
-    // Search for existing PR
+    // Search for existing PR via REST
     const { net } = await import('electron')
-    const response = await net.fetch(
+    const prResponse = await net.fetch(
       `https://api.github.com/repos/${owner}/${repo}/pulls?head=${owner}:${head}&base=${base}&state=open`,
       { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } }
     )
-    if (!response.ok) {
-      return { error: `GitHub API error: ${response.status} ${response.statusText}` }
+    if (!prResponse.ok) {
+      return { error: `GitHub API error: ${prResponse.status} ${prResponse.statusText}` }
     }
-    const prs = await response.json() as Array<{ number: number }>
+    const prs = await prResponse.json() as Array<{ number: number; title: string }>
 
-    if (prs.length > 0) {
-      return { url: `https://github.com/${owner}/${repo}/pull/${prs[0].number}`, hasPr: true }
+    if (prs.length === 0) {
+      return { noPr: true as const, createUrl: `https://github.com/${owner}/${repo}/compare/${base}...${head}?expand=1` }
     }
-    // No PR found — return compare URL to create one
-    return { url: `https://github.com/${owner}/${repo}/compare/${base}...${head}?expand=1`, hasPr: false }
+
+    const pr = prs[0]
+    const prUrl = `https://github.com/${owner}/${repo}/pull/${pr.number}`
+
+    // Fetch rich PR info via GraphQL
+    const graphqlQuery = `query($owner: String!, $repo: String!, $prNumber: Int!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $prNumber) {
+          state
+          reviewThreads(first: 100) {
+            nodes {
+              isResolved
+              comments(first: 1) {
+                nodes {
+                  body
+                  path
+                  line
+                  author { login }
+                }
+              }
+            }
+          }
+          latestReviews(first: 20) {
+            nodes {
+              author { login }
+              state
+            }
+          }
+          commits(last: 1) {
+            nodes {
+              commit {
+                statusCheckRollup {
+                  contexts(first: 50) {
+                    nodes {
+                      ... on CheckRun {
+                        __typename
+                        name
+                        status
+                        conclusion
+                      }
+                      ... on StatusContext {
+                        __typename
+                        context
+                        state
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }`
+
+    try {
+      const graphqlResponse = await net.fetch('https://api.github.com/graphql', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: graphqlQuery,
+          variables: { owner, repo, prNumber: pr.number }
+        })
+      })
+
+      if (!graphqlResponse.ok) {
+        // Graceful degradation — return basic PR info
+        return { prInfo: { number: pr.number, url: prUrl, title: pr.title, state: 'OPEN' as const, reviews: [], checkRuns: [], unresolvedThreads: [], unresolvedCount: 0 } }
+      }
+
+      const graphqlData = await graphqlResponse.json() as {
+        data?: {
+          repository?: {
+            pullRequest?: {
+              state?: string
+              reviewThreads?: {
+                nodes?: Array<{
+                  isResolved: boolean
+                  comments?: { nodes?: Array<{ body: string; path: string; line: number | null; author?: { login: string } }> }
+                }>
+              }
+              latestReviews?: {
+                nodes?: Array<{ author?: { login: string }; state: string }>
+              }
+              commits?: {
+                nodes?: Array<{
+                  commit?: {
+                    statusCheckRollup?: {
+                      contexts?: {
+                        nodes?: Array<{
+                          __typename: string
+                          name?: string
+                          status?: string
+                          conclusion?: string | null
+                          context?: string
+                          state?: string
+                        }>
+                      }
+                    }
+                  }
+                }>
+              }
+            }
+          }
+        }
+      }
+
+      const prData = graphqlData.data?.repository?.pullRequest
+      const prState = (prData?.state ?? 'OPEN') as 'OPEN' | 'CLOSED' | 'MERGED'
+
+      // Parse review threads
+      const threads = prData?.reviewThreads?.nodes ?? []
+      const unresolvedThreads = threads
+        .filter(t => !t.isResolved)
+        .map(t => {
+          const firstComment = t.comments?.nodes?.[0]
+          return {
+            isResolved: false,
+            path: firstComment?.path ?? '',
+            body: firstComment?.body ?? '',
+            author: firstComment?.author?.login ?? '',
+            line: firstComment?.line ?? null,
+          }
+        })
+
+      // Parse reviews
+      const reviews = (prData?.latestReviews?.nodes ?? []).map(r => ({
+        author: r.author?.login ?? '',
+        state: r.state as 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'PENDING' | 'DISMISSED',
+      }))
+
+      // Parse check runs
+      const commitNode = prData?.commits?.nodes?.[0]?.commit
+      const contexts = commitNode?.statusCheckRollup?.contexts?.nodes ?? []
+      const checkRuns = contexts
+        .filter(c => c.__typename === 'CheckRun')
+        .map(c => ({
+          name: c.name ?? '',
+          status: (c.status ?? 'QUEUED') as 'COMPLETED' | 'IN_PROGRESS' | 'QUEUED' | 'WAITING' | 'PENDING' | 'REQUESTED',
+          conclusion: (c.conclusion ?? null) as 'SUCCESS' | 'FAILURE' | 'NEUTRAL' | 'CANCELLED' | 'TIMED_OUT' | 'ACTION_REQUIRED' | 'SKIPPED' | null,
+        }))
+
+      return {
+        prInfo: {
+          number: pr.number,
+          url: prUrl,
+          title: pr.title,
+          state: prState,
+          reviews,
+          checkRuns,
+          unresolvedThreads,
+          unresolvedCount: unresolvedThreads.length,
+        }
+      }
+    } catch {
+      // GraphQL failed — graceful degradation
+      return { prInfo: { number: pr.number, url: prUrl, title: pr.title, state: 'OPEN' as const, reviews: [], checkRuns: [], unresolvedThreads: [], unresolvedCount: 0 } }
+    }
   } catch (error) {
     return { error: error instanceof Error ? error.message : 'Unknown error' }
   }

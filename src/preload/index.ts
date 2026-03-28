@@ -327,8 +327,8 @@ contextBridge.exposeInMainWorld('electron', {
     }
   },
   github: {
-    getPrUrl: (repoPath: string, head: string, base: string) => {
-      return client.githubGetPrUrl(repoPath, head, base)
+    getPrInfo: (repoPath: string, head: string, base: string) => {
+      return client.githubGetPrInfo(repoPath, head, base)
     }
   },
   settings: {

@@ -33,7 +33,8 @@ import type {
   GitLogResult,
   DirectoryContents,
   FileContents,
-  FileEntry
+  FileEntry,
+  GitHubPrInfoResult
 } from '../renderer/types'
 
 // === Request Types (renderer calls, server handles) ===
@@ -198,9 +199,9 @@ export interface IpcRequests {
     params: [repoPath: string]
     result: { url?: string; error?: string }
   }
-  githubGetPrUrl: {
+  githubGetPrInfo: {
     params: [repoPath: string, head: string, base: string]
-    result: { url: string; hasPr: boolean } | { error: string }
+    result: GitHubPrInfoResult
   }
 
   // Settings operations

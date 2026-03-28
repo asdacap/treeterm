@@ -343,8 +343,44 @@ export interface GitApi {
   onOutput: (callback: (operationId: string, data: string) => void) => () => void
 }
 
+export interface GitHubReviewThread {
+  isResolved: boolean
+  path: string
+  body: string
+  author: string
+  line: number | null
+}
+
+export interface GitHubReview {
+  author: string
+  state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'PENDING' | 'DISMISSED'
+}
+
+export interface GitHubCheckRun {
+  name: string
+  status: 'COMPLETED' | 'IN_PROGRESS' | 'QUEUED' | 'WAITING' | 'PENDING' | 'REQUESTED'
+  conclusion: 'SUCCESS' | 'FAILURE' | 'NEUTRAL' | 'CANCELLED' | 'TIMED_OUT' | 'ACTION_REQUIRED' | 'SKIPPED' | null
+}
+
+export interface GitHubPrInfo {
+  number: number
+  url: string
+  title: string
+  state: 'OPEN' | 'CLOSED' | 'MERGED'
+  reviews: GitHubReview[]
+  checkRuns: GitHubCheckRun[]
+  unresolvedThreads: GitHubReviewThread[]
+  unresolvedCount: number
+}
+
+export type GitHubPrInfoResult = { prInfo: GitHubPrInfo } | { noPr: true; createUrl: string } | { error: string }
+
 export interface GitHubApi {
-  getPrUrl: (repoPath: string, head: string, base: string) => Promise<{ url: string; hasPr: boolean } | { error: string }>
+  getPrInfo: (repoPath: string, head: string, base: string) => Promise<GitHubPrInfoResult>
+}
+
+export interface GitHubAppState {
+  // empty — reads prInfo from workspace store
 }
 
 /** Workspace-scoped GitApi with path pre-bound */

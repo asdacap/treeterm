@@ -1,6 +1,6 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, Tab, AppState, AppRef, ReviewComment, AppRegistryApi, GitApi, FilesystemApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi } from '../types'
+import type { Workspace, Tab, AppState, AppRef, ReviewComment, AppRegistryApi, GitApi, FilesystemApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi, GitHubPrInfo } from '../types'
 import { getTabs, isAiHarnessState } from '../types'
 import type { Tty, TtyWriter } from './createTtyStore'
 import { createAnalyzerStore } from './createAnalyzerStore'
@@ -74,7 +74,7 @@ export interface WorkspaceStoreState {
   disposeGitController: () => void
 
   // GitHub PR status (cached, checked on workspace open)
-  hasPr: boolean
+  prInfo: GitHubPrInfo | null
   refreshPrStatus: () => Promise<void>
   openGitHub: () => Promise<{ url: string; hasPr: boolean } | { error: string }>
 
@@ -191,9 +191,11 @@ export function createWorkspaceStore(
     const parent = deps.lookupWorkspace(ws.parentId)
     if (!parent?.gitBranch) return
     try {
-      const result = await deps.github.getPrUrl(ws.gitRootPath, ws.gitBranch, parent.gitBranch)
-      if ('hasPr' in result) {
-        store.setState({ hasPr: result.hasPr })
+      const result = await deps.github.getPrInfo(ws.gitRootPath, ws.gitBranch, parent.gitBranch)
+      if ('prInfo' in result) {
+        store.setState({ prInfo: result.prInfo })
+      } else if ('noPr' in result) {
+        store.setState({ prInfo: null })
       }
     } catch { /* ignore — network/auth issues */ }
   }
@@ -245,16 +247,20 @@ export function createWorkspaceStore(
     disposeGitController: () => stopGitController(),
 
     // GitHub PR status
-    hasPr: false,
+    prInfo: null,
     refreshPrStatus,
     openGitHub: async () => {
       const ws = get().workspace
       if (!ws.parentId || !ws.gitBranch || !ws.gitRootPath) return { error: 'Missing workspace info' }
       const parent = deps.lookupWorkspace(ws.parentId)
       if (!parent?.gitBranch) return { error: 'Parent branch not found' }
-      const result = await deps.github.getPrUrl(ws.gitRootPath, ws.gitBranch, parent.gitBranch)
-      if ('hasPr' in result) {
-        set({ hasPr: result.hasPr })
+      const result = await deps.github.getPrInfo(ws.gitRootPath, ws.gitBranch, parent.gitBranch)
+      if ('prInfo' in result) {
+        set({ prInfo: result.prInfo })
+        return { url: result.prInfo.url, hasPr: true }
+      } else if ('noPr' in result) {
+        set({ prInfo: null })
+        return { url: result.createUrl, hasPr: false }
       }
       return result
     },

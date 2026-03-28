@@ -64,7 +64,7 @@ const mockWorkspaceStoreStateData = {
   pullFromRemote: vi.fn(),
   refreshDiffStatus: vi.fn(),
   gitRefreshing: false,
-  hasPr: false,
+  prInfo: null,
   refreshPrStatus: vi.fn(),
   openGitHub: vi.fn(),
 } as WorkspaceStoreState

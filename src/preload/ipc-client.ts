@@ -47,7 +47,7 @@ const CHANNELS = {
   gitPull: 'git:pull',
   gitGetBehindCount: 'git:getBehindCount',
   gitGetRemoteUrl: 'git:getRemoteUrl',
-  githubGetPrUrl: 'github:getPrUrl',
+  githubGetPrInfo: 'github:getPrInfo',
   settingsLoad: 'settings:load',
   settingsSave: 'settings:save',
   fsReadDirectory: 'fs:readDirectory',
@@ -325,10 +325,10 @@ export class IpcClient {
     return ipcRenderer.invoke(CHANNELS.gitGetRemoteUrl, ...args)
   }
 
-  githubGetPrUrl(
-    ...args: IpcRequests['githubGetPrUrl']['params']
-  ): Promise<IpcRequests['githubGetPrUrl']['result']> {
-    return ipcRenderer.invoke(CHANNELS.githubGetPrUrl, ...args)
+  githubGetPrInfo(
+    ...args: IpcRequests['githubGetPrInfo']['params']
+  ): Promise<IpcRequests['githubGetPrInfo']['result']> {
+    return ipcRenderer.invoke(CHANNELS.githubGetPrInfo, ...args)
   }
 
   // Settings requests
