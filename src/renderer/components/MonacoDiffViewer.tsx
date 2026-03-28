@@ -28,6 +28,9 @@ interface MonacoDiffViewerProps {
   onCommentSubmit?: (text: string) => void
   onCommentCancel?: () => void
   onCommentDelete?: (commentId: string) => void
+  // Scroll position persistence
+  initialScrollTop?: number
+  onScrollPositionChange?: (scrollTop: number) => void
 }
 
 export function MonacoDiffViewer({
@@ -45,9 +48,13 @@ export function MonacoDiffViewer({
   inlineCommentInput,
   onCommentSubmit,
   onCommentCancel,
-  onCommentDelete
+  onCommentDelete,
+  initialScrollTop,
+  onScrollPositionChange
 }: MonacoDiffViewerProps): JSX.Element {
   const diffEditorRef = useRef<editor.IStandaloneDiffEditor | null>(null)
+  const lastScrollTopRef = useRef<number>(initialScrollTop ?? 0)
+  const shouldRestoreScrollRef = useRef<boolean>(!!initialScrollTop && initialScrollTop > 0)
   const [lineChanges, setLineChanges] = useState<editor.ILineChange[] | null>(null)
   const [currentChangeIndex, setCurrentChangeIndex] = useState<number>(-1)
   const [isSplitView, setIsSplitView] = useState<boolean>(false)
@@ -66,11 +73,29 @@ export function MonacoDiffViewer({
     setCurrentChangeIndex(-1)
   }, [originalContent, modifiedContent])
 
+  // Persist scroll position on unmount
+  useEffect(() => {
+    return () => {
+      onScrollPositionChange?.(lastScrollTopRef.current)
+    }
+  }, [])
+
   const updateLineChanges = () => {
     if (!diffEditorRef.current) return
 
     const changes = diffEditorRef.current.getLineChanges()
     setLineChanges(changes || [])
+
+    // Restore saved scroll position instead of auto-scrolling to first change
+    if (shouldRestoreScrollRef.current) {
+      shouldRestoreScrollRef.current = false
+      if (changes && changes.length > 0) {
+        setCurrentChangeIndex(0)
+      }
+      const modEditor = diffEditorRef.current.getModifiedEditor()
+      modEditor.setScrollTop(initialScrollTop ?? 0)
+      return
+    }
 
     // Auto-scroll to first change
     if (changes && changes.length > 0) {
@@ -126,6 +151,12 @@ export function MonacoDiffViewer({
 
   const handleEditorMount: DiffOnMount = (editor, monaco) => {
     diffEditorRef.current = editor
+
+    // Track scroll position on the modified editor
+    const modEditor = editor.getModifiedEditor()
+    modEditor.onDidScrollChange((e) => {
+      lastScrollTopRef.current = e.scrollTop
+    })
 
     // Listen for diff updates
     editor.onDidUpdateDiff(() => {

@@ -28,6 +28,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
   const state = appState?.state as EditorState | undefined
 
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
+  const lastScrollTopRef = useRef<number>(state?.scrollTop ?? 0)
   const [saving, setSaving] = useState(false)
 
   // Load file content on mount
@@ -88,6 +89,16 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
     updateTabTitle(tabId, title)
   }, [state?.isDirty, state?.filePath, tabId, workspace])
 
+  // Persist scroll position on unmount
+  useEffect(() => {
+    return () => {
+      updateTabState<EditorState>(tabId, (s) => ({
+        ...s,
+        scrollTop: lastScrollTopRef.current
+      }))
+    }
+  }, [])
+
   const handleSave = useCallback(async () => {
     if (!state || !state.isDirty || saving) return
 
@@ -117,6 +128,15 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
   const handleEditorMount: OnMount = useCallback(
     (editor) => {
       editorRef.current = editor
+
+      editor.onDidScrollChange((e) => {
+        lastScrollTopRef.current = e.scrollTop
+      })
+
+      // Restore scroll position after content is ready
+      if (lastScrollTopRef.current > 0) {
+        editor.setScrollTop(lastScrollTopRef.current)
+      }
 
       // Add Cmd/Ctrl+S keybinding for save
       editor.addCommand(KeyMod.CtrlCmd | KeyCode.KeyS, () => handleSave())
