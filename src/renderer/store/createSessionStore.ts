@@ -53,6 +53,7 @@ export interface SessionState {
   activeWorkspaceId: string | null
   isRestoring: boolean
   workspaceLoadStates: Record<string, WorkspaceLoadState>
+  sessionVersion: number
 
   getWorkspace: (id: string) => WorkspaceStore | null
   dismissFailedWorkspace: (id: string) => void
@@ -151,12 +152,21 @@ export function createSessionStore(
         return
       }
 
-      console.log('[session] updating session:', config.sessionId, 'senderUuid:', config.windowUuid)
-      const result = await deps.sessionApi.update(config.sessionId, daemonWorkspaces, config.windowUuid || undefined)
+      const currentVersion = store.getState().sessionVersion
+      console.log('[session] updating session:', config.sessionId, 'senderUuid:', config.windowUuid, 'expectedVersion:', currentVersion)
+      const result = await deps.sessionApi.update(config.sessionId, daemonWorkspaces, config.windowUuid || undefined, currentVersion)
       if (!result.success) {
         console.error('[session] failed to update session:', result.error)
-      } else {
-        console.log('[session] session updated successfully')
+      } else if (result.session) {
+        if (result.session.version === currentVersion + 1) {
+          // Update accepted
+          store.setState({ sessionVersion: result.session.version })
+          console.log('[session] session updated successfully, version:', result.session.version)
+        } else {
+          // Update rejected (version mismatch) — reconcile from daemon's current state
+          console.log('[session] session update rejected, expected version:', currentVersion + 1, 'got:', result.session.version, '— reconciling')
+          await store.getState().handleExternalUpdate(result.session)
+        }
       }
     } catch (error) {
       console.error('[session] failed to sync session to daemon:', error)
@@ -570,6 +580,7 @@ export function createSessionStore(
     activeWorkspaceId: null,
     isRestoring: false,
     workspaceLoadStates: {},
+    sessionVersion: 0,
 
     connection: config.connection ?? null,
 
@@ -964,9 +975,9 @@ export function createSessionStore(
     },
 
     handleRestore: async (daemonSession: Session) => {
-      console.log('[Session] Restoring session', daemonSession.id, 'with', daemonSession.workspaces.length, 'workspaces')
+      console.log('[Session] Restoring session', daemonSession.id, 'with', daemonSession.workspaces.length, 'workspaces, version:', daemonSession.version)
 
-      set({ isRestoring: true })
+      set({ isRestoring: true, sessionVersion: daemonSession.version })
       applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: true })
       set({ isRestoring: false })
 
@@ -974,9 +985,15 @@ export function createSessionStore(
     },
 
     handleExternalUpdate: async (daemonSession: Session) => {
-      console.log('[Session] External session update received', JSON.stringify(daemonSession))
+      const currentVersion = get().sessionVersion
+      if (daemonSession.version <= currentVersion) {
+        console.log('[Session] Ignoring stale external update, incoming version:', daemonSession.version, 'current:', currentVersion)
+        return
+      }
 
-      set({ isRestoring: true })
+      console.log('[Session] External session update received, version:', daemonSession.version, 'current:', currentVersion)
+
+      set({ isRestoring: true, sessionVersion: daemonSession.version })
       applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: false })
 
       // Remove workspaces not present in daemon session (skip loading workspaces)
@@ -989,7 +1006,7 @@ export function createSessionStore(
       }
 
       set({ isRestoring: false })
-      console.log('[Session] External session update applied')
+      console.log('[Session] External session update applied, version:', daemonSession.version)
     }
   }))
 

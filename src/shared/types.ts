@@ -74,6 +74,7 @@ export interface Session {
   workspaces: Workspace[]
   createdAt: number
   lastActivity: number
+  version: number
 }
 
 // Helper type for workspace input (without daemon-managed fields)

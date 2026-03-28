@@ -229,16 +229,18 @@ impl TreeTermDaemon for DaemonService {
             ));
         }
 
-        let session = self
+        let (session, accepted) = self
             .session_store
-            .update_session(&client_id, &r.session_id, r.workspaces)
+            .update_session(&client_id, &r.session_id, r.workspaces, r.expected_version)
             .await
             .ok_or_else(|| Status::not_found(format!("session not found: {}", r.session_id)))?;
 
-        // Broadcast to watchers
-        self.session_store
-            .broadcast_update(&r.session_id, &session, &sender_id)
-            .await;
+        // Only broadcast to other watchers if the update was accepted
+        if accepted {
+            self.session_store
+                .broadcast_update(&r.session_id, &session, &sender_id)
+                .await;
+        }
 
         Ok(Response::new(session))
     }

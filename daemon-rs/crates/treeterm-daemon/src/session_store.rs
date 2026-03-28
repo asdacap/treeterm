@@ -70,6 +70,7 @@ impl SessionStore {
             workspaces: full_workspaces,
             created_at: now,
             last_activity: now,
+            version: 1,
         };
 
         tracing::info!(session_id = %session.id, "session created");
@@ -77,16 +78,33 @@ impl SessionStore {
         session
     }
 
+    /// Update a session's workspaces. Returns `(session, accepted)`.
+    /// If `expected_version` is provided and doesn't match the current version,
+    /// the update is rejected and the current session is returned unchanged.
     pub async fn update_session(
         &self,
         _client_id: &str,
         session_id: &str,
         workspaces: Vec<Workspace>,
-    ) -> Option<Session> {
+        expected_version: Option<u64>,
+    ) -> Option<(Session, bool)> {
         let mut inner = self.0.lock().await;
         let existing = inner.sessions.get(session_id)?;
-        let now = now_millis();
 
+        // Version mismatch → reject, return current state
+        if let Some(ev) = expected_version {
+            if ev != existing.version {
+                tracing::info!(
+                    session_id,
+                    expected_version = ev,
+                    actual_version = existing.version,
+                    "session update rejected: version mismatch"
+                );
+                return Some((existing.clone(), false));
+            }
+        }
+
+        let now = now_millis();
         let old_workspaces = &existing.workspaces;
         let full_workspaces = workspaces
             .into_iter()
@@ -108,11 +126,12 @@ impl SessionStore {
             workspaces: full_workspaces,
             created_at: existing.created_at,
             last_activity: now,
+            version: existing.version + 1,
         };
 
-        tracing::info!(session_id, "session updated");
+        tracing::info!(session_id, version = updated.version, "session updated");
         inner.sessions.insert(session_id.to_string(), updated.clone());
-        Some(updated)
+        Some((updated, true))
     }
 
     pub async fn delete_session(&self, session_id: &str) -> bool {
@@ -194,6 +213,22 @@ impl SessionStore {
                 return true; // keep but don't send
             }
             w.tx.try_send(Ok(event.clone())).is_ok()
+        });
+    }
+
+    /// Spawn a background task that broadcasts current session state to all watchers every 15s.
+    /// Ensures clients eventually converge even if they miss a watch event.
+    pub fn start_heartbeat(&self) {
+        let store = self.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                let sessions: Vec<Session> = store.0.lock().await.sessions.values().cloned().collect();
+                for session in &sessions {
+                    // Empty sender_id → sends to ALL watchers (listener_id is always non-empty)
+                    store.broadcast_update(&session.id, session, "").await;
+                }
+            }
         });
     }
 }

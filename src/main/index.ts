@@ -450,14 +450,14 @@ server.onSessionCreate(async (workspaces) => {
   }
 })
 
-server.onSessionUpdate(async (sessionId, workspaces, senderUuid) => {
+server.onSessionUpdate(async (sessionId, workspaces, senderUuid, expectedVersion) => {
   if (!useDaemon || !daemonClient) {
     return { success: false, error: 'Daemon not enabled' }
   }
 
   try {
     await daemonClient.ensureDaemonRunning()
-    const result = await daemonClient.updateSession(sessionId, workspaces, senderUuid)
+    const result = await daemonClient.updateSession(sessionId, workspaces, senderUuid, expectedVersion)
     return { success: true, session: result }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
