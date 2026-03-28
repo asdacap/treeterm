@@ -243,7 +243,7 @@ export class SSHTunnel {
 
       proc.on('close', async (code) => {
         if (code !== 0) {
-          reject(new Error(`SSH bootstrap failed (exit ${code}): ${stderr}`))
+          reject(new Error(`SSH bootstrap failed (exit ${code}). See log output for details.`))
           return
         }
 
