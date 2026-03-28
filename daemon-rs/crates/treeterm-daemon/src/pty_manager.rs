@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::{CStr, CString};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -8,6 +8,14 @@ use tokio::sync::{broadcast, Mutex};
 use treeterm_proto::treeterm::*;
 
 const SCROLLBACK_LINES: u16 = 10000;
+const RAW_BUFFER_CAP: usize = 50 * 1024;
+const RAW_BUFFER_FLUSH_THRESHOLD: usize = 10 * 1024;
+
+#[derive(Clone)]
+pub enum BufferEvent {
+    Data(Vec<u8>),
+    Resize { cols: u16, rows: u16 },
+}
 
 pub struct PtySession {
     pub id: String,
@@ -17,6 +25,8 @@ pub struct PtySession {
     pub cols: u16,
     pub rows: u16,
     pub parser: vt100::Parser,
+    pub raw_buffer: VecDeque<BufferEvent>,
+    pub raw_buffer_data_bytes: usize,
     pub created_at: i64,
     pub last_activity: i64,
     pub exit_code: Option<i32>,
@@ -119,6 +129,8 @@ impl PtyManager {
             cols,
             rows,
             parser: vt100::Parser::new(rows, cols, SCROLLBACK_LINES as usize),
+            raw_buffer: VecDeque::new(),
+            raw_buffer_data_bytes: 0,
             created_at: now,
             last_activity: now,
             exit_code: None,
@@ -167,12 +179,30 @@ impl PtyManager {
         Ok(id)
     }
 
-    pub async fn get_screen_state(&self, session_id: &str) -> Result<Vec<u8>, String> {
+    pub async fn get_initial_state(&self, session_id: &str) -> Result<Vec<BufferEvent>, String> {
         let sessions = self.sessions.lock().await;
         let session = sessions
             .get(session_id)
             .ok_or_else(|| format!("session {} not found", session_id))?;
-        Ok(session.parser.screen().state_formatted())
+
+        let mut events = Vec::new();
+
+        // Compacted old state from vt100
+        let state = session.parser.screen().state_formatted();
+        if !state.is_empty() {
+            events.push(BufferEvent::Data(state));
+        }
+
+        // Parser's current size — the size at which state_formatted() was rendered
+        let (rows, cols) = session.parser.screen().size();
+        events.push(BufferEvent::Resize { cols, rows });
+
+        // Buffered recent events (data + resize interleaved)
+        for event in &session.raw_buffer {
+            events.push(event.clone());
+        }
+
+        Ok(events)
     }
 
     pub async fn write(&self, session_id: &str, data: &[u8]) -> Result<(), String> {
@@ -217,7 +247,7 @@ impl PtyManager {
         }
         session.cols = cols;
         session.rows = rows;
-        session.parser.set_size(rows, cols);
+        session.raw_buffer.push_back(BufferEvent::Resize { cols, rows });
         session.last_activity = chrono_now_millis();
         let _ = session.resize_tx.send((cols as i32, rows as i32));
         Ok(())
@@ -357,7 +387,43 @@ async fn read_pty_loop(
                 let mut sessions = sessions.lock().await;
                 if let Some(session) = sessions.get_mut(session_id) {
                     session.last_activity = chrono_now_millis();
-                    session.parser.process(&chunk);
+
+                    // Append to raw buffer instead of feeding parser directly
+                    session.raw_buffer.push_back(BufferEvent::Data(chunk));
+                    session.raw_buffer_data_bytes += n;
+
+                    // Flush oldest events to vt100 parser when threshold exceeded
+                    while session.raw_buffer_data_bytes > RAW_BUFFER_FLUSH_THRESHOLD {
+                        match session.raw_buffer.pop_front() {
+                            Some(BufferEvent::Data(data)) => {
+                                session.raw_buffer_data_bytes -= data.len();
+                                session.parser.process(&data);
+                            }
+                            Some(BufferEvent::Resize { cols, rows }) => {
+                                session.parser.set_size(rows, cols);
+                            }
+                            None => break,
+                        }
+                    }
+
+                    // Hard cap safety
+                    if session.raw_buffer_data_bytes > RAW_BUFFER_CAP {
+                        let excess = session.raw_buffer_data_bytes - RAW_BUFFER_CAP;
+                        let mut drained = 0;
+                        while drained < excess {
+                            match session.raw_buffer.pop_front() {
+                                Some(BufferEvent::Data(data)) => {
+                                    drained += data.len();
+                                    session.raw_buffer_data_bytes -= data.len();
+                                    session.parser.process(&data);
+                                }
+                                Some(BufferEvent::Resize { cols, rows }) => {
+                                    session.parser.set_size(rows, cols);
+                                }
+                                None => break,
+                            }
+                        }
+                    }
                 }
             }
             Ok(Err(e)) => {
@@ -489,7 +555,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn write_and_get_screen_state() {
+    async fn write_and_get_initial_state() {
         let mgr = PtyManager::new();
         let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
 
@@ -499,8 +565,10 @@ mod tests {
         // Give the pty a moment to process
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
-        let state = mgr.get_screen_state(&id).await;
-        assert!(state.is_ok());
+        let events = mgr.get_initial_state(&id).await;
+        assert!(events.is_ok());
+        let events = events.unwrap();
+        assert!(!events.is_empty());
 
         mgr.kill(&id).await;
     }
@@ -580,5 +648,145 @@ mod tests {
         assert!(exit_code.is_none());
 
         mgr.kill(&id).await;
+    }
+
+    #[tokio::test]
+    async fn raw_buffer_starts_empty() {
+        let mgr = PtyManager::new();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+
+        let sessions = mgr.sessions.lock().await;
+        let session = sessions.get(&id).unwrap();
+        assert!(session.raw_buffer.is_empty());
+        assert_eq!(session.raw_buffer_data_bytes, 0);
+        drop(sessions);
+
+        mgr.kill(&id).await;
+    }
+
+    #[tokio::test]
+    async fn raw_buffer_accumulates_data() {
+        let mgr = PtyManager::new();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+
+        // Write data and wait for read loop to process
+        mgr.write(&id, b"echo test\n").await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let sessions = mgr.sessions.lock().await;
+        let session = sessions.get(&id).unwrap();
+        // Buffer should have accumulated some data events
+        assert!(session.raw_buffer_data_bytes > 0);
+        assert!(!session.raw_buffer.is_empty());
+        drop(sessions);
+
+        mgr.kill(&id).await;
+    }
+
+    #[tokio::test]
+    async fn raw_buffer_flush_threshold() {
+        let mgr = PtyManager::new();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+
+        {
+            let mut sessions = mgr.sessions.lock().await;
+            let session = sessions.get_mut(&id).unwrap();
+
+            // Manually push data exceeding flush threshold
+            let big_chunk = vec![b'A'; RAW_BUFFER_FLUSH_THRESHOLD + 100];
+            session.raw_buffer.push_back(BufferEvent::Data(big_chunk.clone()));
+            session.raw_buffer_data_bytes += big_chunk.len();
+
+            // Simulate the flush logic from read_pty_loop
+            while session.raw_buffer_data_bytes > RAW_BUFFER_FLUSH_THRESHOLD {
+                match session.raw_buffer.pop_front() {
+                    Some(BufferEvent::Data(data)) => {
+                        session.raw_buffer_data_bytes -= data.len();
+                        session.parser.process(&data);
+                    }
+                    Some(BufferEvent::Resize { cols, rows }) => {
+                        session.parser.set_size(rows, cols);
+                    }
+                    None => break,
+                }
+            }
+
+            // After flush, buffer should be within threshold
+            assert!(session.raw_buffer_data_bytes <= RAW_BUFFER_FLUSH_THRESHOLD);
+        }
+
+        mgr.kill(&id).await;
+    }
+
+    #[tokio::test]
+    async fn resize_adds_buffer_event() {
+        let mgr = PtyManager::new();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+
+        mgr.resize(&id, 120, 40).await.unwrap();
+
+        let sessions = mgr.sessions.lock().await;
+        let session = sessions.get(&id).unwrap();
+
+        // Should have at least one resize event in buffer
+        let has_resize = session.raw_buffer.iter().any(|e| {
+            matches!(e, BufferEvent::Resize { cols: 120, rows: 40 })
+        });
+        assert!(has_resize);
+        drop(sessions);
+
+        mgr.kill(&id).await;
+    }
+
+    #[tokio::test]
+    async fn initial_state_includes_parser_size() {
+        let mgr = PtyManager::new();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+
+        let events = mgr.get_initial_state(&id).await.unwrap();
+
+        // Should contain a resize event with the parser's size
+        let has_resize = events.iter().any(|e| {
+            matches!(e, BufferEvent::Resize { cols: 80, rows: 24 })
+        });
+        assert!(has_resize);
+
+        mgr.kill(&id).await;
+    }
+
+    #[tokio::test]
+    async fn initial_state_includes_buffer_events_after_parser_size() {
+        let mgr = PtyManager::new();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+
+        // Resize to new dimensions — this goes into the buffer
+        mgr.resize(&id, 100, 30).await.unwrap();
+
+        let events = mgr.get_initial_state(&id).await.unwrap();
+
+        // Find the parser size resize (80x24) and the buffer resize (100x30)
+        let resize_events: Vec<_> = events.iter().filter(|e| {
+            matches!(e, BufferEvent::Resize { .. })
+        }).collect();
+
+        // Should have at least 2 resizes: parser size + buffer resize
+        assert!(resize_events.len() >= 2);
+
+        // The buffer resize (100x30) should come after the parser size (80x24)
+        let parser_size_idx = events.iter().position(|e| {
+            matches!(e, BufferEvent::Resize { cols: 80, rows: 24 })
+        }).unwrap();
+        let buffer_resize_idx = events.iter().position(|e| {
+            matches!(e, BufferEvent::Resize { cols: 100, rows: 30 })
+        }).unwrap();
+        assert!(buffer_resize_idx > parser_size_idx);
+
+        mgr.kill(&id).await;
+    }
+
+    #[tokio::test]
+    async fn get_initial_state_nonexistent_errors() {
+        let mgr = PtyManager::new();
+        assert!(mgr.get_initial_state("nonexistent").await.is_err());
     }
 }
