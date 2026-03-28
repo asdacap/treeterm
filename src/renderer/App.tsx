@@ -163,7 +163,11 @@ export default function App() {
           )}
           {isActiveProcessesOpen && (
             <ActiveProcessesDialog
-              workspaces={activeSessionStore?.getState().workspaces ?? {}}
+              workspaces={Object.fromEntries(
+                Object.entries(activeSessionStore?.getState().workspaces ?? {})
+                  .filter(([, e]) => e.status === 'loaded' || e.status === 'operation-error')
+                  .map(([id, e]) => [id, (e as Extract<typeof e, { status: 'loaded' | 'operation-error' }>).data])
+              )}
               connectionId={activeSessionStore?.getState().connection?.id ?? 'local'}
               onClose={() => useAppStore.setState({ isActiveProcessesOpen: false })}
             />

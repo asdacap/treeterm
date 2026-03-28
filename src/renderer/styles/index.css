@@ -482,6 +482,10 @@ body,
   gap: 8px;
 }
 
+.workspace-action-btn-danger {
+  color: #f48771;
+}
+
 .tree-item-error-icon {
   color: #f48771;
 }

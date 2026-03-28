@@ -303,9 +303,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const sessionStore = sessionId ? get().sessionStores[sessionId] : Object.values(get().sessionStores)[0]
       if (sessionStore) {
         const { workspaces, addWorkspace, setActiveWorkspace } = sessionStore.getState()
-        const existingWorkspace = Object.values(workspaces).find(ws => ws.path === initialPath)
-        if (existingWorkspace) {
-          setActiveWorkspace(existingWorkspace.id)
+        const existingId = Object.entries(workspaces).find(
+          ([, e]) => (e.status === 'loaded' || e.status === 'operation-error') && e.data.path === initialPath
+        )?.[0]
+        if (existingId) {
+          setActiveWorkspace(existingId)
         } else {
           await addWorkspace(initialPath)
         }
@@ -335,9 +337,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
       if (remainingIds.length > 0) {
         const nextStore = get().sessionStores[remainingIds[0]]
         const workspaces = nextStore.getState().workspaces
-        const firstWs = Object.values(workspaces)[0]
-        if (firstWs) {
-          useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: remainingIds[0] })
+        const firstWsId = Object.keys(workspaces)[0]
+        if (firstWsId) {
+          useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWsId, sessionId: remainingIds[0] })
         }
       }
     }

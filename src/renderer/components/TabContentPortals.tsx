@@ -23,7 +23,6 @@ interface TabContentPortalsProps {
  */
 export default function TabContentPortals({ sessionStore, activeWorkspaceId }: TabContentPortalsProps) {
   const workspaces = useStore(sessionStore, s => s.workspaces)
-  const workspaceStores = useStore(sessionStore, s => s.workspaceStores)
   const applications = useAppStore((s) => s.applications)
 
   // Track available portal slots — updated via MutationObserver
@@ -57,14 +56,17 @@ export default function TabContentPortals({ sessionStore, activeWorkspaceId }: T
   }, [])
 
   // Collect tab IDs for the active workspace to detect unassigned portal slots
-  const activeWorkspace = activeWorkspaceId ? workspaces[activeWorkspaceId] : null
-  const activeTabIds = activeWorkspace ? new Set(getTabs(activeWorkspace).map(t => t.id)) : new Set<string>()
+  const activeEntry = activeWorkspaceId ? workspaces[activeWorkspaceId] : null
+  const activeWsData = activeEntry && (activeEntry.status === 'loaded' || activeEntry.status === 'operation-error') ? activeEntry.data : null
+  const activeTabIds = activeWsData ? new Set(getTabs(activeWsData).map(t => t.id)) : new Set<string>()
 
   return (
     <SessionStoreContext.Provider value={sessionStore}>
-      {Object.values(workspaces).map(workspace => {
+      {Object.entries(workspaces).map(([wsId, entry]) => {
+        if (entry.status !== 'loaded' && entry.status !== 'operation-error') return null
+        const workspace = entry.data
         const wsTabs = getTabs(workspace)
-        const isActiveWorkspace = workspace.id === activeWorkspaceId
+        const isActiveWorkspace = wsId === activeWorkspaceId
 
         return wsTabs.map(tab => {
           const app = applications[tab.applicationId]
@@ -75,18 +77,15 @@ export default function TabContentPortals({ sessionStore, activeWorkspaceId }: T
           const portalTarget = isActiveWorkspace ? portalSlots[tab.id] : null
           const isVisible = !!portalTarget
 
-          const handle = workspaceStores[workspace.id]
-          if (!handle) return null
-
           const content = (
             <ErrorBoundary
-              key={`error-${workspace.id}-${tab.id}`}
+              key={`error-${wsId}-${tab.id}`}
               fallback={(error, reset) => (
                 <TabErrorFallback
                   error={error}
                   tabTitle={tab.title}
                   onReset={reset}
-                  onClose={() => handle.getState().removeTab(tab.id)}
+                  onClose={() => entry.store.getState().removeTab(tab.id)}
                 />
               )}
             >
@@ -96,7 +95,7 @@ export default function TabContentPortals({ sessionStore, activeWorkspaceId }: T
               >
                 {app.render({
                   tab,
-                  workspace: handle,
+                  workspace: entry.store,
                   isVisible,
                 })}
               </div>
@@ -105,7 +104,7 @@ export default function TabContentPortals({ sessionStore, activeWorkspaceId }: T
 
           // If this tab has a portal slot in FlexLayout, portal into it
           if (portalTarget) {
-            return createPortal(content, portalTarget, `${workspace.id}-${tab.id}`)
+            return createPortal(content, portalTarget, `${wsId}-${tab.id}`)
           }
 
           // Tabs in inactive workspaces are unmounted

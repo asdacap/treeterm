@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createWorkspaceStore } from './createWorkspaceStore'
 import type { WorkspaceStoreDeps } from './createWorkspaceStore'
 import { getUnmergedSubWorkspaces } from './createSessionStore'
+import type { WorkspaceEntry } from './createSessionStore'
 import type { Workspace, Application } from '../types'
 
 function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStoreDeps {
@@ -79,17 +80,21 @@ function makeFakeApp(overrides: Partial<Application> = {}): Application {
   }
 }
 
+function toLoaded(ws: Workspace): WorkspaceEntry {
+  return { status: 'loaded', data: ws, store: createWorkspaceStore(ws, makeHandleDeps()) }
+}
+
 describe('getUnmergedSubWorkspaces', () => {
   it('returns empty array when no workspaces', () => {
     expect(getUnmergedSubWorkspaces({})).toEqual([])
   })
 
   it('returns only active worktree workspaces', () => {
-    const workspaces: Record<string, Workspace> = {
-      root: makeWorkspace({ id: 'root', isWorktree: false, status: 'active' }),
-      child1: makeWorkspace({ id: 'child1', isWorktree: true, status: 'active' }),
-      child2: makeWorkspace({ id: 'child2', isWorktree: true, status: 'merged' }),
-      child3: makeWorkspace({ id: 'child3', isWorktree: true, status: 'active' })
+    const workspaces: Record<string, WorkspaceEntry> = {
+      root: toLoaded(makeWorkspace({ id: 'root', isWorktree: false, status: 'active' })),
+      child1: toLoaded(makeWorkspace({ id: 'child1', isWorktree: true, status: 'active' })),
+      child2: toLoaded(makeWorkspace({ id: 'child2', isWorktree: true, status: 'merged' })),
+      child3: toLoaded(makeWorkspace({ id: 'child3', isWorktree: true, status: 'active' }))
     }
     const result = getUnmergedSubWorkspaces(workspaces)
     expect(result).toHaveLength(2)
@@ -98,8 +103,8 @@ describe('getUnmergedSubWorkspaces', () => {
   })
 
   it('excludes non-worktree workspaces even if active', () => {
-    const workspaces: Record<string, Workspace> = {
-      root: makeWorkspace({ id: 'root', isWorktree: false, status: 'active' })
+    const workspaces: Record<string, WorkspaceEntry> = {
+      root: toLoaded(makeWorkspace({ id: 'root', isWorktree: false, status: 'active' }))
     }
     expect(getUnmergedSubWorkspaces(workspaces)).toEqual([])
   })

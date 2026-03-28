@@ -24,15 +24,14 @@ interface WorkspacePaneProps {
 export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneProps) {
   const {
     workspaces,
-    workspaceStores,
     activeWorkspaceId,
     addChildWorkspace,
     adoptExistingWorktree,
     createWorktreeFromBranch,
     createWorktreeFromRemote,
     setActiveWorkspace,
-    workspaceLoadStates,
-    dismissFailedWorkspace,
+    clearWorkspaceError,
+    closeWorkspace,
   } = useStore(sessionStore)
   const enterWorkspaceFocus = useKeybindingStore(s => s.enterWorkspaceFocus)
   const applications = useAppStore((s) => s.applications)
@@ -42,9 +41,9 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
 
   const [branchCopied, setBranchCopied] = useState(false)
 
-  const activeWorkspace = activeWorkspaceId ? workspaces[activeWorkspaceId] : null
-  const activeHandle = activeWorkspaceId ? (workspaceStores[activeWorkspaceId] ?? null) : null
-  const activeLoadState = activeWorkspaceId ? workspaceLoadStates[activeWorkspaceId] : undefined
+  const activeEntry = activeWorkspaceId ? workspaces[activeWorkspaceId] ?? null : null
+  const activeWorkspace = activeEntry && (activeEntry.status === 'loaded' || activeEntry.status === 'operation-error') ? activeEntry.data : null
+  const activeHandle = activeEntry && (activeEntry.status === 'loaded' || activeEntry.status === 'operation-error') ? activeEntry.store : null
   const outputRef = useRef<HTMLPreElement>(null)
 
   // Dialog state
@@ -115,7 +114,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   }, [activeWorkspaceId])
 
   // Auto-scroll loading output
-  const outputLength = activeLoadState?.status === 'loading' ? activeLoadState.output.length : 0
+  const outputLength = activeEntry?.status === 'loading' ? activeEntry.output.length : 0
   useEffect(() => {
     if (outputRef.current) {
       outputRef.current.scrollTop = outputRef.current.scrollHeight
@@ -165,8 +164,10 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   // Compute paths of already-open worktrees
   const openWorktreePaths = useMemo(() => {
     return Object.values(workspaces)
-      .filter(ws => ws.isWorktree)
-      .map(ws => ws.path)
+      .filter((e): e is Extract<typeof e, { status: 'loaded' | 'operation-error' }> =>
+        e.status === 'loaded' || e.status === 'operation-error')
+      .filter(e => e.data.isWorktree)
+      .map(e => e.data.path)
   }, [workspaces])
 
   // Fork handler - create new worktree
@@ -276,16 +277,22 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   // Compute flattened workspace list for navigation
   const flattenedWorkspaceIds = useMemo(() => {
     const result: string[] = []
+    // Build parent lookup for loaded entries
+    const parentMap = new Map<string | null, string[]>()
+    for (const [id, entry] of Object.entries(workspaces)) {
+      const parentId = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data.parentId : null
+      const children = parentMap.get(parentId) ?? []
+      children.push(id)
+      parentMap.set(parentId, children)
+    }
     const traverse = (wsId: string) => {
       result.push(wsId)
-      Object.values(workspaces)
-        .filter((ws) => ws.parentId === wsId)
-        .forEach((ws) => traverse(ws.id))
+      const children = parentMap.get(wsId) ?? []
+      children.forEach(traverse)
     }
-    // Get root workspaces (those without parents)
-    Object.values(workspaces)
-      .filter((ws) => !ws.parentId)
-      .forEach((ws) => traverse(ws.id))
+    // Start from root workspaces
+    const roots = parentMap.get(null) ?? []
+    roots.forEach(traverse)
     return result
   }, [workspaces])
 
@@ -479,27 +486,32 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                 )}
               </div>
             </div>
-            {activeLoadState?.status === 'loading' && (
+            {activeEntry?.status === 'loading' && (
               <div className="workspace-loading">
                 <div className="workspace-loading-header">
                   <Loader2 size={16} className="spinning" />
-                  <span>{activeLoadState.message}</span>
+                  <span>{activeEntry.message}</span>
                 </div>
-                {activeLoadState.output.length > 0 && (
+                {activeEntry.output.length > 0 && (
                   <pre className="workspace-loading-output" ref={outputRef}>
-                    {activeLoadState.output.join('')}
+                    {activeEntry.output.join('')}
                   </pre>
                 )}
               </div>
             )}
-            {activeLoadState?.status === 'error' && (
+            {(activeEntry?.status === 'error' || activeEntry?.status === 'operation-error') && (
               <div className="workspace-load-error">
                 <div className="workspace-load-error-content">
                   <h3>Operation failed</h3>
-                  <p className="workspace-load-error-message">{activeLoadState.error}</p>
+                  <p className="workspace-load-error-message">{activeEntry.error}</p>
                   <div className="workspace-load-error-actions">
-                    <button className="workspace-action-btn" onClick={() => dismissFailedWorkspace(activeWorkspaceId!)}>
-                      Dismiss
+                    {activeEntry.status === 'operation-error' && (
+                      <button className="workspace-action-btn" onClick={() => clearWorkspaceError(activeWorkspaceId!)}>
+                        Dismiss
+                      </button>
+                    )}
+                    <button className="workspace-action-btn workspace-action-btn-danger" onClick={() => closeWorkspace(activeWorkspaceId!)}>
+                      Close
                     </button>
                   </div>
                 </div>
@@ -507,22 +519,21 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
             )}
           </>
         )}
-        <div className="workspace-terminal" style={{ display: activeWorkspace && !activeLoadState ? 'flex' : 'none' }}>
-          {Object.entries(workspaceStores).map(([wsId, handle]) => {
-            const ws = workspaces[wsId]
-            if (!handle || !ws) return null
+        <div className="workspace-terminal" style={{ display: activeEntry?.status === 'loaded' ? 'flex' : 'none' }}>
+          {Object.entries(workspaces).map(([wsId, entry]) => {
+            if (entry.status !== 'loaded' && entry.status !== 'operation-error') return null
             const isActive = wsId === activeWorkspaceId
             return (
               <div key={wsId} style={{ display: isActive ? 'contents' : 'none', height: '100%', width: '100%' }}>
                 <FlexLayoutPane
-                  workspace={handle}
+                  workspace={entry.store}
                   onNewTab={(applicationId: string) => {
                     if (applicationId === 'review') {
-                      handle.getState().addTab<ReviewState>('review', {
-                        parentWorkspaceId: ws.parentId ?? undefined
+                      entry.store.getState().addTab<ReviewState>('review', {
+                        parentWorkspaceId: entry.data.parentId ?? undefined
                       })
                     } else {
-                      handle.getState().addTab(applicationId)
+                      entry.store.getState().addTab(applicationId)
                     }
                   }}
                 />

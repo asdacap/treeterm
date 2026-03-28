@@ -12,9 +12,11 @@ import type {
   Application, SandboxConfig, SessionInfo, LlmApi, GitHubApi
 } from '../types'
 
-export type WorkspaceLoadState =
-  | { status: 'loading'; message: string; output: string[] }
-  | { status: 'error'; error: string }
+export type WorkspaceEntry =
+  | { status: 'loading'; name: string; message: string; output: string[] }
+  | { status: 'error'; name: string; error: string }
+  | { status: 'loaded'; data: Workspace; store: WorkspaceStore }
+  | { status: 'operation-error'; data: Workspace; store: WorkspaceStore; error: string }
 
 export interface AppRegistryApi {
   get: (id: string) => Application | undefined
@@ -48,15 +50,13 @@ export interface SessionState {
   listTty: () => Promise<SessionInfo[]>
 
   // Workspace collection
-  workspaceStores: Record<string, WorkspaceStore>
-  workspaces: Record<string, Workspace>
+  workspaces: Record<string, WorkspaceEntry>
   activeWorkspaceId: string | null
   isRestoring: boolean
-  workspaceLoadStates: Record<string, WorkspaceLoadState>
   sessionVersion: number
 
-  getWorkspace: (id: string) => WorkspaceStore | null
-  dismissFailedWorkspace: (id: string) => void
+  clearWorkspaceError: (id: string) => void
+  closeWorkspace: (id: string) => void
   addWorkspace: (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => string
   addChildWorkspace: (parentId: string, name: string, isDetached?: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
   adoptExistingWorktree: (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
@@ -116,10 +116,12 @@ function getDefaultAppForWorktree(
 /**
  * Helper function to find unmerged sub-workspaces (worktrees with status 'active')
  */
-export function getUnmergedSubWorkspaces(workspaces: Record<string, Workspace>): Workspace[] {
-  return Object.values(workspaces).filter(
-    (ws) => ws.isWorktree && ws.status === 'active'
-  )
+export function getUnmergedSubWorkspaces(workspaces: Record<string, WorkspaceEntry>): Workspace[] {
+  return Object.values(workspaces)
+    .filter((e): e is Extract<WorkspaceEntry, { status: 'loaded' | 'operation-error' }> =>
+      e.status === 'loaded' || e.status === 'operation-error')
+    .map(e => e.data)
+    .filter(ws => ws.isWorktree && ws.status === 'active')
 }
 
 export function createSessionStore(
@@ -139,8 +141,9 @@ export function createSessionStore(
         return
       }
 
-      const loadStates = store.getState().workspaceLoadStates
-      const daemonWorkspaces = Object.values(workspaces).filter(ws => !loadStates[ws.id]).map(({ createdAt, lastActivity, ...ws }) => ws)
+      const daemonWorkspaces = Object.values(workspaces)
+        .filter((e): e is Extract<WorkspaceEntry, { status: 'loaded' }> => e.status === 'loaded')
+        .map(e => { const { createdAt, lastActivity, ...ws } = e.data; return ws })
 
       console.log('[session] syncing to daemon:', daemonWorkspaces.length, 'workspaces', JSON.stringify(daemonWorkspaces))
 
@@ -203,7 +206,10 @@ export function createSessionStore(
       closeAndCleanWorkspace: (id) => store.getState().closeAndCleanWorkspace(id),
       quickForkWorkspace: (id) => store.getState().quickForkWorkspace(id),
       refreshGitInfo: (id) => store.getState().refreshGitInfo(id),
-      lookupWorkspace: (id) => store.getState().workspaces[id],
+      lookupWorkspace: (id) => {
+        const entry = store.getState().workspaces[id]
+        return entry && (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined
+      },
       github: deps.github,
     }
   }
@@ -213,9 +219,13 @@ export function createSessionStore(
 
     // Keep the workspaces snapshot in sync when handle state changes
     handle.subscribe((state) => {
-      store.setState((s) => ({
-        workspaces: { ...s.workspaces, [state.workspace.id]: state.workspace }
-      }))
+      store.setState((s) => {
+        const entry = s.workspaces[state.workspace.id]
+        if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return s
+        return {
+          workspaces: { ...s.workspaces, [state.workspace.id]: { ...entry, data: state.workspace } }
+        }
+      })
     })
 
     return handle
@@ -236,61 +246,23 @@ export function createSessionStore(
     }
   ): { success: true } {
     const state = store.getState()
-    const parent = state.workspaces[parentId]
+    const parentEntry = state.workspaces[parentId]
+    const parent = parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error') ? parentEntry.data : undefined
 
     const id = generateId()
     const operationId = generateId()
 
-    const appStates: Record<string, AppState> = {}
-    let activeTabId: string | null = null
-    const defaultApp = getDefaultAppForWorktree(deps, options.settings, parent?.settings)
-    if (defaultApp) {
-      const tabId = generateTabId()
-      appStates[tabId] = {
-        applicationId: defaultApp.id,
-        title: defaultApp.name,
-        state: defaultApp.createInitialState()
-      }
-      activeTabId = tabId
-    }
-
-    const childWorkspace: Workspace = {
-      id,
-      name: worktreeName,
-      path: `${parent?.gitRootPath}/.worktrees/${worktreeName}`,
-      parentId,
-      status: 'active',
-      isGitRepo: true,
-      gitBranch: options.initialBranch ?? null,
-      gitRootPath: parent?.gitRootPath ?? null,
-      isWorktree: true,
-      isDetached: options.isDetached ?? false,
-      appStates,
-      activeTabId,
-      settings: options.settings,
-      metadata: {
-        ...(options.description ? { description: options.description } : {}),
-        ...(options.initialBranch ? { branchIsUserDefined: 'true' } : {}),
-      },
-      createdAt: Date.now(),
-      lastActivity: Date.now(),
-    }
-
-    const handle = createHandleForWorkspace(childWorkspace)
-
     store.setState((s) => ({
-      workspaceStores: { ...s.workspaceStores, [id]: handle },
-      workspaces: { ...s.workspaces, [id]: childWorkspace },
+      workspaces: { ...s.workspaces, [id]: { status: 'loading' as const, name: worktreeName, message: options.message, output: [] } },
       activeWorkspaceId: id,
-      workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'loading' as const, message: options.message, output: [] } }
     }))
 
     const unsubOutput = deps.git.onOutput((opId, data) => {
       if (opId !== operationId) return
-      const loadState = store.getState().workspaceLoadStates[id]
-      if (loadState?.status === 'loading') {
+      const entry = store.getState().workspaces[id]
+      if (entry?.status === 'loading') {
         store.setState(s => ({
-          workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { ...loadState, output: [...loadState.output, data] } }
+          workspaces: { ...s.workspaces, [id]: { ...entry, output: [...entry.output, data] } }
         }))
       }
     })
@@ -305,29 +277,59 @@ export function createSessionStore(
 
         if (!result.success) {
           store.setState(s => ({
-            workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: result.error || 'Operation failed' } }
+            workspaces: { ...s.workspaces, [id]: { status: 'error', name: worktreeName, error: result.error || 'Operation failed' } }
           }))
           return
         }
 
-        const wsHandle = store.getState().workspaceStores[id]
-        if (wsHandle) {
-          wsHandle.setState(s => ({
-            workspace: { ...s.workspace, path: result.path!, gitBranch: result.branch! }
-          }))
-          for (const tabId of Object.keys(appStates)) {
-            wsHandle.getState().initTab(tabId)
+        // Build workspace data and store only on success
+        const appStates: Record<string, AppState> = {}
+        let activeTabId: string | null = null
+        const defaultApp = getDefaultAppForWorktree(deps, options.settings, parent?.settings)
+        if (defaultApp) {
+          const tabId = generateTabId()
+          appStates[tabId] = {
+            applicationId: defaultApp.id,
+            title: defaultApp.name,
+            state: defaultApp.createInitialState()
           }
+          activeTabId = tabId
         }
 
-        store.setState(s => {
-          const { [id]: _, ...rest } = s.workspaceLoadStates
-          return { workspaceLoadStates: rest }
-        })
+        const childWorkspace: Workspace = {
+          id,
+          name: worktreeName,
+          path: result.path!,
+          parentId,
+          status: 'active',
+          isGitRepo: true,
+          gitBranch: result.branch!,
+          gitRootPath: parent?.gitRootPath ?? null,
+          isWorktree: true,
+          isDetached: options.isDetached ?? false,
+          appStates,
+          activeTabId,
+          settings: options.settings,
+          metadata: {
+            ...(options.description ? { description: options.description } : {}),
+            ...(options.initialBranch ? { branchIsUserDefined: 'true' } : {}),
+          },
+          createdAt: Date.now(),
+          lastActivity: Date.now(),
+        }
+
+        const handle = createHandleForWorkspace(childWorkspace)
+        for (const tabId of Object.keys(appStates)) {
+          handle.getState().initTab(tabId)
+        }
+
+        store.setState(s => ({
+          workspaces: { ...s.workspaces, [id]: { status: 'loaded', data: childWorkspace, store: handle } }
+        }))
         await syncSessionToDaemon(store.getState().isRestoring)
       } catch (err) {
         store.setState(s => ({
-          workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: err instanceof Error ? err.message : String(err) } }
+          workspaces: { ...s.workspaces, [id]: { status: 'error', name: worktreeName, error: err instanceof Error ? err.message : String(err) } }
         }))
       } finally {
         unsubOutput()
@@ -345,8 +347,8 @@ export function createSessionStore(
     branch: string,
     options: { isDetached?: boolean; isWorktree?: boolean; settings?: WorktreeSettings; metadata?: Record<string, string> } = {}
   ): Promise<string> {
-    const state = store.getState()
-    const parent = state.workspaces[parentId]
+    const parentEntry = store.getState().workspaces[parentId]
+    const parent = parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error') ? parentEntry.data : undefined
 
     const id = generateId()
     const appStates: Record<string, AppState> = {}
@@ -385,8 +387,7 @@ export function createSessionStore(
     const handle = createHandleForWorkspace(childWorkspace)
 
     store.setState((s) => ({
-      workspaceStores: { ...s.workspaceStores, [id]: handle },
-      workspaces: { ...s.workspaces, [id]: childWorkspace },
+      workspaces: { ...s.workspaces, [id]: { status: 'loaded', data: childWorkspace, store: handle } },
       activeWorkspaceId: id
     }))
 
@@ -403,21 +404,21 @@ export function createSessionStore(
     id: string,
     options: { keepBranch: boolean; keepWorktree: boolean; operationId?: string }
   ): Promise<void> {
-    const state = store.getState()
-    const workspace = state.workspaces[id]
-    if (!workspace) return
+    const entry = store.getState().workspaces[id]
+    if (!entry) return
+    const workspace = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined
+    const handle = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.store : undefined
 
     // Recursively remove children first (derived from parentId)
-    const childIds = Object.values(state.workspaces)
-      .filter(ws => ws.parentId === id)
-      .map(ws => ws.id)
+    const childIds = Object.entries(store.getState().workspaces)
+      .filter(([, e]) => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === id)
+      .map(([childId]) => childId)
     for (const childId of childIds) {
       await removeWorkspaceInternal(childId, options)
     }
 
     // Dispose tab refs (stops analyzers, kills PTYs, etc.)
-    const handle = state.workspaceStores[id]
-    if (handle) {
+    if (handle && workspace) {
       handle.getState().disposeGitController()
       for (const tabId of Object.keys(workspace.appStates)) {
         const ref = handle.getState().getTabRef(tabId)
@@ -426,7 +427,7 @@ export function createSessionStore(
     }
 
     // Git cleanup
-    if (workspace.isWorktree && workspace.gitRootPath) {
+    if (workspace?.isWorktree && workspace.gitRootPath) {
       if (!options.keepWorktree) {
         const deleteBranch = !options.keepBranch && !workspace.isDetached
         await deps.git.removeWorktree(
@@ -440,15 +441,11 @@ export function createSessionStore(
       }
     }
 
-    // Remove handle, workspace, and any stale load state
+    // Remove workspace entry
     store.setState((s) => {
-      const { [id]: _removedHandle, ...remainingHandles } = s.workspaceStores
-      const { [id]: _removedWs, ...remainingWorkspaces } = s.workspaces
-      const { [id]: _removedLoadState, ...remainingLoadStates } = s.workspaceLoadStates
+      const { [id]: _, ...remaining } = s.workspaces
       return {
-        workspaceStores: remainingHandles,
-        workspaces: remainingWorkspaces,
-        workspaceLoadStates: remainingLoadStates,
+        workspaces: remaining,
         activeWorkspaceId: s.activeWorkspaceId === id ? null : s.activeWorkspaceId
       }
     })
@@ -461,24 +458,24 @@ export function createSessionStore(
     id: string,
     options: { keepBranch: boolean; keepWorktree: boolean }
   ): Promise<void> {
+    const entry = store.getState().workspaces[id]
+    if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
+    const { data, store: wsStore } = entry
+
     const operationId = generateId()
+    // Temporarily show loading in the main pane — preserve data+store for recovery
     store.setState(s => ({
-      workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'loading' as const, message: 'Removing workspace...', output: [] } }
+      workspaces: { ...s.workspaces, [id]: { status: 'loaded', data, store: wsStore } }
     }))
-    const unsubOutput = deps.git.onOutput((opId, data) => {
+    const unsubOutput = deps.git.onOutput((opId, _data) => {
       if (opId !== operationId) return
-      const loadState = store.getState().workspaceLoadStates[id]
-      if (loadState?.status === 'loading') {
-        store.setState(s => ({
-          workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { ...loadState, output: [...loadState.output, data] } }
-        }))
-      }
+      // Output streaming not needed for remove — workspace is removed on success
     })
     try {
       await removeWorkspaceInternal(id, { ...options, operationId })
     } catch (err) {
       store.setState(s => ({
-        workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: err instanceof Error ? err.message : String(err) } }
+        workspaces: { ...s.workspaces, [id]: { status: 'operation-error', data, store: wsStore, error: err instanceof Error ? err.message : String(err) } }
       }))
     } finally {
       unsubOutput()
@@ -491,34 +488,27 @@ export function createSessionStore(
     id: string,
     squash: boolean
   ): Promise<{ success: boolean; error?: string; operationId?: string }> {
-    const state = store.getState()
-    const workspace = state.workspaces[id]
-
-    if (!workspace) {
+    const entry = store.getState().workspaces[id]
+    if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) {
       return { success: false, error: 'Workspace not found' }
     }
+    const { data: workspace, store: wsStore } = entry
 
     if (!workspace.isWorktree || !workspace.parentId) {
       return { success: false, error: 'Not a worktree workspace' }
     }
 
-    const parent = state.workspaces[workspace.parentId]
+    const parentEntry = store.getState().workspaces[workspace.parentId]
+    const parent = parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error') ? parentEntry.data : undefined
     if (!parent || !parent.gitRootPath || !parent.gitBranch) {
       return { success: false, error: 'Parent workspace not found or not a git repo' }
     }
 
     const operationId = generateId()
-    store.setState(s => ({
-      workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'loading' as const, message: squash ? 'Squash merging workspace...' : 'Merging workspace...', output: [] } }
-    }))
-    const unsubOutput = deps.git.onOutput((opId, data) => {
+    // Keep data+store accessible during merge (for recovery on error)
+    const unsubOutput = deps.git.onOutput((opId, _data) => {
       if (opId !== operationId) return
-      const loadState = store.getState().workspaceLoadStates[id]
-      if (loadState?.status === 'loading') {
-        store.setState(s => ({
-          workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { ...loadState, output: [...loadState.output, data] } }
-        }))
-      }
+      // Merge output not streamed to UI — workspace stays in loaded state
     })
 
     try {
@@ -530,7 +520,7 @@ export function createSessionStore(
         )
         if (!commitResult.success) {
           store.setState(s => ({
-            workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: `Failed to commit changes: ${commitResult.error}` } }
+            workspaces: { ...s.workspaces, [id]: { status: 'operation-error', data: workspace, store: wsStore, error: `Failed to commit changes: ${commitResult.error}` } }
           }))
           return { success: false, error: `Failed to commit changes: ${commitResult.error}` }
         }
@@ -545,7 +535,7 @@ export function createSessionStore(
 
       if (!mergeResult.success) {
         store.setState(s => ({
-          workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: `Merge failed: ${mergeResult.error}` } }
+          workspaces: { ...s.workspaces, [id]: { status: 'operation-error', data: workspace, store: wsStore, error: `Merge failed: ${mergeResult.error}` } }
         }))
         return { success: false, error: `Merge failed: ${mergeResult.error}` }
       }
@@ -553,7 +543,7 @@ export function createSessionStore(
       return { success: true, operationId }
     } catch (err) {
       store.setState(s => ({
-        workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: err instanceof Error ? err.message : String(err) } }
+        workspaces: { ...s.workspaces, [id]: { status: 'operation-error', data: workspace, store: wsStore, error: err instanceof Error ? err.message : String(err) } }
       }))
       return { success: false, error: err instanceof Error ? err.message : String(err) }
     } finally {
@@ -575,11 +565,9 @@ export function createSessionStore(
   const store = createStore<SessionState>()((set, get) => ({
     sessionId: config.sessionId,
     ttyWriters: {},
-    workspaceStores: {},
     workspaces: {},
     activeWorkspaceId: null,
     isRestoring: false,
-    workspaceLoadStates: {},
     sessionVersion: 0,
 
     connection: config.connection ?? null,
@@ -627,85 +615,83 @@ export function createSessionStore(
       return deps.terminal.list(connectionId)
     },
 
-    dismissFailedWorkspace: (id: string): void => {
-      get().removeOrphanWorkspace(id)
-      set((s) => {
-        const { [id]: _, ...rest } = s.workspaceLoadStates
-        return { workspaceLoadStates: rest }
-      })
+    clearWorkspaceError: (id: string): void => {
+      const entry = get().workspaces[id]
+      if (!entry || entry.status !== 'operation-error') return
+      set((s) => ({
+        workspaces: { ...s.workspaces, [id]: { status: 'loaded', data: entry.data, store: entry.store } }
+      }))
     },
 
-    getWorkspace: (id: string): WorkspaceStore | null => {
-      return get().workspaceStores[id] ?? null
+    closeWorkspace: (id: string): void => {
+      set((s) => {
+        const { [id]: _, ...rest } = s.workspaces
+        return {
+          workspaces: rest,
+          activeWorkspaceId: s.activeWorkspaceId === id ? null : s.activeWorkspaceId
+        }
+      })
     },
 
     addWorkspace: (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => {
       console.log('[session] addWorkspace called for path:', path)
       const id = generateId()
-
-      const appStates: Record<string, AppState> = {}
-      let activeTabId: string | null = null
-
-      if (!options?.skipDefaultTabs) {
-        const defaultApp = getDefaultAppForWorktree(deps, options?.settings, undefined)
-        if (defaultApp) {
-          const tabId = generateTabId()
-          appStates[tabId] = {
-            applicationId: defaultApp.id,
-            title: defaultApp.name,
-            state: defaultApp.createInitialState()
-          }
-          activeTabId = tabId
-        }
-      }
-
-      const workspace: Workspace = {
-        id,
-        name: getNameFromPath(path),
-        path,
-        parentId: null,
-        status: 'active',
-        isGitRepo: false,
-        gitBranch: null,
-        gitRootPath: null,
-        isWorktree: false,
-        isDetached: false,
-        appStates,
-        activeTabId,
-        settings: options?.settings,
-        metadata: {},
-        createdAt: Date.now(),
-        lastActivity: Date.now(),
-      }
-
-      const handle = createHandleForWorkspace(workspace)
+      const name = getNameFromPath(path)
 
       set((s) => ({
-        workspaceStores: { ...s.workspaceStores, [id]: handle },
-        workspaces: { ...s.workspaces, [id]: workspace },
+        workspaces: { ...s.workspaces, [id]: { status: 'loading' as const, name, message: 'Loading workspace...', output: [] } },
         activeWorkspaceId: id,
-        workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'loading' as const, message: 'Loading workspace...', output: [] } }
       }))
 
-      // Fire-and-forget: resolve git info
+      // Fire-and-forget: resolve git info then create workspace+handle
       deps.git.getInfo(path).then(gitInfo => {
-        const wsHandle = get().workspaceStores[id]
-        if (wsHandle) {
-          wsHandle.setState(s => ({
-            workspace: { ...s.workspace, isGitRepo: gitInfo.isRepo, gitBranch: gitInfo.branch, gitRootPath: gitInfo.rootPath }
-          }))
-          for (const tabId of Object.keys(appStates)) {
-            wsHandle.getState().initTab(tabId)
+        const appStates: Record<string, AppState> = {}
+        let activeTabId: string | null = null
+
+        if (!options?.skipDefaultTabs) {
+          const defaultApp = getDefaultAppForWorktree(deps, options?.settings, undefined)
+          if (defaultApp) {
+            const tabId = generateTabId()
+            appStates[tabId] = {
+              applicationId: defaultApp.id,
+              title: defaultApp.name,
+              state: defaultApp.createInitialState()
+            }
+            activeTabId = tabId
           }
         }
-        set(s => {
-          const { [id]: _, ...rest } = s.workspaceLoadStates
-          return { workspaceLoadStates: rest }
-        })
+
+        const workspace: Workspace = {
+          id,
+          name,
+          path,
+          parentId: null,
+          status: 'active',
+          isGitRepo: gitInfo.isRepo,
+          gitBranch: gitInfo.branch,
+          gitRootPath: gitInfo.rootPath,
+          isWorktree: false,
+          isDetached: false,
+          appStates,
+          activeTabId,
+          settings: options?.settings,
+          metadata: {},
+          createdAt: Date.now(),
+          lastActivity: Date.now(),
+        }
+
+        const handle = createHandleForWorkspace(workspace)
+        for (const tabId of Object.keys(appStates)) {
+          handle.getState().initTab(tabId)
+        }
+
+        set(s => ({
+          workspaces: { ...s.workspaces, [id]: { status: 'loaded', data: workspace, store: handle } }
+        }))
         syncSessionToDaemon(get().isRestoring)
       }).catch(err => {
         set(s => ({
-          workspaceLoadStates: { ...s.workspaceLoadStates, [id]: { status: 'error', error: err instanceof Error ? err.message : String(err) } }
+          workspaces: { ...s.workspaces, [id]: { status: 'error', name, error: err instanceof Error ? err.message : String(err) } }
         }))
       })
 
@@ -713,8 +699,8 @@ export function createSessionStore(
     },
 
     addChildWorkspace: (parentId: string, name: string, isDetached: boolean = false, settings?: WorktreeSettings, description?: string) => {
-      const state = get()
-      const parent = state.workspaces[parentId]
+      const parentEntry = get().workspaces[parentId]
+      const parent = parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error') ? parentEntry.data : undefined
 
       if (!parent) {
         return { success: false, error: 'Parent workspace not found' }
@@ -734,7 +720,8 @@ export function createSessionStore(
           }
         },
         gitOperation: (operationId) => {
-          const currentParent = get().workspaces[parentId]
+          const currentParentEntry = get().workspaces[parentId]
+          const currentParent = currentParentEntry && (currentParentEntry.status === 'loaded' || currentParentEntry.status === 'operation-error') ? currentParentEntry.data : undefined
           return deps.git.createWorktree(
             parent.gitRootPath!,
             name,
@@ -746,17 +733,15 @@ export function createSessionStore(
     },
 
     adoptExistingWorktree: async (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => {
-      const state = get()
-      const parent = state.workspaces[parentId]
-
-      if (!parent) {
+      const parentEntry = get().workspaces[parentId]
+      if (!parentEntry || (parentEntry.status !== 'loaded' && parentEntry.status !== 'operation-error')) {
         return { success: false, error: 'Parent workspace not found' }
       }
 
-      const existingWorkspace = Object.values(state.workspaces).find(
-        ws => ws.path === worktreePath
+      const alreadyOpen = Object.values(get().workspaces).some(
+        e => (e.status === 'loaded' || e.status === 'operation-error') && e.data.path === worktreePath
       )
-      if (existingWorkspace) {
+      if (alreadyOpen) {
         return { success: false, error: 'This worktree is already open' }
       }
 
@@ -767,8 +752,8 @@ export function createSessionStore(
 
     createWorktreeFromBranch: (parentId: string, branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => {
       console.log('[session] createWorktreeFromBranch called:', { parentId, branch, isDetached })
-      const state = get()
-      const parent = state.workspaces[parentId]
+      const parentEntry = get().workspaces[parentId]
+      const parent = parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error') ? parentEntry.data : undefined
 
       if (!parent) {
         return { success: false, error: 'Parent workspace not found' }
@@ -794,8 +779,8 @@ export function createSessionStore(
 
     createWorktreeFromRemote: (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => {
       console.log('[session] createWorktreeFromRemote called:', { parentId, remoteBranch, isDetached })
-      const state = get()
-      const parent = state.workspaces[parentId]
+      const parentEntry = get().workspaces[parentId]
+      const parent = parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error') ? parentEntry.data : undefined
 
       if (!parent) {
         return { success: false, error: 'Parent workspace not found' }
@@ -829,16 +814,11 @@ export function createSessionStore(
       removeWorkspaceWithLoading(id, { keepBranch: true, keepWorktree: true }),
 
     removeOrphanWorkspace: (id: string) => {
-      const state = get()
-      const workspace = state.workspaces[id]
-      if (!workspace) return
-
+      if (!get().workspaces[id]) return
       set((s) => {
-        const { [id]: _removedHandle, ...remainingHandles } = s.workspaceStores
-        const { [id]: _removedWs, ...remainingWorkspaces } = s.workspaces
+        const { [id]: _, ...remaining } = s.workspaces
         return {
-          workspaceStores: remainingHandles,
-          workspaces: remainingWorkspaces,
+          workspaces: remaining,
           activeWorkspaceId: s.activeWorkspaceId === id ? null : s.activeWorkspaceId
         }
       })
@@ -849,24 +829,23 @@ export function createSessionStore(
     },
 
     updateGitInfo: (id: string, gitInfo: GitInfo) => {
-      const handle = get().workspaceStores[id]
-      if (!handle) return
-      const ws = handle.getState().workspace
-      handle.setState({
+      const entry = get().workspaces[id]
+      if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
+      entry.store.setState(s => ({
         workspace: {
-          ...ws,
+          ...s.workspace,
           isGitRepo: gitInfo.isRepo,
           gitBranch: gitInfo.branch,
           gitRootPath: gitInfo.rootPath
         }
-      })
+      }))
       syncSessionToDaemon(get().isRestoring).catch(console.error)
     },
 
     refreshGitInfo: async (id: string) => {
-      const workspace = get().workspaces[id]
-      if (!workspace) return
-      const gitInfo = await deps.git.getInfo(workspace.path)
+      const entry = get().workspaces[id]
+      if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
+      const gitInfo = await deps.git.getInfo(entry.data.path)
       get().updateGitInfo(id, gitInfo)
     },
 
@@ -874,29 +853,31 @@ export function createSessionStore(
       const result = await mergeWorkspaceCore(id, squash)
       if (!result.success) return result
 
-      const workspace = get().workspaces[id]!
-      const handle = get().workspaceStores[id]
-      if (handle) {
-        handle.getState().updateStatus('merged')
+      const entry = get().workspaces[id]
+      if (entry && (entry.status === 'loaded' || entry.status === 'operation-error')) {
+        entry.store.getState().updateStatus('merged')
       }
 
       try {
         await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: false, operationId: result.operationId })
       } catch (err) {
-        // Merge succeeded but removal failed — show dismissable error instead of stuck spinner
-        store.setState(s => ({
-          workspaceLoadStates: {
-            ...s.workspaceLoadStates,
-            [id]: { status: 'error', error: `Merge succeeded but cleanup failed: ${err instanceof Error ? err.message : String(err)}` }
-          }
-        }))
+        // Merge succeeded but removal failed — show operation error
+        const currentEntry = get().workspaces[id]
+        if (currentEntry && (currentEntry.status === 'loaded' || currentEntry.status === 'operation-error')) {
+          store.setState(s => ({
+            workspaces: { ...s.workspaces, [id]: { status: 'operation-error', data: currentEntry.data, store: currentEntry.store, error: `Merge succeeded but cleanup failed: ${err instanceof Error ? err.message : String(err)}` } }
+          }))
+        }
         return { success: false, error: err instanceof Error ? err.message : String(err) }
       }
 
       // Refresh parent's remote status after merge
-      const parentHandle = get().workspaceStores[workspace.parentId!]
-      if (parentHandle) {
-        parentHandle.getState().refreshRemoteStatus()
+      const wsData = entry && (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined
+      if (wsData?.parentId) {
+        const parentEntry = get().workspaces[wsData.parentId]
+        if (parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error')) {
+          parentEntry.store.getState().refreshRemoteStatus()
+        }
       }
 
       return { success: true }
@@ -906,44 +887,45 @@ export function createSessionStore(
       const result = await mergeWorkspaceCore(id, squash)
       if (!result.success) return result
 
-      const workspace = get().workspaces[id]!
-
-      // Clear loading state
-      store.setState(s => {
-        const { [id]: _, ...rest } = s.workspaceLoadStates
-        return { workspaceLoadStates: rest }
-      })
+      // On success, ensure workspace is back to loaded status
+      const entry = get().workspaces[id]
+      if (entry && entry.status === 'operation-error') {
+        store.setState(s => ({
+          workspaces: { ...s.workspaces, [id]: { status: 'loaded', data: entry.data, store: entry.store } }
+        }))
+      }
 
       // Refresh workspace diff status and git info
-      const handle = get().workspaceStores[id]
-      if (handle) {
-        handle.getState().refreshDiffStatus()
+      const currentEntry = get().workspaces[id]
+      if (currentEntry && currentEntry.status === 'loaded') {
+        currentEntry.store.getState().refreshDiffStatus()
       }
       get().refreshGitInfo(id)
 
       // Refresh parent's remote status after merge
-      const parentHandle = get().workspaceStores[workspace.parentId!]
-      if (parentHandle) {
-        parentHandle.getState().refreshRemoteStatus()
+      if (currentEntry && currentEntry.status === 'loaded' && currentEntry.data.parentId) {
+        const parentEntry = get().workspaces[currentEntry.data.parentId]
+        if (parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error')) {
+          parentEntry.store.getState().refreshRemoteStatus()
+        }
       }
 
       return { success: true }
     },
 
     closeAndCleanWorkspace: async (id: string) => {
-      const state = get()
-      const workspace = state.workspaces[id]
-
-      if (!workspace) {
+      const entry = get().workspaces[id]
+      if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) {
         return { success: false, error: 'Workspace not found' }
       }
+      const workspace = entry.data
 
       if (!workspace.isWorktree || !workspace.parentId) {
         return { success: false, error: 'Not a worktree workspace' }
       }
 
-      const parent = state.workspaces[workspace.parentId]
-      if (!parent || !parent.gitRootPath) {
+      const parentEntry = get().workspaces[workspace.parentId]
+      if (!parentEntry || (parentEntry.status !== 'loaded' && parentEntry.status !== 'operation-error') || !parentEntry.data.gitRootPath) {
         return { success: false, error: 'Parent workspace not found or not a git repo' }
       }
 
@@ -952,12 +934,11 @@ export function createSessionStore(
     },
 
     quickForkWorkspace: async (workspaceId: string) => {
-      const state = get()
-      const ws = state.workspaces[workspaceId]
-
-      if (!ws) {
+      const entry = get().workspaces[workspaceId]
+      if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) {
         return { success: false, error: 'Workspace not found' }
       }
+      const ws = entry.data
 
       if (!ws.gitRootPath) {
         return { success: false, error: 'Workspace has no git root path' }
@@ -1009,11 +990,11 @@ export function createSessionStore(
       set({ isRestoring: true, sessionVersion: daemonSession.version })
       applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: false })
 
-      // Remove workspaces not present in daemon session (skip loading workspaces)
+      // Remove workspaces not present in daemon session (skip non-loaded workspaces)
       const incomingPaths = new Set(daemonSession.workspaces.map(ws => ws.path))
       const updatedState = get()
-      for (const [id, ws] of Object.entries(updatedState.workspaces)) {
-        if (!incomingPaths.has(ws.path) && !updatedState.workspaceLoadStates[id]) {
+      for (const [id, entry] of Object.entries(updatedState.workspaces)) {
+        if (entry.status === 'loaded' && !incomingPaths.has(entry.data.path)) {
           get().removeOrphanWorkspace(id)
         }
       }
@@ -1032,12 +1013,25 @@ function updateWorkspaceFields(
   existingId: string,
   daemonWorkspace: Workspace
 ): void {
-  const handle = store.getState().workspaceStores[existingId]
-  if (!handle) return
-  const ws = handle.getState().workspace
-  handle.setState({
+  const entry = store.getState().workspaces[existingId]
+  if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
+  const ws = entry.store.getState().workspace
+  entry.store.setState({
     workspace: { ...ws, metadata: daemonWorkspace.metadata, name: daemonWorkspace.name }
   })
+}
+
+// Helper: find existing loaded workspace by path
+function findLoadedByPath(
+  store: StoreApi<SessionState>,
+  path: string
+): { id: string } | undefined {
+  for (const [id, entry] of Object.entries(store.getState().workspaces)) {
+    if ((entry.status === 'loaded' || entry.status === 'operation-error') && entry.data.path === path) {
+      return { id }
+    }
+  }
+  return undefined
 }
 
 // Helper: apply daemon workspaces to the session store
@@ -1051,9 +1045,7 @@ function applySessionWorkspaces(
   const childWorkspaces = daemonWorkspaces.filter(w => w.parentId)
 
   for (const daemonWorkspace of rootWorkspaces) {
-    const existing = Object.values(store.getState().workspaces).find(
-      ws => ws.path === daemonWorkspace.path
-    )
+    const existing = findLoadedByPath(store, daemonWorkspace.path)
 
     if (existing) {
       if (options.restoreExisting) {
@@ -1068,9 +1060,7 @@ function applySessionWorkspaces(
   }
 
   for (const daemonWorkspace of childWorkspaces) {
-    const existing = Object.values(store.getState().workspaces).find(
-      ws => ws.path === daemonWorkspace.path
-    )
+    const existing = findLoadedByPath(store, daemonWorkspace.path)
 
     if (existing) {
       if (options.restoreExisting) {
@@ -1090,10 +1080,10 @@ function restoreWorkspaceTabs(
   workspaceId: string,
   daemonWorkspace: Workspace
 ): void {
-  const handle = store.getState().workspaceStores[workspaceId]
-  if (!handle) return
-  const ws = handle.getState().workspace
-  handle.setState({
+  const entry = store.getState().workspaces[workspaceId]
+  if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
+  const ws = entry.store.getState().workspace
+  entry.store.setState({
     workspace: {
       ...ws,
       appStates: daemonWorkspace.appStates,
@@ -1102,7 +1092,7 @@ function restoreWorkspaceTabs(
   })
 
   for (const tabId of Object.keys(daemonWorkspace.appStates)) {
-    handle.getState().initTab(tabId)
+    entry.store.getState().initTab(tabId)
   }
 }
 
@@ -1124,8 +1114,7 @@ function reconstructWorkspace(
   const handle = createHandleForWorkspace(workspace)
 
   store.setState((s) => ({
-    workspaceStores: { ...s.workspaceStores, [id]: handle },
-    workspaces: { ...s.workspaces, [id]: workspace },
+    workspaces: { ...s.workspaces, [id]: { status: 'loaded' as const, data: workspace, store: handle } },
     activeWorkspaceId: id
   }))
 

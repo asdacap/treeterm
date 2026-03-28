@@ -11,7 +11,7 @@ import { useKeybindingStore } from '../store/keybinding'
 import { useSessionNamesStore } from '../store/sessionNames'
 import CreateChildDialog from './CreateChildDialog'
 import OpenWorkspaceDialog from './OpenWorkspaceDialog'
-import type { Workspace, ReviewState, WorktreeSettings } from '../types'
+import type { ReviewState, WorktreeSettings } from '../types'
 
 // Import WorkspaceIcon from TreePane
 import { WorkspaceIcon } from './TreePane'
@@ -30,7 +30,6 @@ export default function SessionPanel({
   const connection = useStore(sessionStore, s => s.connection)
   const {
     workspaces,
-    workspaceStores,
     activeWorkspaceId,
     addWorkspace,
     addChildWorkspace,
@@ -39,7 +38,6 @@ export default function SessionPanel({
     createWorktreeFromRemote,
     quickForkWorkspace,
     setActiveWorkspace,
-    workspaceLoadStates,
   } = useStore(sessionStore)
   const { activeView, setActiveView } = useNavigationStore()
   const {
@@ -54,13 +52,14 @@ export default function SessionPanel({
   const closeContextMenu = useContextMenuStore((s) => s.close)
   const [contextMenuWorkspaceId, setContextMenuWorkspaceId] = useState('')
   const getChildren = (parentId: string) =>
-    Object.values(workspaces).filter((ws) => ws.parentId === parentId)
+    Object.entries(workspaces)
+      .filter(([, e]) => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === parentId)
+      .map(([, e]) => (e as Extract<typeof e, { status: 'loaded' | 'operation-error' }>).data)
 
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     return new Set(
-      Object.values(workspaces)
-        .filter((ws) => getChildren(ws.id).length > 0)
-        .map((ws) => ws.id)
+      Object.keys(workspaces)
+        .filter((id) => getChildren(id).length > 0)
     )
   })
   const [createChildDialogParentId, setCreateChildDialogParentId] = useState<string | null>(null)
@@ -100,9 +99,8 @@ export default function SessionPanel({
 
   // Expand any workspace that gains children after mount
   useEffect(() => {
-    const parentIds = Object.values(workspaces)
-      .filter((ws) => getChildren(ws.id).length > 0)
-      .map((ws) => ws.id)
+    const parentIds = Object.keys(workspaces)
+      .filter((id) => getChildren(id).length > 0)
     if (parentIds.length > 0) {
       setExpanded((prev) => {
         const next = new Set(prev)
@@ -115,8 +113,10 @@ export default function SessionPanel({
   // Compute paths of already-open worktrees
   const openWorktreePaths = useMemo(() => {
     return Object.values(workspaces)
-      .filter(ws => ws.isWorktree)
-      .map(ws => ws.path)
+      .filter((e): e is Extract<typeof e, { status: 'loaded' | 'operation-error' }> =>
+        e.status === 'loaded' || e.status === 'operation-error')
+      .filter(e => e.data.isWorktree)
+      .map(e => e.data.path)
   }, [workspaces])
 
   const handleAddWorkspace = () => {
@@ -216,24 +216,23 @@ export default function SessionPanel({
 
   const handleRemove = async (id: string) => {
     closeContextMenu()
-    const ws = workspaces[id]
+    const entry = workspaces[id]
+    if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
+    const ws = entry.data
 
     // For worktree workspaces with a parent, open the Review tab
     if (ws.isWorktree && ws.parentId) {
       setActiveWorkspace(id)
-      const handle = workspaceStores[id]
-      if (handle) {
-        handle.getState().addTab<ReviewState>('review', {
-          parentWorkspaceId: ws.parentId
-        })
-      }
+      entry.store.getState().addTab<ReviewState>('review', {
+        parentWorkspaceId: ws.parentId
+      })
       return
     }
 
     // For regular workspaces, just confirm and remove
     const message = `Remove workspace "${ws.name}"?`
     if (confirm(message)) {
-      await workspaceStores[id]!.getState().remove()
+      await entry.store.getState().remove()
     }
   }
 
@@ -249,45 +248,58 @@ export default function SessionPanel({
     })
   }
 
-  // Get root workspaces (those without parents)
-  const rootWorkspaces = Object.values(workspaces).filter((ws) => !ws.parentId)
+  // Get root workspaces (those without parents) — includes loading/error entries (no parentId)
+  const rootWorkspaceIds = Object.entries(workspaces)
+    .filter(([, e]) => {
+      if (e.status === 'loaded' || e.status === 'operation-error') return !e.data.parentId
+      return true // loading/error entries are always top-level
+    })
+    .map(([id]) => id)
 
   // Get create child dialog parent handle
-  const createChildDialogParentHandle = createChildDialogParentId
-    ? workspaceStores[createChildDialogParentId] ?? null
+  const createChildDialogParentEntry = createChildDialogParentId ? workspaces[createChildDialogParentId] : undefined
+  const createChildDialogParentHandle = createChildDialogParentEntry &&
+    (createChildDialogParentEntry.status === 'loaded' || createChildDialogParentEntry.status === 'operation-error')
+    ? createChildDialogParentEntry.store
     : null
 
-  const handleWorkspaceClick = (ws: Workspace) => {
-    setActiveWorkspace(ws.id)
-    setActiveView({ type: 'workspace', workspaceId: ws.id, sessionId })
+  const handleWorkspaceClick = (id: string) => {
+    setActiveWorkspace(id)
+    setActiveView({ type: 'workspace', workspaceId: id, sessionId })
   }
 
-  const renderWorkspace = (ws: Workspace, depth: number = 0) => {
-    const children = getChildren(ws.id)
+  const renderWorkspace = (id: string, depth: number = 0) => {
+    const entry = workspaces[id]
+    if (!entry) return null
+
+    // For loaded/operation-error entries, use full data
+    const ws = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined
+    const displayName = ws ? (ws.metadata?.displayName || ws.name) : (entry as { name: string }).name
+    const children = getChildren(id)
     const hasChildren = children.length > 0
-    const isExpanded = expanded.has(ws.id)
-    const tabIds = Object.keys(ws.appStates)
+    const isExpanded = expanded.has(id)
+    const tabIds = ws ? Object.keys(ws.appStates) : []
 
     // Check if this workspace is focused in workspace_focus mode
     const isFocused =
       prefixState === 'workspace_focus' &&
-      focusedWorkspaceIds[focusedWorkspaceIndex] === ws.id
+      focusedWorkspaceIds[focusedWorkspaceIndex] === id
 
     return (
-      <div key={ws.id}>
+      <div key={id}>
         <div
-          className={`tree-item ${depth === 0 ? 'tree-item-root' : ''} ${isActiveSession && activeWorkspaceId === ws.id ? 'active' : ''} ${isFocused ? 'focused' : ''}`}
+          className={`tree-item ${depth === 0 ? 'tree-item-root' : ''} ${isActiveSession && activeWorkspaceId === id ? 'active' : ''} ${isFocused ? 'focused' : ''}`}
           style={{ paddingLeft: 4 + depth * 4 }}
-          onClick={() => handleWorkspaceClick(ws)}
-          onContextMenu={(e) => handleContextMenu(e, ws.id)}
-          title={ws.metadata?.description ? `${ws.path}\n\n${ws.metadata.description}` : ws.path}
+          onClick={() => handleWorkspaceClick(id)}
+          onContextMenu={(e) => handleContextMenu(e, id)}
+          title={ws?.metadata?.description ? `${ws.path}\n\n${ws.metadata.description}` : ws?.path}
         >
           {hasChildren ? (
             <span
               className="tree-item-expand"
               onClick={(e) => {
                 e.stopPropagation()
-                toggleExpand(ws.id)
+                toggleExpand(id)
               }}
             >
               {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
@@ -296,17 +308,17 @@ export default function SessionPanel({
             <span className="tree-item-expand-placeholder" />
           )}
           <span className="tree-item-icon">
-            <WorkspaceIcon tabIds={tabIds} loadStatus={workspaceLoadStates[ws.id]?.status} isWorktree={ws.isWorktree} />
+            <WorkspaceIcon tabIds={tabIds} loadStatus={entry.status === 'loading' || entry.status === 'error' ? entry.status : undefined} isWorktree={ws?.isWorktree ?? false} />
           </span>
           <span className="tree-item-name">
-            {ws.metadata?.displayName || ws.name}
+            {displayName}
           </span>
           <span className="tree-item-actions">
-            {ws.isGitRepo && (
+            {ws?.isGitRepo && (
               <button
                 className="tree-item-action"
                 title="Fork"
-                onClick={(e) => { e.stopPropagation(); handleQuickFork(ws.id) }}
+                onClick={(e) => { e.stopPropagation(); handleQuickFork(id) }}
               >
                 <GitFork size={16} />
               </button>
@@ -316,7 +328,7 @@ export default function SessionPanel({
         </div>
 
         {/* Children */}
-        {isExpanded && children.map((child) => renderWorkspace(child, depth + 1))}
+        {isExpanded && children.map((child) => renderWorkspace(child.id, depth + 1))}
       </div>
     )
   }
@@ -355,30 +367,38 @@ export default function SessionPanel({
       </div>
 
       <div className="tree-list">
-        {rootWorkspaces.length === 0 ? (
+        {rootWorkspaceIds.length === 0 ? (
           <div className="tree-empty">No workspaces. Click + to add one.</div>
         ) : (
-          rootWorkspaces.map((ws) => renderWorkspace(ws))
+          rootWorkspaceIds.map((id) => renderWorkspace(id))
         )}
       </div>
 
       {/* Context Menu */}
       <ContextMenu menuId="session-ws-context">
-        {workspaces[contextMenuWorkspaceId]?.isGitRepo && (
-          <div className="context-menu-item" onClick={() => handleCreateChild(contextMenuWorkspaceId)}>
-            Open Existing Branch
-          </div>
-        )}
-        {workspaces[contextMenuWorkspaceId]?.isWorktree && workspaces[contextMenuWorkspaceId]?.parentId && (
-          <div className="context-menu-item" onClick={() => handleRemove(contextMenuWorkspaceId)}>
-            Review & Merge
-          </div>
-        )}
-        {!workspaces[contextMenuWorkspaceId]?.isWorktree && (
-          <div className="context-menu-item danger" onClick={() => handleRemove(contextMenuWorkspaceId)}>
-            Remove
-          </div>
-        )}
+        {(() => {
+          const ctxEntry = workspaces[contextMenuWorkspaceId]
+          const ctxWs = ctxEntry && (ctxEntry.status === 'loaded' || ctxEntry.status === 'operation-error') ? ctxEntry.data : undefined
+          return (
+            <>
+              {ctxWs?.isGitRepo && (
+                <div className="context-menu-item" onClick={() => handleCreateChild(contextMenuWorkspaceId)}>
+                  Open Existing Branch
+                </div>
+              )}
+              {ctxWs?.isWorktree && ctxWs?.parentId && (
+                <div className="context-menu-item" onClick={() => handleRemove(contextMenuWorkspaceId)}>
+                  Review & Merge
+                </div>
+              )}
+              {ctxWs && !ctxWs.isWorktree && (
+                <div className="context-menu-item danger" onClick={() => handleRemove(contextMenuWorkspaceId)}>
+                  Remove
+                </div>
+              )}
+            </>
+          )
+        })()}
       </ContextMenu>
 
       {/* Session Context Menu */}
