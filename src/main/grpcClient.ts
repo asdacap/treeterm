@@ -297,7 +297,8 @@ export class GrpcDaemonClient {
   async updateSession(
     sessionId: string,
     workspaces: Omit<Workspace, 'createdAt' | 'lastActivity'>[],
-    senderId?: string
+    senderId?: string,
+    expectedVersion?: number
   ): Promise<Session> {
     if (!this.client) {
       throw new Error('Not connected to daemon')
@@ -307,7 +308,8 @@ export class GrpcDaemonClient {
       const request: UpdateSessionRequest = {
         sessionId,
         workspaces: this.convertToProtoWorkspaceInputs(workspaces),
-        senderId
+        senderId,
+        expectedVersion
       }
 
       this.client!.updateSession(request, (error, response) => {
@@ -583,7 +585,8 @@ export class GrpcDaemonClient {
       id: protoSession.id,
       workspaces: protoSession.workspaces.map(w => this.convertFromProtoWorkspace(w)),
       createdAt: protoSession.createdAt,
-      lastActivity: protoSession.lastActivity
+      lastActivity: protoSession.lastActivity,
+      version: protoSession.version
     }
   }
 

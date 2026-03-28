@@ -634,6 +634,7 @@ describe('createSessionStore', () => {
         ],
         createdAt: Date.now(),
         lastActivity: Date.now(),
+        version: 1,
       }
 
       await store.getState().handleRestore(daemonSession)
@@ -656,6 +657,7 @@ describe('createSessionStore', () => {
         ],
         createdAt: Date.now(),
         lastActivity: Date.now(),
+        version: 1,
       }
 
       await store.getState().handleExternalUpdate(daemonSession)
@@ -676,6 +678,7 @@ describe('createSessionStore', () => {
         ],
         createdAt: Date.now(),
         lastActivity: Date.now(),
+        version: 1,
       }
 
       await store.getState().handleRestore(daemonSession)

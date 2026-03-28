@@ -75,6 +75,8 @@ export interface Session {
   workspaces: Workspace[];
   createdAt: number;
   lastActivity: number;
+  /** Monotonically increasing version, incremented on every update */
+  version: number;
 }
 
 export interface PtySessionInfo {
@@ -202,7 +204,11 @@ export interface UpdateSessionRequest {
   sessionId: string;
   workspaces: Workspace[];
   /** Window UUID to exclude from broadcast */
-  senderId?: string | undefined;
+  senderId?:
+    | string
+    | undefined;
+  /** Optimistic lock: must match current version for update to apply */
+  expectedVersion?: number | undefined;
 }
 
 export interface SessionWatchRequest {
@@ -1029,7 +1035,7 @@ export const Workspace_AppStatesEntry: MessageFns<Workspace_AppStatesEntry> = {
 };
 
 function createBaseSession(): Session {
-  return { id: "", workspaces: [], createdAt: 0, lastActivity: 0 };
+  return { id: "", workspaces: [], createdAt: 0, lastActivity: 0, version: 0 };
 }
 
 export const Session: MessageFns<Session> = {
@@ -1045,6 +1051,9 @@ export const Session: MessageFns<Session> = {
     }
     if (message.lastActivity !== 0) {
       writer.uint32(32).int64(message.lastActivity);
+    }
+    if (message.version !== 0) {
+      writer.uint32(40).uint64(message.version);
     }
     return writer;
   },
@@ -1088,6 +1097,14 @@ export const Session: MessageFns<Session> = {
           message.lastActivity = longToNumber(reader.int64());
           continue;
         }
+        case 5: {
+          if (tag !== 40) {
+            break;
+          }
+
+          message.version = longToNumber(reader.uint64());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1113,6 +1130,7 @@ export const Session: MessageFns<Session> = {
         : isSet(object.last_activity)
         ? globalThis.Number(object.last_activity)
         : 0,
+      version: isSet(object.version) ? globalThis.Number(object.version) : 0,
     };
   },
 
@@ -1130,6 +1148,9 @@ export const Session: MessageFns<Session> = {
     if (message.lastActivity !== 0) {
       obj.lastActivity = Math.round(message.lastActivity);
     }
+    if (message.version !== 0) {
+      obj.version = Math.round(message.version);
+    }
     return obj;
   },
 
@@ -1142,6 +1163,7 @@ export const Session: MessageFns<Session> = {
     message.workspaces = object.workspaces?.map((e) => Workspace.fromPartial(e)) || [];
     message.createdAt = object.createdAt ?? 0;
     message.lastActivity = object.lastActivity ?? 0;
+    message.version = object.version ?? 0;
     return message;
   },
 };
@@ -2999,7 +3021,7 @@ export const CreateSessionRequest: MessageFns<CreateSessionRequest> = {
 };
 
 function createBaseUpdateSessionRequest(): UpdateSessionRequest {
-  return { sessionId: "", workspaces: [], senderId: undefined };
+  return { sessionId: "", workspaces: [], senderId: undefined, expectedVersion: undefined };
 }
 
 export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
@@ -3012,6 +3034,9 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
     }
     if (message.senderId !== undefined) {
       writer.uint32(26).string(message.senderId);
+    }
+    if (message.expectedVersion !== undefined) {
+      writer.uint32(32).uint64(message.expectedVersion);
     }
     return writer;
   },
@@ -3047,6 +3072,14 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
           message.senderId = reader.string();
           continue;
         }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.expectedVersion = longToNumber(reader.uint64());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3071,6 +3104,11 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
         : isSet(object.sender_id)
         ? globalThis.String(object.sender_id)
         : undefined,
+      expectedVersion: isSet(object.expectedVersion)
+        ? globalThis.Number(object.expectedVersion)
+        : isSet(object.expected_version)
+        ? globalThis.Number(object.expected_version)
+        : undefined,
     };
   },
 
@@ -3085,6 +3123,9 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
     if (message.senderId !== undefined) {
       obj.senderId = message.senderId;
     }
+    if (message.expectedVersion !== undefined) {
+      obj.expectedVersion = Math.round(message.expectedVersion);
+    }
     return obj;
   },
 
@@ -3096,6 +3137,7 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
     message.sessionId = object.sessionId ?? "";
     message.workspaces = object.workspaces?.map((e) => Workspace.fromPartial(e)) || [];
     message.senderId = object.senderId ?? undefined;
+    message.expectedVersion = object.expectedVersion ?? undefined;
     return message;
   },
 };

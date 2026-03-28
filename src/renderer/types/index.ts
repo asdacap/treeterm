@@ -493,7 +493,7 @@ export interface SSHApi {
 export interface SessionApi {
   create: (workspaces: WorkspaceInput[]) =>
     Promise<{ success: boolean; session?: Session; error?: string }>
-  update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string) =>
+  update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number) =>
     Promise<{ success: boolean; session?: Session; error?: string }>
   list: () => Promise<{ success: boolean; sessions?: Session[]; error?: string }>
   get: (sessionId: string) => Promise<{ success: boolean; session?: Session; error?: string }>

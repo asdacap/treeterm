@@ -84,6 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize components
     let session_store = session_store::SessionStore::new();
     let pty_manager = pty_manager::PtyManager::new();
+    session_store.start_heartbeat();
 
     // Create default session at startup
     let default_session = session_store.get_or_create_default_session("daemon-init").await;

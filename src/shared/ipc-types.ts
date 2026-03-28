@@ -252,7 +252,7 @@ export interface IpcRequests {
     result: { success: boolean; session?: Session; error?: string }
   }
   sessionUpdate: {
-    params: [sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string]
+    params: [sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number]
     result: { success: boolean; session?: Session; error?: string }
   }
   sessionList: {
