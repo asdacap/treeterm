@@ -609,7 +609,7 @@ export class GrpcDaemonClient {
       gitBranch: protoWorkspace.gitBranch || null,
       gitRootPath: protoWorkspace.gitRootPath || null,
       isWorktree: protoWorkspace.isWorktree,
-      isDetached: protoWorkspace.isDetached,
+      isDetached: protoWorkspace.isDetached ?? false,
       appStates,
       activeTabId: protoWorkspace.activeTabId || null,
       metadata: protoWorkspace.metadata?.length ? JSON.parse(protoWorkspace.metadata.toString('utf-8')) : {},

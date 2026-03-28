@@ -81,7 +81,8 @@ describe('AI Harness Renderer', () => {
     enableSandbox: true,
     allowNetwork: false,
     backgroundColor: '#1a1a24',
-    disableScrollbar: true
+    disableScrollbar: true,
+    stripScrollbackClear: false
   }
 
   beforeEach(() => {
@@ -119,11 +120,13 @@ describe('AI Harness Renderer', () => {
         expect(state).toEqual({
           ptyId: null,
           ptyHandle: null,
+          keepOnExit: false,
           sandbox: {
             enabled: true,
             allowNetwork: false,
             allowedPaths: []
           },
+          autoApprove: false,
         })
       })
 
@@ -297,10 +300,10 @@ describe('AI Harness Renderer', () => {
         expect(result.props.disableScrollbar).toBe(true)
       })
 
-      it('passes false for disableScrollbar when undefined', () => {
+      it('passes false for disableScrollbar when false', () => {
         const appWithoutScrollbarOption = createAiHarnessVariant({
           ...mockInstance,
-          disableScrollbar: undefined
+          disableScrollbar: false
         }, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
@@ -318,7 +321,7 @@ describe('AI Harness Renderer', () => {
           isVisible: true,
         }) as { props: Record<string, unknown> }
 
-        expect(result.props.disableScrollbar).toBeUndefined()
+        expect(result.props.disableScrollbar).toBe(false)
       })
     })
 

@@ -90,12 +90,12 @@ export interface TerminalState {
   ptyId: string | null       // daemon sessionId — persisted for reconnection
   ptyHandle: string | null   // ephemeral stream handle — used for write/resize/onData/onExit
   connectionId?: string      // which connection this PTY belongs to — used for routing kill/isAlive
-  keepOnExit?: boolean
+  keepOnExit: boolean
 }
 
 export type AiHarnessState = TerminalState & {
   sandbox: SandboxConfig
-  autoApprove?: boolean
+  autoApprove: boolean
 }
 
 export interface FilesystemState {

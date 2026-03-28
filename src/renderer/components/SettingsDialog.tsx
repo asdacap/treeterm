@@ -481,7 +481,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                           <label className="settings-checkbox-label">
                             <input
                               type="checkbox"
-                              checked={inst.stripScrollbackClear ?? false}
+                              checked={inst.stripScrollbackClear}
                               onChange={(e) =>
                                 setLocalSettings((prev) => ({
                                   ...prev,

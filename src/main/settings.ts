@@ -28,7 +28,9 @@ const defaultSettings: Settings = {
       isDefault: false,
       enableSandbox: false,
       allowNetwork: true,
-      backgroundColor: '#1a1a24'
+      backgroundColor: '#1a1a24',
+      disableScrollbar: false,
+      stripScrollbackClear: false
     }]
   },
   appearance: {
@@ -213,9 +215,18 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
       isDefault: oldClaude.startByDefault || false,
       enableSandbox: oldClaude.enableSandbox || false,
       allowNetwork: true,
-      backgroundColor: '#1a1a24'
+      backgroundColor: '#1a1a24',
+      disableScrollbar: false,
+      stripScrollbackClear: false
     }]
   }
+
+  // Backfill required boolean fields on AI Harness instances from old settings
+  aiHarnessInstances = aiHarnessInstances.map(inst => ({
+    ...inst,
+    disableScrollbar: inst.disableScrollbar ?? false,
+    stripScrollbackClear: inst.stripScrollbackClear ?? false,
+  }))
 
   return {
     terminal: {

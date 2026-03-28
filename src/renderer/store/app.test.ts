@@ -796,7 +796,7 @@ describe('useAppStore', () => {
     it('registerAiHarnessVariants registers AI apps', async () => {
       const cleanup = await useAppStore.getState().initialize(mockDeps)
       useAppStore.getState().registerAiHarnessVariants([
-        { id: 'claude', name: 'Claude', icon: 'C', command: 'claude', isDefault: false, enableSandbox: false, allowNetwork: true, backgroundColor: '#000' }
+        { id: 'claude', name: 'Claude', icon: 'C', command: 'claude', isDefault: false, enableSandbox: false, allowNetwork: true, backgroundColor: '#000', disableScrollbar: false, stripScrollbackClear: false }
       ])
       cleanup()
     })

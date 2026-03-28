@@ -104,6 +104,7 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     gitBranch: null,
     gitRootPath: null,
     isWorktree: false,
+    isDetached: false,
     appStates: {},
     activeTabId: null,
     metadata: {},

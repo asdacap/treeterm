@@ -25,6 +25,7 @@ export const defaultSettings: Settings = {
       enableSandbox: false,
       allowNetwork: true,
       backgroundColor: '#1a1a24',
+      disableScrollbar: false,
       stripScrollbackClear: true
     }]
   },

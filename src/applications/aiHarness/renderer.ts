@@ -20,11 +20,13 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
     createInitialState: () => ({
       ptyId: null,
       ptyHandle: null,
+      keepOnExit: false,
       sandbox: {
         enabled: instance.enableSandbox,
         allowNetwork: instance.allowNetwork,
         allowedPaths: []
       },
+      autoApprove: false,
     }),
 
     onWorkspaceLoad: (tab: Tab, workspaceStore: WorkspaceStore): AiHarnessRef => {

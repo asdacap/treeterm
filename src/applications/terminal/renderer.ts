@@ -43,7 +43,8 @@ export function createTerminalApplication(deps: TerminalDeps): Application<Termi
 
     createInitialState: () => ({
       ptyId: null,
-      ptyHandle: null
+      ptyHandle: null,
+      keepOnExit: false
     }),
 
     onWorkspaceLoad: makeTerminalOnWorkspaceLoad(deps),
@@ -73,7 +74,8 @@ export function createTerminalVariant(instance: TerminalInstance, deps: Terminal
 
     createInitialState: () => ({
       ptyId: null,
-      ptyHandle: null
+      ptyHandle: null,
+      keepOnExit: false
     }),
 
     onWorkspaceLoad: makeTerminalOnWorkspaceLoad(deps, instance.startupCommand),

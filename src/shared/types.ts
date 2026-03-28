@@ -60,7 +60,7 @@ export interface Workspace {
   gitBranch: string | null
   gitRootPath: string | null
   isWorktree: boolean
-  isDetached?: boolean
+  isDetached: boolean
   appStates: Record<string, AppState>
   activeTabId: string | null
   settings?: WorktreeSettings
@@ -110,8 +110,8 @@ export interface AiHarnessInstance {
   enableSandbox: boolean
   allowNetwork: boolean
   backgroundColor: string
-  disableScrollbar?: boolean
-  stripScrollbackClear?: boolean
+  disableScrollbar: boolean
+  stripScrollbackClear: boolean
 }
 
 export interface PrefixModeConfig {
