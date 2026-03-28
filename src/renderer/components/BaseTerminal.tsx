@@ -56,8 +56,6 @@ export interface BaseTerminalConfig {
   disableActivityDetector?: boolean
   // Callback when terminal is ready, provides terminal instance and data version ref
   onTerminalReady?: (terminal: XTerm, dataVersionRef: React.MutableRefObject<number>) => void
-  // Ref populated with a function that triggers a PTY resize (cols-1 then restore) to flush buffered output
-  triggerResizeRef?: React.MutableRefObject<(() => void) | null>
 }
 
 interface BaseTerminalProps {
@@ -218,17 +216,6 @@ export default function BaseTerminal({
 
       terminalRef.current = terminal
 
-      // Populate triggerResize ref — shrinks cols by 1 then restores to flush buffered PTY output
-      // Only sends to daemon; xterm.js resize happens when daemon echoes back
-      if (config.triggerResizeRef) {
-        config.triggerResizeRef.current = () => {
-          if (!terminalRef.current || !ttyRef.current) return
-          const { cols, rows } = terminalRef.current
-          const ptyResize = ttyRef.current.getState().resize
-          ptyResize(cols - 1, rows)
-          ptyResize(cols, rows)
-        }
-      }
 
       // Create activity state detector with optional custom patterns
       // Skip when LLM-based analysis handles state (disableActivityDetector)

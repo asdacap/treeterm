@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useStore } from 'zustand'
 import type { Terminal as XTerm } from '@xterm/xterm'
 import BaseTerminal, { type BaseTerminalConfig } from './BaseTerminal'
@@ -65,7 +65,6 @@ export default function AiHarness({
   const ref = workspace.getState().getTabRef(tabId) as AiHarnessRef | null
   const analyzer = ref?.analyzer ?? null
 
-  const triggerResizeRef = useRef<(() => void) | null>(null)
 
   const { aiState, analyzing, reason, autoApprove } = analyzer
     ? useStore(analyzer)
@@ -125,7 +124,6 @@ export default function AiHarness({
     stripScrollbackClear,
     disableActivityDetector: true,
     onTerminalReady: handleTerminalReady,
-    triggerResizeRef,
   }), [backgroundColor, disableScrollbar, stripScrollbackClear, handleTerminalReady])
 
   if (!ptyId) {
@@ -144,13 +142,6 @@ export default function AiHarness({
               {aiState !== 'working' && <PromptCommitButton workspace={workspace} />}
               {aiState !== 'working' && <PromptRebaseButton workspace={workspace} />}
               {aiState !== 'working' && <ReviewCommentsButton workspace={workspace} />}
-              <button
-                className="review-comments-button"
-                onClick={() => triggerResizeRef.current?.()}
-                title="Trigger terminal resize to flush buffered output"
-              >
-                Trigger Resize
-              </button>
               <PushToTalkButton
                 onTranscript={handlePushToTalkTranscript}
                 onSubmit={handlePushToTalkSubmit}
