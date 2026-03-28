@@ -7,15 +7,7 @@ use tokio::io::unix::AsyncFd;
 use tokio::sync::{broadcast, Mutex};
 use treeterm_proto::treeterm::*;
 
-const MERGE_THRESHOLD: usize = 500 * 1024; // 500KB
-const COMPACTED_LIMIT: usize = 5 * 1024 * 1024; // 5MB
 const SCROLLBACK_LINES: u16 = 10000;
-
-#[derive(Clone, Debug)]
-pub enum ScrollbackEntry {
-    Data(Vec<u8>),
-    Resize { cols: u16, rows: u16 },
-}
 
 pub struct PtySession {
     pub id: String,
@@ -24,10 +16,7 @@ pub struct PtySession {
     pub cwd: String,
     pub cols: u16,
     pub rows: u16,
-    pub buffer1: Vec<ScrollbackEntry>,
-    pub buffer1_size: usize,
-    pub buffer2: Vec<ScrollbackEntry>,
-    pub buffer2_size: usize,
+    pub parser: vt100::Parser,
     pub created_at: i64,
     pub last_activity: i64,
     pub exit_code: Option<i32>,
@@ -129,10 +118,7 @@ impl PtyManager {
             cwd,
             cols,
             rows,
-            buffer1: Vec::new(),
-            buffer1_size: 0,
-            buffer2: vec![ScrollbackEntry::Resize { cols, rows }],
-            buffer2_size: 0,
+            parser: vt100::Parser::new(rows, cols, SCROLLBACK_LINES as usize),
             created_at: now,
             last_activity: now,
             exit_code: None,
@@ -181,14 +167,12 @@ impl PtyManager {
         Ok(id)
     }
 
-    pub async fn get_scrollback(&self, session_id: &str) -> Result<Vec<ScrollbackEntry>, String> {
+    pub async fn get_screen_state(&self, session_id: &str) -> Result<Vec<u8>, String> {
         let sessions = self.sessions.lock().await;
         let session = sessions
             .get(session_id)
             .ok_or_else(|| format!("session {} not found", session_id))?;
-        let mut scrollback = session.buffer1.clone();
-        scrollback.extend(session.buffer2.iter().cloned());
-        Ok(scrollback)
+        Ok(session.parser.screen().state_formatted())
     }
 
     pub async fn write(&self, session_id: &str, data: &[u8]) -> Result<(), String> {
@@ -233,7 +217,7 @@ impl PtyManager {
         }
         session.cols = cols;
         session.rows = rows;
-        session.buffer2.push(ScrollbackEntry::Resize { cols, rows });
+        session.parser.set_size(rows, cols);
         session.last_activity = chrono_now_millis();
         let _ = session.resize_tx.send((cols as i32, rows as i32));
         Ok(())
@@ -333,81 +317,6 @@ impl PtyManager {
     }
 }
 
-/// Count the number of terminal lines that entries would produce
-/// when processed through a terminal emulator.
-fn count_terminal_lines(entries: &[ScrollbackEntry], cols: u16, rows: u16) -> usize {
-    let mut parser = vt100::Parser::new(rows, cols, SCROLLBACK_LINES as usize);
-    for entry in entries {
-        match entry {
-            ScrollbackEntry::Data(chunk) => parser.process(chunk),
-            ScrollbackEntry::Resize { cols, rows } => parser.set_size(*rows, *cols),
-        }
-    }
-    let screen = parser.screen();
-    // scrollback lines + visible terminal rows
-    screen.scrollback() + screen.size().0 as usize
-}
-
-fn append_scrollback(session: &mut PtySession, data: &[u8]) {
-    session.buffer2.push(ScrollbackEntry::Data(data.to_vec()));
-    session.buffer2_size += data.len();
-
-    if session.buffer2_size > MERGE_THRESHOLD {
-        compact_scrollback(session);
-    }
-}
-
-fn compact_scrollback(session: &mut PtySession) {
-    let cols = session.cols;
-    let rows = session.rows;
-
-    // Measure combined buffer1 + buffer2
-    let combined: Vec<ScrollbackEntry> = session.buffer1.iter().chain(session.buffer2.iter()).cloned().collect();
-    let combined_lines = count_terminal_lines(&combined, cols, rows);
-
-    // Measure buffer2 alone
-    let buffer2_lines = count_terminal_lines(&session.buffer2, cols, rows);
-
-    if buffer2_lines < combined_lines {
-        // buffer1 contributes meaningful scrollback — merge both into buffer1
-        session.buffer1.extend(session.buffer2.drain(..));
-        session.buffer1_size += session.buffer2_size;
-    } else {
-        // buffer1 is redundant — buffer2 alone captures all visible state
-        session.buffer1 = std::mem::take(&mut session.buffer2);
-        session.buffer1_size = session.buffer2_size;
-    }
-
-    // Clear buffer2
-    session.buffer2 = Vec::new();
-    session.buffer2_size = 0;
-
-    // Truncate buffer1 if exceeds compacted limit
-    let mut last_removed_resize: Option<ScrollbackEntry> = None;
-    while session.buffer1_size > COMPACTED_LIMIT && !session.buffer1.is_empty() {
-        let removed = session.buffer1.remove(0);
-        match &removed {
-            ScrollbackEntry::Data(d) => session.buffer1_size -= d.len(),
-            ScrollbackEntry::Resize { .. } => { last_removed_resize = Some(removed); }
-        }
-    }
-
-    // Ensure buffer1 starts with a Resize entry so replay begins at correct dimensions
-    if !matches!(session.buffer1.first(), Some(ScrollbackEntry::Resize { .. })) {
-        let resize_entry = last_removed_resize.unwrap_or(ScrollbackEntry::Resize { cols, rows });
-        session.buffer1.insert(0, resize_entry);
-    }
-
-    tracing::debug!(
-        session_id = %session.id,
-        buffer1_chunks = session.buffer1.len(),
-        buffer1_size = session.buffer1_size,
-        combined_lines,
-        buffer2_lines,
-        "scrollback compacted"
-    );
-}
-
 /// Wrapper so AsyncFd can own something with AsRawFd.
 struct FdWrapper(RawFd);
 
@@ -448,7 +357,7 @@ async fn read_pty_loop(
                 let mut sessions = sessions.lock().await;
                 if let Some(session) = sessions.get_mut(session_id) {
                     session.last_activity = chrono_now_millis();
-                    append_scrollback(session, &chunk);
+                    session.parser.process(&chunk);
                 }
             }
             Ok(Err(e)) => {
