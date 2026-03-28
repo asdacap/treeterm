@@ -17,7 +17,7 @@
     "typecheck:web": "tsc -p tsconfig.web.json --noEmit",
     "typecheck:node": "tsc -p tsconfig.node.json --noEmit",
     "proto:gen": "mkdir -p src/generated && ./node_modules/.bin/grpc_tools_node_protoc --plugin=protoc-gen-ts_proto=./node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=./src/generated --ts_proto_opt=outputServices=grpc-js,env=node,esModuleInterop=true,useOptionals=messages,useDate=false -I=./src/proto treeterm.proto",
-    "build": "npm run proto:gen && npm run typecheck && npm run build:daemon-rs && electron-vite build",
+    "build": "npm run proto:gen && npm run typecheck && npm run build:daemon-rs && npm run build:daemon-rs:remote && electron-vite build",
     "build:daemon-rs": "cd daemon-rs && cargo build --release && mkdir -p ../out/daemon-rs && cp target/release/treeterm-daemon ../out/daemon-rs/",
     "build:daemon-rs:static": "cd daemon-rs && nix build && mkdir -p ../out/daemon-rs && cp result/bin/treeterm-daemon ../out/daemon-rs/",
     "build:daemon-rs:linux-x86_64": "cd daemon-rs && cross build --release --target x86_64-unknown-linux-musl && mkdir -p ../out/daemon-rs && cp target/x86_64-unknown-linux-musl/release/treeterm-daemon ../out/daemon-rs/treeterm-daemon-x86_64-linux",
