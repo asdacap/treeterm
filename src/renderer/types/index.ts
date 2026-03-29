@@ -557,28 +557,31 @@ export interface SessionApi {
 
 export type Platform = 'darwin' | 'linux' | 'win32' | 'aix' | 'android' | 'freebsd' | 'haiku' | 'openbsd' | 'sunos' | 'cygwin' | 'netbsd'
 
+export type PreloadApi = {
+  platform: Platform
+  terminal: TerminalApi
+  selectFolder: () => Promise<string | null>
+  getRecentDirectories: () => Promise<string[]>
+  git: RawGitApi
+  github: RawGitHubApi
+  settings: SettingsApi
+  filesystem: RawFilesystemApi
+  runActions: RawRunActionsApi
+  sandbox: SandboxApi
+  stt: STTApi
+  getInitialWorkspace: () => Promise<string | null>
+  app: AppApi
+  daemon: DaemonApi
+  session: SessionApi
+  getWindowUuid: () => Promise<string>
+  clipboard: ClipboardApi
+  llm: LlmApi
+  ssh: SSHApi
+}
+
 declare global {
   interface Window {
-    electron: {
-      platform: Platform
-      terminal: TerminalApi
-      selectFolder: () => Promise<string | null>
-      git: RawGitApi
-      github: RawGitHubApi
-      settings: SettingsApi
-      filesystem: RawFilesystemApi
-      runActions: RawRunActionsApi
-      sandbox: SandboxApi
-      stt: STTApi
-      getInitialWorkspace: () => Promise<string | null>
-      app: AppApi
-      daemon: DaemonApi
-      session: SessionApi
-      getWindowUuid: () => Promise<string>
-      clipboard: ClipboardApi
-      llm: LlmApi
-      ssh: SSHApi
-    }
+    electron: PreloadApi
   }
 }
 

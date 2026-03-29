@@ -481,6 +481,26 @@ server.onSessionList(async () => {
   }
 })
 
+server.onSessionGet(async (sessionId) => {
+  if (!useDaemon || !daemonClient) {
+    return { success: false, error: 'Daemon not enabled' }
+  }
+
+  try {
+    await daemonClient.ensureDaemonRunning()
+    const sessions = await daemonClient.listSessions()
+    const session = sessions.find(s => s.id === sessionId)
+    if (!session) {
+      return { success: false, error: 'Session not found' }
+    }
+    return { success: true, session }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[main] failed to get session:', errorMessage)
+    return { success: false, error: errorMessage }
+  }
+})
+
 server.onSessionDelete(async (sessionId) => {
   if (!useDaemon || !daemonClient) {
     return { success: false, error: 'Daemon not enabled' }
