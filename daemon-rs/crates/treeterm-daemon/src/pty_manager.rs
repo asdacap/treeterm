@@ -141,6 +141,13 @@ impl PtyManager {
 
         self.sessions.lock().await.insert(id.clone(), session);
 
+        // Subscribe for startup command detection before data_tx is moved into the reader
+        let startup_rx = if startup_command.as_deref().map_or(false, |s| !s.trim().is_empty()) {
+            Some(data_tx.subscribe())
+        } else {
+            None
+        };
+
         // Spawn background reader task
         let sessions = self.sessions.clone();
         let reader_id = id.clone();
@@ -163,11 +170,14 @@ impl PtyManager {
             }
         });
 
-        // Execute startup command if provided
-        if let Some(cmd) = startup_command.filter(|s| !s.trim().is_empty()) {
+        // Execute startup command once the shell is ready to accept input
+        if let Some((cmd, rx)) = startup_command
+            .filter(|s| !s.trim().is_empty())
+            .zip(startup_rx)
+        {
             let fd = master_fd;
             tokio::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                wait_for_shell_ready(rx).await;
                 let data = format!("exec {}\n", cmd.trim());
                 unsafe {
                     libc::write(fd, data.as_ptr() as *const libc::c_void, data.len());
@@ -343,6 +353,52 @@ impl PtyManager {
                 libc::close(session.master_fd);
             }
             tracing::info!(session_id = %id, "pty session killed during shutdown");
+        }
+    }
+}
+
+/// Wait until the shell is ready to accept input by detecting silence after output.
+///
+/// Phase 1: wait for the first PTY output chunk (shell has started).
+/// Phase 2: wait for 200ms of silence after the last output (shell prompt drawn, init done).
+/// Falls back after a 5s overall timeout.
+async fn wait_for_shell_ready(mut rx: broadcast::Receiver<Vec<u8>>) {
+    let overall_timeout = tokio::time::sleep(std::time::Duration::from_secs(5));
+    tokio::pin!(overall_timeout);
+
+    // Phase 1: wait for first output
+    loop {
+        tokio::select! {
+            result = rx.recv() => {
+                match result {
+                    Ok(_) => break,
+                    Err(broadcast::error::RecvError::Lagged(_)) => break,
+                    Err(broadcast::error::RecvError::Closed) => return,
+                }
+            }
+            _ = &mut overall_timeout => {
+                tracing::warn!("wait_for_shell_ready: timed out waiting for first output");
+                return;
+            }
+        }
+    }
+
+    // Phase 2: wait for 200ms of silence
+    loop {
+        let silence = tokio::time::sleep(std::time::Duration::from_millis(200));
+        tokio::select! {
+            result = rx.recv() => {
+                match result {
+                    Ok(_) => continue,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => return,
+                }
+            }
+            _ = silence => return,
+            _ = &mut overall_timeout => {
+                tracing::warn!("wait_for_shell_ready: timed out waiting for silence");
+                return;
+            }
         }
     }
 }
@@ -788,5 +844,56 @@ mod tests {
     async fn get_initial_state_nonexistent_errors() {
         let mgr = PtyManager::new();
         assert!(mgr.get_initial_state("nonexistent").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn wait_for_shell_ready_detects_silence() {
+        let (tx, rx) = broadcast::channel::<Vec<u8>>(16);
+
+        let start = std::time::Instant::now();
+        let handle = tokio::spawn(wait_for_shell_ready(rx));
+
+        // Simulate shell producing output for 100ms
+        tx.send(b"some output".to_vec()).unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        tx.send(b"more output".to_vec()).unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        tx.send(b"prompt: ".to_vec()).unwrap();
+        // Then silence — wait_for_shell_ready should return after 200ms of silence
+
+        handle.await.unwrap();
+        let elapsed = start.elapsed();
+
+        // Should have returned after ~300ms (100ms output + 200ms silence), well under 5s
+        assert!(elapsed < std::time::Duration::from_secs(2));
+        // Should have waited at least 200ms for the silence window
+        assert!(elapsed >= std::time::Duration::from_millis(200));
+    }
+
+    #[tokio::test]
+    async fn wait_for_shell_ready_channel_closed() {
+        let (tx, rx) = broadcast::channel::<Vec<u8>>(16);
+
+        // Send one chunk then drop sender (simulates channel close)
+        tx.send(b"output".to_vec()).unwrap();
+        drop(tx);
+
+        let start = std::time::Instant::now();
+        wait_for_shell_ready(rx).await;
+        // Should return quickly once channel closes
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn wait_for_shell_ready_no_output_times_out() {
+        let (_tx, rx) = broadcast::channel::<Vec<u8>>(16);
+
+        let start = std::time::Instant::now();
+        wait_for_shell_ready(rx).await;
+        let elapsed = start.elapsed();
+
+        // Should time out after 5s
+        assert!(elapsed >= std::time::Duration::from_secs(5));
+        assert!(elapsed < std::time::Duration::from_secs(7));
     }
 }
