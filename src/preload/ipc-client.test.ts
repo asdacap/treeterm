@@ -36,8 +36,8 @@ describe('IpcClient', () => {
 
     it('gitGetInfo calls ipcRenderer.invoke with correct channel and args', async () => {
       mockInvoke.mockResolvedValue({ branch: 'main' })
-      const result = await client.gitGetInfo('/repo')
-      expect(mockInvoke).toHaveBeenCalledWith('git:getInfo', '/repo')
+      const result = await client.gitGetInfo('local', '/repo')
+      expect(mockInvoke).toHaveBeenCalledWith('git:getInfo', 'local', '/repo')
       expect(result).toEqual({ branch: 'main' })
     })
 
@@ -51,8 +51,8 @@ describe('IpcClient', () => {
 
     it('fsReadFile calls ipcRenderer.invoke with correct channel and args', async () => {
       mockInvoke.mockResolvedValue({ success: true, content: 'hello' })
-      const result = await client.fsReadFile('/ws', '/file.txt')
-      expect(mockInvoke).toHaveBeenCalledWith('fs:readFile', '/ws', '/file.txt')
+      const result = await client.fsReadFile('local', '/ws', '/file.txt')
+      expect(mockInvoke).toHaveBeenCalledWith('fs:readFile', 'local', '/ws', '/file.txt')
       expect(result).toEqual({ success: true, content: 'hello' })
     })
 

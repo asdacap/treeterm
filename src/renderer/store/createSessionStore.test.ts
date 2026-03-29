@@ -51,6 +51,10 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       writeFile: vi.fn().mockResolvedValue({ success: true }),
       searchFiles: vi.fn().mockResolvedValue({ success: true }),
     },
+    runActions: {
+      detect: vi.fn().mockResolvedValue([]),
+      run: vi.fn().mockResolvedValue(null),
+    },
     sessionApi: {
       create: vi.fn().mockResolvedValue({ success: true }),
       update: vi.fn().mockResolvedValue({ success: true }),

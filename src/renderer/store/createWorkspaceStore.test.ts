@@ -17,6 +17,7 @@ function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStore
     connectionId: 'local',
     git: {} as any,
     filesystem: {} as any,
+    runActions: { detect: vi.fn().mockResolvedValue([]), run: vi.fn().mockResolvedValue(null) },
     syncToDaemon: vi.fn(),
     removeWorkspace: vi.fn().mockResolvedValue(undefined),
     removeWorkspaceKeepBranch: vi.fn().mockResolvedValue(undefined),

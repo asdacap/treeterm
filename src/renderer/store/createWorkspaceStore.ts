@@ -1,6 +1,6 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, AppRef, ReviewComment, AppRegistryApi, GitApi, FilesystemApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi, GitHubPrInfo } from '../types'
+import type { Workspace, AppRef, ReviewComment, AppRegistryApi, GitApi, FilesystemApi, RunActionsApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi, GitHubPrInfo } from '../types'
 import { getTabs, isAiHarnessState } from '../types'
 import type { Tty, TtyWriter } from './createTtyStore'
 import { createAnalyzerStore } from './createAnalyzerStore'
@@ -14,6 +14,7 @@ export interface WorkspaceStoreDeps {
   connectionId: string
   git: GitApi
   filesystem: FilesystemApi
+  runActions: RunActionsApi
   getSettings: () => Settings
   llm: Pick<LlmApi, 'analyzeTerminal' | 'generateTitle'>
   setActivityTabState: (tabId: string, state: ActivityState) => void
@@ -94,6 +95,9 @@ export interface WorkspaceStoreState {
 
   // Filesystem API (workspace-scoped)
   getFilesystemApi: () => WorkspaceFilesystemApi
+
+  // Run Actions API (connection-bound)
+  getRunActionsApi: () => RunActionsApi
 
   // Cross-cutting (delegate to session)
   refreshGitInfo: () => Promise<void>
@@ -552,6 +556,8 @@ export function createWorkspaceStore(
         searchFiles: (query) => deps.filesystem.searchFiles(path, query),
       }
     },
+
+    getRunActionsApi: (): RunActionsApi => deps.runActions,
 
     // Cross-cutting operations — delegate to session
     refreshGitInfo: () => deps.refreshGitInfo(id),
