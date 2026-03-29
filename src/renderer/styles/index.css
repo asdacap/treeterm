@@ -3512,6 +3512,22 @@ body,
   border-color: var(--accent);
 }
 
+.file-viewer-toggle-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.file-viewer-toggle-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
 /* Markdown Preview */
 .markdown-preview {
   padding: 20px;

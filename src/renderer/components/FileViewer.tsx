@@ -69,6 +69,7 @@ export function FileViewer({
   const decorationsRef = useRef<string[]>([])
   const viewZoneIdRef = useRef<string | null>(null)
   const [commentContainer, setCommentContainer] = useState<HTMLDivElement | null>(null)
+  const [viewMode, setViewMode] = useState<'source' | 'preview'>(onLineClick ? 'source' : 'preview')
   // Inline comment display zones
   const commentDisplayZonesRef = useRef<Map<string, { zoneId: string; container: HTMLDivElement }>>(new Map())
   const [commentDisplayContainers, setCommentDisplayContainers] = useState<Map<string, { container: HTMLDivElement; comments: ReviewComment[] }>>(new Map())
@@ -112,6 +113,10 @@ export function FileViewer({
 
     loadFile()
   }, [wsData.path, filePath])
+
+  useEffect(() => {
+    setViewMode(onLineClick ? 'source' : 'preview')
+  }, [filePath])
 
   const handleEditorMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor
@@ -344,6 +349,15 @@ export function FileViewer({
       <div className="file-viewer-header">
         <span className="file-viewer-filename">{fileName}</span>
         <div className="file-viewer-header-actions">
+          {isMarkdown && (
+            <button
+              className="file-viewer-toggle-btn"
+              onClick={() => setViewMode(v => v === 'preview' ? 'source' : 'preview')}
+              title={viewMode === 'preview' ? 'View source' : 'View preview'}
+            >
+              {viewMode === 'preview' ? '</> Source' : 'Preview'}
+            </button>
+          )}
           <button
             className="file-viewer-open-btn"
             onClick={handleOpenInTab}
@@ -355,7 +369,7 @@ export function FileViewer({
         </div>
       </div>
       <div className="file-viewer-content">
-        {isMarkdown ? (
+        {isMarkdown && viewMode === 'preview' ? (
           <MarkdownPreview content={fileState.content} />
         ) : (
           <Editor
