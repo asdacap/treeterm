@@ -42,6 +42,22 @@ function mapLanguageToMonaco(language: string): string {
   return languageMap[language] || language
 }
 
+function getMimeType(filePath: string): string {
+  const ext = filePath.split('.').pop()?.toLowerCase() || ''
+  const mimeMap: Record<string, string> = {
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    bmp: 'image/bmp',
+    ico: 'image/x-icon',
+    avif: 'image/avif',
+    svg: 'image/svg+xml',
+  }
+  return mimeMap[ext] || 'image/png'
+}
+
 export function FileViewer({
   workspace,
   filePath,
@@ -343,6 +359,7 @@ export function FileViewer({
 
   const fileName = filePath.split('/').pop() || filePath
   const isMarkdown = fileState.language === 'markdown'
+  const isImage = fileState.language === 'image'
 
   return (
     <div className="file-viewer">
@@ -358,18 +375,27 @@ export function FileViewer({
               {viewMode === 'preview' ? '</> Source' : 'Preview'}
             </button>
           )}
-          <button
-            className="file-viewer-open-btn"
-            onClick={handleOpenInTab}
-            title="Open in new tab for editing"
-          >
-            ⇗ Open in Tab
-          </button>
+          {!isImage && (
+            <button
+              className="file-viewer-open-btn"
+              onClick={handleOpenInTab}
+              title="Open in new tab for editing"
+            >
+              ⇗ Open in Tab
+            </button>
+          )}
           <span className="file-viewer-language">{fileState.language}</span>
         </div>
       </div>
       <div className="file-viewer-content">
-        {isMarkdown && viewMode === 'preview' ? (
+        {isImage ? (
+          <div className="file-viewer-image-container">
+            <img
+              src={`data:${getMimeType(filePath)};base64,${fileState.content}`}
+              alt={fileName}
+            />
+          </div>
+        ) : isMarkdown && viewMode === 'preview' ? (
           <MarkdownPreview content={fileState.content} />
         ) : (
           <Editor

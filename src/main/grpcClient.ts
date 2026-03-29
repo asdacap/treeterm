@@ -111,6 +111,13 @@ export class PtyStream {
   }
 }
 
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif', 'svg'])
+
+function isImageFile(filePath: string): boolean {
+  const ext = filePath.split('.').pop()?.toLowerCase() || ''
+  return IMAGE_EXTENSIONS.has(ext)
+}
+
 export class GrpcDaemonClient {
   private client: TreeTermDaemonClient | null = null
   private connected: boolean = false
@@ -483,13 +490,14 @@ export class GrpcDaemonClient {
           if (!chunk.end.success) {
             resolve({ success: false, error: chunk.end.error })
           } else if (fileMetadata) {
+            const isImage = isImageFile(fileMetadata.path)
             resolve({
               success: true,
               file: {
                 path: fileMetadata.path,
-                content: Buffer.concat(chunks).toString('utf-8'),
+                content: isImage ? Buffer.concat(chunks).toString('base64') : Buffer.concat(chunks).toString('utf-8'),
                 size: fileMetadata.size,
-                language: fileMetadata.language
+                language: isImage ? 'image' : fileMetadata.language
               }
             })
           }
