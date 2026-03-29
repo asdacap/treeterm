@@ -55,8 +55,6 @@ function PendingSessionPanel({
   sessionEntry: Extract<SessionEntry, { status: 'connecting' | 'error' }>
 }) {
   const { setActiveView } = useNavigationStore()
-  const disconnectSession = useAppStore(s => s.disconnectSession)
-  const removeSession = useAppStore(s => s.removeSession)
 
   const label = sessionEntry.config.label || `${sessionEntry.config.user}@${sessionEntry.config.host}`
 
@@ -76,37 +74,6 @@ function PendingSessionPanel({
         <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>
           {sessionEntry.status === 'connecting' ? 'Connecting...' : sessionEntry.error}
         </div>
-        {sessionEntry.status === 'error' && (
-          <div style={{ padding: '4px 8px', display: 'flex', gap: 4 }}>
-            <button
-              className="add-button"
-              style={{ fontSize: 11 }}
-              onClick={() => {
-                removeSession(sessionId)
-                const { ssh, startRemoteConnect } = useAppStore.getState()
-                startRemoteConnect(sessionEntry.config)
-                ssh.connect(sessionEntry.config).then(({ info, session }) => {
-                  if (info.status !== 'connected' || !session) {
-                    useAppStore.getState().setSessionError(sessionEntry.config.id, info.error || 'Connection failed')
-                    return
-                  }
-                  useAppStore.getState().addRemoteSession(session, info)
-                }).catch((err) => {
-                  useAppStore.getState().setSessionError(sessionEntry.config.id, err instanceof Error ? err.message : String(err))
-                })
-              }}
-            >
-              Retry
-            </button>
-            <button
-              className="add-button"
-              style={{ fontSize: 11, color: '#f44336' }}
-              onClick={() => disconnectSession(sessionId)}
-            >
-              Remove
-            </button>
-          </div>
-        )}
       </div>
     </div>
   )

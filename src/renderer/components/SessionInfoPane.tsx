@@ -65,6 +65,9 @@ const CONNECTING_TABS: { id: TabId; label: string }[] = [
 
 function ConnectingSessionInfoPane({ sessionId, connectionId, config, initialError }: ConnectingProps) {
   const ssh = useAppStore(s => s.ssh)
+  const removeSession = useAppStore(s => s.removeSession)
+  const startRemoteConnect = useAppStore(s => s.startRemoteConnect)
+  const disconnectSession = useAppStore(s => s.disconnectSession)
   const [activeTab, setActiveTab] = useState<TabId>('bootstrap')
   const [output, setOutput] = useState<string[]>([])
   const [status, setStatus] = useState<string>(initialError ? 'error' : 'connecting')
@@ -112,6 +115,20 @@ function ConnectingSessionInfoPane({ sessionId, connectionId, config, initialErr
     }
   }, [filteredOutput.length])
 
+  const handleRetry = () => {
+    removeSession(sessionId)
+    startRemoteConnect(config)
+    ssh.connect(config).then(({ info, session }) => {
+      if (info.status !== 'connected' || !session) {
+        useAppStore.getState().setSessionError(config.id, info.error || 'Connection failed')
+        return
+      }
+      useAppStore.getState().addRemoteSession(session, info)
+    }).catch((err) => {
+      useAppStore.getState().setSessionError(config.id, err instanceof Error ? err.message : String(err))
+    })
+  }
+
   return (
     <div className="ssh-pane">
       <div className="ssh-pane-header">
@@ -126,6 +143,12 @@ function ConnectingSessionInfoPane({ sessionId, connectionId, config, initialErr
         <span className="ssh-pane-status-text">({status})</span>
         {error && (
           <span className="ssh-pane-error">{error}</span>
+        )}
+        {status === 'error' && (
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <button className="ssh-pane-tab" onClick={handleRetry}>Retry</button>
+            <button className="ssh-pane-tab" style={{ color: '#f44336' }} onClick={() => disconnectSession(sessionId)}>Remove</button>
+          </div>
         )}
       </div>
       <div className="ssh-pane-tabs">
