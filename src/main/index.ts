@@ -782,8 +782,12 @@ server.onGitGetUncommittedFileContentsForDiff(async (connectionId, repoPath, fil
 })
 
 server.onGitGetHeadCommitHash(async (connectionId, repoPath) => {
-  const hash = await getGitClientForConnection(connectionId).getHeadCommitHash(repoPath)
-  return { success: true, hash }
+  try {
+    const hash = await getGitClientForConnection(connectionId).getHeadCommitHash(repoPath)
+    return { success: true, hash }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
 })
 
 server.onGitGetLog(async (connectionId, repoPath, parentBranch, skip, limit) => {

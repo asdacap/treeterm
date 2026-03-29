@@ -424,6 +424,21 @@ describe('createWorkspaceStore', () => {
       expect(comments[1].isOutdated).toBe(false)
     })
 
+    it('updateOutdatedReviewComments never marks null-commitHash comments as outdated', () => {
+      const deps = makeHandleDeps()
+      const existingComments = JSON.stringify([
+        { id: 'c1', filePath: 'a.ts', lineNumber: 1, text: 'A', commitHash: null, createdAt: 1, isOutdated: false, addressed: false, side: 'modified' }
+      ])
+      const ws = makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
+      const store = createWorkspaceStore(ws, deps)
+
+      store.getState().updateOutdatedReviewComments('any-hash')
+
+      const wsState = store.getState().workspace
+      const comments = JSON.parse(wsState.metadata.reviewComments)
+      expect(comments[0].isOutdated).toBe(false)
+    })
+
     it('clearReviewComments empties the comments', () => {
       const deps = makeHandleDeps()
       const existingComments = JSON.stringify([

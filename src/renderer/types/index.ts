@@ -280,7 +280,7 @@ export interface ReviewComment {
   filePath: string
   lineNumber: number
   text: string
-  commitHash: string
+  commitHash: string | null
   createdAt: number
   isOutdated: boolean
   addressed: boolean

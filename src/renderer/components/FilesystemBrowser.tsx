@@ -27,7 +27,6 @@ export function FilesystemBrowser({
   const allComments = getReviewComments()
   const [commentInput, setCommentInput] = useState<{ lineNumber: number } | null>(null)
   const [currentCommitHash, setCurrentCommitHash] = useState<string | null>(null)
-  const [commitHashError, setCommitHashError] = useState<string | null>(null)
 
   if (!appState || !state) {
     return <div className="filesystem-browser-error">Invalid tab</div>
@@ -60,18 +59,14 @@ export function FilesystemBrowser({
     })
   }
 
-  // Update outdated comments on mount
+  // Update outdated comments on mount (git repos only)
   useEffect(() => {
+    if (!wsData.isGitRepo) return
     const updateOutdated = async () => {
-      try {
-        const hashResult = await git.getHeadCommitHash()
-        if (hashResult.success && hashResult.hash) {
-          setCurrentCommitHash(hashResult.hash)
-          updateOutdatedReviewComments(hashResult.hash)
-        }
-      } catch (error) {
-        console.error('Failed to update outdated comments:', error)
-        setCommitHashError(`Failed to get commit hash: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      const hashResult = await git.getHeadCommitHash()
+      if (hashResult.success && hashResult.hash) {
+        setCurrentCommitHash(hashResult.hash)
+        updateOutdatedReviewComments(hashResult.hash)
       }
     }
     updateOutdated()
@@ -87,7 +82,7 @@ export function FilesystemBrowser({
   }
 
   const handleCommentSubmit = (text: string) => {
-    if (!commentInput || !currentCommitHash || !state.selectedPath) return
+    if (!commentInput || !state.selectedPath) return
     addReviewComment({
       filePath: state.selectedPath,
       lineNumber: commentInput.lineNumber,
@@ -131,9 +126,6 @@ export function FilesystemBrowser({
 
   return (
     <div className="filesystem-browser" onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
-      {commitHashError && (
-        <div className="review-load-error">{commitHashError}</div>
-      )}
       <div style={{ width: treeWidth }}>
         <FileTree
           workspace={workspace}

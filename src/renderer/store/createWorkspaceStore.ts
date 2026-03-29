@@ -469,7 +469,7 @@ export function createWorkspaceStore(
       const comments = parseReviewComments(get().workspace.metadata)
       if (comments.length === 0) return
       const updated = comments.map(comment => {
-        const shouldBeOutdated = comment.commitHash !== currentCommitHash
+        const shouldBeOutdated = comment.commitHash !== null && comment.commitHash !== currentCommitHash
         if (comment.isOutdated !== shouldBeOutdated) {
           return { ...comment, isOutdated: shouldBeOutdated }
         }
