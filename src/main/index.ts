@@ -1316,6 +1316,78 @@ server.onSshUnwatchConnectionStatus(async (event, connectionId) => {
   statusWatchUnsubscribers.get(winId)?.delete(connectionId)
 })
 
+// Port forward IPC handlers
+const pfStatusWatchUnsubscribers = new Map<number, Map<string, () => void>>()
+
+server.onSshAddPortForward(async (event, config) => {
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
+  const info = connectionManager.addPortForward(config)
+
+  // Register a status watcher for the sender window
+  const senderWindow = BrowserWindow.fromWebContents(event.sender)
+  if (senderWindow) {
+    const winId = senderWindow.id
+    const windowInfo = windowManager.getWindow(winId)
+    const { unsubscribe } = connectionManager.watchPortForwardStatus(config.id, (pfInfo) => {
+      if (windowInfo) {
+        windowInfo.ipcServer.sshPortForwardStatus(pfInfo)
+      }
+    })
+    if (!pfStatusWatchUnsubscribers.has(winId)) {
+      pfStatusWatchUnsubscribers.set(winId, new Map())
+    }
+    pfStatusWatchUnsubscribers.get(winId)!.set(config.id, unsubscribe)
+  }
+
+  return info
+})
+
+server.onSshRemovePortForward(async (portForwardId) => {
+  if (!connectionManager) return
+  connectionManager.removePortForward(portForwardId)
+})
+
+server.onSshListPortForwards(async (connectionId) => {
+  if (!connectionManager) return []
+  return connectionManager.listPortForwards(connectionId)
+})
+
+// Per-window port forward watch subscriptions
+const pfOutputWatchUnsubscribers = new Map<number, Map<string, () => void>>()
+
+server.onSshWatchPortForwardOutput(async (event, portForwardId) => {
+  if (!connectionManager) return { scrollback: [] }
+
+  const senderWindow = BrowserWindow.fromWebContents(event.sender)
+  if (!senderWindow) return { scrollback: [] }
+  const winId = senderWindow.id
+
+  pfOutputWatchUnsubscribers.get(winId)?.get(portForwardId)?.()
+
+  const windowInfo = windowManager.getWindow(winId)
+  const { scrollback, unsubscribe } = connectionManager.watchPortForwardOutput(portForwardId, (line) => {
+    if (windowInfo) {
+      windowInfo.ipcServer.sshPortForwardOutput(portForwardId, line)
+    }
+  })
+
+  if (!pfOutputWatchUnsubscribers.has(winId)) {
+    pfOutputWatchUnsubscribers.set(winId, new Map())
+  }
+  pfOutputWatchUnsubscribers.get(winId)!.set(portForwardId, unsubscribe)
+
+  return { scrollback }
+})
+
+server.onSshUnwatchPortForwardOutput(async (event, portForwardId) => {
+  const senderWindow = BrowserWindow.fromWebContents(event.sender)
+  if (!senderWindow) return
+
+  const winId = senderWindow.id
+  pfOutputWatchUnsubscribers.get(winId)?.get(portForwardId)?.()
+  pfOutputWatchUnsubscribers.get(winId)?.delete(portForwardId)
+})
+
 // App close confirmation IPC handlers
 server.onAppCloseConfirmed((event) => {
   const windowInfo = windowManager.findWindowByWebContentsId(event.sender.id)

@@ -12,6 +12,8 @@ import type {
   RunAction,
   SSHConnectionConfig,
   ConnectionInfo,
+  PortForwardConfig,
+  PortForwardInfo,
   ReasoningEffort
 } from './types'
 
@@ -361,6 +363,26 @@ export interface IpcRequests {
     params: [connectionId: string]
     result: void
   }
+  sshAddPortForward: {
+    params: [config: PortForwardConfig]
+    result: PortForwardInfo
+  }
+  sshRemovePortForward: {
+    params: [portForwardId: string]
+    result: void
+  }
+  sshListPortForwards: {
+    params: [connectionId: string]
+    result: PortForwardInfo[]
+  }
+  sshWatchPortForwardOutput: {
+    params: [portForwardId: string]
+    result: { scrollback: string[] }
+  }
+  sshUnwatchPortForwardOutput: {
+    params: [portForwardId: string]
+    result: void
+  }
 
   // LLM operations
   llmChatSend: {
@@ -451,6 +473,12 @@ export interface IpcEvents {
   }
   sshOutput: {
     params: [connectionId: string, line: string]
+  }
+  sshPortForwardStatus: {
+    params: [info: PortForwardInfo]
+  }
+  sshPortForwardOutput: {
+    params: [portForwardId: string, line: string]
   }
   llmChatDelta: {
     params: [requestId: string, text: string]

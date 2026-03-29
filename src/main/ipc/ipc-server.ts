@@ -82,6 +82,11 @@ const CHANNELS = {
   sshUnwatchOutput: 'ssh:unwatchOutput',
   sshWatchConnectionStatus: 'ssh:watchConnectionStatus',
   sshUnwatchConnectionStatus: 'ssh:unwatchConnectionStatus',
+  sshAddPortForward: 'ssh:addPortForward',
+  sshRemovePortForward: 'ssh:removePortForward',
+  sshListPortForwards: 'ssh:listPortForwards',
+  sshWatchPortForwardOutput: 'ssh:watchPortForwardOutput',
+  sshUnwatchPortForwardOutput: 'ssh:unwatchPortForwardOutput',
 
   // LLM operations
   llmChatSend: 'llm:chat:send',
@@ -112,6 +117,8 @@ const CHANNELS = {
   activeProcessesOpen: 'active-processes:open',
   sshConnectionStatus: 'ssh:connectionStatus',
   sshOutput: 'ssh:output',
+  sshPortForwardStatus: 'ssh:portForwardStatus',
+  sshPortForwardOutput: 'ssh:portForwardOutput',
   llmChatDelta: 'llm:chat:delta',
   llmChatDone: 'llm:chat:done',
   llmChatError: 'llm:chat:error',
@@ -853,6 +860,59 @@ export class IpcServer {
     )
   }
 
+  onSshAddPortForward(
+    handler: (
+      event: IpcMainInvokeEvent,
+      ...args: IpcRequests['sshAddPortForward']['params']
+    ) => IpcRequests['sshAddPortForward']['result'] | Promise<IpcRequests['sshAddPortForward']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshAddPortForward, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(event, ...(args as IpcRequests['sshAddPortForward']['params']))
+    )
+  }
+
+  onSshRemovePortForward(
+    handler: (
+      ...args: IpcRequests['sshRemovePortForward']['params']
+    ) => IpcRequests['sshRemovePortForward']['result'] | Promise<IpcRequests['sshRemovePortForward']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshRemovePortForward, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshRemovePortForward']['params']))
+    )
+  }
+
+  onSshListPortForwards(
+    handler: (
+      ...args: IpcRequests['sshListPortForwards']['params']
+    ) => IpcRequests['sshListPortForwards']['result'] | Promise<IpcRequests['sshListPortForwards']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshListPortForwards, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshListPortForwards']['params']))
+    )
+  }
+
+  onSshWatchPortForwardOutput(
+    handler: (
+      event: IpcMainInvokeEvent,
+      ...args: IpcRequests['sshWatchPortForwardOutput']['params']
+    ) => IpcRequests['sshWatchPortForwardOutput']['result'] | Promise<IpcRequests['sshWatchPortForwardOutput']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshWatchPortForwardOutput, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(event, ...(args as IpcRequests['sshWatchPortForwardOutput']['params']))
+    )
+  }
+
+  onSshUnwatchPortForwardOutput(
+    handler: (
+      event: IpcMainInvokeEvent,
+      ...args: IpcRequests['sshUnwatchPortForwardOutput']['params']
+    ) => IpcRequests['sshUnwatchPortForwardOutput']['result'] | Promise<IpcRequests['sshUnwatchPortForwardOutput']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshUnwatchPortForwardOutput, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(event, ...(args as IpcRequests['sshUnwatchPortForwardOutput']['params']))
+    )
+  }
+
   // ==================== Fire-and-Forget Handlers (send/on pattern) ====================
 
   onAppCloseConfirmed(handler: (event: IpcMainEvent) => void): void {
@@ -929,6 +989,14 @@ export class IpcServer {
 
   sshOutput(...args: IpcEvents['sshOutput']['params']): void {
     this.window?.webContents.send(CHANNELS.sshOutput, ...args)
+  }
+
+  sshPortForwardStatus(...args: IpcEvents['sshPortForwardStatus']['params']): void {
+    this.window?.webContents.send(CHANNELS.sshPortForwardStatus, ...args)
+  }
+
+  sshPortForwardOutput(...args: IpcEvents['sshPortForwardOutput']['params']): void {
+    this.window?.webContents.send(CHANNELS.sshPortForwardOutput, ...args)
   }
 
   gitOutput(...args: IpcEvents['gitOutput']['params']): void {

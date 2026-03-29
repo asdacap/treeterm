@@ -5439,6 +5439,135 @@ body,
   padding-top: 4px;
 }
 
+/* Port Forward Dialog */
+.port-forward-dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  width: 420px;
+  padding: 0;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.port-forward-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.port-forward-dialog-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.port-forward-dialog-content {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.port-forward-dialog-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.port-forward-dialog-row label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.port-forward-dialog-row input {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 6px 10px;
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+}
+
+.port-forward-dialog-row input:focus {
+  border-color: var(--accent);
+}
+
+.port-forward-dialog-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.port-forward-dialog-error {
+  font-size: 12px;
+  color: #f44336;
+  padding: 6px 8px;
+  background: rgba(244, 67, 54, 0.1);
+  border-radius: 4px;
+}
+
+.port-forward-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+/* Port Forward List */
+.port-forward-toolbar {
+  padding: 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.port-forward-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.port-forward-item {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.port-forward-item:last-child {
+  border-bottom: none;
+}
+
+.port-forward-item-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+}
+
+.port-forward-item-label {
+  flex: 1;
+  font-size: 12px;
+  font-family: monospace;
+  color: var(--text-primary);
+}
+
+.port-forward-item-error {
+  font-size: 11px;
+  color: #f44336;
+  padding: 0 8px 6px;
+}
+
+.port-forward-item-output {
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border-color);
+  padding: 6px 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  font-size: 11px;
+  font-family: monospace;
+}
+
 /* Chat Application */
 .chat-container {
   display: flex;

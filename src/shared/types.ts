@@ -27,6 +27,28 @@ export interface ConnectionInfo {
   error?: string
 }
 
+// === Port Forward Types ===
+
+export interface PortForwardConfig {
+  id: string
+  connectionId: string
+  localPort: number
+  remoteHost: string
+  remotePort: number
+}
+
+export type PortForwardStatus = 'connecting' | 'active' | 'error' | 'stopped'
+
+export interface PortForwardInfo {
+  id: string
+  connectionId: string
+  localPort: number
+  remoteHost: string
+  remotePort: number
+  status: PortForwardStatus
+  error?: string
+}
+
 // === Sandbox Types ===
 
 export interface SandboxConfig {

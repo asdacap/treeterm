@@ -1,5 +1,5 @@
 import { contextBridge } from 'electron'
-import type { SandboxConfig, Session, SessionInfo, WorkspaceInput, Settings, SSHConnectionConfig, ConnectionInfo, ReasoningEffort } from '../shared/types'
+import type { SandboxConfig, Session, SessionInfo, WorkspaceInput, Settings, SSHConnectionConfig, ConnectionInfo, PortForwardConfig, PortForwardInfo, ReasoningEffort } from '../shared/types'
 import type { PtyEvent } from '../shared/ipc-types'
 import { IpcClient } from './ipc-client'
 import type { PreloadApi } from '../renderer/types'
@@ -153,6 +153,21 @@ const sshStatusWatchCallbacks = new Map<string, SshStatusWatchCallback>()
 client.onSshConnectionStatus((info) => {
   const cb = sshStatusWatchCallbacks.get(info.id)
   if (cb) cb(info)
+})
+
+type PortForwardStatusCallback = (info: PortForwardInfo) => void
+const portForwardStatusListeners: PortForwardStatusCallback[] = []
+
+client.onSshPortForwardStatus((info) => {
+  portForwardStatusListeners.forEach((cb) => cb(info))
+})
+
+type PortForwardOutputWatchCallback = (line: string) => void
+const portForwardOutputWatchCallbacks = new Map<string, PortForwardOutputWatchCallback>()
+
+client.onSshPortForwardOutput((portForwardId, line) => {
+  const cb = portForwardOutputWatchCallbacks.get(portForwardId)
+  if (cb) cb(line)
 })
 
 const preloadApi: PreloadApi = {
@@ -591,6 +606,33 @@ const preloadApi: PreloadApi = {
         unsubscribe: () => {
           sshStatusWatchCallbacks.delete(connectionId)
           client.sshUnwatchConnectionStatus(connectionId).catch(() => {})
+        }
+      }
+    },
+    addPortForward: (config: PortForwardConfig): Promise<PortForwardInfo> => {
+      return client.sshAddPortForward(config)
+    },
+    removePortForward: (portForwardId: string): Promise<void> => {
+      return client.sshRemovePortForward(portForwardId)
+    },
+    listPortForwards: (connectionId: string): Promise<PortForwardInfo[]> => {
+      return client.sshListPortForwards(connectionId)
+    },
+    onPortForwardStatus: (callback: PortForwardStatusCallback): (() => void) => {
+      portForwardStatusListeners.push(callback)
+      return () => {
+        const index = portForwardStatusListeners.indexOf(callback)
+        if (index > -1) portForwardStatusListeners.splice(index, 1)
+      }
+    },
+    watchPortForwardOutput: async (portForwardId: string, cb: (line: string) => void): Promise<{ scrollback: string[], unsubscribe: () => void }> => {
+      portForwardOutputWatchCallbacks.set(portForwardId, cb)
+      const result = await client.sshWatchPortForwardOutput(portForwardId)
+      return {
+        scrollback: result.scrollback,
+        unsubscribe: () => {
+          portForwardOutputWatchCallbacks.delete(portForwardId)
+          client.sshUnwatchPortForwardOutput(portForwardId).catch(() => {})
         }
       }
     }

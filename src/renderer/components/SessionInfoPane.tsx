@@ -5,9 +5,10 @@ import { Loader2 } from 'lucide-react'
 import type { SessionState } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import { useSessionNamesStore } from '../store/sessionNames'
-import type { SSHConnectionConfig } from '../types'
+import type { SSHConnectionConfig, PortForwardInfo } from '../types'
+import PortForwardDialog from './PortForwardDialog'
 
-type TabId = 'info' | 'ssh' | 'json'
+type TabId = 'info' | 'ssh' | 'portForwards' | 'json'
 
 const BOOTSTRAP_PREFIXES = ['[bootstrap]', '[bootstrap:err]', '[ssh]']
 const START_PREFIXES = ['[start]', '[start:err]']
@@ -24,6 +25,16 @@ function getStatusColor(status: string | undefined): string {
     case 'connected': return '#4caf50'
     case 'connecting': return '#ff9800'
     case 'error': return '#f44336'
+    default: return '#666'
+  }
+}
+
+function getPfStatusColor(status: string | undefined): string {
+  switch (status) {
+    case 'active': return '#4caf50'
+    case 'connecting': return '#ff9800'
+    case 'error': return '#f44336'
+    case 'stopped': return '#666'
     default: return '#666'
   }
 }
@@ -227,6 +238,9 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
   const [sessionJson, setSessionJson] = useState<string | null>(null)
   const [jsonLoading, setJsonLoading] = useState(false)
   const [jsonError, setJsonError] = useState<string | null>(null)
+  const [portForwards, setPortForwards] = useState<PortForwardInfo[]>([])
+  const [showPortForwardDialog, setShowPortForwardDialog] = useState(false)
+  const [expandedPfOutput, setExpandedPfOutput] = useState<Record<string, string[]>>({})
   const ssh = useAppStore(s => s.ssh)
   const sessionApi = useAppStore(s => s.sessionApi)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -275,12 +289,54 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
     }
   }, [sshOutput.bootstrap.length, sshOutput.start.length, sshOutput.proxy.length])
 
+  useEffect(() => {
+    if (!isRemote || !connection) return
+    ssh.listPortForwards(connection.id).then(setPortForwards).catch(console.error)
+  }, [isRemote, connection, ssh])
+
+  useEffect(() => {
+    if (!isRemote) return
+    const unsubscribe = ssh.onPortForwardStatus((info) => {
+      if (!connection || info.connectionId !== connection.id) return
+      setPortForwards(prev => {
+        const idx = prev.findIndex(p => p.id === info.id)
+        if (idx >= 0) {
+          const next = [...prev]
+          next[idx] = info
+          return next
+        }
+        return [...prev, info]
+      })
+    })
+    return unsubscribe
+  }, [isRemote, connection, ssh])
+
+  const handleTogglePfOutput = (pfId: string, currentlyExpanded: boolean) => {
+    if (currentlyExpanded) {
+      setExpandedPfOutput(prev => {
+        const next = { ...prev }
+        delete next[pfId]
+        return next
+      })
+    } else {
+      ssh.watchPortForwardOutput(pfId, (line) => {
+        setExpandedPfOutput(prev => ({
+          ...prev,
+          [pfId]: [...(prev[pfId] ?? []), line]
+        }))
+      }).then(({ scrollback, unsubscribe: _ }) => {
+        setExpandedPfOutput(prev => ({ ...prev, [pfId]: scrollback }))
+      }).catch(console.error)
+      setExpandedPfOutput(prev => ({ ...prev, [pfId]: [] }))
+    }
+  }
+
   const label = isRemote && connection.target.type === 'remote'
     ? `${connection.target.config.user}@${connection.target.config.host}`
     : displayName || sessionId
 
   const tabs: { id: TabId; label: string }[] = isRemote
-    ? [{ id: 'info', label: 'Info' }, { id: 'ssh', label: 'SSH' }, { id: 'json', label: 'JSON' }]
+    ? [{ id: 'info', label: 'Info' }, { id: 'ssh', label: 'SSH' }, { id: 'portForwards', label: 'Port Forwards' }, { id: 'json', label: 'JSON' }]
     : [{ id: 'info', label: 'Info' }, { id: 'json', label: 'JSON' }]
 
   return (
@@ -311,7 +367,89 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
           </button>
         ))}
       </div>
-      {activeTab === 'info' ? (
+      {showPortForwardDialog && isRemote && connection && (
+        <PortForwardDialog
+          connectionId={connection.id}
+          onClose={() => setShowPortForwardDialog(false)}
+          onCreated={(info) => {
+            setPortForwards(prev => {
+              const idx = prev.findIndex(p => p.id === info.id)
+              if (idx >= 0) {
+                const next = [...prev]
+                next[idx] = info
+                return next
+              }
+              return [...prev, info]
+            })
+          }}
+          addPortForward={ssh.addPortForward}
+        />
+      )}
+      {activeTab === 'portForwards' ? (
+        <div className="ssh-pane-output">
+          <div className="port-forward-toolbar">
+            <button className="ssh-pane-tab active" onClick={() => setShowPortForwardDialog(true)}>
+              + Add Port Forward
+            </button>
+          </div>
+          {portForwards.length === 0 ? (
+            <div className="ssh-pane-output-empty">No port forwards. Click "+ Add Port Forward" to start one.</div>
+          ) : (
+            <div className="port-forward-list">
+              {portForwards.map(pf => {
+                const isExpanded = pf.id in expandedPfOutput
+                return (
+                  <div key={pf.id} className="port-forward-item">
+                    <div className="port-forward-item-header">
+                      <span
+                        className="ssh-pane-status-dot"
+                        style={{ backgroundColor: getPfStatusColor(pf.status) }}
+                      />
+                      <span className="port-forward-item-label">
+                        localhost:{pf.localPort} → {pf.remoteHost}:{pf.remotePort}
+                      </span>
+                      <span className="ssh-pane-status-text">({pf.status})</span>
+                      <button
+                        className="ssh-pane-tab"
+                        onClick={() => handleTogglePfOutput(pf.id, isExpanded)}
+                        title={isExpanded ? 'Hide output' : 'Show output'}
+                      >
+                        {isExpanded ? 'Hide' : 'Log'}
+                      </button>
+                      {pf.status !== 'stopped' && (
+                        <button
+                          className="ssh-pane-tab"
+                          style={{ color: '#f44336' }}
+                          onClick={() => {
+                            ssh.removePortForward(pf.id).catch(console.error)
+                            setPortForwards(prev => prev.filter(p => p.id !== pf.id))
+                          }}
+                        >
+                          Stop
+                        </button>
+                      )}
+                    </div>
+                    {pf.error && (
+                      <div className="port-forward-item-error">{pf.error}</div>
+                    )}
+                    {isExpanded && (
+                      <div className="port-forward-item-output">
+                        {(expandedPfOutput[pf.id] ?? []).length === 0 ? (
+                          <div className="ssh-pane-output-empty">No output yet...</div>
+                        ) : (
+                          (expandedPfOutput[pf.id] ?? []).map((line, i) => (
+                            <div key={i} className="ssh-pane-output-line">{line}</div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      ) : activeTab === 'info' ? (
         <div className="ssh-pane-output">
           <div className="ssh-pane-output-line">Session ID: {sessionId}</div>
           {isRemote && connection.target.type === 'remote' ? (

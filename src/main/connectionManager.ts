@@ -5,11 +5,14 @@
 
 import { GrpcDaemonClient } from './grpcClient'
 import { SSHTunnel } from './ssh'
+import { PortForwardProcess } from './portForward'
 import type {
   SSHConnectionConfig,
   ConnectionTarget,
   ConnectionStatus,
-  ConnectionInfo
+  ConnectionInfo,
+  PortForwardConfig,
+  PortForwardInfo
 } from '../shared/types'
 
 interface Connection {
@@ -22,6 +25,7 @@ interface Connection {
 
 type StatusChangeCallback = (info: ConnectionInfo) => void
 type OutputCallback = (line: string) => void
+type PortForwardStatusCallback = (info: PortForwardInfo) => void
 
 export class ConnectionManager {
   private connections: Map<string, Connection> = new Map()
@@ -29,6 +33,9 @@ export class ConnectionManager {
   private statusListeners: Set<StatusChangeCallback> = new Set()
   private outputWatchers: Map<string, Set<OutputCallback>> = new Map()
   private statusWatchers: Map<string, Set<StatusChangeCallback>> = new Map()
+  private portForwards: Map<string, PortForwardProcess> = new Map()
+  private portForwardOutputWatchers: Map<string, Set<OutputCallback>> = new Map()
+  private portForwardStatusWatchers: Map<string, Set<PortForwardStatusCallback>> = new Map()
 
   constructor(localClient: GrpcDaemonClient) {
     // Register the local connection
@@ -226,6 +233,16 @@ export class ConnectionManager {
     const conn = this.connections.get(connectionId)
     if (!conn) return
 
+    // Stop all port forwards for this connection
+    for (const [pfId, pf] of this.portForwards) {
+      if (pf.toInfo().connectionId === connectionId) {
+        pf.stop()
+        this.portForwards.delete(pfId)
+        this.portForwardOutputWatchers.delete(pfId)
+        this.portForwardStatusWatchers.delete(pfId)
+      }
+    }
+
     // Disconnect client and tunnel
     if (conn.client) {
       conn.client.disconnect()
@@ -237,6 +254,92 @@ export class ConnectionManager {
     conn.status = 'disconnected'
     this.emitStatus(connectionId)
     this.connections.delete(connectionId)
+  }
+
+  addPortForward(config: PortForwardConfig): PortForwardInfo {
+    const conn = this.connections.get(config.connectionId)
+    if (!conn || conn.target.type !== 'remote') {
+      throw new Error(`Connection not found or not remote: ${config.connectionId}`)
+    }
+
+    const sshConfig = (conn.target as { type: 'remote'; config: SSHConnectionConfig }).config
+    const pf = new PortForwardProcess(sshConfig, config)
+
+    pf.onOutput((line) => {
+      const watchers = this.portForwardOutputWatchers.get(config.id)
+      if (watchers) {
+        for (const cb of watchers) {
+          cb(line)
+        }
+      }
+    })
+
+    pf.onStatusChange((info) => {
+      const watchers = this.portForwardStatusWatchers.get(config.id)
+      if (watchers) {
+        for (const cb of watchers) {
+          cb(info)
+        }
+      }
+    })
+
+    this.portForwards.set(config.id, pf)
+    pf.start()
+
+    return pf.toInfo()
+  }
+
+  removePortForward(portForwardId: string): void {
+    const pf = this.portForwards.get(portForwardId)
+    if (!pf) return
+    pf.stop()
+    this.portForwards.delete(portForwardId)
+    this.portForwardOutputWatchers.delete(portForwardId)
+    this.portForwardStatusWatchers.delete(portForwardId)
+  }
+
+  listPortForwards(connectionId: string): PortForwardInfo[] {
+    const result: PortForwardInfo[] = []
+    for (const pf of this.portForwards.values()) {
+      const info = pf.toInfo()
+      if (info.connectionId === connectionId) {
+        result.push(info)
+      }
+    }
+    return result
+  }
+
+  watchPortForwardOutput(portForwardId: string, cb: OutputCallback): { scrollback: string[], unsubscribe: () => void } {
+    const pf = this.portForwards.get(portForwardId)
+    const scrollback = pf?.getOutput() ?? []
+
+    if (!this.portForwardOutputWatchers.has(portForwardId)) {
+      this.portForwardOutputWatchers.set(portForwardId, new Set())
+    }
+    this.portForwardOutputWatchers.get(portForwardId)!.add(cb)
+
+    return {
+      scrollback,
+      unsubscribe: () => {
+        this.portForwardOutputWatchers.get(portForwardId)?.delete(cb)
+      }
+    }
+  }
+
+  watchPortForwardStatus(portForwardId: string, cb: PortForwardStatusCallback): { initial: PortForwardInfo | undefined, unsubscribe: () => void } {
+    const initial = this.portForwards.get(portForwardId)?.toInfo()
+
+    if (!this.portForwardStatusWatchers.has(portForwardId)) {
+      this.portForwardStatusWatchers.set(portForwardId, new Set())
+    }
+    this.portForwardStatusWatchers.get(portForwardId)!.add(cb)
+
+    return {
+      initial,
+      unsubscribe: () => {
+        this.portForwardStatusWatchers.get(portForwardId)?.delete(cb)
+      }
+    }
   }
 
   getSSHTunnel(connectionId: string): SSHTunnel | undefined {

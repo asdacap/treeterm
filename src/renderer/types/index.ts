@@ -19,6 +19,8 @@ import type {
   RunAction,
   SSHConnectionConfig,
   ConnectionInfo,
+  PortForwardConfig,
+  PortForwardInfo,
   ReasoningEffort
 } from '../../shared/types'
 import type { PtyEvent } from '../../shared/ipc-types'
@@ -40,6 +42,8 @@ export type {
   RunAction,
   SSHConnectionConfig,
   ConnectionInfo,
+  PortForwardConfig,
+  PortForwardInfo,
   ReasoningEffort
 }
 
@@ -540,6 +544,11 @@ export interface SSHApi {
   onOutput: (callback: (connectionId: string, line: string) => void) => () => void
   watchOutput: (connectionId: string, cb: (line: string) => void) => Promise<{ scrollback: string[], unsubscribe: () => void }>
   watchConnectionStatus: (connectionId: string, cb: (info: ConnectionInfo) => void) => Promise<{ initial: ConnectionInfo | undefined, unsubscribe: () => void }>
+  addPortForward: (config: PortForwardConfig) => Promise<PortForwardInfo>
+  removePortForward: (portForwardId: string) => Promise<void>
+  listPortForwards: (connectionId: string) => Promise<PortForwardInfo[]>
+  onPortForwardStatus: (callback: (info: PortForwardInfo) => void) => () => void
+  watchPortForwardOutput: (portForwardId: string, cb: (line: string) => void) => Promise<{ scrollback: string[], unsubscribe: () => void }>
 }
 
 export interface SessionApi {

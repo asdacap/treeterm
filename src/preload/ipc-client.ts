@@ -82,6 +82,11 @@ const CHANNELS = {
   sshUnwatchOutput: 'ssh:unwatchOutput',
   sshWatchConnectionStatus: 'ssh:watchConnectionStatus',
   sshUnwatchConnectionStatus: 'ssh:unwatchConnectionStatus',
+  sshAddPortForward: 'ssh:addPortForward',
+  sshRemovePortForward: 'ssh:removePortForward',
+  sshListPortForwards: 'ssh:listPortForwards',
+  sshWatchPortForwardOutput: 'ssh:watchPortForwardOutput',
+  sshUnwatchPortForwardOutput: 'ssh:unwatchPortForwardOutput',
   llmChatSend: 'llm:chat:send',
   llmAnalyzeTerminal: 'llm:analyzeTerminal',
   llmClearAnalyzerCache: 'llm:clearAnalyzerCache',
@@ -112,6 +117,8 @@ const CHANNELS = {
   activeProcessesOpen: 'active-processes:open',
   sshConnectionStatus: 'ssh:connectionStatus',
   sshOutput: 'ssh:output',
+  sshPortForwardStatus: 'ssh:portForwardStatus',
+  sshPortForwardOutput: 'ssh:portForwardOutput',
   llmChatDelta: 'llm:chat:delta',
   llmChatDone: 'llm:chat:done',
   llmChatError: 'llm:chat:error',
@@ -497,6 +504,26 @@ export class IpcClient {
     return ipcRenderer.invoke(CHANNELS.sshUnwatchConnectionStatus, ...args)
   }
 
+  sshAddPortForward(...args: IpcRequests['sshAddPortForward']['params']): Promise<IpcRequests['sshAddPortForward']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshAddPortForward, ...args)
+  }
+
+  sshRemovePortForward(...args: IpcRequests['sshRemovePortForward']['params']): Promise<IpcRequests['sshRemovePortForward']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshRemovePortForward, ...args)
+  }
+
+  sshListPortForwards(...args: IpcRequests['sshListPortForwards']['params']): Promise<IpcRequests['sshListPortForwards']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshListPortForwards, ...args)
+  }
+
+  sshWatchPortForwardOutput(...args: IpcRequests['sshWatchPortForwardOutput']['params']): Promise<IpcRequests['sshWatchPortForwardOutput']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshWatchPortForwardOutput, ...args)
+  }
+
+  sshUnwatchPortForwardOutput(...args: IpcRequests['sshUnwatchPortForwardOutput']['params']): Promise<IpcRequests['sshUnwatchPortForwardOutput']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshUnwatchPortForwardOutput, ...args)
+  }
+
   // LLM requests
   llmChatSend(
     ...args: IpcRequests['llmChatSend']['params']
@@ -633,6 +660,20 @@ export class IpcClient {
       callback(...(args as IpcEvents['sshOutput']['params']))
     ipcRenderer.on(CHANNELS.sshOutput, handler)
     return () => ipcRenderer.removeListener(CHANNELS.sshOutput, handler)
+  }
+
+  onSshPortForwardStatus(callback: (...args: IpcEvents['sshPortForwardStatus']['params']) => void): () => void {
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
+      callback(...(args as IpcEvents['sshPortForwardStatus']['params']))
+    ipcRenderer.on(CHANNELS.sshPortForwardStatus, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.sshPortForwardStatus, handler)
+  }
+
+  onSshPortForwardOutput(callback: (...args: IpcEvents['sshPortForwardOutput']['params']) => void): () => void {
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
+      callback(...(args as IpcEvents['sshPortForwardOutput']['params']))
+    ipcRenderer.on(CHANNELS.sshPortForwardOutput, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.sshPortForwardOutput, handler)
   }
 
   onLlmChatDelta(callback: (...args: IpcEvents['llmChatDelta']['params']) => void): () => void {
