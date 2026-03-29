@@ -5426,6 +5426,19 @@ body,
   word-break: break-all;
 }
 
+.ssh-pane-section-header {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 8px 8px 4px;
+  border-top: 1px solid var(--border-color);
+}
+
+.ssh-pane-section-header:first-child {
+  border-top: none;
+  padding-top: 4px;
+}
+
 /* Chat Application */
 .chat-container {
   display: flex;

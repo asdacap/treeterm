@@ -7,7 +7,7 @@ import { useAppStore } from '../store/app'
 import { useSessionNamesStore } from '../store/sessionNames'
 import type { SSHConnectionConfig } from '../types'
 
-type TabId = 'info' | 'bootstrap' | 'start' | 'proxy' | 'json'
+type TabId = 'info' | 'ssh' | 'json'
 
 const BOOTSTRAP_PREFIXES = ['[bootstrap]', '[bootstrap:err]', '[ssh]']
 const START_PREFIXES = ['[start]', '[start:err]']
@@ -58,9 +58,7 @@ interface ConnectingProps {
 
 const CONNECTING_TABS: { id: TabId; label: string }[] = [
   { id: 'info', label: 'Info' },
-  { id: 'bootstrap', label: 'Bootstrap' },
-  { id: 'start', label: 'Start' },
-  { id: 'proxy', label: 'Proxy' },
+  { id: 'ssh', label: 'SSH' },
 ]
 
 function ConnectingSessionInfoPane({ sessionId, connectionId, config, initialError }: ConnectingProps) {
@@ -68,7 +66,7 @@ function ConnectingSessionInfoPane({ sessionId, connectionId, config, initialErr
   const removeSession = useAppStore(s => s.removeSession)
   const startRemoteConnect = useAppStore(s => s.startRemoteConnect)
   const disconnectSession = useAppStore(s => s.disconnectSession)
-  const [activeTab, setActiveTab] = useState<TabId>('bootstrap')
+  const [activeTab, setActiveTab] = useState<TabId>('ssh')
   const [output, setOutput] = useState<string[]>([])
   const [status, setStatus] = useState<string>(initialError ? 'error' : 'connecting')
   const [error, setError] = useState<string | undefined>(initialError)
@@ -102,18 +100,17 @@ function ConnectingSessionInfoPane({ sessionId, connectionId, config, initialErr
     return () => { unsubscribe?.() }
   }, [connectionId, ssh])
 
-  const filteredOutput = useMemo(() => {
-    if (activeTab === 'bootstrap') return filterLines(output, BOOTSTRAP_PREFIXES)
-    if (activeTab === 'start') return filterLines(output, START_PREFIXES)
-    if (activeTab === 'proxy') return filterLines(output, PROXY_PREFIXES)
-    return []
-  }, [output, activeTab])
+  const sshOutput = useMemo(() => ({
+    bootstrap: filterLines(output, BOOTSTRAP_PREFIXES),
+    start: filterLines(output, START_PREFIXES),
+    proxy: filterLines(output, PROXY_PREFIXES),
+  }), [output])
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [filteredOutput.length])
+  }, [sshOutput.bootstrap.length, sshOutput.start.length, sshOutput.proxy.length])
 
   const handleRetry = () => {
     removeSession(sessionId)
@@ -179,14 +176,35 @@ function ConnectingSessionInfoPane({ sessionId, connectionId, config, initialErr
         </div>
       ) : (
         <div className="ssh-pane-output" ref={scrollRef}>
-          {filteredOutput.length === 0 && (
+          {sshOutput.bootstrap.length === 0 && sshOutput.start.length === 0 && sshOutput.proxy.length === 0 && (
             <div className="ssh-pane-output-empty">
-              No {activeTab} output yet...
+              Waiting for SSH output...
             </div>
           )}
-          {filteredOutput.map((line, i) => (
-            <div key={i} className="ssh-pane-output-line">{line}</div>
-          ))}
+          {sshOutput.bootstrap.length > 0 && (
+            <>
+              <div className="ssh-pane-section-header">── Bootstrap ──</div>
+              {sshOutput.bootstrap.map((line, i) => (
+                <div key={`bootstrap-${i}`} className="ssh-pane-output-line">{line}</div>
+              ))}
+            </>
+          )}
+          {sshOutput.start.length > 0 && (
+            <>
+              <div className="ssh-pane-section-header">── Start ──</div>
+              {sshOutput.start.map((line, i) => (
+                <div key={`start-${i}`} className="ssh-pane-output-line">{line}</div>
+              ))}
+            </>
+          )}
+          {sshOutput.proxy.length > 0 && (
+            <>
+              <div className="ssh-pane-section-header">── Proxy ──</div>
+              {sshOutput.proxy.map((line, i) => (
+                <div key={`proxy-${i}`} className="ssh-pane-output-line">{line}</div>
+              ))}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -245,25 +263,24 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
     return () => { unsubscribe?.() }
   }, [isRemote, connection, ssh])
 
-  const filteredOutput = useMemo(() => {
-    if (activeTab === 'bootstrap') return filterLines(output, BOOTSTRAP_PREFIXES)
-    if (activeTab === 'start') return filterLines(output, START_PREFIXES)
-    if (activeTab === 'proxy') return filterLines(output, PROXY_PREFIXES)
-    return []
-  }, [output, activeTab])
+  const sshOutput = useMemo(() => ({
+    bootstrap: filterLines(output, BOOTSTRAP_PREFIXES),
+    start: filterLines(output, START_PREFIXES),
+    proxy: filterLines(output, PROXY_PREFIXES),
+  }), [output])
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [filteredOutput.length])
+  }, [sshOutput.bootstrap.length, sshOutput.start.length, sshOutput.proxy.length])
 
   const label = isRemote && connection.target.type === 'remote'
     ? `${connection.target.config.user}@${connection.target.config.host}`
     : displayName || sessionId
 
   const tabs: { id: TabId; label: string }[] = isRemote
-    ? [{ id: 'info', label: 'Info' }, { id: 'bootstrap', label: 'Bootstrap' }, { id: 'start', label: 'Start' }, { id: 'proxy', label: 'Proxy' }, { id: 'json', label: 'JSON' }]
+    ? [{ id: 'info', label: 'Info' }, { id: 'ssh', label: 'SSH' }, { id: 'json', label: 'JSON' }]
     : [{ id: 'info', label: 'Info' }, { id: 'json', label: 'JSON' }]
 
   return (
@@ -344,14 +361,35 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
         </div>
       ) : (
         <div className="ssh-pane-output" ref={scrollRef}>
-          {filteredOutput.length === 0 && (
+          {sshOutput.bootstrap.length === 0 && sshOutput.start.length === 0 && sshOutput.proxy.length === 0 && (
             <div className="ssh-pane-output-empty">
-              No {activeTab === 'bootstrap' ? 'bootstrap' : activeTab === 'start' ? 'start' : 'proxy'} output yet...
+              Waiting for SSH output...
             </div>
           )}
-          {filteredOutput.map((line, i) => (
-            <div key={i} className="ssh-pane-output-line">{line}</div>
-          ))}
+          {sshOutput.bootstrap.length > 0 && (
+            <>
+              <div className="ssh-pane-section-header">── Bootstrap ──</div>
+              {sshOutput.bootstrap.map((line, i) => (
+                <div key={`bootstrap-${i}`} className="ssh-pane-output-line">{line}</div>
+              ))}
+            </>
+          )}
+          {sshOutput.start.length > 0 && (
+            <>
+              <div className="ssh-pane-section-header">── Start ──</div>
+              {sshOutput.start.map((line, i) => (
+                <div key={`start-${i}`} className="ssh-pane-output-line">{line}</div>
+              ))}
+            </>
+          )}
+          {sshOutput.proxy.length > 0 && (
+            <>
+              <div className="ssh-pane-section-header">── Proxy ──</div>
+              {sshOutput.proxy.map((line, i) => (
+                <div key={`proxy-${i}`} className="ssh-pane-output-line">{line}</div>
+              ))}
+            </>
+          )}
         </div>
       )}
     </div>
