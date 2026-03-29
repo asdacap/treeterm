@@ -102,13 +102,11 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
   function extractBuffer(): string | null {
     if (!terminal) return null
-    const settings = deps.getSettings()
-    const numLines = settings.terminalAnalyzer.bufferLines || 10
     const xtermBuffer = terminal.buffer.normal
-    const contentEnd = xtermBuffer.baseY + xtermBuffer.cursorY + 1
-    const startLine = Math.max(0, contentEnd - numLines)
+    const startLine = xtermBuffer.baseY
+    const endLine = xtermBuffer.baseY + terminal.rows
     const lines: string[] = []
-    for (let i = startLine; i < contentEnd; i++) {
+    for (let i = startLine; i < endLine; i++) {
       const line = xtermBuffer.getLine(i)
       if (line) lines.push(line.translateToString(true))
     }
