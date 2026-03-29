@@ -8,6 +8,7 @@ import { useKeybindingStore } from './keybinding'
 import { initKeyboardHealthMonitor } from '../utils/keyboardHealthMonitor'
 import { useNavigationStore } from './navigation'
 import { useActivityStateStore } from './activityState'
+import { useSessionNamesStore } from './sessionNames'
 import { createTerminalApplication, createTerminalVariant } from '../../applications/terminal/renderer'
 import { filesystemApplication } from '../../applications/filesystem/renderer'
 import { createAiHarnessVariant } from '../../applications/aiHarness/renderer'
@@ -259,6 +260,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
       console.log('[App] Received app:ready with session:', session?.id)
       if (session) {
         const sessionStore = getOrCreateSession(session.id, get, set)
+        if (!useSessionNamesStore.getState().getName(session.id)) {
+          useSessionNamesStore.getState().setName(session.id, 'LOCAL')
+        }
         if (session.workspaces && session.workspaces.length > 0) {
           sessionStore.getState().handleRestore(session)
           const firstWs = session.workspaces[0]
@@ -352,6 +356,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
     console.log(`[renderer:app] addRemoteSession called: session=${session.id}, connection=${connection.id}, status=${connection.status}, workspaces=${session.workspaces?.length ?? 0}`)
     // Remove the old connecting entry (keyed by connectionId) and create connected entry (keyed by session.id)
     const store = getOrCreateSession(session.id, get, set, connection)
+    if (!useSessionNamesStore.getState().getName(session.id)) {
+      const label = connection.target.type === 'remote'
+        ? (connection.target.config.label || `${connection.target.config.user}@${connection.target.config.host}`)
+        : session.id
+      useSessionNamesStore.getState().setName(session.id, label)
+    }
     // Remove old connecting entry if it was keyed differently
     if (connection.id !== session.id) {
       set((state) => {
