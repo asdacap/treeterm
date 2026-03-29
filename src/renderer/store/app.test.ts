@@ -57,6 +57,7 @@ vi.mock('../../applications/comments/renderer', () => ({
 
 import { useAppStore } from './app'
 import { useNavigationStore } from './navigation'
+import { useSessionNamesStore } from './sessionNames'
 
 // Mock createSessionStore and its utilities
 vi.mock('./createSessionStore', () => ({
@@ -801,6 +802,65 @@ describe('useAppStore', () => {
         { id: 'claude', name: 'Claude', icon: 'C', command: 'claude', isDefault: false, enableSandbox: false, allowNetwork: true, backgroundColor: '#000', disableScrollbar: false, stripScrollbackClear: false }
       ])
       cleanup()
+    })
+  })
+
+  describe('session auto-naming', () => {
+    beforeEach(async () => {
+      useSessionNamesStore.setState({ names: {} })
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
+      cleanup()
+    })
+
+    describe('local session via onReady', () => {
+      it('names local session LOCAL', () => {
+        const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0]
+        readyCallback({ id: 'local-session-1', workspaces: [] })
+        expect(useSessionNamesStore.getState().getName('local-session-1')).toBe('LOCAL')
+      })
+
+      it('does not overwrite existing custom name', () => {
+        useSessionNamesStore.getState().setName('local-session-2', 'My Custom Name')
+        const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0]
+        readyCallback({ id: 'local-session-2', workspaces: [] })
+        expect(useSessionNamesStore.getState().getName('local-session-2')).toBe('My Custom Name')
+      })
+    })
+
+    describe('SSH session via addRemoteSession', () => {
+      it('names session with user@host when no label', async () => {
+        const connection = {
+          id: 'conn-1',
+          target: { type: 'remote' as const, config: { id: 'conn-1', host: 'myserver.com', user: 'alice', port: 22 } },
+          status: 'connected' as const
+        }
+        const session = { id: 'ssh-session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }
+        await useAppStore.getState().addRemoteSession(session, connection)
+        expect(useSessionNamesStore.getState().getName('ssh-session-1')).toBe('alice@myserver.com')
+      })
+
+      it('uses label over user@host when label is set', async () => {
+        const connection = {
+          id: 'conn-2',
+          target: { type: 'remote' as const, config: { id: 'conn-2', host: 'myserver.com', user: 'alice', port: 22, label: 'Production' } },
+          status: 'connected' as const
+        }
+        const session = { id: 'ssh-session-2', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }
+        await useAppStore.getState().addRemoteSession(session, connection)
+        expect(useSessionNamesStore.getState().getName('ssh-session-2')).toBe('Production')
+      })
+
+      it('does not overwrite existing custom name', async () => {
+        useSessionNamesStore.getState().setName('ssh-session-3', 'My Server')
+        const connection = {
+          id: 'conn-3',
+          target: { type: 'remote' as const, config: { id: 'conn-3', host: 'myserver.com', user: 'alice', port: 22 } },
+          status: 'connected' as const
+        }
+        const session = { id: 'ssh-session-3', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }
+        await useAppStore.getState().addRemoteSession(session, connection)
+        expect(useSessionNamesStore.getState().getName('ssh-session-3')).toBe('My Server')
+      })
     })
   })
 })
