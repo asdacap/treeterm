@@ -298,6 +298,14 @@ function ConnectedSessionPanel({
     }
   }
 
+  const handleOpenSettings = (workspaceId: string) => {
+    closeContextMenu()
+    const entry = workspaces[workspaceId]
+    if (entry && (entry.status === 'loaded' || entry.status === 'operation-error')) {
+      entry.store.getState().addTab('workspace-settings')
+    }
+  }
+
   const toggleExpand = (id: string) => {
     setExpanded((prev) => {
       const next = new Set(prev)
@@ -443,6 +451,11 @@ function ConnectedSessionPanel({
           const ctxWs = ctxEntry && (ctxEntry.status === 'loaded' || ctxEntry.status === 'operation-error') ? ctxEntry.data : undefined
           return (
             <>
+              {ctxWs && (
+                <div className="context-menu-item" onClick={() => handleOpenSettings(contextMenuWorkspaceId)}>
+                  Settings
+                </div>
+              )}
               {ctxWs?.isGitRepo && (
                 <div className="context-menu-item" onClick={() => handleCreateChild(contextMenuWorkspaceId)}>
                   Open Existing Branch

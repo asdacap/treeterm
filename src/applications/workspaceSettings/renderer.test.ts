@@ -45,7 +45,7 @@ describe('WorkspaceSettings Renderer', () => {
     expect(workspaceSettingsApplication.id).toBe('workspace-settings')
     expect(workspaceSettingsApplication.name).toBe('Settings')
     expect(workspaceSettingsApplication.canClose).toBe(true)
-    expect(workspaceSettingsApplication.showInNewTabMenu).toBe(true)
+    expect(workspaceSettingsApplication.showInNewTabMenu).toBe(false)
     expect(workspaceSettingsApplication.displayStyle).toBe('flex')
     expect(workspaceSettingsApplication.isDefault).toBe(false)
   })
