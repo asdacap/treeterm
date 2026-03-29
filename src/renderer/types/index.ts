@@ -385,6 +385,42 @@ export interface GitHubApi {
   getPrInfo: (repoPath: string, head: string, base: string) => Promise<GitHubPrInfoResult>
 }
 
+/** Prepend connectionId to a function's parameter list */
+type PrependConnectionId<F> = F extends (...args: infer A) => infer R
+  ? (connectionId: string, ...args: A) => R
+  : F
+
+/** Version of an API where every method (except onOutput) receives connectionId as the first argument */
+type WithConnectionId<T> = {
+  [K in keyof T]: K extends 'onOutput' ? T[K] : PrependConnectionId<T[K]>
+}
+
+/** Raw git API exposed by the preload — connectionId is the first parameter of every method */
+export type RawGitApi = WithConnectionId<GitApi>
+
+/** Raw GitHub API exposed by the preload — connectionId is the first parameter */
+export type RawGitHubApi = WithConnectionId<GitHubApi>
+
+/** Bind a connectionId to a RawGitApi, returning a GitApi scoped to that connection */
+export function createBoundGit(raw: RawGitApi, connectionId: string): GitApi {
+  return Object.fromEntries(
+    Object.entries(raw).map(([key, fn]) => {
+      if (key === 'onOutput') return [key, fn]
+      return [key, (...args: unknown[]) => (fn as (connId: string, ...rest: unknown[]) => unknown)(connectionId, ...args)]
+    })
+  ) as unknown as GitApi
+}
+
+/** Bind a connectionId to a RawGitHubApi, returning a GitHubApi scoped to that connection */
+export function createBoundGitHub(raw: RawGitHubApi, connectionId: string): GitHubApi {
+  return Object.fromEntries(
+    Object.entries(raw).map(([key, fn]) => [
+      key,
+      (...args: unknown[]) => (fn as (connId: string, ...rest: unknown[]) => unknown)(connectionId, ...args)
+    ])
+  ) as unknown as GitHubApi
+}
+
 export interface GitHubAppState {
   // empty — reads prInfo from workspace store
 }
@@ -511,8 +547,8 @@ declare global {
       platform: Platform
       terminal: TerminalApi
       selectFolder: () => Promise<string | null>
-      git: GitApi
-      github: GitHubApi
+      git: RawGitApi
+      github: RawGitHubApi
       settings: SettingsApi
       filesystem: FilesystemApi
       runActions: RunActionsApi

@@ -32,7 +32,7 @@ let loadingWindow: BrowserWindow | null = null
 const closeConfirmedWindows: Set<number> = new Set()
 let daemonClient: GrpcDaemonClient | null = null
 let connectionManager: ConnectionManager | null = null
-let gitClient: GitClient | null = null
+const gitClients = new Map<string, GitClient>()
 let runActionsClient: RunActionsClient | null = null
 let useDaemon = true // Always use daemon mode
 
@@ -552,11 +552,14 @@ server.onDialogGetRecentDirectories(async () => {
   }
 })
 
-// Initialize git client when daemon is ready
-function initializeGitClient(): void {
-  if (daemonClient && !gitClient) {
-    gitClient = new GitClient(daemonClient)
+// Get (or create) a GitClient for the given connectionId
+function getGitClientForConnection(connectionId: string): GitClient {
+  let gc = gitClients.get(connectionId)
+  if (!gc) {
+    gc = new GitClient(getClientForConnection(connectionId))
+    gitClients.set(connectionId, gc)
   }
+  return gc
 }
 
 // Initialize run actions client when daemon is ready
@@ -567,22 +570,16 @@ function initializeRunActionsClient(): void {
 }
 
 // Git IPC Handlers - Now handled in main process via ExecStream
-server.onGitGetInfo(async (dirPath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  return gitClient.getGitInfo(dirPath)
+server.onGitGetInfo(async (connectionId, dirPath) => {
+  return getGitClientForConnection(connectionId).getGitInfo(dirPath)
 })
 
-server.onGitCreateWorktree(async (repoPath, name, baseBranch, operationId) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
+server.onGitCreateWorktree(async (connectionId, repoPath, name, baseBranch, operationId) => {
   try {
     const onProgress = operationId
       ? (data: string) => server.gitOutput(operationId, data)
       : undefined
-    const result = await gitClient.createWorktree(repoPath, name, baseBranch, onProgress)
+    const result = await getGitClientForConnection(connectionId).createWorktree(repoPath, name, baseBranch, onProgress)
     return { success: true, path: result.path, branch: result.branch }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Failed to create worktree'
@@ -591,54 +588,36 @@ server.onGitCreateWorktree(async (repoPath, name, baseBranch, operationId) => {
   }
 })
 
-server.onGitRemoveWorktree(async (repoPath, worktreePath, deleteBranch, operationId) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
+server.onGitRemoveWorktree(async (connectionId, repoPath, worktreePath, deleteBranch, operationId) => {
   const onProgress = operationId
     ? (data: string) => server.gitOutput(operationId, data)
     : undefined
-  await gitClient.removeWorktree(repoPath, worktreePath, deleteBranch, onProgress)
+  await getGitClientForConnection(connectionId).removeWorktree(repoPath, worktreePath, deleteBranch, onProgress)
   return { success: true }
 })
 
-server.onGitListWorktrees(async (repoPath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  return gitClient.listWorktrees(repoPath)
+server.onGitListWorktrees(async (connectionId, repoPath) => {
+  return getGitClientForConnection(connectionId).listWorktrees(repoPath)
 })
 
-server.onGitListLocalBranches(async (repoPath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  return gitClient.listLocalBranches(repoPath)
+server.onGitListLocalBranches(async (connectionId, repoPath) => {
+  return getGitClientForConnection(connectionId).listLocalBranches(repoPath)
 })
 
-server.onGitListRemoteBranches(async (repoPath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  return gitClient.listRemoteBranches(repoPath)
+server.onGitListRemoteBranches(async (connectionId, repoPath) => {
+  return getGitClientForConnection(connectionId).listRemoteBranches(repoPath)
 })
 
-server.onGitGetBranchesInWorktrees(async (repoPath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  return gitClient.getBranchesInWorktrees(repoPath)
+server.onGitGetBranchesInWorktrees(async (connectionId, repoPath) => {
+  return getGitClientForConnection(connectionId).getBranchesInWorktrees(repoPath)
 })
 
-server.onGitCreateWorktreeFromBranch(async (repoPath, branch, worktreeName, operationId) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
+server.onGitCreateWorktreeFromBranch(async (connectionId, repoPath, branch, worktreeName, operationId) => {
   try {
     const onProgress = operationId
       ? (data: string) => server.gitOutput(operationId, data)
       : undefined
-    const result = await gitClient.createWorktreeFromBranch(repoPath, branch, worktreeName, onProgress)
+    const result = await getGitClientForConnection(connectionId).createWorktreeFromBranch(repoPath, branch, worktreeName, onProgress)
     return { success: true, path: result.path, branch: result.branch }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Failed to create worktree from branch'
@@ -647,15 +626,12 @@ server.onGitCreateWorktreeFromBranch(async (repoPath, branch, worktreeName, oper
   }
 })
 
-server.onGitCreateWorktreeFromRemote(async (repoPath, remoteBranch, worktreeName, operationId) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
+server.onGitCreateWorktreeFromRemote(async (connectionId, repoPath, remoteBranch, worktreeName, operationId) => {
   try {
     const onProgress = operationId
       ? (data: string) => server.gitOutput(operationId, data)
       : undefined
-    const result = await gitClient.createWorktreeFromRemote(repoPath, remoteBranch, worktreeName, onProgress)
+    const result = await getGitClientForConnection(connectionId).createWorktreeFromRemote(repoPath, remoteBranch, worktreeName, onProgress)
     return { success: true, path: result.path, branch: result.branch }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Failed to create worktree from remote branch'
@@ -664,40 +640,28 @@ server.onGitCreateWorktreeFromRemote(async (repoPath, remoteBranch, worktreeName
   }
 })
 
-server.onGitGetDiff(async (worktreePath, parentBranch) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  const result = await gitClient.getDiff(worktreePath, parentBranch)
+server.onGitGetDiff(async (connectionId, worktreePath, parentBranch) => {
+  const result = await getGitClientForConnection(connectionId).getDiff(worktreePath, parentBranch)
   return { success: true, diff: result }
 })
 
-server.onGitGetFileDiff(async (worktreePath, parentBranch, filePath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  const diff = await gitClient.getFileDiff(worktreePath, parentBranch, filePath)
+server.onGitGetFileDiff(async (connectionId, worktreePath, parentBranch, filePath) => {
+  const diff = await getGitClientForConnection(connectionId).getFileDiff(worktreePath, parentBranch, filePath)
   return { success: true, diff }
 })
 
-server.onGitMerge(async (targetWorktreePath, worktreeBranch, squash, operationId) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
+server.onGitMerge(async (connectionId, targetWorktreePath, worktreeBranch, squash, operationId) => {
   const onProgress = operationId
     ? (data: string) => server.gitOutput(operationId, data)
     : undefined
-  await gitClient.mergeWorktree(targetWorktreePath, worktreeBranch, squash, onProgress)
+  await getGitClientForConnection(connectionId).mergeWorktree(targetWorktreePath, worktreeBranch, squash, onProgress)
   return { success: true }
 })
 
-server.onGitCheckMergeConflicts(async (repoPath, sourceBranch, targetBranch) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  const result = await gitClient.checkMergeConflicts(repoPath, sourceBranch, targetBranch)
-  return { 
-    success: true, 
+server.onGitCheckMergeConflicts(async (connectionId, repoPath, sourceBranch, targetBranch) => {
+  const result = await getGitClientForConnection(connectionId).checkMergeConflicts(repoPath, sourceBranch, targetBranch)
+  return {
+    success: true,
     conflicts: {
       hasConflicts: result.hasConflicts,
       conflictedFiles: result.conflictedFiles,
@@ -706,47 +670,32 @@ server.onGitCheckMergeConflicts(async (repoPath, sourceBranch, targetBranch) => 
   }
 })
 
-server.onGitHasUncommittedChanges(async (repoPath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  return gitClient.hasUncommittedChanges(repoPath)
+server.onGitHasUncommittedChanges(async (connectionId, repoPath) => {
+  return getGitClientForConnection(connectionId).hasUncommittedChanges(repoPath)
 })
 
-server.onGitCommitAll(async (repoPath, message) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  const hash = await gitClient.commitAll(repoPath, message)
+server.onGitCommitAll(async (connectionId, repoPath, message) => {
+  const hash = await getGitClientForConnection(connectionId).commitAll(repoPath, message)
   return { success: true, hash }
 })
 
-server.onGitDeleteBranch(async (repoPath, branchName, operationId) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
+server.onGitDeleteBranch(async (connectionId, repoPath, branchName, operationId) => {
   const onProgress = operationId
     ? (data: string) => server.gitOutput(operationId, data)
     : undefined
-  await gitClient.deleteBranch(repoPath, branchName, false, onProgress)
+  await getGitClientForConnection(connectionId).deleteBranch(repoPath, branchName, false, onProgress)
   return { success: true }
 })
 
-server.onGitRenameBranch(async (repoPath, oldName, newName) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  await gitClient.renameBranch(repoPath, oldName, newName)
+server.onGitRenameBranch(async (connectionId, repoPath, oldName, newName) => {
+  await getGitClientForConnection(connectionId).renameBranch(repoPath, oldName, newName)
   return { success: true }
 })
 
-server.onGitGetUncommittedChanges(async (repoPath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  const result = await gitClient.getUncommittedChanges(repoPath)
-  return { 
-    success: true, 
+server.onGitGetUncommittedChanges(async (connectionId, repoPath) => {
+  const result = await getGitClientForConnection(connectionId).getUncommittedChanges(repoPath)
+  return {
+    success: true,
     changes: {
       files: result.files,
       totalAdditions: result.totalAdditions,
@@ -755,61 +704,40 @@ server.onGitGetUncommittedChanges(async (repoPath) => {
   }
 })
 
-server.onGitGetUncommittedFileDiff(async (repoPath, filePath, staged) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  const diff = await gitClient.getUncommittedFileDiff(repoPath, filePath, staged)
+server.onGitGetUncommittedFileDiff(async (connectionId, repoPath, filePath, staged) => {
+  const diff = await getGitClientForConnection(connectionId).getUncommittedFileDiff(repoPath, filePath, staged)
   return { success: true, diff }
 })
 
-server.onGitStageFile(async (repoPath, filePath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  await gitClient.stageFile(repoPath, filePath)
+server.onGitStageFile(async (connectionId, repoPath, filePath) => {
+  await getGitClientForConnection(connectionId).stageFile(repoPath, filePath)
   return { success: true }
 })
 
-server.onGitUnstageFile(async (repoPath, filePath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  await gitClient.unstageFile(repoPath, filePath)
+server.onGitUnstageFile(async (connectionId, repoPath, filePath) => {
+  await getGitClientForConnection(connectionId).unstageFile(repoPath, filePath)
   return { success: true }
 })
 
-server.onGitStageAll(async (repoPath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  await gitClient.stageAll(repoPath)
+server.onGitStageAll(async (connectionId, repoPath) => {
+  await getGitClientForConnection(connectionId).stageAll(repoPath)
   return { success: true }
 })
 
-server.onGitUnstageAll(async (repoPath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  await gitClient.unstageAll(repoPath)
+server.onGitUnstageAll(async (connectionId, repoPath) => {
+  await getGitClientForConnection(connectionId).unstageAll(repoPath)
   return { success: true }
 })
 
-server.onGitCommitStaged(async (repoPath, message) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  const hash = await gitClient.commitStaged(repoPath, message)
+server.onGitCommitStaged(async (connectionId, repoPath, message) => {
+  const hash = await getGitClientForConnection(connectionId).commitStaged(repoPath, message)
   return { success: true, hash }
 })
 
-server.onGitGetFileContentsForDiff(async (worktreePath, parentBranch, filePath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  const result = await gitClient.getFileContentsForDiff(worktreePath, parentBranch, filePath)
-  return { 
-    success: true, 
+server.onGitGetFileContentsForDiff(async (connectionId, worktreePath, parentBranch, filePath) => {
+  const result = await getGitClientForConnection(connectionId).getFileContentsForDiff(worktreePath, parentBranch, filePath)
+  return {
+    success: true,
     contents: {
       originalContent: result.originalContent,
       modifiedContent: result.modifiedContent,
@@ -818,13 +746,10 @@ server.onGitGetFileContentsForDiff(async (worktreePath, parentBranch, filePath) 
   }
 })
 
-server.onGitGetUncommittedFileContentsForDiff(async (repoPath, filePath, staged) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  const result = await gitClient.getUncommittedFileContentsForDiff(repoPath, filePath, staged)
-  return { 
-    success: true, 
+server.onGitGetUncommittedFileContentsForDiff(async (connectionId, repoPath, filePath, staged) => {
+  const result = await getGitClientForConnection(connectionId).getUncommittedFileContentsForDiff(repoPath, filePath, staged)
+  return {
+    success: true,
     contents: {
       originalContent: result.originalContent,
       modifiedContent: result.modifiedContent,
@@ -833,44 +758,32 @@ server.onGitGetUncommittedFileContentsForDiff(async (repoPath, filePath, staged)
   }
 })
 
-server.onGitGetHeadCommitHash(async (repoPath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  const hash = await gitClient.getHeadCommitHash(repoPath)
+server.onGitGetHeadCommitHash(async (connectionId, repoPath) => {
+  const hash = await getGitClientForConnection(connectionId).getHeadCommitHash(repoPath)
   return { success: true, hash }
 })
 
-server.onGitGetLog(async (repoPath, parentBranch, skip, limit) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
+server.onGitGetLog(async (connectionId, repoPath, parentBranch, skip, limit) => {
   try {
-    const result = await gitClient.getLog(repoPath, parentBranch, skip, limit)
+    const result = await getGitClientForConnection(connectionId).getLog(repoPath, parentBranch, skip, limit)
     return { success: true, result }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
   }
 })
 
-server.onGitGetCommitDiff(async (repoPath, commitHash) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
+server.onGitGetCommitDiff(async (connectionId, repoPath, commitHash) => {
   try {
-    const files = await gitClient.getCommitDiff(repoPath, commitHash)
+    const files = await getGitClientForConnection(connectionId).getCommitDiff(repoPath, commitHash)
     return { success: true, files }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
   }
 })
 
-server.onGitGetCommitFileDiff(async (repoPath, commitHash, filePath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
+server.onGitGetCommitFileDiff(async (connectionId, repoPath, commitHash, filePath) => {
   try {
-    const contents = await gitClient.getCommitFileDiff(repoPath, commitHash, filePath)
+    const contents = await getGitClientForConnection(connectionId).getCommitFileDiff(repoPath, commitHash, filePath)
     return { success: true, contents }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
@@ -878,43 +791,31 @@ server.onGitGetCommitFileDiff(async (repoPath, commitHash, filePath) => {
 })
 
 // Git fetch/pull IPC Handlers
-server.onGitFetch(async (repoPath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
+server.onGitFetch(async (connectionId, repoPath) => {
   try {
-    await gitClient.fetch(repoPath)
+    await getGitClientForConnection(connectionId).fetch(repoPath)
     return { success: true }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
   }
 })
 
-server.onGitPull(async (repoPath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
+server.onGitPull(async (connectionId, repoPath) => {
   try {
-    return await gitClient.pull(repoPath)
+    return await getGitClientForConnection(connectionId).pull(repoPath)
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
   }
 })
 
-server.onGitGetBehindCount(async (repoPath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
-  return await gitClient.getBehindCount(repoPath)
+server.onGitGetBehindCount(async (connectionId, repoPath) => {
+  return await getGitClientForConnection(connectionId).getBehindCount(repoPath)
 })
 
 // GitHub IPC Handlers
-server.onGitGetRemoteUrl(async (repoPath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
+server.onGitGetRemoteUrl(async (connectionId, repoPath) => {
   try {
-    const url = await gitClient.getRemoteUrl(repoPath)
+    const url = await getGitClientForConnection(connectionId).getRemoteUrl(repoPath)
     return { url }
   } catch (error) {
     return { error: error instanceof Error ? error.message : 'Unknown error' }
@@ -970,16 +871,13 @@ function parseGitHubOwnerRepo(remoteUrl: string): { owner: string; repo: string 
   return null
 }
 
-server.onGithubGetPrInfo(async (repoPath, head, base) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeGitClient()
-  if (!gitClient) throw new Error('Git client not initialized')
+server.onGithubGetPrInfo(async (connectionId, repoPath, head, base) => {
   try {
     // Get GitHub token
     const settings = loadSettings()
     let token: string
     if (settings.github?.autodetectViaGh !== false) {
-      const result = await execCommand(daemonClient, repoPath, 'gh', ['auth', 'token'])
+      const result = await execCommand(getClientForConnection(connectionId), repoPath, 'gh', ['auth', 'token'])
       if (result.exitCode !== 0) {
         return { error: 'Failed to get token from gh CLI. Is gh installed and authenticated?' }
       }
@@ -990,7 +888,7 @@ server.onGithubGetPrInfo(async (repoPath, head, base) => {
     }
 
     // Get remote URL and parse owner/repo
-    const remoteUrl = await gitClient.getRemoteUrl(repoPath)
+    const remoteUrl = await getGitClientForConnection(connectionId).getRemoteUrl(repoPath)
     const parsed = parseGitHubOwnerRepo(remoteUrl)
     if (!parsed) return { error: `Could not parse GitHub owner/repo from remote URL: ${remoteUrl}` }
     const { owner, repo } = parsed

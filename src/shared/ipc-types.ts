@@ -60,147 +60,147 @@ export interface IpcRequests {
 
   // Git operations
   gitGetInfo: {
-    params: [dirPath: string]
+    params: [connectionId: string, dirPath: string]
     result: GitInfo
   }
   gitCreateWorktree: {
-    params: [repoPath: string, name: string, baseBranch?: string, operationId?: string]
+    params: [connectionId: string, repoPath: string, name: string, baseBranch?: string, operationId?: string]
     result: WorktreeResult
   }
   gitRemoveWorktree: {
-    params: [repoPath: string, worktreePath: string, deleteBranch?: boolean, operationId?: string]
+    params: [connectionId: string, repoPath: string, worktreePath: string, deleteBranch?: boolean, operationId?: string]
     result: { success: boolean; error?: string }
   }
   gitListWorktrees: {
-    params: [repoPath: string]
+    params: [connectionId: string, repoPath: string]
     result: WorktreeInfo[]
   }
   gitListLocalBranches: {
-    params: [repoPath: string]
+    params: [connectionId: string, repoPath: string]
     result: string[]
   }
   gitListRemoteBranches: {
-    params: [repoPath: string]
+    params: [connectionId: string, repoPath: string]
     result: string[]
   }
   gitGetBranchesInWorktrees: {
-    params: [repoPath: string]
+    params: [connectionId: string, repoPath: string]
     result: string[]
   }
   gitCreateWorktreeFromBranch: {
-    params: [repoPath: string, branch: string, worktreeName: string, operationId?: string]
+    params: [connectionId: string, repoPath: string, branch: string, worktreeName: string, operationId?: string]
     result: WorktreeResult
   }
   gitCreateWorktreeFromRemote: {
-    params: [repoPath: string, remoteBranch: string, worktreeName: string, operationId?: string]
+    params: [connectionId: string, repoPath: string, remoteBranch: string, worktreeName: string, operationId?: string]
     result: WorktreeResult
   }
   gitGetDiff: {
-    params: [worktreePath: string, parentBranch: string]
+    params: [connectionId: string, worktreePath: string, parentBranch: string]
     result: { success: boolean; diff?: DiffResult; error?: string }
   }
   gitGetFileDiff: {
-    params: [worktreePath: string, parentBranch: string, filePath: string]
+    params: [connectionId: string, worktreePath: string, parentBranch: string, filePath: string]
     result: { success: boolean; diff?: string; error?: string }
   }
   gitMerge: {
-    params: [targetWorktreePath: string, worktreeBranch: string, squash: boolean, operationId?: string]
+    params: [connectionId: string, targetWorktreePath: string, worktreeBranch: string, squash: boolean, operationId?: string]
     result: { success: boolean; error?: string }
   }
   gitCheckMergeConflicts: {
-    params: [repoPath: string, sourceBranch: string, targetBranch: string]
+    params: [connectionId: string, repoPath: string, sourceBranch: string, targetBranch: string]
     result: ConflictCheckResult
   }
   gitHasUncommittedChanges: {
-    params: [repoPath: string]
+    params: [connectionId: string, repoPath: string]
     result: boolean
   }
   gitCommitAll: {
-    params: [repoPath: string, message: string]
+    params: [connectionId: string, repoPath: string, message: string]
     result: { success: boolean; error?: string }
   }
   gitDeleteBranch: {
-    params: [repoPath: string, branchName: string, operationId?: string]
+    params: [connectionId: string, repoPath: string, branchName: string, operationId?: string]
     result: { success: boolean; error?: string }
   }
   gitRenameBranch: {
-    params: [repoPath: string, oldName: string, newName: string]
+    params: [connectionId: string, repoPath: string, oldName: string, newName: string]
     result: { success: boolean; error?: string }
   }
   gitGetUncommittedChanges: {
-    params: [repoPath: string]
+    params: [connectionId: string, repoPath: string]
     result: { success: boolean; changes?: UncommittedChanges; error?: string }
   }
   gitGetUncommittedFileDiff: {
-    params: [repoPath: string, filePath: string, staged: boolean]
+    params: [connectionId: string, repoPath: string, filePath: string, staged: boolean]
     result: { success: boolean; diff?: string; error?: string }
   }
   gitStageFile: {
-    params: [repoPath: string, filePath: string]
+    params: [connectionId: string, repoPath: string, filePath: string]
     result: { success: boolean; error?: string }
   }
   gitUnstageFile: {
-    params: [repoPath: string, filePath: string]
+    params: [connectionId: string, repoPath: string, filePath: string]
     result: { success: boolean; error?: string }
   }
   gitStageAll: {
-    params: [repoPath: string]
+    params: [connectionId: string, repoPath: string]
     result: { success: boolean; error?: string }
   }
   gitUnstageAll: {
-    params: [repoPath: string]
+    params: [connectionId: string, repoPath: string]
     result: { success: boolean; error?: string }
   }
   gitCommitStaged: {
-    params: [repoPath: string, message: string]
+    params: [connectionId: string, repoPath: string, message: string]
     result: { success: boolean; error?: string }
   }
   gitGetFileContentsForDiff: {
-    params: [worktreePath: string, parentBranch: string, filePath: string]
+    params: [connectionId: string, worktreePath: string, parentBranch: string, filePath: string]
     result: { success: boolean; contents?: FileDiffContents; error?: string }
   }
   gitGetUncommittedFileContentsForDiff: {
-    params: [repoPath: string, filePath: string, staged: boolean]
+    params: [connectionId: string, repoPath: string, filePath: string, staged: boolean]
     result: { success: boolean; contents?: FileDiffContents; error?: string }
   }
   gitGetHeadCommitHash: {
-    params: [repoPath: string]
+    params: [connectionId: string, repoPath: string]
     result: { success: boolean; hash?: string; error?: string }
   }
   gitGetLog: {
-    params: [repoPath: string, parentBranch: string | null, skip: number, limit: number]
+    params: [connectionId: string, repoPath: string, parentBranch: string | null, skip: number, limit: number]
     result: { success: boolean; result?: GitLogResult; error?: string }
   }
   gitGetCommitDiff: {
-    params: [repoPath: string, commitHash: string]
+    params: [connectionId: string, repoPath: string, commitHash: string]
     result: { success: boolean; files?: DiffFile[]; error?: string }
   }
   gitGetCommitFileDiff: {
-    params: [repoPath: string, commitHash: string, filePath: string]
+    params: [connectionId: string, repoPath: string, commitHash: string, filePath: string]
     result: { success: boolean; contents?: FileDiffContents; error?: string }
   }
 
   // Git fetch/pull operations
   gitFetch: {
-    params: [repoPath: string]
+    params: [connectionId: string, repoPath: string]
     result: { success: boolean; error?: string }
   }
   gitPull: {
-    params: [repoPath: string]
+    params: [connectionId: string, repoPath: string]
     result: { success: boolean; error?: string }
   }
   gitGetBehindCount: {
-    params: [repoPath: string]
+    params: [connectionId: string, repoPath: string]
     result: number
   }
 
   // GitHub operations
   gitGetRemoteUrl: {
-    params: [repoPath: string]
+    params: [connectionId: string, repoPath: string]
     result: { url?: string; error?: string }
   }
   githubGetPrInfo: {
-    params: [repoPath: string, head: string, base: string]
+    params: [connectionId: string, repoPath: string, head: string, base: string]
     result: GitHubPrInfoResult
   }
 

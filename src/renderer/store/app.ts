@@ -21,16 +21,17 @@ import { workspaceSettingsApplication } from '../../applications/workspaceSettin
 import { githubApplication } from '../../applications/github/renderer'
 import type {
   Workspace, Session, Application,
-  Platform, TerminalApi, GitApi, SessionApi, AppApi, DaemonApi,
+  Platform, TerminalApi, RawGitApi, SessionApi, AppApi, DaemonApi,
   FilesystemApi, STTApi, SandboxApi, SettingsApi, RunActionsApi,
   TerminalInstance, AiHarnessInstance,
-  ConnectionInfo, SSHConnectionConfig, SSHApi, LlmApi, ClipboardApi, GitHubApi
+  ConnectionInfo, SSHConnectionConfig, SSHApi, LlmApi, ClipboardApi, RawGitHubApi
 } from '../types'
+import { createBoundGit, createBoundGitHub } from '../types'
 
 export interface AppDeps {
   platform: Platform
   terminal: TerminalApi
-  git: GitApi
+  git: RawGitApi
   sessionApi: SessionApi
   settingsApi: SettingsApi
   appApi: AppApi
@@ -42,7 +43,7 @@ export interface AppDeps {
   ssh: SSHApi
   llm: LlmApi
   clipboard: ClipboardApi
-  github: GitHubApi
+  github: RawGitHubApi
   selectFolder: () => Promise<string | null>
   getWindowUuid: () => Promise<string>
   getInitialWorkspace: () => Promise<string | null>
@@ -433,10 +434,13 @@ function getOrCreateSession(
     return existing.store
   }
   console.log(`[renderer:app] getOrCreateSession: creating new session store for session=${sessionId}, connection=${connection?.id ?? 'local'}`)
+  const connId = connection?.id ?? 'local'
+  const boundGit = createBoundGit(git, connId)
+  const boundGithub = createBoundGitHub(github, connId)
   const store = createSessionStore(
     { sessionId, windowUuid, connection },
     {
-      git,
+      git: boundGit,
       filesystem,
       sessionApi,
       terminal,
@@ -445,7 +449,7 @@ function getOrCreateSession(
         get: (id: string) => get().applications[id],
         getDefaultApp: (appId?: string) => get().getDefaultApplication(appId),
       },
-      github,
+      github: boundGithub,
       llm: { analyzeTerminal: llm.analyzeTerminal, generateTitle: llm.generateTitle },
       setActivityTabState: (tabId, state) => useActivityStateStore.getState().setTabState(tabId, state),
     }

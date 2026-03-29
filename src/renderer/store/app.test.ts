@@ -113,7 +113,8 @@ const mockDeps = {
     kill: vi.fn(),
     bind: vi.fn().mockReturnThis()
   },
-  git: {},
+  git: { onOutput: vi.fn().mockReturnValue(() => {}) },
+  github: { getPrInfo: vi.fn() },
   filesystem: {},
   reviews: {},
   stt: {},

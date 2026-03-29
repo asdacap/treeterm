@@ -36,8 +36,8 @@ describe('IpcClient', () => {
 
     it('gitGetInfo calls ipcRenderer.invoke with correct channel and args', async () => {
       mockInvoke.mockResolvedValue({ branch: 'main' })
-      const result = await client.gitGetInfo('/repo')
-      expect(mockInvoke).toHaveBeenCalledWith('git:getInfo', '/repo')
+      const result = await client.gitGetInfo('local', '/repo')
+      expect(mockInvoke).toHaveBeenCalledWith('git:getInfo', 'local', '/repo')
       expect(result).toEqual({ branch: 'main' })
     })
 
