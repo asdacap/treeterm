@@ -9,7 +9,7 @@ import type {
   Workspace, Session, AppState, GitInfo,
   ConnectionInfo, ActivityState, SSHConnectionConfig,
   TerminalApi, GitApi, FilesystemApi, SessionApi, Settings, WorktreeSettings,
-  Application, SandboxConfig, SessionInfo, LlmApi, GitHubApi
+  Application, SandboxConfig, SessionInfo, LlmApi, GitHubApi, RunActionsApi
 } from '../types'
 
 export type WorkspaceEntry =
@@ -31,6 +31,7 @@ export interface AppRegistryApi {
 export interface SessionDeps {
   git: GitApi
   filesystem: FilesystemApi
+  runActions: RunActionsApi
   sessionApi: SessionApi
   terminal: TerminalApi
   github: GitHubApi
@@ -198,6 +199,7 @@ export function createSessionStore(
       connectionId: config.connection?.id ?? 'local',
       git: deps.git,
       filesystem: deps.filesystem,
+      runActions: deps.runActions,
       getSettings: deps.getSettings,
       llm: deps.llm,
       setActivityTabState: deps.setActivityTabState,

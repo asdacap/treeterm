@@ -45,6 +45,7 @@ const mockWorkspaceStoreStateData = {
   removeKeepBoth: vi.fn(),
   getGitApi: vi.fn(),
   getFilesystemApi: vi.fn(),
+  getRunActionsApi: vi.fn(),
   initTab: vi.fn(),
   getTabRef: vi.fn().mockReturnValue(null),
   initAnalyzer: vi.fn(),

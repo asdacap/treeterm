@@ -401,24 +401,40 @@ export type RawGitApi = WithConnectionId<GitApi>
 /** Raw GitHub API exposed by the preload — connectionId is the first parameter */
 export type RawGitHubApi = WithConnectionId<GitHubApi>
 
-/** Bind a connectionId to a RawGitApi, returning a GitApi scoped to that connection */
-export function createBoundGit(raw: RawGitApi, connectionId: string): GitApi {
+/** Raw filesystem API exposed by the preload — connectionId is the first parameter of every method */
+export type RawFilesystemApi = WithConnectionId<FilesystemApi>
+
+/** Raw run actions API exposed by the preload — connectionId is the first parameter of every method */
+export type RawRunActionsApi = WithConnectionId<RunActionsApi>
+
+/** Generic helper: bind connectionId to all methods of a raw (WithConnectionId) API */
+function bindConnectionId<T extends object>(raw: WithConnectionId<T>, connectionId: string): T {
   return Object.fromEntries(
     Object.entries(raw).map(([key, fn]) => {
       if (key === 'onOutput') return [key, fn]
       return [key, (...args: unknown[]) => (fn as (connId: string, ...rest: unknown[]) => unknown)(connectionId, ...args)]
     })
-  ) as unknown as GitApi
+  ) as unknown as T
+}
+
+/** Bind a connectionId to a RawGitApi, returning a GitApi scoped to that connection */
+export function createBoundGit(raw: RawGitApi, connectionId: string): GitApi {
+  return bindConnectionId<GitApi>(raw, connectionId)
 }
 
 /** Bind a connectionId to a RawGitHubApi, returning a GitHubApi scoped to that connection */
 export function createBoundGitHub(raw: RawGitHubApi, connectionId: string): GitHubApi {
-  return Object.fromEntries(
-    Object.entries(raw).map(([key, fn]) => [
-      key,
-      (...args: unknown[]) => (fn as (connId: string, ...rest: unknown[]) => unknown)(connectionId, ...args)
-    ])
-  ) as unknown as GitHubApi
+  return bindConnectionId<GitHubApi>(raw, connectionId)
+}
+
+/** Bind a connectionId to a RawFilesystemApi, returning a FilesystemApi scoped to that connection */
+export function createBoundFilesystem(raw: RawFilesystemApi, connectionId: string): FilesystemApi {
+  return bindConnectionId<FilesystemApi>(raw, connectionId)
+}
+
+/** Bind a connectionId to a RawRunActionsApi, returning a RunActionsApi scoped to that connection */
+export function createBoundRunActions(raw: RawRunActionsApi, connectionId: string): RunActionsApi {
+  return bindConnectionId<RunActionsApi>(raw, connectionId)
 }
 
 export interface GitHubAppState {
@@ -550,8 +566,8 @@ declare global {
       git: RawGitApi
       github: RawGitHubApi
       settings: SettingsApi
-      filesystem: FilesystemApi
-      runActions: RunActionsApi
+      filesystem: RawFilesystemApi
+      runActions: RawRunActionsApi
       sandbox: SandboxApi
       stt: STTApi
       getInitialWorkspace: () => Promise<string | null>

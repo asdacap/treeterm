@@ -216,19 +216,19 @@ export interface IpcRequests {
 
   // Filesystem operations
   fsReadDirectory: {
-    params: [workspacePath: string, dirPath: string]
+    params: [connectionId: string, workspacePath: string, dirPath: string]
     result: { success: boolean; contents?: DirectoryContents; error?: string }
   }
   fsReadFile: {
-    params: [workspacePath: string, filePath: string]
+    params: [connectionId: string, workspacePath: string, filePath: string]
     result: { success: boolean; file?: FileContents; error?: string }
   }
   fsWriteFile: {
-    params: [workspacePath: string, filePath: string, content: string]
+    params: [connectionId: string, workspacePath: string, filePath: string, content: string]
     result: { success: boolean; error?: string }
   }
   fsSearchFiles: {
-    params: [workspacePath: string, query: string]
+    params: [connectionId: string, workspacePath: string, query: string]
     result: { success: boolean; entries?: FileEntry[]; error?: string }
   }
 
@@ -292,11 +292,11 @@ export interface IpcRequests {
 
   // Run Actions operations
   runActionsDetect: {
-    params: [workspacePath: string]
+    params: [connectionId: string, workspacePath: string]
     result: RunAction[]
   }
   runActionsRun: {
-    params: [workspacePath: string, actionId: string]
+    params: [connectionId: string, workspacePath: string, actionId: string]
     result: string | null  // returns ptyId
   }
 

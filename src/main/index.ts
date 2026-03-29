@@ -33,7 +33,7 @@ const closeConfirmedWindows: Set<number> = new Set()
 let daemonClient: GrpcDaemonClient | null = null
 let connectionManager: ConnectionManager | null = null
 const gitClients = new Map<string, GitClient>()
-let runActionsClient: RunActionsClient | null = null
+const runActionsClients = new Map<string, RunActionsClient>()
 let useDaemon = true // Always use daemon mode
 
 // Simple object storage — each entry is an independent terminal's stream.
@@ -562,11 +562,14 @@ function getGitClientForConnection(connectionId: string): GitClient {
   return gc
 }
 
-// Initialize run actions client when daemon is ready
-function initializeRunActionsClient(): void {
-  if (daemonClient && !runActionsClient) {
-    runActionsClient = createRunActionsClient(daemonClient)
+// Get (or create) a RunActionsClient for the given connectionId
+function getRunActionsClientForConnection(connectionId: string): RunActionsClient {
+  let rc = runActionsClients.get(connectionId)
+  if (!rc) {
+    rc = createRunActionsClient(getClientForConnection(connectionId))
+    runActionsClients.set(connectionId, rc)
   }
+  return rc
 }
 
 // Git IPC Handlers - Now handled in main process via ExecStream
@@ -1074,18 +1077,12 @@ server.onGithubGetPrInfo(async (connectionId, repoPath, head, base) => {
 })
 
 // Run Actions IPC Handlers
-server.onRunActionsDetect(async (workspacePath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeRunActionsClient()
-  if (!runActionsClient) throw new Error('RunActions client not initialized')
-  return runActionsClient.detect(workspacePath)
+server.onRunActionsDetect(async (connectionId, workspacePath) => {
+  return getRunActionsClientForConnection(connectionId).detect(workspacePath)
 })
 
-server.onRunActionsRun(async (workspacePath, actionId) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  initializeRunActionsClient()
-  if (!runActionsClient) throw new Error('RunActions client not initialized')
-  return runActionsClient.run(workspacePath, actionId)
+server.onRunActionsRun(async (connectionId, workspacePath, actionId) => {
+  return getRunActionsClientForConnection(connectionId).run(workspacePath, actionId)
 })
 
 // Settings IPC Handlers
@@ -1099,24 +1096,20 @@ server.onSettingsSave((settings) => {
 })
 
 // Filesystem IPC Handlers - All proxied to daemon
-server.onFsReadDirectory(async (workspacePath, dirPath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  return daemonClient.readDirectory(workspacePath, dirPath)
+server.onFsReadDirectory(async (connectionId, workspacePath, dirPath) => {
+  return getClientForConnection(connectionId).readDirectory(workspacePath, dirPath)
 })
 
-server.onFsReadFile(async (workspacePath, filePath) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  return daemonClient.readFile(workspacePath, filePath)
+server.onFsReadFile(async (connectionId, workspacePath, filePath) => {
+  return getClientForConnection(connectionId).readFile(workspacePath, filePath)
 })
 
-server.onFsWriteFile(async (workspacePath, filePath, content) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  return daemonClient.writeFile(workspacePath, filePath, content)
+server.onFsWriteFile(async (connectionId, workspacePath, filePath, content) => {
+  return getClientForConnection(connectionId).writeFile(workspacePath, filePath, content)
 })
 
-server.onFsSearchFiles(async (workspacePath, query) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
-  return daemonClient.searchFiles(workspacePath, query)
+server.onFsSearchFiles(async (connectionId, workspacePath, query) => {
+  return getClientForConnection(connectionId).searchFiles(workspacePath, query)
 })
 
 // Sandbox IPC Handlers

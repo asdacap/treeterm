@@ -349,25 +349,25 @@ contextBridge.exposeInMainWorld('electron', {
     }
   },
   filesystem: {
-    readDirectory: (workspacePath: string, dirPath: string) => {
-      return client.fsReadDirectory(workspacePath, dirPath)
+    readDirectory: (connectionId: string, workspacePath: string, dirPath: string) => {
+      return client.fsReadDirectory(connectionId, workspacePath, dirPath)
     },
-    readFile: (workspacePath: string, filePath: string) => {
-      return client.fsReadFile(workspacePath, filePath)
+    readFile: (connectionId: string, workspacePath: string, filePath: string) => {
+      return client.fsReadFile(connectionId, workspacePath, filePath)
     },
-    writeFile: (workspacePath: string, filePath: string, content: string) => {
-      return client.fsWriteFile(workspacePath, filePath, content)
+    writeFile: (connectionId: string, workspacePath: string, filePath: string, content: string) => {
+      return client.fsWriteFile(connectionId, workspacePath, filePath, content)
     },
-    searchFiles: (workspacePath: string, query: string) => {
-      return client.fsSearchFiles(workspacePath, query)
+    searchFiles: (connectionId: string, workspacePath: string, query: string) => {
+      return client.fsSearchFiles(connectionId, workspacePath, query)
     }
   },
   runActions: {
-    detect: (workspacePath: string) => {
-      return client.runActionsDetect(workspacePath)
+    detect: (connectionId: string, workspacePath: string) => {
+      return client.runActionsDetect(connectionId, workspacePath)
     },
-    run: (workspacePath: string, actionId: string) => {
-      return client.runActionsRun(workspacePath, actionId)
+    run: (connectionId: string, workspacePath: string, actionId: string) => {
+      return client.runActionsRun(connectionId, workspacePath, actionId)
     }
   },
   sandbox: {

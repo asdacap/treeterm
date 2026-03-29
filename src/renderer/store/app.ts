@@ -22,11 +22,11 @@ import { githubApplication } from '../../applications/github/renderer'
 import type {
   Workspace, Session, Application,
   Platform, TerminalApi, RawGitApi, SessionApi, AppApi, DaemonApi,
-  FilesystemApi, STTApi, SandboxApi, SettingsApi, RunActionsApi,
+  RawFilesystemApi, STTApi, SandboxApi, SettingsApi, RawRunActionsApi,
   TerminalInstance, AiHarnessInstance,
   ConnectionInfo, SSHConnectionConfig, SSHApi, LlmApi, ClipboardApi, RawGitHubApi
 } from '../types'
-import { createBoundGit, createBoundGitHub } from '../types'
+import { createBoundGit, createBoundGitHub, createBoundFilesystem, createBoundRunActions } from '../types'
 
 export interface AppDeps {
   platform: Platform
@@ -36,9 +36,9 @@ export interface AppDeps {
   settingsApi: SettingsApi
   appApi: AppApi
   daemon: DaemonApi
-  filesystem: FilesystemApi
+  filesystem: RawFilesystemApi
   stt: STTApi
-  runActions: RunActionsApi
+  runActions: RawRunActionsApi
   sandbox: SandboxApi
   ssh: SSHApi
   llm: LlmApi
@@ -427,7 +427,7 @@ function getOrCreateSession(
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
   connection?: ConnectionInfo
 ): StoreApi<SessionState> {
-  const { sessionStores, windowUuid, git, filesystem, sessionApi, terminal, llm, github } = get()
+  const { sessionStores, windowUuid, git, filesystem, runActions, sessionApi, terminal, llm, github } = get()
   const existing = sessionStores[sessionId]
   if (existing?.status === 'connected') {
     console.log(`[renderer:app] getOrCreateSession: reusing existing session store for session=${sessionId}`)
@@ -437,11 +437,14 @@ function getOrCreateSession(
   const connId = connection?.id ?? 'local'
   const boundGit = createBoundGit(git, connId)
   const boundGithub = createBoundGitHub(github, connId)
+  const boundFilesystem = createBoundFilesystem(filesystem, connId)
+  const boundRunActions = createBoundRunActions(runActions, connId)
   const store = createSessionStore(
     { sessionId, windowUuid, connection },
     {
       git: boundGit,
-      filesystem,
+      filesystem: boundFilesystem,
+      runActions: boundRunActions,
       sessionApi,
       terminal,
       getSettings: () => useSettingsStore.getState().settings,

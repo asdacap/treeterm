@@ -389,15 +389,16 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                   {activeWorkspace.isGitRepo && activeHandle && (
                     <GitPullButton workspace={activeHandle} />
                   )}
-                  <RunActionDropdown
-                    workspacePath={activeWorkspace.path}
-                    onRun={async (ptyId, actionId) => {
-                      if (activeHandle) {
+                  {activeHandle && (
+                    <RunActionDropdown
+                      workspacePath={activeWorkspace.path}
+                      runActions={activeHandle.getState().getRunActionsApi()}
+                      onRun={async (ptyId, actionId) => {
                         const tabId = activeHandle.getState().addTab('terminal', { ptyId, ptyHandle: null, keepOnExit: true })
                         activeHandle.getState().updateTabTitle(tabId, actionId)
-                      }
-                    }}
-                  />
+                      }}
+                    />
+                  )}
                   {activeWorkspace.isWorktree && activeWorkspace.parentId && activeWorkspace.gitBranch && activeHandle && (
                     <GitHubButton workspace={activeHandle} />
                   )}

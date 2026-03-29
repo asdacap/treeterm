@@ -1,17 +1,16 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useStore } from 'zustand'
-import { useAppStore } from '../store/app'
 import { createRunActionsStore } from '../store/createRunActionsStore'
-import type { RunAction } from '../types'
+import type { RunAction, RunActionsApi } from '../types'
 
 interface RunActionDropdownProps {
   workspacePath: string
+  runActions: RunActionsApi
   onRun: (ptyId: string, actionId: string) => void
 }
 
-export default function RunActionDropdown({ workspacePath, onRun }: RunActionDropdownProps) {
-  const runActionsApi = useAppStore(s => s.runActions)
+export default function RunActionDropdown({ workspacePath, runActions: runActionsApi, onRun }: RunActionDropdownProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
