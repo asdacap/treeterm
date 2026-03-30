@@ -47,11 +47,9 @@ export interface GitLogResult {
   hasMore: boolean
 }
 
-export interface GitInfo {
-  isRepo: boolean
-  branch: string | null
-  rootPath: string | null
-}
+export type GitInfo =
+  | { isRepo: false }
+  | { isRepo: true; branch: string; rootPath: string }
 
 export interface WorktreeInfo {
   path: string
@@ -147,7 +145,7 @@ export class GitClient {
   /**
    * Pull from remote (git pull)
    */
-  async pull(repoPath: string): Promise<{ success: boolean; error?: string }> {
+  async pull(repoPath: string): Promise<{ success: true } | { success: false; error: string }> {
     const result = await this.exec(repoPath, ['pull'], { timeoutMs: 60000 })
     if (result.exitCode !== 0) {
       return { success: false, error: result.stderr.trim() || 'git pull failed' }
@@ -185,7 +183,7 @@ export class GitClient {
       const result = await this.exec(dirPath, ['rev-parse', '--is-inside-work-tree'])
       
       if (result.exitCode !== 0) {
-        return { isRepo: false, branch: null, rootPath: null }
+        return { isRepo: false }
       }
 
       const [branchResult, rootResult] = await Promise.all([
@@ -195,12 +193,12 @@ export class GitClient {
 
       return {
         isRepo: true,
-        branch: branchResult.stdout.trim() || null,
-        rootPath: rootResult.stdout.trim() || null
+        branch: branchResult.stdout.trim() || 'HEAD',
+        rootPath: rootResult.stdout.trim() || dirPath
       }
     } catch (error) {
       console.warn('[git] getGitInfo failed, treating as non-repo:', error)
-      return { isRepo: false, branch: null, rootPath: null }
+      return { isRepo: false }
     }
   }
 

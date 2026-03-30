@@ -266,14 +266,15 @@ describe('RunActionsClient', () => {
     const client = new RunActionsClient({} as any, [p1, p2])
 
     const result = await client.run('/workspace', 'make:build')
-    expect(result).toBe('pty-make')
+    expect(result).toMatchObject({ success: true, ptyId: 'pty-make' })
     expect(p2.run).toHaveBeenCalledWith('make:build', '/workspace')
     expect(p1.run).not.toHaveBeenCalled()
   })
 
   it('run throws for unknown provider', async () => {
     const client = new RunActionsClient({} as any, [])
-    await expect(client.run('/workspace', 'unknown:action')).rejects.toThrow('No provider found')
+    const result = await client.run('/workspace', 'unknown:action')
+    expect(result).toMatchObject({ success: false, error: expect.stringContaining('No provider found') })
   })
 
   it('detect returns empty when package.json has no scripts', async () => {
@@ -388,7 +389,7 @@ describe('RunActionsClient', () => {
 
     const client = createRunActionsClient(mockDaemonClient as any)
     const result = await client.run('/workspace', 'npm:build')
-    expect(result).toBe('pty-npm')
+    expect(result).toMatchObject({ success: true, ptyId: 'pty-npm' })
     expect(mockDaemonClient.createPtySession).toHaveBeenCalledWith({
       cwd: '/workspace',
       startupCommand: 'npm run build',

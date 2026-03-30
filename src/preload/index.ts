@@ -173,10 +173,10 @@ client.onSshPortForwardOutput((portForwardId, line) => {
 const preloadApi: PreloadApi = {
   platform: process.platform,
   terminal: {
-    create: (connectionId: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string): Promise<{ sessionId: string; handle: string } | null> => {
+    create: (connectionId: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => {
       return client.ptyCreate(connectionId, cwd, sandbox, startupCommand)
     },
-    attach: (connectionId: string, sessionId: string): Promise<{ success: boolean; handle?: string; error?: string }> => {
+    attach: (connectionId: string, sessionId: string) => {
       return client.ptyAttach(connectionId, sessionId)
     },
     list: (connectionId: string): Promise<TTYSessionInfo[]> => {
@@ -450,7 +450,7 @@ const preloadApi: PreloadApi = {
     }
   },
   daemon: {
-    shutdown: (): Promise<{ success: boolean; error?: string }> => {
+    shutdown: () => {
       return client.daemonShutdown()
     },
     onSessions: (callback: SessionsCallback): (() => void) => {
@@ -473,22 +473,22 @@ const preloadApi: PreloadApi = {
     }
   },
   session: {
-    create: (workspaces: WorkspaceInput[]): Promise<{ success: boolean; session?: Session; error?: string }> => {
+    create: (workspaces: WorkspaceInput[]) => {
       return client.sessionCreate(workspaces)
     },
-    update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number): Promise<{ success: boolean; session?: Session; error?: string }> => {
+    update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number) => {
       return client.sessionUpdate(sessionId, workspaces, senderUuid, expectedVersion)
     },
-    list: (): Promise<{ success: boolean; sessions?: Session[]; error?: string }> => {
+    list: () => {
       return client.sessionList()
     },
-    get: (sessionId: string): Promise<{ success: boolean; session?: Session; error?: string }> => {
+    get: (sessionId: string) => {
       return client.sessionGet(sessionId)
     },
-    delete: (sessionId: string): Promise<{ success: boolean; error?: string }> => {
+    delete: (sessionId: string) => {
       return client.sessionDelete(sessionId)
     },
-    openInNewWindow: (sessionId: string): Promise<{ success: boolean; error?: string }> => {
+    openInNewWindow: (sessionId: string) => {
       return client.sessionOpenInNewWindow(sessionId)
     },
     onShowSessions: (callback: SessionMenuCallback): (() => void) => {
@@ -552,7 +552,7 @@ const preloadApi: PreloadApi = {
     }
   },
   ssh: {
-    connect: (config: SSHConnectionConfig, options?: { refreshDaemon?: boolean }): Promise<{ info: ConnectionInfo, session?: Session }> => {
+    connect: (config: SSHConnectionConfig, options?: { refreshDaemon?: boolean }) => {
       return client.sshConnect(config, options)
     },
     disconnect: (connectionId: string): Promise<void> => {
@@ -598,7 +598,7 @@ const preloadApi: PreloadApi = {
         }
       }
     },
-    watchConnectionStatus: async (connectionId: string, cb: (info: ConnectionInfo) => void): Promise<{ initial: ConnectionInfo | undefined, unsubscribe: () => void }> => {
+    watchConnectionStatus: async (connectionId: string, cb: (info: ConnectionInfo) => void): Promise<{ initial: ConnectionInfo, unsubscribe: () => void }> => {
       sshStatusWatchCallbacks.set(connectionId, cb)
       const result = await client.sshWatchConnectionStatus(connectionId)
       return {

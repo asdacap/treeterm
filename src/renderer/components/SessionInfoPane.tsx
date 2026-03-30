@@ -100,12 +100,10 @@ function ConnectingSessionInfoPane({ sessionId, connectionId, config, initialErr
     let unsubscribe: (() => void) | undefined
     ssh.watchConnectionStatus(connectionId, (info) => {
       setStatus(info.status)
-      setError(info.error)
+      setError(info.status === 'error' ? info.error : undefined)
     }).then(({ initial, unsubscribe: unsub }) => {
-      if (initial) {
-        setStatus(initial.status)
-        setError(initial.error)
-      }
+      setStatus(initial.status)
+      setError(initial.status === 'error' ? initial.error : undefined)
       unsubscribe = unsub
     }).catch(console.error)
     return () => { unsubscribe?.() }
@@ -128,7 +126,7 @@ function ConnectingSessionInfoPane({ sessionId, connectionId, config, initialErr
     startRemoteConnect(config)
     ssh.connect(config).then(({ info, session }) => {
       if (info.status !== 'connected' || !session) {
-        useAppStore.getState().setSessionError(config.id, info.error || 'Connection failed')
+        useAppStore.getState().setSessionError(config.id, info.status === 'error' ? info.error : 'Connection failed')
         return
       }
       useAppStore.getState().addRemoteSession(session, info)
@@ -251,7 +249,7 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
     setJsonError(null)
     try {
       const result = await sessionApi.get(sessionId)
-      if (result.success && result.session) {
+      if (result.success) {
         setSessionJson(JSON.stringify(result.session, null, 2))
       } else {
         setJsonError(result.error || 'Failed to fetch session')
@@ -398,7 +396,7 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
                 <div className="ssh-pane-output-line">Identity File: {connection.target.config.identityFile}</div>
               )}
               <div className="ssh-pane-output-line">Status: {connection.status}</div>
-              {connection.error && (
+              {connection.status === 'error' && (
                 <div className="ssh-pane-output-line">Error: {connection.error}</div>
               )}
             </>
@@ -509,7 +507,7 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
                             </button>
                           )}
                         </div>
-                        {pf.error && (
+                        {pf.status === 'error' && (
                           <div className="port-forward-item-error">{pf.error}</div>
                         )}
                         {isExpanded && (

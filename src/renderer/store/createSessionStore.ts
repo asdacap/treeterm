@@ -315,7 +315,7 @@ export function createSessionStore(
           isDetached: options.isDetached ?? false,
           appStates,
           activeTabId,
-          settings: options.settings,
+          settings: options.settings ?? { defaultApplicationId: '' },
           metadata: {
             ...(options.description ? { description: options.description } : {}),
             ...(options.initialBranch ? { branchIsUserDefined: 'true' } : {}),
@@ -384,7 +384,7 @@ export function createSessionStore(
       isDetached: options.isDetached ?? false,
       appStates,
       activeTabId,
-      settings: options.settings,
+      settings: options.settings ?? { defaultApplicationId: '' },
       metadata: options.metadata ?? {},
       createdAt: Date.now(),
       lastActivity: Date.now(),
@@ -580,8 +580,8 @@ export function createSessionStore(
 
     createTty: async (cwd: string, sandbox?: SandboxConfig, startupCommand?: string): Promise<string> => {
       const result = await deps.terminal.create(connectionId, cwd, sandbox, startupCommand)
-      if (!result) {
-        throw new Error('Failed to create PTY')
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to create PTY')
       }
       const writer = createTtyWriter(result.sessionId, result.handle, boundTerminal)
       set((s) => ({
@@ -592,7 +592,7 @@ export function createSessionStore(
 
     openTtyStream: async (ptyId: string): Promise<{ tty: Tty }> => {
       const result = await deps.terminal.attach(connectionId, ptyId)
-      if (!result.success || !result.handle) {
+      if (!result.success) {
         throw new Error(result.error || 'Failed to attach to PTY')
       }
       const tty = createTtyStore(ptyId, result.handle, boundTerminal)
@@ -603,7 +603,7 @@ export function createSessionStore(
       const cached = get().ttyWriters[ptyId]
       if (cached) return cached
       const result = await deps.terminal.attach(connectionId, ptyId)
-      if (!result.success || !result.handle) {
+      if (!result.success) {
         throw new Error(result.error || 'Failed to attach to PTY')
       }
       const writer = createTtyWriter(ptyId, result.handle, boundTerminal)
@@ -674,13 +674,13 @@ export function createSessionStore(
           parentId: null,
           status: 'active',
           isGitRepo: gitInfo.isRepo,
-          gitBranch: gitInfo.branch,
-          gitRootPath: gitInfo.rootPath,
+          gitBranch: gitInfo.isRepo ? gitInfo.branch : null,
+          gitRootPath: gitInfo.isRepo ? gitInfo.rootPath : null,
           isWorktree: false,
           isDetached: false,
           appStates,
           activeTabId,
-          settings: options?.settings,
+          settings: options?.settings ?? { defaultApplicationId: '' },
           metadata: {},
           createdAt: Date.now(),
           lastActivity: Date.now(),
@@ -721,7 +721,7 @@ export function createSessionStore(
         message: 'Creating worktree...',
         preOperation: async () => {
           const currentGitInfo = await deps.git.getInfo(parent.path)
-          if (currentGitInfo.branch && currentGitInfo.branch !== parent.gitBranch) {
+          if (currentGitInfo.isRepo && currentGitInfo.branch !== parent.gitBranch) {
             get().updateGitInfo(parentId, currentGitInfo)
           }
         },
@@ -841,8 +841,8 @@ export function createSessionStore(
         workspace: {
           ...s.workspace,
           isGitRepo: gitInfo.isRepo,
-          gitBranch: gitInfo.branch,
-          gitRootPath: gitInfo.rootPath
+          gitBranch: gitInfo.isRepo ? gitInfo.branch : null,
+          gitRootPath: gitInfo.isRepo ? gitInfo.rootPath : null
         }
       }))
       syncSessionToDaemon(get().isRestoring).catch(console.error)

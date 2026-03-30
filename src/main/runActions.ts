@@ -242,11 +242,12 @@ export class RunActionsClient {
     return actions
   }
 
-  async run(workspacePath: string, actionId: string): Promise<string | null> {
+  async run(workspacePath: string, actionId: string): Promise<{ success: true; ptyId: string } | { success: false; error: string }> {
     const source = actionId.split(':')[0]
     const provider = this.providers.find(p => p.source === source)
-    if (!provider) throw new Error(`No provider found for action source: ${source}`)
-    return provider.run(actionId, workspacePath)
+    if (!provider) return { success: false, error: `No provider found for action source: ${source}` }
+    const ptyId = await provider.run(actionId, workspacePath)
+    return { success: true, ptyId }
   }
 }
 

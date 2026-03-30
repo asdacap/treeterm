@@ -97,15 +97,17 @@ export class PortForwardProcess {
   }
 
   toInfo(): PortForwardInfo {
-    return {
+    const base = {
       id: this.config.id,
       connectionId: this.config.connectionId,
       localPort: this.config.localPort,
       remoteHost: this.config.remoteHost,
       remotePort: this.config.remotePort,
-      status: this._status,
-      error: this._error
     }
+    if (this._status === 'error') {
+      return { ...base, status: 'error', error: this._error ?? 'Unknown error' }
+    }
+    return { ...base, status: this._status }
   }
 
   private appendOutput(line: string): void {

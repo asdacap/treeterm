@@ -7,15 +7,14 @@ export const editorApplication: Application<EditorState> = {
   name: 'Editor',
   icon: '\u270F',
 
-  createInitialState: () => ({
+  createInitialState: (): EditorState => ({
+    status: 'ready',
     filePath: '',
     originalContent: '',
     currentContent: '',
     language: 'plaintext',
     isDirty: false,
-    viewMode: 'editor',
-    isLoading: false,
-    error: null
+    viewMode: 'editor'
   }),
 
   onWorkspaceLoad: () => ({ dispose: () => {} }),

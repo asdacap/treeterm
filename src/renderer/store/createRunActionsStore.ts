@@ -5,10 +5,11 @@
 
 import { createStore } from 'zustand/vanilla'
 import type { RunAction } from '../types'
+import type { IpcResult } from '../../shared/ipc-types'
 
 export interface RunActionsDeps {
   detect: (workspacePath: string) => Promise<RunAction[]>
-  run: (workspacePath: string, actionId: string) => Promise<string | null>
+  run: (workspacePath: string, actionId: string) => Promise<IpcResult<{ ptyId: string }>>
 }
 
 export interface RunActionsState {
@@ -16,7 +17,7 @@ export interface RunActionsState {
   detecting: boolean
 
   detect: () => Promise<void>
-  run: (actionId: string) => Promise<string | null>
+  run: (actionId: string) => Promise<IpcResult<{ ptyId: string }>>
 }
 
 export function createRunActionsStore(

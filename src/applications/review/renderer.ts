@@ -10,6 +10,7 @@ export const reviewApplication: Application<ReviewState> = {
 
   createInitialState: () => ({
     // parentWorkspaceId is optional - null means top-level worktree (no merge parent)
+    viewMode: 'committed' as const
   }),
 
   onWorkspaceLoad: () => ({ dispose: () => {} }),

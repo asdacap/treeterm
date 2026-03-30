@@ -54,9 +54,9 @@ export default function RunActionDropdown({ workspacePath, runActions: runAction
 
   const handleRun = useCallback(async (actionId: string) => {
     setMenuOpen(false)
-    const ptyId = await runActionsApi.run(workspacePath, actionId)
-    if (ptyId) {
-      onRun(ptyId, actionId)
+    const result = await runActionsApi.run(workspacePath, actionId)
+    if (result.success) {
+      onRun(result.ptyId, actionId)
     }
   }, [runActionsApi, workspacePath, onRun])
 

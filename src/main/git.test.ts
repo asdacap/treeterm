@@ -317,8 +317,7 @@ describe('GitClient', () => {
       const info = await git.getGitInfo('/repo')
 
       expect(info.isRepo).toBe(true)
-      expect(info.branch).toBe('main')
-      expect(info.rootPath).toBe('/repo')
+      expect(info).toMatchObject({ isRepo: true, branch: 'main', rootPath: '/repo' })
     })
   })
 
@@ -625,16 +624,14 @@ describe('GitClient', () => {
       const client = makeMockClient([errorStream('merge conflict')])
       const git = new GitClient(client)
       const result = await git.pull('/repo')
-      expect(result.success).toBe(false)
-      expect(result.error).toContain('merge conflict')
+      expect(result).toMatchObject({ success: false, error: expect.stringContaining('merge conflict') })
     })
 
     it('uses fallback message when stderr is empty', async () => {
       const client = makeMockClient([buildMockStream([{ result: { exitCode: 1 } }])])
       const git = new GitClient(client)
       const result = await git.pull('/repo')
-      expect(result.success).toBe(false)
-      expect(result.error).toBe('git pull failed')
+      expect(result).toMatchObject({ success: false, error: 'git pull failed' })
     })
   })
 

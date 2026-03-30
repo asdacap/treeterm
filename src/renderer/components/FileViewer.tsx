@@ -102,7 +102,7 @@ export function FileViewer({
       try {
         const result = await filesystem.readFile(filePath)
 
-        if (result.success && result.file) {
+        if (result.success) {
           setFileState({
             content: result.file.content,
             language: mapLanguageToMonaco(result.file.language),
@@ -322,14 +322,13 @@ export function FileViewer({
     if (!filePath) return
 
     addTab<EditorState>('editor', {
+      status: 'ready',
       filePath: filePath,
       originalContent: fileState.content,
       currentContent: fileState.content,
       language: fileState.language,
       isDirty: false,
       viewMode: fileState.language === 'markdown' ? 'preview' : 'editor',
-      isLoading: false,
-      error: null
     })
   }, [filePath, fileState, workspace])
 

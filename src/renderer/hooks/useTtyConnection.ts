@@ -2,10 +2,10 @@ import { useState, useEffect, useRef } from 'react'
 import type { SandboxConfig } from '../types'
 import { useSessionApi } from '../contexts/SessionStoreContext'
 
-interface UseTtyCreationResult {
-  loading: boolean
-  error: Error | null
-}
+export type UseTtyCreationResult =
+  | { status: 'loading' }
+  | { status: 'ready' }
+  | { status: 'error'; error: Error }
 
 /**
  * Creates a PTY if one doesn't already exist for this tab.
@@ -14,14 +14,13 @@ interface UseTtyCreationResult {
  * before rendering BaseTerminal.
  */
 export function useTtyCreation(
-  existingPtyId: string | null | undefined,
+  existingPtyId: string | null,
   cwd: string,
   sandbox: SandboxConfig | undefined,
   startupCommand: string | undefined,
   onCreated: (ptyId: string) => void
 ): UseTtyCreationResult {
-  const [loading, setLoading] = useState(!existingPtyId)
-  const [error, setError] = useState<Error | null>(null)
+  const [status, setStatus] = useState<UseTtyCreationResult>(existingPtyId ? { status: 'ready' } : { status: 'loading' })
   const sessionStore = useSessionApi()
   const createTtyPromiseRef = useRef<Promise<string> | null>(null)
   const mountedRef = useRef(true)
@@ -53,11 +52,10 @@ export function useTtyCreation(
         }
 
         onCreated(ptyId)
-        setLoading(false)
+        setStatus({ status: 'ready' })
       } catch (err) {
         if (!cancelled && mountedRef.current) {
-          setError(err instanceof Error ? err : new Error(String(err)))
-          setLoading(false)
+          setStatus({ status: 'error', error: err instanceof Error ? err : new Error(String(err)) })
         }
       }
     }
@@ -71,8 +69,8 @@ export function useTtyCreation(
   }, [existingPtyId, cwd, sandbox?.enabled, startupCommand, sessionStore])
 
   if (existingPtyId) {
-    return { loading: false, error: null }
+    return { status: 'ready' }
   }
 
-  return { loading, error }
+  return status
 }

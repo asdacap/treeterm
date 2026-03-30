@@ -23,8 +23,8 @@ import type {
   PortForwardInfo,
   ReasoningEffort
 } from '../../shared/types'
-import type { PtyEvent } from '../../shared/ipc-types'
-export type { PtyEvent }
+import type { PtyEvent, IpcResult } from '../../shared/ipc-types'
+export type { PtyEvent, IpcResult }
 
 export type {
   SandboxConfig,
@@ -113,7 +113,7 @@ export interface ReviewState {
   // parentWorkspaceId identifies the target branch for merging.
   // If undefined/null, this is a top-level worktree - review shows only uncommitted changes
   parentWorkspaceId?: string
-  viewMode?: 'committed' | 'uncommitted' | 'commits'
+  viewMode: 'committed' | 'uncommitted' | 'commits'
   selectedFilePath?: string
   selectedUncommittedFilePath?: string
   scrollTop?: number
@@ -133,17 +133,10 @@ export interface ChatState {
   messages: ChatMessage[]
 }
 
-export interface EditorState {
-  filePath: string
-  originalContent: string
-  currentContent: string
-  language: string
-  isDirty: boolean
-  viewMode: 'editor' | 'preview'
-  isLoading: boolean
-  error: string | null
-  scrollTop?: number
-}
+export type EditorState =
+  | { status: 'loading'; filePath: string }
+  | { status: 'ready'; filePath: string; originalContent: string; currentContent: string; language: string; isDirty: boolean; viewMode: 'editor' | 'preview'; scrollTop?: number }
+  | { status: 'error'; filePath: string; error: string }
 
 export interface FileEntry {
   name: string
@@ -167,47 +160,25 @@ export interface FileContents {
 }
 
 export interface FilesystemApi {
-  readDirectory: (workspacePath: string, dirPath: string) => Promise<{
-    success: boolean
-    contents?: DirectoryContents
-    error?: string
-  }>
-  readFile: (workspacePath: string, filePath: string) => Promise<{
-    success: boolean
-    file?: FileContents
-    error?: string
-  }>
-  writeFile: (workspacePath: string, filePath: string, content: string) => Promise<{
-    success: boolean
-    error?: string
-  }>
-  searchFiles: (workspacePath: string, query: string) => Promise<{
-    success: boolean
-    entries?: FileEntry[]
-    error?: string
-  }>
+  readDirectory: (workspacePath: string, dirPath: string) => Promise<IpcResult<{ contents: DirectoryContents }>>
+  readFile: (workspacePath: string, filePath: string) => Promise<IpcResult<{ file: FileContents }>>
+  writeFile: (workspacePath: string, filePath: string, content: string) => Promise<IpcResult>
+  searchFiles: (workspacePath: string, query: string) => Promise<IpcResult<{ entries: FileEntry[] }>>
 }
 
 /** Workspace-scoped FilesystemApi with path pre-bound */
 export interface WorkspaceFilesystemApi {
-  readDirectory: (dirPath: string) => Promise<{ success: boolean; contents?: DirectoryContents; error?: string }>
-  readFile: (filePath: string) => Promise<{ success: boolean; file?: FileContents; error?: string }>
-  writeFile: (filePath: string, content: string) => Promise<{ success: boolean; error?: string }>
-  searchFiles: (query: string) => Promise<{ success: boolean; entries?: FileEntry[]; error?: string }>
+  readDirectory: (dirPath: string) => Promise<IpcResult<{ contents: DirectoryContents }>>
+  readFile: (filePath: string) => Promise<IpcResult<{ file: FileContents }>>
+  writeFile: (filePath: string, content: string) => Promise<IpcResult>
+  searchFiles: (query: string) => Promise<IpcResult<{ entries: FileEntry[] }>>
 }
 
-export interface GitInfo {
-  isRepo: boolean
-  branch: string | null
-  rootPath: string | null
-}
+export type GitInfo =
+  | { isRepo: false }
+  | { isRepo: true; branch: string; rootPath: string }
 
-export interface WorktreeResult {
-  success: boolean
-  path?: string
-  branch?: string
-  error?: string
-}
+export type WorktreeResult = IpcResult<{ path: string; branch: string }>
 
 export interface WorktreeInfo {
   path: string
@@ -217,7 +188,7 @@ export interface WorktreeInfo {
 export interface BranchInfo {
   name: string
   isInWorktree: boolean
-  worktreePath?: string  // Path if branch is in a worktree
+  worktreePath?: string
 }
 
 export interface DiffFile {
@@ -292,11 +263,7 @@ export interface ReviewsData {
   comments: ReviewComment[]
 }
 
-export interface ConflictCheckResult {
-  success: boolean
-  conflicts?: ConflictInfo
-  error?: string
-}
+export type ConflictCheckResult = IpcResult<{ conflicts: ConflictInfo }>
 
 export interface ClipboardApi {
   writeText: (text: string) => void
@@ -304,8 +271,8 @@ export interface ClipboardApi {
 }
 
 export interface TerminalApi {
-  create: (connectionId: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<{ sessionId: string; handle: string } | null>
-  attach: (connectionId: string, sessionId: string) => Promise<{ success: boolean; handle?: string; error?: string }>
+  create: (connectionId: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<IpcResult<{ sessionId: string; handle: string }>>
+  attach: (connectionId: string, sessionId: string) => Promise<IpcResult<{ handle: string }>>
   list: (connectionId: string) => Promise<TTYSessionInfo[]>
   write: (handle: string, data: string) => void
   resize: (handle: string, cols: number, rows: number) => void
@@ -318,38 +285,38 @@ export interface TerminalApi {
 export interface GitApi {
   getInfo: (dirPath: string) => Promise<GitInfo>
   createWorktree: (repoPath: string, name: string, baseBranch?: string, operationId?: string) => Promise<WorktreeResult>
-  removeWorktree: (repoPath: string, worktreePath: string, deleteBranch?: boolean, operationId?: string) => Promise<{ success: boolean; error?: string }>
+  removeWorktree: (repoPath: string, worktreePath: string, deleteBranch?: boolean, operationId?: string) => Promise<IpcResult>
   listWorktrees: (repoPath: string) => Promise<WorktreeInfo[]>
   listLocalBranches: (repoPath: string) => Promise<string[]>
   listRemoteBranches: (repoPath: string) => Promise<string[]>
   getBranchesInWorktrees: (repoPath: string) => Promise<string[]>
   createWorktreeFromBranch: (repoPath: string, branch: string, worktreeName: string, operationId?: string) => Promise<WorktreeResult>
   createWorktreeFromRemote: (repoPath: string, remoteBranch: string, worktreeName: string, operationId?: string) => Promise<WorktreeResult>
-  getDiff: (worktreePath: string, parentBranch: string) => Promise<{ success: boolean; diff?: DiffResult; error?: string }>
-  getFileDiff: (worktreePath: string, parentBranch: string, filePath: string) => Promise<{ success: boolean; diff?: string; error?: string }>
+  getDiff: (worktreePath: string, parentBranch: string) => Promise<IpcResult<{ diff: DiffResult }>>
+  getFileDiff: (worktreePath: string, parentBranch: string, filePath: string) => Promise<IpcResult<{ diff: string }>>
   checkMergeConflicts: (repoPath: string, sourceBranch: string, targetBranch: string) => Promise<ConflictCheckResult>
-  merge: (targetWorktreePath: string, worktreeBranch: string, squash?: boolean, operationId?: string) => Promise<{ success: boolean; error?: string }>
+  merge: (targetWorktreePath: string, worktreeBranch: string, squash?: boolean, operationId?: string) => Promise<IpcResult>
   hasUncommittedChanges: (repoPath: string) => Promise<boolean>
-  commitAll: (repoPath: string, message: string) => Promise<{ success: boolean; error?: string }>
-  deleteBranch: (repoPath: string, branchName: string, operationId?: string) => Promise<{ success: boolean; error?: string }>
-  renameBranch: (repoPath: string, oldName: string, newName: string) => Promise<{ success: boolean; error?: string }>
-  getUncommittedChanges: (repoPath: string) => Promise<{ success: boolean; changes?: UncommittedChanges; error?: string }>
-  getUncommittedFileDiff: (repoPath: string, filePath: string, staged: boolean) => Promise<{ success: boolean; diff?: string; error?: string }>
-  stageFile: (repoPath: string, filePath: string) => Promise<{ success: boolean; error?: string }>
-  unstageFile: (repoPath: string, filePath: string) => Promise<{ success: boolean; error?: string }>
-  stageAll: (repoPath: string) => Promise<{ success: boolean; error?: string }>
-  unstageAll: (repoPath: string) => Promise<{ success: boolean; error?: string }>
-  commitStaged: (repoPath: string, message: string) => Promise<{ success: boolean; error?: string }>
-  getFileContentsForDiff: (worktreePath: string, parentBranch: string, filePath: string) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
-  getUncommittedFileContentsForDiff: (repoPath: string, filePath: string, staged: boolean) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
-  getHeadCommitHash: (repoPath: string) => Promise<{ success: boolean; hash?: string; error?: string }>
-  getLog: (repoPath: string, parentBranch: string | null, skip: number, limit: number) => Promise<{ success: boolean; result?: GitLogResult; error?: string }>
-  getCommitDiff: (repoPath: string, commitHash: string) => Promise<{ success: boolean; files?: DiffFile[]; error?: string }>
-  getCommitFileDiff: (repoPath: string, commitHash: string, filePath: string) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
-  fetch: (repoPath: string) => Promise<{ success: boolean; error?: string }>
-  pull: (repoPath: string) => Promise<{ success: boolean; error?: string }>
+  commitAll: (repoPath: string, message: string) => Promise<IpcResult>
+  deleteBranch: (repoPath: string, branchName: string, operationId?: string) => Promise<IpcResult>
+  renameBranch: (repoPath: string, oldName: string, newName: string) => Promise<IpcResult>
+  getUncommittedChanges: (repoPath: string) => Promise<IpcResult<{ changes: UncommittedChanges }>>
+  getUncommittedFileDiff: (repoPath: string, filePath: string, staged: boolean) => Promise<IpcResult<{ diff: string }>>
+  stageFile: (repoPath: string, filePath: string) => Promise<IpcResult>
+  unstageFile: (repoPath: string, filePath: string) => Promise<IpcResult>
+  stageAll: (repoPath: string) => Promise<IpcResult>
+  unstageAll: (repoPath: string) => Promise<IpcResult>
+  commitStaged: (repoPath: string, message: string) => Promise<IpcResult>
+  getFileContentsForDiff: (worktreePath: string, parentBranch: string, filePath: string) => Promise<IpcResult<{ contents: FileDiffContents }>>
+  getUncommittedFileContentsForDiff: (repoPath: string, filePath: string, staged: boolean) => Promise<IpcResult<{ contents: FileDiffContents }>>
+  getHeadCommitHash: (repoPath: string) => Promise<IpcResult<{ hash: string }>>
+  getLog: (repoPath: string, parentBranch: string | null, skip: number, limit: number) => Promise<IpcResult<{ result: GitLogResult }>>
+  getCommitDiff: (repoPath: string, commitHash: string) => Promise<IpcResult<{ files: DiffFile[] }>>
+  getCommitFileDiff: (repoPath: string, commitHash: string, filePath: string) => Promise<IpcResult<{ contents: FileDiffContents }>>
+  fetch: (repoPath: string) => Promise<IpcResult>
+  pull: (repoPath: string) => Promise<IpcResult>
   getBehindCount: (repoPath: string) => Promise<number>
-  getRemoteUrl: (repoPath: string) => Promise<{ url?: string; error?: string }>
+  getRemoteUrl: (repoPath: string) => Promise<IpcResult<{ url: string }>>
   onOutput: (callback: (operationId: string, data: string) => void) => () => void
 }
 
@@ -449,35 +416,35 @@ export interface GitHubAppState {
 export interface WorkspaceGitApi {
   getInfo: () => Promise<GitInfo>
   createWorktree: (name: string, baseBranch?: string) => Promise<WorktreeResult>
-  removeWorktree: (worktreePath: string, deleteBranch?: boolean, operationId?: string) => Promise<{ success: boolean; error?: string }>
+  removeWorktree: (worktreePath: string, deleteBranch?: boolean, operationId?: string) => Promise<IpcResult>
   listWorktrees: () => Promise<WorktreeInfo[]>
   listLocalBranches: () => Promise<string[]>
   listRemoteBranches: () => Promise<string[]>
   getBranchesInWorktrees: () => Promise<string[]>
   createWorktreeFromBranch: (branch: string, worktreeName: string) => Promise<WorktreeResult>
   createWorktreeFromRemote: (remoteBranch: string, worktreeName: string) => Promise<WorktreeResult>
-  getDiff: (parentBranch: string) => Promise<{ success: boolean; diff?: DiffResult; error?: string }>
-  getFileDiff: (parentBranch: string, filePath: string) => Promise<{ success: boolean; diff?: string; error?: string }>
+  getDiff: (parentBranch: string) => Promise<IpcResult<{ diff: DiffResult }>>
+  getFileDiff: (parentBranch: string, filePath: string) => Promise<IpcResult<{ diff: string }>>
   checkMergeConflicts: (sourceBranch: string, targetBranch: string) => Promise<ConflictCheckResult>
-  merge: (worktreeBranch: string, squash?: boolean, operationId?: string) => Promise<{ success: boolean; error?: string }>
+  merge: (worktreeBranch: string, squash?: boolean, operationId?: string) => Promise<IpcResult>
   hasUncommittedChanges: () => Promise<boolean>
-  commitAll: (message: string) => Promise<{ success: boolean; error?: string }>
-  deleteBranch: (branchName: string, operationId?: string) => Promise<{ success: boolean; error?: string }>
-  getUncommittedChanges: () => Promise<{ success: boolean; changes?: UncommittedChanges; error?: string }>
-  getUncommittedFileDiff: (filePath: string, staged: boolean) => Promise<{ success: boolean; diff?: string; error?: string }>
-  stageFile: (filePath: string) => Promise<{ success: boolean; error?: string }>
-  unstageFile: (filePath: string) => Promise<{ success: boolean; error?: string }>
-  stageAll: () => Promise<{ success: boolean; error?: string }>
-  unstageAll: () => Promise<{ success: boolean; error?: string }>
-  commitStaged: (message: string) => Promise<{ success: boolean; error?: string }>
-  getFileContentsForDiff: (parentBranch: string, filePath: string) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
-  getUncommittedFileContentsForDiff: (filePath: string, staged: boolean) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
-  getHeadCommitHash: () => Promise<{ success: boolean; hash?: string; error?: string }>
-  getLog: (parentBranch: string | null, skip: number, limit: number) => Promise<{ success: boolean; result?: GitLogResult; error?: string }>
-  getCommitDiff: (commitHash: string) => Promise<{ success: boolean; files?: DiffFile[]; error?: string }>
-  getCommitFileDiff: (commitHash: string, filePath: string) => Promise<{ success: boolean; contents?: FileDiffContents; error?: string }>
-  fetch: () => Promise<{ success: boolean; error?: string }>
-  pull: () => Promise<{ success: boolean; error?: string }>
+  commitAll: (message: string) => Promise<IpcResult>
+  deleteBranch: (branchName: string, operationId?: string) => Promise<IpcResult>
+  getUncommittedChanges: () => Promise<IpcResult<{ changes: UncommittedChanges }>>
+  getUncommittedFileDiff: (filePath: string, staged: boolean) => Promise<IpcResult<{ diff: string }>>
+  stageFile: (filePath: string) => Promise<IpcResult>
+  unstageFile: (filePath: string) => Promise<IpcResult>
+  stageAll: () => Promise<IpcResult>
+  unstageAll: () => Promise<IpcResult>
+  commitStaged: (message: string) => Promise<IpcResult>
+  getFileContentsForDiff: (parentBranch: string, filePath: string) => Promise<IpcResult<{ contents: FileDiffContents }>>
+  getUncommittedFileContentsForDiff: (filePath: string, staged: boolean) => Promise<IpcResult<{ contents: FileDiffContents }>>
+  getHeadCommitHash: () => Promise<IpcResult<{ hash: string }>>
+  getLog: (parentBranch: string | null, skip: number, limit: number) => Promise<IpcResult<{ result: GitLogResult }>>
+  getCommitDiff: (commitHash: string) => Promise<IpcResult<{ files: DiffFile[] }>>
+  getCommitFileDiff: (commitHash: string, filePath: string) => Promise<IpcResult<{ contents: FileDiffContents }>>
+  fetch: () => Promise<IpcResult>
+  pull: () => Promise<IpcResult>
   getBehindCount: () => Promise<number>
 }
 
@@ -488,13 +455,13 @@ export interface SettingsApi {
 }
 
 export interface AppRegistryApi {
-  get: (id: string) => Application | undefined | null
+  get: (id: string) => Application | undefined
   getDefaultApp: (appId?: string) => Application | null
 }
 
 export interface RunActionsApi {
   detect: (workspacePath: string) => Promise<RunAction[]>
-  run: (workspacePath: string, actionId: string) => Promise<string | null>
+  run: (workspacePath: string, actionId: string) => Promise<IpcResult<{ ptyId: string }>>
 }
 
 export interface SandboxApi {
@@ -516,7 +483,7 @@ export interface AppApi {
 }
 
 export interface DaemonApi {
-  shutdown: () => Promise<{ success: boolean; error?: string }>
+  shutdown: () => Promise<IpcResult>
   onSessions: (callback: (sessions: TTYSessionInfo[]) => void) => () => void
   onDisconnected: (callback: () => void) => () => void
 }
@@ -533,7 +500,7 @@ export interface LlmApi {
 }
 
 export interface SSHApi {
-  connect: (config: SSHConnectionConfig, options?: { refreshDaemon?: boolean }) => Promise<{ info: ConnectionInfo, session?: Session }>
+  connect: (config: SSHConnectionConfig, options?: { refreshDaemon?: boolean }) => Promise<{ info: ConnectionInfo; session: Session | null }>
   disconnect: (connectionId: string) => Promise<void>
   listConnections: () => Promise<ConnectionInfo[]>
   saveConnection: (config: SSHConnectionConfig) => Promise<void>
@@ -542,24 +509,22 @@ export interface SSHApi {
   getOutput: (connectionId: string) => Promise<string[]>
   onConnectionStatus: (callback: (info: ConnectionInfo) => void) => () => void
   onOutput: (callback: (connectionId: string, line: string) => void) => () => void
-  watchOutput: (connectionId: string, cb: (line: string) => void) => Promise<{ scrollback: string[], unsubscribe: () => void }>
-  watchConnectionStatus: (connectionId: string, cb: (info: ConnectionInfo) => void) => Promise<{ initial: ConnectionInfo | undefined, unsubscribe: () => void }>
+  watchOutput: (connectionId: string, cb: (line: string) => void) => Promise<{ scrollback: string[]; unsubscribe: () => void }>
+  watchConnectionStatus: (connectionId: string, cb: (info: ConnectionInfo) => void) => Promise<{ initial: ConnectionInfo; unsubscribe: () => void }>
   addPortForward: (config: PortForwardConfig) => Promise<PortForwardInfo>
   removePortForward: (portForwardId: string) => Promise<void>
   listPortForwards: (connectionId: string) => Promise<PortForwardInfo[]>
   onPortForwardStatus: (callback: (info: PortForwardInfo) => void) => () => void
-  watchPortForwardOutput: (portForwardId: string, cb: (line: string) => void) => Promise<{ scrollback: string[], unsubscribe: () => void }>
+  watchPortForwardOutput: (portForwardId: string, cb: (line: string) => void) => Promise<{ scrollback: string[]; unsubscribe: () => void }>
 }
 
 export interface SessionApi {
-  create: (workspaces: WorkspaceInput[]) =>
-    Promise<{ success: boolean; session?: Session; error?: string }>
-  update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number) =>
-    Promise<{ success: boolean; session?: Session; error?: string }>
-  list: () => Promise<{ success: boolean; sessions?: Session[]; error?: string }>
-  get: (sessionId: string) => Promise<{ success: boolean; session?: Session; error?: string }>
-  delete: (sessionId: string) => Promise<{ success: boolean; error?: string }>
-  openInNewWindow: (sessionId: string) => Promise<{ success: boolean; error?: string }>
+  create: (workspaces: WorkspaceInput[]) => Promise<IpcResult<{ session: Session }>>
+  update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number) => Promise<IpcResult<{ session: Session }>>
+  list: () => Promise<IpcResult<{ sessions: Session[] }>>
+  get: (sessionId: string) => Promise<IpcResult<{ session: Session }>>
+  delete: (sessionId: string) => Promise<IpcResult>
+  openInNewWindow: (sessionId: string) => Promise<IpcResult>
   onShowSessions: (callback: () => void) => () => void
   onSync: (callback: (session: Session) => void) => () => void
 }
@@ -632,13 +597,11 @@ export function isEditorState(state: unknown): state is EditorState {
   return (
     state !== null &&
     typeof state === 'object' &&
+    'status' in state &&
     'filePath' in state &&
-    'originalContent' in state &&
-    'currentContent' in state &&
-    'language' in state &&
-    'isDirty' in state &&
-    'viewMode' in state &&
-    'isLoading' in state &&
+    ((state as { status: unknown }).status === 'loading' ||
+      (state as { status: unknown }).status === 'ready' ||
+      (state as { status: unknown }).status === 'error') &&
     typeof (state as EditorState).filePath === 'string'
   )
 }

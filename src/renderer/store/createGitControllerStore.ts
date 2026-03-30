@@ -61,7 +61,7 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
           const parent = deps.lookupWorkspace(ws.parentId)
           if (parent?.gitBranch) {
             const result = await deps.git.checkMergeConflicts(ws.path, ws.gitBranch, parent.gitBranch)
-            store.setState({ hasConflictsWithParent: result.conflicts?.hasConflicts ?? false })
+            store.setState({ hasConflictsWithParent: result.success ? result.conflicts.hasConflicts : false })
           }
         }
       } catch { /* ignore */ }
