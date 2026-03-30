@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { useStore } from 'zustand'
 import { fitTerminal } from '../utils/fitTerminal'
@@ -8,7 +8,6 @@ import { useActivityStateStore } from '../store/activityState'
 import { useSessionApi } from '../contexts/SessionStoreContext'
 import { createActivityStateDetector } from '../utils/activityStateDetector'
 import type { Tty } from '../store/createTtyStore'
-import TerminalScrollWrapper from './TerminalScrollWrapper'
 import type { SandboxConfig, TerminalState, WorkspaceStore } from '../types'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
@@ -371,6 +370,16 @@ export default function BaseTerminal({
     // Note: existingPtyId is intentionally NOT in deps - we only check it on mount/re-run
   }, [tabId, workspaceId, config.themeBackground, settings])
 
+  const handleScrollDown = useCallback(() => {
+    terminalRef.current?.scrollToBottom()
+  }, [terminalRef])
+
+  const handleScrollToTop = useCallback(() => {
+    terminalRef.current?.scrollToTop()
+  }, [terminalRef])
+
+  const handleBadgeClick = scrollPosition === 'bottom' ? handleScrollToTop : handleScrollDown
+
   const openContextMenu = useContextMenuStore((s) => s.open)
   const closeContextMenu = useContextMenuStore((s) => s.close)
   const contextMenuId = `terminal-${tabId}`
@@ -399,13 +408,7 @@ export default function BaseTerminal({
   }
 
   return (
-    <TerminalScrollWrapper
-      terminalRef={terminalRef}
-      scrollPosition={scrollPosition}
-      isAlternateScreen={isAlternateScreen}
-      sizeMismatch={sizeMismatch}
-      extraButtons={extraButtons}
-    >
+    <div className="terminal-wrapper">
       <div className="terminal-padding-wrapper">
         <div
           ref={containerRef}
@@ -441,6 +444,33 @@ export default function BaseTerminal({
           Paste
         </div>
       </ContextMenu>
-    </TerminalScrollWrapper>
+
+      <button
+        className={`scroll-position-badge scroll-position-${scrollPosition}`}
+        onClick={handleBadgeClick}
+        title={scrollPosition === 'bottom' ? 'Scroll to top' : 'Scroll to bottom'}
+      >
+        {scrollPosition.toUpperCase()}
+      </button>
+      {isAlternateScreen && (
+        <span className="alt-screen-badge" title="Terminal is in alternate screen mode (no scrollback)">
+          ALT SCREEN
+        </span>
+      )}
+      {sizeMismatch && (
+        <span
+          className="size-mismatch-badge"
+          title={`Requested: ${sizeMismatch.requested.cols}x${sizeMismatch.requested.rows}, Stream: ${sizeMismatch.actual.cols}x${sizeMismatch.actual.rows}`}
+        >
+          {sizeMismatch.actual.cols}x{sizeMismatch.actual.rows}
+        </span>
+      )}
+      <div className="terminal-floating-buttons">
+        {extraButtons}
+        <button className="scroll-down-btn terminal-circle-btn" onClick={handleScrollDown} title="Scroll to bottom">
+          ↓
+        </button>
+      </div>
+    </div>
   )
 }
