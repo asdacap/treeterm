@@ -142,7 +142,6 @@ export class PortForwardProcess {
     const { localPort, remoteHost, remotePort } = this.config
 
     const args = [
-      '-N',
       '-L', `${localPort}:${remoteHost}:${remotePort}`,
       '-o', 'StrictHostKeyChecking=accept-new',
       '-o', 'BatchMode=yes',
@@ -157,6 +156,7 @@ export class PortForwardProcess {
     }
 
     args.push(`${user}@${host}`)
+    args.push('cat')
 
     return args
   }

@@ -76,10 +76,10 @@ describe('PortForwardProcess', () => {
       expect(spawn).toHaveBeenCalledWith(
         'ssh',
         expect.arrayContaining([
-          '-N',
           '-L', '8080:localhost:3000',
           '-p', '22',
           'admin@example.com',
+          'cat',
         ]),
         { stdio: ['pipe', 'pipe', 'pipe'] }
       )
