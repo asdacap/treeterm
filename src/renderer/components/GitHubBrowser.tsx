@@ -10,7 +10,8 @@ interface GitHubBrowserProps {
 }
 
 export default function GitHubBrowser({ workspace, isVisible }: GitHubBrowserProps) {
-  const { prInfo, refreshPrStatus } = useStore(workspace)
+  const { gitController } = useStore(workspace)
+  const { prInfo, refreshPrStatus } = useStore(gitController)
   const [refreshing, setRefreshing] = useState(false)
 
   const handleRefresh = async () => {

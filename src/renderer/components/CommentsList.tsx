@@ -30,7 +30,8 @@ function extractCodeContext(
 export default function CommentsList({
   workspace,
 }: CommentsListProps): JSX.Element {
-  const { workspace: wsData, getReviewComments, toggleReviewCommentAddressed, deleteReviewComment, addTab, getFilesystemApi } = useStore(workspace)
+  const { workspace: wsData, reviewComments: reviewCommentStore, addTab, getFilesystemApi } = useStore(workspace)
+  const { getReviewComments, toggleReviewCommentAddressed, deleteReviewComment } = useStore(reviewCommentStore)
   const clipboard = useAppStore((state) => state.clipboard)
   const filesystem = getFilesystemApi()
   const comments: ReviewComment[] = getReviewComments()

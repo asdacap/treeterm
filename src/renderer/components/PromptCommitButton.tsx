@@ -2,7 +2,8 @@ import { useStore } from 'zustand'
 import type { WorkspaceStore } from '../types'
 
 export function PromptCommitButton({ workspace }: { workspace: WorkspaceStore }): JSX.Element | null {
-  const { hasUncommittedChanges, hasConflictsWithParent, promptHarness } = useStore(workspace)
+  const { gitController, promptHarness } = useStore(workspace)
+  const { hasUncommittedChanges, hasConflictsWithParent } = useStore(gitController)
 
   if (!hasUncommittedChanges || hasConflictsWithParent) return null
 

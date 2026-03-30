@@ -568,7 +568,8 @@ function MergeAbandonButton({
   workspace, abandonMenuOpen, abandonMenuRef, abandonButtonRef,
   onToggleMenu, onOpenReview, onAbandon, onAbandonKeepBranch, onAbandonKeepBoth,
 }: MergeAbandonButtonProps) {
-  const { isDiffCleanFromParent } = useStore(workspace)
+  const { gitController } = useStore(workspace)
+  const { isDiffCleanFromParent } = useStore(gitController)
 
   const mainLabel = isDiffCleanFromParent ? 'Abandon' : 'Review & Merge'
   const mainAction = isDiffCleanFromParent ? onAbandon : onOpenReview
@@ -626,7 +627,8 @@ interface GitStatusButtonProps {
 }
 
 function GitStatusButton({ workspace }: GitStatusButtonProps) {
-  const { gitRefreshing, hasUncommittedChanges, hasConflictsWithParent, refreshDiffStatus } = useStore(workspace)
+  const { gitController } = useStore(workspace)
+  const { gitRefreshing, hasUncommittedChanges, hasConflictsWithParent, refreshDiffStatus } = useStore(gitController)
 
   const handleRefresh = async () => {
     await refreshDiffStatus()
@@ -671,7 +673,8 @@ interface GitHubButtonProps {
 }
 
 function GitHubButton({ workspace }: GitHubButtonProps) {
-  const { prInfo, openGitHub, addTab } = useStore(workspace)
+  const { gitController, addTab } = useStore(workspace)
+  const { prInfo, openGitHub } = useStore(gitController)
   const [loading, setLoading] = useState(false)
 
   const hasPr = prInfo !== null
@@ -731,7 +734,8 @@ interface GitPullButtonProps {
 }
 
 function GitPullButton({ workspace }: GitPullButtonProps) {
-  const { behindCount, pullLoading, refreshRemoteStatus, pullFromRemote } = useStore(workspace)
+  const { gitController } = useStore(workspace)
+  const { behindCount, pullLoading, refreshRemoteStatus, pullFromRemote } = useStore(gitController)
 
   const handleRefresh = async () => {
     await refreshRemoteStatus()

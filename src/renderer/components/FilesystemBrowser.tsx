@@ -13,7 +13,8 @@ export function FilesystemBrowser({
   workspace,
   tabId,
 }: FilesystemBrowserProps): JSX.Element {
-  const { workspace: wsData, updateTabState, getReviewComments, addReviewComment, deleteReviewComment, updateOutdatedReviewComments, getGitApi } = useStore(workspace)
+  const { workspace: wsData, updateTabState, reviewComments: reviewCommentStore, getGitApi } = useStore(workspace)
+  const { getReviewComments, addReviewComment, deleteReviewComment, updateOutdatedReviewComments } = useStore(reviewCommentStore)
   const git = getGitApi()
   const workspacePath = wsData.path
   const appState = wsData?.appStates[tabId]

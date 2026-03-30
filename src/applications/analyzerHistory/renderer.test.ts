@@ -3,6 +3,8 @@ import { analyzerHistoryApplication } from './renderer'
 import type { Tab, Workspace } from '../../renderer/types'
 import { createStore } from 'zustand/vanilla'
 import type { WorkspaceStoreState } from '../../renderer/store/createWorkspaceStore'
+import type { GitControllerState } from '../../renderer/store/createGitControllerStore'
+import type { ReviewCommentState } from '../../renderer/store/createReviewCommentStore'
 
 vi.mock('react', () => ({
   createElement: vi.fn((component: unknown, props: unknown) => ({ component, props }))
@@ -16,10 +18,13 @@ const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => ({
   workspace: { id: 'ws-1', path: '/test' } as Workspace,
   addTab: vi.fn(), removeTab: vi.fn(), setActiveTab: vi.fn(),
   updateTabTitle: vi.fn(), updateTabState: vi.fn(),
-  getReviewComments: vi.fn(), addReviewComment: vi.fn(),
-  deleteReviewComment: vi.fn(), toggleReviewCommentAddressed: vi.fn(),
-  updateOutdatedReviewComments: vi.fn(), clearReviewComments: vi.fn(),
-  markAllReviewCommentsAddressed: vi.fn(), promptHarness: vi.fn(),
+  reviewComments: createStore<ReviewCommentState>()(() => ({
+    getReviewComments: vi.fn().mockReturnValue([]),
+    addReviewComment: vi.fn(), deleteReviewComment: vi.fn(),
+    toggleReviewCommentAddressed: vi.fn(), updateOutdatedReviewComments: vi.fn(),
+    clearReviewComments: vi.fn(), markAllReviewCommentsAddressed: vi.fn(),
+  } as ReviewCommentState)),
+  promptHarness: vi.fn(),
   quickForkWorkspace: vi.fn(), updateMetadata: vi.fn(),
   updateStatus: vi.fn(), refreshGitInfo: vi.fn(),
   mergeAndRemove: vi.fn(), mergeAndKeep: vi.fn(),
@@ -29,13 +34,15 @@ const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => ({
   initAnalyzer: vi.fn(), createTty: vi.fn().mockResolvedValue('pty-1'),
   connectionId: 'local', updateSettings: vi.fn(),
   getGitApi: vi.fn(), getFilesystemApi: vi.fn(), getRunActionsApi: vi.fn(),
-  hasUncommittedChanges: false, isDiffCleanFromParent: false,
-  hasConflictsWithParent: false, disposeGitController: vi.fn(),
   focusTabId: null, requestFocus: vi.fn(), clearFocusRequest: vi.fn(),
-  behindCount: 0, pullLoading: false, refreshRemoteStatus: vi.fn(),
-  pullFromRemote: vi.fn(), refreshDiffStatus: vi.fn(),
-  gitRefreshing: false, prInfo: null, refreshPrStatus: vi.fn(),
-  openGitHub: vi.fn(),
+  gitController: createStore<GitControllerState>()(() => ({
+    hasUncommittedChanges: false, isDiffCleanFromParent: false,
+    hasConflictsWithParent: false, behindCount: 0, pullLoading: false,
+    gitRefreshing: false, prInfo: null,
+    refreshDiffStatus: vi.fn(), refreshRemoteStatus: vi.fn(),
+    pullFromRemote: vi.fn(), refreshPrStatus: vi.fn(),
+    openGitHub: vi.fn(), startPolling: vi.fn(), dispose: vi.fn(),
+  } as GitControllerState)),
 } as WorkspaceStoreState))
 
 describe('AnalyzerHistory Renderer', () => {

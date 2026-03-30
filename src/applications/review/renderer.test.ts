@@ -3,6 +3,8 @@ import { reviewApplication } from './renderer'
 import type { Tab, Workspace } from '../../renderer/types'
 import { createStore } from 'zustand/vanilla'
 import type { WorkspaceStoreState, WorkspaceStore } from '../../renderer/store/createWorkspaceStore'
+import type { GitControllerState } from '../../renderer/store/createGitControllerStore'
+import type { ReviewCommentState } from '../../renderer/store/createReviewCommentStore'
 
 // Mock React
 vi.mock('react', () => ({
@@ -14,6 +16,33 @@ vi.mock('../../renderer/components/ReviewBrowser', () => ({
   default: vi.fn(() => null)
 }))
 
+const mockReviewCommentStore = createStore<ReviewCommentState>()(() => ({
+  getReviewComments: vi.fn().mockReturnValue([]),
+  addReviewComment: vi.fn(),
+  deleteReviewComment: vi.fn(),
+  toggleReviewCommentAddressed: vi.fn(),
+  updateOutdatedReviewComments: vi.fn(),
+  clearReviewComments: vi.fn(),
+  markAllReviewCommentsAddressed: vi.fn(),
+} as ReviewCommentState))
+
+const mockGitControllerStore = createStore<GitControllerState>()(() => ({
+  hasUncommittedChanges: false,
+  isDiffCleanFromParent: false,
+  hasConflictsWithParent: false,
+  behindCount: 0,
+  pullLoading: false,
+  gitRefreshing: false,
+  prInfo: null,
+  refreshDiffStatus: vi.fn(),
+  refreshRemoteStatus: vi.fn(),
+  pullFromRemote: vi.fn(),
+  refreshPrStatus: vi.fn(),
+  openGitHub: vi.fn(),
+  startPolling: vi.fn(),
+  dispose: vi.fn(),
+} as GitControllerState))
+
 function createMockWorkspaceStoreStateData(overrides?: Partial<WorkspaceStoreState>): WorkspaceStoreState {
   return {
     workspace: { id: 'ws-1', path: '/test' } as Workspace,
@@ -22,13 +51,7 @@ function createMockWorkspaceStoreStateData(overrides?: Partial<WorkspaceStoreSta
     setActiveTab: vi.fn(),
     updateTabTitle: vi.fn(),
     updateTabState: vi.fn(),
-    getReviewComments: vi.fn(),
-    addReviewComment: vi.fn(),
-    deleteReviewComment: vi.fn(),
-    toggleReviewCommentAddressed: vi.fn(),
-    updateOutdatedReviewComments: vi.fn(),
-    clearReviewComments: vi.fn(),
-    markAllReviewCommentsAddressed: vi.fn(),
+    reviewComments: mockReviewCommentStore,
     promptHarness: vi.fn(),
     quickForkWorkspace: vi.fn(),
     updateMetadata: vi.fn(),
@@ -46,6 +69,10 @@ function createMockWorkspaceStoreStateData(overrides?: Partial<WorkspaceStoreSta
     initAnalyzer: vi.fn(),
     createTty: vi.fn().mockResolvedValue('pty-1'),
     connectionId: 'local',
+    focusTabId: null,
+    requestFocus: vi.fn(),
+    clearFocusRequest: vi.fn(),
+    gitController: mockGitControllerStore,
     ...overrides,
   } as WorkspaceStoreState
 }
