@@ -215,23 +215,41 @@ impl PtyManager {
         Ok(events)
     }
 
+    const WRITE_CHUNK_SIZE: usize = 4096;
+
     pub async fn write(&self, session_id: &str, data: &[u8]) -> Result<(), String> {
-        let sessions = self.sessions.lock().await;
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| format!("session {} not found", session_id))?;
-        if session.exit_code.is_some() {
-            return Ok(()); // no-op if exited
-        }
-        let fd = session.master_fd;
-        let n = unsafe { libc::write(fd, data.as_ptr() as *const libc::c_void, data.len()) };
-        if n < 0 {
-            return Err(format!(
-                "write failed: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-        Ok(())
+        let fd = {
+            let sessions = self.sessions.lock().await;
+            let session = sessions
+                .get(session_id)
+                .ok_or_else(|| format!("session {} not found", session_id))?;
+            if session.exit_code.is_some() {
+                return Ok(());
+            }
+            session.master_fd
+        };
+
+        let data = data.to_vec();
+        tokio::task::spawn_blocking(move || {
+            let mut offset = 0;
+            while offset < data.len() {
+                let end = (offset + Self::WRITE_CHUNK_SIZE).min(data.len());
+                let chunk = &data[offset..end];
+                let n = unsafe {
+                    libc::write(fd, chunk.as_ptr() as *const libc::c_void, chunk.len())
+                };
+                if n < 0 {
+                    return Err(format!(
+                        "write failed: {}",
+                        std::io::Error::last_os_error()
+                    ));
+                }
+                offset += n as usize;
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking failed: {}", e))?
     }
 
     pub async fn resize(&self, session_id: &str, cols: u16, rows: u16) -> Result<(), String> {
