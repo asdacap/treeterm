@@ -2,15 +2,17 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useStore } from 'zustand'
 import { createRunActionsStore } from '../store/createRunActionsStore'
+import { useAppStore } from '../store/app'
 import type { RunAction, RunActionsApi } from '../types'
 
 interface RunActionDropdownProps {
   workspacePath: string
   runActions: RunActionsApi
   onRun: (ptyId: string, actionId: string) => void
+  onOpenApp: (applicationId: string) => void
 }
 
-export default function RunActionDropdown({ workspacePath, runActions: runActionsApi, onRun }: RunActionDropdownProps) {
+export default function RunActionDropdown({ workspacePath, runActions: runActionsApi, onRun, onOpenApp }: RunActionDropdownProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -25,6 +27,9 @@ export default function RunActionDropdown({ workspacePath, runActions: runAction
 
   const actions = useStore(store, s => s.actions)
   const detecting = useStore(store, s => s.detecting)
+  const customRunnerApps = useAppStore((s) =>
+    Object.values(s.applications).filter(app => app.id.startsWith('customrunner-'))
+  )
 
   // Group actions by source
   const grouped = useMemo(() => {
@@ -75,7 +80,7 @@ export default function RunActionDropdown({ workspacePath, runActions: runAction
           {detecting && (
             <div className="run-action-menu-loading">Loading...</div>
           )}
-          {!detecting && actions.length === 0 && (
+          {!detecting && actions.length === 0 && customRunnerApps.length === 0 && (
             <div className="run-action-menu-empty">No actions found</div>
           )}
           {!detecting && Array.from(grouped.entries()).map(([source, sourceActions]) => (
@@ -93,6 +98,24 @@ export default function RunActionDropdown({ workspacePath, runActions: runAction
               ))}
             </div>
           ))}
+          {customRunnerApps.length > 0 && (
+            <div className="run-action-menu-group">
+              <div className="run-action-menu-group-header">Custom Runners</div>
+              {customRunnerApps.map(app => (
+                <div
+                  key={app.id}
+                  className="run-action-menu-item"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onOpenApp(app.id)
+                  }}
+                >
+                  <span className="run-action-menu-icon">{app.icon}</span>
+                  {app.name}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
