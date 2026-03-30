@@ -425,7 +425,7 @@ export function createSessionStore(
 
     // Dispose tab refs (stops analyzers, kills PTYs, etc.)
     if (handle && workspace) {
-      handle.getState().disposeGitController()
+      handle.getState().gitController.getState().dispose()
       for (const tabId of Object.keys(workspace.appStates)) {
         const ref = handle.getState().getTabRef(tabId)
         if (ref) ref.dispose()
@@ -882,7 +882,7 @@ export function createSessionStore(
       if (wsData?.parentId) {
         const parentEntry = get().workspaces[wsData.parentId]
         if (parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error')) {
-          parentEntry.store.getState().refreshRemoteStatus()
+          parentEntry.store.getState().gitController.getState().refreshRemoteStatus()
         }
       }
 
@@ -904,7 +904,7 @@ export function createSessionStore(
       // Refresh workspace diff status and git info
       const currentEntry = get().workspaces[id]
       if (currentEntry && currentEntry.status === 'loaded') {
-        currentEntry.store.getState().refreshDiffStatus()
+        currentEntry.store.getState().gitController.getState().refreshDiffStatus()
       }
       get().refreshGitInfo(id)
 
@@ -912,7 +912,7 @@ export function createSessionStore(
       if (currentEntry && currentEntry.status === 'loaded' && currentEntry.data.parentId) {
         const parentEntry = get().workspaces[currentEntry.data.parentId]
         if (parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error')) {
-          parentEntry.store.getState().refreshRemoteStatus()
+          parentEntry.store.getState().gitController.getState().refreshRemoteStatus()
         }
       }
 

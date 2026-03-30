@@ -2,7 +2,8 @@ import { useStore } from 'zustand'
 import type { WorkspaceStore } from '../types'
 
 export function PromptRebaseButton({ workspace }: { workspace: WorkspaceStore }): JSX.Element | null {
-  const { hasConflictsWithParent, promptHarness } = useStore(workspace)
+  const { gitController, promptHarness } = useStore(workspace)
+  const { hasConflictsWithParent } = useStore(gitController)
 
   if (!hasConflictsWithParent) return null
 

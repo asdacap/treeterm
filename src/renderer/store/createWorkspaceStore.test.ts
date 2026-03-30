@@ -135,12 +135,8 @@ describe('createWorkspaceStore', () => {
     expect(typeof state.updateTabState).toBe('function')
     expect(typeof state.updateMetadata).toBe('function')
     expect(typeof state.updateStatus).toBe('function')
-    expect(typeof state.getReviewComments).toBe('function')
-    expect(typeof state.addReviewComment).toBe('function')
-    expect(typeof state.deleteReviewComment).toBe('function')
-    expect(typeof state.toggleReviewCommentAddressed).toBe('function')
-    expect(typeof state.updateOutdatedReviewComments).toBe('function')
-    expect(typeof state.clearReviewComments).toBe('function')
+    expect(state.reviewComments).toBeDefined()
+    expect(state.gitController).toBeDefined()
     expect(typeof state.refreshGitInfo).toBe('function')
     expect(typeof state.remove).toBe('function')
   })
@@ -356,7 +352,7 @@ describe('createWorkspaceStore', () => {
       const ws = makeWorkspace({ id: 'ws-1', metadata: {} })
       const store = createWorkspaceStore(ws, deps)
 
-      store.getState().addReviewComment({
+      store.getState().reviewComments.getState().addReviewComment({
         filePath: 'test.ts',
         lineNumber: 10,
         text: 'Fix this',
@@ -384,7 +380,7 @@ describe('createWorkspaceStore', () => {
       const ws = makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
       const store = createWorkspaceStore(ws, deps)
 
-      store.getState().deleteReviewComment('c1')
+      store.getState().reviewComments.getState().deleteReviewComment('c1')
 
       const wsState = store.getState().workspace
       const comments = JSON.parse(wsState.metadata.reviewComments)
@@ -400,7 +396,7 @@ describe('createWorkspaceStore', () => {
       const ws = makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
       const store = createWorkspaceStore(ws, deps)
 
-      store.getState().toggleReviewCommentAddressed('c1')
+      store.getState().reviewComments.getState().toggleReviewCommentAddressed('c1')
 
       const wsState = store.getState().workspace
       const comments = JSON.parse(wsState.metadata.reviewComments)
@@ -416,7 +412,7 @@ describe('createWorkspaceStore', () => {
       const ws = makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
       const store = createWorkspaceStore(ws, deps)
 
-      store.getState().updateOutdatedReviewComments('new')
+      store.getState().reviewComments.getState().updateOutdatedReviewComments('new')
 
       const wsState = store.getState().workspace
       const comments = JSON.parse(wsState.metadata.reviewComments)
@@ -432,7 +428,7 @@ describe('createWorkspaceStore', () => {
       const ws = makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
       const store = createWorkspaceStore(ws, deps)
 
-      store.getState().updateOutdatedReviewComments('any-hash')
+      store.getState().reviewComments.getState().updateOutdatedReviewComments('any-hash')
 
       const wsState = store.getState().workspace
       const comments = JSON.parse(wsState.metadata.reviewComments)
@@ -447,7 +443,7 @@ describe('createWorkspaceStore', () => {
       const ws = makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
       const store = createWorkspaceStore(ws, deps)
 
-      store.getState().clearReviewComments()
+      store.getState().reviewComments.getState().clearReviewComments()
 
       const wsState = store.getState().workspace
       const comments = JSON.parse(wsState.metadata.reviewComments)

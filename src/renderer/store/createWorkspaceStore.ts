@@ -1,10 +1,14 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, AppRef, ReviewComment, AppRegistryApi, GitApi, FilesystemApi, RunActionsApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi, GitHubPrInfo } from '../types'
+import type { Workspace, AppRef, AppRegistryApi, GitApi, FilesystemApi, RunActionsApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi } from '../types'
 import { getTabs, isAiHarnessState } from '../types'
 import type { Tty, TtyWriter } from './createTtyStore'
 import { createAnalyzerStore } from './createAnalyzerStore'
 import type { Analyzer } from './createAnalyzerStore'
+import { createGitControllerStore } from './createGitControllerStore'
+import type { GitController } from './createGitControllerStore'
+import { createReviewCommentStore } from './createReviewCommentStore'
+import type { ReviewCommentStore } from './createReviewCommentStore'
 
 export interface WorkspaceStoreDeps {
   appRegistry: AppRegistryApi
@@ -42,14 +46,8 @@ export interface WorkspaceStoreState {
   updateTabTitle: (tabId: string, title: string) => void
   updateTabState: <T>(tabId: string, updater: (state: T) => T) => void
 
-  // Review comments
-  getReviewComments: () => ReviewComment[]
-  addReviewComment: (comment: Omit<ReviewComment, 'id' | 'createdAt'>) => void
-  deleteReviewComment: (commentId: string) => void
-  toggleReviewCommentAddressed: (commentId: string) => void
-  updateOutdatedReviewComments: (currentCommitHash: string) => void
-  clearReviewComments: () => void
-  markAllReviewCommentsAddressed: () => void
+  // Review comment controller
+  reviewComments: ReviewCommentStore
 
   // Tab lifecycle
   initTab: (tabId: string) => void
@@ -62,22 +60,8 @@ export interface WorkspaceStoreState {
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
   connectionId: string
 
-  // Git controller (polling)
-  hasUncommittedChanges: boolean
-  isDiffCleanFromParent: boolean
-  hasConflictsWithParent: boolean
-  behindCount: number
-  pullLoading: boolean
-  gitRefreshing: boolean
-  refreshRemoteStatus: () => Promise<void>
-  pullFromRemote: () => Promise<{ success: boolean; error?: string }>
-  refreshDiffStatus: () => Promise<void>
-  disposeGitController: () => void
-
-  // GitHub PR status (cached, checked on workspace open)
-  prInfo: GitHubPrInfo | null
-  refreshPrStatus: () => Promise<void>
-  openGitHub: () => Promise<{ url: string; hasPr: boolean } | { error: string }>
+  // Git controller (polling, diff status, PR status)
+  gitController: GitController
 
   // Focus signal (ephemeral, not persisted)
   focusTabId: string | null
@@ -117,24 +101,14 @@ function generateTabId(): string {
   return `tab-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
-export function parseReviewComments(metadata: Record<string, string>): ReviewComment[] {
-  if (!metadata.reviewComments) return []
-  try {
-    return JSON.parse(metadata.reviewComments)
-  } catch {
-    return []
-  }
-}
-
-function serializeReviewComments(comments: ReviewComment[]): string {
-  return JSON.stringify(comments)
-}
-
 export function createWorkspaceStore(
   workspace: Workspace,
   deps: WorkspaceStoreDeps
 ): WorkspaceStore {
   const id = workspace.id
+
+  // Declare store early so sub-stores can reference it lazily via callbacks
+  let store!: WorkspaceStore
 
   function updateWorkspace(updater: (ws: Workspace) => Workspace): void {
     store.setState((state) => ({ workspace: updater(state.workspace) }))
@@ -143,131 +117,25 @@ export function createWorkspaceStore(
   // Closure-level tab ref registry (non-serialized per-tab runtime state)
   const tabRefs: Record<string, AppRef> = {}
 
-  // Git controller — polls git status every 10s
-  let gitControllerInterval: ReturnType<typeof setInterval> | null = null
+  const gitController = createGitControllerStore({
+    git: deps.git,
+    github: deps.github,
+    lookupWorkspace: deps.lookupWorkspace,
+    refreshGitInfo: () => deps.refreshGitInfo(id),
+    getWorkspace: () => store.getState().workspace,
+    initialWorkspace: workspace,
+  })
 
-  async function refreshDiffStatus(): Promise<void> {
-    store.setState({ gitRefreshing: true })
-    try {
-      try {
-        const uncommitted = await deps.git.hasUncommittedChanges(workspace.path)
-        store.setState({ hasUncommittedChanges: uncommitted })
-      } catch { /* ignore — workspace may be removed */ }
+  const reviewComments = createReviewCommentStore({
+    getMetadata: () => store.getState().workspace.metadata,
+    updateMetadata: (key, value) => store.getState().updateMetadata(key, value),
+  })
 
-      try {
-        const ws = store.getState().workspace
-        if (ws.isWorktree && ws.parentId) {
-          const parent = deps.lookupWorkspace(ws.parentId)
-          if (parent?.gitBranch) {
-            const result = await deps.git.getDiff(ws.path, parent.gitBranch)
-            const clean = result.success && result.diff ? result.diff.files.length === 0 : false
-            const uncommitted = store.getState().hasUncommittedChanges
-            store.setState({ isDiffCleanFromParent: clean && !uncommitted })
-          }
-        }
-      } catch { /* ignore */ }
-
-      try {
-        const ws = store.getState().workspace
-        if (ws.isWorktree && ws.parentId && ws.gitBranch) {
-          const parent = deps.lookupWorkspace(ws.parentId)
-          if (parent?.gitBranch) {
-            const result = await deps.git.checkMergeConflicts(ws.path, ws.gitBranch, parent.gitBranch)
-            store.setState({ hasConflictsWithParent: result.conflicts?.hasConflicts ?? false })
-          }
-        }
-      } catch { /* ignore */ }
-    } finally {
-      store.setState({ gitRefreshing: false })
-    }
-  }
-
-  function startGitController(): void {
-    if (!workspace.isGitRepo) return
-
-    refreshDiffStatus()
-    gitControllerInterval = setInterval(refreshDiffStatus, 10_000)
-  }
-
-  async function refreshPrStatus(): Promise<void> {
-    const ws = store.getState().workspace
-    if (!ws.isWorktree || !ws.parentId || !ws.gitBranch || !ws.gitRootPath) return
-    const parent = deps.lookupWorkspace(ws.parentId)
-    if (!parent?.gitBranch) return
-    try {
-      const result = await deps.github.getPrInfo(ws.gitRootPath, ws.gitBranch, parent.gitBranch)
-      if ('prInfo' in result) {
-        store.setState({ prInfo: result.prInfo })
-      } else if ('noPr' in result) {
-        store.setState({ prInfo: null })
-      }
-    } catch { /* ignore — network/auth issues */ }
-  }
-
-  function stopGitController(): void {
-    if (gitControllerInterval) {
-      clearInterval(gitControllerInterval)
-      gitControllerInterval = null
-    }
-  }
-
-  const store = createStore<WorkspaceStoreState>()((set, get) => ({
+  store = createStore<WorkspaceStoreState>()((set, get) => ({
     workspace,
 
-    // Git controller state
-    hasUncommittedChanges: false,
-    isDiffCleanFromParent: false,
-    hasConflictsWithParent: false,
-    behindCount: 0,
-    pullLoading: false,
-    gitRefreshing: false,
-    refreshRemoteStatus: async () => {
-      const ws = get().workspace
-      if (!ws.isGitRepo) return
-      try {
-        await deps.git.fetch(ws.path)
-        const count = await deps.git.getBehindCount(ws.path)
-        set({ behindCount: count })
-      } catch { /* ignore — no remote or network issue */ }
-    },
-    pullFromRemote: async () => {
-      const ws = get().workspace
-      if (!ws.isGitRepo) return { success: false, error: 'Not a git repo' }
-      set({ pullLoading: true })
-      try {
-        const result = await deps.git.pull(ws.path)
-        if (result.success) {
-          set({ behindCount: 0 })
-          await deps.refreshGitInfo(id)
-        }
-        return result
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-      } finally {
-        set({ pullLoading: false })
-      }
-    },
-    refreshDiffStatus,
-    disposeGitController: () => stopGitController(),
-
-    // GitHub PR status
-    prInfo: null,
-    refreshPrStatus,
-    openGitHub: async () => {
-      const ws = get().workspace
-      if (!ws.parentId || !ws.gitBranch || !ws.gitRootPath) return { error: 'Missing workspace info' }
-      const parent = deps.lookupWorkspace(ws.parentId)
-      if (!parent?.gitBranch) return { error: 'Parent branch not found' }
-      const result = await deps.github.getPrInfo(ws.gitRootPath, ws.gitBranch, parent.gitBranch)
-      if ('prInfo' in result) {
-        set({ prInfo: result.prInfo })
-        return { url: result.prInfo.url, hasPr: true }
-      } else if ('noPr' in result) {
-        set({ prInfo: null })
-        return { url: result.createUrl, hasPr: false }
-      }
-      return result
-    },
+    gitController,
+    reviewComments,
 
     initTab: (tabId: string): void => {
       const appState = get().workspace.appStates[tabId]
@@ -296,7 +164,7 @@ export function createWorkspaceStore(
       getBranchIsUserDefined: () => get().workspace.metadata?.branchIsUserDefined === 'true',
       getParentId: () => get().workspace.parentId,
       refreshGitInfo: () => deps.refreshGitInfo(id),
-      refreshDiffStatus,
+      refreshDiffStatus: () => gitController.getState().refreshDiffStatus(),
     }),
 
     createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) =>
@@ -436,58 +304,6 @@ export function createWorkspaceStore(
       deps.syncToDaemon()
     },
 
-    getReviewComments: (): ReviewComment[] => {
-      return parseReviewComments(get().workspace.metadata)
-    },
-
-    addReviewComment: (comment: Omit<ReviewComment, 'id' | 'createdAt'>): void => {
-      const comments = parseReviewComments(get().workspace.metadata)
-      const newComment: ReviewComment = {
-        ...comment,
-        id: crypto.randomUUID(),
-        createdAt: Date.now(),
-      }
-      comments.push(newComment)
-      get().updateMetadata('reviewComments', serializeReviewComments(comments))
-    },
-
-    deleteReviewComment: (commentId: string): void => {
-      const comments = parseReviewComments(get().workspace.metadata)
-      const filtered = comments.filter(c => c.id !== commentId)
-      get().updateMetadata('reviewComments', serializeReviewComments(filtered))
-    },
-
-    toggleReviewCommentAddressed: (commentId: string): void => {
-      const comments = parseReviewComments(get().workspace.metadata)
-      const updated = comments.map(c =>
-        c.id === commentId ? { ...c, addressed: !c.addressed } : c
-      )
-      get().updateMetadata('reviewComments', serializeReviewComments(updated))
-    },
-
-    updateOutdatedReviewComments: (currentCommitHash: string): void => {
-      const comments = parseReviewComments(get().workspace.metadata)
-      if (comments.length === 0) return
-      const updated = comments.map(comment => {
-        const shouldBeOutdated = comment.commitHash !== null && comment.commitHash !== currentCommitHash
-        if (comment.isOutdated !== shouldBeOutdated) {
-          return { ...comment, isOutdated: shouldBeOutdated }
-        }
-        return comment
-      })
-      get().updateMetadata('reviewComments', serializeReviewComments(updated))
-    },
-
-    clearReviewComments: (): void => {
-      get().updateMetadata('reviewComments', serializeReviewComments([]))
-    },
-
-    markAllReviewCommentsAddressed: (): void => {
-      const comments = parseReviewComments(get().workspace.metadata)
-      const updated = comments.map(c => c.addressed ? c : { ...c, addressed: true })
-      get().updateMetadata('reviewComments', serializeReviewComments(updated))
-    },
-
     promptHarness: async (text: string): Promise<boolean> => {
       const ws = get().workspace
       const tabs = getTabs(ws)
@@ -571,17 +387,7 @@ export function createWorkspaceStore(
     lookupWorkspace: (otherId: string) => deps.lookupWorkspace(otherId),
   }))
 
-  startGitController()
-
-  // Auto-refresh remote status on workspace open
-  if (workspace.isGitRepo) {
-    store.getState().refreshRemoteStatus()
-  }
-
-  // Auto-check PR status on workspace open
-  if (workspace.isWorktree && workspace.parentId) {
-    refreshPrStatus()
-  }
+  gitController.getState().startPolling()
 
   return store
 }

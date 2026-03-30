@@ -22,6 +22,8 @@
     "src/renderer/types/**/*.ts",
     "src/renderer/store/createTtyStore.ts",
     "src/renderer/store/createAnalyzerStore.ts",
+    "src/renderer/store/createGitControllerStore.ts",
+    "src/renderer/store/createReviewCommentStore.ts",
     "src/renderer/store/createWorkspaceStore.ts",
     "src/renderer/store/createSessionStore.ts"
   ]

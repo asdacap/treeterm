@@ -25,11 +25,12 @@ export default function ReviewBrowser({
   isVisible,
 }: ReviewBrowserProps) {
   const {
-    workspace: wsData, lookupWorkspace, getReviewComments, getGitApi,
+    workspace: wsData, lookupWorkspace, getGitApi,
     promptHarness, mergeAndRemove, mergeAndKeep, closeAndClean, removeTab,
-    addReviewComment, deleteReviewComment, updateOutdatedReviewComments,
-    refreshDiffStatus, updateTabState,
+    reviewComments: reviewCommentStore, gitController, updateTabState,
   } = useStore(workspace)
+  const { getReviewComments, addReviewComment, deleteReviewComment, updateOutdatedReviewComments } = useStore(reviewCommentStore)
+  const { refreshDiffStatus } = useStore(gitController)
   const git = getGitApi()
   const workspaceId = wsData.id
   const workspacePath = wsData.path
