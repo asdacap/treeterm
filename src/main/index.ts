@@ -269,10 +269,11 @@ ipcMain.handle('pty:create', async (event, connectionId: string, cwd: string, sa
     })
     ptyStreams.set(ptyStream.handle, ptyStream)
 
-    return { sessionId, handle: ptyStream.handle }
+    return { success: true, sessionId, handle: ptyStream.handle }
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
     console.error('[main] failed to create PTY session via daemon:', error)
-    return null
+    return { success: false, error: errorMessage }
   }
 })
 
@@ -299,14 +300,9 @@ ipcMain.handle('pty:attach', async (_event, connectionId: string, sessionId: str
 })
 
 ipcMain.handle('pty:list', async (_event, connectionId: string) => {
-  try {
-    const client = getClientForConnection(connectionId)
-    await client.ensureDaemonRunning()
-    return await client.listPtySessions()
-  } catch (error) {
-    console.error('[main] failed to list sessions:', error)
-    return []
-  }
+  const client = getClientForConnection(connectionId)
+  await client.ensureDaemonRunning()
+  return await client.listPtySessions()
 })
 
 ipcMain.on('pty:write', (_event, handle: string, data: string) => {
@@ -336,14 +332,9 @@ ipcMain.on('pty:kill', (_event, connectionId: string, sessionId: string) => {
 })
 
 ipcMain.handle('pty:isAlive', async (_event, connectionId: string, id: string) => {
-  try {
-    const client = getClientForConnection(connectionId)
-    const sessions = await client.listPtySessions()
-    return sessions.some(s => s.id === id)
-  } catch (error) {
-    console.warn('[main] PTY alive check failed:', error)
-    return false
-  }
+  const client = getClientForConnection(connectionId)
+  const sessions = await client.listPtySessions()
+  return sessions.some(s => s.id === id)
 })
 
 // LLM chat — uses ipcMain.handle directly for event.sender access (like PTY)
@@ -562,14 +553,9 @@ server.onDialogSelectFolder(async () => {
   return selectedPath
 })
 
-server.onDialogGetRecentDirectories(async () => {
-  try {
-    const settings = loadSettings()
-    return settings.recentDirectories || []
-  } catch (error) {
-    console.error('[main] failed to load recent directories:', error)
-    return []
-  }
+server.onDialogGetRecentDirectories(() => {
+  const settings = loadSettings()
+  return settings.recentDirectories || []
 })
 
 // Get (or create) a GitClient for the given connectionId
@@ -698,8 +684,8 @@ server.onGitHasUncommittedChanges(async (connectionId, repoPath) => {
 })
 
 server.onGitCommitAll(async (connectionId, repoPath, message) => {
-  const hash = await getGitClientForConnection(connectionId).commitAll(repoPath, message)
-  return { success: true, hash }
+  await getGitClientForConnection(connectionId).commitAll(repoPath, message)
+  return { success: true }
 })
 
 server.onGitDeleteBranch(async (connectionId, repoPath, branchName, operationId) => {
@@ -753,8 +739,8 @@ server.onGitUnstageAll(async (connectionId, repoPath) => {
 })
 
 server.onGitCommitStaged(async (connectionId, repoPath, message) => {
-  const hash = await getGitClientForConnection(connectionId).commitStaged(repoPath, message)
-  return { success: true, hash }
+  await getGitClientForConnection(connectionId).commitStaged(repoPath, message)
+  return { success: true }
 })
 
 server.onGitGetFileContentsForDiff(async (connectionId, worktreePath, parentBranch, filePath) => {
@@ -843,9 +829,9 @@ server.onGitGetBehindCount(async (connectionId, repoPath) => {
 server.onGitGetRemoteUrl(async (connectionId, repoPath) => {
   try {
     const url = await getGitClientForConnection(connectionId).getRemoteUrl(repoPath)
-    return { url }
+    return { success: true, url }
   } catch (error) {
-    return { error: error instanceof Error ? error.message : 'Unknown error' }
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
   }
 })
 
@@ -1169,7 +1155,7 @@ server.onSshConnect(async (event, config, options) => {
 
   console.log(`[main:ssh] onSshConnect called for host=${config.host}, id=${config.id}, refreshDaemon=${options?.refreshDaemon ?? false}`)
   const info = await connectionManager.connectRemote(config, { refreshDaemon: options?.refreshDaemon })
-  console.log(`[main:ssh] connectRemote returned status=${info.status}${info.error ? `, error=${info.error}` : ''}`)
+  console.log(`[main:ssh] connectRemote returned status=${info.status}${info.status === 'error' ? `, error=${info.error}` : ''}`)
 
   // Switch the calling window to use the remote daemon
   if (info.status === 'connected') {
@@ -1197,7 +1183,8 @@ server.onSshConnect(async (event, config, options) => {
         const errorMsg = error instanceof Error ? error.message : String(error)
         console.error('[main:ssh] Failed to load remote session:', errorMsg)
         return {
-          info: { ...info, status: 'error' as const, error: `Connected but failed to load session: ${errorMsg}` }
+          info: { ...info, status: 'error' as const, error: `Connected but failed to load session: ${errorMsg}` },
+          session: null
         }
       }
     } else {
@@ -1205,7 +1192,7 @@ server.onSshConnect(async (event, config, options) => {
     }
   }
 
-  return { info }
+  return { info, session: null }
 })
 
 server.onSshDisconnect(async (connectionId) => {
@@ -1214,7 +1201,7 @@ server.onSshDisconnect(async (connectionId) => {
 })
 
 server.onSshListConnections(async () => {
-  if (!connectionManager) return []
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
   return connectionManager.listConnections()
 })
 
@@ -1243,7 +1230,7 @@ server.onSshRemoveSavedConnection(async (id) => {
 })
 
 server.onSshGetOutput(async (connectionId) => {
-  if (!connectionManager) return []
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
   const tunnel = connectionManager.getSSHTunnel(connectionId)
   return tunnel?.getOutput() || []
 })
@@ -1253,10 +1240,10 @@ const outputWatchUnsubscribers = new Map<number, Map<string, () => void>>()
 const statusWatchUnsubscribers = new Map<number, Map<string, () => void>>()
 
 server.onSshWatchOutput(async (event, connectionId) => {
-  if (!connectionManager) return { scrollback: [] }
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
 
   const senderWindow = BrowserWindow.fromWebContents(event.sender)
-  if (!senderWindow) return { scrollback: [] }
+  if (!senderWindow) throw new Error('No window found for event sender')
   const winId = senderWindow.id
 
   // Clean up any existing watch for this window+connection
@@ -1287,10 +1274,10 @@ server.onSshUnwatchOutput(async (event, connectionId) => {
 })
 
 server.onSshWatchConnectionStatus(async (event, connectionId) => {
-  if (!connectionManager) return { initial: undefined }
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
 
   const senderWindow = BrowserWindow.fromWebContents(event.sender)
-  if (!senderWindow) return { initial: undefined }
+  if (!senderWindow) throw new Error('No window found for event sender')
   const winId = senderWindow.id
 
   // Clean up any existing watch for this window+connection
@@ -1302,6 +1289,8 @@ server.onSshWatchConnectionStatus(async (event, connectionId) => {
       windowInfo.ipcServer.sshConnectionStatus(info)
     }
   })
+
+  if (!initial) throw new Error(`Connection not found: ${connectionId}`)
 
   if (!statusWatchUnsubscribers.has(winId)) {
     statusWatchUnsubscribers.set(winId, new Map())
@@ -1352,7 +1341,7 @@ server.onSshRemovePortForward(async (portForwardId) => {
 })
 
 server.onSshListPortForwards(async (connectionId) => {
-  if (!connectionManager) return []
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
   return connectionManager.listPortForwards(connectionId)
 })
 
@@ -1360,10 +1349,10 @@ server.onSshListPortForwards(async (connectionId) => {
 const pfOutputWatchUnsubscribers = new Map<number, Map<string, () => void>>()
 
 server.onSshWatchPortForwardOutput(async (event, portForwardId) => {
-  if (!connectionManager) return { scrollback: [] }
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
 
   const senderWindow = BrowserWindow.fromWebContents(event.sender)
-  if (!senderWindow) return { scrollback: [] }
+  if (!senderWindow) throw new Error('No window found for event sender')
   const winId = senderWindow.id
 
   pfOutputWatchUnsubscribers.get(winId)?.get(portForwardId)?.()
@@ -1469,7 +1458,7 @@ app.whenReady().then(async () => {
             }
           }
         } else {
-          console.error('[main] SSH connection failed:', info.error)
+          console.error('[main] SSH connection failed:', info.status === 'error' ? info.error : `status=${info.status}`)
         }
       }).catch((error) => {
         console.error('[main] SSH connection error:', error)

@@ -179,8 +179,7 @@ describe('ConnectionManager', () => {
       mockTunnelInstance.connect.mockRejectedValue(new Error('SSH failed'))
 
       const result = await manager.connectRemote(config)
-      expect(result.status).toBe('error')
-      expect(result.error).toBe('SSH failed')
+      expect(result).toMatchObject({ status: 'error', error: 'SSH failed' })
       expect(mockTunnelInstance.disconnect).toHaveBeenCalled()
     })
   })

@@ -66,7 +66,7 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       onSync: vi.fn().mockReturnValue(() => {}),
     },
     terminal: {
-      create: vi.fn().mockResolvedValue({ sessionId: 'pty-1', handle: 'handle-1' }),
+      create: vi.fn().mockResolvedValue({ success: true, sessionId: 'pty-1', handle: 'handle-1' }),
       attach: vi.fn().mockResolvedValue({ success: true, handle: 'handle-1' }),
       list: vi.fn().mockResolvedValue([]),
       write: vi.fn(),
@@ -111,6 +111,7 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     isDetached: false,
     appStates: {},
     activeTabId: null,
+    settings: { defaultApplicationId: '' },
     metadata: {},
     createdAt: Date.now(),
     lastActivity: Date.now(),
@@ -182,8 +183,8 @@ describe('createSessionStore', () => {
       expect(deps.terminal.create).toHaveBeenCalledWith('local', '/home', undefined, undefined)
     })
 
-    it('createTty throws when terminal.create returns null', async () => {
-      vi.mocked(deps.terminal.create).mockResolvedValue(null)
+    it('createTty throws when terminal.create returns error', async () => {
+      vi.mocked(deps.terminal.create).mockResolvedValue({ success: false, error: 'Failed to create PTY' })
       await expect(store.getState().createTty('/home')).rejects.toThrow('Failed to create PTY')
     })
 
@@ -319,7 +320,7 @@ describe('createSessionStore', () => {
     })
 
     it('addChildWorkspace fails when parent is not a git repo', async () => {
-      vi.mocked(deps.git.getInfo).mockResolvedValue({ isRepo: false, branch: null, rootPath: null })
+      vi.mocked(deps.git.getInfo).mockResolvedValue({ isRepo: false })
       const id = store.getState().addWorkspace('/no-git')
       await flushPromises()
       const result = store.getState().addChildWorkspace(id, 'feat')
@@ -364,7 +365,7 @@ describe('createSessionStore', () => {
     })
 
     it('createWorktreeFromBranch fails for non-git parent', async () => {
-      vi.mocked(deps.git.getInfo).mockResolvedValue({ isRepo: false, branch: null, rootPath: null })
+      vi.mocked(deps.git.getInfo).mockResolvedValue({ isRepo: false })
       const id = store.getState().addWorkspace('/no-git')
       await flushPromises()
       const result = store.getState().createWorktreeFromBranch(id, 'feat', false)
@@ -452,7 +453,7 @@ describe('createSessionStore', () => {
     })
 
     it('updateGitInfo does nothing for non-existent workspace', () => {
-      store.getState().updateGitInfo('bad', { isRepo: false, branch: null, rootPath: null })
+      store.getState().updateGitInfo('bad', { isRepo: false })
       // Should not throw
     })
 
@@ -580,7 +581,7 @@ describe('createSessionStore', () => {
     })
 
     it('fails when workspace has no git root', async () => {
-      vi.mocked(deps.git.getInfo).mockResolvedValue({ isRepo: false, branch: null, rootPath: null })
+      vi.mocked(deps.git.getInfo).mockResolvedValue({ isRepo: false })
       const id = store.getState().addWorkspace('/no-git')
       await flushPromises()
       const result = await store.getState().quickForkWorkspace(id)

@@ -27,7 +27,8 @@ import {
   type FileEntry
 } from '../generated/treeterm'
 import { getDefaultSocketPath } from './socketPath'
-import type { PtyEvent } from '../shared/ipc-types'
+import type { PtyEvent, IpcResult } from '../shared/ipc-types'
+import type { FileContents } from '../renderer/types'
 import type {
   SandboxConfig,
   TTYSessionInfo,
@@ -462,18 +463,18 @@ export class GrpcDaemonClient {
 
   // Filesystem Operations
 
-  async readDirectory(workspacePath: string, dirPath: string): Promise<{ success: boolean; contents?: DirectoryContents; error?: string }> {
+  async readDirectory(workspacePath: string, dirPath: string): Promise<IpcResult<{ contents: DirectoryContents }>> {
     if (!this.client) throw new Error('Not connected to daemon')
     return new Promise((resolve, reject) => {
       this.client!.readDirectory({ workspacePath, dirPath }, (error, response) => {
         if (error) reject(new Error(error.message))
-        else if (response) resolve(response as { success: boolean; contents?: DirectoryContents; error?: string })
+        else if (response) resolve(response as IpcResult<{ contents: DirectoryContents }>)
         else reject(new Error('No response from server'))
       })
     })
   }
 
-  async readFile(workspacePath: string, filePath: string): Promise<{ success: boolean; file?: { path: string; content: string; size: number; language: string }; error?: string }> {
+  async readFile(workspacePath: string, filePath: string): Promise<IpcResult<{ file: FileContents }>> {
     if (!this.client) throw new Error('Not connected to daemon')
 
     return new Promise((resolve, reject) => {
@@ -508,13 +509,13 @@ export class GrpcDaemonClient {
     })
   }
 
-  async writeFile(workspacePath: string, filePath: string, content: string): Promise<{ success: boolean; error?: string }> {
+  async writeFile(workspacePath: string, filePath: string, content: string): Promise<IpcResult> {
     if (!this.client) throw new Error('Not connected to daemon')
 
     return new Promise((resolve, reject) => {
       const stream = this.client!.writeFile((error, response) => {
         if (error) reject(new Error(error.message))
-        else if (response) resolve(response as { success: boolean; error?: string })
+        else if (response) resolve(response as IpcResult)
         else reject(new Error('No response from server'))
       })
 
@@ -534,12 +535,12 @@ export class GrpcDaemonClient {
     })
   }
 
-  async searchFiles(workspacePath: string, query: string): Promise<{ success: boolean; entries?: FileEntry[]; error?: string }> {
+  async searchFiles(workspacePath: string, query: string): Promise<IpcResult<{ entries: FileEntry[] }>> {
     if (!this.client) throw new Error('Not connected to daemon')
     return new Promise((resolve, reject) => {
       this.client!.searchFiles({ workspacePath, query }, (error, response) => {
         if (error) reject(new Error(error.message))
-        else if (response) resolve(response as { success: boolean; entries?: FileEntry[]; error?: string })
+        else if (response) resolve(response as IpcResult<{ entries: FileEntry[] }>)
         else reject(new Error('No response from server'))
       })
     })
@@ -619,6 +620,7 @@ export class GrpcDaemonClient {
       isDetached: protoWorkspace.isDetached ?? false,
       appStates,
       activeTabId: protoWorkspace.activeTabId || null,
+      settings: { defaultApplicationId: '' },
       metadata: protoWorkspace.metadata?.length ? JSON.parse(protoWorkspace.metadata.toString('utf-8')) : {},
       createdAt: protoWorkspace.createdAt,
       lastActivity: protoWorkspace.lastActivity

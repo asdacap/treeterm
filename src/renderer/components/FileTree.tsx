@@ -63,10 +63,10 @@ export function FileTree({
       try {
         const result = await filesystem.searchFiles(debouncedQuery)
 
-        if (result.success && result.entries) {
+        if (result.success) {
           setSearch((prev) => ({
             ...prev,
-            entries: result.entries!,
+            entries: result.entries,
             loading: false,
             error: null
           }))
@@ -104,10 +104,10 @@ export function FileTree({
       try {
         const result = await filesystem.readDirectory(dirPath)
 
-        if (result.success && result.contents) {
+        if (result.success) {
           setDirContents((prev) => ({
             ...prev,
-            [dirPath]: { entries: result.contents!.entries, loading: false, error: null }
+            [dirPath]: { entries: result.contents.entries, loading: false, error: null }
           }))
         } else {
           setDirContents((prev) => ({

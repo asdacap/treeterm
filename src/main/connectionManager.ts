@@ -23,6 +23,13 @@ interface Connection {
   error?: string
 }
 
+function toConnectionInfo(id: string, conn: Connection): ConnectionInfo {
+  if (conn.status === 'error') {
+    return { id, target: conn.target, status: 'error', error: conn.error ?? 'Unknown error' }
+  }
+  return { id, target: conn.target, status: conn.status }
+}
+
 type StatusChangeCallback = (info: ConnectionInfo) => void
 type OutputCallback = (line: string) => void
 type PortForwardStatusCallback = (info: PortForwardInfo) => void
@@ -61,12 +68,7 @@ export class ConnectionManager {
   listConnections(): ConnectionInfo[] {
     const result: ConnectionInfo[] = []
     for (const [id, conn] of this.connections) {
-      result.push({
-        id,
-        target: conn.target,
-        status: conn.status,
-        error: conn.error
-      })
+      result.push(toConnectionInfo(id, conn))
     }
     return result
   }
@@ -74,12 +76,7 @@ export class ConnectionManager {
   getConnection(connectionId: string): ConnectionInfo | undefined {
     const conn = this.connections.get(connectionId)
     if (!conn) return undefined
-    return {
-      id: connectionId,
-      target: conn.target,
-      status: conn.status,
-      error: conn.error
-    }
+    return toConnectionInfo(connectionId, conn)
   }
 
   watchOutput(connectionId: string, cb: OutputCallback): { scrollback: string[], unsubscribe: () => void } {

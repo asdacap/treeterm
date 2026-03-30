@@ -439,7 +439,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const { sessionApi } = get()
     try {
       const result = await sessionApi.create([])
-      if (!result.success || !result.session) {
+      if (!result.success) {
         throw new Error(result.error || 'Failed to create session')
       }
       await sessionApi.openInNewWindow(result.session.id)

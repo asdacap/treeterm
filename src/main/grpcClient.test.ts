@@ -388,6 +388,7 @@ describe('GrpcDaemonClient', () => {
         isDetached: false,
         appStates: {},
         activeTabId: null,
+        settings: { defaultApplicationId: '' },
         metadata: {}
       }])
       expect(result.id).toBe('session-1')
@@ -567,8 +568,7 @@ describe('GrpcDaemonClient', () => {
       })
 
       const result = await client.readFile('/ws', '/file.txt')
-      expect(result.success).toBe(true)
-      expect(result.file?.content).toBe('hello')
+      expect(result).toMatchObject({ success: true, file: { content: 'hello' } })
     })
 
     it('writeFile resolves with result', async () => {
@@ -585,8 +585,7 @@ describe('GrpcDaemonClient', () => {
         cb(null, { success: true, entries: [{ name: 'file.txt' }] })
       )
       const result = await client.searchFiles('/ws', 'file')
-      expect(result.success).toBe(true)
-      expect(result.entries).toHaveLength(1)
+      expect(result).toMatchObject({ success: true, entries: expect.arrayContaining([expect.any(Object)]) })
     })
 
     it('readFile rejects when stream returns success=false', async () => {

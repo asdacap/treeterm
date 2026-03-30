@@ -27,80 +27,79 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
   const appState = wsData?.appStates[tabId]
   const state = appState?.state as EditorState | undefined
 
-  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
-  const lastScrollTopRef = useRef<number>(state?.scrollTop ?? 0)
+  const scrollTop = state?.status === 'ready' ? state.scrollTop ?? 0 : 0
+  const lastScrollTopRef = useRef<number>(scrollTop)
   const [saving, setSaving] = useState(false)
 
   // Load file content on mount
   useEffect(() => {
-    if (!state?.filePath || state.isLoading) return
+    if (!state?.filePath || state.status === 'loading') return
 
     const loadFile = async () => {
-      updateTabState<EditorState>(tabId, (s) => ({
-        ...s,
-        isLoading: true,
-        error: null
+      updateTabState<EditorState>(tabId, () => ({
+        status: 'loading',
+        filePath: state.filePath
       }))
 
       try {
         const result = await filesystem.readFile(state.filePath)
 
-        if (result.success && result.file) {
+        if (result.success) {
           const language = mapLanguageToMonaco(result.file.language)
-          const isMarkdown = language === 'markdown'
 
-          updateTabState<EditorState>(tabId, (s) => ({
-            ...s,
-            originalContent: result.file!.content,
-            currentContent: result.file!.content,
+          updateTabState<EditorState>(tabId, () => ({
+            status: 'ready',
+            filePath: state.filePath,
+            originalContent: result.file.content,
+            currentContent: result.file.content,
             language,
-            viewMode: isMarkdown ? 'preview' : 'editor',
-            isLoading: false,
-            isDirty: false
+            viewMode: language === 'markdown' ? 'preview' : 'editor',
+            isDirty: false,
           }))
 
           updateTabTitle(tabId, getFilename(state.filePath))
         } else {
-          updateTabState<EditorState>(tabId, (s) => ({
-            ...s,
-            isLoading: false,
-            error: result.error || 'Failed to load file'
+          updateTabState<EditorState>(tabId, () => ({
+            status: 'error',
+            filePath: state.filePath,
+            error: result.error
           }))
         }
       } catch (err) {
-        updateTabState<EditorState>(tabId, (s) => ({
-          ...s,
-          isLoading: false,
+        updateTabState<EditorState>(tabId, () => ({
+          status: 'error',
+          filePath: state.filePath,
           error: `Error loading file: ${err}`
         }))
       }
     }
 
-    if (!state.originalContent && !state.error) {
+    if (state.status !== 'ready' || !state.originalContent) {
       loadFile()
     }
   }, [state?.filePath, wsData.path, tabId, workspace])
 
   // Update tab title with dirty indicator
+  const isDirty = state?.status === 'ready' ? state.isDirty : false
   useEffect(() => {
     if (!state?.filePath) return
     const filename = getFilename(state.filePath)
-    const title = state.isDirty ? `${filename} \u2022` : filename
+    const title = isDirty ? `${filename} \u2022` : filename
     updateTabTitle(tabId, title)
-  }, [state?.isDirty, state?.filePath, tabId, workspace])
+  }, [isDirty, state?.filePath, tabId, workspace])
 
   // Persist scroll position on unmount
   useEffect(() => {
     return () => {
-      updateTabState<EditorState>(tabId, (s) => ({
-        ...s,
-        scrollTop: lastScrollTopRef.current
-      }))
+      updateTabState<EditorState>(tabId, (s) => {
+        if (s.status !== 'ready') return s
+        return { ...s, scrollTop: lastScrollTopRef.current }
+      })
     }
   }, [])
 
   const handleSave = useCallback(async () => {
-    if (!state || !state.isDirty || saving) return
+    if (!state || state.status !== 'ready' || !state.isDirty || saving) return
 
     setSaving(true)
     try {
@@ -110,11 +109,10 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
       )
 
       if (result.success) {
-        updateTabState<EditorState>(tabId, (s) => ({
-          ...s,
-          originalContent: s.currentContent,
-          isDirty: false
-        }))
+        updateTabState<EditorState>(tabId, (s) => {
+          if (s.status !== 'ready') return s
+          return { ...s, originalContent: s.currentContent, isDirty: false }
+        })
       } else {
         alert(`Failed to save: ${result.error}`)
       }
@@ -148,27 +146,28 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
     (value) => {
       if (value === undefined) return
 
-      updateTabState<EditorState>(tabId, (s) => ({
-        ...s,
-        currentContent: value,
-        isDirty: value !== s.originalContent
-      }))
+      updateTabState<EditorState>(tabId, (s) => {
+        if (s.status !== 'ready') return s
+        return { ...s, currentContent: value, isDirty: value !== s.originalContent }
+      })
     },
     [tabId, workspace]
   )
 
   const toggleViewMode = useCallback(() => {
-    updateTabState<EditorState>(tabId, (s) => ({
-      ...s,
-      viewMode: s.viewMode === 'preview' ? 'editor' : 'preview'
-    }))
+    updateTabState<EditorState>(tabId, (s) => {
+      if (s.status !== 'ready') return s
+      return { ...s, viewMode: s.viewMode === 'preview' ? 'editor' : 'preview' }
+    })
   }, [tabId, workspace])
+
+  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
 
   if (!state) {
     return <div className="file-editor-error">Invalid tab</div>
   }
 
-  if (state.isLoading) {
+  if (state.status === 'loading') {
     return (
       <div className="file-editor">
         <div className="file-editor-placeholder">Loading...</div>
@@ -176,7 +175,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
     )
   }
 
-  if (state.error) {
+  if (state.status === 'error') {
     return (
       <div className="file-editor">
         <div className="file-editor-error">{state.error}</div>

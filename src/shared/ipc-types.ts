@@ -3,6 +3,11 @@
  * Single source of truth for all IPC messages between main and renderer processes.
  */
 
+/** Discriminated union for IPC results — use instead of { success: boolean; data?: T; error?: string } */
+export type IpcOk<T = Record<never, never>> = { success: true } & T
+export type IpcErr = { success: false; error: string }
+export type IpcResult<T = Record<never, never>> = IpcOk<T> | IpcErr
+
 import type {
   SandboxConfig,
   Settings,
@@ -45,11 +50,11 @@ export interface IpcRequests {
   // PTY operations
   ptyCreate: {
     params: [connectionId: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string]
-    result: { sessionId: string; handle: string } | null
+    result: IpcResult<{ sessionId: string; handle: string }>
   }
   ptyAttach: {
     params: [connectionId: string, sessionId: string]
-    result: { success: boolean; handle?: string; error?: string }
+    result: IpcResult<{ handle: string }>
   }
   ptyList: {
     params: [connectionId: string]
@@ -71,7 +76,7 @@ export interface IpcRequests {
   }
   gitRemoveWorktree: {
     params: [connectionId: string, repoPath: string, worktreePath: string, deleteBranch?: boolean, operationId?: string]
-    result: { success: boolean; error?: string }
+    result: IpcResult
   }
   gitListWorktrees: {
     params: [connectionId: string, repoPath: string]
@@ -99,15 +104,15 @@ export interface IpcRequests {
   }
   gitGetDiff: {
     params: [connectionId: string, worktreePath: string, parentBranch: string]
-    result: { success: boolean; diff?: DiffResult; error?: string }
+    result: IpcResult<{ diff: DiffResult }>
   }
   gitGetFileDiff: {
     params: [connectionId: string, worktreePath: string, parentBranch: string, filePath: string]
-    result: { success: boolean; diff?: string; error?: string }
+    result: IpcResult<{ diff: string }>
   }
   gitMerge: {
     params: [connectionId: string, targetWorktreePath: string, worktreeBranch: string, squash: boolean, operationId?: string]
-    result: { success: boolean; error?: string }
+    result: IpcResult
   }
   gitCheckMergeConflicts: {
     params: [connectionId: string, repoPath: string, sourceBranch: string, targetBranch: string]
@@ -119,77 +124,77 @@ export interface IpcRequests {
   }
   gitCommitAll: {
     params: [connectionId: string, repoPath: string, message: string]
-    result: { success: boolean; error?: string }
+    result: IpcResult
   }
   gitDeleteBranch: {
     params: [connectionId: string, repoPath: string, branchName: string, operationId?: string]
-    result: { success: boolean; error?: string }
+    result: IpcResult
   }
   gitRenameBranch: {
     params: [connectionId: string, repoPath: string, oldName: string, newName: string]
-    result: { success: boolean; error?: string }
+    result: IpcResult
   }
   gitGetUncommittedChanges: {
     params: [connectionId: string, repoPath: string]
-    result: { success: boolean; changes?: UncommittedChanges; error?: string }
+    result: IpcResult<{ changes: UncommittedChanges }>
   }
   gitGetUncommittedFileDiff: {
     params: [connectionId: string, repoPath: string, filePath: string, staged: boolean]
-    result: { success: boolean; diff?: string; error?: string }
+    result: IpcResult<{ diff: string }>
   }
   gitStageFile: {
     params: [connectionId: string, repoPath: string, filePath: string]
-    result: { success: boolean; error?: string }
+    result: IpcResult
   }
   gitUnstageFile: {
     params: [connectionId: string, repoPath: string, filePath: string]
-    result: { success: boolean; error?: string }
+    result: IpcResult
   }
   gitStageAll: {
     params: [connectionId: string, repoPath: string]
-    result: { success: boolean; error?: string }
+    result: IpcResult
   }
   gitUnstageAll: {
     params: [connectionId: string, repoPath: string]
-    result: { success: boolean; error?: string }
+    result: IpcResult
   }
   gitCommitStaged: {
     params: [connectionId: string, repoPath: string, message: string]
-    result: { success: boolean; error?: string }
+    result: IpcResult
   }
   gitGetFileContentsForDiff: {
     params: [connectionId: string, worktreePath: string, parentBranch: string, filePath: string]
-    result: { success: boolean; contents?: FileDiffContents; error?: string }
+    result: IpcResult<{ contents: FileDiffContents }>
   }
   gitGetUncommittedFileContentsForDiff: {
     params: [connectionId: string, repoPath: string, filePath: string, staged: boolean]
-    result: { success: boolean; contents?: FileDiffContents; error?: string }
+    result: IpcResult<{ contents: FileDiffContents }>
   }
   gitGetHeadCommitHash: {
     params: [connectionId: string, repoPath: string]
-    result: { success: boolean; hash?: string; error?: string }
+    result: IpcResult<{ hash: string }>
   }
   gitGetLog: {
     params: [connectionId: string, repoPath: string, parentBranch: string | null, skip: number, limit: number]
-    result: { success: boolean; result?: GitLogResult; error?: string }
+    result: IpcResult<{ result: GitLogResult }>
   }
   gitGetCommitDiff: {
     params: [connectionId: string, repoPath: string, commitHash: string]
-    result: { success: boolean; files?: DiffFile[]; error?: string }
+    result: IpcResult<{ files: DiffFile[] }>
   }
   gitGetCommitFileDiff: {
     params: [connectionId: string, repoPath: string, commitHash: string, filePath: string]
-    result: { success: boolean; contents?: FileDiffContents; error?: string }
+    result: IpcResult<{ contents: FileDiffContents }>
   }
 
   // Git fetch/pull operations
   gitFetch: {
     params: [connectionId: string, repoPath: string]
-    result: { success: boolean; error?: string }
+    result: IpcResult
   }
   gitPull: {
     params: [connectionId: string, repoPath: string]
-    result: { success: boolean; error?: string }
+    result: IpcResult
   }
   gitGetBehindCount: {
     params: [connectionId: string, repoPath: string]
@@ -199,7 +204,7 @@ export interface IpcRequests {
   // GitHub operations
   gitGetRemoteUrl: {
     params: [connectionId: string, repoPath: string]
-    result: { url?: string; error?: string }
+    result: IpcResult<{ url: string }>
   }
   githubGetPrInfo: {
     params: [connectionId: string, repoPath: string, head: string, base: string]
@@ -219,19 +224,19 @@ export interface IpcRequests {
   // Filesystem operations
   fsReadDirectory: {
     params: [connectionId: string, workspacePath: string, dirPath: string]
-    result: { success: boolean; contents?: DirectoryContents; error?: string }
+    result: IpcResult<{ contents: DirectoryContents }>
   }
   fsReadFile: {
     params: [connectionId: string, workspacePath: string, filePath: string]
-    result: { success: boolean; file?: FileContents; error?: string }
+    result: IpcResult<{ file: FileContents }>
   }
   fsWriteFile: {
     params: [connectionId: string, workspacePath: string, filePath: string, content: string]
-    result: { success: boolean; error?: string }
+    result: IpcResult
   }
   fsSearchFiles: {
     params: [connectionId: string, workspacePath: string, query: string]
-    result: { success: boolean; entries?: FileEntry[]; error?: string }
+    result: IpcResult<{ entries: FileEntry[] }>
   }
 
   // STT operations
@@ -251,33 +256,33 @@ export interface IpcRequests {
   // Session operations
   sessionCreate: {
     params: [workspaces: WorkspaceInput[]]
-    result: { success: boolean; session?: Session; error?: string }
+    result: IpcResult<{ session: Session }>
   }
   sessionUpdate: {
     params: [sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number]
-    result: { success: boolean; session?: Session; error?: string }
+    result: IpcResult<{ session: Session }>
   }
   sessionList: {
     params: []
-    result: { success: boolean; sessions?: Session[]; error?: string }
+    result: IpcResult<{ sessions: Session[] }>
   }
   sessionGet: {
     params: [sessionId: string]
-    result: { success: boolean; session?: Session; error?: string }
+    result: IpcResult<{ session: Session }>
   }
   sessionDelete: {
     params: [sessionId: string]
-    result: { success: boolean; error?: string }
+    result: IpcResult
   }
   sessionOpenInNewWindow: {
     params: [sessionId: string]
-    result: { success: boolean; error?: string }
+    result: IpcResult
   }
 
   // Daemon operations
   daemonShutdown: {
     params: []
-    result: { success: boolean; error?: string }
+    result: IpcResult
   }
 
   // Dialog operations
@@ -303,7 +308,7 @@ export interface IpcRequests {
   }
   runActionsRun: {
     params: [connectionId: string, workspacePath: string, actionId: string]
-    result: string | null  // returns ptyId
+    result: IpcResult<{ ptyId: string }>
   }
 
   // App operations
@@ -321,7 +326,7 @@ export interface IpcRequests {
   // SSH operations
   sshConnect: {
     params: [config: SSHConnectionConfig, options?: { refreshDaemon?: boolean }]
-    result: { info: ConnectionInfo, session?: Session }
+    result: { info: ConnectionInfo; session: Session | null }
   }
   sshDisconnect: {
     params: [connectionId: string]
@@ -357,7 +362,7 @@ export interface IpcRequests {
   }
   sshWatchConnectionStatus: {
     params: [connectionId: string]
-    result: { initial: ConnectionInfo | undefined }
+    result: { initial: ConnectionInfo }
   }
   sshUnwatchConnectionStatus: {
     params: [connectionId: string]

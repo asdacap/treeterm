@@ -28,7 +28,7 @@ export default function WorkspaceSettings({ workspace }: WorkspaceSettingsProps)
   }
 
   const handleDefaultAppChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    updateSettings({ defaultApplicationId: e.target.value || null })
+    updateSettings({ defaultApplicationId: e.target.value || '' })
   }
 
   return (

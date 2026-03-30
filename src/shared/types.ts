@@ -20,12 +20,9 @@ export type ConnectionTarget =
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
 
-export interface ConnectionInfo {
-  id: string
-  target: ConnectionTarget
-  status: ConnectionStatus
-  error?: string
-}
+export type ConnectionInfo =
+  | { id: string; target: ConnectionTarget; status: 'disconnected' | 'connecting' | 'connected' }
+  | { id: string; target: ConnectionTarget; status: 'error'; error: string }
 
 // === Port Forward Types ===
 
@@ -39,15 +36,9 @@ export interface PortForwardConfig {
 
 export type PortForwardStatus = 'connecting' | 'active' | 'error' | 'stopped'
 
-export interface PortForwardInfo {
-  id: string
-  connectionId: string
-  localPort: number
-  remoteHost: string
-  remotePort: number
-  status: PortForwardStatus
-  error?: string
-}
+export type PortForwardInfo =
+  | { id: string; connectionId: string; localPort: number; remoteHost: string; remotePort: number; status: 'connecting' | 'active' | 'stopped' }
+  | { id: string; connectionId: string; localPort: number; remoteHost: string; remotePort: number; status: 'error'; error: string }
 
 // === Sandbox Types ===
 
@@ -68,8 +59,8 @@ export interface AppState {
 // Worktree-specific settings that can be inherited from parent
 export interface WorktreeSettings {
   // Default application to open when creating a new worktree
-  // If null, inherits from parent or uses global default
-  defaultApplicationId: string | null
+  // Empty string means inherit from parent or use global default
+  defaultApplicationId: string
 }
 
 export interface Workspace {
@@ -85,7 +76,7 @@ export interface Workspace {
   isDetached: boolean
   appStates: Record<string, AppState>
   activeTabId: string | null
-  settings?: WorktreeSettings
+  settings: WorktreeSettings
   metadata: Record<string, string>
   createdAt: number
   lastActivity: number

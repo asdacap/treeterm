@@ -102,14 +102,13 @@ describe('Editor Renderer', () => {
         const state = editorApplication.createInitialState()
 
         expect(state).toEqual({
+          status: 'ready',
           filePath: '',
           originalContent: '',
           currentContent: '',
           language: 'plaintext',
           isDirty: false,
           viewMode: 'editor',
-          isLoading: false,
-          error: null
         })
       })
 

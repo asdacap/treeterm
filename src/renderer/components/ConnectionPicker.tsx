@@ -41,8 +41,9 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
       console.log(`[renderer:ConnectionPicker] ssh.connect returned: status=${info.status}, session=${session ? session.id : 'undefined'}`)
 
       if (info.status !== 'connected' || !session) {
-        console.error(`[renderer:ConnectionPicker] SSH connection failed: ${info.error || 'No session returned'}`)
-        setSessionError(config.id, info.error || 'No session returned')
+        const errorMsg = info.status === 'error' ? info.error : 'No session returned'
+        console.error(`[renderer:ConnectionPicker] SSH connection failed: ${errorMsg}`)
+        setSessionError(config.id, errorMsg)
         return
       }
 

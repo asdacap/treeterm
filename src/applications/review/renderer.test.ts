@@ -99,7 +99,7 @@ describe('Review Renderer', () => {
       it('returns empty object as initial state', () => {
         const state = reviewApplication.createInitialState()
 
-        expect(state).toEqual({})
+        expect(state).toEqual({ viewMode: 'committed' })
       })
 
       it('returns a fresh state object on each call', () => {

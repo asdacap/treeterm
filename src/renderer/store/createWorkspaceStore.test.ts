@@ -58,6 +58,7 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     isDetached: false,
     appStates: {},
     activeTabId: null,
+    settings: { defaultApplicationId: '' },
     metadata: {},
     createdAt: Date.now(),
     lastActivity: Date.now(),

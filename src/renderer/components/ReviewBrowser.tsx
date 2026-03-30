@@ -246,7 +246,7 @@ export default function ReviewBrowser({
     setError(null)
     try {
       const result = await git.getDiff(parentWorkspace.gitBranch)
-      if (result.success && result.diff) {
+      if (result.success) {
         setDiff(result.diff)
       } else {
         setError(result.error || 'Failed to load diff')
@@ -275,8 +275,8 @@ export default function ReviewBrowser({
     try {
       const parentBranch = parentWorkspace?.gitBranch || null
       const result = await git.getLog(parentBranch, skip, 50)
-      if (result.success && result.result) {
-        setCommits(prev => skip === 0 ? result.result!.commits : [...prev, ...result.result!.commits])
+      if (result.success) {
+        setCommits(prev => skip === 0 ? result.result.commits : [...prev, ...result.result.commits])
         setCommitsHasMore(result.result.hasMore)
       } else {
         setCommitsError(result.error || 'Failed to load commits')
@@ -311,7 +311,7 @@ export default function ReviewBrowser({
     setLoadError(null)
     try {
       const result = await git.getCommitFileDiff(commitHash, filePath)
-      if (result.success && result.contents) {
+      if (result.success) {
         setFileDiffContents(result.contents)
       } else {
         setLoadError(result.error || 'Failed to load commit file diff')
@@ -358,7 +358,7 @@ export default function ReviewBrowser({
     setLoadError(null)
     try {
       const result = await git.getFileContentsForDiff(parentWorkspace.gitBranch, filePath)
-      if (result.success && result.contents) {
+      if (result.success) {
         setFileDiffContents(result.contents)
       } else {
         setFileDiffContents(null)
@@ -382,7 +382,7 @@ export default function ReviewBrowser({
     setLoadError(null)
     try {
       const result = await git.getUncommittedFileContentsForDiff(file.path, file.staged)
-      if (result.success && result.contents) {
+      if (result.success) {
         setFileDiffContents(result.contents)
       } else {
         setFileDiffContents(null)
