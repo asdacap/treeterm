@@ -5,7 +5,7 @@ import { Loader2 } from 'lucide-react'
 import type { SessionState } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import { useSessionNamesStore } from '../store/sessionNames'
-import type { SSHConnectionConfig, PortForwardInfo } from '../types'
+import type { SSHConnectionConfig, PortForwardConfig, PortForwardInfo } from '../types'
 import PortForwardDialog from './PortForwardDialog'
 import JsonViewer from './JsonViewer'
 
@@ -470,7 +470,31 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
                       >
                         {isExpanded ? 'Hide' : 'Log'}
                       </button>
-                      {pf.status !== 'stopped' && (
+                      {(pf.status === 'error' || pf.status === 'stopped') && (
+                        <button
+                          className="ssh-pane-tab"
+                          style={{ color: '#ff9800' }}
+                          onClick={async () => {
+                            await ssh.removePortForward(pf.id).catch(() => {})
+                            const config: PortForwardConfig = {
+                              id: crypto.randomUUID(),
+                              connectionId: pf.connectionId,
+                              localPort: pf.localPort,
+                              remoteHost: pf.remoteHost,
+                              remotePort: pf.remotePort,
+                            }
+                            try {
+                              const info = await ssh.addPortForward(config)
+                              setPortForwards(prev => prev.filter(p => p.id !== pf.id).concat(info))
+                            } catch (err) {
+                              console.error('Failed to restart port forward:', err)
+                            }
+                          }}
+                        >
+                          Restart
+                        </button>
+                      )}
+                      {pf.status !== 'stopped' && pf.status !== 'error' && (
                         <button
                           className="ssh-pane-tab"
                           style={{ color: '#f44336' }}
