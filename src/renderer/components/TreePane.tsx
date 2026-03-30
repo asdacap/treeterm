@@ -45,16 +45,18 @@ export default function TreePane({ selectFolder }: TreePaneProps): JSX.Element {
     <div className="tree-pane-content">
       <div className="tree-header">
         <span className="tree-title">Sessions</span>
-        <button
-          className="add-button"
-          onClick={() => useAppStore.setState({ showConnectionPicker: true })}
-          title="Connect to SSH"
-        >
-          <Monitor size={14} />
-        </button>
-        <button className="add-button" onClick={handleShowSessions} title="Browse sessions">
-          +
-        </button>
+        <div className="tree-header-actions">
+          <button
+            className="add-button"
+            onClick={() => useAppStore.setState({ showConnectionPicker: true })}
+            title="Connect to SSH"
+          >
+            <Monitor size={14} />
+          </button>
+          <button className="add-button" onClick={handleShowSessions} title="Browse sessions">
+            +
+          </button>
+        </div>
       </div>
       <div className="tree-sessions-scroll">
         {sessionIds.map((sessionId) => (

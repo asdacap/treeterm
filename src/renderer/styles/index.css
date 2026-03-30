@@ -98,6 +98,12 @@ body,
   color: var(--text-secondary);
 }
 
+.tree-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .add-button {
   background: transparent;
   border: none;
