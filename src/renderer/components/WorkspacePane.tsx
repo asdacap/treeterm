@@ -417,6 +417,9 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                         const tabId = activeHandle.getState().addTab('terminal', { ptyId, ptyHandle: null, keepOnExit: true })
                         activeHandle.getState().updateTabTitle(tabId, actionId)
                       }}
+                      onOpenApp={(applicationId) => {
+                        activeHandle.getState().addTab(applicationId)
+                      }}
                     />
                   )}
                   {activeWorkspace.isWorktree && activeWorkspace.parentId && activeWorkspace.gitBranch && activeHandle && (

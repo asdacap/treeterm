@@ -5312,6 +5312,10 @@ body,
   background: var(--bg-hover);
 }
 
+.run-action-menu-icon {
+  margin-right: 6px;
+}
+
 .run-action-menu-loading,
 .run-action-menu-empty {
   padding: 8px 12px;
