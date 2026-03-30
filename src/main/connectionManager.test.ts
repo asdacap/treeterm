@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { PortForwardConfig, PortForwardInfo } from '../shared/types'
+import type { PortForwardConfig } from '../shared/types'
 
 // Mock ssh module before importing connectionManager
 let tunnelOutputCallback: ((line: string) => void) | null = null
@@ -248,7 +248,7 @@ describe('ConnectionManager', () => {
       manager.onStatusChange(cb)
       await manager.connectRemote(remoteConfig)
 
-      const statuses = cb.mock.calls.map((c: [{ status: string }]) => c[0].status)
+      const statuses = cb.mock.calls.map((c: unknown[]) => (c[0] as { status: string }).status)
       expect(statuses).toContain('connecting')
       expect(statuses).toContain('connected')
     })
@@ -259,7 +259,7 @@ describe('ConnectionManager', () => {
       await manager.connectRemote(remoteConfig)
 
       expect(cb).toHaveBeenCalled()
-      const statuses = cb.mock.calls.map((c: [{ status: string }]) => c[0].status)
+      const statuses = cb.mock.calls.map((c: unknown[]) => (c[0] as { status: string }).status)
       expect(statuses).toContain('connecting')
       expect(statuses).toContain('connected')
     })

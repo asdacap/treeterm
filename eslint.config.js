@@ -38,6 +38,12 @@ export default [
       'no-restricted-syntax': ['error', {
         selector: "MemberExpression[object.name='window'][property.name='electron']",
         message: 'window.electron is only allowed in main.tsx. Use useAppStore() instead.'
+      }, {
+        selector: "CallExpression[callee.name=/^use.*Store$/] > ArrowFunctionExpression CallExpression[callee.property.name=/^(filter|map|flatMap|slice|concat|flat|reduce)$/]",
+        message: 'Zustand selectors must return stable references. Array methods like .filter()/.map() create new arrays every call, causing infinite re-renders. Select the parent object and derive with useMemo().'
+      }, {
+        selector: "CallExpression[callee.name=/^use.*Store$/] > ArrowFunctionExpression CallExpression[callee.object.name='Object'][callee.property.name=/^(values|keys|entries|assign)$/]",
+        message: 'Zustand selectors must return stable references. Object.values()/keys()/entries() create new arrays every call. Select the parent object and derive with useMemo().'
       }]
     }
   }

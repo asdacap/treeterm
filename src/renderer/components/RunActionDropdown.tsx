@@ -27,8 +27,10 @@ export default function RunActionDropdown({ workspacePath, runActions: runAction
 
   const actions = useStore(store, s => s.actions)
   const detecting = useStore(store, s => s.detecting)
-  const customRunnerApps = useAppStore((s) =>
-    Object.values(s.applications).filter(app => app.id.startsWith('customrunner-'))
+  const applications = useAppStore((s) => s.applications)
+  const customRunnerApps = useMemo(() =>
+    Object.values(applications).filter(app => app.id.startsWith('customrunner-')),
+    [applications]
   )
 
   // Group actions by source
