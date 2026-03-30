@@ -353,6 +353,50 @@ describe('createAnalyzerStore', () => {
     vi.useRealTimers()
   })
 
+  it('dedup LRU cache retains previous buffers across changes', async () => {
+    vi.useFakeTimers()
+    const mock = makeMockTty()
+
+    let callCount = 0
+    deps = makeDeps({
+      llm: {
+        analyzeTerminal: vi.fn().mockImplementation(() => {
+          callCount++
+          return Promise.resolve({ state: 'idle', reason: `call-${callCount}` })
+        }),
+        generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
+      },
+      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+    })
+    const store = createAnalyzerStore('tab-1', deps)
+
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0)
+
+    // Analyze buffer A
+    mock.emitData('$ echo hello\r\nhello\r\n$ ')
+    vi.advanceTimersByTime(1000)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
+
+    // Analyze buffer B (different content via terminal reset + new data)
+    mock.emitData('\x1bc$ npm test\r\nPASS\r\n$ ')
+    vi.advanceTimersByTime(1000)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(2)
+
+    // Go back to buffer A by resetting terminal and writing same content
+    mock.emitData('\x1bc$ echo hello\r\nhello\r\n$ ')
+    vi.advanceTimersByTime(1000)
+    await vi.advanceTimersByTimeAsync(0)
+
+    // Should reuse cached result for buffer A — no third LLM call
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(2)
+
+    store.getState().stop()
+    vi.useRealTimers()
+  })
+
   it('restores scrollback into headless terminal on start', async () => {
     const mock = makeMockTty()
     deps = makeDeps({

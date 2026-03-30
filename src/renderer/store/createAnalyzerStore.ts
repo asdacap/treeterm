@@ -81,8 +81,8 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
   // Dedup buffer (inlined from TerminalAnalyzerBuffer)
   let inFlightBuffer: string | null = null
-  let lastAnalyzedBuffer: string | null = null
-  let lastResult: AnalyzerResult | null = null
+  const CACHE_SIZE = 10
+  const cache: { buffer: string; result: AnalyzerResult }[] = []
   let requestInFlight = false
   let pendingAnalyze = false
 
@@ -94,8 +94,12 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     if (buffer === inFlightBuffer) {
       return { action: 'skip' }
     }
-    if (buffer === lastAnalyzedBuffer && lastResult !== null) {
-      return { action: 'reuse', result: lastResult }
+    const idx = cache.findIndex((entry) => entry.buffer === buffer)
+    if (idx !== -1) {
+      const hit = cache[idx]
+      cache.splice(idx, 1)
+      cache.push(hit)
+      return { action: 'reuse', result: hit.result }
     }
     return { action: 'analyze' }
   }
@@ -194,8 +198,10 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
       if ('state' in result) {
         console.debug('[terminal-analyzer] state set:', result.state, 'reason:', result.reason)
-        lastAnalyzedBuffer = buffer
-        lastResult = { state: result.state, reason: result.reason }
+        cache.push({ buffer, result: { state: result.state, reason: result.reason } })
+        if (cache.length > CACHE_SIZE) {
+          cache.shift()
+        }
         inFlightBuffer = null
         store.setState({ analyzing: false })
         updateAiState(result.state as ActivityState, result.reason)
@@ -222,6 +228,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       }
     } catch (err) {
       requestInFlight = false
+      inFlightBuffer = null
       console.error('[terminal-analyzer] LLM call failed:', err)
       store.setState({ analyzing: false })
       updateAiState('error')
@@ -270,8 +277,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     ownTty = null
     // Reset dedup state
     inFlightBuffer = null
-    lastAnalyzedBuffer = null
-    lastResult = null
+    cache.length = 0
     dataVersion = 0
     lastVersion = 0
     requestInFlight = false
