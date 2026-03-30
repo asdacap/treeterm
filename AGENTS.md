@@ -71,6 +71,11 @@ Never silently swallow errors or return empty/default values on failure. Throw e
 - Use Zod for runtime validation at system boundaries
 - Make invalid states unrepresentable via interface design
 
+### Prefer non-nullable and non-undefined
+- Nullable and undefined is treated similarly with this rules, which is to say, they are both bad.
+- Prefer to use union type with discriminator key rather than making properties nullable. Nullable adds further conditional check which make branch coverage worst.
+- If a prop can be nullable then just return early rather than making further state nullable. Same case with type check, if the type assumption fail, then return error rather than making the type nullable.
+
 ### Onclosed ID on large object
 - Prefer to have store with id within it and expose operation to that store instead of having a service based pattern.
 - eg: Instead of WorkspaceApi.addTab(workspaceId), have SessionApi.getWorkspace(workspaceId).addTab()
