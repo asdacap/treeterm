@@ -226,33 +226,18 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
   const [activeTab, setActiveTab] = useState<TabId>('info')
   const [sshSubTab, setSshSubTab] = useState<SshSubTab>('bootstrap')
   const [output, setOutput] = useState<string[]>([])
-  const [sessionJson, setSessionJson] = useState<unknown>(null)
-  const [jsonLoading, setJsonLoading] = useState(false)
-  const [jsonError, setJsonError] = useState<string | null>(null)
   const [portForwards, setPortForwards] = useState<PortForwardInfo[]>([])
   const [showPortForwardDialog, setShowPortForwardDialog] = useState(false)
   const [expandedPfOutput, setExpandedPfOutput] = useState<Record<string, string[]>>({})
   const ssh = useAppStore(s => s.ssh)
-  const sessionApi = useAppStore(s => s.sessionApi)
   const scrollRef = useRef<HTMLDivElement>(null)
   const displayName = useSessionNamesStore(s => s.names[sessionId]?.name)
 
-  const fetchSessionJson = async () => {
-    setJsonLoading(true)
-    setJsonError(null)
-    try {
-      const result = await sessionApi.get(sessionId)
-      if (result.success) {
-        setSessionJson(result.session)
-      } else {
-        setJsonError(result.error || 'Failed to fetch session')
-      }
-    } catch (err) {
-      setJsonError(err instanceof Error ? err.message : 'Unknown error')
-    } finally {
-      setJsonLoading(false)
-    }
-  }
+  const rawSessionId = useStore(sessionStore, s => s.sessionId)
+  const rawConnection = useStore(sessionStore, s => s.connection)
+  const rawActiveWorkspaceId = useStore(sessionStore, s => s.activeWorkspaceId)
+  const rawSessionVersion = useStore(sessionStore, s => s.sessionVersion)
+  const rawWorkspaces = useStore(sessionStore, s => s.workspaces)
 
   useEffect(() => {
     if (!isRemote || !connection) return
@@ -328,6 +313,23 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
   const tabs: { id: TabId; label: string }[] = isRemote
     ? [{ id: 'info', label: 'Info' }, { id: 'ssh', label: 'SSH' }, { id: 'json', label: 'JSON' }]
     : [{ id: 'info', label: 'Info' }, { id: 'json', label: 'JSON' }]
+
+  const sessionData = {
+    sessionId: rawSessionId,
+    connection: rawConnection,
+    activeWorkspaceId: rawActiveWorkspaceId,
+    sessionVersion: rawSessionVersion,
+    workspaces: Object.fromEntries(
+      Object.entries(rawWorkspaces).map(([id, entry]) => [
+        id,
+        entry.status === 'loaded' || entry.status === 'operation-error'
+          ? { status: entry.status, data: entry.data }
+          : entry.status === 'loading'
+            ? { status: entry.status, name: entry.name, message: entry.message }
+            : { status: entry.status, name: entry.name, error: entry.error },
+      ]),
+    ),
+  }
 
   return (
     <div className="ssh-pane">
@@ -420,28 +422,7 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
         </div>
       ) : activeTab === 'json' ? (
         <div className="ssh-pane-output">
-          <div style={{ padding: '8px', borderBottom: '1px solid var(--border-color)' }}>
-            <button
-              className="ssh-pane-tab active"
-              onClick={fetchSessionJson}
-              disabled={jsonLoading}
-              style={{ borderBottom: 'none' }}
-            >
-              {jsonLoading ? 'Loading...' : 'Refresh'}
-            </button>
-          </div>
-          {jsonError && (
-            <div className="ssh-pane-output-line" style={{ color: '#f44336' }}>
-              Error: {jsonError}
-            </div>
-          )}
-          {sessionJson !== null ? (
-            <JsonViewer data={sessionJson} />
-          ) : !jsonLoading && !jsonError && (
-            <div className="ssh-pane-output-empty">
-              Click Refresh to load session JSON
-            </div>
-          )}
+          <JsonViewer data={sessionData} />
         </div>
       ) : sshSubTab === 'bootstrap' ? (
         <div className="ssh-pane-output" ref={scrollRef}>
