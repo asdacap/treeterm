@@ -15,6 +15,8 @@ import type { ReviewState, Platform, WorkspaceStore } from '../types'
 import { getTabs } from '../types'
 import { PromptDescriptionButton } from './PromptDescriptionButton'
 import RunActionDropdown from './RunActionDropdown'
+import ContextMenu from './ContextMenu'
+import { useContextMenuStore } from '../store/contextMenu'
 
 interface WorkspacePaneProps {
   sessionStore: StoreApi<SessionState>
@@ -37,6 +39,9 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const applications = useAppStore((s) => s.applications)
   const clipboard = useAppStore((s) => s.clipboard)
   const menuApplications = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
+  const openContextMenu = useContextMenuStore((s) => s.open)
+  const closeContextMenu = useContextMenuStore((s) => s.close)
+  const branchBadgeMenuId = 'branch-badge'
 
   const [branchCopied, setBranchCopied] = useState(false)
 
@@ -373,15 +378,30 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                 )}
                 <div className="workspace-actions">
                   {activeWorkspace.gitBranch && (
-                    <span
-                      className={`workspace-branch${branchCopied ? ' copied' : ''}`}
-                      onClick={() => {
-                        clipboard.writeText(activeWorkspace.gitBranch!)
-                        setBranchCopied(true)
-                        setTimeout(() => setBranchCopied(false), 1500)
-                      }}
-                      title="Copy branch name"
-                    >{branchCopied ? 'Copied!' : activeWorkspace.gitBranch}</span>
+                    <>
+                      <span
+                        className={`workspace-branch${branchCopied ? ' copied' : ''}`}
+                        onClick={() => {
+                          clipboard.writeText(activeWorkspace.gitBranch!)
+                          setBranchCopied(true)
+                          setTimeout(() => setBranchCopied(false), 1500)
+                        }}
+                        onContextMenu={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          openContextMenu(branchBadgeMenuId, e.clientX, e.clientY)
+                        }}
+                        title="Copy branch name"
+                      >{branchCopied ? 'Copied!' : activeWorkspace.gitBranch}</span>
+                      <ContextMenu menuId={branchBadgeMenuId}>
+                        <div className="context-menu-item" onClick={() => {
+                          closeContextMenu()
+                          clipboard.writeText(activeWorkspace.path)
+                        }}>
+                          Copy worktree path
+                        </div>
+                      </ContextMenu>
+                    </>
                   )}
                   {activeWorkspace.isGitRepo && activeHandle && (
                     <GitStatusButton workspace={activeHandle} />
