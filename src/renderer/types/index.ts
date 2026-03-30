@@ -20,6 +20,7 @@ import type {
   RunAction,
   SSHConnectionConfig,
   ConnectionInfo,
+  PortForwardSpec,
   PortForwardConfig,
   PortForwardInfo,
   ReasoningEffort
@@ -44,6 +45,7 @@ export type {
   RunAction,
   SSHConnectionConfig,
   ConnectionInfo,
+  PortForwardSpec,
   PortForwardConfig,
   PortForwardInfo,
   ReasoningEffort

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAppStore } from '../store/app'
-import type { SSHConnectionConfig } from '../types'
+import type { SSHConnectionConfig, PortForwardSpec } from '../types'
 
 interface ConnectionPickerProps {
   isOpen: boolean
@@ -18,6 +18,10 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
   const [port, setPort] = useState('22')
   const [identityFile, setIdentityFile] = useState('')
   const [label, setLabel] = useState('')
+  const [portForwards, setPortForwards] = useState<PortForwardSpec[]>([])
+  const [pfLocalPort, setPfLocalPort] = useState('')
+  const [pfRemoteHost, setPfRemoteHost] = useState('localhost')
+  const [pfRemotePort, setPfRemotePort] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [refreshDaemon, setRefreshDaemon] = useState(false)
 
@@ -68,7 +72,8 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
       user,
       port: parseInt(port, 10) || 22,
       identityFile: identityFile || undefined,
-      label: label || `${user}@${host}`
+      label: label || `${user}@${host}`,
+      portForwards,
     }
 
     setError(null)
@@ -81,6 +86,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
     setPort('22')
     setIdentityFile('')
     setLabel('')
+    setPortForwards([])
   }
 
   const handleConnectSaved = (config: SSHConnectionConfig) => {
@@ -91,6 +97,20 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
   const handleRemoveSaved = async (id: string) => {
     await ssh.removeSavedConnection(id)
     setSavedConnections(await ssh.getSavedConnections())
+  }
+
+  const handleAddPortForward = () => {
+    const lp = parseInt(pfLocalPort, 10)
+    const rp = parseInt(pfRemotePort, 10)
+    if (!lp || lp < 1 || lp > 65535 || !rp || rp < 1 || rp > 65535 || !pfRemoteHost) return
+    setPortForwards([...portForwards, { localPort: lp, remoteHost: pfRemoteHost, remotePort: rp }])
+    setPfLocalPort('')
+    setPfRemoteHost('localhost')
+    setPfRemotePort('')
+  }
+
+  const handleRemovePortForward = (index: number) => {
+    setPortForwards(portForwards.filter((_, i) => i !== index))
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -127,7 +147,14 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 padding: '6px 12px', backgroundColor: '#313244', borderRadius: 4, marginBottom: 4
               }}>
-                <span>{config.label || `${config.user}@${config.host}`}</span>
+                <div>
+                  <span>{config.label || `${config.user}@${config.host}`}</span>
+                  {config.portForwards.length > 0 && (
+                    <span style={{ fontSize: 11, color: '#a6adc8', marginLeft: 6 }}>
+                      ({config.portForwards.length} port fwd{config.portForwards.length > 1 ? 's' : ''})
+                    </span>
+                  )}
+                </div>
                 <div style={{ display: 'flex', gap: 4 }}>
                   <button
                     onClick={() => {
@@ -136,6 +163,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
                       setPort(String(config.port))
                       setIdentityFile(config.identityFile || '')
                       setLabel(config.label || '')
+                      setPortForwards(config.portForwards)
                     }}
                     style={smallButtonStyle}
                   >Fill</button>
@@ -190,6 +218,42 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
               value={identityFile} onChange={e => setIdentityFile(e.target.value)}
               placeholder="~/.ssh/id_rsa" style={inputStyle}
             />
+          </div>
+        </div>
+
+        {/* Port forwards editor */}
+        <div style={{ marginBottom: 12 }}>
+          <label style={labelStyle}>Port Forwards</label>
+          {portForwards.map((pf, i) => (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4,
+              fontSize: 12, color: '#cdd6f4'
+            }}>
+              <span style={{ flex: 1 }}>
+                localhost:{pf.localPort} → {pf.remoteHost}:{pf.remotePort}
+              </span>
+              <button
+                onClick={() => handleRemovePortForward(i)}
+                style={{ ...smallButtonStyle, color: '#f44336', padding: '0 6px' }}
+              >x</button>
+            </div>
+          ))}
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <input
+              value={pfLocalPort} onChange={e => setPfLocalPort(e.target.value)}
+              placeholder="local port" style={{ ...inputStyle, width: 80 }}
+            />
+            <span style={{ fontSize: 12, color: '#a6adc8' }}>→</span>
+            <input
+              value={pfRemoteHost} onChange={e => setPfRemoteHost(e.target.value)}
+              placeholder="remote host" style={{ ...inputStyle, width: 120 }}
+            />
+            <span style={{ fontSize: 12, color: '#a6adc8' }}>:</span>
+            <input
+              value={pfRemotePort} onChange={e => setPfRemotePort(e.target.value)}
+              placeholder="remote port" style={{ ...inputStyle, width: 80 }}
+            />
+            <button onClick={handleAddPortForward} style={smallButtonStyle}>Add</button>
           </div>
         </div>
 

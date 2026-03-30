@@ -269,7 +269,11 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
     },
     ssh: {
       ...defaults.ssh,
-      ...loaded.ssh
+      ...loaded.ssh,
+      savedConnections: (loaded.ssh?.savedConnections || []).map(c => ({
+        ...c,
+        portForwards: c.portForwards || []
+      }))
     },
     llm: {
       ...defaults.llm,

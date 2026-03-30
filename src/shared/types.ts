@@ -5,6 +5,12 @@
 
 // === SSH Connection Types ===
 
+export interface PortForwardSpec {
+  localPort: number
+  remoteHost: string
+  remotePort: number
+}
+
 export interface SSHConnectionConfig {
   id: string
   host: string
@@ -12,6 +18,7 @@ export interface SSHConnectionConfig {
   port: number // default 22
   identityFile?: string
   label?: string // display name
+  portForwards: PortForwardSpec[]
 }
 
 export type ConnectionTarget =

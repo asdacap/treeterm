@@ -29,6 +29,7 @@ function makeConfig(overrides?: Partial<SSHConnectionConfig>): SSHConnectionConf
     host: 'example.com',
     port: 22,
     user: 'testuser',
+    portForwards: [],
     ...overrides,
   }
 }

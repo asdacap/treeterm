@@ -30,6 +30,7 @@ const sshConfig: SSHConnectionConfig = {
   host: 'example.com',
   user: 'admin',
   port: 22,
+  portForwards: [],
 }
 
 const pfConfig: PortForwardConfig = {

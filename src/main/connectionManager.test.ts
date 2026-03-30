@@ -88,6 +88,7 @@ describe('ConnectionManager', () => {
     host: 'example.com',
     user: 'test',
     port: 22,
+    portForwards: [],
   }
 
   beforeEach(() => {

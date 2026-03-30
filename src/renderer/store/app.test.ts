@@ -872,7 +872,7 @@ describe('useAppStore', () => {
       it('names session with user@host when no label', async () => {
         const connection = {
           id: 'conn-1',
-          target: { type: 'remote' as const, config: { id: 'conn-1', host: 'myserver.com', user: 'alice', port: 22 } },
+          target: { type: 'remote' as const, config: { id: 'conn-1', host: 'myserver.com', user: 'alice', port: 22, portForwards: [] } },
           status: 'connected' as const
         }
         const session = { id: 'ssh-session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }
@@ -883,7 +883,7 @@ describe('useAppStore', () => {
       it('uses label over user@host when label is set', async () => {
         const connection = {
           id: 'conn-2',
-          target: { type: 'remote' as const, config: { id: 'conn-2', host: 'myserver.com', user: 'alice', port: 22, label: 'Production' } },
+          target: { type: 'remote' as const, config: { id: 'conn-2', host: 'myserver.com', user: 'alice', port: 22, label: 'Production', portForwards: [] } },
           status: 'connected' as const
         }
         const session = { id: 'ssh-session-2', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }
@@ -895,7 +895,7 @@ describe('useAppStore', () => {
         useSessionNamesStore.getState().setName('ssh-session-3', 'My Server')
         const connection = {
           id: 'conn-3',
-          target: { type: 'remote' as const, config: { id: 'conn-3', host: 'myserver.com', user: 'alice', port: 22 } },
+          target: { type: 'remote' as const, config: { id: 'conn-3', host: 'myserver.com', user: 'alice', port: 22, portForwards: [] } },
           status: 'connected' as const
         }
         const session = { id: 'ssh-session-3', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }

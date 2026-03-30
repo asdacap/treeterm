@@ -9,7 +9,7 @@ import { createRunActionsClient, RunActionsClient } from './runActions'
 import { ConnectionManager } from './connectionManager'
 import { windowManager } from './windowManager'
 import type { ExecInput, ExecOutput } from '../generated/treeterm'
-import type { ReasoningEffort, SandboxConfig, SSHConnectionConfig } from '../shared/types'
+import type { ReasoningEffort, SandboxConfig, SSHConnectionConfig, PortForwardConfig } from '../shared/types'
 
 // Parse initial workspace and SSH target from command line
 let initialWorkspacePath: string | null = null
@@ -1149,6 +1149,57 @@ server.onAppGetWindowUuid((event) => {
   return windowInfo?.uuid || ''
 })
 
+// Helper: sync port forwards for a connection to the saved connection in settings
+function syncSavedPortForwards(connectionId: string): void {
+  if (!connectionManager) return
+  const settings = loadSettings()
+  const saved = settings.ssh.savedConnections.find(c => c.id === connectionId)
+  if (!saved) return
+  const activeForwards = connectionManager.listPortForwards(connectionId)
+  saved.portForwards = activeForwards.map(pf => ({
+    localPort: pf.localPort,
+    remoteHost: pf.remoteHost,
+    remotePort: pf.remotePort
+  }))
+  saveSettings(settings)
+}
+
+// Helper: start port forwards from config and register watchers for a window
+function autoStartPortForwards(
+  config: SSHConnectionConfig,
+  senderWindow: BrowserWindow
+): void {
+  if (!connectionManager || config.portForwards.length === 0) return
+  const winId = senderWindow.id
+  const windowInfo = windowManager.getWindow(winId)
+
+  for (const spec of config.portForwards) {
+    const pfConfig: PortForwardConfig = {
+      id: randomUUID(),
+      connectionId: config.id,
+      localPort: spec.localPort,
+      remoteHost: spec.remoteHost,
+      remotePort: spec.remotePort,
+    }
+
+    try {
+      connectionManager.addPortForward(pfConfig)
+
+      const { unsubscribe } = connectionManager.watchPortForwardStatus(pfConfig.id, (pfInfo) => {
+        if (windowInfo) {
+          windowInfo.ipcServer.sshPortForwardStatus(pfInfo)
+        }
+      })
+      if (!pfStatusWatchUnsubscribers.has(winId)) {
+        pfStatusWatchUnsubscribers.set(winId, new Map())
+      }
+      pfStatusWatchUnsubscribers.get(winId)!.set(pfConfig.id, unsubscribe)
+    } catch (err) {
+      console.error(`[main:ssh] Failed to auto-start port forward ${spec.localPort}:${spec.remoteHost}:${spec.remotePort}:`, err)
+    }
+  }
+}
+
 // SSH IPC Handlers
 server.onSshConnect(async (event, config, options) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
@@ -1178,6 +1229,10 @@ server.onSshConnect(async (event, config, options) => {
         })
         const session = await remoteWatch.initial
         console.log(`[main:ssh] Initial session loaded: id=${session.id}, workspaces=${session.workspaces?.length ?? 0}`)
+
+        // Auto-start saved port forwards
+        autoStartPortForwards(config, senderWindow)
+
         return { info, session }
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error)
@@ -1332,12 +1387,28 @@ server.onSshAddPortForward(async (event, config) => {
     pfStatusWatchUnsubscribers.get(winId)!.set(config.id, unsubscribe)
   }
 
+  // Sync saved connection with updated port forwards
+  syncSavedPortForwards(config.connectionId)
+
   return info
 })
 
 server.onSshRemovePortForward(async (portForwardId) => {
   if (!connectionManager) return
+  // Find the owning connection before removal so we can sync saved config
+  let ownerConnectionId: string | undefined
+  for (const connInfo of connectionManager.listConnections()) {
+    if (connectionManager.listPortForwards(connInfo.id).some(pf => pf.id === portForwardId)) {
+      ownerConnectionId = connInfo.id
+      break
+    }
+  }
+
   connectionManager.removePortForward(portForwardId)
+
+  if (ownerConnectionId) {
+    syncSavedPortForwards(ownerConnectionId)
+  }
 })
 
 server.onSshListPortForwards(async (connectionId) => {
@@ -1493,7 +1564,8 @@ function parseSSHTarget(target: string): SSHConnectionConfig | null {
     user: match[1],
     host: match[2],
     port: match[3] ? parseInt(match[3], 10) : 22,
-    label: target
+    label: target,
+    portForwards: [],
   }
 }
 
