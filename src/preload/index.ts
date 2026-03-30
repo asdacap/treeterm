@@ -1,5 +1,5 @@
 import { contextBridge } from 'electron'
-import type { SandboxConfig, Session, SessionInfo, WorkspaceInput, Settings, SSHConnectionConfig, ConnectionInfo, PortForwardConfig, PortForwardInfo, ReasoningEffort } from '../shared/types'
+import type { SandboxConfig, Session, TTYSessionInfo, WorkspaceInput, Settings, SSHConnectionConfig, ConnectionInfo, PortForwardConfig, PortForwardInfo, ReasoningEffort } from '../shared/types'
 import type { PtyEvent } from '../shared/ipc-types'
 import { IpcClient } from './ipc-client'
 import type { PreloadApi } from '../renderer/types'
@@ -60,7 +60,7 @@ client.onAppReady((session) => {
   readyListeners.forEach((cb) => cb(session))
 })
 
-type SessionsCallback = (sessions: SessionInfo[]) => void
+type SessionsCallback = (sessions: TTYSessionInfo[]) => void
 const daemonSessionsListeners: SessionsCallback[] = []
 
 client.onDaemonSessions((sessions) => {
@@ -179,7 +179,7 @@ const preloadApi: PreloadApi = {
     attach: (connectionId: string, sessionId: string): Promise<{ success: boolean; handle?: string; error?: string }> => {
       return client.ptyAttach(connectionId, sessionId)
     },
-    list: (connectionId: string): Promise<SessionInfo[]> => {
+    list: (connectionId: string): Promise<TTYSessionInfo[]> => {
       return client.ptyList(connectionId)
     },
     write: (id: string, data: string): void => {

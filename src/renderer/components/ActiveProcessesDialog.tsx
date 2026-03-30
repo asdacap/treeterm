@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { fitTerminal } from '../utils/fitTerminal'
 import { useAppStore } from '../store/app'
-import type { TerminalApi, SessionInfo, Workspace } from '../types'
+import type { TerminalApi, TTYSessionInfo, Workspace } from '../types'
 
 interface ActiveProcessesDialogProps {
   workspaces: Record<string, Workspace>
@@ -152,7 +152,7 @@ function getDisplayName(cwd: string, workspaces: Record<string, Workspace>): str
 
 export default function ActiveProcessesDialog({ workspaces, connectionId, onClose }: ActiveProcessesDialogProps) {
   const terminalApi = useAppStore(s => s.terminal)
-  const [sessions, setSessions] = useState<SessionInfo[]>([])
+  const [sessions, setSessions] = useState<TTYSessionInfo[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const fetchSessions = useCallback(async () => {

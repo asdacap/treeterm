@@ -1,17 +1,18 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import type { ReactNode } from 'react'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
 import { GitFork, ChevronDown, ChevronRight, Loader2, AlertCircle } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
-import type { SessionState, SessionEntry } from '../store/createSessionStore'
+import type { SessionState, SessionEntry, WorkspaceEntry } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import { useNavigationStore } from '../store/navigation'
 import { useKeybindingStore } from '../store/keybinding'
 import { useSessionNamesStore } from '../store/sessionNames'
 import CreateChildDialog from './CreateChildDialog'
 import OpenWorkspaceDialog from './OpenWorkspaceDialog'
-import type { ReviewState, WorktreeSettings } from '../types'
+import type { ReviewState, WorktreeSettings, Workspace } from '../types'
 
 // Import WorkspaceIcon from TreePane
 import { WorkspaceIcon } from './TreePane'
@@ -112,7 +113,6 @@ function ConnectedSessionPanel({
 
   const openContextMenu = useContextMenuStore((s) => s.open)
   const closeContextMenu = useContextMenuStore((s) => s.close)
-  const [contextMenuWorkspaceId, setContextMenuWorkspaceId] = useState('')
   const getChildren = (parentId: string) =>
     Object.entries(workspaces)
       .filter(([, e]) => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === parentId)
@@ -188,13 +188,6 @@ function ConnectedSessionPanel({
   const handleOpenWorkspaceSubmit = (path: string, settings?: WorktreeSettings) => {
     addWorkspace(path, { settings })
     setIsOpenWorkspaceDialogOpen(false)
-  }
-
-  const handleContextMenu = (e: React.MouseEvent, id: string) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setContextMenuWorkspaceId(id)
-    openContextMenu('session-ws-context', e.clientX, e.clientY)
   }
 
   const handleSessionContextMenu = (e: React.MouseEvent) => {
@@ -338,68 +331,31 @@ function ConnectedSessionPanel({
     setActiveView({ type: 'workspace', workspaceId: id, sessionId })
   }
 
-  const renderWorkspace = (id: string, depth: number = 0) => {
+  const renderWorkspace = (id: string, depth: number = 0): ReactNode => {
     const entry = workspaces[id]
     if (!entry) return null
 
-    // For loaded/operation-error entries, use full data
-    const ws = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined
-    const displayName = ws ? (ws.metadata?.displayName || ws.name) : (entry as { name: string }).name
     const children = getChildren(id)
-    const hasChildren = children.length > 0
-    const isExpanded = expanded.has(id)
-    const tabIds = ws ? Object.keys(ws.appStates) : []
-
-    // Check if this workspace is focused in workspace_focus mode
-    const isFocused =
-      prefixState === 'workspace_focus' &&
-      focusedWorkspaceIds[focusedWorkspaceIndex] === id
+    const isFocused = prefixState === 'workspace_focus' && focusedWorkspaceIds[focusedWorkspaceIndex] === id
 
     return (
-      <div key={id}>
-        <div
-          className={`tree-item ${depth === 0 ? 'tree-item-root' : ''} ${isActiveSession && activeWorkspaceId === id ? 'active' : ''} ${isFocused ? 'focused' : ''}`}
-          style={{ paddingLeft: 4 + depth * 4 }}
-          onClick={() => handleWorkspaceClick(id)}
-          onContextMenu={(e) => handleContextMenu(e, id)}
-          title={ws?.metadata?.description ? `${ws.path}\n\n${ws.metadata.description}` : ws?.path}
-        >
-          {hasChildren ? (
-            <span
-              className="tree-item-expand"
-              onClick={(e) => {
-                e.stopPropagation()
-                toggleExpand(id)
-              }}
-            >
-              {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-            </span>
-          ) : (
-            <span className="tree-item-expand-placeholder" />
-          )}
-          <span className="tree-item-icon">
-            <WorkspaceIcon tabIds={tabIds} loadStatus={entry.status === 'loading' || entry.status === 'error' ? entry.status : undefined} isWorktree={ws?.isWorktree ?? false} />
-          </span>
-          <span className="tree-item-name">
-            {displayName}
-          </span>
-          <span className="tree-item-actions">
-            {ws?.isGitRepo && (
-              <button
-                className="tree-item-action"
-                title="Fork"
-                onClick={(e) => { e.stopPropagation(); handleQuickFork(id) }}
-              >
-                <GitFork size={16} />
-              </button>
-            )}
-
-          </span>
-        </div>
-
-        {/* Children */}
-        {isExpanded && children.map((child) => renderWorkspace(child.id, depth + 1))}
-      </div>
+      <WorkspaceTreeItem
+        key={id}
+        id={id}
+        depth={depth}
+        entry={entry}
+        isActive={isActiveSession && activeWorkspaceId === id}
+        isFocused={isFocused}
+        isExpanded={expanded.has(id)}
+        onToggleExpand={toggleExpand}
+        onClick={handleWorkspaceClick}
+        onQuickFork={handleQuickFork}
+        onCreateChild={handleCreateChild}
+        onRemove={handleRemove}
+        onOpenSettings={handleOpenSettings}
+        children={children}
+        renderChild={renderWorkspace}
+      />
     )
   }
 
@@ -444,38 +400,6 @@ function ConnectedSessionPanel({
         )}
       </div>
 
-      {/* Context Menu */}
-      <ContextMenu menuId="session-ws-context">
-        {(() => {
-          const ctxEntry = workspaces[contextMenuWorkspaceId]
-          const ctxWs = ctxEntry && (ctxEntry.status === 'loaded' || ctxEntry.status === 'operation-error') ? ctxEntry.data : undefined
-          return (
-            <>
-              {ctxWs && (
-                <div className="context-menu-item" onClick={() => handleOpenSettings(contextMenuWorkspaceId)}>
-                  Settings
-                </div>
-              )}
-              {ctxWs?.isGitRepo && (
-                <div className="context-menu-item" onClick={() => handleCreateChild(contextMenuWorkspaceId)}>
-                  Open Existing Branch
-                </div>
-              )}
-              {ctxWs?.isWorktree && ctxWs?.parentId && (
-                <div className="context-menu-item" onClick={() => handleRemove(contextMenuWorkspaceId)}>
-                  Review & Merge
-                </div>
-              )}
-              {ctxWs && !ctxWs.isWorktree && (
-                <div className="context-menu-item danger" onClick={() => handleRemove(contextMenuWorkspaceId)}>
-                  Remove
-                </div>
-              )}
-            </>
-          )
-        })()}
-      </ContextMenu>
-
       {/* Session Context Menu */}
       <ContextMenu menuId="session-context">
         <div className="context-menu-item danger" onClick={handleDisconnectSession}>
@@ -509,6 +433,111 @@ function ConnectedSessionPanel({
           isRemote={connection?.target.type === 'remote'}
         />
       )}
+    </div>
+  )
+}
+
+interface WorkspaceTreeItemProps {
+  id: string
+  depth: number
+  entry: WorkspaceEntry
+  isActive: boolean
+  isFocused: boolean
+  isExpanded: boolean
+  onToggleExpand: (id: string) => void
+  onClick: (id: string) => void
+  onQuickFork: (id: string) => void
+  onCreateChild: (id: string) => void
+  onRemove: (id: string) => void
+  onOpenSettings: (id: string) => void
+  children: Workspace[]
+  renderChild: (id: string, depth: number) => ReactNode
+}
+
+function WorkspaceTreeItem({
+  id, depth, entry, isActive, isFocused, isExpanded,
+  onToggleExpand, onClick, onQuickFork, onCreateChild, onRemove, onOpenSettings,
+  children, renderChild,
+}: WorkspaceTreeItemProps): JSX.Element {
+  const openContextMenu = useContextMenuStore((s) => s.open)
+  const menuId = `ws-context-${id}`
+
+  const ws = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined
+  const displayName = ws ? (ws.metadata?.displayName || ws.name) : (entry as { name: string }).name
+  const hasChildren = children.length > 0
+  const tabIds = ws ? Object.keys(ws.appStates) : []
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    openContextMenu(menuId, e.clientX, e.clientY)
+  }
+
+  return (
+    <div>
+      <div
+        className={`tree-item ${depth === 0 ? 'tree-item-root' : ''} ${isActive ? 'active' : ''} ${isFocused ? 'focused' : ''}`}
+        style={{ paddingLeft: 4 + depth * 4 }}
+        onClick={() => onClick(id)}
+        onContextMenu={handleContextMenu}
+        title={ws?.metadata?.description ? `${ws.path}\n\n${ws.metadata.description}` : ws?.path}
+      >
+        {hasChildren ? (
+          <span
+            className="tree-item-expand"
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggleExpand(id)
+            }}
+          >
+            {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          </span>
+        ) : (
+          <span className="tree-item-expand-placeholder" />
+        )}
+        <span className="tree-item-icon">
+          <WorkspaceIcon tabIds={tabIds} loadStatus={entry.status === 'loading' || entry.status === 'error' ? entry.status : undefined} isWorktree={ws?.isWorktree ?? false} />
+        </span>
+        <span className="tree-item-name">
+          {displayName}
+        </span>
+        <span className="tree-item-actions">
+          {ws?.isGitRepo && (
+            <button
+              className="tree-item-action"
+              title="Fork"
+              onClick={(e) => { e.stopPropagation(); onQuickFork(id) }}
+            >
+              <GitFork size={16} />
+            </button>
+          )}
+        </span>
+      </div>
+
+      <ContextMenu menuId={menuId}>
+        {ws && (
+          <div className="context-menu-item" onClick={() => onOpenSettings(id)}>
+            Settings
+          </div>
+        )}
+        {ws?.isGitRepo && (
+          <div className="context-menu-item" onClick={() => onCreateChild(id)}>
+            Open Existing Branch
+          </div>
+        )}
+        {ws?.isWorktree && ws?.parentId && (
+          <div className="context-menu-item" onClick={() => onRemove(id)}>
+            Review & Merge
+          </div>
+        )}
+        {ws && !ws.isWorktree && (
+          <div className="context-menu-item danger" onClick={() => onRemove(id)}>
+            Remove
+          </div>
+        )}
+      </ContextMenu>
+
+      {isExpanded && children.map((child) => renderChild(child.id, depth + 1))}
     </div>
   )
 }

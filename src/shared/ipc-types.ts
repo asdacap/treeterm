@@ -7,7 +7,7 @@ import type {
   SandboxConfig,
   Settings,
   Session,
-  SessionInfo,
+  TTYSessionInfo,
   WorkspaceInput,
   RunAction,
   SSHConnectionConfig,
@@ -53,7 +53,7 @@ export interface IpcRequests {
   }
   ptyList: {
     params: [connectionId: string]
-    result: SessionInfo[]
+    result: TTYSessionInfo[]
   }
   ptyIsAlive: {
     params: [connectionId: string, id: string]
@@ -454,7 +454,7 @@ export interface IpcEvents {
     params: [event: { type: string; key: string; code: string }]
   }
   daemonSessions: {
-    params: [sessions: SessionInfo[]]
+    params: [sessions: TTYSessionInfo[]]
   }
   sessionShowSessions: {
     params: []
