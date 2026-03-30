@@ -13,12 +13,30 @@ export function FilesystemBrowser({
   workspace,
   tabId,
 }: FilesystemBrowserProps): JSX.Element {
+  const { workspace: wsData } = useStore(workspace)
+  const appState = wsData?.appStates[tabId]
+  const state = appState?.state as FilesystemState | undefined
+
+  if (!appState || !state) {
+    return <div className="filesystem-browser-error">Invalid tab</div>
+  }
+
+  return <FilesystemBrowserContent workspace={workspace} tabId={tabId} state={state} />
+}
+
+function FilesystemBrowserContent({
+  workspace,
+  tabId,
+  state,
+}: {
+  workspace: WorkspaceStore
+  tabId: string
+  state: FilesystemState
+}): JSX.Element {
   const { workspace: wsData, updateTabState, reviewComments: reviewCommentStore, getGitApi } = useStore(workspace)
   const { getReviewComments, addReviewComment, deleteReviewComment, updateOutdatedReviewComments } = useStore(reviewCommentStore)
   const git = getGitApi()
   const workspacePath = wsData.path
-  const appState = wsData?.appStates[tabId]
-  const state = appState?.state as FilesystemState | undefined
 
   // Resize state
   const [treeWidth, setTreeWidth] = useState(250)
@@ -28,10 +46,6 @@ export function FilesystemBrowser({
   const allComments = getReviewComments()
   const [commentInput, setCommentInput] = useState<{ lineNumber: number } | null>(null)
   const [currentCommitHash, setCurrentCommitHash] = useState<string | null>(null)
-
-  if (!appState || !state) {
-    return <div className="filesystem-browser-error">Invalid tab</div>
-  }
 
   const setSelectedPath = (path: string | null) => {
     updateTabState<FilesystemState>(tabId, (s) => ({

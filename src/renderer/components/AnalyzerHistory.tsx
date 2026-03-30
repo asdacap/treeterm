@@ -34,11 +34,14 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
   }
 
   const ref = workspace.getState().getTabRef(state.sourceTabId) as AiHarnessRef | null
-  const analyzer = ref?.analyzer ?? null
-  if (!analyzer) {
+  if (!ref?.analyzer) {
     return <div style={{ padding: 16, color: '#f14c4c' }}>Analyzer not found for tab {state.sourceTabId}</div>
   }
 
+  return <AnalyzerHistoryContent analyzer={ref.analyzer} workspace={workspace} />
+}
+
+function AnalyzerHistoryContent({ analyzer, workspace }: { analyzer: AiHarnessRef['analyzer']; workspace: ApplicationRenderProps['workspace'] }) {
   const [entries, setEntries] = useState<AnalyzerHistoryEntry[]>(() => analyzer.getState().getHistory())
   const [expandedEntries, setExpandedEntries] = useState<Set<number>>(new Set())
   const [expandedResponses, setExpandedResponses] = useState<Set<number>>(new Set())

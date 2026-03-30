@@ -56,7 +56,6 @@ export default function AiHarness({
   disableScrollbar,
   stripScrollbackClear,
 }: AiHarnessProps) {
-  const sessionStore = useSessionApi()
   const { workspace: wsData } = useStore(workspace)
   const appState = wsData?.appStates[tabId]
 
@@ -67,21 +66,49 @@ export default function AiHarness({
     return <div style={{ padding: 16, color: '#f44747' }}>Error: Invalid AI harness state</div>
   }
 
-  const state = appState.state
-  const ptyId = state.ptyId
-
+  const ptyId = appState.state.ptyId
   if (!ptyId) {
     return <div style={{ padding: 16, color: '#888' }}>Starting AI harness...</div>
   }
 
-  // Read analyzer from tab ref (created by onWorkspaceLoad)
   const ref = workspace.getState().getTabRef(tabId) as AiHarnessRef | null
-  const analyzer = ref?.analyzer ?? null
-
-  if (!analyzer) {
+  if (!ref?.analyzer) {
     return <div style={{ padding: 16, color: '#888' }}>Starting AI harness...</div>
   }
 
+  return (
+    <AiHarnessContent
+      workspace={workspace}
+      tabId={tabId}
+      ptyId={ptyId}
+      analyzer={ref.analyzer}
+      backgroundColor={backgroundColor}
+      disableScrollbar={disableScrollbar}
+      stripScrollbackClear={stripScrollbackClear}
+    />
+  )
+}
+
+interface AiHarnessContentProps {
+  workspace: WorkspaceStore
+  tabId: string
+  ptyId: string
+  analyzer: AiHarnessRef['analyzer']
+  backgroundColor: string
+  disableScrollbar?: boolean
+  stripScrollbackClear?: boolean
+}
+
+function AiHarnessContent({
+  workspace,
+  tabId,
+  ptyId,
+  analyzer,
+  backgroundColor,
+  disableScrollbar,
+  stripScrollbackClear,
+}: AiHarnessContentProps) {
+  const sessionStore = useSessionApi()
   const { aiState, analyzing, reason, autoApprove } = useStore(analyzer)
 
   const handlePushToTalkTranscript = useCallback(async (text: string) => {
@@ -95,7 +122,6 @@ export default function AiHarness({
   }, [ptyId, sessionStore])
 
   const handleTerminalReady = useCallback((term: XTerm) => {
-    // Intercept user input for title generation
     term.onData((data) => {
       analyzer.getState().onUserInput(data)
     })
@@ -123,10 +149,9 @@ export default function AiHarness({
     workspace.getState().addTab<{ sourceTabId: string }>('analyzer-history', { sourceTabId: tabId })
   }
 
-  // Memoize config based on props to prevent unnecessary re-renders
   const config = useMemo<BaseTerminalConfig>(() => ({
     themeBackground: backgroundColor,
-    promptPatterns: [/❯\s/], // Common AI tool prompt pattern
+    promptPatterns: [/❯\s/],
     logPrefix: 'AiHarness',
     disableScrollbar,
     stripScrollbackClear,
