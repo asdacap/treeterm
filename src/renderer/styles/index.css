@@ -5429,6 +5429,17 @@ body,
   border-bottom-color: var(--accent);
 }
 
+.ssh-pane-subtabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  padding-left: 4px;
+}
+
+.ssh-pane-subtabs .ssh-pane-tab {
+  font-size: 11px;
+  padding: 6px 12px;
+}
+
 .ssh-pane-output {
   flex: 1;
   overflow: auto;

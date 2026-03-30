@@ -9,10 +9,10 @@ import type { SSHConnectionConfig, PortForwardInfo } from '../types'
 import PortForwardDialog from './PortForwardDialog'
 
 type TabId = 'info' | 'ssh' | 'json'
+type SshSubTab = 'bootstrap' | 'tunnel' | 'portforwards'
 
-const BOOTSTRAP_PREFIXES = ['[bootstrap]', '[bootstrap:err]', '[ssh]']
-const START_PREFIXES = ['[start]', '[start:err]']
-const PROXY_PREFIXES = ['[tunnel]', '[tunnel:err]']
+const BOOTSTRAP_PREFIXES = ['[bootstrap]', '[bootstrap:err]', '[ssh]', '[start]', '[start:err]']
+const TUNNEL_PREFIXES = ['[tunnel]', '[tunnel:err]']
 
 function filterLines(lines: string[], prefixes: string[]): string[] {
   return lines.filter(line =>
@@ -111,15 +111,14 @@ function ConnectingSessionInfoPane({ sessionId, connectionId, config, initialErr
 
   const sshOutput = useMemo(() => ({
     bootstrap: filterLines(output, BOOTSTRAP_PREFIXES),
-    start: filterLines(output, START_PREFIXES),
-    proxy: filterLines(output, PROXY_PREFIXES),
+    tunnel: filterLines(output, TUNNEL_PREFIXES),
   }), [output])
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [sshOutput.bootstrap.length, sshOutput.start.length, sshOutput.proxy.length])
+  }, [sshOutput.bootstrap.length, sshOutput.tunnel.length])
 
   const handleRetry = () => {
     removeSession(sessionId)
@@ -185,7 +184,7 @@ function ConnectingSessionInfoPane({ sessionId, connectionId, config, initialErr
         </div>
       ) : (
         <div className="ssh-pane-output" ref={scrollRef}>
-          {sshOutput.bootstrap.length === 0 && sshOutput.start.length === 0 && sshOutput.proxy.length === 0 && (
+          {sshOutput.bootstrap.length === 0 && sshOutput.tunnel.length === 0 && (
             <div className="ssh-pane-output-empty">
               Waiting for SSH output...
             </div>
@@ -198,19 +197,11 @@ function ConnectingSessionInfoPane({ sessionId, connectionId, config, initialErr
               ))}
             </>
           )}
-          {sshOutput.start.length > 0 && (
+          {sshOutput.tunnel.length > 0 && (
             <>
-              <div className="ssh-pane-section-header">── Start ──</div>
-              {sshOutput.start.map((line, i) => (
-                <div key={`start-${i}`} className="ssh-pane-output-line">{line}</div>
-              ))}
-            </>
-          )}
-          {sshOutput.proxy.length > 0 && (
-            <>
-              <div className="ssh-pane-section-header">── Proxy ──</div>
-              {sshOutput.proxy.map((line, i) => (
-                <div key={`proxy-${i}`} className="ssh-pane-output-line">{line}</div>
+              <div className="ssh-pane-section-header">── Tunnel ──</div>
+              {sshOutput.tunnel.map((line, i) => (
+                <div key={`tunnel-${i}`} className="ssh-pane-output-line">{line}</div>
               ))}
             </>
           )}
@@ -232,6 +223,7 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
   const isRemote = connection?.target.type === 'remote'
 
   const [activeTab, setActiveTab] = useState<TabId>('info')
+  const [sshSubTab, setSshSubTab] = useState<SshSubTab>('bootstrap')
   const [output, setOutput] = useState<string[]>([])
   const [sessionJson, setSessionJson] = useState<string | null>(null)
   const [jsonLoading, setJsonLoading] = useState(false)
@@ -277,15 +269,14 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
 
   const sshOutput = useMemo(() => ({
     bootstrap: filterLines(output, BOOTSTRAP_PREFIXES),
-    start: filterLines(output, START_PREFIXES),
-    proxy: filterLines(output, PROXY_PREFIXES),
+    tunnel: filterLines(output, TUNNEL_PREFIXES),
   }), [output])
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [sshOutput.bootstrap.length, sshOutput.start.length, sshOutput.proxy.length])
+  }, [sshOutput.bootstrap.length, sshOutput.tunnel.length])
 
   useEffect(() => {
     if (!isRemote || !connection) return
@@ -383,6 +374,28 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
           addPortForward={ssh.addPortForward}
         />
       )}
+      {activeTab === 'ssh' && isRemote && (
+        <div className="ssh-pane-subtabs">
+          {([
+            { id: 'bootstrap' as SshSubTab, label: 'Bootstrap' },
+            { id: 'tunnel' as SshSubTab, label: 'Tunnel' },
+            { id: 'portforwards' as SshSubTab, label: 'Port Forwards' },
+          ]).map(tab => (
+            <button
+              key={tab.id}
+              className={`ssh-pane-tab ${sshSubTab === tab.id ? 'active' : ''}`}
+              onClick={() => setSshSubTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+          {sshSubTab === 'portforwards' && (
+            <button className="ssh-pane-tab active" style={{ marginLeft: 'auto' }} onClick={() => setShowPortForwardDialog(true)}>
+              + Add Port Forward
+            </button>
+          )}
+        </div>
+      )}
       {activeTab === 'info' ? (
         <div className="ssh-pane-output">
           <div className="ssh-pane-output-line">Session ID: {sessionId}</div>
@@ -431,102 +444,83 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
             </div>
           )}
         </div>
-      ) : (
+      ) : sshSubTab === 'bootstrap' ? (
         <div className="ssh-pane-output" ref={scrollRef}>
-          {sshOutput.bootstrap.length === 0 && sshOutput.start.length === 0 && sshOutput.proxy.length === 0 && (
-            <div className="ssh-pane-output-empty">
-              Waiting for SSH output...
-            </div>
+          {sshOutput.bootstrap.length === 0 ? (
+            <div className="ssh-pane-output-empty">No bootstrap output yet...</div>
+          ) : (
+            sshOutput.bootstrap.map((line, i) => (
+              <div key={`bootstrap-${i}`} className="ssh-pane-output-line">{line}</div>
+            ))
           )}
-          {sshOutput.bootstrap.length > 0 && (
-            <>
-              <div className="ssh-pane-section-header">── Bootstrap ──</div>
-              {sshOutput.bootstrap.map((line, i) => (
-                <div key={`bootstrap-${i}`} className="ssh-pane-output-line">{line}</div>
-              ))}
-            </>
+        </div>
+      ) : sshSubTab === 'tunnel' ? (
+        <div className="ssh-pane-output" ref={scrollRef}>
+          {sshOutput.tunnel.length === 0 ? (
+            <div className="ssh-pane-output-empty">No tunnel output yet...</div>
+          ) : (
+            sshOutput.tunnel.map((line, i) => (
+              <div key={`tunnel-${i}`} className="ssh-pane-output-line">{line}</div>
+            ))
           )}
-          {sshOutput.start.length > 0 && (
-            <>
-              <div className="ssh-pane-section-header">── Start ──</div>
-              {sshOutput.start.map((line, i) => (
-                <div key={`start-${i}`} className="ssh-pane-output-line">{line}</div>
-              ))}
-            </>
-          )}
-          {sshOutput.proxy.length > 0 && (
-            <>
-              <div className="ssh-pane-section-header">── Proxy ──</div>
-              {sshOutput.proxy.map((line, i) => (
-                <div key={`proxy-${i}`} className="ssh-pane-output-line">{line}</div>
-              ))}
-            </>
-          )}
-          {isRemote && (
-            <>
-              <div className="ssh-pane-section-header">── Port Forwards ──</div>
-              <div className="port-forward-toolbar">
-                <button className="ssh-pane-tab active" onClick={() => setShowPortForwardDialog(true)}>
-                  + Add Port Forward
-                </button>
-              </div>
-              {portForwards.length === 0 ? (
-                <div className="ssh-pane-output-empty">No port forwards. Click "+ Add Port Forward" to start one.</div>
-              ) : (
-                <div className="port-forward-list">
-                  {portForwards.map(pf => {
-                    const isExpanded = pf.id in expandedPfOutput
-                    return (
-                      <div key={pf.id} className="port-forward-item">
-                        <div className="port-forward-item-header">
-                          <span
-                            className="ssh-pane-status-dot"
-                            style={{ backgroundColor: getPfStatusColor(pf.status) }}
-                          />
-                          <span className="port-forward-item-label">
-                            localhost:{pf.localPort} → {pf.remoteHost}:{pf.remotePort}
-                          </span>
-                          <span className="ssh-pane-status-text">({pf.status})</span>
-                          <button
-                            className="ssh-pane-tab"
-                            onClick={() => handleTogglePfOutput(pf.id, isExpanded)}
-                            title={isExpanded ? 'Hide output' : 'Show output'}
-                          >
-                            {isExpanded ? 'Hide' : 'Log'}
-                          </button>
-                          {pf.status !== 'stopped' && (
-                            <button
-                              className="ssh-pane-tab"
-                              style={{ color: '#f44336' }}
-                              onClick={() => {
-                                ssh.removePortForward(pf.id).catch(console.error)
-                                setPortForwards(prev => prev.filter(p => p.id !== pf.id))
-                              }}
-                            >
-                              Stop
-                            </button>
-                          )}
-                        </div>
-                        {pf.status === 'error' && (
-                          <div className="port-forward-item-error">{pf.error}</div>
-                        )}
-                        {isExpanded && (
-                          <div className="port-forward-item-output">
-                            {(expandedPfOutput[pf.id] ?? []).length === 0 ? (
-                              <div className="ssh-pane-output-empty">No output yet...</div>
-                            ) : (
-                              (expandedPfOutput[pf.id] ?? []).map((line, i) => (
-                                <div key={i} className="ssh-pane-output-line">{line}</div>
-                              ))
-                            )}
-                          </div>
+        </div>
+      ) : (
+        <div className="ssh-pane-output">
+          {portForwards.length === 0 ? (
+            <div className="ssh-pane-output-empty">No port forwards configured.</div>
+          ) : (
+            <div className="port-forward-list">
+              {portForwards.map(pf => {
+                const isExpanded = pf.id in expandedPfOutput
+                return (
+                  <div key={pf.id} className="port-forward-item">
+                    <div className="port-forward-item-header">
+                      <span
+                        className="ssh-pane-status-dot"
+                        style={{ backgroundColor: getPfStatusColor(pf.status) }}
+                      />
+                      <span className="port-forward-item-label">
+                        localhost:{pf.localPort} → {pf.remoteHost}:{pf.remotePort}
+                      </span>
+                      <span className="ssh-pane-status-text">({pf.status})</span>
+                      <button
+                        className="ssh-pane-tab"
+                        onClick={() => handleTogglePfOutput(pf.id, isExpanded)}
+                        title={isExpanded ? 'Hide output' : 'Show output'}
+                      >
+                        {isExpanded ? 'Hide' : 'Log'}
+                      </button>
+                      {pf.status !== 'stopped' && (
+                        <button
+                          className="ssh-pane-tab"
+                          style={{ color: '#f44336' }}
+                          onClick={() => {
+                            ssh.removePortForward(pf.id).catch(console.error)
+                            setPortForwards(prev => prev.filter(p => p.id !== pf.id))
+                          }}
+                        >
+                          Stop
+                        </button>
+                      )}
+                    </div>
+                    {pf.status === 'error' && (
+                      <div className="port-forward-item-error">{pf.error}</div>
+                    )}
+                    {isExpanded && (
+                      <div className="port-forward-item-output">
+                        {(expandedPfOutput[pf.id] ?? []).length === 0 ? (
+                          <div className="ssh-pane-output-empty">No output yet...</div>
+                        ) : (
+                          (expandedPfOutput[pf.id] ?? []).map((line, i) => (
+                            <div key={i} className="ssh-pane-output-line">{line}</div>
+                          ))
                         )}
                       </div>
-                    )
-                  })}
-                </div>
-              )}
-            </>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           )}
         </div>
       )}
