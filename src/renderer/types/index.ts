@@ -8,7 +8,7 @@ import type {
   AppState,
   Workspace,
   Session,
-  SessionInfo,
+  TTYSessionInfo,
   WorkspaceInput,
   TerminalInstance,
   AiHarnessInstance,
@@ -31,7 +31,7 @@ export type {
   AppState,
   Workspace,
   Session,
-  SessionInfo,
+  TTYSessionInfo,
   WorkspaceInput,
   TerminalInstance,
   AiHarnessInstance,
@@ -306,7 +306,7 @@ export interface ClipboardApi {
 export interface TerminalApi {
   create: (connectionId: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<{ sessionId: string; handle: string } | null>
   attach: (connectionId: string, sessionId: string) => Promise<{ success: boolean; handle?: string; error?: string }>
-  list: (connectionId: string) => Promise<SessionInfo[]>
+  list: (connectionId: string) => Promise<TTYSessionInfo[]>
   write: (handle: string, data: string) => void
   resize: (handle: string, cols: number, rows: number) => void
   kill: (connectionId: string, sessionId: string) => void
@@ -517,7 +517,7 @@ export interface AppApi {
 
 export interface DaemonApi {
   shutdown: () => Promise<{ success: boolean; error?: string }>
-  onSessions: (callback: (sessions: SessionInfo[]) => void) => () => void
+  onSessions: (callback: (sessions: TTYSessionInfo[]) => void) => () => void
   onDisconnected: (callback: () => void) => () => void
 }
 

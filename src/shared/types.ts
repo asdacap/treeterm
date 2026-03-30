@@ -104,7 +104,7 @@ export type WorkspaceInput = Omit<Workspace, 'createdAt' | 'lastActivity' | 'att
 
 // === PTY Session Types ===
 
-export interface SessionInfo {
+export interface TTYSessionInfo {
   id: string
   cwd: string
   cols: number

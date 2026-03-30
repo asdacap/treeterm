@@ -30,7 +30,7 @@ import { getDefaultSocketPath } from './socketPath'
 import type { PtyEvent } from '../shared/ipc-types'
 import type {
   SandboxConfig,
-  SessionInfo,
+  TTYSessionInfo,
   Workspace,
   Session,
   AppState
@@ -243,7 +243,7 @@ export class GrpcDaemonClient {
     })
   }
 
-  async listPtySessions(): Promise<SessionInfo[]> {
+  async listPtySessions(): Promise<TTYSessionInfo[]> {
     if (!this.client) {
       throw new Error('Not connected to daemon')
     }
@@ -253,7 +253,7 @@ export class GrpcDaemonClient {
         if (error) {
           reject(new Error(error.message))
         } else if (response) {
-          resolve(response.sessions as SessionInfo[])
+          resolve(response.sessions as TTYSessionInfo[])
         } else {
           resolve([])
         }

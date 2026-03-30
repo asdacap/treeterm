@@ -9,7 +9,7 @@ import type {
   Workspace, Session, AppState, GitInfo,
   ConnectionInfo, ActivityState, SSHConnectionConfig,
   TerminalApi, GitApi, FilesystemApi, SessionApi, Settings, WorktreeSettings,
-  Application, SandboxConfig, SessionInfo, LlmApi, GitHubApi, RunActionsApi
+  Application, SandboxConfig, TTYSessionInfo, LlmApi, GitHubApi, RunActionsApi
 } from '../types'
 
 export type WorkspaceEntry =
@@ -53,7 +53,7 @@ export interface SessionState {
   openTtyStream: (ptyId: string) => Promise<{ tty: Tty }>
   getTtyWriter: (ptyId: string) => Promise<TtyWriter>
   killTty: (ptyId: string) => void
-  listTty: () => Promise<SessionInfo[]>
+  listTty: () => Promise<TTYSessionInfo[]>
 
   // Workspace collection
   workspaces: Record<string, WorkspaceEntry>
@@ -617,7 +617,7 @@ export function createSessionStore(
       boundTerminal.kill(ptyId)
     },
 
-    listTty: (): Promise<SessionInfo[]> => {
+    listTty: (): Promise<TTYSessionInfo[]> => {
       return deps.terminal.list(connectionId)
     },
 
