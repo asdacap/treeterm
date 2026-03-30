@@ -12,6 +12,7 @@ import { useSessionNamesStore } from './sessionNames'
 import { createTerminalApplication, createTerminalVariant } from '../../applications/terminal/renderer'
 import { filesystemApplication } from '../../applications/filesystem/renderer'
 import { createAiHarnessVariant } from '../../applications/aiHarness/renderer'
+import { createCustomRunnerVariant } from '../../applications/customRunner/renderer'
 import { reviewApplication } from '../../applications/review/renderer'
 import { editorApplication } from '../../applications/editor/renderer'
 import { commentsApplication } from '../../applications/comments/renderer'
@@ -24,7 +25,7 @@ import type {
   Workspace, Session, Application,
   Platform, TerminalApi, RawGitApi, SessionApi, AppApi, DaemonApi,
   RawFilesystemApi, STTApi, SandboxApi, SettingsApi, RawRunActionsApi,
-  TerminalInstance, AiHarnessInstance,
+  TerminalInstance, AiHarnessInstance, CustomRunnerInstance,
   ConnectionInfo, SSHConnectionConfig, SSHApi, LlmApi, ClipboardApi, RawGitHubApi
 } from '../types'
 import { createBoundGit, createBoundGitHub, createBoundFilesystem, createBoundRunActions } from '../types'
@@ -74,6 +75,7 @@ interface AppState extends AppDeps {
   initializeApplications: () => void
   registerTerminalVariants: (instances: TerminalInstance[]) => void
   registerAiHarnessVariants: (instances: AiHarnessInstance[]) => void
+  registerCustomRunnerVariants: (instances: CustomRunnerInstance[]) => void
 
   // Session management
   sessionStores: Record<string, SessionEntry>
@@ -216,6 +218,24 @@ export const useAppStore = create<AppState>()((set, get) => ({
     // Register new variants
     for (const instance of instances) {
       get().registerApplication(createAiHarnessVariant(instance, deps))
+    }
+  },
+
+  registerCustomRunnerVariants: (instances: CustomRunnerInstance[]) => {
+    const { terminal } = get()
+    const deps = { terminal: { kill: terminal.kill.bind(terminal) } }
+
+    // Unregister existing dynamic custom runner apps
+    const allApps = Object.values(get().applications)
+    for (const app of allApps) {
+      if (app.id.startsWith('customrunner-')) {
+        get().unregisterApplication(app.id)
+      }
+    }
+
+    // Register new variants
+    for (const instance of instances) {
+      get().registerApplication(createCustomRunnerVariant(instance, deps))
     }
   },
 

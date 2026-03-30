@@ -136,6 +136,32 @@ describe('settings', () => {
       expect(settings.aiHarness.instances[0].id).toBe('existing-ai')
     })
 
+    it('preserves customRunner.instances from loaded settings', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true)
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        JSON.stringify({
+          customRunner: {
+            instances: [{ id: 'rider', name: 'Rider', icon: '▶', commandTemplate: 'rider {{workspace_path}}', isDefault: false }]
+          }
+        })
+      )
+
+      const settings = loadSettings()
+
+      expect(settings.customRunner.instances).toHaveLength(1)
+      expect(settings.customRunner.instances[0].id).toBe('rider')
+      expect(settings.customRunner.instances[0].commandTemplate).toBe('rider {{workspace_path}}')
+    })
+
+    it('defaults customRunner.instances to empty array when not in stored settings', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true)
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({}))
+
+      const settings = loadSettings()
+
+      expect(settings.customRunner.instances).toEqual([])
+    })
+
     it('preserves string keybindings as-is', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true)
       vi.mocked(fs.readFileSync).mockReturnValue(

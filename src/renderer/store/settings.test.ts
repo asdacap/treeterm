@@ -5,7 +5,8 @@ vi.mock('./app', () => ({
   useAppStore: {
     getState: vi.fn().mockReturnValue({
       registerTerminalVariants: vi.fn(),
-      registerAiHarnessVariants: vi.fn()
+      registerAiHarnessVariants: vi.fn(),
+      registerCustomRunnerVariants: vi.fn()
     })
   }
 }))
@@ -50,6 +51,9 @@ describe('SettingsStore', () => {
             allowNetwork: true,
             backgroundColor: '#1a1a24'
           }]
+        },
+        customRunner: {
+          instances: []
         },
         appearance: {
           theme: 'dark'
@@ -111,6 +115,7 @@ describe('SettingsStore', () => {
         },
         appearance: { theme: 'light' },
         aiHarness: { instances: [] },
+        customRunner: { instances: [] },
         sandbox: { enabledByDefault: false, allowNetworkByDefault: true },
         prefixMode: { enabled: true, prefixKey: 'Control+B', timeout: 1500 },
         keybindings: {

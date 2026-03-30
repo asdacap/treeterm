@@ -136,6 +136,14 @@ export interface AiHarnessInstance {
   stripScrollbackClear: boolean
 }
 
+export interface CustomRunnerInstance {
+  id: string
+  name: string
+  icon: string
+  commandTemplate: string  // e.g., "rider {{workspace_path}}"
+  isDefault: boolean
+}
+
 export interface PrefixModeConfig {
   enabled: boolean
   prefixKey: string // e.g., 'Control+B'
@@ -170,6 +178,9 @@ export interface Settings {
   }
   aiHarness: {
     instances: AiHarnessInstance[]
+  }
+  customRunner: {
+    instances: CustomRunnerInstance[]
   }
   appearance: {
     theme: 'dark' | 'light' | 'system'
