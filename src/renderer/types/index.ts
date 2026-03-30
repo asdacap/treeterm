@@ -523,13 +523,7 @@ export interface SSHApi {
 }
 
 export interface SessionApi {
-  create: (connectionId: string, workspaces: WorkspaceInput[]) => Promise<IpcResult<{ session: Session }>>
-  update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number) => Promise<IpcResult<{ session: Session }>>
-  list: (connectionId: string) => Promise<IpcResult<{ sessions: Session[] }>>
-  get: (sessionId: string) => Promise<IpcResult<{ session: Session }>>
-  delete: (sessionId: string) => Promise<IpcResult>
-  openInNewWindow: (sessionId: string) => Promise<IpcResult>
-  onShowSessions: (callback: () => void) => () => void
+  update: (workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number) => Promise<IpcResult<{ session: Session }>>
   onSync: (callback: (session: Session) => void) => () => void
 }
 

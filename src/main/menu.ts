@@ -102,19 +102,6 @@ export function createApplicationMenu(
       ]
     },
 
-    // Workspace menu
-    {
-      label: 'Workspace',
-      submenu: [
-        {
-          label: 'Browse Sessions...',
-          click: () => {
-            sendToFocusedWindow(server, s => s.sessionShowSessions())
-          }
-        }
-      ]
-    },
-
     // View menu
     {
       label: 'View',

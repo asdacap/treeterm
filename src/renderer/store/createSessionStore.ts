@@ -152,17 +152,9 @@ export function createSessionStore(
 
       console.log('[session] syncing to daemon:', daemonWorkspaces.length, 'workspaces', JSON.stringify(daemonWorkspaces))
 
-      if (daemonWorkspaces.length === 0) {
-        if (config.sessionId) {
-          console.log('[session] deleting session:', config.sessionId)
-          await deps.sessionApi.delete(config.sessionId)
-        }
-        return
-      }
-
       const currentVersion = store.getState().sessionVersion
       console.log('[session] updating session:', config.sessionId, 'senderUuid:', config.windowUuid, 'expectedVersion:', currentVersion)
-      const result = await deps.sessionApi.update(config.sessionId, daemonWorkspaces, config.windowUuid || undefined, currentVersion)
+      const result = await deps.sessionApi.update(daemonWorkspaces, config.windowUuid || undefined, currentVersion)
       if (!result.success) {
         console.error('[session] failed to update session:', result.error)
       } else if (result.session) {

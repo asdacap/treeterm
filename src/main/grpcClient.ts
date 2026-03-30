@@ -17,9 +17,7 @@ import {
   type PtyOutput,
   type ExecInput,
   type ExecOutput,
-  type CreateSessionRequest,
   type UpdateSessionRequest,
-  type DeleteSessionRequest,
   type Session as ProtoSession,
   type Workspace as ProtoWorkspace,
   type SessionWatchRequest,
@@ -279,30 +277,7 @@ export class GrpcDaemonClient {
     })
   }
 
-  async createSession(workspaces: Omit<Workspace, 'createdAt' | 'lastActivity'>[]): Promise<Session> {
-    if (!this.client) {
-      throw new Error('Not connected to daemon')
-    }
-
-    return new Promise((resolve, reject) => {
-      const request: CreateSessionRequest = {
-        workspaces: this.convertToProtoWorkspaceInputs(workspaces)
-      }
-
-      this.client!.createSession(request, (error, response) => {
-        if (error) {
-          reject(new Error(error.message))
-        } else if (response) {
-          resolve(this.convertFromProtoSession(response))
-        } else {
-          reject(new Error('No response from server'))
-        }
-      })
-    })
-  }
-
   async updateSession(
-    sessionId: string,
     workspaces: Omit<Workspace, 'createdAt' | 'lastActivity'>[],
     senderId?: string,
     expectedVersion?: number
@@ -313,7 +288,6 @@ export class GrpcDaemonClient {
 
     return new Promise((resolve, reject) => {
       const request: UpdateSessionRequest = {
-        sessionId,
         workspaces: this.convertToProtoWorkspaceInputs(workspaces),
         senderId,
         expectedVersion
@@ -332,7 +306,6 @@ export class GrpcDaemonClient {
   }
 
   watchSession(
-    sessionId: string,
     listenerId: string,
     onUpdate: (session: Session) => void,
     onError?: (error: Error) => void
@@ -345,7 +318,7 @@ export class GrpcDaemonClient {
       }
     }
 
-    const request: SessionWatchRequest = { sessionId, listenerId }
+    const request: SessionWatchRequest = { listenerId }
     const stream = this.client.sessionWatch(request)
 
     let isFirst = true
@@ -356,7 +329,7 @@ export class GrpcDaemonClient {
       rejectInitial = reject
     })
 
-    console.log(`[grpcClient] watchSession started for session=${sessionId}, listener=${listenerId}`)
+    console.log(`[grpcClient] watchSession started for listener=${listenerId}`)
 
     stream.on('data', (event) => {
       if (event.session) {
@@ -373,7 +346,7 @@ export class GrpcDaemonClient {
     })
 
     stream.on('error', (error) => {
-      console.error(`[grpcClient] watchSession stream error for session=${sessionId}:`, error)
+      console.error(`[grpcClient] watchSession stream error:`, error)
       if (isFirst) {
         isFirst = false
         rejectInitial(error)
@@ -389,64 +362,6 @@ export class GrpcDaemonClient {
         stream.cancel()
       }
     }
-  }
-
-  async listSessions(): Promise<Session[]> {
-    if (!this.client) {
-      throw new Error('Not connected to daemon')
-    }
-
-    return new Promise((resolve, reject) => {
-      this.client!.listSessions({}, (error, response) => {
-        if (error) {
-          reject(new Error(error.message))
-        } else if (response) {
-          resolve(response.sessions.map(s => this.convertFromProtoSession(s)))
-        } else {
-          resolve([])
-        }
-      })
-    })
-  }
-
-  async getDefaultSessionId(): Promise<string> {
-    if (!this.client) {
-      throw new Error('Not connected to daemon')
-    }
-
-    console.log('[grpcClient] getDefaultSessionId request sent')
-    return new Promise((resolve, reject) => {
-      this.client!.getDefaultSessionId({}, (error, response) => {
-        if (error) {
-          console.error('[grpcClient] getDefaultSessionId error:', error.message)
-          reject(new Error(error.message))
-        } else if (response) {
-          console.log(`[grpcClient] getDefaultSessionId resolved: ${response.sessionId}`)
-          resolve(response.sessionId)
-        } else {
-          console.error('[grpcClient] getDefaultSessionId: no response from daemon')
-          reject(new Error('No response from daemon'))
-        }
-      })
-    })
-  }
-
-  async deleteSession(sessionId: string): Promise<void> {
-    if (!this.client) {
-      throw new Error('Not connected to daemon')
-    }
-
-    return new Promise((resolve, reject) => {
-      const request: DeleteSessionRequest = { sessionId }
-
-      this.client!.deleteSession(request, (error) => {
-        if (error) {
-          reject(new Error(error.message))
-        } else {
-          resolve()
-        }
-      })
-    })
   }
 
   // Exec Stream - Execute shell commands with streaming I/O

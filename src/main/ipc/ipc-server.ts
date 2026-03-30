@@ -59,12 +59,7 @@ const CHANNELS = {
   sttTranscribeOpenai: 'stt:transcribe-openai',
   sttTranscribeLocal: 'stt:transcribe-local',
   sttCheckMicPermission: 'stt:check-mic-permission',
-  sessionCreate: 'session:create',
   sessionUpdate: 'session:update',
-  sessionList: 'session:list',
-  sessionGet: 'session:get',
-  sessionDelete: 'session:delete',
-  sessionOpenInNewWindow: 'session:open-in-new-window',
   daemonShutdown: 'daemon:shutdown',
   dialogSelectFolder: 'dialog:selectFolder',
   dialogGetRecentDirectories: 'dialog:getRecentDirectories',
@@ -111,7 +106,6 @@ const CHANNELS = {
   appReady: 'app:ready',
   capsLockEvent: 'capslock-event',
   daemonSessions: 'daemon:sessions',
-  sessionShowSessions: 'session:show-sessions',
   sessionSync: 'session:sync',
   daemonDisconnected: 'daemon:disconnected',
   activeProcessesOpen: 'active-processes:open',
@@ -606,16 +600,6 @@ export class IpcServer {
   }
 
   // Session request handlers
-  onSessionCreate(
-    handler: (
-      ...args: IpcRequests['sessionCreate']['params']
-    ) => IpcRequests['sessionCreate']['result'] | Promise<IpcRequests['sessionCreate']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.sessionCreate, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['sessionCreate']['params']))
-    )
-  }
-
   onSessionUpdate(
     handler: (
       ...args: IpcRequests['sessionUpdate']['params']
@@ -623,46 +607,6 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.sessionUpdate, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['sessionUpdate']['params']))
-    )
-  }
-
-  onSessionList(
-    handler: (
-      ...args: IpcRequests['sessionList']['params']
-    ) => IpcRequests['sessionList']['result'] | Promise<IpcRequests['sessionList']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.sessionList, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['sessionList']['params']))
-    )
-  }
-
-  onSessionGet(
-    handler: (
-      ...args: IpcRequests['sessionGet']['params']
-    ) => IpcRequests['sessionGet']['result'] | Promise<IpcRequests['sessionGet']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.sessionGet, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['sessionGet']['params']))
-    )
-  }
-
-  onSessionDelete(
-    handler: (
-      ...args: IpcRequests['sessionDelete']['params']
-    ) => IpcRequests['sessionDelete']['result'] | Promise<IpcRequests['sessionDelete']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.sessionDelete, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['sessionDelete']['params']))
-    )
-  }
-
-  onSessionOpenInNewWindow(
-    handler: (
-      ...args: IpcRequests['sessionOpenInNewWindow']['params']
-    ) => IpcRequests['sessionOpenInNewWindow']['result'] | Promise<IpcRequests['sessionOpenInNewWindow']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.sessionOpenInNewWindow, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['sessionOpenInNewWindow']['params']))
     )
   }
 
@@ -965,10 +909,6 @@ export class IpcServer {
 
   daemonSessions(...args: IpcEvents['daemonSessions']['params']): void {
     this.window?.webContents.send(CHANNELS.daemonSessions, ...args)
-  }
-
-  sessionShowSessions(): void {
-    this.window?.webContents.send(CHANNELS.sessionShowSessions)
   }
 
   sessionSync(...args: IpcEvents['sessionSync']['params']): void {

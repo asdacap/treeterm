@@ -33,7 +33,8 @@ const closeConfirmedWindows: Set<number> = new Set()
 let connectionManager: ConnectionManager | null = null
 const gitClients = new Map<string, GitClient>()
 const runActionsClients = new Map<string, RunActionsClient>()
-const sessionClients = new Map<string, GrpcDaemonClient>()
+// Maps sessionId to the daemon client that owns it (populated when session watch returns initial data)
+const sessionConnectionMap = new Map<string, string>()
 // Simple object storage — each entry is an independent terminal's stream.
 const ptyStreams = new Map<string, PtyStream>()
 
@@ -79,7 +80,7 @@ function createLoadingWindow(): BrowserWindow {
   return loadingWindow
 }
 
-function createWindow(initialSessionId?: string): BrowserWindow {
+function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -167,22 +168,10 @@ function createWindow(initialSessionId?: string): BrowserWindow {
     }
   })
 
-  // Build the load URL with sessionId query parameter if provided
-  let loadUrl: string
-  if (process.env.ELECTRON_RENDERER_URL) {
-    const url = new URL(process.env.ELECTRON_RENDERER_URL)
-    if (initialSessionId) {
-      url.searchParams.set('sessionId', initialSessionId)
-    }
-    loadUrl = url.toString()
-  } else {
-    const basePath = join(__dirname, '../renderer/index.html')
-    if (initialSessionId) {
-      loadUrl = `file://${basePath}?sessionId=${encodeURIComponent(initialSessionId)}`
-    } else {
-      loadUrl = `file://${basePath}`
-    }
-  }
+  // Build the load URL
+  const loadUrl = process.env.ELECTRON_RENDERER_URL
+    ? process.env.ELECTRON_RENDERER_URL
+    : `file://${join(__dirname, '../renderer/index.html')}`
 
   // Load the renderer
   window.loadURL(loadUrl)
@@ -198,17 +187,11 @@ function createWindow(initialSessionId?: string): BrowserWindow {
       const localClient = connectionManager.getClient('local')
       await localClient.ensureDaemonRunning()
 
-      let sessionId = initialSessionId
-      if (!sessionId) {
-        sessionId = await localClient.getDefaultSessionId()
-        console.log('[main] got default session id:', sessionId)
-      }
-
-      // Start watching this session for changes from other windows (cancel previous if HMR reload)
+      // Start watching the single session (cancel previous if HMR reload)
       if (unwatchSession) {
         unwatchSession()
       }
-      const watch = localClient.watchSession(sessionId, windowUuid, (updatedSession) => {
+      const watch = localClient.watchSession(windowUuid, (updatedSession) => {
         console.log('[main] session sync received for window', window.id, {
           sessionId: updatedSession.id,
           workspaces: updatedSession.workspaces.map(ws => ({ path: ws.path, metadata: ws.metadata })),
@@ -217,24 +200,10 @@ function createWindow(initialSessionId?: string): BrowserWindow {
       })
       unwatchSession = watch.unsubscribe
 
-      try {
-        const session = await watch.initial
-        console.log('[main] loaded session:', session.id)
-        sessionClients.set(session.id, localClient)
-        windowServer.appReady(session)
-      } catch {
-        // Session not found (e.g. stale initialSessionId), fall back to default
-        unwatchSession()
-        const defaultId = await localClient.getDefaultSessionId()
-        const fallbackWatch = localClient.watchSession(defaultId, windowUuid, (updatedSession) => {
-          windowServer.sessionSync(updatedSession)
-        })
-        unwatchSession = fallbackWatch.unsubscribe
-        const session = await fallbackWatch.initial
-        console.log('[main] session not found, using default:', session.id)
-        sessionClients.set(session.id, localClient)
-        windowServer.appReady(session)
-      }
+      const session = await watch.initial
+      console.log('[main] loaded session:', session.id)
+      sessionConnectionMap.set(session.id, 'local')
+      windowServer.appReady(session)
     } catch (error) {
       console.error('[main] failed to get session:', error)
       windowServer.appReady(null)
@@ -424,114 +393,20 @@ server.onDaemonShutdown(async (connectionId) => {
 })
 
 // Session IPC Handlers (workspace sessions)
-server.onSessionCreate(async (connectionId, workspaces) => {
+server.onSessionUpdate(async (workspaces, senderUuid, expectedVersion) => {
   if (!connectionManager) {
     return { success: false, error: 'ConnectionManager not initialized' }
   }
 
-  try {
-    const client = connectionManager.getClient(connectionId)
-    await client.ensureDaemonRunning()
-    const result = await client.createSession(workspaces)
-    console.log('[main] session created:', result?.id)
-    return { success: true, session: result }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-    console.error('[main] failed to create session:', errorMessage)
-    return { success: false, error: errorMessage }
-  }
-})
-
-server.onSessionUpdate(async (sessionId, workspaces, senderUuid, expectedVersion) => {
-  const client = sessionClients.get(sessionId)
-  if (!client) {
-    return { success: false, error: `No daemon client for session ${sessionId}` }
-  }
+  // For now, route to local client. In the future, sessionConnectionMap can route to remote daemons.
+  const client = connectionManager.getClient('local')
 
   try {
-    const result = await client.updateSession(sessionId, workspaces, senderUuid, expectedVersion)
+    const result = await client.updateSession(workspaces, senderUuid, expectedVersion)
     return { success: true, session: result }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     console.error('[main] failed to update session:', errorMessage)
-    return { success: false, error: errorMessage }
-  }
-})
-
-server.onSessionList(async (connectionId) => {
-  if (!connectionManager) {
-    return { success: true, sessions: [] }
-  }
-
-  try {
-    const client = connectionManager.getClient(connectionId)
-    await client.ensureDaemonRunning()
-    const sessions = await client.listSessions()
-    console.log('[main] listed sessions:', sessions.length)
-    return { success: true, sessions }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-    console.error('[main] failed to list sessions:', errorMessage)
-    return { success: false, error: errorMessage }
-  }
-})
-
-server.onSessionGet(async (sessionId) => {
-  const client = sessionClients.get(sessionId)
-  if (!client) {
-    return { success: false, error: `No daemon client for session ${sessionId}` }
-  }
-
-  try {
-    const sessions = await client.listSessions()
-    const session = sessions.find(s => s.id === sessionId)
-    if (!session) {
-      return { success: false, error: 'Session not found' }
-    }
-    return { success: true, session }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-    console.error('[main] failed to get session:', errorMessage)
-    return { success: false, error: errorMessage }
-  }
-})
-
-server.onSessionDelete(async (sessionId) => {
-  const client = sessionClients.get(sessionId)
-  if (!client) {
-    return { success: false, error: `No daemon client for session ${sessionId}` }
-  }
-
-  try {
-    await client.deleteSession(sessionId)
-    return { success: true }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-    console.error('[main] failed to delete session:', errorMessage)
-    return { success: false, error: errorMessage }
-  }
-})
-
-server.onSessionOpenInNewWindow(async (sessionId) => {
-  const client = sessionClients.get(sessionId)
-  if (!client) {
-    return { success: false, error: `No daemon client for session ${sessionId}` }
-  }
-
-  try {
-    // Verify the session exists
-    const sessions = await client.listSessions()
-    if (!sessions.some(s => s.id === sessionId)) {
-      return { success: false, error: 'Session not found' }
-    }
-
-    // Create new window with the session
-    createWindow(sessionId)
-    console.log('[main] opened session in new window:', sessionId)
-    return { success: true }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-    console.error('[main] failed to open session in new window:', errorMessage)
     return { success: false, error: errorMessage }
   }
 })
@@ -1221,12 +1096,8 @@ server.onSshConnect(async (event, config, options) => {
       // Load session from remote daemon and return it alongside connection info
       const remoteClient = connectionManager.getClient(config.id)
       try {
-        console.log(`[main:ssh] Fetching default session ID from remote daemon...`)
-        const remoteSessionId = await remoteClient.getDefaultSessionId()
-        console.log(`[main:ssh] Got remote session ID: ${remoteSessionId}`)
-
-        console.log(`[main:ssh] Starting session watch for session=${remoteSessionId}`)
-        const remoteWatch = remoteClient.watchSession(remoteSessionId, randomUUID(), (updatedSession) => {
+        console.log(`[main:ssh] Starting session watch for remote daemon`)
+        const remoteWatch = remoteClient.watchSession(randomUUID(), (updatedSession) => {
           console.log(`[main:ssh] Session sync update received for session=${updatedSession.id}, workspaces=${updatedSession.workspaces?.length ?? 0}`)
           const windowInfo = windowManager.getWindow(senderWindow.id)
           if (windowInfo) {
@@ -1235,7 +1106,7 @@ server.onSshConnect(async (event, config, options) => {
         })
         const session = await remoteWatch.initial
         console.log(`[main:ssh] Initial session loaded: id=${session.id}, workspaces=${session.workspaces?.length ?? 0}`)
-        sessionClients.set(session.id, remoteClient)
+        sessionConnectionMap.set(session.id, config.id)
 
         // Auto-start saved port forwards
         autoStartPortForwards(config, senderWindow)
@@ -1518,9 +1389,8 @@ app.whenReady().then(async () => {
             // Load session from remote daemon and re-initialize the renderer
             try {
               const remoteClient = connectionManager!.getClient(parsed.id)
-              const remoteSessionId = await remoteClient.getDefaultSessionId()
               const windowId = mainWindow.id
-              const remoteWatch = remoteClient.watchSession(remoteSessionId, randomUUID(), (updatedSession) => {
+              const remoteWatch = remoteClient.watchSession(randomUUID(), (updatedSession) => {
                 const windowInfo = windowManager.getWindow(windowId)
                 if (windowInfo) {
                   windowInfo.ipcServer.sessionSync(updatedSession)

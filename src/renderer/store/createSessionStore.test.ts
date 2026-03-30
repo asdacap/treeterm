@@ -56,13 +56,7 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       run: vi.fn().mockResolvedValue(null),
     },
     sessionApi: {
-      create: vi.fn().mockResolvedValue({ success: true }),
       update: vi.fn().mockResolvedValue({ success: true }),
-      list: vi.fn().mockResolvedValue({ success: true, sessions: [] }),
-      get: vi.fn().mockResolvedValue({ success: true }),
-      delete: vi.fn().mockResolvedValue({ success: true }),
-      openInNewWindow: vi.fn().mockResolvedValue({ success: true }),
-      onShowSessions: vi.fn().mockReturnValue(() => {}),
       onSync: vi.fn().mockReturnValue(() => {}),
     },
     terminal: {
@@ -595,11 +589,6 @@ describe('createSessionStore', () => {
       await flushPromises()
       await store.getState().syncToDaemon()
       expect(deps.sessionApi.update).toHaveBeenCalled()
-    })
-
-    it('deletes session when no workspaces', async () => {
-      await store.getState().syncToDaemon()
-      expect(deps.sessionApi.delete).toHaveBeenCalledWith('session-1')
     })
   })
 

@@ -41,12 +41,12 @@ describe('IpcClient', () => {
       expect(result).toEqual({ branch: 'main' })
     })
 
-    it('sessionCreate calls ipcRenderer.invoke with correct channel and args', async () => {
+    it('sessionUpdate calls ipcRenderer.invoke with correct channel and args', async () => {
       const workspaces = [{ id: 'ws-1', path: '/test' }]
-      mockInvoke.mockResolvedValue({ id: 'session-1' })
-      const result = await client.sessionCreate('local', workspaces as any)
-      expect(mockInvoke).toHaveBeenCalledWith('session:create', 'local', workspaces)
-      expect(result).toEqual({ id: 'session-1' })
+      mockInvoke.mockResolvedValue({ success: true, session: { id: 'session-1' } })
+      const result = await client.sessionUpdate(workspaces as any, 'uuid-1', 5)
+      expect(mockInvoke).toHaveBeenCalledWith('session:update', workspaces, 'uuid-1', 5)
+      expect(result).toEqual({ success: true, session: { id: 'session-1' } })
     })
 
     it('fsReadFile calls ipcRenderer.invoke with correct channel and args', async () => {
@@ -68,13 +68,6 @@ describe('IpcClient', () => {
       const result = await client.appGetWindowUuid()
       expect(mockInvoke).toHaveBeenCalledWith('app:getWindowUuid')
       expect(result).toBe('uuid-abc')
-    })
-
-    it('sessionList calls ipcRenderer.invoke with correct channel', async () => {
-      mockInvoke.mockResolvedValue([{ id: 'session-1' }])
-      const result = await client.sessionList('local')
-      expect(mockInvoke).toHaveBeenCalledWith('session:list', 'local')
-      expect(result).toEqual([{ id: 'session-1' }])
     })
 
     it.each([
@@ -115,8 +108,6 @@ describe('IpcClient', () => {
       ['sttTranscribeLocal', 'stt:transcribe-local'],
       ['sttCheckMicPermission', 'stt:check-mic-permission'],
       ['sessionUpdate', 'session:update'],
-      ['sessionDelete', 'session:delete'],
-      ['sessionOpenInNewWindow', 'session:open-in-new-window'],
       ['daemonShutdown', 'daemon:shutdown'],
       ['dialogSelectFolder', 'dialog:selectFolder'],
       ['dialogGetRecentDirectories', 'dialog:getRecentDirectories'],
@@ -226,7 +217,6 @@ describe('IpcClient', () => {
       ['onAppReady', 'app:ready'],
       ['onCapsLockEvent', 'capslock-event'],
       ['onDaemonSessions', 'daemon:sessions'],
-      ['onSessionShowSessions', 'session:show-sessions'],
     ] as const)('%s registers listener on %s and unsubscribe works', (method, channel) => {
       const callback = vi.fn()
       const unsub = (client as any)[method](callback)

@@ -4,7 +4,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::io::unix::AsyncFd;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, Mutex, RwLock};
 use treeterm_proto::treeterm::*;
 
 const SCROLLBACK_LINES: u16 = 10000;
@@ -37,7 +37,7 @@ pub struct PtySession {
 
 #[derive(Clone)]
 pub struct PtyManager {
-    sessions: Arc<Mutex<HashMap<String, PtySession>>>,
+    sessions: Arc<RwLock<HashMap<String, Arc<Mutex<PtySession>>>>>,
     counter: Arc<AtomicUsize>,
 }
 
@@ -58,7 +58,7 @@ fn get_login_shell() -> String {
 impl PtyManager {
     pub fn new() -> Self {
         Self {
-            sessions: Arc::new(Mutex::new(HashMap::new())),
+            sessions: Arc::new(RwLock::new(HashMap::new())),
             counter: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -139,7 +139,8 @@ impl PtyManager {
             resize_tx: resize_tx.clone(),
         };
 
-        self.sessions.lock().await.insert(id.clone(), session);
+        let session = Arc::new(Mutex::new(session));
+        self.sessions.write().await.insert(id.clone(), Arc::clone(&session));
 
         // Subscribe for startup command detection before data_tx is moved into the reader
         let startup_rx = if startup_command.as_deref().map_or(false, |s| !s.trim().is_empty()) {
@@ -149,25 +150,23 @@ impl PtyManager {
         };
 
         // Spawn background reader task
-        let sessions = self.sessions.clone();
+        let reader_session = Arc::clone(&session);
         let reader_id = id.clone();
         tokio::spawn(async move {
-            if let Err(e) = read_pty_loop(master_fd, &reader_id, data_tx, sessions).await {
+            if let Err(e) = read_pty_loop(master_fd, data_tx, reader_session).await {
                 tracing::debug!(session_id = %reader_id, error = %e, "pty reader ended");
             }
         });
 
         // Spawn waitpid task
-        let sessions = self.sessions.clone();
+        let wait_session = Arc::clone(&session);
         let wait_id = id.clone();
         tokio::spawn(async move {
             let (exit_code, signal) = waitpid_blocking(child_pid).await;
             tracing::info!(session_id = %wait_id, exit_code, ?signal, "pty child exited");
-            let mut sessions = sessions.lock().await;
-            if let Some(session) = sessions.get_mut(&wait_id) {
-                session.exit_code = Some(exit_code);
-                let _ = session.exit_tx.send((exit_code, signal));
-            }
+            let mut session = wait_session.lock().await;
+            session.exit_code = Some(exit_code);
+            let _ = session.exit_tx.send((exit_code, signal));
         });
 
         // Execute startup command once the shell is ready to accept input
@@ -190,10 +189,13 @@ impl PtyManager {
     }
 
     pub async fn get_initial_state(&self, session_id: &str) -> Result<Vec<BufferEvent>, String> {
-        let sessions = self.sessions.lock().await;
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| format!("session {} not found", session_id))?;
+        let session = {
+            let sessions = self.sessions.read().await;
+            Arc::clone(sessions
+                .get(session_id)
+                .ok_or_else(|| format!("session {} not found", session_id))?)
+        };
+        let session = session.lock().await;
 
         let mut events = Vec::new();
 
@@ -219,10 +221,13 @@ impl PtyManager {
 
     pub async fn write(&self, session_id: &str, data: &[u8]) -> Result<(), String> {
         let fd = {
-            let sessions = self.sessions.lock().await;
-            let session = sessions
-                .get(session_id)
-                .ok_or_else(|| format!("session {} not found", session_id))?;
+            let session = {
+                let sessions = self.sessions.read().await;
+                Arc::clone(sessions
+                    .get(session_id)
+                    .ok_or_else(|| format!("session {} not found", session_id))?)
+            };
+            let session = session.lock().await;
             if session.exit_code.is_some() {
                 return Ok(());
             }
@@ -253,10 +258,13 @@ impl PtyManager {
     }
 
     pub async fn resize(&self, session_id: &str, cols: u16, rows: u16) -> Result<(), String> {
-        let mut sessions = self.sessions.lock().await;
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| format!("session {} not found", session_id))?;
+        let session = {
+            let sessions = self.sessions.read().await;
+            Arc::clone(sessions
+                .get(session_id)
+                .ok_or_else(|| format!("session {} not found", session_id))?)
+        };
+        let mut session = session.lock().await;
         if session.exit_code.is_some() {
             return Ok(());
         }
@@ -282,8 +290,9 @@ impl PtyManager {
     }
 
     pub async fn kill(&self, session_id: &str) {
-        let mut sessions = self.sessions.lock().await;
-        if let Some(session) = sessions.remove(session_id) {
+        let removed = self.sessions.write().await.remove(session_id);
+        if let Some(session) = removed {
+            let session = session.lock().await;
             unsafe {
                 libc::kill(session.child_pid, libc::SIGTERM);
                 libc::close(session.master_fd);
@@ -295,18 +304,20 @@ impl PtyManager {
     }
 
     pub async fn list_sessions(&self) -> Vec<PtySessionInfo> {
-        let sessions = self.sessions.lock().await;
-        sessions
-            .values()
-            .map(|s| PtySessionInfo {
+        let sessions = self.sessions.read().await;
+        let mut result = Vec::with_capacity(sessions.len());
+        for session in sessions.values() {
+            let s = session.lock().await;
+            result.push(PtySessionInfo {
                 id: s.id.clone(),
                 cwd: s.cwd.clone(),
                 cols: s.cols as i32,
                 rows: s.rows as i32,
                 created_at: s.created_at,
                 last_activity: s.last_activity,
-            })
-            .collect()
+            });
+        }
+        result
     }
 
     /// Subscribe to data broadcasts for a session.
@@ -314,10 +325,8 @@ impl PtyManager {
         &self,
         session_id: &str,
     ) -> Result<broadcast::Receiver<Vec<u8>>, String> {
-        let sessions = self.sessions.lock().await;
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| format!("session {} not found", session_id))?;
+        let session = self.get_session(session_id).await?;
+        let session = session.lock().await;
         Ok(session.data_tx.subscribe())
     }
 
@@ -326,10 +335,8 @@ impl PtyManager {
         &self,
         session_id: &str,
     ) -> Result<broadcast::Receiver<(i32, Option<i32>)>, String> {
-        let sessions = self.sessions.lock().await;
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| format!("session {} not found", session_id))?;
+        let session = self.get_session(session_id).await?;
+        let session = session.lock().await;
         Ok(session.exit_tx.subscribe())
     }
 
@@ -338,34 +345,38 @@ impl PtyManager {
         &self,
         session_id: &str,
     ) -> Result<broadcast::Receiver<(i32, i32)>, String> {
-        let sessions = self.sessions.lock().await;
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| format!("session {} not found", session_id))?;
+        let session = self.get_session(session_id).await?;
+        let session = session.lock().await;
         Ok(session.resize_tx.subscribe())
     }
 
     /// Get the current terminal size for a session.
     pub async fn get_size(&self, session_id: &str) -> Result<(i32, i32), String> {
-        let sessions = self.sessions.lock().await;
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| format!("session {} not found", session_id))?;
+        let session = self.get_session(session_id).await?;
+        let session = session.lock().await;
         Ok((session.cols as i32, session.rows as i32))
     }
 
     /// Get the exit code for a session (if already exited).
     pub async fn get_exit_code(&self, session_id: &str) -> Result<Option<i32>, String> {
-        let sessions = self.sessions.lock().await;
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| format!("session {} not found", session_id))?;
+        let session = self.get_session(session_id).await?;
+        let session = session.lock().await;
         Ok(session.exit_code)
     }
 
+    /// Look up a session by ID (read-locks the map briefly, returns Arc to per-session mutex).
+    async fn get_session(&self, session_id: &str) -> Result<Arc<Mutex<PtySession>>, String> {
+        let sessions = self.sessions.read().await;
+        sessions
+            .get(session_id)
+            .cloned()
+            .ok_or_else(|| format!("session {} not found", session_id))
+    }
+
     pub async fn shutdown(&self) {
-        let mut sessions = self.sessions.lock().await;
+        let mut sessions = self.sessions.write().await;
         for (id, session) in sessions.drain() {
+            let session = session.lock().await;
             unsafe {
                 libc::kill(session.child_pid, libc::SIGTERM);
                 libc::close(session.master_fd);
@@ -432,9 +443,8 @@ impl AsRawFd for FdWrapper {
 
 async fn read_pty_loop(
     master_fd: RawFd,
-    session_id: &str,
     data_tx: broadcast::Sender<Vec<u8>>,
-    sessions: Arc<Mutex<HashMap<String, PtySession>>>,
+    session: Arc<Mutex<PtySession>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let async_fd = AsyncFd::new(FdWrapper(master_fd))?;
     loop {
@@ -458,28 +468,26 @@ async fn read_pty_loop(
             Ok(Ok(n)) => {
                 let chunk = buf[..n].to_vec();
                 let _ = data_tx.send(chunk.clone());
-                let mut sessions = sessions.lock().await;
-                if let Some(session) = sessions.get_mut(session_id) {
-                    session.last_activity = chrono_now_millis();
+                let mut session = session.lock().await;
+                session.last_activity = chrono_now_millis();
 
-                    // Append to raw buffer in ≤1KB chunks for fine-grained eviction
-                    for sub in chunk.chunks(RAW_BUFFER_CHUNK_CAP) {
-                        session.raw_buffer.push_back(BufferEvent::Data(sub.to_vec()));
-                    }
-                    session.raw_buffer_data_bytes += n;
+                // Append to raw buffer in ≤1KB chunks for fine-grained eviction
+                for sub in chunk.chunks(RAW_BUFFER_CHUNK_CAP) {
+                    session.raw_buffer.push_back(BufferEvent::Data(sub.to_vec()));
+                }
+                session.raw_buffer_data_bytes += n;
 
-                    // Flush oldest events to vt100 parser when cap exceeded
-                    while session.raw_buffer_data_bytes > RAW_BUFFER_CAP {
-                        match session.raw_buffer.pop_front() {
-                            Some(BufferEvent::Data(data)) => {
-                                session.raw_buffer_data_bytes -= data.len();
-                                session.parser.process(&data);
-                            }
-                            Some(BufferEvent::Resize { cols, rows }) => {
-                                session.parser.set_size(rows, cols);
-                            }
-                            None => break,
+                // Flush oldest events to vt100 parser when cap exceeded
+                while session.raw_buffer_data_bytes > RAW_BUFFER_CAP {
+                    match session.raw_buffer.pop_front() {
+                        Some(BufferEvent::Data(data)) => {
+                            session.raw_buffer_data_bytes -= data.len();
+                            session.parser.process(&data);
                         }
+                        Some(BufferEvent::Resize { cols, rows }) => {
+                            session.parser.set_size(rows, cols);
+                        }
+                        None => break,
                     }
                 }
             }
@@ -495,6 +503,7 @@ async fn read_pty_loop(
     }
     Ok(())
 }
+
 
 async fn waitpid_blocking(child_pid: libc::pid_t) -> (i32, Option<i32>) {
     tokio::task::spawn_blocking(move || {
@@ -712,10 +721,11 @@ mod tests {
         let mgr = PtyManager::new();
         let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
 
-        let sessions = mgr.sessions.lock().await;
-        let session = sessions.get(&id).unwrap();
+        let sessions = mgr.sessions.read().await;
+        let session = sessions.get(&id).unwrap().lock().await;
         assert!(session.raw_buffer.is_empty());
         assert_eq!(session.raw_buffer_data_bytes, 0);
+        drop(session);
         drop(sessions);
 
         mgr.kill(&id).await;
@@ -730,11 +740,12 @@ mod tests {
         mgr.write(&id, b"echo test\n").await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
-        let sessions = mgr.sessions.lock().await;
-        let session = sessions.get(&id).unwrap();
+        let sessions = mgr.sessions.read().await;
+        let session = sessions.get(&id).unwrap().lock().await;
         // Buffer should have accumulated some data events
         assert!(session.raw_buffer_data_bytes > 0);
         assert!(!session.raw_buffer.is_empty());
+        drop(session);
         drop(sessions);
 
         mgr.kill(&id).await;
@@ -746,8 +757,8 @@ mod tests {
         let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
 
         {
-            let mut sessions = mgr.sessions.lock().await;
-            let session = sessions.get_mut(&id).unwrap();
+            let sessions = mgr.sessions.read().await;
+            let mut session = sessions.get(&id).unwrap().lock().await;
 
             // Manually push data exceeding cap
             let big_chunk = vec![b'A'; RAW_BUFFER_CAP + 100];
@@ -784,14 +795,15 @@ mod tests {
 
         mgr.resize(&id, 120, 40).await.unwrap();
 
-        let sessions = mgr.sessions.lock().await;
-        let session = sessions.get(&id).unwrap();
+        let sessions = mgr.sessions.read().await;
+        let session = sessions.get(&id).unwrap().lock().await;
 
         // Should have at least one resize event in buffer
         let has_resize = session.raw_buffer.iter().any(|e| {
             matches!(e, BufferEvent::Resize { cols: 120, rows: 40 })
         });
         assert!(has_resize);
+        drop(session);
         drop(sessions);
 
         mgr.kill(&id).await;

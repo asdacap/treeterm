@@ -28,19 +28,6 @@ export default function TreePane({ selectFolder }: TreePaneProps): JSX.Element {
   const sessionStores = useAppStore(s => s.sessionStores)
   const sessionIds = Object.keys(sessionStores)
 
-  const handleShowSessions = async () => {
-    const { sessionApi } = useAppStore.getState()
-    try {
-      const result = await sessionApi.list('local')
-      if (result.success && result.sessions) {
-        useAppStore.setState({ daemonSessions: result.sessions, showWorkspacePicker: true })
-      }
-    } catch (error) {
-      console.error('Failed to list daemon sessions:', error)
-      alert(`Failed to list sessions: ${error instanceof Error ? error.message : 'Unknown error'}`)
-    }
-  }
-
   return (
     <div className="tree-pane-content">
       <div className="tree-header">
@@ -52,9 +39,6 @@ export default function TreePane({ selectFolder }: TreePaneProps): JSX.Element {
             title="Connect to SSH"
           >
             <Monitor size={14} />
-          </button>
-          <button className="add-button" onClick={handleShowSessions} title="Browse sessions">
-            +
           </button>
         </div>
       </div>

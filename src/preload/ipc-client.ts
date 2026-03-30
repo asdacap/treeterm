@@ -59,12 +59,7 @@ const CHANNELS = {
   sttTranscribeOpenai: 'stt:transcribe-openai',
   sttTranscribeLocal: 'stt:transcribe-local',
   sttCheckMicPermission: 'stt:check-mic-permission',
-  sessionCreate: 'session:create',
   sessionUpdate: 'session:update',
-  sessionList: 'session:list',
-  sessionGet: 'session:get',
-  sessionDelete: 'session:delete',
-  sessionOpenInNewWindow: 'session:open-in-new-window',
   daemonShutdown: 'daemon:shutdown',
   dialogSelectFolder: 'dialog:selectFolder',
   dialogGetRecentDirectories: 'dialog:getRecentDirectories',
@@ -111,7 +106,6 @@ const CHANNELS = {
   appReady: 'app:ready',
   capsLockEvent: 'capslock-event',
   daemonSessions: 'daemon:sessions',
-  sessionShowSessions: 'session:show-sessions',
   sessionSync: 'session:sync',
   daemonDisconnected: 'daemon:disconnected',
   activeProcessesOpen: 'active-processes:open',
@@ -400,28 +394,8 @@ export class IpcClient {
   }
 
   // Session requests
-  sessionCreate(...args: IpcRequests['sessionCreate']['params']): Promise<IpcRequests['sessionCreate']['result']> {
-    return ipcRenderer.invoke(CHANNELS.sessionCreate, ...args)
-  }
-
   sessionUpdate(...args: IpcRequests['sessionUpdate']['params']): Promise<IpcRequests['sessionUpdate']['result']> {
     return ipcRenderer.invoke(CHANNELS.sessionUpdate, ...args)
-  }
-
-  sessionList(...args: IpcRequests['sessionList']['params']): Promise<IpcRequests['sessionList']['result']> {
-    return ipcRenderer.invoke(CHANNELS.sessionList, ...args)
-  }
-
-  sessionGet(...args: IpcRequests['sessionGet']['params']): Promise<IpcRequests['sessionGet']['result']> {
-    return ipcRenderer.invoke(CHANNELS.sessionGet, ...args)
-  }
-
-  sessionDelete(...args: IpcRequests['sessionDelete']['params']): Promise<IpcRequests['sessionDelete']['result']> {
-    return ipcRenderer.invoke(CHANNELS.sessionDelete, ...args)
-  }
-
-  sessionOpenInNewWindow(...args: IpcRequests['sessionOpenInNewWindow']['params']): Promise<IpcRequests['sessionOpenInNewWindow']['result']> {
-    return ipcRenderer.invoke(CHANNELS.sessionOpenInNewWindow, ...args)
   }
 
   // Other requests
@@ -621,12 +595,6 @@ export class IpcClient {
       callback(...(args as IpcEvents['daemonSessions']['params']))
     ipcRenderer.on(CHANNELS.daemonSessions, handler)
     return () => ipcRenderer.removeListener(CHANNELS.daemonSessions, handler)
-  }
-
-  onSessionShowSessions(callback: () => void): () => void {
-    const handler = () => callback()
-    ipcRenderer.on(CHANNELS.sessionShowSessions, handler)
-    return () => ipcRenderer.removeListener(CHANNELS.sessionShowSessions, handler)
   }
 
   onSessionSync(callback: (...args: IpcEvents['sessionSync']['params']) => void): () => void {

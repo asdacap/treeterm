@@ -111,9 +111,7 @@ const mockDeps = {
   },
   sessionApi: {
     onSync: vi.fn().mockReturnValue(() => {}),
-    onShowSessions: vi.fn().mockReturnValue(() => {}),
-    list: vi.fn().mockResolvedValue({ success: true, sessions: [] }),
-    openInNewWindow: vi.fn()
+    update: vi.fn().mockResolvedValue({ success: true, session: { id: 'test-session' } })
   },
   daemon: { onDisconnected: vi.fn().mockReturnValue(() => {}) },
   terminal: {
@@ -156,8 +154,6 @@ describe('useAppStore', () => {
       isSettingsOpen: false,
       showCloseConfirm: false,
       unmergedWorkspaces: [],
-      showWorkspacePicker: false,
-      daemonSessions: [],
       sessionStores: {}
     })
     useNavigationStore.setState({ activeView: null })
@@ -180,9 +176,6 @@ describe('useAppStore', () => {
       expect(useAppStore.getState().isSettingsOpen).toBe(false)
     })
 
-    it('has showWorkspacePicker false by default', () => {
-      expect(useAppStore.getState().showWorkspacePicker).toBe(false)
-    })
   })
 
   describe('disconnectSession', () => {
@@ -400,7 +393,6 @@ describe('useAppStore', () => {
       expect(mockDeps.appApi.onReady).toHaveBeenCalled()
       expect(mockDeps.sessionApi.onSync).toHaveBeenCalled()
       expect(mockDeps.daemon.onDisconnected).toHaveBeenCalled()
-      expect(mockDeps.sessionApi.onShowSessions).toHaveBeenCalled()
       cleanup()
     })
 
@@ -500,21 +492,6 @@ describe('useAppStore', () => {
       cleanup()
     })
 
-    it('onShowSessions lists sessions and shows picker', async () => {
-      const sessions = [{ id: 's1', workspaces: [] }, { id: 's2', workspaces: [] }]
-      mockDeps.sessionApi.list.mockResolvedValue({ success: true, sessions })
-
-      const cleanup = await useAppStore.getState().initialize(mockDeps)
-
-      const showCallback = mockDeps.sessionApi.onShowSessions.mock.calls[0][0]
-      await showCallback()
-
-      expect(mockDeps.sessionApi.list).toHaveBeenCalled()
-      expect(useAppStore.getState().showWorkspacePicker).toBe(true)
-      expect(useAppStore.getState().daemonSessions).toEqual(sessions)
-      cleanup()
-    })
-
     it('onDisconnected sets daemonDisconnected', async () => {
       const cleanup = await useAppStore.getState().initialize(mockDeps)
 
@@ -597,42 +574,6 @@ describe('useAppStore', () => {
       const cleanup = await useAppStore.getState().initialize(deps)
       expect(mockAddWorkspace).toHaveBeenCalledWith('/new/path')
       cleanup()
-    })
-  })
-
-  describe('createNewSession', () => {
-    beforeEach(async () => {
-      const cleanup = await useAppStore.getState().initialize(mockDeps)
-      cleanup()
-    })
-
-    it('creates session, opens in new window, hides picker', async () => {
-      mockDeps.sessionApi.create = vi.fn().mockResolvedValue({
-        success: true,
-        session: { id: 'new-session', workspaces: [] }
-      })
-      mockDeps.sessionApi.openInNewWindow = vi.fn().mockResolvedValue(undefined)
-      useAppStore.setState({ showWorkspacePicker: true })
-
-      await useAppStore.getState().createNewSession()
-
-      expect(mockDeps.sessionApi.create).toHaveBeenCalledWith('local', [])
-      expect(mockDeps.sessionApi.openInNewWindow).toHaveBeenCalledWith('new-session')
-      expect(useAppStore.getState().showWorkspacePicker).toBe(false)
-    })
-
-    it('shows alert on failure', async () => {
-      mockDeps.sessionApi.create = vi.fn().mockResolvedValue({
-        success: false,
-        error: 'Something went wrong'
-      })
-      // alert doesn't exist in node env, so define it
-      globalThis.alert = vi.fn()
-
-      await useAppStore.getState().createNewSession()
-
-      expect(globalThis.alert).toHaveBeenCalledWith(expect.stringContaining('Something went wrong'))
-      delete (globalThis as any).alert
     })
   })
 

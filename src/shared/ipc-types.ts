@@ -254,29 +254,9 @@ export interface IpcRequests {
   }
 
   // Session operations
-  sessionCreate: {
-    params: [connectionId: string, workspaces: WorkspaceInput[]]
-    result: IpcResult<{ session: Session }>
-  }
   sessionUpdate: {
-    params: [sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number]
+    params: [workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number]
     result: IpcResult<{ session: Session }>
-  }
-  sessionList: {
-    params: [connectionId: string]
-    result: IpcResult<{ sessions: Session[] }>
-  }
-  sessionGet: {
-    params: [sessionId: string]
-    result: IpcResult<{ session: Session }>
-  }
-  sessionDelete: {
-    params: [sessionId: string]
-    result: IpcResult
-  }
-  sessionOpenInNewWindow: {
-    params: [sessionId: string]
-    result: IpcResult
   }
 
   // Daemon operations
@@ -460,9 +440,6 @@ export interface IpcEvents {
   }
   daemonSessions: {
     params: [sessions: TTYSessionInfo[]]
-  }
-  sessionShowSessions: {
-    params: []
   }
   sessionSync: {
     params: [session: Session]

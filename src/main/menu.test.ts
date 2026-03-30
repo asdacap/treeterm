@@ -30,7 +30,6 @@ import { createApplicationMenu } from './menu'
 describe('menu', () => {
   const mockServer = {
     settingsOpen: vi.fn(),
-    sessionShowSessions: vi.fn(),
     activeProcessesOpen: vi.fn()
   }
 
@@ -79,18 +78,6 @@ describe('menu', () => {
       expect(mockServer.settingsOpen).toHaveBeenCalled()
     })
 
-    it('calls sessionShowSessions when Browse Sessions clicked', () => {
-      createApplicationMenu(null, mockServer as any)
-      
-      const template = (Menu.buildFromTemplate as any).mock.calls[0][0]
-      const workspaceMenu = template.find((item: any) => item.label === 'Workspace')
-      const browseSessionsItem = workspaceMenu.submenu.find((item: any) => item.label === 'Browse Sessions...')
-      
-      browseSessionsItem.click()
-      
-      expect(mockServer.sessionShowSessions).toHaveBeenCalled()
-    })
-
     it('calls onQuitAndKillDaemon callback when Exit and Kill Daemon clicked', () => {
       const onQuitAndKillDaemon = vi.fn()
       
@@ -120,7 +107,7 @@ describe('menu', () => {
     })
 
     it('uses focused window ipcServer when available', () => {
-      const focusedServer = { settingsOpen: vi.fn(), sessionShowSessions: vi.fn(), activeProcessesOpen: vi.fn() }
+      const focusedServer = { settingsOpen: vi.fn(), activeProcessesOpen: vi.fn() }
       ;(BrowserWindow.getFocusedWindow as any).mockReturnValue({ id: 1 })
       ;(windowManager.getWindow as any).mockReturnValue({ ipcServer: focusedServer })
 

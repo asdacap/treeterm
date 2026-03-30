@@ -59,8 +59,6 @@ interface AppState extends AppDeps {
   isActiveProcessesOpen: boolean
   showCloseConfirm: boolean
   unmergedWorkspaces: Workspace[]
-  showWorkspacePicker: boolean
-  daemonSessions: Session[]
   showConnectionPicker: boolean
 
   // Application registry
@@ -87,9 +85,6 @@ interface AppState extends AppDeps {
   startRemoteConnect: (config: SSHConnectionConfig) => void
   setSessionError: (connectionId: string, error: string) => void
   removeSession: (id: string) => void
-
-  // Internal
-  createNewSession: () => Promise<void>
 }
 
 // Placeholder used before initialize() injects real deps.
@@ -123,8 +118,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
   isActiveProcessesOpen: false,
   showCloseConfirm: false,
   unmergedWorkspaces: [],
-  showWorkspacePicker: false,
-  daemonSessions: [],
   showConnectionPicker: false,
   sessionStores: {},
 
@@ -307,18 +300,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
       set({ isActiveProcessesOpen: true })
     })
 
-    const unsubShowSessions = sessionApi.onShowSessions(async () => {
-      try {
-        const result = await sessionApi.list('local')
-        if (result.success && result.sessions) {
-          set({ daemonSessions: result.sessions, showWorkspacePicker: true })
-        }
-      } catch (error) {
-        console.error('Failed to list daemon sessions:', error)
-        alert(`Failed to list sessions: ${error instanceof Error ? error.message : 'Unknown error'}`)
-      }
-    })
-
     // Handle initial workspace from CLI
     const initialPath = await getInitialWorkspace()
     if (initialPath) {
@@ -345,7 +326,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
       unsubSync()
       unsubDisconnect()
       unsubActiveProcesses()
-      unsubShowSessions()
     }
   },
 
@@ -435,19 +415,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
     })
   },
 
-  createNewSession: async () => {
-    const { sessionApi } = get()
-    try {
-      const result = await sessionApi.create('local', [])
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to create session')
-      }
-      await sessionApi.openInNewWindow(result.session.id)
-      set({ showWorkspacePicker: false })
-    } catch (error) {
-      alert(`Failed to create session: ${error instanceof Error ? error.message : 'Unknown error'}`)
-    }
-  },
 }))
 
 // Helper: get or create a connected session store

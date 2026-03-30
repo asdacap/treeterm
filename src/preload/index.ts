@@ -68,13 +68,6 @@ client.onDaemonSessions((sessions) => {
 })
 
 
-type SessionMenuCallback = () => void
-const sessionShowSessionsListeners: SessionMenuCallback[] = []
-
-client.onSessionShowSessions(() => {
-  sessionShowSessionsListeners.forEach((cb) => cb())
-})
-
 type SessionSyncCallback = (session: Session) => void
 const sessionSyncListeners: SessionSyncCallback[] = []
 
@@ -473,30 +466,8 @@ const preloadApi: PreloadApi = {
     }
   },
   session: {
-    create: (connectionId: string, workspaces: WorkspaceInput[]) => {
-      return client.sessionCreate(connectionId, workspaces)
-    },
-    update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number) => {
-      return client.sessionUpdate(sessionId, workspaces, senderUuid, expectedVersion)
-    },
-    list: (connectionId: string) => {
-      return client.sessionList(connectionId)
-    },
-    get: (sessionId: string) => {
-      return client.sessionGet(sessionId)
-    },
-    delete: (sessionId: string) => {
-      return client.sessionDelete(sessionId)
-    },
-    openInNewWindow: (sessionId: string) => {
-      return client.sessionOpenInNewWindow(sessionId)
-    },
-    onShowSessions: (callback: SessionMenuCallback): (() => void) => {
-      sessionShowSessionsListeners.push(callback)
-      return () => {
-        const index = sessionShowSessionsListeners.indexOf(callback)
-        if (index > -1) sessionShowSessionsListeners.splice(index, 1)
-      }
+    update: (workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number) => {
+      return client.sessionUpdate(workspaces, senderUuid, expectedVersion)
     },
     onSync: (callback: SessionSyncCallback): (() => void) => {
       sessionSyncListeners.push(callback)

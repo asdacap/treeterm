@@ -3,7 +3,6 @@ import TreePane from './components/TreePane'
 import WorkspacePane from './components/WorkspacePane'
 import SettingsDialog from './components/SettingsDialog'
 import CloseConfirmDialog from './components/CloseConfirmDialog'
-import WorkspacePickerDialog from './components/WorkspacePickerDialog'
 import ActiveProcessesDialog from './components/ActiveProcessesDialog'
 import ConnectionPicker from './components/ConnectionPicker'
 import SessionInfoPane from './components/SessionInfoPane'
@@ -30,14 +29,11 @@ export default function App() {
     stt,
     sandbox,
     appApi,
-    sessionApi,
     selectFolder,
     isSettingsOpen,
     isActiveProcessesOpen,
     showCloseConfirm,
     unmergedWorkspaces,
-    showWorkspacePicker,
-    daemonSessions,
     daemonDisconnected,
     showConnectionPicker,
   } = useAppStore()
@@ -60,24 +56,6 @@ export default function App() {
   const handleCancelClose = () => {
     useAppStore.setState({ showCloseConfirm: false })
     appApi.cancelClose()
-  }
-
-  const handleCreateNewFromPicker = () => {
-    useAppStore.getState().createNewSession()
-  }
-
-  const handleOpenInNewWindow = async (session: import('./types').Session) => {
-    try {
-      const result = await sessionApi.openInNewWindow(session.id)
-      if (result.success) {
-        useAppStore.setState({ showWorkspacePicker: false })
-      } else {
-        console.error('Failed to open session in new window:', result.error)
-      }
-    } catch (error) {
-      console.error('Failed to open session in new window:', error)
-      alert(`Failed to open session: ${error instanceof Error ? error.message : 'Unknown error'}`)
-    }
   }
 
   const handleMouseDown = useCallback(() => {
@@ -176,27 +154,6 @@ export default function App() {
             isOpen={showConnectionPicker}
             onClose={() => useAppStore.setState({ showConnectionPicker: false })}
           />
-          {showWorkspacePicker && (
-            <WorkspacePickerDialog
-              sessions={daemonSessions}
-              onSelect={(session) => {
-                const store = useAppStore.getState()
-                // If the session store already exists and is connected, restore directly
-                const sessionEntry = store.sessionStores[session.id]
-                if (sessionEntry?.status === 'connected') {
-                  sessionEntry.store.getState().handleRestore(session)
-                }
-                // Navigate to first workspace if available
-                if (session.workspaces && session.workspaces.length > 0) {
-                  useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: session.workspaces[0].id, sessionId: session.id })
-                }
-                useAppStore.setState({ showWorkspacePicker: false })
-              }}
-              onOpenInNewWindow={handleOpenInNewWindow}
-              onCreateNew={handleCreateNewFromPicker}
-              onCancel={() => useAppStore.setState({ showWorkspacePicker: false })}
-            />
-          )}
         </div>
       </STTApiContext.Provider>
     </ErrorBoundary>

@@ -196,12 +196,8 @@ export interface ExecResult {
   error?: string | undefined;
 }
 
-export interface CreateSessionRequest {
-  workspaces: Workspace[];
-}
-
 export interface UpdateSessionRequest {
-  sessionId: string;
+  /** Field 1 (session_id) removed — daemon has exactly one session */
   workspaces: Workspace[];
   /** Window UUID to exclude from broadcast */
   senderId?:
@@ -212,30 +208,17 @@ export interface UpdateSessionRequest {
 }
 
 export interface SessionWatchRequest {
-  sessionId: string;
-  /** Window UUID */
+  /** Field 1 (session_id) removed — daemon has exactly one session */
   listenerId: string;
 }
 
 export interface SessionWatchEvent {
-  sessionId: string;
+  /** Field 1 (session_id) removed — daemon has exactly one session */
   session?:
     | Session
     | undefined;
   /** Who triggered the update */
   senderId: string;
-}
-
-export interface GetDefaultSessionIdResponse {
-  sessionId: string;
-}
-
-export interface DeleteSessionRequest {
-  sessionId: string;
-}
-
-export interface ListSessionsResponse {
-  sessions: Session[];
 }
 
 /** File read streaming messages */
@@ -2958,77 +2941,12 @@ export const ExecResult: MessageFns<ExecResult> = {
   },
 };
 
-function createBaseCreateSessionRequest(): CreateSessionRequest {
-  return { workspaces: [] };
-}
-
-export const CreateSessionRequest: MessageFns<CreateSessionRequest> = {
-  encode(message: CreateSessionRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    for (const v of message.workspaces) {
-      Workspace.encode(v!, writer.uint32(10).fork()).join();
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): CreateSessionRequest {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseCreateSessionRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.workspaces.push(Workspace.decode(reader, reader.uint32()));
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): CreateSessionRequest {
-    return {
-      workspaces: globalThis.Array.isArray(object?.workspaces)
-        ? object.workspaces.map((e: any) => Workspace.fromJSON(e))
-        : [],
-    };
-  },
-
-  toJSON(message: CreateSessionRequest): unknown {
-    const obj: any = {};
-    if (message.workspaces?.length) {
-      obj.workspaces = message.workspaces.map((e) => Workspace.toJSON(e));
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<CreateSessionRequest>, I>>(base?: I): CreateSessionRequest {
-    return CreateSessionRequest.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<CreateSessionRequest>, I>>(object: I): CreateSessionRequest {
-    const message = createBaseCreateSessionRequest();
-    message.workspaces = object.workspaces?.map((e) => Workspace.fromPartial(e)) || [];
-    return message;
-  },
-};
-
 function createBaseUpdateSessionRequest(): UpdateSessionRequest {
-  return { sessionId: "", workspaces: [], senderId: undefined, expectedVersion: undefined };
+  return { workspaces: [], senderId: undefined, expectedVersion: undefined };
 }
 
 export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
   encode(message: UpdateSessionRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.sessionId !== "") {
-      writer.uint32(10).string(message.sessionId);
-    }
     for (const v of message.workspaces) {
       Workspace.encode(v!, writer.uint32(18).fork()).join();
     }
@@ -3048,14 +2966,6 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.sessionId = reader.string();
-          continue;
-        }
         case 2: {
           if (tag !== 18) {
             break;
@@ -3091,11 +3001,6 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
 
   fromJSON(object: any): UpdateSessionRequest {
     return {
-      sessionId: isSet(object.sessionId)
-        ? globalThis.String(object.sessionId)
-        : isSet(object.session_id)
-        ? globalThis.String(object.session_id)
-        : "",
       workspaces: globalThis.Array.isArray(object?.workspaces)
         ? object.workspaces.map((e: any) => Workspace.fromJSON(e))
         : [],
@@ -3114,9 +3019,6 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
 
   toJSON(message: UpdateSessionRequest): unknown {
     const obj: any = {};
-    if (message.sessionId !== "") {
-      obj.sessionId = message.sessionId;
-    }
     if (message.workspaces?.length) {
       obj.workspaces = message.workspaces.map((e) => Workspace.toJSON(e));
     }
@@ -3134,7 +3036,6 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
   },
   fromPartial<I extends Exact<DeepPartial<UpdateSessionRequest>, I>>(object: I): UpdateSessionRequest {
     const message = createBaseUpdateSessionRequest();
-    message.sessionId = object.sessionId ?? "";
     message.workspaces = object.workspaces?.map((e) => Workspace.fromPartial(e)) || [];
     message.senderId = object.senderId ?? undefined;
     message.expectedVersion = object.expectedVersion ?? undefined;
@@ -3143,14 +3044,11 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
 };
 
 function createBaseSessionWatchRequest(): SessionWatchRequest {
-  return { sessionId: "", listenerId: "" };
+  return { listenerId: "" };
 }
 
 export const SessionWatchRequest: MessageFns<SessionWatchRequest> = {
   encode(message: SessionWatchRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.sessionId !== "") {
-      writer.uint32(10).string(message.sessionId);
-    }
     if (message.listenerId !== "") {
       writer.uint32(18).string(message.listenerId);
     }
@@ -3164,14 +3062,6 @@ export const SessionWatchRequest: MessageFns<SessionWatchRequest> = {
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.sessionId = reader.string();
-          continue;
-        }
         case 2: {
           if (tag !== 18) {
             break;
@@ -3191,11 +3081,6 @@ export const SessionWatchRequest: MessageFns<SessionWatchRequest> = {
 
   fromJSON(object: any): SessionWatchRequest {
     return {
-      sessionId: isSet(object.sessionId)
-        ? globalThis.String(object.sessionId)
-        : isSet(object.session_id)
-        ? globalThis.String(object.session_id)
-        : "",
       listenerId: isSet(object.listenerId)
         ? globalThis.String(object.listenerId)
         : isSet(object.listener_id)
@@ -3206,9 +3091,6 @@ export const SessionWatchRequest: MessageFns<SessionWatchRequest> = {
 
   toJSON(message: SessionWatchRequest): unknown {
     const obj: any = {};
-    if (message.sessionId !== "") {
-      obj.sessionId = message.sessionId;
-    }
     if (message.listenerId !== "") {
       obj.listenerId = message.listenerId;
     }
@@ -3220,21 +3102,17 @@ export const SessionWatchRequest: MessageFns<SessionWatchRequest> = {
   },
   fromPartial<I extends Exact<DeepPartial<SessionWatchRequest>, I>>(object: I): SessionWatchRequest {
     const message = createBaseSessionWatchRequest();
-    message.sessionId = object.sessionId ?? "";
     message.listenerId = object.listenerId ?? "";
     return message;
   },
 };
 
 function createBaseSessionWatchEvent(): SessionWatchEvent {
-  return { sessionId: "", session: undefined, senderId: "" };
+  return { session: undefined, senderId: "" };
 }
 
 export const SessionWatchEvent: MessageFns<SessionWatchEvent> = {
   encode(message: SessionWatchEvent, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.sessionId !== "") {
-      writer.uint32(10).string(message.sessionId);
-    }
     if (message.session !== undefined) {
       Session.encode(message.session, writer.uint32(18).fork()).join();
     }
@@ -3251,14 +3129,6 @@ export const SessionWatchEvent: MessageFns<SessionWatchEvent> = {
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.sessionId = reader.string();
-          continue;
-        }
         case 2: {
           if (tag !== 18) {
             break;
@@ -3286,11 +3156,6 @@ export const SessionWatchEvent: MessageFns<SessionWatchEvent> = {
 
   fromJSON(object: any): SessionWatchEvent {
     return {
-      sessionId: isSet(object.sessionId)
-        ? globalThis.String(object.sessionId)
-        : isSet(object.session_id)
-        ? globalThis.String(object.session_id)
-        : "",
       session: isSet(object.session) ? Session.fromJSON(object.session) : undefined,
       senderId: isSet(object.senderId)
         ? globalThis.String(object.senderId)
@@ -3302,9 +3167,6 @@ export const SessionWatchEvent: MessageFns<SessionWatchEvent> = {
 
   toJSON(message: SessionWatchEvent): unknown {
     const obj: any = {};
-    if (message.sessionId !== "") {
-      obj.sessionId = message.sessionId;
-    }
     if (message.session !== undefined) {
       obj.session = Session.toJSON(message.session);
     }
@@ -3319,199 +3181,10 @@ export const SessionWatchEvent: MessageFns<SessionWatchEvent> = {
   },
   fromPartial<I extends Exact<DeepPartial<SessionWatchEvent>, I>>(object: I): SessionWatchEvent {
     const message = createBaseSessionWatchEvent();
-    message.sessionId = object.sessionId ?? "";
     message.session = (object.session !== undefined && object.session !== null)
       ? Session.fromPartial(object.session)
       : undefined;
     message.senderId = object.senderId ?? "";
-    return message;
-  },
-};
-
-function createBaseGetDefaultSessionIdResponse(): GetDefaultSessionIdResponse {
-  return { sessionId: "" };
-}
-
-export const GetDefaultSessionIdResponse: MessageFns<GetDefaultSessionIdResponse> = {
-  encode(message: GetDefaultSessionIdResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.sessionId !== "") {
-      writer.uint32(10).string(message.sessionId);
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): GetDefaultSessionIdResponse {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetDefaultSessionIdResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.sessionId = reader.string();
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): GetDefaultSessionIdResponse {
-    return {
-      sessionId: isSet(object.sessionId)
-        ? globalThis.String(object.sessionId)
-        : isSet(object.session_id)
-        ? globalThis.String(object.session_id)
-        : "",
-    };
-  },
-
-  toJSON(message: GetDefaultSessionIdResponse): unknown {
-    const obj: any = {};
-    if (message.sessionId !== "") {
-      obj.sessionId = message.sessionId;
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<GetDefaultSessionIdResponse>, I>>(base?: I): GetDefaultSessionIdResponse {
-    return GetDefaultSessionIdResponse.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<GetDefaultSessionIdResponse>, I>>(object: I): GetDefaultSessionIdResponse {
-    const message = createBaseGetDefaultSessionIdResponse();
-    message.sessionId = object.sessionId ?? "";
-    return message;
-  },
-};
-
-function createBaseDeleteSessionRequest(): DeleteSessionRequest {
-  return { sessionId: "" };
-}
-
-export const DeleteSessionRequest: MessageFns<DeleteSessionRequest> = {
-  encode(message: DeleteSessionRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.sessionId !== "") {
-      writer.uint32(10).string(message.sessionId);
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): DeleteSessionRequest {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseDeleteSessionRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.sessionId = reader.string();
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): DeleteSessionRequest {
-    return {
-      sessionId: isSet(object.sessionId)
-        ? globalThis.String(object.sessionId)
-        : isSet(object.session_id)
-        ? globalThis.String(object.session_id)
-        : "",
-    };
-  },
-
-  toJSON(message: DeleteSessionRequest): unknown {
-    const obj: any = {};
-    if (message.sessionId !== "") {
-      obj.sessionId = message.sessionId;
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<DeleteSessionRequest>, I>>(base?: I): DeleteSessionRequest {
-    return DeleteSessionRequest.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<DeleteSessionRequest>, I>>(object: I): DeleteSessionRequest {
-    const message = createBaseDeleteSessionRequest();
-    message.sessionId = object.sessionId ?? "";
-    return message;
-  },
-};
-
-function createBaseListSessionsResponse(): ListSessionsResponse {
-  return { sessions: [] };
-}
-
-export const ListSessionsResponse: MessageFns<ListSessionsResponse> = {
-  encode(message: ListSessionsResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    for (const v of message.sessions) {
-      Session.encode(v!, writer.uint32(10).fork()).join();
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): ListSessionsResponse {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseListSessionsResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.sessions.push(Session.decode(reader, reader.uint32()));
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): ListSessionsResponse {
-    return {
-      sessions: globalThis.Array.isArray(object?.sessions) ? object.sessions.map((e: any) => Session.fromJSON(e)) : [],
-    };
-  },
-
-  toJSON(message: ListSessionsResponse): unknown {
-    const obj: any = {};
-    if (message.sessions?.length) {
-      obj.sessions = message.sessions.map((e) => Session.toJSON(e));
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<ListSessionsResponse>, I>>(base?: I): ListSessionsResponse {
-    return ListSessionsResponse.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<ListSessionsResponse>, I>>(object: I): ListSessionsResponse {
-    const message = createBaseListSessionsResponse();
-    message.sessions = object.sessions?.map((e) => Session.fromPartial(e)) || [];
     return message;
   },
 };
@@ -5216,16 +4889,7 @@ export const TreeTermDaemonService = {
     responseSerialize: (value: ExecOutput): Buffer => Buffer.from(ExecOutput.encode(value).finish()),
     responseDeserialize: (value: Buffer): ExecOutput => ExecOutput.decode(value),
   },
-  /** Workspace Session Management */
-  createSession: {
-    path: "/treeterm.TreeTermDaemon/CreateSession" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: CreateSessionRequest): Buffer => Buffer.from(CreateSessionRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): CreateSessionRequest => CreateSessionRequest.decode(value),
-    responseSerialize: (value: Session): Buffer => Buffer.from(Session.encode(value).finish()),
-    responseDeserialize: (value: Buffer): Session => Session.decode(value),
-  },
+  /** Workspace Session Management (one session per daemon) */
   updateSession: {
     path: "/treeterm.TreeTermDaemon/UpdateSession" as const,
     requestStream: false as const,
@@ -5234,35 +4898,6 @@ export const TreeTermDaemonService = {
     requestDeserialize: (value: Buffer): UpdateSessionRequest => UpdateSessionRequest.decode(value),
     responseSerialize: (value: Session): Buffer => Buffer.from(Session.encode(value).finish()),
     responseDeserialize: (value: Buffer): Session => Session.decode(value),
-  },
-  deleteSession: {
-    path: "/treeterm.TreeTermDaemon/DeleteSession" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: DeleteSessionRequest): Buffer => Buffer.from(DeleteSessionRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer): DeleteSessionRequest => DeleteSessionRequest.decode(value),
-    responseSerialize: (value: Empty): Buffer => Buffer.from(Empty.encode(value).finish()),
-    responseDeserialize: (value: Buffer): Empty => Empty.decode(value),
-  },
-  listSessions: {
-    path: "/treeterm.TreeTermDaemon/ListSessions" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: Empty): Buffer => Buffer.from(Empty.encode(value).finish()),
-    requestDeserialize: (value: Buffer): Empty => Empty.decode(value),
-    responseSerialize: (value: ListSessionsResponse): Buffer =>
-      Buffer.from(ListSessionsResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): ListSessionsResponse => ListSessionsResponse.decode(value),
-  },
-  getDefaultSessionId: {
-    path: "/treeterm.TreeTermDaemon/GetDefaultSessionId" as const,
-    requestStream: false as const,
-    responseStream: false as const,
-    requestSerialize: (value: Empty): Buffer => Buffer.from(Empty.encode(value).finish()),
-    requestDeserialize: (value: Buffer): Empty => Empty.decode(value),
-    responseSerialize: (value: GetDefaultSessionIdResponse): Buffer =>
-      Buffer.from(GetDefaultSessionIdResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer): GetDefaultSessionIdResponse => GetDefaultSessionIdResponse.decode(value),
   },
   sessionWatch: {
     path: "/treeterm.TreeTermDaemon/SessionWatch" as const,
@@ -5338,12 +4973,8 @@ export interface TreeTermDaemonServer extends UntypedServiceImplementation {
    * For executing one-shot shell commands with streaming I/O
    */
   execStream: handleBidiStreamingCall<ExecInput, ExecOutput>;
-  /** Workspace Session Management */
-  createSession: handleUnaryCall<CreateSessionRequest, Session>;
+  /** Workspace Session Management (one session per daemon) */
   updateSession: handleUnaryCall<UpdateSessionRequest, Session>;
-  deleteSession: handleUnaryCall<DeleteSessionRequest, Empty>;
-  listSessions: handleUnaryCall<Empty, ListSessionsResponse>;
-  getDefaultSessionId: handleUnaryCall<Empty, GetDefaultSessionIdResponse>;
   sessionWatch: handleServerStreamingCall<SessionWatchRequest, SessionWatchEvent>;
   /** Daemon Control */
   shutdown: handleUnaryCall<Empty, Empty>;
@@ -5412,22 +5043,7 @@ export interface TreeTermDaemonClient extends Client {
   execStream(): ClientDuplexStream<ExecInput, ExecOutput>;
   execStream(options: Partial<CallOptions>): ClientDuplexStream<ExecInput, ExecOutput>;
   execStream(metadata: Metadata, options?: Partial<CallOptions>): ClientDuplexStream<ExecInput, ExecOutput>;
-  /** Workspace Session Management */
-  createSession(
-    request: CreateSessionRequest,
-    callback: (error: ServiceError | null, response: Session) => void,
-  ): ClientUnaryCall;
-  createSession(
-    request: CreateSessionRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: Session) => void,
-  ): ClientUnaryCall;
-  createSession(
-    request: CreateSessionRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: Session) => void,
-  ): ClientUnaryCall;
+  /** Workspace Session Management (one session per daemon) */
   updateSession(
     request: UpdateSessionRequest,
     callback: (error: ServiceError | null, response: Session) => void,
@@ -5442,51 +5058,6 @@ export interface TreeTermDaemonClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: Session) => void,
-  ): ClientUnaryCall;
-  deleteSession(
-    request: DeleteSessionRequest,
-    callback: (error: ServiceError | null, response: Empty) => void,
-  ): ClientUnaryCall;
-  deleteSession(
-    request: DeleteSessionRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: Empty) => void,
-  ): ClientUnaryCall;
-  deleteSession(
-    request: DeleteSessionRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: Empty) => void,
-  ): ClientUnaryCall;
-  listSessions(
-    request: Empty,
-    callback: (error: ServiceError | null, response: ListSessionsResponse) => void,
-  ): ClientUnaryCall;
-  listSessions(
-    request: Empty,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: ListSessionsResponse) => void,
-  ): ClientUnaryCall;
-  listSessions(
-    request: Empty,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: ListSessionsResponse) => void,
-  ): ClientUnaryCall;
-  getDefaultSessionId(
-    request: Empty,
-    callback: (error: ServiceError | null, response: GetDefaultSessionIdResponse) => void,
-  ): ClientUnaryCall;
-  getDefaultSessionId(
-    request: Empty,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: GetDefaultSessionIdResponse) => void,
-  ): ClientUnaryCall;
-  getDefaultSessionId(
-    request: Empty,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: GetDefaultSessionIdResponse) => void,
   ): ClientUnaryCall;
   sessionWatch(request: SessionWatchRequest, options?: Partial<CallOptions>): ClientReadableStream<SessionWatchEvent>;
   sessionWatch(

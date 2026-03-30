@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -10,35 +9,16 @@ use treeterm_proto::treeterm::tree_term_daemon_server::TreeTermDaemon;
 
 use crate::exec_manager;
 use crate::filesystem;
-use crate::pty_manager::{BufferEvent, PtyManager};
+use crate::pty_manager::BufferEvent;
 use crate::session_store::SessionStore;
 
 pub struct DaemonService {
     session_store: SessionStore,
-    pty_manager: PtyManager,
-    client_counter: AtomicUsize,
 }
 
 impl DaemonService {
-    pub fn new(session_store: SessionStore, pty_manager: PtyManager) -> Self {
-        Self {
-            session_store,
-            pty_manager,
-            client_counter: AtomicUsize::new(0),
-        }
-    }
-
-    fn get_client_id(&self, metadata: &tonic::metadata::MetadataMap) -> String {
-        metadata
-            .get("client-id")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| {
-                format!(
-                    "client-{}",
-                    self.client_counter.fetch_add(1, Ordering::Relaxed)
-                )
-            })
+    pub fn new(session_store: SessionStore) -> Self {
+        Self { session_store }
     }
 }
 
@@ -56,7 +36,8 @@ impl TreeTermDaemon for DaemonService {
         let rows = r.rows.unwrap_or(24) as u16;
 
         let session_id = self
-            .pty_manager
+            .session_store
+            .pty_manager()
             .create_pty(r.cwd, env, cols, rows, r.startup_command)
             .await
             .map_err(|e| Status::internal(e))?;
@@ -65,7 +46,7 @@ impl TreeTermDaemon for DaemonService {
     }
 
     async fn kill_pty(&self, req: Request<KillPtyRequest>) -> Result<Response<Empty>, Status> {
-        self.pty_manager.kill(&req.into_inner().session_id).await;
+        self.session_store.pty_manager().kill(&req.into_inner().session_id).await;
         Ok(Response::new(Empty {}))
     }
 
@@ -73,7 +54,7 @@ impl TreeTermDaemon for DaemonService {
         &self,
         _req: Request<Empty>,
     ) -> Result<Response<ListPtySessionsResponse>, Status> {
-        let sessions = self.pty_manager.list_sessions().await;
+        let sessions = self.session_store.pty_manager().list_sessions().await;
         Ok(Response::new(ListPtySessionsResponse { sessions }))
     }
 
@@ -85,7 +66,7 @@ impl TreeTermDaemon for DaemonService {
     ) -> Result<Response<Self::PtyStreamStream>, Status> {
         let mut in_stream = req.into_inner();
         let (tx, rx) = mpsc::channel(256);
-        let pty_mgr = self.pty_manager.clone();
+        let pty_mgr = self.session_store.pty_manager().clone();
 
         tokio::spawn(async move {
             // Wait for PtyStartData as first message
@@ -208,26 +189,12 @@ impl TreeTermDaemon for DaemonService {
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 
-    // ---- Session Management ----
-
-    async fn create_session(
-        &self,
-        req: Request<CreateSessionRequest>,
-    ) -> Result<Response<Session>, Status> {
-        let client_id = self.get_client_id(req.metadata());
-        let r = req.into_inner();
-        let session = self
-            .session_store
-            .create_session(&client_id, r.workspaces)
-            .await;
-        Ok(Response::new(session))
-    }
+    // ---- Session Management (one session per daemon) ----
 
     async fn update_session(
         &self,
         req: Request<UpdateSessionRequest>,
     ) -> Result<Response<Session>, Status> {
-        let client_id = self.get_client_id(req.metadata());
         let r = req.into_inner();
 
         let sender_id = r.sender_id.unwrap_or_default();
@@ -239,50 +206,17 @@ impl TreeTermDaemon for DaemonService {
 
         let (session, accepted) = self
             .session_store
-            .update_session(&client_id, &r.session_id, r.workspaces, r.expected_version)
-            .await
-            .ok_or_else(|| Status::not_found(format!("session not found: {}", r.session_id)))?;
+            .update_session(r.workspaces, r.expected_version)
+            .await;
 
         // Only broadcast to other watchers if the update was accepted
         if accepted {
             self.session_store
-                .broadcast_update(&r.session_id, &session, &sender_id)
+                .broadcast_update(&session, &sender_id)
                 .await;
         }
 
         Ok(Response::new(session))
-    }
-
-    async fn delete_session(
-        &self,
-        req: Request<DeleteSessionRequest>,
-    ) -> Result<Response<Empty>, Status> {
-        self.session_store
-            .delete_session(&req.into_inner().session_id)
-            .await;
-        Ok(Response::new(Empty {}))
-    }
-
-    async fn list_sessions(
-        &self,
-        _req: Request<Empty>,
-    ) -> Result<Response<ListSessionsResponse>, Status> {
-        let sessions = self.session_store.list_sessions().await;
-        Ok(Response::new(ListSessionsResponse { sessions }))
-    }
-
-    async fn get_default_session_id(
-        &self,
-        req: Request<Empty>,
-    ) -> Result<Response<GetDefaultSessionIdResponse>, Status> {
-        let client_id = self.get_client_id(req.metadata());
-        let session = self
-            .session_store
-            .get_or_create_default_session(&client_id)
-            .await;
-        Ok(Response::new(GetDefaultSessionIdResponse {
-            session_id: session.id,
-        }))
     }
 
     type SessionWatchStream = ReceiverStream<Result<SessionWatchEvent, Status>>;
@@ -297,22 +231,17 @@ impl TreeTermDaemon for DaemonService {
         }
 
         // Send initial session state
-        let session = self
-            .session_store
-            .get_session(&r.session_id)
-            .await
-            .ok_or_else(|| Status::not_found(format!("session not found: {}", r.session_id)))?;
+        let session = self.session_store.session().await;
 
         let (tx, rx) = mpsc::channel(64);
         let initial_event = SessionWatchEvent {
-            session_id: r.session_id.clone(),
             session: Some(session),
             sender_id: String::new(),
         };
         let _ = tx.send(Ok(initial_event)).await;
 
         self.session_store
-            .add_watcher(r.listener_id, r.session_id, tx)
+            .add_watcher(r.listener_id, tx)
             .await;
 
         Ok(Response::new(ReceiverStream::new(rx)))
@@ -322,7 +251,7 @@ impl TreeTermDaemon for DaemonService {
 
     async fn shutdown(&self, _req: Request<Empty>) -> Result<Response<Empty>, Status> {
         tracing::info!("shutdown requested via gRPC");
-        self.pty_manager.shutdown().await;
+        self.session_store.shutdown().await;
         // Schedule process exit after response is sent
         tokio::spawn(async {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;

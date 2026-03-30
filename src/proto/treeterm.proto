@@ -169,40 +169,25 @@ message ExecResult {
 
 // ============================================
 // Workspace Session Messages
+// One session per daemon. Multiple sessions = multiple daemon instances.
 // ============================================
 
-message CreateSessionRequest {
-  repeated Workspace workspaces = 1;
-}
-
 message UpdateSessionRequest {
-  string session_id = 1;
+  // Field 1 (session_id) removed — daemon has exactly one session
   repeated Workspace workspaces = 2;
   optional string sender_id = 3;  // Window UUID to exclude from broadcast
   optional uint64 expected_version = 4;  // Optimistic lock: must match current version for update to apply
 }
 
 message SessionWatchRequest {
-  string session_id = 1;
+  // Field 1 (session_id) removed — daemon has exactly one session
   string listener_id = 2;  // Window UUID
 }
 
 message SessionWatchEvent {
-  string session_id = 1;
+  // Field 1 (session_id) removed — daemon has exactly one session
   Session session = 2;
   string sender_id = 3;  // Who triggered the update
-}
-
-message GetDefaultSessionIdResponse {
-  string session_id = 1;
-}
-
-message DeleteSessionRequest {
-  string session_id = 1;
-}
-
-message ListSessionsResponse {
-  repeated Session sessions = 1;
 }
 
 // ============================================
@@ -340,12 +325,8 @@ service TreeTermDaemon {
   // For executing one-shot shell commands with streaming I/O
   rpc ExecStream(stream ExecInput) returns (stream ExecOutput);
 
-  // Workspace Session Management
-  rpc CreateSession(CreateSessionRequest) returns (Session);
+  // Workspace Session Management (one session per daemon)
   rpc UpdateSession(UpdateSessionRequest) returns (Session);
-  rpc DeleteSession(DeleteSessionRequest) returns (Empty);
-  rpc ListSessions(Empty) returns (ListSessionsResponse);
-  rpc GetDefaultSessionId(Empty) returns (GetDefaultSessionIdResponse);
   rpc SessionWatch(SessionWatchRequest) returns (stream SessionWatchEvent);
 
   // Daemon Control

@@ -46,20 +46,10 @@ describe('IpcServer', () => {
       expect(mockHandle).toHaveBeenCalledWith('git:getInfo', expect.any(Function))
     })
 
-    it('onSessionCreate registers handler on session:create channel', () => {
+    it('onSessionUpdate registers handler on session:update channel', () => {
       const handler = vi.fn()
-      server.onSessionCreate(handler)
-      expect(mockHandle).toHaveBeenCalledWith('session:create', expect.any(Function))
-    })
-
-    it('onSessionCreate wrapper forwards args', async () => {
-      const handler = vi.fn().mockResolvedValue({ id: 'session-1' })
-      server.onSessionCreate(handler)
-      const wrapper = mockHandle.mock.calls[0][1]
-      const workspaces = [{ id: 'ws-1' }]
-      const result = await wrapper({}, workspaces)
-      expect(handler).toHaveBeenCalledWith(workspaces)
-      expect(result).toEqual({ id: 'session-1' })
+      server.onSessionUpdate(handler)
+      expect(mockHandle).toHaveBeenCalledWith('session:update', expect.any(Function))
     })
 
     it('onSettingsLoad registers handler on settings:load channel', () => {
@@ -125,9 +115,6 @@ describe('IpcServer', () => {
       ['onSttTranscribeLocal', 'stt:transcribe-local'],
       ['onSttCheckMicPermission', 'stt:check-mic-permission'],
       ['onSessionUpdate', 'session:update'],
-      ['onSessionList', 'session:list'],
-      ['onSessionDelete', 'session:delete'],
-      ['onSessionOpenInNewWindow', 'session:open-in-new-window'],
       ['onDaemonShutdown', 'daemon:shutdown'],
       ['onDialogSelectFolder', 'dialog:selectFolder'],
       ['onDialogGetRecentDirectories', 'dialog:getRecentDirectories'],
@@ -283,15 +270,6 @@ describe('IpcServer', () => {
       const sessions = [{ id: 's1' }] as any
       server.daemonSessions(sessions)
       expect(mockSend).toHaveBeenCalledWith('daemon:sessions', sessions)
-    })
-
-    it('sessionShowSessions sends to window webContents', () => {
-      const mockSend = vi.fn()
-      const mockWindow = { webContents: { send: mockSend } } as any
-      server.setWindow(mockWindow)
-
-      server.sessionShowSessions()
-      expect(mockSend).toHaveBeenCalledWith('session:show-sessions')
     })
 
     it('activeProcessesOpen sends to window webContents', () => {

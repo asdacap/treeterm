@@ -82,22 +82,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let incoming = UnixListenerStream::new(listener);
 
-    // Initialize components
+    // Initialize components (one session per daemon, PtyManager embedded)
     let session_store = session_store::SessionStore::new();
-    let pty_manager = pty_manager::PtyManager::new();
     session_store.start_heartbeat();
 
-    // Create default session at startup
-    let default_session = session_store.get_or_create_default_session("daemon-init").await;
-    tracing::info!(session_id = %default_session.id, "default session created");
+    let svc = grpc_server::DaemonService::new(session_store.clone());
 
-    let svc = grpc_server::DaemonService::new(session_store.clone(), pty_manager.clone());
-
-    let pty_mgr = pty_manager.clone();
+    let ss = session_store.clone();
     let shutdown = async move {
         tokio::signal::ctrl_c().await.ok();
         tracing::info!("shutting down");
-        pty_mgr.shutdown().await;
+        ss.shutdown().await;
     };
 
     Server::builder()
