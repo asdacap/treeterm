@@ -616,7 +616,7 @@ describe('useAppStore', () => {
 
       await useAppStore.getState().createNewSession()
 
-      expect(mockDeps.sessionApi.create).toHaveBeenCalledWith([])
+      expect(mockDeps.sessionApi.create).toHaveBeenCalledWith('local', [])
       expect(mockDeps.sessionApi.openInNewWindow).toHaveBeenCalledWith('new-session')
       expect(useAppStore.getState().showWorkspacePicker).toBe(false)
     })

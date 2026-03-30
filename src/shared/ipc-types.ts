@@ -255,7 +255,7 @@ export interface IpcRequests {
 
   // Session operations
   sessionCreate: {
-    params: [workspaces: WorkspaceInput[]]
+    params: [connectionId: string, workspaces: WorkspaceInput[]]
     result: IpcResult<{ session: Session }>
   }
   sessionUpdate: {
@@ -263,7 +263,7 @@ export interface IpcRequests {
     result: IpcResult<{ session: Session }>
   }
   sessionList: {
-    params: []
+    params: [connectionId: string]
     result: IpcResult<{ sessions: Session[] }>
   }
   sessionGet: {
@@ -281,7 +281,7 @@ export interface IpcRequests {
 
   // Daemon operations
   daemonShutdown: {
-    params: []
+    params: [connectionId: string]
     result: IpcResult
   }
 

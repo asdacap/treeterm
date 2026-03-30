@@ -487,7 +487,7 @@ export interface AppApi {
 }
 
 export interface DaemonApi {
-  shutdown: () => Promise<IpcResult>
+  shutdown: (connectionId: string) => Promise<IpcResult>
   onSessions: (callback: (sessions: TTYSessionInfo[]) => void) => () => void
   onDisconnected: (callback: () => void) => () => void
 }
@@ -523,9 +523,9 @@ export interface SSHApi {
 }
 
 export interface SessionApi {
-  create: (workspaces: WorkspaceInput[]) => Promise<IpcResult<{ session: Session }>>
+  create: (connectionId: string, workspaces: WorkspaceInput[]) => Promise<IpcResult<{ session: Session }>>
   update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number) => Promise<IpcResult<{ session: Session }>>
-  list: () => Promise<IpcResult<{ sessions: Session[] }>>
+  list: (connectionId: string) => Promise<IpcResult<{ sessions: Session[] }>>
   get: (sessionId: string) => Promise<IpcResult<{ session: Session }>>
   delete: (sessionId: string) => Promise<IpcResult>
   openInNewWindow: (sessionId: string) => Promise<IpcResult>

@@ -31,7 +31,7 @@ export default function TreePane({ selectFolder }: TreePaneProps): JSX.Element {
   const handleShowSessions = async () => {
     const { sessionApi } = useAppStore.getState()
     try {
-      const result = await sessionApi.list()
+      const result = await sessionApi.list('local')
       if (result.success && result.sessions) {
         useAppStore.setState({ daemonSessions: result.sessions, showWorkspacePicker: true })
       }

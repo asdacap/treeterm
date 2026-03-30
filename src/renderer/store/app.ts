@@ -309,7 +309,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
     const unsubShowSessions = sessionApi.onShowSessions(async () => {
       try {
-        const result = await sessionApi.list()
+        const result = await sessionApi.list('local')
         if (result.success && result.sessions) {
           set({ daemonSessions: result.sessions, showWorkspacePicker: true })
         }
@@ -438,7 +438,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   createNewSession: async () => {
     const { sessionApi } = get()
     try {
-      const result = await sessionApi.create([])
+      const result = await sessionApi.create('local', [])
       if (!result.success) {
         throw new Error(result.error || 'Failed to create session')
       }

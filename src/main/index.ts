@@ -30,13 +30,10 @@ import { startChatStream, cancelChatStream, completeChatCall, formatLlmError, pa
 let mainWindow: BrowserWindow | null = null
 let loadingWindow: BrowserWindow | null = null
 const closeConfirmedWindows: Set<number> = new Set()
-let daemonClient: GrpcDaemonClient | null = null
 let connectionManager: ConnectionManager | null = null
 const gitClients = new Map<string, GitClient>()
 const runActionsClients = new Map<string, RunActionsClient>()
 const sessionClients = new Map<string, GrpcDaemonClient>()
-let useDaemon = true // Always use daemon mode
-
 // Simple object storage — each entry is an independent terminal's stream.
 const ptyStreams = new Map<string, PtyStream>()
 
@@ -192,17 +189,18 @@ function createWindow(initialSessionId?: string): BrowserWindow {
 
   // Signal renderer when ready to initialize with the session
   window.webContents.on('did-finish-load', async () => {
-    if (!daemonClient) {
+    if (!connectionManager) {
       windowServer.appReady(null)
       return
     }
 
     try {
-      await daemonClient.ensureDaemonRunning()
+      const localClient = connectionManager.getClient('local')
+      await localClient.ensureDaemonRunning()
 
       let sessionId = initialSessionId
       if (!sessionId) {
-        sessionId = await daemonClient.getDefaultSessionId()
+        sessionId = await localClient.getDefaultSessionId()
         console.log('[main] got default session id:', sessionId)
       }
 
@@ -210,7 +208,7 @@ function createWindow(initialSessionId?: string): BrowserWindow {
       if (unwatchSession) {
         unwatchSession()
       }
-      const watch = daemonClient.watchSession(sessionId, windowUuid, (updatedSession) => {
+      const watch = localClient.watchSession(sessionId, windowUuid, (updatedSession) => {
         console.log('[main] session sync received for window', window.id, {
           sessionId: updatedSession.id,
           workspaces: updatedSession.workspaces.map(ws => ({ path: ws.path, metadata: ws.metadata })),
@@ -222,19 +220,19 @@ function createWindow(initialSessionId?: string): BrowserWindow {
       try {
         const session = await watch.initial
         console.log('[main] loaded session:', session.id)
-        sessionClients.set(session.id, daemonClient!)
+        sessionClients.set(session.id, localClient)
         windowServer.appReady(session)
       } catch {
         // Session not found (e.g. stale initialSessionId), fall back to default
         unwatchSession()
-        const defaultId = await daemonClient.getDefaultSessionId()
-        const fallbackWatch = daemonClient.watchSession(defaultId, windowUuid, (updatedSession) => {
+        const defaultId = await localClient.getDefaultSessionId()
+        const fallbackWatch = localClient.watchSession(defaultId, windowUuid, (updatedSession) => {
           windowServer.sessionSync(updatedSession)
         })
         unwatchSession = fallbackWatch.unsubscribe
         const session = await fallbackWatch.initial
         console.log('[main] session not found, using default:', session.id)
-        sessionClients.set(session.id, daemonClient!)
+        sessionClients.set(session.id, localClient)
         windowServer.appReady(session)
       }
     } catch (error) {
@@ -260,7 +258,7 @@ function createWindow(initialSessionId?: string): BrowserWindow {
 // IPC Handlers
 // PTY create/attach use ipcMain.handle directly to get event.sender for routing PTY data to the correct window
 ipcMain.handle('pty:create', async (event, connectionId: string, cwd: string, sandbox?: unknown, startupCommand?: string) => {
-  if (!daemonClient) throw new Error('Daemon not initialized')
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
 
   try {
     const client = getClientForConnection(connectionId)
@@ -281,8 +279,8 @@ ipcMain.handle('pty:create', async (event, connectionId: string, cwd: string, sa
 })
 
 ipcMain.handle('pty:attach', async (_event, connectionId: string, sessionId: string) => {
-  if (!daemonClient) {
-    return { success: false, error: 'Daemon not initialized' }
+  if (!connectionManager) {
+    return { success: false, error: 'ConnectionManager not initialized' }
   }
 
   try {
@@ -409,13 +407,14 @@ server.onLlmChatCancel((requestId) => {
   cancelChatStream(requestId)
 })
 
-server.onDaemonShutdown(async () => {
-  if (!daemonClient) {
-    return { success: false, error: 'Daemon not initialized' }
+server.onDaemonShutdown(async (connectionId) => {
+  if (!connectionManager) {
+    return { success: false, error: 'ConnectionManager not initialized' }
   }
 
   try {
-    await daemonClient.shutdownDaemon()
+    const client = connectionManager.getClient(connectionId)
+    await client.shutdownDaemon()
     return { success: true }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -425,14 +424,15 @@ server.onDaemonShutdown(async () => {
 })
 
 // Session IPC Handlers (workspace sessions)
-server.onSessionCreate(async (workspaces) => {
-  if (!useDaemon || !daemonClient) {
-    return { success: false, error: 'Daemon not enabled' }
+server.onSessionCreate(async (connectionId, workspaces) => {
+  if (!connectionManager) {
+    return { success: false, error: 'ConnectionManager not initialized' }
   }
 
   try {
-    await daemonClient.ensureDaemonRunning()
-    const result = await daemonClient.createSession(workspaces)
+    const client = connectionManager.getClient(connectionId)
+    await client.ensureDaemonRunning()
+    const result = await client.createSession(workspaces)
     console.log('[main] session created:', result?.id)
     return { success: true, session: result }
   } catch (error) {
@@ -443,13 +443,13 @@ server.onSessionCreate(async (workspaces) => {
 })
 
 server.onSessionUpdate(async (sessionId, workspaces, senderUuid, expectedVersion) => {
-  if (!useDaemon || !daemonClient) {
-    return { success: false, error: 'Daemon not enabled' }
+  const client = sessionClients.get(sessionId)
+  if (!client) {
+    return { success: false, error: `No daemon client for session ${sessionId}` }
   }
 
   try {
-    await daemonClient.ensureDaemonRunning()
-    const result = await daemonClient.updateSession(sessionId, workspaces, senderUuid, expectedVersion)
+    const result = await client.updateSession(sessionId, workspaces, senderUuid, expectedVersion)
     return { success: true, session: result }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -458,14 +458,15 @@ server.onSessionUpdate(async (sessionId, workspaces, senderUuid, expectedVersion
   }
 })
 
-server.onSessionList(async () => {
-  if (!useDaemon || !daemonClient) {
+server.onSessionList(async (connectionId) => {
+  if (!connectionManager) {
     return { success: true, sessions: [] }
   }
 
   try {
-    await daemonClient.ensureDaemonRunning()
-    const sessions = await daemonClient.listSessions()
+    const client = connectionManager.getClient(connectionId)
+    await client.ensureDaemonRunning()
+    const sessions = await client.listSessions()
     console.log('[main] listed sessions:', sessions.length)
     return { success: true, sessions }
   } catch (error) {
@@ -476,9 +477,9 @@ server.onSessionList(async () => {
 })
 
 server.onSessionGet(async (sessionId) => {
-  const client = sessionClients.get(sessionId) ?? daemonClient
+  const client = sessionClients.get(sessionId)
   if (!client) {
-    return { success: false, error: 'No daemon client available' }
+    return { success: false, error: `No daemon client for session ${sessionId}` }
   }
 
   try {
@@ -496,12 +497,13 @@ server.onSessionGet(async (sessionId) => {
 })
 
 server.onSessionDelete(async (sessionId) => {
-  if (!useDaemon || !daemonClient) {
-    return { success: false, error: 'Daemon not enabled' }
+  const client = sessionClients.get(sessionId)
+  if (!client) {
+    return { success: false, error: `No daemon client for session ${sessionId}` }
   }
 
   try {
-    await daemonClient.deleteSession(sessionId)
+    await client.deleteSession(sessionId)
     return { success: true }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -511,13 +513,14 @@ server.onSessionDelete(async (sessionId) => {
 })
 
 server.onSessionOpenInNewWindow(async (sessionId) => {
-  if (!useDaemon || !daemonClient) {
-    return { success: false, error: 'Daemon not enabled' }
+  const client = sessionClients.get(sessionId)
+  if (!client) {
+    return { success: false, error: `No daemon client for session ${sessionId}` }
   }
 
   try {
     // Verify the session exists
-    const sessions = await daemonClient.listSessions()
+    const sessions = await client.listSessions()
     if (!sessions.some(s => s.id === sessionId)) {
       return { success: false, error: 'Session not found' }
     }
@@ -1479,18 +1482,18 @@ app.whenReady().then(async () => {
     createLoadingWindow()
   }
 
-  daemonClient = new GrpcDaemonClient(process.env.TREETERM_SOCKET_PATH)
+  const localClient = new GrpcDaemonClient(process.env.TREETERM_SOCKET_PATH)
 
   // Forward daemon disconnections to renderer so the UI can show a warning
-  daemonClient.onDisconnect(() => {
+  localClient.onDisconnect(() => {
     server.daemonDisconnected()
   })
 
   // Proactively connect to daemon on startup
-  await daemonClient.ensureDaemonRunning()
+  await localClient.ensureDaemonRunning()
 
   // Create ConnectionManager wrapping local daemon client
-  connectionManager = new ConnectionManager(daemonClient)
+  connectionManager = new ConnectionManager(localClient)
 
   // Close loading window and show main window
   if (loadingWindow) {
@@ -1574,10 +1577,10 @@ function parseSSHTarget(target: string): SSHConnectionConfig | null {
 }
 
 async function quitAndKillDaemon(): Promise<void> {
-  if (daemonClient) {
+  if (connectionManager) {
     try {
       console.log('[main] shutting down daemon before quit')
-      await daemonClient.shutdownDaemon()
+      await connectionManager.getClient('local').shutdownDaemon()
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       console.error('[main] failed to shutdown daemon:', errorMessage)
@@ -1587,12 +1590,12 @@ async function quitAndKillDaemon(): Promise<void> {
 }
 
 app.on('before-quit', async () => {
-  // Disconnect all remote SSH connections
   if (connectionManager) {
+    // Disconnect all remote SSH connections
     connectionManager.disconnectAll()
-  }
-
-  if (daemonClient && daemonClient.isConnected()) {
-    daemonClient.disconnect()
+    const localClient = connectionManager.getClient('local')
+    if (localClient.isConnected()) {
+      localClient.disconnect()
+    }
   }
 })

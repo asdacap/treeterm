@@ -44,8 +44,8 @@ describe('IpcClient', () => {
     it('sessionCreate calls ipcRenderer.invoke with correct channel and args', async () => {
       const workspaces = [{ id: 'ws-1', path: '/test' }]
       mockInvoke.mockResolvedValue({ id: 'session-1' })
-      const result = await client.sessionCreate(workspaces as any)
-      expect(mockInvoke).toHaveBeenCalledWith('session:create', workspaces)
+      const result = await client.sessionCreate('local', workspaces as any)
+      expect(mockInvoke).toHaveBeenCalledWith('session:create', 'local', workspaces)
       expect(result).toEqual({ id: 'session-1' })
     })
 
@@ -72,8 +72,8 @@ describe('IpcClient', () => {
 
     it('sessionList calls ipcRenderer.invoke with correct channel', async () => {
       mockInvoke.mockResolvedValue([{ id: 'session-1' }])
-      const result = await client.sessionList()
-      expect(mockInvoke).toHaveBeenCalledWith('session:list')
+      const result = await client.sessionList('local')
+      expect(mockInvoke).toHaveBeenCalledWith('session:list', 'local')
       expect(result).toEqual([{ id: 'session-1' }])
     })
 

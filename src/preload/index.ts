@@ -450,8 +450,8 @@ const preloadApi: PreloadApi = {
     }
   },
   daemon: {
-    shutdown: () => {
-      return client.daemonShutdown()
+    shutdown: (connectionId: string) => {
+      return client.daemonShutdown(connectionId)
     },
     onSessions: (callback: SessionsCallback): (() => void) => {
       daemonSessionsListeners.push(callback)
@@ -473,14 +473,14 @@ const preloadApi: PreloadApi = {
     }
   },
   session: {
-    create: (workspaces: WorkspaceInput[]) => {
-      return client.sessionCreate(workspaces)
+    create: (connectionId: string, workspaces: WorkspaceInput[]) => {
+      return client.sessionCreate(connectionId, workspaces)
     },
     update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number) => {
       return client.sessionUpdate(sessionId, workspaces, senderUuid, expectedVersion)
     },
-    list: () => {
-      return client.sessionList()
+    list: (connectionId: string) => {
+      return client.sessionList(connectionId)
     },
     get: (sessionId: string) => {
       return client.sessionGet(sessionId)
