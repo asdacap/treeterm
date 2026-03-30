@@ -7,7 +7,8 @@ import { PromptCommitButton } from './PromptCommitButton'
 import { PromptRebaseButton } from './PromptRebaseButton'
 import { ReviewCommentsButton } from './ReviewCommentsButton'
 import { useSessionApi } from '../contexts/SessionStoreContext'
-import type { ActivityState, AiHarnessState, SandboxConfig, WorkspaceStore } from '../types'
+import type { ActivityState, SandboxConfig, WorkspaceStore } from '../types'
+import { isAiHarnessState } from '../types'
 import type { AiHarnessRef } from '../../applications/aiHarness/renderer'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
@@ -58,39 +59,46 @@ export default function AiHarness({
   const sessionStore = useSessionApi()
   const { workspace: wsData } = useStore(workspace)
   const appState = wsData?.appStates[tabId]
-  const state = appState?.state as AiHarnessState | undefined
-  const ptyId = state?.ptyId ?? null
+
+  if (!appState) {
+    return <div style={{ padding: 16, color: '#888' }}>Loading AI harness...</div>
+  }
+  if (!isAiHarnessState(appState.state)) {
+    return <div style={{ padding: 16, color: '#f44747' }}>Error: Invalid AI harness state</div>
+  }
+
+  const state = appState.state
+  const ptyId = state.ptyId
+
+  if (!ptyId) {
+    return <div style={{ padding: 16, color: '#888' }}>Starting AI harness...</div>
+  }
 
   // Read analyzer from tab ref (created by onWorkspaceLoad)
   const ref = workspace.getState().getTabRef(tabId) as AiHarnessRef | null
   const analyzer = ref?.analyzer ?? null
 
+  if (!analyzer) {
+    return <div style={{ padding: 16, color: '#888' }}>Starting AI harness...</div>
+  }
 
-  const { aiState, analyzing, reason, autoApprove } = analyzer
-    ? useStore(analyzer)
-    : { aiState: 'idle' as ActivityState, analyzing: false, reason: '', autoApprove: false }
+  const { aiState, analyzing, reason, autoApprove } = useStore(analyzer)
 
   const handlePushToTalkTranscript = useCallback(async (text: string) => {
-    if (ptyId) {
-      const writer = await sessionStore.getState().getTtyWriter(ptyId)
-      writer.write(text)
-    }
+    const writer = await sessionStore.getState().getTtyWriter(ptyId)
+    writer.write(text)
   }, [ptyId, sessionStore])
 
   const handlePushToTalkSubmit = useCallback(async () => {
-    if (ptyId) {
-      const writer = await sessionStore.getState().getTtyWriter(ptyId)
-      writer.write('\r')
-    }
+    const writer = await sessionStore.getState().getTtyWriter(ptyId)
+    writer.write('\r')
   }, [ptyId, sessionStore])
 
   const handleTerminalReady = useCallback((term: XTerm) => {
     // Intercept user input for title generation
-    if (analyzer) {
-      term.onData((data) => {
-        analyzer.getState().onUserInput(data)
-      })
-    }
+    term.onData((data) => {
+      analyzer.getState().onUserInput(data)
+    })
   }, [analyzer])
 
   const openContextMenu = useContextMenuStore((s) => s.open)
@@ -105,7 +113,7 @@ export default function AiHarness({
 
   const handleDebugAnalyzer = () => {
     closeContextMenu()
-    const bufferText = analyzer?.getState().getBufferText()
+    const bufferText = analyzer.getState().getBufferText()
     if (!bufferText) return
     workspace.getState().addTab<{ bufferText: string }>('system-prompt-debugger', { bufferText })
   }
@@ -125,10 +133,6 @@ export default function AiHarness({
     disableActivityDetector: true,
     onTerminalReady: handleTerminalReady,
   }), [backgroundColor, disableScrollbar, stripScrollbackClear, handleTerminalReady])
-
-  if (!ptyId) {
-    return <div style={{ padding: 16, color: '#888' }}>Starting AI harness...</div>
-  }
 
   return (
     <div className="ai-harness-wrapper">
@@ -164,7 +168,7 @@ export default function AiHarness({
           <input
             type="checkbox"
             checked={autoApprove}
-            onChange={(e) => analyzer?.getState().setAutoApprove(e.target.checked)}
+            onChange={(e) => analyzer.getState().setAutoApprove(e.target.checked)}
           />
           <span className="ai-harness-toggle-slider" />
           <span className="ai-harness-toggle-label">Auto-approve safe</span>
