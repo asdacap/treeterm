@@ -110,6 +110,7 @@ function ConnectedSessionPanel({
   } = useKeybindingStore()
 
   const disconnectSession = useAppStore(s => s.disconnectSession)
+  const filesystem = useAppStore(s => s.filesystem)
 
   const openContextMenu = useContextMenuStore((s) => s.open)
   const closeContextMenu = useContextMenuStore((s) => s.close)
@@ -431,6 +432,9 @@ function ConnectedSessionPanel({
             ? `${connection.target.config.user}@${connection.target.config.host}:${connection.target.config.port}`
             : 'local'}
           isRemote={connection?.target.type === 'remote'}
+          readDirectory={connection?.target.type === 'remote'
+            ? (dirPath: string) => filesystem.readDirectory(connection.id, '/', dirPath)
+            : undefined}
         />
       )}
     </div>

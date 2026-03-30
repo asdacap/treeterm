@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react'
 import { useAppStore } from '../store/app'
 import { useRecentDirectoriesStore } from '../store/recentDirectories'
-import type { WorktreeSettings } from '../types'
+import RemoteDirectoryBrowser from './RemoteDirectoryBrowser'
+import type { WorktreeSettings, IpcResult, DirectoryContents } from '../types'
 
 const EMPTY_RECENT: string[] = []
 
@@ -11,12 +12,14 @@ interface OpenWorkspaceDialogProps {
   selectFolder: () => Promise<string | null>
   connectionKey: string
   isRemote: boolean
+  readDirectory?: (dirPath: string) => Promise<IpcResult<{ contents: DirectoryContents }>>
 }
 
-export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, connectionKey, isRemote }: OpenWorkspaceDialogProps) {
+export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, connectionKey, isRemote, readDirectory }: OpenWorkspaceDialogProps) {
   const [selectedPath, setSelectedPath] = useState<string>('')
   const [isSelecting, setIsSelecting] = useState(false)
   const [selectedAppId, setSelectedAppId] = useState<string>('')
+  const [showBrowser, setShowBrowser] = useState(false)
 
   const recentDirectories = useRecentDirectoriesStore(s => s.directories[connectionKey]) ?? EMPTY_RECENT
   const addRecent = useRecentDirectoriesStore(s => s.addRecent)
@@ -116,8 +119,28 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, co
                   {isSelecting ? 'Opening...' : 'Browse...'}
                 </button>
               )}
+              {isRemote && readDirectory && (
+                <button
+                  className="dialog-btn browse"
+                  onClick={() => setShowBrowser(!showBrowser)}
+                >
+                  {showBrowser ? 'Hide' : 'Browse...'}
+                </button>
+              )}
             </div>
           </div>
+
+          {showBrowser && readDirectory && (
+            <RemoteDirectoryBrowser
+              readDirectory={readDirectory}
+              initialPath={selectedPath || '/'}
+              onSelect={(path) => {
+                setSelectedPath(path)
+                setShowBrowser(false)
+              }}
+              onCancel={() => setShowBrowser(false)}
+            />
+          )}
 
           <div className="open-workspace-field">
             <label>Default Application</label>
