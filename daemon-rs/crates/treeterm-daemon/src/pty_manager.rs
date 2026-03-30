@@ -8,8 +8,8 @@ use tokio::sync::{broadcast, Mutex};
 use treeterm_proto::treeterm::*;
 
 const SCROLLBACK_LINES: u16 = 10000;
-const RAW_BUFFER_CAP: usize = 50 * 1024;
-const RAW_BUFFER_FLUSH_THRESHOLD: usize = 10 * 1024;
+const RAW_BUFFER_CAP: usize = 500 * 1024;
+const RAW_BUFFER_CHUNK_CAP: usize = 1024;
 
 #[derive(Clone)]
 pub enum BufferEvent {
@@ -444,12 +444,14 @@ async fn read_pty_loop(
                 if let Some(session) = sessions.get_mut(session_id) {
                     session.last_activity = chrono_now_millis();
 
-                    // Append to raw buffer instead of feeding parser directly
-                    session.raw_buffer.push_back(BufferEvent::Data(chunk));
+                    // Append to raw buffer in ≤1KB chunks for fine-grained eviction
+                    for sub in chunk.chunks(RAW_BUFFER_CHUNK_CAP) {
+                        session.raw_buffer.push_back(BufferEvent::Data(sub.to_vec()));
+                    }
                     session.raw_buffer_data_bytes += n;
 
-                    // Flush oldest events to vt100 parser when threshold exceeded
-                    while session.raw_buffer_data_bytes > RAW_BUFFER_FLUSH_THRESHOLD {
+                    // Flush oldest events to vt100 parser when cap exceeded
+                    while session.raw_buffer_data_bytes > RAW_BUFFER_CAP {
                         match session.raw_buffer.pop_front() {
                             Some(BufferEvent::Data(data)) => {
                                 session.raw_buffer_data_bytes -= data.len();
@@ -459,25 +461,6 @@ async fn read_pty_loop(
                                 session.parser.set_size(rows, cols);
                             }
                             None => break,
-                        }
-                    }
-
-                    // Hard cap safety
-                    if session.raw_buffer_data_bytes > RAW_BUFFER_CAP {
-                        let excess = session.raw_buffer_data_bytes - RAW_BUFFER_CAP;
-                        let mut drained = 0;
-                        while drained < excess {
-                            match session.raw_buffer.pop_front() {
-                                Some(BufferEvent::Data(data)) => {
-                                    drained += data.len();
-                                    session.raw_buffer_data_bytes -= data.len();
-                                    session.parser.process(&data);
-                                }
-                                Some(BufferEvent::Resize { cols, rows }) => {
-                                    session.parser.set_size(rows, cols);
-                                }
-                                None => break,
-                            }
                         }
                     }
                 }
@@ -740,7 +723,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn raw_buffer_flush_threshold() {
+    async fn raw_buffer_flush_cap() {
         let mgr = PtyManager::new();
         let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
 
@@ -748,13 +731,15 @@ mod tests {
             let mut sessions = mgr.sessions.lock().await;
             let session = sessions.get_mut(&id).unwrap();
 
-            // Manually push data exceeding flush threshold
-            let big_chunk = vec![b'A'; RAW_BUFFER_FLUSH_THRESHOLD + 100];
-            session.raw_buffer.push_back(BufferEvent::Data(big_chunk.clone()));
+            // Manually push data exceeding cap
+            let big_chunk = vec![b'A'; RAW_BUFFER_CAP + 100];
+            for sub in big_chunk.chunks(RAW_BUFFER_CHUNK_CAP) {
+                session.raw_buffer.push_back(BufferEvent::Data(sub.to_vec()));
+            }
             session.raw_buffer_data_bytes += big_chunk.len();
 
             // Simulate the flush logic from read_pty_loop
-            while session.raw_buffer_data_bytes > RAW_BUFFER_FLUSH_THRESHOLD {
+            while session.raw_buffer_data_bytes > RAW_BUFFER_CAP {
                 match session.raw_buffer.pop_front() {
                     Some(BufferEvent::Data(data)) => {
                         session.raw_buffer_data_bytes -= data.len();
@@ -767,8 +752,8 @@ mod tests {
                 }
             }
 
-            // After flush, buffer should be within threshold
-            assert!(session.raw_buffer_data_bytes <= RAW_BUFFER_FLUSH_THRESHOLD);
+            // After flush, buffer should be within cap
+            assert!(session.raw_buffer_data_bytes <= RAW_BUFFER_CAP);
         }
 
         mgr.kill(&id).await;
