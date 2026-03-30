@@ -90,6 +90,7 @@ Never silently swallow errors or return empty/default values on failure. Throw e
 - Similarly, this async call should have a clear error UI where the user will be notified if there are any error.
 - An exception to this is if the async call itself is called by an upper level async call, then the upper level one must handle
 the error UI.
+- ANY async calls that use tty stream should have a loading screen or view that stream the tty output.
 
 ### No duplicated state
 - Use the same data as Daemon as much as possible.
