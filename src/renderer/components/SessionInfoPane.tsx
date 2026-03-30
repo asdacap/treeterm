@@ -7,6 +7,7 @@ import { useAppStore } from '../store/app'
 import { useSessionNamesStore } from '../store/sessionNames'
 import type { SSHConnectionConfig, PortForwardInfo } from '../types'
 import PortForwardDialog from './PortForwardDialog'
+import JsonViewer from './JsonViewer'
 
 type TabId = 'info' | 'ssh' | 'json'
 type SshSubTab = 'bootstrap' | 'tunnel' | 'portforwards'
@@ -225,7 +226,7 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
   const [activeTab, setActiveTab] = useState<TabId>('info')
   const [sshSubTab, setSshSubTab] = useState<SshSubTab>('bootstrap')
   const [output, setOutput] = useState<string[]>([])
-  const [sessionJson, setSessionJson] = useState<string | null>(null)
+  const [sessionJson, setSessionJson] = useState<unknown>(null)
   const [jsonLoading, setJsonLoading] = useState(false)
   const [jsonError, setJsonError] = useState<string | null>(null)
   const [portForwards, setPortForwards] = useState<PortForwardInfo[]>([])
@@ -242,7 +243,7 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
     try {
       const result = await sessionApi.get(sessionId)
       if (result.success) {
-        setSessionJson(JSON.stringify(result.session, null, 2))
+        setSessionJson(result.session)
       } else {
         setJsonError(result.error || 'Failed to fetch session')
       }
@@ -434,10 +435,8 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
               Error: {jsonError}
             </div>
           )}
-          {sessionJson ? (
-            <pre style={{ margin: 0, padding: '8px', fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-              {sessionJson}
-            </pre>
+          {sessionJson !== null ? (
+            <JsonViewer data={sessionJson} />
           ) : !jsonLoading && !jsonError && (
             <div className="ssh-pane-output-empty">
               Click Refresh to load session JSON
