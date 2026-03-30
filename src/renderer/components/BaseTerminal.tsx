@@ -13,6 +13,14 @@ import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
 import '@xterm/xterm/css/xterm.css'
 
+const WRITE_CHUNK_SIZE = 1024
+
+function writeChunked(tty: { write(data: string): void }, data: string): void {
+  for (let i = 0; i < data.length; i += WRITE_CHUNK_SIZE) {
+    tty.write(data.slice(i, i + WRITE_CHUNK_SIZE))
+  }
+}
+
 // Utility to format raw chars for console debugging
 function formatRawChars(str: string): string {
   let result = ''
@@ -338,7 +346,7 @@ export default function BaseTerminal({
 
         // Forward terminal input to PTY
         inputDisposable = terminal!.onData((data) => {
-          ttyRef.current!.getState().write(data)
+          writeChunked(ttyRef.current!.getState(), data)
         })
       }, 100)
     }
@@ -402,7 +410,7 @@ export default function BaseTerminal({
     const text = await clipboard.readText()
     console.log(`[${config.logPrefix} ${tabId}] paste:`, { clipboardText: text ?? '(empty)', hasTty: !!ttyRef.current })
     if (text && ttyRef.current) {
-      ttyRef.current.getState().write(text)
+      writeChunked(ttyRef.current.getState(), text)
     }
     closeContextMenu()
   }
