@@ -29,6 +29,9 @@ export const defaultSettings: Settings = {
       stripScrollbackClear: true
     }]
   },
+  customRunner: {
+    instances: []
+  },
   appearance: {
     theme: 'dark'
   },
@@ -119,6 +122,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       useAppStore.getState().registerTerminalVariants(settings.terminal.instances)
       // Register dynamic AI Harness variants
       useAppStore.getState().registerAiHarnessVariants(settings.aiHarness.instances)
+      // Register dynamic custom runner variants
+      useAppStore.getState().registerCustomRunnerVariants(settings.customRunner.instances)
     } catch (error) {
       console.warn('[settings] Failed to load settings, using defaults:', error)
       set({ isLoaded: true })
@@ -133,6 +138,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       useAppStore.getState().registerTerminalVariants(settings.terminal.instances)
       // Re-register AI Harness variants when settings change
       useAppStore.getState().registerAiHarnessVariants(settings.aiHarness.instances)
+      // Re-register custom runner variants when settings change
+      useAppStore.getState().registerCustomRunnerVariants(settings.customRunner.instances)
     } catch (error) {
       console.error('Failed to save settings:', error)
       throw error

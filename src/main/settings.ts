@@ -1,10 +1,10 @@
 import { app } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
-import type { Settings, TerminalInstance, AiHarnessInstance, PrefixModeConfig, STTProvider, SSHConnectionConfig, ReasoningEffort } from '../shared/types'
+import type { Settings, TerminalInstance, AiHarnessInstance, CustomRunnerInstance, PrefixModeConfig, STTProvider, SSHConnectionConfig, ReasoningEffort } from '../shared/types'
 
 // Re-export for backward compatibility
-export type { Settings, TerminalInstance, AiHarnessInstance, PrefixModeConfig, STTProvider, SSHConnectionConfig }
+export type { Settings, TerminalInstance, AiHarnessInstance, CustomRunnerInstance, PrefixModeConfig, STTProvider, SSHConnectionConfig }
 
 const defaultSettings: Settings = {
   terminal: {
@@ -32,6 +32,9 @@ const defaultSettings: Settings = {
       disableScrollbar: false,
       stripScrollbackClear: false
     }]
+  },
+  customRunner: {
+    instances: []
   },
   appearance: {
     theme: 'dark'
@@ -240,6 +243,9 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
     },
     aiHarness: {
       instances: aiHarnessInstances
+    },
+    customRunner: {
+      instances: loaded.customRunner?.instances || []
     },
     appearance: {
       ...defaults.appearance,

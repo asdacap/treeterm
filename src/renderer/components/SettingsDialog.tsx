@@ -11,13 +11,14 @@ interface SettingsDialogProps {
   platform: Platform
 }
 
-type TabId = 'general' | 'terminal' | 'sandbox' | 'ai-harness' | 'llm' | 'appearance' | 'keybindings' | 'terminal-profiles' | 'speech' | 'github' | 'debug'
+type TabId = 'general' | 'terminal' | 'sandbox' | 'ai-harness' | 'llm' | 'appearance' | 'keybindings' | 'terminal-profiles' | 'speech' | 'github' | 'debug' | 'custom-runners'
 
 const tabs: { id: TabId; label: string }[] = [
   { id: 'general', label: 'General' },
   { id: 'terminal', label: 'Terminal' },
   { id: 'terminal-profiles', label: 'Terminal Profiles' },
   { id: 'ai-harness', label: 'AI Harness' },
+  { id: 'custom-runners', label: 'Custom Runners' },
   { id: 'llm', label: 'LLM' },
   { id: 'sandbox', label: 'Sandbox' },
   { id: 'appearance', label: 'Appearance' },
@@ -547,6 +548,136 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                 <p className="settings-hint">
                   Default profiles open automatically in new workspaces.
                   Sandbox settings restrict file and network access.
+                </p>
+              </div>
+            )}
+
+            {activeTab === 'custom-runners' && (
+              <div className="settings-section">
+                <p className="settings-hint">
+                  Configure custom runners with template commands.
+                  Use {'{{workspace_path}}'} in the command to insert the workspace path at runtime.
+                  These appear as separate options in the new tab menu.
+                </p>
+                <div className="applications-list">
+                  {localSettings.customRunner.instances.map((inst, index) => (
+                    <div key={inst.id} className="application-item">
+                      <div className="application-icon">
+                        <input
+                          type="text"
+                          className="settings-input icon-input"
+                          value={inst.icon}
+                          maxLength={2}
+                          onChange={(e) =>
+                            setLocalSettings((prev) => ({
+                              ...prev,
+                              customRunner: {
+                                ...prev.customRunner,
+                                instances: prev.customRunner.instances.map((a, i) =>
+                                  i === index ? { ...a, icon: e.target.value } : a
+                                )
+                              }
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="application-fields">
+                        <input
+                          type="text"
+                          className="settings-input"
+                          value={inst.name}
+                          placeholder="Name (e.g., Rider)"
+                          onChange={(e) =>
+                            setLocalSettings((prev) => ({
+                              ...prev,
+                              customRunner: {
+                                ...prev.customRunner,
+                                instances: prev.customRunner.instances.map((a, i) =>
+                                  i === index ? { ...a, name: e.target.value } : a
+                                )
+                              }
+                            }))
+                          }
+                        />
+                        <input
+                          type="text"
+                          className="settings-input"
+                          value={inst.commandTemplate}
+                          placeholder="Command template (e.g., rider {{workspace_path}})"
+                          onChange={(e) =>
+                            setLocalSettings((prev) => ({
+                              ...prev,
+                              customRunner: {
+                                ...prev.customRunner,
+                                instances: prev.customRunner.instances.map((a, i) =>
+                                  i === index ? { ...a, commandTemplate: e.target.value } : a
+                                )
+                              }
+                            }))
+                          }
+                        />
+                      </div>
+                      <label className="settings-checkbox-label default-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={inst.isDefault}
+                          onChange={(e) =>
+                            setLocalSettings((prev) => ({
+                              ...prev,
+                              customRunner: {
+                                ...prev.customRunner,
+                                instances: prev.customRunner.instances.map((a, i) =>
+                                  i === index ? { ...a, isDefault: e.target.checked } : a
+                                )
+                              }
+                            }))
+                          }
+                        />
+                        Default
+                      </label>
+                      <button
+                        className="application-delete"
+                        onClick={() =>
+                          setLocalSettings((prev) => ({
+                            ...prev,
+                            customRunner: {
+                              ...prev.customRunner,
+                              instances: prev.customRunner.instances.filter((_, i) => i !== index)
+                            }
+                          }))
+                        }
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  className="settings-btn add-app"
+                  onClick={() => {
+                    const newId = `runner-${Date.now()}`
+                    setLocalSettings((prev) => ({
+                      ...prev,
+                      customRunner: {
+                        ...prev.customRunner,
+                        instances: [
+                          ...prev.customRunner.instances,
+                          {
+                            id: newId,
+                            name: 'New Runner',
+                            icon: '▶',
+                            commandTemplate: '',
+                            isDefault: false
+                          }
+                        ]
+                      }
+                    }))
+                  }}
+                >
+                  + Add Custom Runner
+                </button>
+                <p className="settings-hint">
+                  Default runners open automatically in new workspaces.
                 </p>
               </div>
             )}

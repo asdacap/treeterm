@@ -30,6 +30,14 @@ vi.mock('../../applications/aiHarness/renderer', () => ({
   })
 }))
 
+vi.mock('../../applications/customRunner/renderer', () => ({
+  createCustomRunnerVariant: vi.fn().mockReturnValue({
+    id: 'customrunner-test', name: 'Runner', icon: '▶', createInitialState: () => ({}),
+    render: () => null, onWorkspaceLoad: () => ({ dispose: () => {} }), canClose: true, showInNewTabMenu: true,
+    displayStyle: 'flex', isDefault: false
+  })
+}))
+
 vi.mock('../../applications/review/renderer', () => ({
   reviewApplication: {
     id: 'review', name: 'Review', icon: 'R', createInitialState: () => ({}),
@@ -802,6 +810,38 @@ describe('useAppStore', () => {
       useAppStore.getState().registerAiHarnessVariants([
         { id: 'claude', name: 'Claude', icon: 'C', command: 'claude', isDefault: false, enableSandbox: false, allowNetwork: true, backgroundColor: '#000', disableScrollbar: false, stripScrollbackClear: false }
       ])
+      cleanup()
+    })
+
+    it('registerCustomRunnerVariants registers custom runner apps', async () => {
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
+      useAppStore.getState().registerCustomRunnerVariants([
+        { id: 'rider', name: 'Rider', icon: '▶', commandTemplate: 'rider {{workspace_path}}', isDefault: false }
+      ])
+      expect(useAppStore.getState().getApplication('customrunner-test')).toBeDefined()
+      cleanup()
+    })
+
+    it('registerCustomRunnerVariants unregisters old customrunner- apps before registering new ones', async () => {
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
+      // Register initial set
+      useAppStore.getState().registerCustomRunnerVariants([
+        { id: 'rider', name: 'Rider', icon: '▶', commandTemplate: 'rider {{workspace_path}}', isDefault: false }
+      ])
+      // Register a new set — old ones should be removed
+      useAppStore.getState().registerCustomRunnerVariants([
+        { id: 'rider2', name: 'Rider2', icon: '▶', commandTemplate: 'rider2 {{workspace_path}}', isDefault: false }
+      ])
+      cleanup()
+    })
+
+    it('registerCustomRunnerVariants with empty array only unregisters existing', async () => {
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
+      useAppStore.getState().registerCustomRunnerVariants([
+        { id: 'rider', name: 'Rider', icon: '▶', commandTemplate: 'rider {{workspace_path}}', isDefault: false }
+      ])
+      useAppStore.getState().registerCustomRunnerVariants([])
+      expect(useAppStore.getState().getApplication('customrunner-rider')).toBeUndefined()
       cleanup()
     })
   })
