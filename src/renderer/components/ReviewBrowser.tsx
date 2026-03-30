@@ -50,7 +50,7 @@ export default function ReviewBrowser({
 
   // Uncommitted changes state
   const [uncommitted, setUncommitted] = useState<UncommittedChanges | null>(null)
-  const [viewMode, setViewMode] = useState<ViewMode>(reviewState?.viewMode ?? 'committed')
+  const [viewMode, setViewMode] = useState<ViewMode>(reviewState?.viewMode ?? (hasParent ? 'committed' : 'uncommitted'))
   const [selectedUncommittedFile, setSelectedUncommittedFile] = useState<UncommittedFile | null>(null)
 
   // Staging state
@@ -723,13 +723,22 @@ export default function ReviewBrowser({
           </button>
           {!hasParent ? (
             <>
-              <span className="review-top-level-message">Top-level worktree - review only</span>
+              {hasUncommitted && runningHarness && (
+                <button
+                  className="review-action-btn review-prompt-commit-btn"
+                  onClick={handlePromptCommit}
+                  disabled={isProcessing}
+                  title="Send commit command to the AI harness"
+                >
+                  Prompt Commit
+                </button>
+              )}
               <button
                 className="review-action-btn review-cancel-btn"
                 onClick={handleCancel}
                 disabled={isProcessing}
               >
-                Close Review
+                Close
               </button>
             </>
           ) : wsData?.isDetached ? (
@@ -866,7 +875,7 @@ export default function ReviewBrowser({
       )}
 
       <div className="diff-tabs">
-        {hasParent ? (
+        {hasParent && (
           <button
             className={`diff-tab ${viewMode === 'committed' ? 'active' : ''}`}
             onClick={() => { setViewMode('committed'); persistViewState({ viewMode: 'committed' }) }}
@@ -875,14 +884,6 @@ export default function ReviewBrowser({
             {hasCommittedChanges && (
               <span className="diff-tab-count">{diff.files.length}</span>
             )}
-          </button>
-        ) : (
-          <button
-            className="diff-tab disabled"
-            disabled
-            title="Top-level worktree - no parent branch to compare against"
-          >
-            Committed Changes
           </button>
         )}
         <button
@@ -992,9 +993,7 @@ export default function ReviewBrowser({
               )}
             </div>
           ) : viewMode === 'committed' ? (
-            !hasParent ? (
-              <div className="diff-empty">Top-level worktree - no parent branch to compare committed changes against</div>
-            ) : !hasCommittedChanges ? (
+            !hasCommittedChanges ? (
               <div className="diff-empty">No committed changes to show</div>
             ) : (
               <>
