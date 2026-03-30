@@ -34,6 +34,7 @@ let daemonClient: GrpcDaemonClient | null = null
 let connectionManager: ConnectionManager | null = null
 const gitClients = new Map<string, GitClient>()
 const runActionsClients = new Map<string, RunActionsClient>()
+const sessionClients = new Map<string, GrpcDaemonClient>()
 let useDaemon = true // Always use daemon mode
 
 // Simple object storage — each entry is an independent terminal's stream.
@@ -221,6 +222,7 @@ function createWindow(initialSessionId?: string): BrowserWindow {
       try {
         const session = await watch.initial
         console.log('[main] loaded session:', session.id)
+        sessionClients.set(session.id, daemonClient!)
         windowServer.appReady(session)
       } catch {
         // Session not found (e.g. stale initialSessionId), fall back to default
@@ -232,6 +234,7 @@ function createWindow(initialSessionId?: string): BrowserWindow {
         unwatchSession = fallbackWatch.unsubscribe
         const session = await fallbackWatch.initial
         console.log('[main] session not found, using default:', session.id)
+        sessionClients.set(session.id, daemonClient!)
         windowServer.appReady(session)
       }
     } catch (error) {
@@ -473,13 +476,13 @@ server.onSessionList(async () => {
 })
 
 server.onSessionGet(async (sessionId) => {
-  if (!useDaemon || !daemonClient) {
-    return { success: false, error: 'Daemon not enabled' }
+  const client = sessionClients.get(sessionId) ?? daemonClient
+  if (!client) {
+    return { success: false, error: 'No daemon client available' }
   }
 
   try {
-    await daemonClient.ensureDaemonRunning()
-    const sessions = await daemonClient.listSessions()
+    const sessions = await client.listSessions()
     const session = sessions.find(s => s.id === sessionId)
     if (!session) {
       return { success: false, error: 'Session not found' }
@@ -1229,6 +1232,7 @@ server.onSshConnect(async (event, config, options) => {
         })
         const session = await remoteWatch.initial
         console.log(`[main:ssh] Initial session loaded: id=${session.id}, workspaces=${session.workspaces?.length ?? 0}`)
+        sessionClients.set(session.id, remoteClient)
 
         // Auto-start saved port forwards
         autoStartPortForwards(config, senderWindow)
