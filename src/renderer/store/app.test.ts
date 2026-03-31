@@ -106,6 +106,7 @@ const mockDeps = {
   appApi: {
     onCloseConfirm: vi.fn().mockReturnValue(() => {}),
     onReady: vi.fn().mockReturnValue(() => {}),
+    onSshAutoConnected: vi.fn().mockReturnValue(() => {}),
     confirmClose: vi.fn(),
     cancelClose: vi.fn()
   },
@@ -604,35 +605,93 @@ describe('useAppStore', () => {
       cleanup()
     })
 
-    it('syncs new workspaces from daemon', async () => {
+    it('syncs new workspaces from daemon for known session', async () => {
+      const sessionId = 'sync-session'
       const session: any = {
-        id: 'sync-session',
+        id: sessionId,
         workspaces: [{
           id: 'ws-new', path: '/new', name: 'new',
           parentId: null, appStates: {}, activeTabId: null
         }]
       }
 
-      // Trigger onSync
+      // Pre-populate session store so onSync finds it (local connection)
+      const mockStore = {
+        getState: vi.fn().mockReturnValue({ connection: null, handleExternalUpdate: mockHandleExternalUpdate }),
+        setState: vi.fn(),
+        subscribe: vi.fn()
+      }
+      useAppStore.setState((state) => ({
+        sessionStores: { ...state.sessionStores, [sessionId]: { store: mockStore as any } }
+      }))
+
+      // Trigger onSync with matching connectionId
       const syncCallback = mockDeps.sessionApi.onSync.mock.calls[0][0]
-      await syncCallback(session)
+      await syncCallback('local', session)
 
       // handleExternalUpdate called to sync workspaces
       expect(mockHandleExternalUpdate).toHaveBeenCalledWith(session)
     })
 
     it('delegates external update handling to session store', async () => {
+      const sessionId = 'sync-session-2'
       const session: any = {
-        id: 'sync-session-2',
+        id: sessionId,
         workspaces: [] // No workspaces — removal handled inside session store
       }
 
-      // Trigger onSync
+      // Pre-populate session store so onSync finds it (local connection)
+      const mockStore = {
+        getState: vi.fn().mockReturnValue({ connection: null, handleExternalUpdate: mockHandleExternalUpdate }),
+        setState: vi.fn(),
+        subscribe: vi.fn()
+      }
+      useAppStore.setState((state) => ({
+        sessionStores: { ...state.sessionStores, [sessionId]: { store: mockStore as any } }
+      }))
+
+      // Trigger onSync with matching connectionId
       const syncCallback = mockDeps.sessionApi.onSync.mock.calls[0][0]
-      await syncCallback(session)
+      await syncCallback('local', session)
 
       // handleExternalUpdate is responsible for removing orphan workspaces internally
       expect(mockHandleExternalUpdate).toHaveBeenCalledWith(session)
+    })
+
+    it('ignores onSync for unknown session', async () => {
+      const session: any = {
+        id: 'unknown-session',
+        workspaces: [{ id: 'ws-1', path: '/test', name: 'test' }]
+      }
+
+      // Trigger onSync without pre-populating session store
+      const syncCallback = mockDeps.sessionApi.onSync.mock.calls[0][0]
+      await syncCallback('local', session)
+
+      // handleExternalUpdate should NOT be called
+      expect(mockHandleExternalUpdate).not.toHaveBeenCalled()
+    })
+
+    it('ignores onSync from wrong connection', async () => {
+      const sessionId = 'sync-session-3'
+      const session: any = { id: sessionId, workspaces: [] }
+
+      // Pre-populate session store with remote connection
+      const mockStore = {
+        getState: vi.fn().mockReturnValue({ connection: { id: 'ssh-remote' }, handleExternalUpdate: mockHandleExternalUpdate }),
+        setState: vi.fn(),
+        subscribe: vi.fn()
+      }
+      useAppStore.setState((state) => ({
+        sessionStores: { ...state.sessionStores, [sessionId]: { store: mockStore as any } }
+      }))
+
+      // Trigger onSync with wrong connectionId
+      const syncCallback = mockDeps.sessionApi.onSync.mock.calls[0][0]
+      await syncCallback('local', session)
+
+      // handleExternalUpdate should NOT be called — wrong connection
+      expect(mockHandleExternalUpdate).not.toHaveBeenCalled()
     })
   })
 

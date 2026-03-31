@@ -231,8 +231,8 @@ describe('IpcServer', () => {
       server.setWindow(mockWindow)
 
       const sessionData = { id: 'session-1' }
-      server.sessionSync(sessionData as any)
-      expect(mockSend).toHaveBeenCalledWith('session:sync', sessionData)
+      server.sessionSync('local', sessionData as any)
+      expect(mockSend).toHaveBeenCalledWith('session:sync', 'local', sessionData)
     })
 
     it('daemonDisconnected sends to window', () => {

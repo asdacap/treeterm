@@ -255,7 +255,7 @@ export interface IpcRequests {
 
   // Session operations
   sessionUpdate: {
-    params: [workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number]
+    params: [sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number]
     result: IpcResult<{ session: Session }>
   }
 
@@ -442,7 +442,10 @@ export interface IpcEvents {
     params: [sessions: TTYSessionInfo[]]
   }
   sessionSync: {
-    params: [session: Session]
+    params: [connectionId: string, session: Session]
+  }
+  sshAutoConnected: {
+    params: [session: Session, connection: ConnectionInfo]
   }
   daemonDisconnected: {
     params: []

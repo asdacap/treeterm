@@ -44,8 +44,8 @@ describe('IpcClient', () => {
     it('sessionUpdate calls ipcRenderer.invoke with correct channel and args', async () => {
       const workspaces = [{ id: 'ws-1', path: '/test' }]
       mockInvoke.mockResolvedValue({ success: true, session: { id: 'session-1' } })
-      const result = await client.sessionUpdate(workspaces as any, 'uuid-1', 5)
-      expect(mockInvoke).toHaveBeenCalledWith('session:update', workspaces, 'uuid-1', 5)
+      const result = await client.sessionUpdate('session-1', workspaces as any, 'uuid-1', 5)
+      expect(mockInvoke).toHaveBeenCalledWith('session:update', 'session-1', workspaces, 'uuid-1', 5)
       expect(result).toEqual({ success: true, session: { id: 'session-1' } })
     })
 

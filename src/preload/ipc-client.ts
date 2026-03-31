@@ -107,6 +107,7 @@ const CHANNELS = {
   capsLockEvent: 'capslock-event',
   daemonSessions: 'daemon:sessions',
   sessionSync: 'session:sync',
+  sshAutoConnected: 'ssh:autoConnected',
   daemonDisconnected: 'daemon:disconnected',
   activeProcessesOpen: 'active-processes:open',
   sshConnectionStatus: 'ssh:connectionStatus',
@@ -602,6 +603,13 @@ export class IpcClient {
       callback(...(args as IpcEvents['sessionSync']['params']))
     ipcRenderer.on(CHANNELS.sessionSync, handler)
     return () => ipcRenderer.removeListener(CHANNELS.sessionSync, handler)
+  }
+
+  onSshAutoConnected(callback: (...args: IpcEvents['sshAutoConnected']['params']) => void): () => void {
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
+      callback(...(args as IpcEvents['sshAutoConnected']['params']))
+    ipcRenderer.on(CHANNELS.sshAutoConnected, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.sshAutoConnected, handler)
   }
 
   onDaemonDisconnected(callback: () => void): () => void {

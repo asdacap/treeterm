@@ -68,11 +68,18 @@ client.onDaemonSessions((sessions) => {
 })
 
 
-type SessionSyncCallback = (session: Session) => void
+type SessionSyncCallback = (connectionId: string, session: Session) => void
 const sessionSyncListeners: SessionSyncCallback[] = []
 
-client.onSessionSync((session) => {
-  sessionSyncListeners.forEach((cb) => cb(session))
+client.onSessionSync((connectionId, session) => {
+  sessionSyncListeners.forEach((cb) => cb(connectionId, session))
+})
+
+type SshAutoConnectedCallback = (session: Session, connection: ConnectionInfo) => void
+const sshAutoConnectedListeners: SshAutoConnectedCallback[] = []
+
+client.onSshAutoConnected((session, connection) => {
+  sshAutoConnectedListeners.forEach((cb) => cb(session, connection))
 })
 
 type DaemonDisconnectedCallback = () => void
@@ -440,6 +447,15 @@ const preloadApi: PreloadApi = {
           capsLockListeners.splice(index, 1)
         }
       }
+    },
+    onSshAutoConnected: (callback: SshAutoConnectedCallback): (() => void) => {
+      sshAutoConnectedListeners.push(callback)
+      return () => {
+        const index = sshAutoConnectedListeners.indexOf(callback)
+        if (index > -1) {
+          sshAutoConnectedListeners.splice(index, 1)
+        }
+      }
     }
   },
   daemon: {
@@ -466,8 +482,8 @@ const preloadApi: PreloadApi = {
     }
   },
   session: {
-    update: (workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number) => {
-      return client.sessionUpdate(workspaces, senderUuid, expectedVersion)
+    update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number) => {
+      return client.sessionUpdate(sessionId, workspaces, senderUuid, expectedVersion)
     },
     onSync: (callback: SessionSyncCallback): (() => void) => {
       sessionSyncListeners.push(callback)

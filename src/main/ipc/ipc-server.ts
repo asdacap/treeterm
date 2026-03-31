@@ -107,6 +107,7 @@ const CHANNELS = {
   capsLockEvent: 'capslock-event',
   daemonSessions: 'daemon:sessions',
   sessionSync: 'session:sync',
+  sshAutoConnected: 'ssh:autoConnected',
   daemonDisconnected: 'daemon:disconnected',
   activeProcessesOpen: 'active-processes:open',
   sshConnectionStatus: 'ssh:connectionStatus',
@@ -913,6 +914,10 @@ export class IpcServer {
 
   sessionSync(...args: IpcEvents['sessionSync']['params']): void {
     this.window?.webContents.send(CHANNELS.sessionSync, ...args)
+  }
+
+  sshAutoConnected(...args: IpcEvents['sshAutoConnected']['params']): void {
+    this.window?.webContents.send(CHANNELS.sshAutoConnected, ...args)
   }
 
   daemonDisconnected(): void {

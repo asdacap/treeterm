@@ -196,7 +196,7 @@ function createWindow(): BrowserWindow {
           sessionId: updatedSession.id,
           workspaces: updatedSession.workspaces.map(ws => ({ path: ws.path, metadata: ws.metadata })),
         })
-        windowServer.sessionSync(updatedSession)
+        windowServer.sessionSync('local', updatedSession)
       })
       unwatchSession = watch.unsubscribe
 
@@ -393,13 +393,14 @@ server.onDaemonShutdown(async (connectionId) => {
 })
 
 // Session IPC Handlers (workspace sessions)
-server.onSessionUpdate(async (workspaces, senderUuid, expectedVersion) => {
+server.onSessionUpdate(async (sessionId, workspaces, senderUuid, expectedVersion) => {
   if (!connectionManager) {
     return { success: false, error: 'ConnectionManager not initialized' }
   }
 
-  // For now, route to local client. In the future, sessionConnectionMap can route to remote daemons.
-  const client = connectionManager.getClient('local')
+  // Route to the daemon that owns this session
+  const connectionId = sessionConnectionMap.get(sessionId) ?? 'local'
+  const client = connectionManager.getClient(connectionId)
 
   try {
     const result = await client.updateSession(workspaces, senderUuid, expectedVersion)
@@ -1101,7 +1102,7 @@ server.onSshConnect(async (event, config, options) => {
           console.log(`[main:ssh] Session sync update received for session=${updatedSession.id}, workspaces=${updatedSession.workspaces?.length ?? 0}`)
           const windowInfo = windowManager.getWindow(senderWindow.id)
           if (windowInfo) {
-            windowInfo.ipcServer.sessionSync(updatedSession)
+            windowInfo.ipcServer.sessionSync(config.id, updatedSession)
           }
         })
         const session = await remoteWatch.initial
@@ -1397,13 +1398,14 @@ app.whenReady().then(async () => {
               const remoteWatch = remoteClient.watchSession(randomUUID(), (updatedSession) => {
                 const windowInfo = windowManager.getWindow(windowId)
                 if (windowInfo) {
-                  windowInfo.ipcServer.sessionSync(updatedSession)
+                  windowInfo.ipcServer.sessionSync(parsed.id, updatedSession)
                 }
               })
               const session = await remoteWatch.initial
+              sessionConnectionMap.set(session.id, parsed.id)
               const windowInfo = windowManager.getWindow(windowId)
               if (windowInfo) {
-                windowInfo.ipcServer.appReady(session)
+                windowInfo.ipcServer.sshAutoConnected(session, info)
               }
             } catch (error) {
               console.error('[main] Failed to load remote session:', error)

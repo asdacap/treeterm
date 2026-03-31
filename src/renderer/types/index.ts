@@ -484,6 +484,7 @@ export interface AppApi {
   confirmClose: () => void
   cancelClose: () => void
   onCapsLockEvent: (callback: (event: { type: string; key: string; code: string }) => void) => () => void
+  onSshAutoConnected: (callback: (session: Session, connection: ConnectionInfo) => void) => () => void
 }
 
 export interface DaemonApi {
@@ -523,8 +524,8 @@ export interface SSHApi {
 }
 
 export interface SessionApi {
-  update: (workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number) => Promise<IpcResult<{ session: Session }>>
-  onSync: (callback: (session: Session) => void) => () => void
+  update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number) => Promise<IpcResult<{ session: Session }>>
+  onSync: (callback: (connectionId: string, session: Session) => void) => () => void
 }
 
 export type Platform = 'darwin' | 'linux' | 'win32' | 'aix' | 'android' | 'freebsd' | 'haiku' | 'openbsd' | 'sunos' | 'cygwin' | 'netbsd'

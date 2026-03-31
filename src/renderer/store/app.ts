@@ -283,10 +283,24 @@ export const useAppStore = create<AppState>()((set, get) => ({
       }
     })
 
-    const unsubSync = sessionApi.onSync((session) => {
-      console.log('[App] Received session:sync with', session.workspaces.length, 'workspaces')
-      const sessionStore = getOrCreateSession(session.id, get, set)
-      sessionStore.getState().handleExternalUpdate(session)
+    const unsubSync = sessionApi.onSync((connectionId, session) => {
+      console.log('[App] Received session:sync from connection', connectionId, 'with', session.workspaces.length, 'workspaces for session', session.id)
+      const entry = get().sessionStores[session.id]
+      if (!entry) {
+        console.log('[App] Ignoring session:sync for unknown session', session.id)
+        return
+      }
+      const storeConnId = entry.store.getState().connection?.id ?? 'local'
+      if (storeConnId !== connectionId) {
+        console.warn('[App] Ignoring session:sync from wrong connection', connectionId, 'expected', storeConnId)
+        return
+      }
+      entry.store.getState().handleExternalUpdate(session)
+    })
+
+    const unsubSshAutoConnected = appApi.onSshAutoConnected((session, connection) => {
+      console.log('[App] SSH auto-connected with session:', session.id, 'connection:', connection.id)
+      get().addRemoteSession(session, connection)
     })
 
     const unsubDisconnect = daemon.onDisconnected(() => {
@@ -323,6 +337,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       unsubClose()
       unsubReady()
       unsubSync()
+      unsubSshAutoConnected()
       unsubDisconnect()
       unsubActiveProcesses()
     }
