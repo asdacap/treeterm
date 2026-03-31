@@ -492,3 +492,62 @@ function WorkspaceTreeItem({
     </div>
   )
 }
+
+// Collapsed sidebar view — shows only workspace icons with tooltips
+interface CollapsedSessionPanelProps {
+  sessionId: string
+  sessionStore: StoreApi<SessionState>
+}
+
+export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSessionPanelProps): JSX.Element {
+  const { workspaces, activeWorkspaceId, setActiveWorkspace } = useStore(sessionStore)
+  const { activeView, setActiveView } = useNavigationStore()
+  const isActiveSession = activeView?.type === 'workspace' && activeView.sessionId === sessionId
+
+  const getChildren = (parentId: string): Workspace[] =>
+    Object.entries(workspaces)
+      .filter(([, e]) => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === parentId)
+      .map(([, e]) => (e as Extract<typeof e, { status: 'loaded' | 'operation-error' }>).data)
+
+  const rootWorkspaceIds = Object.entries(workspaces)
+    .filter(([, e]) => {
+      if (e.status === 'loaded' || e.status === 'operation-error') return !e.data.parentId
+      return true
+    })
+    .map(([id]) => id)
+
+  const handleClick = (id: string) => {
+    setActiveWorkspace(id)
+    setActiveView({ type: 'workspace', workspaceId: id, sessionId })
+  }
+
+  const renderIcon = (id: string): ReactNode => {
+    const entry = workspaces[id]
+    if (!entry) return null
+
+    const ws = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined
+    const displayName = ws ? (ws.metadata?.displayName || ws.name) : (entry as { name: string }).name
+    const tabIds = ws ? Object.keys(ws.appStates) : []
+    const isActive = isActiveSession && activeWorkspaceId === id
+    const children = getChildren(id)
+
+    return (
+      <div key={id}>
+        <div
+          className={`collapsed-workspace-icon ${isActive ? 'active' : ''}`}
+          title={displayName}
+          onClick={() => handleClick(id)}
+        >
+          <WorkspaceIcon
+            tabIds={tabIds}
+            loadStatus={entry.status === 'loading' || entry.status === 'error' ? entry.status : undefined}
+            isWorktree={ws?.isWorktree ?? false}
+          />
+        </div>
+        {children.map((child) => renderIcon(child.id))}
+      </div>
+    )
+  }
+
+  return <>{rootWorkspaceIds.map((id) => renderIcon(id))}</>
+}

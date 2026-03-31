@@ -23,6 +23,7 @@ export default function App() {
   const isSettingsLoaded = useSettingsStore(s => s.isLoaded)
   const [treeWidth, setTreeWidth] = useState(250)
   const [isResizing, setIsResizing] = useState(false)
+  const [isTreeCollapsed, setIsTreeCollapsed] = useState(false)
 
   const {
     platform,
@@ -97,15 +98,19 @@ export default function App() {
               Daemon disconnected — terminal sessions may be unavailable. Please restart the app.
             </div>
           )}
-          <div className="tree-pane" style={{ width: treeWidth }}>
+          <div className="tree-pane" style={{ width: isTreeCollapsed ? 36 : treeWidth }}>
             <TreePane
               selectFolder={selectFolder}
+              isCollapsed={isTreeCollapsed}
+              onToggleCollapse={() => setIsTreeCollapsed(prev => !prev)}
             />
           </div>
-          <div
-            className={`divider ${isResizing ? 'active' : ''}`}
-            onMouseDown={handleMouseDown}
-          />
+          {!isTreeCollapsed && (
+            <div
+              className={`divider ${isResizing ? 'active' : ''}`}
+              onMouseDown={handleMouseDown}
+            />
+          )}
           <div className="workspace-pane">
             {activeSessionStore ? (
               <>

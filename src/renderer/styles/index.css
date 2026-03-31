@@ -40,6 +40,7 @@ body,
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 .tree-pane-content {
@@ -47,6 +48,53 @@ body,
   flex-direction: column;
   height: 100%;
   padding-top: 38px; /* Account for traffic light buttons on macOS */
+}
+
+/* Collapsed tree pane rail */
+.tree-pane-collapsed {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding-top: 38px; /* Account for traffic light buttons on macOS */
+}
+
+.tree-pane-collapsed-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.tree-pane-collapsed-rail {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.collapsed-workspace-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.collapsed-workspace-icon:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.collapsed-workspace-icon.active {
+  background: var(--bg-active);
+  color: var(--text-primary);
 }
 
 .tree-sessions-scroll {

@@ -1,7 +1,7 @@
-import { Monitor, Loader2, AlertCircle, GitBranch, Folder } from 'lucide-react'
+import { Monitor, Loader2, AlertCircle, GitBranch, Folder, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useActivityStateStore } from '../store/activityState'
 import { useAppStore } from '../store/app'
-import SessionPanel from './SessionPanel'
+import SessionPanel, { CollapsedSessionPanel } from './SessionPanel'
 import { ActivityIndicator } from './ActivityIndicator'
 
 // Shows activity indicator in icon slot when active, otherwise shows workspace icon
@@ -22,11 +22,38 @@ export function WorkspaceIcon({ tabIds, loadStatus, isWorktree }: {
 
 interface TreePaneProps {
   selectFolder: () => Promise<string | null>
+  isCollapsed: boolean
+  onToggleCollapse: () => void
 }
 
-export default function TreePane({ selectFolder }: TreePaneProps): JSX.Element {
+export default function TreePane({ selectFolder, isCollapsed, onToggleCollapse }: TreePaneProps): JSX.Element {
   const sessionStores = useAppStore(s => s.sessionStores)
   const sessionIds = Object.keys(sessionStores)
+
+  if (isCollapsed) {
+    return (
+      <div className="tree-pane-collapsed">
+        <div className="tree-pane-collapsed-header">
+          <button
+            className="add-button"
+            onClick={onToggleCollapse}
+            title="Expand sidebar"
+          >
+            <PanelLeftOpen size={14} />
+          </button>
+        </div>
+        <div className="tree-pane-collapsed-rail">
+          {sessionIds.map((sessionId) => (
+            <CollapsedSessionPanel
+              key={sessionId}
+              sessionId={sessionId}
+              sessionStore={sessionStores[sessionId].store}
+            />
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="tree-pane-content">
@@ -39,6 +66,13 @@ export default function TreePane({ selectFolder }: TreePaneProps): JSX.Element {
             title="Connect to SSH"
           >
             <Monitor size={14} />
+          </button>
+          <button
+            className="add-button"
+            onClick={onToggleCollapse}
+            title="Collapse sidebar"
+          >
+            <PanelLeftClose size={14} />
           </button>
         </div>
       </div>
