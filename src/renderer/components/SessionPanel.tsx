@@ -325,7 +325,7 @@ export default function SessionPanel({
             {displayName || sessionId}
           </span>
         )}
-        {connection?.status === 'connected' && (
+        {(!connection || connection.status === 'connected') && (
           <button
             className="add-button"
             onClick={(e) => { e.stopPropagation(); handleAddWorkspace() }}
