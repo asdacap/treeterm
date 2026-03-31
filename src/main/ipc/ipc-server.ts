@@ -86,6 +86,8 @@ const CHANNELS = {
   // LLM operations
   llmChatSend: 'llm:chat:send',
   llmAnalyzeTerminal: 'llm:analyzeTerminal',
+  llmClearAnalyzerCache: 'llm:clearAnalyzerCache',
+  llmGenerateTitle: 'llm:generateTitle',
 
   // Clipboard operations
   clipboardReadText: 'clipboard:readText',
@@ -135,21 +137,61 @@ export class IpcServer {
   // PTY request handlers
   onPtyCreate(
     handler: (
+      event: IpcMainInvokeEvent,
       ...args: IpcRequests['ptyCreate']['params']
     ) => IpcRequests['ptyCreate']['result'] | Promise<IpcRequests['ptyCreate']['result']>
   ): void {
-    ipcMain.handle(CHANNELS.ptyCreate, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['ptyCreate']['params']))
+    ipcMain.handle(CHANNELS.ptyCreate, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(event, ...(args as IpcRequests['ptyCreate']['params']))
     )
   }
 
   onPtyAttach(
     handler: (
+      event: IpcMainInvokeEvent,
       ...args: IpcRequests['ptyAttach']['params']
     ) => IpcRequests['ptyAttach']['result'] | Promise<IpcRequests['ptyAttach']['result']>
   ): void {
-    ipcMain.handle(CHANNELS.ptyAttach, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['ptyAttach']['params']))
+    ipcMain.handle(CHANNELS.ptyAttach, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(event, ...(args as IpcRequests['ptyAttach']['params']))
+    )
+  }
+
+  onPtyList(
+    handler: (
+      ...args: IpcRequests['ptyList']['params']
+    ) => IpcRequests['ptyList']['result'] | Promise<IpcRequests['ptyList']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.ptyList, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['ptyList']['params']))
+    )
+  }
+
+  onPtyIsAlive(
+    handler: (
+      ...args: IpcRequests['ptyIsAlive']['params']
+    ) => IpcRequests['ptyIsAlive']['result'] | Promise<IpcRequests['ptyIsAlive']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.ptyIsAlive, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['ptyIsAlive']['params']))
+    )
+  }
+
+  onPtyWrite(handler: (...args: IpcSends['ptyWrite']['params']) => void): void {
+    ipcMain.on(CHANNELS.ptyWrite, (_event: IpcMainEvent, ...args: unknown[]) =>
+      handler(...(args as IpcSends['ptyWrite']['params']))
+    )
+  }
+
+  onPtyResize(handler: (...args: IpcSends['ptyResize']['params']) => void): void {
+    ipcMain.on(CHANNELS.ptyResize, (_event: IpcMainEvent, ...args: unknown[]) =>
+      handler(...(args as IpcSends['ptyResize']['params']))
+    )
+  }
+
+  onPtyKill(handler: (...args: IpcSends['ptyKill']['params']) => void): void {
+    ipcMain.on(CHANNELS.ptyKill, (_event: IpcMainEvent, ...args: unknown[]) =>
+      handler(...(args as IpcSends['ptyKill']['params']))
     )
   }
 
@@ -597,6 +639,48 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.sttCheckMicPermission, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['sttCheckMicPermission']['params']))
+    )
+  }
+
+  // LLM request handlers
+  onLlmChatSend(
+    handler: (
+      event: IpcMainInvokeEvent,
+      ...args: IpcRequests['llmChatSend']['params']
+    ) => IpcRequests['llmChatSend']['result'] | Promise<IpcRequests['llmChatSend']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.llmChatSend, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(event, ...(args as IpcRequests['llmChatSend']['params']))
+    )
+  }
+
+  onLlmAnalyzeTerminal(
+    handler: (
+      ...args: IpcRequests['llmAnalyzeTerminal']['params']
+    ) => IpcRequests['llmAnalyzeTerminal']['result'] | Promise<IpcRequests['llmAnalyzeTerminal']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.llmAnalyzeTerminal, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['llmAnalyzeTerminal']['params']))
+    )
+  }
+
+  onLlmClearAnalyzerCache(
+    handler: (
+      ...args: IpcRequests['llmClearAnalyzerCache']['params']
+    ) => IpcRequests['llmClearAnalyzerCache']['result'] | Promise<IpcRequests['llmClearAnalyzerCache']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.llmClearAnalyzerCache, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['llmClearAnalyzerCache']['params']))
+    )
+  }
+
+  onLlmGenerateTitle(
+    handler: (
+      ...args: IpcRequests['llmGenerateTitle']['params']
+    ) => IpcRequests['llmGenerateTitle']['result'] | Promise<IpcRequests['llmGenerateTitle']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.llmGenerateTitle, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['llmGenerateTitle']['params']))
     )
   }
 

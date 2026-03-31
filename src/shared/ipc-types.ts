@@ -371,7 +371,7 @@ export interface IpcRequests {
 
   // LLM operations
   llmChatSend: {
-    params: [requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string }]
+    params: [requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string; reasoning: ReasoningEffort }]
     result: void
   }
   llmAnalyzeTerminal: {

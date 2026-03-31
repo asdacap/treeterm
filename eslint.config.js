@@ -28,6 +28,32 @@ export default [
     }
   },
   {
+    files: ['src/main/**/*.ts'],
+    ignores: ['src/main/ipc/ipc-server.ts', 'src/main/ipc/ipc-server.test.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        paths: [{
+          name: 'electron',
+          importNames: ['ipcMain'],
+          message: 'ipcMain is only allowed in ipc-server.ts. Use IpcServer methods instead.'
+        }]
+      }]
+    }
+  },
+  {
+    files: ['src/preload/**/*.ts'],
+    ignores: ['src/preload/ipc-client.ts', 'src/preload/ipc-client.test.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        paths: [{
+          name: 'electron',
+          importNames: ['ipcRenderer'],
+          message: 'ipcRenderer is only allowed in ipc-client.ts. Use IpcClient methods instead.'
+        }]
+      }]
+    }
+  },
+  {
     files: ['src/renderer/**/*.ts', 'src/renderer/**/*.tsx'],
     ignores: ['src/renderer/main.tsx'],
     plugins: {

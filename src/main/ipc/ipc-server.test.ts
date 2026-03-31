@@ -30,13 +30,13 @@ describe('IpcServer', () => {
       expect(mockHandle).toHaveBeenCalledWith('pty:create', expect.any(Function))
     })
 
-    it('onPtyCreate wrapper forwards args to handler and returns result', async () => {
+    it('onPtyCreate wrapper forwards event and args to handler', async () => {
       const handler = vi.fn().mockResolvedValue('pty-123')
       server.onPtyCreate(handler)
       const wrapper = mockHandle.mock.calls[0][1]
-      const fakeEvent = {}
+      const fakeEvent = { sender: {} }
       const result = await wrapper(fakeEvent, '/home/user', undefined, undefined)
-      expect(handler).toHaveBeenCalledWith('/home/user', undefined, undefined)
+      expect(handler).toHaveBeenCalledWith(fakeEvent, '/home/user', undefined, undefined)
       expect(result).toBe('pty-123')
     })
 
@@ -140,7 +140,6 @@ describe('IpcServer', () => {
     })
 
     it.each([
-      ['onPtyAttach', 'pty:attach'],
       ['onGitCreateWorktree', 'git:createWorktree'],
       ['onSettingsSave', 'settings:save'],
       ['onFsReadDirectory', 'fs:readDirectory'],
@@ -155,6 +154,20 @@ describe('IpcServer', () => {
       const wrapper = mockHandle.mock.calls[0][1]
       const result = await wrapper({}, 'arg1', 'arg2')
       expect(handler).toHaveBeenCalledWith('arg1', 'arg2')
+      expect(result).toBe('result')
+    })
+
+    it.each([
+      ['onPtyCreate', 'pty:create'],
+      ['onPtyAttach', 'pty:attach'],
+      ['onLlmChatSend', 'llm:chat:send'],
+    ] as const)('%s wrapper forwards event and args to handler', async (method, _channel) => {
+      const handler = vi.fn().mockResolvedValue('result')
+      ;(server as any)[method](handler)
+      const wrapper = mockHandle.mock.calls[0][1]
+      const mockEvent = { sender: {} }
+      const result = await wrapper(mockEvent, 'arg1', 'arg2')
+      expect(handler).toHaveBeenCalledWith(mockEvent, 'arg1', 'arg2')
       expect(result).toBe('result')
     })
   })

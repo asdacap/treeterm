@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, shell, ipcMain } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, shell } from 'electron'
 import { execSync } from 'child_process'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
@@ -9,7 +9,7 @@ import { createRunActionsClient, RunActionsClient } from './runActions'
 import { ConnectionManager } from './connectionManager'
 import { windowManager } from './windowManager'
 import type { ExecInput, ExecOutput } from '../generated/treeterm'
-import type { ReasoningEffort, SandboxConfig, SSHConnectionConfig, PortForwardConfig } from '../shared/types'
+import type { SandboxConfig, SSHConnectionConfig, PortForwardConfig } from '../shared/types'
 
 // Parse initial workspace and SSH target from command line
 let initialWorkspacePath: string | null = null
@@ -225,8 +225,7 @@ function createWindow(): BrowserWindow {
 }
 
 // IPC Handlers
-// PTY create/attach use ipcMain.handle directly to get event.sender for routing PTY data to the correct window
-ipcMain.handle('pty:create', async (event, connectionId: string, cwd: string, sandbox?: unknown, startupCommand?: string) => {
+server.onPtyCreate(async (event, connectionId, cwd, sandbox, startupCommand) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
 
   try {
@@ -247,7 +246,7 @@ ipcMain.handle('pty:create', async (event, connectionId: string, cwd: string, sa
   }
 })
 
-ipcMain.handle('pty:attach', async (_event, connectionId: string, sessionId: string) => {
+server.onPtyAttach(async (event, connectionId, sessionId) => {
   if (!connectionManager) {
     return { success: false, error: 'ConnectionManager not initialized' }
   }
@@ -256,7 +255,7 @@ ipcMain.handle('pty:attach', async (_event, connectionId: string, sessionId: str
     const client = getClientForConnection(connectionId)
     await client.ensureDaemonRunning()
     const ptyStream = client.openPtyStream(sessionId, (evt) => {
-      _event.sender.send('pty:event', ptyStream.handle, evt)
+      event.sender.send('pty:event', ptyStream.handle, evt)
       if (evt.type === 'exit') ptyStreams.delete(ptyStream.handle)
     })
     ptyStreams.set(ptyStream.handle, ptyStream)
@@ -269,21 +268,21 @@ ipcMain.handle('pty:attach', async (_event, connectionId: string, sessionId: str
   }
 })
 
-ipcMain.handle('pty:list', async (_event, connectionId: string) => {
+server.onPtyList(async (connectionId) => {
   const client = getClientForConnection(connectionId)
   await client.ensureDaemonRunning()
   return await client.listPtySessions()
 })
 
-ipcMain.on('pty:write', (_event, handle: string, data: string) => {
+server.onPtyWrite((handle, data) => {
   ptyStreams.get(handle)?.write(data)
 })
 
-ipcMain.on('pty:resize', (_event, handle: string, cols: number, rows: number) => {
+server.onPtyResize((handle, cols, rows) => {
   ptyStreams.get(handle)?.resize(cols, rows)
 })
 
-ipcMain.on('pty:kill', (_event, connectionId: string, sessionId: string) => {
+server.onPtyKill((connectionId, sessionId) => {
   // Close any PtyStreams for this session
   for (const [handle, stream] of ptyStreams) {
     if (stream.sessionId === sessionId) {
@@ -301,22 +300,21 @@ ipcMain.on('pty:kill', (_event, connectionId: string, sessionId: string) => {
   }
 })
 
-ipcMain.handle('pty:isAlive', async (_event, connectionId: string, id: string) => {
+server.onPtyIsAlive(async (connectionId, id) => {
   const client = getClientForConnection(connectionId)
   const sessions = await client.listPtySessions()
   return sessions.some(s => s.id === id)
-})
-
-// LLM chat — uses ipcMain.handle directly for event.sender access (like PTY)
-ipcMain.handle('llm:chat:send', async (event, requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string; reasoning: ReasoningEffort }) => {
-  await startChatStream(requestId, messages, settings, event.sender)
 })
 
 // Terminal analyzer — non-streaming LLM call with buffer cache
 const analyzerCache: { buffer: string; result: { state: string; reason: string } }[] = []
 const ANALYZER_CACHE_SIZE = 10
 
-ipcMain.handle('llm:analyzeTerminal', async (_event, buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; reasoningEffort: ReasoningEffort; safePaths: string[] }) => {
+server.onLlmChatSend(async (event, requestId, messages, settings) => {
+  await startChatStream(requestId, messages, settings, event.sender)
+})
+
+server.onLlmAnalyzeTerminal(async (buffer, cwd, settings) => {
   const cached = analyzerCache.find((entry) => entry.buffer === buffer)
   if (cached) {
     return { ...cached.result, cached: true }
@@ -349,11 +347,11 @@ ipcMain.handle('llm:analyzeTerminal', async (_event, buffer: string, cwd: string
   }
 })
 
-ipcMain.handle('llm:clearAnalyzerCache', () => {
+server.onLlmClearAnalyzerCache(() => {
   analyzerCache.length = 0
 })
 
-ipcMain.handle('llm:generateTitle', async (_event, buffer: string, settings: { baseUrl: string; apiKey: string; model: string; titleSystemPrompt: string; reasoningEffort: ReasoningEffort }) => {
+server.onLlmGenerateTitle(async (buffer, settings) => {
   const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
     { role: 'system', content: settings.titleSystemPrompt },
     { role: 'user', content: buffer }

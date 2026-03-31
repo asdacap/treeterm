@@ -501,7 +501,7 @@ const preloadApi: PreloadApi = {
     return client.appGetWindowUuid()
   },
   llm: {
-    send: (requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string }): Promise<void> => {
+    send: (requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string; reasoning: ReasoningEffort }): Promise<void> => {
       return client.llmChatSend(requestId, messages, settings)
     },
     cancel: (requestId: string): void => {
