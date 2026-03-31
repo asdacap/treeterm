@@ -18,9 +18,9 @@ describe('socketPath', () => {
   })
 
   describe('getRemoteForwardSocketPath', () => {
-    it('returns path with r- prefix and hash', () => {
+    it('returns path with r- prefix, hash, and unique suffix', () => {
       const result = getRemoteForwardSocketPath('test-connection')
-      expect(result).toMatch(/\/r-[a-f0-9]{12}\.sock$/)
+      expect(result).toMatch(/\/r-[a-f0-9]{12}-[a-f0-9]{8}\.sock$/)
     })
 
     it('returns path under /tmp with treeterm prefix', () => {
@@ -35,10 +35,10 @@ describe('socketPath', () => {
       expect(path1).not.toBe(path2)
     })
 
-    it('produces consistent paths for the same connection ID', () => {
+    it('produces unique paths for the same connection ID (no collision between windows)', () => {
       const path1 = getRemoteForwardSocketPath('my-connection')
       const path2 = getRemoteForwardSocketPath('my-connection')
-      expect(path1).toBe(path2)
+      expect(path1).not.toBe(path2)
     })
   })
 })

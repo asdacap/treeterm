@@ -27,6 +27,7 @@ export class SSHTunnel {
   private localSocketPath: string
   private _connected: boolean = false
   private options: SSHTunnelOptions
+  private tunnelStderr: string[] = []
 
   constructor(private config: SSHConnectionConfig, options?: SSHTunnelOptions) {
     this.localSocketPath = getRemoteForwardSocketPath(config.id)
@@ -431,8 +432,10 @@ export class SSHTunnel {
       }
     })
 
+    this.tunnelStderr = []
     this.sshProcess.stderr?.on('data', (data: Buffer) => {
       for (const line of data.toString().split('\n').filter(Boolean)) {
+        this.tunnelStderr.push(line)
         this.appendOutput(`[tunnel:err] ${line}`)
       }
     })
@@ -442,7 +445,10 @@ export class SSHTunnel {
       this._connected = false
       this.sshProcess = null
 
-      const msg = `SSH tunnel closed (exit ${code})`
+      const stderrDetail = this.tunnelStderr.length > 0
+        ? `: ${this.tunnelStderr.join('; ')}`
+        : ''
+      const msg = `SSH tunnel closed (exit ${code})${stderrDetail}`
       this.appendOutput(`[ssh] ${msg}`)
 
       if (wasConnected) {

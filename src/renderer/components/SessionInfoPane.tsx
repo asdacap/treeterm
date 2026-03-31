@@ -26,6 +26,7 @@ function getStatusColor(status: string | undefined): string {
     case 'connected': return '#4caf50'
     case 'connecting': return '#ff9800'
     case 'error': return '#f44336'
+    case 'disconnected': return '#f44336'
     default: return '#666'
   }
 }
@@ -49,7 +50,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
   const connection = useStore(sessionStore, s => s.connection)
   const isRemote = connection?.target.type === 'remote'
   const isConnected = connection?.status === 'connected'
-  const connectionError = connection?.status === 'error' ? connection.error : undefined
+  const connectionError = (connection?.status === 'error' || connection?.status === 'disconnected') ? connection.error : undefined
 
   const ssh = useAppStore(s => s.ssh)
   const disconnectSession = useAppStore(s => s.disconnectSession)
@@ -209,7 +210,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
         {connectionError && (
           <span className="ssh-pane-error">{connectionError}</span>
         )}
-        {connection?.status === 'error' && (
+        {(connection?.status === 'error' || connection?.status === 'disconnected') && (
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             <button className="ssh-pane-tab" onClick={handleRetry}>Retry</button>
             <button className="ssh-pane-tab" style={{ color: '#f44336' }} onClick={() => disconnectSession(sessionId)}>Remove</button>
@@ -276,7 +277,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
                 <div className="ssh-pane-output-line">Identity File: {connection.target.config.identityFile}</div>
               )}
               <div className="ssh-pane-output-line">Status: {connection.status}</div>
-              {connection.status === 'error' && (
+              {(connection.status === 'error' || connection.status === 'disconnected') && connection.error && (
                 <div className="ssh-pane-output-line">Error: {connection.error}</div>
               )}
             </>
