@@ -7,6 +7,7 @@ import type { PreloadApi } from '../renderer/types'
 type PtyEventCallback = (event: PtyEvent) => void
 const ptyEventListeners = new Map<string, PtyEventCallback[]>()
 const ptyEventBuffer = new Map<string, PtyEvent[]>()
+const PTY_EVENT_BUFFER_MAX = 1000
 
 // Initialize IPC client
 const client = new IpcClient()
@@ -20,7 +21,11 @@ client.onPtyEvent((handle, event) => {
     // Buffer events until a listener registers (covers the gap between
     // main forwarding live data and renderer subscribing after resize debounce)
     if (!ptyEventBuffer.has(handle)) ptyEventBuffer.set(handle, [])
-    ptyEventBuffer.get(handle)!.push(event)
+    const buf = ptyEventBuffer.get(handle)!
+    buf.push(event)
+    if (buf.length > PTY_EVENT_BUFFER_MAX) {
+      buf.splice(0, buf.length - PTY_EVENT_BUFFER_MAX)
+    }
   }
   if (event.type === 'exit') {
     ptyEventListeners.delete(handle)

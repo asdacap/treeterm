@@ -4,12 +4,14 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::io::unix::AsyncFd;
-use tokio::sync::{broadcast, Mutex, RwLock};
+use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
 use treeterm_proto::treeterm::*;
 
 const SCROLLBACK_LINES: u16 = 10000;
 const RAW_BUFFER_CAP: usize = 500 * 1024;
 const RAW_BUFFER_CHUNK_CAP: usize = 1024;
+/// Per-subscriber data channel capacity (~10MB at 4KB/read).
+const PTY_SUBSCRIBER_CAP: usize = 2560;
 
 #[derive(Clone)]
 pub enum BufferEvent {
@@ -33,6 +35,10 @@ pub struct PtySession {
     pub data_tx: broadcast::Sender<Vec<u8>>,
     pub exit_tx: broadcast::Sender<(i32, Option<i32>)>,
     pub resize_tx: broadcast::Sender<(i32, i32)>,
+    /// Per-subscriber bounded data channels. Each gRPC stream gets its own
+    /// ~10MB buffer. When any subscriber's buffer fills, the PTY read loop
+    /// blocks, propagating backpressure to the child process.
+    pub data_subs: Vec<mpsc::Sender<Vec<u8>>>,
 }
 
 #[derive(Clone)]
@@ -137,6 +143,7 @@ impl PtyManager {
             data_tx: data_tx.clone(),
             exit_tx: exit_tx.clone(),
             resize_tx: resize_tx.clone(),
+            data_subs: Vec::new(),
         };
 
         let session = Arc::new(Mutex::new(session));
@@ -320,14 +327,17 @@ impl PtyManager {
         result
     }
 
-    /// Subscribe to data broadcasts for a session.
+    /// Subscribe to data for a session via a per-subscriber bounded channel.
+    /// Each subscriber gets its own ~10MB buffer with backpressure.
     pub async fn subscribe_data(
         &self,
         session_id: &str,
-    ) -> Result<broadcast::Receiver<Vec<u8>>, String> {
+    ) -> Result<mpsc::Receiver<Vec<u8>>, String> {
         let session = self.get_session(session_id).await?;
-        let session = session.lock().await;
-        Ok(session.data_tx.subscribe())
+        let mut session = session.lock().await;
+        let (tx, rx) = mpsc::channel(PTY_SUBSCRIBER_CAP);
+        session.data_subs.push(tx);
+        Ok(rx)
     }
 
     /// Subscribe to exit broadcasts for a session.
@@ -469,27 +479,52 @@ async fn read_pty_loop(
             Ok(Ok(0)) => break, // EOF
             Ok(Ok(n)) => {
                 let chunk = buf[..n].to_vec();
+                // Fire-and-forget broadcast for shell-ready detection
                 let _ = data_tx.send(chunk.clone());
-                let mut session = session.lock().await;
-                session.last_activity = chrono_now_millis();
 
-                // Append to raw buffer in ≤1KB chunks for fine-grained eviction
-                for sub in chunk.chunks(RAW_BUFFER_CHUNK_CAP) {
-                    session.raw_buffer.push_back(BufferEvent::Data(sub.to_vec()));
+                // Lock: update raw_buffer + clone subscriber list
+                let subs = {
+                    let mut session = session.lock().await;
+                    session.last_activity = chrono_now_millis();
+
+                    // Append to raw buffer in ≤1KB chunks for fine-grained eviction
+                    for sub in chunk.chunks(RAW_BUFFER_CHUNK_CAP) {
+                        session.raw_buffer.push_back(BufferEvent::Data(sub.to_vec()));
+                    }
+                    session.raw_buffer_data_bytes += n;
+
+                    // Flush oldest events to vt100 parser when cap exceeded
+                    while session.raw_buffer_data_bytes > RAW_BUFFER_CAP {
+                        match session.raw_buffer.pop_front() {
+                            Some(BufferEvent::Data(data)) => {
+                                session.raw_buffer_data_bytes -= data.len();
+                                session.parser.process(&data);
+                            }
+                            Some(BufferEvent::Resize { cols, rows }) => {
+                                session.parser.set_size(rows, cols);
+                            }
+                            None => break,
+                        }
+                    }
+
+                    session.data_subs.clone()
+                }; // session lock released
+
+                // Send to each subscriber (blocks on slowest = backpressure to child)
+                let mut dead = Vec::new();
+                for (i, sub) in subs.iter().enumerate() {
+                    if sub.send(chunk.clone()).await.is_err() {
+                        dead.push(i);
+                    }
                 }
-                session.raw_buffer_data_bytes += n;
 
-                // Flush oldest events to vt100 parser when cap exceeded
-                while session.raw_buffer_data_bytes > RAW_BUFFER_CAP {
-                    match session.raw_buffer.pop_front() {
-                        Some(BufferEvent::Data(data)) => {
-                            session.raw_buffer_data_bytes -= data.len();
-                            session.parser.process(&data);
+                // Clean up disconnected subscribers
+                if !dead.is_empty() {
+                    let mut session = session.lock().await;
+                    for i in dead.into_iter().rev() {
+                        if i < session.data_subs.len() {
+                            session.data_subs.swap_remove(i);
                         }
-                        Some(BufferEvent::Resize { cols, rows }) => {
-                            session.parser.set_size(rows, cols);
-                        }
-                        None => break,
                     }
                 }
             }

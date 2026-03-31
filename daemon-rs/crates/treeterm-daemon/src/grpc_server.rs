@@ -111,6 +111,7 @@ impl TreeTermDaemon for DaemonService {
             }
 
             // Subscribe to live events
+            // data_rx is a per-subscriber bounded mpsc channel (~10MB buffer with backpressure)
             let mut data_rx = match pty_mgr.subscribe_data(&session_id).await {
                 Ok(rx) => rx,
                 Err(_) => return,
@@ -146,11 +147,16 @@ impl TreeTermDaemon for DaemonService {
             // Forward live events to client
             loop {
                 tokio::select! {
-                    Ok(data) = data_rx.recv() => {
-                        let msg = PtyOutput {
-                            output: Some(pty_output::Output::Data(PtyData { data })),
-                        };
-                        if tx.send(Ok(msg)).await.is_err() { break; }
+                    result = data_rx.recv() => {
+                        match result {
+                            Some(data) => {
+                                let msg = PtyOutput {
+                                    output: Some(pty_output::Output::Data(PtyData { data })),
+                                };
+                                if tx.send(Ok(msg)).await.is_err() { break; }
+                            }
+                            None => break, // channel closed
+                        }
                     }
                     Ok((exit_code, signal)) = exit_rx.recv() => {
                         let _ = tx.send(Ok(PtyOutput {

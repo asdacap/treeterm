@@ -96,7 +96,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     Server::builder()
-        .add_service(TreeTermDaemonServer::new(svc))
+        .add_service(
+            TreeTermDaemonServer::new(svc)
+                .max_decoding_message_size(8 * 1024 * 1024)
+                .max_encoding_message_size(8 * 1024 * 1024),
+        )
         .serve_with_incoming_shutdown(incoming, shutdown)
         .await?;
 
