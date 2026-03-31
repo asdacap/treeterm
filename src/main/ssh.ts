@@ -4,6 +4,7 @@
  */
 
 import { spawn, ChildProcess } from 'child_process'
+import * as crypto from 'crypto'
 import * as fs from 'fs'
 import * as path from 'path'
 
@@ -125,6 +126,15 @@ export class SSHTunnel {
   }
 
   /**
+   * Compute SHA256 checksum of the local daemon binary for the given architecture.
+   */
+  private getLocalDaemonChecksum(remoteArch: string): string {
+    const localPath = this.getDaemonBinaryPath(remoteArch)
+    const fileBuffer = fs.readFileSync(localPath)
+    return crypto.createHash('sha256').update(fileBuffer).digest('hex')
+  }
+
+  /**
    * Upload the daemon binary to the remote host via scp.
    */
   private async uploadDaemon(remotePath: string, remoteArch: string): Promise<void> {
@@ -158,6 +168,50 @@ export class SSHTunnel {
     })
   }
 
+  /**
+   * Upload the daemon binary and start it on the remote host.
+   * Returns the remote socket path.
+   */
+  private async uploadAndStartDaemon(remoteArch: string): Promise<string> {
+    this.appendOutput(`[ssh] Uploading daemon binary (remote arch: ${remoteArch})...`)
+    await this.uploadDaemon('~/.treeterm/treeterm-daemon', remoteArch)
+
+    const startArgs = this.buildBaseSSHArgs()
+    const startScript = [
+      'chmod +x ~/.treeterm/treeterm-daemon',
+      'DAEMON_SOCKET="/tmp/treeterm-$(id -u)/daemon.sock"',
+      'mkdir -p "/tmp/treeterm-$(id -u)"',
+      '~/.treeterm/treeterm-daemon >> ~/.treeterm/daemon.log 2>&1 &',
+      'DAEMON_PID=$!',
+      'for i in $(seq 1 40); do',
+      '  [ -S "$DAEMON_SOCKET" ] && break',
+      '  kill -0 "$DAEMON_PID" 2>/dev/null || break',
+      '  sleep 0.25',
+      'done',
+      'if [ -S "$DAEMON_SOCKET" ]; then',
+      '  echo "TREETERM_SOCKET:$DAEMON_SOCKET"',
+      'else',
+      '  echo "Daemon failed to start after upload." >&2',
+      '  if [ -f ~/.treeterm/daemon.log ]; then',
+      '    echo "Last 20 lines of daemon.log:" >&2',
+      '    tail -20 ~/.treeterm/daemon.log >&2',
+      '  fi',
+      '  if [ -n "$DAEMON_PID" ] && ! kill -0 "$DAEMON_PID" 2>/dev/null; then',
+      '    wait "$DAEMON_PID" 2>/dev/null',
+      '    echo "Daemon process $DAEMON_PID exited (died early)." >&2',
+      '  fi',
+      '  exit 1',
+      'fi',
+    ].join('\n')
+    startArgs.push(startScript)
+    const startResult = await this.runSSHCommand(startArgs, 'start')
+    const startMatch = startResult.match(/TREETERM_SOCKET:(.+)/)
+    if (!startMatch) {
+      throw new Error('Daemon failed to start after upload — check daemon log on remote')
+    }
+    return startMatch[1].trim()
+  }
+
   private async bootstrapRemoteDaemon(): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       const sshArgs = this.buildBaseSSHArgs()
@@ -172,10 +226,18 @@ export class SSHTunnel {
         '# Report system architecture for binary selection',
         'echo "TREETERM_ARCH:$(uname -m)"',
         '',
-        '# Check if daemon binary exists and get its version',
+        '# Check if daemon binary exists',
         'NEEDS_UPLOAD=0',
         'if [ ! -x "$DAEMON_BIN" ]; then',
         '  NEEDS_UPLOAD=1',
+        'fi',
+        '',
+        '# Report checksum of remote binary for version verification',
+        'if [ "$NEEDS_UPLOAD" = "0" ]; then',
+        '  REMOTE_HASH=$(sha256sum "$DAEMON_BIN" 2>/dev/null | cut -c1-64)',
+        '  echo "TREETERM_REMOTE_HASH:${REMOTE_HASH:-NONE}"',
+        'else',
+        '  echo "TREETERM_REMOTE_HASH:NONE"',
         'fi',
         '',
         '# Kill old daemon if refresh requested',
@@ -260,74 +322,51 @@ export class SSHTunnel {
           return
         }
 
-        // Parse socket path from stdout
-        const match = stdout.match(/TREETERM_SOCKET:(.+)/)
-        if (match) {
-          const socketPath = match[1].trim()
-
-          if (socketPath === 'NEEDS_UPLOAD') {
-            // Binary not on remote or wrong architecture — upload and retry
-            try {
-              const archMatch = stdout.match(/TREETERM_ARCH:(\S+)/)
-              const remoteArch = archMatch ? archMatch[1].trim() : undefined
-              if (!remoteArch) {
-                reject(new Error('Could not detect remote architecture (TREETERM_ARCH not reported)'))
-                return
-              }
-              this.appendOutput(`[ssh] Uploading daemon binary (remote arch: ${remoteArch})...`)
-              await this.uploadDaemon('~/.treeterm/treeterm-daemon', remoteArch)
-
-              // Make executable and start via ssh, waiting for socket to be ready
-              const startArgs = this.buildBaseSSHArgs()
-              const startScript = [
-                'chmod +x ~/.treeterm/treeterm-daemon',
-                'DAEMON_SOCKET="/tmp/treeterm-$(id -u)/daemon.sock"',
-                'mkdir -p "/tmp/treeterm-$(id -u)"',
-                '~/.treeterm/treeterm-daemon >> ~/.treeterm/daemon.log 2>&1 &',
-                'DAEMON_PID=$!',
-                'for i in $(seq 1 40); do',
-                '  [ -S "$DAEMON_SOCKET" ] && break',
-                '  kill -0 "$DAEMON_PID" 2>/dev/null || break',
-                '  sleep 0.25',
-                'done',
-                'if [ -S "$DAEMON_SOCKET" ]; then',
-                '  echo "TREETERM_SOCKET:$DAEMON_SOCKET"',
-                'else',
-                '  echo "Daemon failed to start after upload." >&2',
-                '  if [ -f ~/.treeterm/daemon.log ]; then',
-                '    echo "Last 20 lines of daemon.log:" >&2',
-                '    tail -20 ~/.treeterm/daemon.log >&2',
-                '  fi',
-                '  if [ -n "$DAEMON_PID" ] && ! kill -0 "$DAEMON_PID" 2>/dev/null; then',
-                '    wait "$DAEMON_PID" 2>/dev/null',
-                '    echo "Daemon process $DAEMON_PID exited (died early)." >&2',
-                '  fi',
-                '  exit 1',
-                'fi',
-              ].join('\n')
-              startArgs.push(startScript)
-              const startResult = await this.runSSHCommand(startArgs, 'start')
-              const startMatch = startResult.match(/TREETERM_SOCKET:(.+)/)
-              if (!startMatch) {
-                reject(new Error('Daemon failed to start after upload — check daemon log on remote'))
-                return
-              }
-              resolve(startMatch[1].trim())
-            } catch (uploadErr) {
-              reject(new Error(`Failed to start remote daemon: ${uploadErr instanceof Error ? uploadErr.message : String(uploadErr)}`))
-            }
+        try {
+          const archMatch = stdout.match(/TREETERM_ARCH:(\S+)/)
+          const remoteArch = archMatch?.[1]?.trim()
+          if (!remoteArch) {
+            reject(new Error('Could not detect remote architecture (TREETERM_ARCH not reported)'))
             return
           }
 
-          resolve(socketPath)
-        } else {
-          // Fall back to default socket path using uid from output
-          const uidMatch = stdout.match(/uid=(\d+)/)
-          if (uidMatch) {
-            resolve(`/tmp/treeterm-${uidMatch[1]}/daemon.sock`)
-          } else {
-            reject(new Error('Failed to parse daemon socket path from bootstrap output'))
+          const hashMatch = stdout.match(/TREETERM_REMOTE_HASH:(\S+)/)
+          const remoteHash = hashMatch?.[1]?.trim()
+          const socketMatch = stdout.match(/TREETERM_SOCKET:(.+)/)
+          const socketPath = socketMatch?.[1]?.trim()
+
+          // If daemon is running, verify the binary matches before using it
+          if (socketPath && socketPath !== 'NEEDS_UPLOAD') {
+            if (remoteHash && remoteHash !== 'NONE') {
+              const localHash = this.getLocalDaemonChecksum(remoteArch)
+              if (remoteHash === localHash) {
+                resolve(socketPath)
+                return
+              }
+              // Hash mismatch — kill outdated daemon before re-uploading
+              this.appendOutput(
+                `[ssh] Daemon binary mismatch (local=${localHash.substring(0, 12)}... remote=${remoteHash.substring(0, 12)}...), re-uploading...`,
+              )
+              const killArgs = this.buildBaseSSHArgs()
+              killArgs.push(
+                'pkill -x "treeterm-daemon" 2>/dev/null || true; rm -f /tmp/treeterm-$(id -u)/daemon.sock; sleep 0.5',
+              )
+              await this.runSSHCommand(killArgs, 'kill-old-daemon')
+            } else {
+              // No hash available (sha256sum missing) — trust the running daemon
+              resolve(socketPath)
+              return
+            }
           }
+
+          // Upload and start daemon (binary missing, wrong arch, or hash mismatch)
+          resolve(await this.uploadAndStartDaemon(remoteArch))
+        } catch (err) {
+          reject(
+            new Error(
+              `Failed to start remote daemon: ${err instanceof Error ? err.message : String(err)}`,
+            ),
+          )
         }
       })
 

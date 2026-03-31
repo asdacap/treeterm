@@ -11,6 +11,7 @@ vi.mock('fs', () => ({
   existsSync: vi.fn(),
   mkdirSync: vi.fn(),
   unlinkSync: vi.fn(),
+  readFileSync: vi.fn().mockReturnValue(Buffer.from('mock-binary')),
 }))
 
 // Mock socketPath
@@ -179,7 +180,7 @@ describe('SSHTunnel', () => {
       const tunnel = new SSHTunnel(makeConfig())
       const promise = (tunnel as any).bootstrapRemoteDaemon()
 
-      proc.stdout.emit('data', Buffer.from('Starting daemon...\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n'))
+      proc.stdout.emit('data', Buffer.from('TREETERM_ARCH:x86_64\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n'))
       proc.emit('close', 0)
 
       const result = await promise
@@ -211,7 +212,7 @@ describe('SSHTunnel', () => {
       await expect(promise).rejects.toThrow('Failed to spawn ssh')
     })
 
-    it('falls back to default socket path without TREETERM_SOCKET marker', async () => {
+    it('rejects when TREETERM_ARCH marker is missing', async () => {
       const proc = makeMockProcess()
       vi.mocked(spawn).mockReturnValue(proc as any)
 
@@ -221,8 +222,7 @@ describe('SSHTunnel', () => {
       proc.stdout.emit('data', Buffer.from('uid=1001\n'))
       proc.emit('close', 0)
 
-      const result = await promise
-      expect(result).toBe('/tmp/treeterm-1001/daemon.sock')
+      await expect(promise).rejects.toThrow('Could not detect remote architecture')
     })
 
     it('includes REFRESH_DAEMON=1 when refreshDaemon option set', async () => {
@@ -237,10 +237,118 @@ describe('SSHTunnel', () => {
       const scriptArg = spawnCall[1][spawnCall[1].length - 1] as string
       expect(scriptArg).toContain('REFRESH_DAEMON=1')
 
-      proc.stdout.emit('data', Buffer.from('TREETERM_SOCKET:/tmp/daemon.sock\n'))
+      proc.stdout.emit('data', Buffer.from('TREETERM_ARCH:x86_64\nTREETERM_SOCKET:/tmp/daemon.sock\n'))
       proc.emit('close', 0)
 
       await promise
+    })
+
+    it('bootstrap script includes sha256sum checksum reporting', async () => {
+      const proc = makeMockProcess()
+      vi.mocked(spawn).mockReturnValue(proc as any)
+
+      const tunnel = new SSHTunnel(makeConfig())
+      ;(tunnel as any).bootstrapRemoteDaemon()
+
+      const spawnCall = vi.mocked(spawn).mock.calls[0]
+      const scriptArg = spawnCall[1][spawnCall[1].length - 1] as string
+      expect(scriptArg).toContain('sha256sum')
+      expect(scriptArg).toContain('TREETERM_REMOTE_HASH')
+
+      proc.stdout.emit('data', Buffer.from('TREETERM_ARCH:x86_64\nTREETERM_SOCKET:/tmp/daemon.sock\n'))
+      proc.emit('close', 0)
+    })
+
+    it('resolves immediately when hash matches', async () => {
+      const proc = makeMockProcess()
+      vi.mocked(spawn).mockReturnValue(proc as any)
+
+      const tunnel = new SSHTunnel(makeConfig())
+      vi.spyOn(tunnel as any, 'getLocalDaemonChecksum').mockReturnValue('aabbccdd11223344')
+
+      const promise = (tunnel as any).bootstrapRemoteDaemon()
+
+      proc.stdout.emit(
+        'data',
+        Buffer.from(
+          'TREETERM_ARCH:x86_64\nTREETERM_REMOTE_HASH:aabbccdd11223344\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n',
+        ),
+      )
+      proc.emit('close', 0)
+
+      const result = await promise
+      expect(result).toBe('/tmp/treeterm-1000/daemon.sock')
+      // Only 1 spawn call (the bootstrap itself) — no kill or upload
+      expect(spawn).toHaveBeenCalledTimes(1)
+    })
+
+    it('kills and re-uploads when hash mismatches', async () => {
+      const bootstrapProc = makeMockProcess()
+      const killProc = makeMockProcess()
+      const scpProc = makeMockProcess()
+      const startProc = makeMockProcess()
+      vi.mocked(spawn)
+        .mockReturnValueOnce(bootstrapProc as any)  // bootstrap
+        .mockReturnValueOnce(killProc as any)        // kill-old-daemon
+        .mockReturnValueOnce(scpProc as any)         // scp upload
+        .mockReturnValueOnce(startProc as any)       // start new daemon
+
+      vi.mocked(fs.existsSync).mockReturnValue(false)
+
+      const tunnel = new SSHTunnel(makeConfig())
+      vi.spyOn(tunnel as any, 'getLocalDaemonChecksum').mockReturnValue('localhash000')
+      vi.spyOn(tunnel as any, 'getDaemonBinaryPath').mockReturnValue('/mock/path/treeterm-daemon-x86_64-linux')
+
+      const promise = (tunnel as any).bootstrapRemoteDaemon()
+
+      // Bootstrap reports mismatched hash
+      bootstrapProc.stdout.emit(
+        'data',
+        Buffer.from(
+          'TREETERM_ARCH:x86_64\nTREETERM_REMOTE_HASH:remotehash999\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n',
+        ),
+      )
+      bootstrapProc.emit('close', 0)
+
+      // Allow microtask to process
+      await new Promise(r => setTimeout(r, 0))
+
+      // Kill old daemon completes
+      killProc.emit('close', 0)
+      await new Promise(r => setTimeout(r, 0))
+
+      // SCP upload completes
+      scpProc.emit('close', 0)
+      await new Promise(r => setTimeout(r, 0))
+
+      // Start new daemon reports socket
+      startProc.stdout.emit('data', Buffer.from('TREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n'))
+      startProc.emit('close', 0)
+
+      const result = await promise
+      expect(result).toBe('/tmp/treeterm-1000/daemon.sock')
+      expect(spawn).toHaveBeenCalledTimes(4)
+    })
+
+    it('trusts running daemon when sha256sum is unavailable (NONE hash)', async () => {
+      const proc = makeMockProcess()
+      vi.mocked(spawn).mockReturnValue(proc as any)
+
+      const tunnel = new SSHTunnel(makeConfig())
+      const promise = (tunnel as any).bootstrapRemoteDaemon()
+
+      proc.stdout.emit(
+        'data',
+        Buffer.from(
+          'TREETERM_ARCH:x86_64\nTREETERM_REMOTE_HASH:NONE\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n',
+        ),
+      )
+      proc.emit('close', 0)
+
+      const result = await promise
+      expect(result).toBe('/tmp/treeterm-1000/daemon.sock')
+      // Only 1 spawn call — no upload triggered
+      expect(spawn).toHaveBeenCalledTimes(1)
     })
   })
 
