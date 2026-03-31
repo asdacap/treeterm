@@ -86,7 +86,7 @@ export default function BaseTerminal({
   const dataVersionRef = useRef(0)
   const [overlay, setOverlay] = useState<{ message: string; type: 'info' | 'error' } | null>(null)
   const [loading, setLoading] = useState(true)
-  const [scrollPosition, setScrollPosition] = useState<'top' | 'bottom' | 'middle'>('middle')
+  const [scrollPosition, setScrollPosition] = useState<'top' | 'bottom' | 'middle'>('bottom')
   const [isAlternateScreen, setIsAlternateScreen] = useState(false)
   const [sizeMismatch, setSizeMismatch] = useState<{ requested: { cols: number; rows: number }; actual: { cols: number; rows: number } } | null>(null)
   const requestedSizeRef = useRef<{ cols: number; rows: number } | null>(null)
@@ -201,7 +201,7 @@ export default function BaseTerminal({
       scrollDisposable = terminal.onScroll(() => {
         const buf = terminal!.buffer.active
         if (buf.baseY === 0) {
-          setScrollPosition('middle')
+          setScrollPosition('bottom')
         } else if (buf.viewportY === 0) {
           setScrollPosition('top')
         } else if (buf.baseY - buf.viewportY <= 1) {
@@ -274,17 +274,19 @@ export default function BaseTerminal({
               const buf = terminal!.buffer.active
               const wasAtBottom = buf.baseY - buf.viewportY <= 1
 
+              const afterWrite = () => {
+                if (wasAtBottom && terminal!.buffer.active.baseY - terminal!.buffer.active.viewportY > 1) {
+                  terminal!.scrollToBottom()
+                }
+              }
+
               if (config.stripScrollbackClear) {
                 const decoder = new TextDecoder('utf-8', { fatal: false })
                 const dataStr = decoder.decode(event.data)
                 const stripped = dataStr.replace(/\x1b\[3J/g, '')
-                terminal!.write(stripped)
+                terminal!.write(stripped, afterWrite)
               } else {
-                terminal!.write(event.data)
-              }
-
-              if (wasAtBottom && terminal!.buffer.active.baseY - terminal!.buffer.active.viewportY > 1) {
-                terminal!.scrollToBottom()
+                terminal!.write(event.data, afterWrite)
               }
 
               setIsAlternateScreen(terminal!.buffer.active.type === 'alternate')
