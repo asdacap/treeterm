@@ -6,6 +6,7 @@ import PushToTalkButton from './PushToTalkButton'
 import { PromptCommitButton } from './PromptCommitButton'
 import { PromptRebaseButton } from './PromptRebaseButton'
 import { ReviewCommentsButton } from './ReviewCommentsButton'
+import { PromptGitHubCommentsButton } from './PromptGitHubCommentsButton'
 import { useSessionApi } from '../contexts/SessionStoreContext'
 import type { ActivityState, SandboxConfig, WorkspaceStore } from '../types'
 import { isAiHarnessState } from '../types'
@@ -171,6 +172,7 @@ function AiHarnessContent({
               <PromptCommitButton workspace={workspace} />
               <PromptRebaseButton workspace={workspace} />
               <ReviewCommentsButton workspace={workspace} />
+              <PromptGitHubCommentsButton workspace={workspace} />
               <PushToTalkButton
                 onTranscript={handlePushToTalkTranscript}
                 onSubmit={handlePushToTalkSubmit}
