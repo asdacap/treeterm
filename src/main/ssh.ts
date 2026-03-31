@@ -181,7 +181,7 @@ export class SSHTunnel {
         '# Kill old daemon if refresh requested',
         'if [ "$REFRESH_DAEMON" = "1" ] && [ -S "$DAEMON_SOCKET" ]; then',
         '  echo "Refreshing daemon: killing old process..."',
-        '  pkill -f "treeterm-daemon" 2>/dev/null || true',
+        '  pkill -x "treeterm-daemon" 2>/dev/null || true',
         '  rm -f "$DAEMON_SOCKET"',
         '  sleep 0.5',
         'fi',
