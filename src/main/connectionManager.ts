@@ -27,6 +27,9 @@ function toConnectionInfo(id: string, conn: Connection): ConnectionInfo {
   if (conn.status === 'error') {
     return { id, target: conn.target, status: 'error', error: conn.error ?? 'Unknown error' }
   }
+  if (conn.status === 'disconnected') {
+    return { id, target: conn.target, status: 'disconnected', error: conn.error }
+  }
   return { id, target: conn.target, status: conn.status }
 }
 
