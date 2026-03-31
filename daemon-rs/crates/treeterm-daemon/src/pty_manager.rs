@@ -388,14 +388,13 @@ impl PtyManager {
 
 /// Wait until the shell is ready to accept input by detecting silence after output.
 ///
-/// Phase 1: wait for the first PTY output chunk (shell has started).
-/// Phase 2: wait for 200ms of silence after the last output (shell prompt drawn, init done).
-/// Falls back after a 5s overall timeout.
+/// Phase 1: wait for the first PTY output chunk (shell has started). 5s timeout.
+/// Phase 2: wait for 200ms of silence after the last output (shell prompt drawn, init done). 30s timeout.
 async fn wait_for_shell_ready(mut rx: broadcast::Receiver<Vec<u8>>) {
-    let overall_timeout = tokio::time::sleep(std::time::Duration::from_secs(5));
-    tokio::pin!(overall_timeout);
+    // Phase 1: wait for first output (5s timeout)
+    let phase1_timeout = tokio::time::sleep(std::time::Duration::from_secs(5));
+    tokio::pin!(phase1_timeout);
 
-    // Phase 1: wait for first output
     loop {
         tokio::select! {
             result = rx.recv() => {
@@ -405,14 +404,17 @@ async fn wait_for_shell_ready(mut rx: broadcast::Receiver<Vec<u8>>) {
                     Err(broadcast::error::RecvError::Closed) => return,
                 }
             }
-            _ = &mut overall_timeout => {
+            _ = &mut phase1_timeout => {
                 tracing::warn!("wait_for_shell_ready: timed out waiting for first output");
                 return;
             }
         }
     }
 
-    // Phase 2: wait for 200ms of silence
+    // Phase 2: wait for 200ms of silence (30s timeout)
+    let phase2_timeout = tokio::time::sleep(std::time::Duration::from_secs(30));
+    tokio::pin!(phase2_timeout);
+
     loop {
         let silence = tokio::time::sleep(std::time::Duration::from_millis(200));
         tokio::select! {
@@ -424,7 +426,7 @@ async fn wait_for_shell_ready(mut rx: broadcast::Receiver<Vec<u8>>) {
                 }
             }
             _ = silence => return,
-            _ = &mut overall_timeout => {
+            _ = &mut phase2_timeout => {
                 tracing::warn!("wait_for_shell_ready: timed out waiting for silence");
                 return;
             }
@@ -907,8 +909,30 @@ mod tests {
         wait_for_shell_ready(rx).await;
         let elapsed = start.elapsed();
 
-        // Should time out after 5s
+        // Should time out after 5s (Phase 1 timeout)
         assert!(elapsed >= std::time::Duration::from_secs(5));
         assert!(elapsed < std::time::Duration::from_secs(7));
+    }
+
+    #[tokio::test]
+    async fn wait_for_shell_ready_continuous_output_waits_for_silence() {
+        let (tx, rx) = broadcast::channel::<Vec<u8>>(16);
+
+        let start = std::time::Instant::now();
+        let handle = tokio::spawn(wait_for_shell_ready(rx));
+
+        // Simulate shell outputting continuously for 6 seconds (beyond old 5s shared timeout)
+        for _ in 0..60 {
+            tx.send(b"loading...".to_vec()).unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        // Stop sending — silence should be detected after 200ms
+
+        handle.await.unwrap();
+        let elapsed = start.elapsed();
+
+        // Should wait for all output (~6s) plus 200ms silence, not bail at 5s
+        assert!(elapsed >= std::time::Duration::from_secs(6));
+        assert!(elapsed < std::time::Duration::from_secs(8));
     }
 }
