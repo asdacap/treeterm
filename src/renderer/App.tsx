@@ -46,7 +46,7 @@ export default function App() {
   const activeSessionEntry = activeSessionId
     ? sessionStores[activeSessionId] ?? null
     : null
-  const activeSessionStore = activeSessionEntry?.status === 'connected' ? activeSessionEntry.store : null
+  const activeSessionStore = activeSessionEntry?.store ?? null
 
   const handleConfirmClose = () => {
     useAppStore.setState({ showCloseConfirm: false })
@@ -107,17 +107,13 @@ export default function App() {
             onMouseDown={handleMouseDown}
           />
           <div className="workspace-pane">
-            {activeSessionEntry?.status === 'connecting' ? (
-              <SessionInfoPane status="connecting" sessionId={activeSessionEntry.connectionId} connectionId={activeSessionEntry.connectionId} config={activeSessionEntry.config} />
-            ) : activeSessionEntry?.status === 'error' ? (
-              <SessionInfoPane status="error" sessionId={activeSessionEntry.connectionId} connectionId={activeSessionEntry.connectionId} config={activeSessionEntry.config} error={activeSessionEntry.error} />
-            ) : activeSessionStore ? (
+            {activeSessionStore ? (
               <>
                 <div style={{ display: activeView?.type === 'workspace' ? 'contents' : 'none' }}>
                   <WorkspacePane sessionStore={activeSessionStore} platform={platform} />
                 </div>
                 {activeView?.type === 'session' && (
-                  <SessionInfoPane status="connected" sessionId={activeView.sessionId} sessionStore={activeSessionStore} />
+                  <SessionInfoPane sessionStore={activeSessionStore} />
                 )}
               </>
             ) : (

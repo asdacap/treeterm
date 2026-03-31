@@ -5,7 +5,7 @@ import { Loader2 } from 'lucide-react'
 import type { SessionState } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import { useSessionNamesStore } from '../store/sessionNames'
-import type { SSHConnectionConfig, PortForwardConfig, PortForwardInfo } from '../types'
+import type { PortForwardConfig, PortForwardInfo } from '../types'
 import PortForwardDialog from './PortForwardDialog'
 import JsonViewer from './JsonViewer'
 
@@ -40,218 +40,48 @@ function getPfStatusColor(status: string | undefined): string {
   }
 }
 
-export type SessionInfoPaneProps =
-  | { sessionId: string; status: 'connecting'; connectionId: string; config: SSHConnectionConfig }
-  | { sessionId: string; status: 'error'; connectionId: string; config: SSHConnectionConfig; error: string }
-  | { sessionId: string; status: 'connected'; sessionStore: StoreApi<SessionState> }
-
-export default function SessionInfoPane(props: SessionInfoPaneProps) {
-  if (props.status === 'connected') {
-    return <ConnectedSessionInfoPane sessionId={props.sessionId} sessionStore={props.sessionStore} />
-  }
-  return (
-    <ConnectingSessionInfoPane
-      sessionId={props.sessionId}
-      connectionId={props.connectionId}
-      config={props.config}
-      initialError={props.status === 'error' ? props.error : undefined}
-    />
-  )
-}
-
-// --- ConnectingSessionInfoPane ---
-
-interface ConnectingProps {
-  sessionId: string
-  connectionId: string
-  config: SSHConnectionConfig
-  initialError?: string
-}
-
-const CONNECTING_TABS: { id: TabId; label: string }[] = [
-  { id: 'info', label: 'Info' },
-  { id: 'ssh', label: 'SSH' },
-]
-
-function ConnectingSessionInfoPane({ sessionId, connectionId, config, initialError }: ConnectingProps) {
-  const ssh = useAppStore(s => s.ssh)
-  const removeSession = useAppStore(s => s.removeSession)
-  const startRemoteConnect = useAppStore(s => s.startRemoteConnect)
-  const disconnectSession = useAppStore(s => s.disconnectSession)
-  const [activeTab, setActiveTab] = useState<TabId>('ssh')
-  const [output, setOutput] = useState<string[]>([])
-  const [status, setStatus] = useState<string>(initialError ? 'error' : 'connecting')
-  const [error, setError] = useState<string | undefined>(initialError)
-  const scrollRef = useRef<HTMLDivElement>(null)
-
-  const label = config.label || `${config.user}@${config.host}`
-
-  useEffect(() => {
-    let unsubscribe: (() => void) | undefined
-    ssh.watchOutput(connectionId, (line) => {
-      setOutput(prev => [...prev, line])
-    }).then(({ scrollback, unsubscribe: unsub }) => {
-      setOutput(scrollback)
-      unsubscribe = unsub
-    }).catch(console.error)
-    return () => { unsubscribe?.() }
-  }, [connectionId, ssh])
-
-  useEffect(() => {
-    let unsubscribe: (() => void) | undefined
-    ssh.watchConnectionStatus(connectionId, (info) => {
-      setStatus(info.status)
-      setError(info.status === 'error' ? info.error : undefined)
-    }).then(({ initial, unsubscribe: unsub }) => {
-      setStatus(initial.status)
-      setError(initial.status === 'error' ? initial.error : undefined)
-      unsubscribe = unsub
-    }).catch(console.error)
-    return () => { unsubscribe?.() }
-  }, [connectionId, ssh])
-
-  const sshOutput = useMemo(() => ({
-    bootstrap: filterLines(output, BOOTSTRAP_PREFIXES),
-    tunnel: filterLines(output, TUNNEL_PREFIXES),
-  }), [output])
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
-  }, [sshOutput.bootstrap.length, sshOutput.tunnel.length])
-
-  const handleRetry = () => {
-    removeSession(sessionId)
-    startRemoteConnect(config)
-    ssh.connect(config).then(({ info, session }) => {
-      if (info.status !== 'connected' || !session) {
-        useAppStore.getState().setSessionError(config.id, info.status === 'error' ? info.error : 'Connection failed')
-        return
-      }
-      useAppStore.getState().addRemoteSession(session, info)
-    }).catch((err) => {
-      useAppStore.getState().setSessionError(config.id, err instanceof Error ? err.message : String(err))
-    })
-  }
-
-  return (
-    <div className="ssh-pane">
-      <div className="ssh-pane-header">
-        <span
-          className="ssh-pane-status-dot"
-          style={{ backgroundColor: getStatusColor(status) }}
-        />
-        <span className="ssh-pane-label">{label}</span>
-        {status === 'connecting' && (
-          <Loader2 size={14} className="spinning" style={{ marginLeft: 8 }} />
-        )}
-        <span className="ssh-pane-status-text">({status})</span>
-        {error && (
-          <span className="ssh-pane-error">{error}</span>
-        )}
-        {status === 'error' && (
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            <button className="ssh-pane-tab" onClick={handleRetry}>Retry</button>
-            <button className="ssh-pane-tab" style={{ color: '#f44336' }} onClick={() => disconnectSession(sessionId)}>Remove</button>
-          </div>
-        )}
-      </div>
-      <div className="ssh-pane-tabs">
-        {CONNECTING_TABS.map(tab => (
-          <button
-            key={tab.id}
-            className={`ssh-pane-tab ${activeTab === tab.id ? 'active' : ''}`}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-      {activeTab === 'info' ? (
-        <div className="ssh-pane-output">
-          <div className="ssh-pane-output-line">Session ID: {sessionId}</div>
-          <div className="ssh-pane-output-line">Connection: SSH</div>
-          <div className="ssh-pane-output-line">Host: {config.host}</div>
-          <div className="ssh-pane-output-line">User: {config.user}</div>
-          <div className="ssh-pane-output-line">Port: {config.port}</div>
-          {config.identityFile && (
-            <div className="ssh-pane-output-line">Identity File: {config.identityFile}</div>
-          )}
-          <div className="ssh-pane-output-line">Status: {status}</div>
-          {error && (
-            <div className="ssh-pane-output-line">Error: {error}</div>
-          )}
-        </div>
-      ) : (
-        <div className="ssh-pane-output" ref={scrollRef}>
-          {sshOutput.bootstrap.length === 0 && sshOutput.tunnel.length === 0 && (
-            <div className="ssh-pane-output-empty">
-              Waiting for SSH output...
-            </div>
-          )}
-          {sshOutput.bootstrap.length > 0 && (
-            <>
-              <div className="ssh-pane-section-header">── Bootstrap ──</div>
-              {sshOutput.bootstrap.map((line, i) => (
-                <div key={`bootstrap-${i}`} className="ssh-pane-output-line">{line}</div>
-              ))}
-            </>
-          )}
-          {sshOutput.tunnel.length > 0 && (
-            <>
-              <div className="ssh-pane-section-header">── Tunnel ──</div>
-              {sshOutput.tunnel.map((line, i) => (
-                <div key={`tunnel-${i}`} className="ssh-pane-output-line">{line}</div>
-              ))}
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// --- ConnectedSessionInfoPane ---
-
-interface ConnectedProps {
-  sessionId: string
+interface SessionInfoPaneProps {
   sessionStore: StoreApi<SessionState>
 }
 
-function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
+export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) {
+  const sessionId = useStore(sessionStore, s => s.sessionId)
   const connection = useStore(sessionStore, s => s.connection)
   const isRemote = connection?.target.type === 'remote'
+  const isConnected = connection?.status === 'connected'
+  const connectionError = connection?.status === 'error' ? connection.error : undefined
 
-  const [activeTab, setActiveTab] = useState<TabId>('info')
+  const ssh = useAppStore(s => s.ssh)
+  const disconnectSession = useAppStore(s => s.disconnectSession)
+  const displayName = useSessionNamesStore(s => s.names[sessionId]?.name)
+
+  const [activeTab, setActiveTab] = useState<TabId>(isRemote ? 'ssh' : 'info')
   const [sshSubTab, setSshSubTab] = useState<SshSubTab>('bootstrap')
   const [output, setOutput] = useState<string[]>([])
   const [portForwards, setPortForwards] = useState<PortForwardInfo[]>([])
   const [showPortForwardDialog, setShowPortForwardDialog] = useState(false)
   const [expandedPfOutput, setExpandedPfOutput] = useState<Record<string, string[]>>({})
-  const ssh = useAppStore(s => s.ssh)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const displayName = useSessionNamesStore(s => s.names[sessionId]?.name)
 
+  // Session data for JSON tab
   const rawSessionId = useStore(sessionStore, s => s.sessionId)
   const rawConnection = useStore(sessionStore, s => s.connection)
   const rawActiveWorkspaceId = useStore(sessionStore, s => s.activeWorkspaceId)
   const rawSessionVersion = useStore(sessionStore, s => s.sessionVersion)
   const rawWorkspaces = useStore(sessionStore, s => s.workspaces)
 
+  // SSH output watching
   useEffect(() => {
     if (!isRemote || !connection) return
     let unsubscribe: (() => void) | undefined
-
     ssh.watchOutput(connection.id, (line) => {
       setOutput(prev => [...prev, line])
     }).then(({ scrollback, unsubscribe: unsub }) => {
       setOutput(scrollback)
       unsubscribe = unsub
     }).catch(console.error)
-
     return () => { unsubscribe?.() }
-  }, [isRemote, connection, ssh])
+  }, [isRemote, connection?.id, ssh])
 
   const sshOutput = useMemo(() => ({
     bootstrap: filterLines(output, BOOTSTRAP_PREFIXES),
@@ -264,13 +94,14 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
     }
   }, [sshOutput.bootstrap.length, sshOutput.tunnel.length])
 
+  // Port forwards (only when connected + remote)
   useEffect(() => {
-    if (!isRemote || !connection) return
+    if (!isRemote || !isConnected || !connection) return
     ssh.listPortForwards(connection.id).then(setPortForwards).catch(console.error)
-  }, [isRemote, connection, ssh])
+  }, [isRemote, isConnected, connection?.id, ssh])
 
   useEffect(() => {
-    if (!isRemote) return
+    if (!isRemote || !isConnected) return
     const unsubscribe = ssh.onPortForwardStatus((info) => {
       if (!connection || info.connectionId !== connection.id) return
       setPortForwards(prev => {
@@ -284,7 +115,7 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
       })
     })
     return unsubscribe
-  }, [isRemote, connection, ssh])
+  }, [isRemote, isConnected, connection?.id, ssh])
 
   const handleTogglePfOutput = (pfId: string, currentlyExpanded: boolean) => {
     if (currentlyExpanded) {
@@ -306,13 +137,38 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
     }
   }
 
+  const handleRetry = () => {
+    if (!isRemote || connection?.target.type !== 'remote') return
+    const config = connection.target.config
+    // Reset connection to connecting state
+    sessionStore.setState({ connection: { ...connection, status: 'connecting' as const } })
+    ssh.connect(config).then(({ info, session }) => {
+      if (info.status !== 'connected' || !session) {
+        useAppStore.getState().setSessionError(config.id, info.status === 'error' ? info.error : 'Connection failed')
+        return
+      }
+      useAppStore.getState().addRemoteSession(session, info)
+    }).catch((err) => {
+      useAppStore.getState().setSessionError(config.id, err instanceof Error ? err.message : String(err))
+    })
+  }
+
+  // Derive label
   const label = isRemote && connection.target.type === 'remote'
-    ? `${connection.target.config.user}@${connection.target.config.host}`
+    ? (connection.target.config.label || `${connection.target.config.user}@${connection.target.config.host}`)
     : displayName || sessionId
 
+  // Tabs: Info + SSH (if remote) + JSON (if connected)
   const tabs: { id: TabId; label: string }[] = isRemote
-    ? [{ id: 'info', label: 'Info' }, { id: 'ssh', label: 'SSH' }, { id: 'json', label: 'JSON' }]
+    ? isConnected
+      ? [{ id: 'info', label: 'Info' }, { id: 'ssh', label: 'SSH' }, { id: 'json', label: 'JSON' }]
+      : [{ id: 'info', label: 'Info' }, { id: 'ssh', label: 'SSH' }]
     : [{ id: 'info', label: 'Info' }, { id: 'json', label: 'JSON' }]
+
+  // SSH sub-tabs: Bootstrap + Tunnel always, Port Forwards when connected
+  const sshSubTabs: { id: SshSubTab; label: string }[] = isConnected
+    ? [{ id: 'bootstrap', label: 'Bootstrap' }, { id: 'tunnel', label: 'Tunnel' }, { id: 'portforwards', label: 'Port Forwards' }]
+    : [{ id: 'bootstrap', label: 'Bootstrap' }, { id: 'tunnel', label: 'Tunnel' }]
 
   const sessionData = {
     sessionId: rawSessionId,
@@ -341,11 +197,23 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
           />
         )}
         <span className="ssh-pane-label">{label}</span>
+        {isRemote && connection?.status === 'connecting' && (
+          <Loader2 size={14} className="spinning" style={{ marginLeft: 8 }} />
+        )}
         {isRemote && connection?.status && (
           <span className="ssh-pane-status-text">({connection.status})</span>
         )}
         {!isRemote && (
           <span className="ssh-pane-status-text">(Local)</span>
+        )}
+        {connectionError && (
+          <span className="ssh-pane-error">{connectionError}</span>
+        )}
+        {connection?.status === 'error' && (
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <button className="ssh-pane-tab" onClick={handleRetry}>Retry</button>
+            <button className="ssh-pane-tab" style={{ color: '#f44336' }} onClick={() => disconnectSession(sessionId)}>Remove</button>
+          </div>
         )}
       </div>
       <div className="ssh-pane-tabs">
@@ -379,11 +247,7 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
       )}
       {activeTab === 'ssh' && isRemote && (
         <div className="ssh-pane-subtabs">
-          {([
-            { id: 'bootstrap' as SshSubTab, label: 'Bootstrap' },
-            { id: 'tunnel' as SshSubTab, label: 'Tunnel' },
-            { id: 'portforwards' as SshSubTab, label: 'Port Forwards' },
-          ]).map(tab => (
+          {sshSubTabs.map(tab => (
             <button
               key={tab.id}
               className={`ssh-pane-tab ${sshSubTab === tab.id ? 'active' : ''}`}
@@ -392,7 +256,7 @@ function ConnectedSessionInfoPane({ sessionId, sessionStore }: ConnectedProps) {
               {tab.label}
             </button>
           ))}
-          {sshSubTab === 'portforwards' && (
+          {sshSubTab === 'portforwards' && isConnected && (
             <button className="ssh-pane-tab active" style={{ marginLeft: 'auto' }} onClick={() => setShowPortForwardDialog(true)}>
               + Add Port Forward
             </button>

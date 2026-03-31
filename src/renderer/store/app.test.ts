@@ -186,8 +186,8 @@ describe('useAppStore', () => {
         subscribe: vi.fn()
       } as never
       useAppStore.setState({ sessionStores: {
-        's1': { status: 'connected', store: mockStore },
-        's2': { status: 'connected', store: mockStore }
+        's1': { store: mockStore },
+        's2': { store: mockStore }
       } })
       useAppStore.getState().disconnectSession('s1')
       expect(useAppStore.getState().sessionStores['s1']).toBeUndefined()
@@ -201,8 +201,8 @@ describe('useAppStore', () => {
         subscribe: vi.fn()
       } as never
       useAppStore.setState({ sessionStores: {
-        's1': { status: 'connected', store: mockStore },
-        's2': { status: 'connected', store: mockStore }
+        's1': { store: mockStore },
+        's2': { store: mockStore }
       } })
       useNavigationStore.setState({ activeView: { type: 'workspace', workspaceId: 'ws-x', sessionId: 's1' } })
       useAppStore.getState().disconnectSession('s1')
@@ -539,7 +539,7 @@ describe('useAppStore', () => {
       // Create a mock session store directly
       const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', windowUuid: null }, {} as any) as any
       useAppStore.setState({
-        sessionStores: { 'pre-session': { status: 'connected', store: mockSessionStoreInstance } }
+        sessionStores: { 'pre-session': { store: mockSessionStoreInstance } }
       })
 
       const cleanup = await useAppStore.getState().initialize(deps)
@@ -567,7 +567,7 @@ describe('useAppStore', () => {
 
       const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', windowUuid: null }, {} as any) as any
       useAppStore.setState({
-        sessionStores: { 'pre-session': { status: 'connected', store: mockSessionStoreInstance } }
+        sessionStores: { 'pre-session': { store: mockSessionStoreInstance } }
       })
 
       const deps = { ...mockDeps, getInitialWorkspace: vi.fn().mockResolvedValue('/new/path') } as any

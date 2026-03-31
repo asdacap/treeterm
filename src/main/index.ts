@@ -1115,8 +1115,12 @@ server.onSshConnect(async (event, config, options) => {
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error)
         console.error('[main:ssh] Failed to load remote session:', errorMsg)
+        const isOldDaemon = errorMsg.includes('NOT_FOUND') && errorMsg.includes('session')
+        const userError = isOldDaemon
+          ? `Remote daemon is outdated. Retry with 'Refresh remote daemon' checked. (${errorMsg})`
+          : `Connected but failed to load session: ${errorMsg}`
         return {
-          info: { ...info, status: 'error' as const, error: `Connected but failed to load session: ${errorMsg}` },
+          info: { ...info, status: 'error' as const, error: userError },
           session: null
         }
       }

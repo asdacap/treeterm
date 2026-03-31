@@ -259,9 +259,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const unsubClose = appApi.onCloseConfirm(() => {
       const allUnmerged: Workspace[] = []
       for (const entry of Object.values(get().sessionStores)) {
-        if (entry.status === 'connected') {
-          allUnmerged.push(...getUnmergedSubWorkspaces(entry.store.getState().workspaces))
-        }
+        allUnmerged.push(...getUnmergedSubWorkspaces(entry.store.getState().workspaces))
       }
       if (allUnmerged.length > 0) {
         set({ unmergedWorkspaces: allUnmerged, showCloseConfirm: true })
@@ -306,7 +304,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const { activeView } = useNavigationStore.getState()
       const sessionId = activeView?.type === 'workspace' ? activeView.sessionId : null
       const sessionEntry = sessionId ? get().sessionStores[sessionId] : Object.values(get().sessionStores)[0]
-      if (sessionEntry?.status === 'connected') {
+      const connStatus = sessionEntry?.store.getState().connection?.status
+      if (sessionEntry && connStatus !== 'connecting') {
         const { workspaces, addWorkspace, setActiveWorkspace } = sessionEntry.store.getState()
         const existingId = Object.entries(workspaces).find(
           ([, e]) => (e.status === 'loaded' || e.status === 'operation-error') && e.data.path === initialPath
@@ -340,12 +339,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const remainingIds = Object.keys(get().sessionStores)
       if (remainingIds.length > 0) {
         const nextEntry = get().sessionStores[remainingIds[0]]
-        if (nextEntry.status === 'connected') {
-          const workspaces = nextEntry.store.getState().workspaces
-          const firstWsId = Object.keys(workspaces)[0]
-          if (firstWsId) {
-            useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWsId, sessionId: remainingIds[0] })
-          }
+        const workspaces = nextEntry.store.getState().workspaces
+        const firstWsId = Object.keys(workspaces)[0]
+        if (firstWsId) {
+          useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWsId, sessionId: remainingIds[0] })
         } else {
           useNavigationStore.getState().setActiveView({ type: 'session', sessionId: remainingIds[0] })
         }
@@ -355,20 +352,29 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   addRemoteSession: async (session: Session, connection: ConnectionInfo) => {
     console.log(`[renderer:app] addRemoteSession called: session=${session.id}, connection=${connection.id}, status=${connection.status}, workspaces=${session.workspaces?.length ?? 0}`)
-    // Remove the old connecting entry (keyed by connectionId) and create connected entry (keyed by session.id)
-    const store = getOrCreateSession(session.id, get, set, connection)
+    // Reuse existing store (created eagerly in startRemoteConnect) or create new one
+    const existingEntry = get().sessionStores[connection.id]
+    let store: StoreApi<SessionState>
+    if (existingEntry) {
+      store = existingEntry.store
+      // Update session ID and connection status on the existing store
+      store.setState({ sessionId: session.id, connection })
+      // Re-key from connection.id to session.id
+      if (connection.id !== session.id) {
+        set((state) => {
+          const { [connection.id]: _, ...rest } = state.sessionStores
+          return { sessionStores: { ...rest, [session.id]: { store } } }
+        })
+      }
+    } else {
+      // Fallback: no prior connecting entry (e.g. --ssh auto-connect flow)
+      store = getOrCreateSession(session.id, get, set, connection)
+    }
     if (!useSessionNamesStore.getState().getName(session.id)) {
       const label = connection.target.type === 'remote'
         ? (connection.target.config.label || `${connection.target.config.user}@${connection.target.config.host}`)
         : session.id
       useSessionNamesStore.getState().setName(session.id, label)
-    }
-    // Remove old connecting entry if it was keyed differently
-    if (connection.id !== session.id) {
-      set((state) => {
-        const { [connection.id]: _, ...rest } = state.sessionStores
-        return { sessionStores: { ...rest, [session.id]: { status: 'connected' as const, store } } }
-      })
     }
     console.log(`[renderer:app] Session store created/retrieved for session=${session.id}`)
     if (session.workspaces && session.workspaces.length > 0) {
@@ -387,24 +393,21 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   startRemoteConnect: (config: SSHConnectionConfig) => {
-    set((state) => ({
-      sessionStores: {
-        ...state.sessionStores,
-        [config.id]: { status: 'connecting' as const, connectionId: config.id, config }
-      }
-    }))
+    const connection: ConnectionInfo = { id: config.id, target: { type: 'remote', config }, status: 'connecting' }
+    getOrCreateSession(config.id, get, set, connection)
+    if (!useSessionNamesStore.getState().getName(config.id)) {
+      useSessionNamesStore.getState().setName(config.id, config.label || `${config.user}@${config.host}`)
+    }
     useNavigationStore.getState().setActiveView({ type: 'session', sessionId: config.id })
   },
 
   setSessionError: (connectionId: string, error: string) => {
     const entry = get().sessionStores[connectionId]
-    if (entry?.status === 'connecting') {
-      set((state) => ({
-        sessionStores: {
-          ...state.sessionStores,
-          [connectionId]: { status: 'error' as const, connectionId: entry.connectionId, config: entry.config, error }
-        }
-      }))
+    if (entry) {
+      const conn = entry.store.getState().connection
+      if (conn) {
+        entry.store.setState({ connection: { ...conn, status: 'error' as const, error } })
+      }
     }
   },
 
@@ -417,7 +420,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
 }))
 
-// Helper: get or create a connected session store
+// Helper: get or create a session store
 function getOrCreateSession(
   sessionId: string,
   get: () => AppState,
@@ -426,7 +429,7 @@ function getOrCreateSession(
 ): StoreApi<SessionState> {
   const { sessionStores, windowUuid, git, filesystem, runActions, sessionApi, terminal, llm, github } = get()
   const existing = sessionStores[sessionId]
-  if (existing?.status === 'connected') {
+  if (existing) {
     console.log(`[renderer:app] getOrCreateSession: reusing existing session store for session=${sessionId}`)
     return existing.store
   }
@@ -455,7 +458,7 @@ function getOrCreateSession(
     }
   )
   set((state) => ({
-    sessionStores: { ...state.sessionStores, [sessionId]: { status: 'connected' as const, store } }
+    sessionStores: { ...state.sessionStores, [sessionId]: { store } }
   }))
   console.log(`[renderer:app] getOrCreateSession: session store added to sessionStores, total sessions=${Object.keys(get().sessionStores).length}`)
   return store

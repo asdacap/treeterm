@@ -7,7 +7,7 @@ import { createTtyStore, createTtyWriter } from './createTtyStore'
 import type { Tty, TtyWriter, TtyTerminalDeps } from './createTtyStore'
 import type {
   Workspace, Session, AppState, GitInfo,
-  ConnectionInfo, ActivityState, SSHConnectionConfig,
+  ConnectionInfo, ActivityState,
   TerminalApi, GitApi, FilesystemApi, SessionApi, Settings, WorktreeSettings,
   Application, SandboxConfig, TTYSessionInfo, LlmApi, GitHubApi, RunActionsApi
 } from '../types'
@@ -18,10 +18,7 @@ export type WorkspaceEntry =
   | { status: 'loaded'; data: Workspace; store: WorkspaceStore }
   | { status: 'operation-error'; data: Workspace; store: WorkspaceStore; error: string }
 
-export type SessionEntry =
-  | { status: 'connecting'; connectionId: string; config: SSHConnectionConfig }
-  | { status: 'connected'; store: StoreApi<SessionState> }
-  | { status: 'error'; connectionId: string; config: SSHConnectionConfig; error: string }
+export type SessionEntry = { store: StoreApi<SessionState> }
 
 export interface AppRegistryApi {
   get: (id: string) => Application | undefined
@@ -44,7 +41,7 @@ export interface SessionDeps {
 export interface SessionState {
   sessionId: string
 
-  // Single SSH connection for this session (set at creation, immutable)
+  // SSH connection for this session (transitions: connecting → connected/error)
   connection: ConnectionInfo | null
 
   // TTY writers (write-only, keyed by ptyId)
@@ -138,8 +135,13 @@ export function createSessionStore(
 
   async function syncSessionToDaemon(isRestoring: boolean = false): Promise<void> {
     try {
-      const workspaces = store.getState().workspaces
+      const { workspaces, connection } = store.getState()
       console.log('[session] syncSessionToDaemon called - workspaces:', Object.keys(workspaces).length, 'isRestoring:', isRestoring)
+
+      if (connection && connection.status !== 'connected') {
+        console.log('[session] connection not yet established, skipping sync')
+        return
+      }
 
       if (isRestoring) {
         console.log('[session] currently restoring, skipping sync')
@@ -153,7 +155,7 @@ export function createSessionStore(
       console.log('[session] syncing to daemon:', daemonWorkspaces.length, 'workspaces', JSON.stringify(daemonWorkspaces))
 
       const currentVersion = store.getState().sessionVersion
-      console.log('[session] updating session:', config.sessionId, 'senderUuid:', config.windowUuid, 'expectedVersion:', currentVersion)
+      console.log('[session] updating session:', store.getState().sessionId, 'senderUuid:', config.windowUuid, 'expectedVersion:', currentVersion)
       const result = await deps.sessionApi.update(daemonWorkspaces, config.windowUuid || undefined, currentVersion)
       if (!result.success) {
         console.error('[session] failed to update session:', result.error)

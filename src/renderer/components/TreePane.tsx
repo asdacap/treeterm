@@ -47,7 +47,7 @@ export default function TreePane({ selectFolder }: TreePaneProps): JSX.Element {
           <SessionPanel
             key={sessionId}
             sessionId={sessionId}
-            sessionEntry={sessionStores[sessionId]}
+            sessionStore={sessionStores[sessionId].store}
             selectFolder={selectFolder}
           />
         ))}

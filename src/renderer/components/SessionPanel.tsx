@@ -5,7 +5,7 @@ import ContextMenu from './ContextMenu'
 import { GitFork, ChevronDown, ChevronRight, Loader2, AlertCircle } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
-import type { SessionState, SessionEntry, WorkspaceEntry } from '../store/createSessionStore'
+import type { SessionState, WorkspaceEntry } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import { useNavigationStore } from '../store/navigation'
 import { useKeybindingStore } from '../store/keybinding'
@@ -19,77 +19,15 @@ import { WorkspaceIcon } from './TreePane'
 
 interface SessionPanelProps {
   sessionId: string
-  sessionEntry: SessionEntry
+  sessionStore: StoreApi<SessionState>
   selectFolder: () => Promise<string | null>
 }
 
 export default function SessionPanel({
   sessionId,
-  sessionEntry,
-  selectFolder,
-}: SessionPanelProps): JSX.Element {
-  if (sessionEntry.status === 'connected') {
-    return (
-      <ConnectedSessionPanel
-        sessionId={sessionId}
-        sessionStore={sessionEntry.store}
-        selectFolder={selectFolder}
-      />
-    )
-  }
-
-  // Connecting or error state — render minimal panel
-  return (
-    <PendingSessionPanel
-      sessionId={sessionId}
-      sessionEntry={sessionEntry}
-    />
-  )
-}
-
-// Minimal panel for connecting/error sessions
-function PendingSessionPanel({
-  sessionId,
-  sessionEntry,
-}: {
-  sessionId: string
-  sessionEntry: Extract<SessionEntry, { status: 'connecting' | 'error' }>
-}) {
-  const { setActiveView } = useNavigationStore()
-
-  const label = sessionEntry.config.label || `${sessionEntry.config.user}@${sessionEntry.config.host}`
-
-  return (
-    <div className="session-panel">
-      <div
-        className="session-panel-header"
-        onClick={() => setActiveView({ type: 'session', sessionId })}
-      >
-        <span className="tree-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {sessionEntry.status === 'connecting' && <Loader2 size={14} className="spinning" />}
-          {sessionEntry.status === 'error' && <AlertCircle size={14} style={{ color: '#f44336' }} />}
-          {label}
-        </span>
-      </div>
-      <div className="tree-list">
-        <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>
-          {sessionEntry.status === 'connecting' ? 'Connecting...' : sessionEntry.error}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// Full panel for connected sessions (original implementation)
-function ConnectedSessionPanel({
-  sessionId,
   sessionStore,
   selectFolder,
-}: {
-  sessionId: string
-  sessionStore: StoreApi<SessionState>
-  selectFolder: () => Promise<string | null>
-}): JSX.Element {
+}: SessionPanelProps): JSX.Element {
   const connection = useStore(sessionStore, s => s.connection)
   const {
     workspaces,
@@ -380,21 +318,30 @@ function ConnectedSessionPanel({
           <span
             className="tree-title"
             onDoubleClick={(e) => { e.stopPropagation(); handleStartEditName() }}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
+            {connection?.status === 'connecting' && <Loader2 size={14} className="spinning" />}
+            {connection?.status === 'error' && <AlertCircle size={14} style={{ color: '#f44336' }} />}
             {displayName || sessionId}
           </span>
         )}
-        <button
-          className="add-button"
-          onClick={(e) => { e.stopPropagation(); handleAddWorkspace() }}
-          title="Add workspace"
-        >
-          +
-        </button>
+        {connection?.status === 'connected' && (
+          <button
+            className="add-button"
+            onClick={(e) => { e.stopPropagation(); handleAddWorkspace() }}
+            title="Add workspace"
+          >
+            +
+          </button>
+        )}
       </div>
 
       <div className="tree-list">
-        {rootWorkspaceIds.length === 0 ? (
+        {connection?.status === 'connecting' ? (
+          <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>Connecting...</div>
+        ) : connection?.status === 'error' ? (
+          <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{connection.error}</div>
+        ) : rootWorkspaceIds.length === 0 ? (
           <div className="tree-empty">No workspaces. Click + to add one.</div>
         ) : (
           rootWorkspaceIds.map((id) => renderWorkspace(id))
