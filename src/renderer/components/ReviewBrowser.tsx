@@ -140,7 +140,7 @@ export default function ReviewBrowser({
 
   const handlePromptRebase = useCallback(() => {
     if (parentWorkspace?.gitBranch) {
-      promptHarness(`rebase with ${parentWorkspace.gitBranch}`)
+      promptHarness(`rebase local branch ${wsData.gitBranch} onto ${parentWorkspace.gitBranch}`)
     }
   }, [workspace, parentWorkspace?.gitBranch])
 
