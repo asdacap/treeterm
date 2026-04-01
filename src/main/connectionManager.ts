@@ -17,7 +17,7 @@ import type {
 
 interface Connection {
   target: ConnectionTarget
-  client: GrpcDaemonClient
+  client: GrpcDaemonClient | null
   tunnel?: SSHTunnel
   status: ConnectionStatus
   error?: string
@@ -60,6 +60,9 @@ export class ConnectionManager {
     const conn = this.connections.get(connectionId)
     if (!conn) {
       throw new Error(`Connection not found: ${connectionId}`)
+    }
+    if (!conn.client || conn.status !== 'connected') {
+      throw new Error(`Connection ${connectionId} is ${conn.status}${conn.error ? ': ' + conn.error : ''}`)
     }
     return conn.client
   }
@@ -186,6 +189,8 @@ export class ConnectionManager {
       tunnel.onDisconnect((error) => {
         const conn = this.connections.get(config.id)
         if (conn) {
+          conn.client?.disconnect()
+          conn.client = null
           conn.status = 'disconnected'
           conn.error = error
           this.emitStatus(config.id)
@@ -244,9 +249,8 @@ export class ConnectionManager {
     }
 
     // Disconnect client and tunnel
-    if (conn.client) {
-      conn.client.disconnect()
-    }
+    conn.client?.disconnect()
+    conn.client = null
     if (conn.tunnel) {
       conn.tunnel.disconnect()
     }

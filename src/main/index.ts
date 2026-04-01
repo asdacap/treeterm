@@ -31,8 +31,6 @@ let mainWindow: BrowserWindow | null = null
 let loadingWindow: BrowserWindow | null = null
 const closeConfirmedWindows: Set<number> = new Set()
 let connectionManager: ConnectionManager | null = null
-const gitClients = new Map<string, GitClient>()
-const runActionsClients = new Map<string, RunActionsClient>()
 // Maps sessionId to the daemon client that owns it (populated when session watch returns initial data)
 const sessionConnectionMap = new Map<string, string>()
 // Simple object storage — each entry is an independent terminal's stream.
@@ -438,24 +436,12 @@ server.onDialogGetRecentDirectories(() => {
   return settings.recentDirectories || []
 })
 
-// Get (or create) a GitClient for the given connectionId
 function getGitClientForConnection(connectionId: string): GitClient {
-  let gc = gitClients.get(connectionId)
-  if (!gc) {
-    gc = new GitClient(getClientForConnection(connectionId))
-    gitClients.set(connectionId, gc)
-  }
-  return gc
+  return new GitClient(getClientForConnection(connectionId))
 }
 
-// Get (or create) a RunActionsClient for the given connectionId
 function getRunActionsClientForConnection(connectionId: string): RunActionsClient {
-  let rc = runActionsClients.get(connectionId)
-  if (!rc) {
-    rc = createRunActionsClient(getClientForConnection(connectionId))
-    runActionsClients.set(connectionId, rc)
-  }
-  return rc
+  return createRunActionsClient(getClientForConnection(connectionId))
 }
 
 // Git IPC Handlers - Now handled in main process via ExecStream
