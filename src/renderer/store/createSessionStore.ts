@@ -513,6 +513,15 @@ export function createSessionStore(
     })
 
     try {
+      // Block merge if parent worktree has uncommitted changes
+      const parentHasChanges = await deps.git.hasUncommittedChanges(parent.path)
+      if (parentHasChanges) {
+        store.setState(s => ({
+          workspaces: { ...s.workspaces, [id]: { status: 'operation-error', data: workspace, store: wsStore, error: 'Parent workspace has uncommitted changes. Commit or stash them before merging.' } }
+        }))
+        return { success: false, error: 'Parent workspace has uncommitted changes. Commit or stash them before merging.' }
+      }
+
       const hasChanges = await deps.git.hasUncommittedChanges(workspace.path)
       if (hasChanges) {
         const commitResult = await deps.git.commitAll(

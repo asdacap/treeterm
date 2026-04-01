@@ -489,9 +489,20 @@ describe('createSessionStore', () => {
     })
 
     it('mergeAndRemoveWorkspace auto-commits uncommitted changes', async () => {
-      vi.mocked(deps.git.hasUncommittedChanges).mockResolvedValue(true)
+      // First call is parent (clean), second call is child (dirty)
+      vi.mocked(deps.git.hasUncommittedChanges)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(true)
       await store.getState().mergeAndRemoveWorkspace(childId, false)
       expect(deps.git.commitAll).toHaveBeenCalled()
+    })
+
+    it('mergeAndRemoveWorkspace fails when parent has uncommitted changes', async () => {
+      vi.mocked(deps.git.hasUncommittedChanges).mockResolvedValueOnce(true)
+      const result = await store.getState().mergeAndRemoveWorkspace(childId, false)
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('Parent workspace has uncommitted changes')
+      expect(deps.git.merge).not.toHaveBeenCalled()
     })
 
     it('mergeAndRemoveWorkspace fails when workspace not found', async () => {
@@ -519,9 +530,20 @@ describe('createSessionStore', () => {
     })
 
     it('mergeAndKeepWorkspace auto-commits uncommitted changes', async () => {
-      vi.mocked(deps.git.hasUncommittedChanges).mockResolvedValue(true)
+      // First call is parent (clean), second call is child (dirty)
+      vi.mocked(deps.git.hasUncommittedChanges)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(true)
       await store.getState().mergeAndKeepWorkspace(childId, false)
       expect(deps.git.commitAll).toHaveBeenCalled()
+    })
+
+    it('mergeAndKeepWorkspace fails when parent has uncommitted changes', async () => {
+      vi.mocked(deps.git.hasUncommittedChanges).mockResolvedValueOnce(true)
+      const result = await store.getState().mergeAndKeepWorkspace(childId, false)
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('Parent workspace has uncommitted changes')
+      expect(deps.git.merge).not.toHaveBeenCalled()
     })
 
     it('mergeAndKeepWorkspace fails when workspace not found', async () => {
