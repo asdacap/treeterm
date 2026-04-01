@@ -35,10 +35,6 @@ pub struct PtySession {
     pub data_tx: broadcast::Sender<Vec<u8>>,
     pub exit_tx: broadcast::Sender<(i32, Option<i32>)>,
     pub resize_tx: broadcast::Sender<(i32, i32)>,
-    /// Per-subscriber bounded data channels. Each gRPC stream gets its own
-    /// ~10MB buffer. When any subscriber's buffer fills, the PTY read loop
-    /// blocks, propagating backpressure to the child process.
-    pub data_subs: Vec<mpsc::Sender<Vec<u8>>>,
 }
 
 #[derive(Clone)]
@@ -143,7 +139,6 @@ impl PtyManager {
             data_tx: data_tx.clone(),
             exit_tx: exit_tx.clone(),
             resize_tx: resize_tx.clone(),
-            data_subs: Vec::new(),
         };
 
         let session = Arc::new(Mutex::new(session));
@@ -330,18 +325,22 @@ impl PtyManager {
     /// Atomically subscribe to live data AND snapshot initial state under one lock.
     /// This eliminates the race where data arriving between get_initial_state()
     /// and subscribe_data() would be lost, corrupting the terminal.
+    ///
+    /// Uses broadcast + per-subscriber bridge: the broadcast fan-out is O(1) in
+    /// the read loop, while each subscriber gets its own ~10MB mpsc buffer so a
+    /// slow reader cannot block other subscribers.
     pub async fn subscribe_with_initial_state(
         &self,
         session_id: &str,
     ) -> Result<(Vec<BufferEvent>, mpsc::Receiver<Vec<u8>>), String> {
         let session = self.get_session(session_id).await?;
-        let mut session = session.lock().await;
+        let session = session.lock().await;
 
-        // Subscribe first — any data arriving after this point queues in the channel
-        let (tx, rx) = mpsc::channel(PTY_SUBSCRIBER_CAP);
-        session.data_subs.push(tx);
+        // Subscribe to broadcast first — any data arriving after this point
+        // queues in the broadcast ring buffer.
+        let mut broadcast_rx = session.data_tx.subscribe();
 
-        // Then snapshot state — guaranteed no gap between snapshot and subscription
+        // Snapshot state — guaranteed no gap between snapshot and subscription
         let mut events = Vec::new();
 
         let state = session.parser.screen().state_formatted();
@@ -355,6 +354,31 @@ impl PtyManager {
         for event in &session.raw_buffer {
             events.push(event.clone());
         }
+
+        drop(session); // release lock before spawning
+
+        // Bridge task: drain broadcast into a per-subscriber mpsc buffer.
+        // If the mpsc fills (subscriber too slow) or broadcast lags, the
+        // bridge exits and the mpsc sender is dropped — the gRPC stream
+        // sees recv() → None and ends, prompting the client to reconnect.
+        let (tx, rx) = mpsc::channel(PTY_SUBSCRIBER_CAP);
+        tokio::spawn(async move {
+            loop {
+                match broadcast_rx.recv().await {
+                    Ok(data) => {
+                        if tx.try_send(data).is_err() {
+                            tracing::debug!("dropping slow PTY subscriber (buffer full)");
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::debug!(skipped = n, "PTY subscriber lagged, disconnecting");
+                        break;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
 
         Ok((events, rx))
     }
@@ -498,11 +522,11 @@ async fn read_pty_loop(
             Ok(Ok(0)) => break, // EOF
             Ok(Ok(n)) => {
                 let chunk = buf[..n].to_vec();
-                // Fire-and-forget broadcast for shell-ready detection
+                // Broadcast to all subscriber bridge tasks (non-blocking, O(1))
                 let _ = data_tx.send(chunk.clone());
 
-                // Lock: update raw_buffer + clone subscriber list
-                let subs = {
+                // Update raw_buffer under lock
+                {
                     let mut session = session.lock().await;
                     session.last_activity = chrono_now_millis();
 
@@ -523,26 +547,6 @@ async fn read_pty_loop(
                                 session.parser.set_size(rows, cols);
                             }
                             None => break,
-                        }
-                    }
-
-                    session.data_subs.clone()
-                }; // session lock released
-
-                // Send to each subscriber (blocks on slowest = backpressure to child)
-                let mut dead = Vec::new();
-                for (i, sub) in subs.iter().enumerate() {
-                    if sub.send(chunk.clone()).await.is_err() {
-                        dead.push(i);
-                    }
-                }
-
-                // Clean up disconnected subscribers
-                if !dead.is_empty() {
-                    let mut session = session.lock().await;
-                    for i in dead.into_iter().rev() {
-                        if i < session.data_subs.len() {
-                            session.data_subs.swap_remove(i);
                         }
                     }
                 }
