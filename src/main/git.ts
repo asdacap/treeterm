@@ -1041,7 +1041,7 @@ export class GitClient {
       stream.end()
 
       stream.on('data', (output: ExecOutput) => {
-        if (output.stdout) stdout.push(Buffer.from(output.stdout))
+        if (output.stdout) stdout.push(output.stdout.data)
         if (output.result) {
           resultReceived = true
           const home = Buffer.concat(stdout).toString('utf-8').trim()
