@@ -340,8 +340,20 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   return (
     <ErrorBoundary FallbackComponent={WorkspaceErrorFallback}>
       <div className="workspace-content">
-        {/* Show empty state when no workspace is active, but keep terminals mounted below */}
-        {!activeWorkspace ? (
+        {/* Show loading pane when a workspace is being created (e.g. fork / new worktree) */}
+        {activeEntry?.status === 'loading' ? (
+          <div className="workspace-loading">
+            <div className="workspace-loading-header">
+              <Loader2 size={16} className="spinning" />
+              <span>{activeEntry.message}</span>
+            </div>
+            {activeEntry.output.length > 0 && (
+              <pre className="workspace-loading-output" ref={outputRef}>
+                {activeEntry.output.join('')}
+              </pre>
+            )}
+          </div>
+        ) : !activeWorkspace ? (
           <div className="workspace-empty">
             <div className="workspace-empty-content">
               <h2>No workspace selected</h2>
@@ -495,19 +507,6 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                 )}
               </div>
             </div>
-            {activeEntry?.status === 'loading' && (
-              <div className="workspace-loading">
-                <div className="workspace-loading-header">
-                  <Loader2 size={16} className="spinning" />
-                  <span>{activeEntry.message}</span>
-                </div>
-                {activeEntry.output.length > 0 && (
-                  <pre className="workspace-loading-output" ref={outputRef}>
-                    {activeEntry.output.join('')}
-                  </pre>
-                )}
-              </div>
-            )}
             {(activeEntry?.status === 'error' || activeEntry?.status === 'operation-error') && (
               <div className="workspace-load-error">
                 <div className="workspace-load-error-content">
