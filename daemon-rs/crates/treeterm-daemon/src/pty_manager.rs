@@ -327,17 +327,36 @@ impl PtyManager {
         result
     }
 
-    /// Subscribe to data for a session via a per-subscriber bounded channel.
-    /// Each subscriber gets its own ~10MB buffer with backpressure.
-    pub async fn subscribe_data(
+    /// Atomically subscribe to live data AND snapshot initial state under one lock.
+    /// This eliminates the race where data arriving between get_initial_state()
+    /// and subscribe_data() would be lost, corrupting the terminal.
+    pub async fn subscribe_with_initial_state(
         &self,
         session_id: &str,
-    ) -> Result<mpsc::Receiver<Vec<u8>>, String> {
+    ) -> Result<(Vec<BufferEvent>, mpsc::Receiver<Vec<u8>>), String> {
         let session = self.get_session(session_id).await?;
         let mut session = session.lock().await;
+
+        // Subscribe first — any data arriving after this point queues in the channel
         let (tx, rx) = mpsc::channel(PTY_SUBSCRIBER_CAP);
         session.data_subs.push(tx);
-        Ok(rx)
+
+        // Then snapshot state — guaranteed no gap between snapshot and subscription
+        let mut events = Vec::new();
+
+        let state = session.parser.screen().state_formatted();
+        if !state.is_empty() {
+            events.push(BufferEvent::Data(state));
+        }
+
+        let (rows, cols) = session.parser.screen().size();
+        events.push(BufferEvent::Resize { cols, rows });
+
+        for event in &session.raw_buffer {
+            events.push(event.clone());
+        }
+
+        Ok((events, rx))
     }
 
     /// Subscribe to exit broadcasts for a session.
@@ -707,9 +726,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn subscribe_data_nonexistent_errors() {
+    async fn subscribe_with_initial_state_nonexistent_errors() {
         let mgr = PtyManager::new();
-        assert!(mgr.subscribe_data("nonexistent").await.is_err());
+        assert!(mgr.subscribe_with_initial_state("nonexistent").await.is_err());
     }
 
     #[tokio::test]

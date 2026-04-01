@@ -77,23 +77,28 @@ impl TreeTermDaemon for DaemonService {
                 _ => return,
             };
 
+            // Atomically subscribe + snapshot initial state under one lock.
+            // This prevents data loss between get_initial_state() and subscribe_data().
+            let (initial_events, mut data_rx) = match pty_mgr.subscribe_with_initial_state(&session_id).await {
+                Ok(result) => result,
+                Err(_) => return,
+            };
+
             // Send initial state (vt100 snapshot + parser size + buffered events)
-            if let Ok(events) = pty_mgr.get_initial_state(&session_id).await {
-                for event in events {
-                    let msg = match event {
-                        BufferEvent::Data(data) => PtyOutput {
-                            output: Some(pty_output::Output::Data(PtyData { data })),
-                        },
-                        BufferEvent::Resize { cols, rows } => PtyOutput {
-                            output: Some(pty_output::Output::Resize(PtyResizeData {
-                                cols: cols as i32,
-                                rows: rows as i32,
-                            })),
-                        },
-                    };
-                    if tx.send(Ok(msg)).await.is_err() {
-                        return;
-                    }
+            for event in initial_events {
+                let msg = match event {
+                    BufferEvent::Data(data) => PtyOutput {
+                        output: Some(pty_output::Output::Data(PtyData { data })),
+                    },
+                    BufferEvent::Resize { cols, rows } => PtyOutput {
+                        output: Some(pty_output::Output::Resize(PtyResizeData {
+                            cols: cols as i32,
+                            rows: rows as i32,
+                        })),
+                    },
+                };
+                if tx.send(Ok(msg)).await.is_err() {
+                    return;
                 }
             }
 
@@ -109,13 +114,6 @@ impl TreeTermDaemon for DaemonService {
                     .await;
                 return;
             }
-
-            // Subscribe to live events
-            // data_rx is a per-subscriber bounded mpsc channel (~10MB buffer with backpressure)
-            let mut data_rx = match pty_mgr.subscribe_data(&session_id).await {
-                Ok(rx) => rx,
-                Err(_) => return,
-            };
             let mut exit_rx = match pty_mgr.subscribe_exit(&session_id).await {
                 Ok(rx) => rx,
                 Err(_) => return,
