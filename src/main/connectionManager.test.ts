@@ -254,20 +254,21 @@ describe('ConnectionManager', () => {
     })
 
     it('notifies per-connection status watchers', async () => {
+      await manager.connectRemote(remoteConfig)
       const cb = vi.fn()
       manager.watchConnectionStatus('remote-1', cb)
-      await manager.connectRemote(remoteConfig)
 
+      // Trigger a status change via tunnel disconnect
+      tunnelDisconnectCallback?.('lost connection')
       expect(cb).toHaveBeenCalled()
       const statuses = cb.mock.calls.map((c: unknown[]) => (c[0] as { status: string }).status)
-      expect(statuses).toContain('connecting')
-      expect(statuses).toContain('connected')
+      expect(statuses).toContain('disconnected')
     })
 
     it('forwards tunnel output to watchers', async () => {
+      await manager.connectRemote(remoteConfig)
       const outputCb = vi.fn()
       manager.watchOutput('remote-1', outputCb)
-      await manager.connectRemote(remoteConfig)
 
       // Simulate tunnel output via the captured callback
       tunnelOutputCallback?.('hello from tunnel')
