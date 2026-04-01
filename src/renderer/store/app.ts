@@ -234,7 +234,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   initialize: async (deps: AppDeps) => {
     set(deps)
-    const { terminal, sessionApi, settingsApi, appApi, daemon, getWindowUuid, getInitialWorkspace } = deps
+    const { terminal, sessionApi, settingsApi, appApi, daemon, ssh, getWindowUuid, getInitialWorkspace } = deps
 
     get().initializeApplications()
     useSettingsStore.getState().init(settingsApi, terminal.kill.bind(terminal))
@@ -312,6 +312,15 @@ export const useAppStore = create<AppState>()((set, get) => ({
       set({ isActiveProcessesOpen: true })
     })
 
+    const unsubSshStatus = ssh.onConnectionStatus((info) => {
+      for (const entry of Object.values(get().sessionStores)) {
+        const conn = entry.store.getState().connection
+        if (conn && conn.id === info.id) {
+          entry.store.setState({ connection: info })
+        }
+      }
+    })
+
     // Handle initial workspace from CLI
     const initialPath = await getInitialWorkspace()
     if (initialPath) {
@@ -340,6 +349,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       unsubSshAutoConnected()
       unsubDisconnect()
       unsubActiveProcesses()
+      unsubSshStatus()
     }
   },
 
