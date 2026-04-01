@@ -39,6 +39,10 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
 
   const tabs = workspace ? getTabs(workspace) : []
   const activeTabId = workspace?.activeTabId ?? null
+  const tabsRef = useRef(tabs)
+  tabsRef.current = tabs
+  const activeTabIdRef = useRef(activeTabId)
+  activeTabIdRef.current = activeTabId
 
   const [model, setModel] = useState<Model | null>(null)
   const layoutRef = useRef<Layout>(null)
@@ -49,35 +53,39 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
 
   // Initialize model from metadata or create default
   useEffect(() => {
-    if (!workspace) return
+    const currentWorkspace = ws.getState().workspace
+    if (!currentWorkspace) return
 
+    const currentTabs = tabsRef.current
+    const currentActiveTabId = activeTabIdRef.current
     let json: IJsonModel
-    const saved = workspace.metadata?.layoutModel
+    const saved = currentWorkspace.metadata?.layoutModel
     if (saved) {
       try {
         json = JSON.parse(saved)
       } catch {
-        json = createDefaultLayoutModel(tabs, activeTabId, getApplication)
+        json = createDefaultLayoutModel(currentTabs, currentActiveTabId, getApplication)
       }
     } else {
-      json = createDefaultLayoutModel(tabs, activeTabId, getApplication)
+      json = createDefaultLayoutModel(currentTabs, currentActiveTabId, getApplication)
     }
 
     const m = Model.fromJson(json)
     setModel(m)
-    syncedTabIdsRef.current = new Set(tabs.map(t => t.id))
-    // Only run on mount / workspace ID change
-  }, [workspace.id])
+    syncedTabIdsRef.current = new Set(currentTabs.map(t => t.id))
+  }, [workspace?.id, getApplication, ws])
 
   // Sync store tab changes → model (adds/removes)
+  const appStates = workspace?.appStates
   useEffect(() => {
-    if (!model) return
+    if (!model || !appStates) return
 
-    const currentIds = new Set(tabs.map(t => t.id))
+    const currentTabs = tabsRef.current
+    const currentIds = new Set(currentTabs.map(t => t.id))
     const synced = syncedTabIdsRef.current
 
     // Detect added tabs
-    const added = tabs.filter(t => !synced.has(t.id))
+    const added = currentTabs.filter(t => !synced.has(t.id))
     // Detect removed tabs
     const removed = Array.from(synced).filter(id => !currentIds.has(id))
 
@@ -115,7 +123,7 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
     // Handles tabs that exist in syncedTabIdsRef but were never added to the model
     // (e.g. initial add failed)
     let reconciled = false
-    for (const tab of tabs) {
+    for (const tab of currentTabs) {
       if (!model.getNodeById(tab.id)) {
         const tabset = findTabset()
         if (tabset) {
@@ -133,7 +141,7 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
     if (added.length > 0 || removed.length > 0 || reconciled) {
       setModel(model)
     }
-  }, [model, tabs])
+  }, [model, appStates, getApplication])
 
   // Sync store active tab → model selected tab
   useEffect(() => {
@@ -179,7 +187,7 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
   // Customize tab rendering with icons and activity indicators
   const handleRenderTab = useCallback((node: TabNode, renderValues: ITabRenderValues) => {
     const tabId = node.getId()
-    const tab = tabs.find(t => t.id === tabId)
+    const tab = tabsRef.current.find(t => t.id === tabId)
     if (tab) {
       const app = getApplication(tab.applicationId)
       if (app) {
@@ -189,7 +197,7 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
         <TabActivityIndicator key="activity" tabId={tabId} />
       )
     }
-  }, [tabs, getApplication])
+  }, [getApplication])
 
   // Add "+" button to each tabset header; menu renders via portal
   const handleRenderTabSet = useCallback((node: TabSetNode | BorderNode, renderValues: ITabSetRenderValues) => {

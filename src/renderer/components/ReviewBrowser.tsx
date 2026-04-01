@@ -33,7 +33,6 @@ export default function ReviewBrowser({
   const { refreshDiffStatus } = useStore(gitController)
   const git = getGitApi()
   const workspaceId = wsData.id
-  const workspacePath = wsData.path
   const parentWorkspace = parentWorkspaceId ? lookupWorkspace(parentWorkspaceId) : undefined
   const reviewState = wsData?.appStates[tabId]?.state as ReviewState | undefined
 
@@ -105,7 +104,7 @@ export default function ReviewBrowser({
   // Persist view state to tab state for restoration across workspace switches
   const persistViewState = useCallback((updates: Partial<ReviewState>) => {
     updateTabState<ReviewState>(tabId, (s) => ({ ...s, ...updates }))
-  }, [tabId])
+  }, [tabId, updateTabState])
 
   const handleScrollPositionChange = useCallback((scrollTop: number) => {
     persistViewState({ scrollTop })
@@ -114,16 +113,17 @@ export default function ReviewBrowser({
   const handleRefresh = useCallback(async () => {
     setRefreshing(true)
     try {
+      const h = helpersRef.current
       await Promise.all([
-        loadUncommittedChanges(),
-        loadReviews(),
-        ...(parentWorkspace ? [loadDiff(), checkConflicts()] : []),
+        h.loadUncommittedChanges(),
+        h.loadReviews(),
+        ...(parentWorkspace ? [h.loadDiff(), h.checkConflicts()] : []),
       ])
       refreshDiffStatus()
     } finally {
       setRefreshing(false)
     }
-  }, [workspacePath, parentWorkspace])
+  }, [parentWorkspace, refreshDiffStatus])
 
   // Auto-refresh when tab becomes visible (e.g., switching back from terminal)
   const wasVisibleRef = useRef<boolean | null>(null)
@@ -136,13 +136,13 @@ export default function ReviewBrowser({
 
   const handlePromptCommit = useCallback(() => {
     promptHarness('commit')
-  }, [workspace])
+  }, [promptHarness])
 
   const handlePromptRebase = useCallback(() => {
     if (parentWorkspace?.gitBranch) {
       promptHarness(`rebase local branch ${wsData.gitBranch} onto ${parentWorkspace.gitBranch}`)
     }
-  }, [workspace, parentWorkspace?.gitBranch])
+  }, [promptHarness, wsData.gitBranch, parentWorkspace?.gitBranch])
 
   // Resize handlers
   const handleResizeMouseDown = useCallback(() => {
@@ -172,21 +172,22 @@ export default function ReviewBrowser({
   useEffect(() => {
     if (!wsData) return
 
-    loadUncommittedChanges()
-    loadReviews()
+    const h = helpersRef.current
+    h.loadUncommittedChanges()
+    h.loadReviews()
 
     if (parentWorkspace) {
-      loadDiff()
-      checkConflicts()
+      h.loadDiff()
+      h.checkConflicts()
     } else {
       setLoading(false)
     }
 
     // If commits tab was persisted, load commits on mount
     if (viewMode === 'commits') {
-      loadCommits()
+      h.loadCommits()
     }
-  }, [workspaceId, parentWorkspaceId])
+  }, [workspaceId, parentWorkspaceId, wsData, parentWorkspace, viewMode])
 
   // Auto-restore persisted file selection after initial data load
   useEffect(() => {
@@ -196,10 +197,10 @@ export default function ReviewBrowser({
       const fileExists = diff.files.some(f => f.path === reviewState.selectedFilePath)
       if (fileExists) {
         pendingRestoreRef.current = false
-        loadFileDiff(reviewState.selectedFilePath)
+        helpersRef.current.loadFileDiff(reviewState.selectedFilePath)
       }
     }
-  }, [diff])
+  }, [diff, viewMode, reviewState?.selectedFilePath])
 
   useEffect(() => {
     if (!pendingRestoreRef.current) return
@@ -208,10 +209,10 @@ export default function ReviewBrowser({
       const file = uncommitted.files.find(f => f.path === reviewState.selectedUncommittedFilePath)
       if (file) {
         pendingRestoreRef.current = false
-        loadUncommittedFileDiff(file)
+        helpersRef.current.loadUncommittedFileDiff(file)
       }
     }
-  }, [uncommitted])
+  }, [uncommitted, viewMode, reviewState?.selectedUncommittedFilePath])
 
   // Close merge dropdown on click outside
   useEffect(() => {
@@ -394,6 +395,9 @@ export default function ReviewBrowser({
     }
     setLoadingFileDiff(false)
   }
+
+  const helpersRef = useRef({ loadDiff, loadReviews, loadUncommittedChanges, checkConflicts, loadCommits, loadFileDiff, loadUncommittedFileDiff })
+  helpersRef.current = { loadDiff, loadReviews, loadUncommittedChanges, checkConflicts, loadCommits, loadFileDiff, loadUncommittedFileDiff }
 
   const handleStageFile = async (filePath: string) => {
     setStagingInProgress(true)

@@ -60,7 +60,7 @@ function FilesystemBrowserContent({
       ...s,
       scrollTop
     }))
-  }, [tabId])
+  }, [tabId, updateTabState])
 
   const toggleExpandedDir = (dirPath: string) => {
     updateTabState<FilesystemState>(tabId, (s) => {
@@ -85,7 +85,7 @@ function FilesystemBrowserContent({
       }
     }
     updateOutdated()
-  }, [workspacePath])
+  }, [workspacePath, git, updateOutdatedReviewComments, wsData.isGitRepo])
 
   // Clear comment input when selected file changes
   useEffect(() => {

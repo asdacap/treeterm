@@ -225,7 +225,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
         <div style={{ marginBottom: 12 }}>
           <label style={labelStyle}>Port Forwards</label>
           {portForwards.map((pf, i) => (
-            <div key={i} style={{
+            <div key={`${pf.localPort}-${pf.remoteHost}:${pf.remotePort}`} style={{
               display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4,
               fontSize: 12, color: '#cdd6f4'
             }}>

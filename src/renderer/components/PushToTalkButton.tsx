@@ -28,7 +28,7 @@ export default function PushToTalkButton({ onTranscript, onSubmit }: PushToTalkB
         settings.stt.language
       )
     }
-  }, [settings.stt])
+  }, [settings.stt, stt])
 
   const handleTranscript = useCallback(
     (text: string) => {

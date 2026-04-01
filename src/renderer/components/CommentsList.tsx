@@ -64,7 +64,7 @@ export default function CommentsList({
     }
 
     fetchFiles()
-  }, [comments, wsData.path])
+  }, [comments, wsData.path, fileContents, filesystem])
 
   const handleToggleAddressed = (commentId: string) => {
     toggleReviewCommentAddressed(commentId)

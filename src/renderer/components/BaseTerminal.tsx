@@ -99,10 +99,13 @@ export default function BaseTerminal({
   // Get existing ptyId from store for reconnection
   const appState = wsData?.appStates[tabId]
   const existingPtyId = (appState?.state as BaseTerminalState | undefined)?.ptyId
+  const existingPtyIdRef = useRef(existingPtyId)
+  existingPtyIdRef.current = existingPtyId
 
   useEffect(() => {
+    const currentExistingPtyId = existingPtyIdRef.current
     console.log(`[${config.logPrefix} ${tabId}] useEffect running`, {
-      existingPtyId,
+      existingPtyId: currentExistingPtyId,
       workspaceId
     })
 
@@ -138,7 +141,7 @@ export default function BaseTerminal({
 
     const init = async () => {
       // Phase 1: Resolve TTY
-      if (!existingPtyId) {
+      if (!currentExistingPtyId) {
         setLoading(false)
         setOverlay({ message: 'No PTY available for this terminal', type: 'error' })
         return
@@ -146,11 +149,11 @@ export default function BaseTerminal({
 
       let tty: Tty
       try {
-        const result = await session.openTtyStream(existingPtyId)
-        console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, existingPtyId)
+        const result = await session.openTtyStream(currentExistingPtyId)
+        console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, currentExistingPtyId)
         tty = result.tty
       } catch (error) {
-        console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, existingPtyId, error)
+        console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, currentExistingPtyId, error)
         if (cancelled) return
         setLoading(false)
         setOverlay({ message: `Failed to reattach terminal: ${error instanceof Error ? error.message : 'Unknown error'}`, type: 'error' })
@@ -305,7 +308,7 @@ export default function BaseTerminal({
             case 'exit': {
               console.log(`[${config.logPrefix} ${tabId}] PTY exited with code:`, event.exitCode)
               if (!cancelled) {
-                const currentTab = wsData?.appStates[tabId]
+                const currentTab = workspace.getState().workspace?.appStates[tabId]
                 const keepOnExit = (currentTab?.state as BaseTerminalState | undefined)?.keepOnExit
                 const immediateFailure = event.exitCode !== 0 && (Date.now() - connectedAt) < 1000
                 if (immediateFailure) {
@@ -377,8 +380,7 @@ export default function BaseTerminal({
       // The PTY lifecycle is managed by removeWorkspace/removeTab in workspace.ts
       terminal?.dispose()
     }
-    // Note: existingPtyId is intentionally NOT in deps - we only check it on mount/re-run
-  }, [tabId, workspaceId, config.themeBackground, settings])
+  }, [tabId, workspaceId, config, settings, removeTab, setTabState, sessionStore, workspace])
 
   const handleScrollDown = useCallback(() => {
     terminalRef.current?.scrollToBottom()

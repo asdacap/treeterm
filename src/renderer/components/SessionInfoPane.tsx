@@ -15,9 +15,14 @@ type SshSubTab = 'bootstrap' | 'tunnel' | 'portforwards'
 const BOOTSTRAP_PREFIXES = ['[bootstrap]', '[bootstrap:err]', '[ssh]', '[start]', '[start:err]']
 const TUNNEL_PREFIXES = ['[tunnel]', '[tunnel:err]']
 
-function filterLines(lines: string[], prefixes: string[]): string[] {
-  return lines.filter(line =>
-    prefixes.some(prefix => line.includes(prefix))
+interface OutputLine {
+  id: number
+  line: string
+}
+
+function filterLines(lines: OutputLine[], prefixes: string[]): OutputLine[] {
+  return lines.filter(item =>
+    prefixes.some(prefix => item.line.includes(prefix))
   )
 }
 
@@ -58,11 +63,12 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
 
   const [activeTab, setActiveTab] = useState<TabId>(isRemote ? 'ssh' : 'info')
   const [sshSubTab, setSshSubTab] = useState<SshSubTab>('bootstrap')
-  const [output, setOutput] = useState<string[]>([])
+  const [output, setOutput] = useState<OutputLine[]>([])
   const [portForwards, setPortForwards] = useState<PortForwardInfo[]>([])
   const [showPortForwardDialog, setShowPortForwardDialog] = useState(false)
-  const [expandedPfOutput, setExpandedPfOutput] = useState<Record<string, string[]>>({})
+  const [expandedPfOutput, setExpandedPfOutput] = useState<Record<string, OutputLine[]>>({})
   const scrollRef = useRef<HTMLDivElement>(null)
+  const nextLineIdRef = useRef(0)
 
   // Session data for JSON tab
   const rawSessionId = useStore(sessionStore, s => s.sessionId)
@@ -76,13 +82,14 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
     if (!isRemote || !connection) return
     let unsubscribe: (() => void) | undefined
     ssh.watchOutput(connection.id, (line) => {
-      setOutput(prev => [...prev, line])
+      const id = nextLineIdRef.current++
+      setOutput(prev => [...prev, { id, line }])
     }).then(({ scrollback, unsubscribe: unsub }) => {
-      setOutput(scrollback)
+      setOutput(scrollback.map(line => ({ id: nextLineIdRef.current++, line })))
       unsubscribe = unsub
     }).catch(console.error)
     return () => { unsubscribe?.() }
-  }, [isRemote, connection?.id, ssh])
+  }, [isRemote, connection, ssh])
 
   const sshOutput = useMemo(() => ({
     bootstrap: filterLines(output, BOOTSTRAP_PREFIXES),
@@ -99,7 +106,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
   useEffect(() => {
     if (!isRemote || !isConnected || !connection) return
     ssh.listPortForwards(connection.id).then(setPortForwards).catch(console.error)
-  }, [isRemote, isConnected, connection?.id, ssh])
+  }, [isRemote, isConnected, connection, ssh])
 
   useEffect(() => {
     if (!isRemote || !isConnected) return
@@ -116,7 +123,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
       })
     })
     return unsubscribe
-  }, [isRemote, isConnected, connection?.id, ssh])
+  }, [isRemote, isConnected, connection, ssh])
 
   const handleTogglePfOutput = (pfId: string, currentlyExpanded: boolean) => {
     if (currentlyExpanded) {
@@ -127,12 +134,13 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
       })
     } else {
       ssh.watchPortForwardOutput(pfId, (line) => {
+        const id = nextLineIdRef.current++
         setExpandedPfOutput(prev => ({
           ...prev,
-          [pfId]: [...(prev[pfId] ?? []), line]
+          [pfId]: [...(prev[pfId] ?? []), { id, line }]
         }))
       }).then(({ scrollback, unsubscribe: _ }) => {
-        setExpandedPfOutput(prev => ({ ...prev, [pfId]: scrollback }))
+        setExpandedPfOutput(prev => ({ ...prev, [pfId]: scrollback.map(line => ({ id: nextLineIdRef.current++, line })) }))
       }).catch(console.error)
       setExpandedPfOutput(prev => ({ ...prev, [pfId]: [] }))
     }
@@ -294,8 +302,8 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
           {sshOutput.bootstrap.length === 0 ? (
             <div className="ssh-pane-output-empty">No bootstrap output yet...</div>
           ) : (
-            sshOutput.bootstrap.map((line, i) => (
-              <div key={`bootstrap-${i}`} className="ssh-pane-output-line">{line}</div>
+            sshOutput.bootstrap.map((item) => (
+              <div key={item.id} className="ssh-pane-output-line">{item.line}</div>
             ))
           )}
         </div>
@@ -304,8 +312,8 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
           {sshOutput.tunnel.length === 0 ? (
             <div className="ssh-pane-output-empty">No tunnel output yet...</div>
           ) : (
-            sshOutput.tunnel.map((line, i) => (
-              <div key={`tunnel-${i}`} className="ssh-pane-output-line">{line}</div>
+            sshOutput.tunnel.map((item) => (
+              <div key={item.id} className="ssh-pane-output-line">{item.line}</div>
             ))
           )}
         </div>
@@ -380,8 +388,8 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
                         {(expandedPfOutput[pf.id] ?? []).length === 0 ? (
                           <div className="ssh-pane-output-empty">No output yet...</div>
                         ) : (
-                          (expandedPfOutput[pf.id] ?? []).map((line, i) => (
-                            <div key={i} className="ssh-pane-output-line">{line}</div>
+                          (expandedPfOutput[pf.id] ?? []).map((item) => (
+                            <div key={item.id} className="ssh-pane-output-line">{item.line}</div>
                           ))
                         )}
                       </div>
