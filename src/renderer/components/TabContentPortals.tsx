@@ -80,14 +80,8 @@ export default function TabContentPortals({ sessionStore, activeWorkspaceId }: T
           const content = (
             <ErrorBoundary
               key={`error-${wsId}-${tab.id}`}
-              fallback={(error, reset) => (
-                <TabErrorFallback
-                  error={error}
-                  tabTitle={tab.title}
-                  onReset={reset}
-                  onClose={() => entry.store.getState().removeTab(tab.id)}
-                />
-              )}
+              FallbackComponent={TabErrorFallback}
+              fallbackProps={{ tabTitle: tab.title, onClose: () => entry.store.getState().removeTab(tab.id) }}
             >
               <div
                 className={`app-wrapper ${tab.applicationId}-wrapper`}

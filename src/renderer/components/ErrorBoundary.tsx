@@ -1,8 +1,15 @@
 import React, { Component, ReactNode } from 'react'
 
-interface ErrorBoundaryProps {
+export interface FallbackProps {
+  error: Error
+  reset: () => void
+}
+
+interface ErrorBoundaryProps<FP extends FallbackProps = FallbackProps> {
   children: ReactNode
-  fallback?: ReactNode | ((error: Error, reset: () => void) => ReactNode)
+  fallback?: ReactNode
+  FallbackComponent?: React.ComponentType<FP>
+  fallbackProps?: Omit<FP, keyof FallbackProps>
   onError?: (error: Error, errorInfo: React.ErrorInfo) => void
 }
 
@@ -11,8 +18,8 @@ interface ErrorBoundaryState {
   error: Error | null
 }
 
-export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
+export class ErrorBoundary<FP extends FallbackProps = FallbackProps> extends Component<ErrorBoundaryProps<FP>, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps<FP>) {
     super(props)
     this.state = { hasError: false, error: null }
   }
@@ -35,8 +42,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   render(): ReactNode {
     if (this.state.hasError && this.state.error) {
-      if (typeof this.props.fallback === 'function') {
-        return this.props.fallback(this.state.error, this.reset)
+      if (this.props.FallbackComponent) {
+        const FallbackComp = this.props.FallbackComponent
+        const props = { error: this.state.error, reset: this.reset, ...this.props.fallbackProps } as FP
+        return <FallbackComp {...props} />
       }
       return this.props.fallback || <div>Something went wrong</div>
     }
