@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useStore } from 'zustand'
 import type { FileEntry, WorkspaceStore } from '../types'
+import { useFilesystemApi } from '../hooks/useWorkspaceApis'
 
 interface FileTreeProps {
   workspace: WorkspaceStore
@@ -30,9 +31,9 @@ export function FileTree({
   onSelectFile,
   onToggleDir
 }: FileTreeProps): JSX.Element {
-  const { workspace: wsData, getFilesystemApi } = useStore(workspace)
+  const { workspace: wsData } = useStore(workspace)
   const workspacePath = wsData.path
-  const filesystem = getFilesystemApi()
+  const filesystem = useFilesystemApi(workspace)
   const [dirContents, setDirContents] = useState<Record<string, DirectoryState>>({})
   const [search, setSearch] = useState<SearchState>({
     query: '',

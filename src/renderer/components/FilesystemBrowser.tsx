@@ -3,6 +3,7 @@ import { useStore } from 'zustand'
 import { FileTree } from './FileTree'
 import { FileViewer } from './FileViewer'
 import type { FilesystemState, WorkspaceStore } from '../types'
+import { useGitApi } from '../hooks/useWorkspaceApis'
 
 interface FilesystemBrowserProps {
   workspace: WorkspaceStore
@@ -33,9 +34,9 @@ function FilesystemBrowserContent({
   tabId: string
   state: FilesystemState
 }): JSX.Element {
-  const { workspace: wsData, updateTabState, reviewComments: reviewCommentStore, getGitApi } = useStore(workspace)
+  const { workspace: wsData, updateTabState, reviewComments: reviewCommentStore } = useStore(workspace)
+  const git = useGitApi(workspace)
   const { getReviewComments, addReviewComment, deleteReviewComment, updateOutdatedReviewComments } = useStore(reviewCommentStore)
-  const git = getGitApi()
   const workspacePath = wsData.path
 
   // Resize state

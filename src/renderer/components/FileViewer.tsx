@@ -4,6 +4,7 @@ import Editor, { OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
 import { useStore } from 'zustand'
 import type { EditorState, ReviewComment, WorkspaceStore } from '../types'
+import { useFilesystemApi } from '../hooks/useWorkspaceApis'
 import { MarkdownPreview } from './MarkdownPreview'
 import { CommentInput } from './CommentInput'
 import { CommentDisplay } from './CommentDisplay'
@@ -72,8 +73,8 @@ export function FileViewer({
   initialScrollTop,
   onScrollPositionChange
 }: FileViewerProps): JSX.Element {
-  const { workspace: wsData, addTab, getFilesystemApi } = useStore(workspace)
-  const filesystem = getFilesystemApi()
+  const { workspace: wsData, addTab } = useStore(workspace)
+  const filesystem = useFilesystemApi(workspace)
   const [fileState, setFileState] = useState<FileState>({
     content: '',
     language: 'plaintext',

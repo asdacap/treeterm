@@ -3,6 +3,7 @@ import Editor, { OnMount, OnChange } from '@monaco-editor/react'
 import { editor, KeyMod, KeyCode } from 'monaco-editor'
 import { useStore } from 'zustand'
 import type { EditorState, WorkspaceStore } from '../types'
+import { useFilesystemApi } from '../hooks/useWorkspaceApis'
 import { MarkdownPreview } from './MarkdownPreview'
 
 interface FileEditorProps {
@@ -22,8 +23,8 @@ function getFilename(filePath: string): string {
 }
 
 export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
-  const { workspace: wsData, updateTabState, updateTabTitle, getFilesystemApi } = useStore(workspace)
-  const filesystem = getFilesystemApi()
+  const { workspace: wsData, updateTabState, updateTabTitle } = useStore(workspace)
+  const filesystem = useFilesystemApi(workspace)
   const appState = wsData?.appStates[tabId]
   const state = appState?.state as EditorState | undefined
 

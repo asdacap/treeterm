@@ -3,6 +3,7 @@ import { useStore } from 'zustand'
 import { useAppStore } from '../store/app'
 import { generateReviewPrompt } from '../utils/reviewPrompt'
 import type { ReviewComment, FilesystemState, WorkspaceStore } from '../types'
+import { useFilesystemApi } from '../hooks/useWorkspaceApis'
 
 interface CommentsListProps {
   workspace: WorkspaceStore
@@ -30,10 +31,10 @@ function extractCodeContext(
 export default function CommentsList({
   workspace,
 }: CommentsListProps): JSX.Element {
-  const { workspace: wsData, reviewComments: reviewCommentStore, addTab, getFilesystemApi } = useStore(workspace)
+  const { workspace: wsData, reviewComments: reviewCommentStore, addTab } = useStore(workspace)
   const { getReviewComments, toggleReviewCommentAddressed, deleteReviewComment } = useStore(reviewCommentStore)
   const clipboard = useAppStore((state) => state.clipboard)
-  const filesystem = getFilesystemApi()
+  const filesystem = useFilesystemApi(workspace)
   const comments: ReviewComment[] = getReviewComments()
   const [fileContents, setFileContents] = useState<Map<string, string>>(new Map())
   const [promptExpanded, setPromptExpanded] = useState(false)

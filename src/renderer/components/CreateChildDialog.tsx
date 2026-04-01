@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useStore } from 'zustand'
 import type { WorktreeInfo, BranchInfo, WorktreeSettings, WorkspaceStore } from '../types'
 import { useAppStore } from '../store/app'
+import { useGitApi } from '../hooks/useWorkspaceApis'
 
 interface CreateChildDialogProps {
   parentWorkspace: WorkspaceStore
@@ -26,8 +27,8 @@ export default function CreateChildDialog({
   openWorktreePaths,
   initialMode
 }: CreateChildDialogProps) {
-  const { workspace: parentWsData, getGitApi } = useStore(parentWorkspace)
-  const git = getGitApi()
+  const { workspace: parentWsData } = useStore(parentWorkspace)
+  const git = useGitApi(parentWorkspace)
   const [mode, setMode] = useState<TabMode>(initialMode ?? 'create')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')

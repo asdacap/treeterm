@@ -4,6 +4,7 @@ import { useStore } from 'zustand'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
 import { getTabs } from '../types'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, GitLogCommit, WorkspaceStore, ReviewState } from '../types'
+import { useGitApi } from '../hooks/useWorkspaceApis'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
 import { CommittedDiffFileTree, UncommittedDiffFileTree, getSortedFilePaths } from './DiffFileTree'
 
@@ -25,13 +26,13 @@ export default function ReviewBrowser({
   isVisible,
 }: ReviewBrowserProps) {
   const {
-    workspace: wsData, lookupWorkspace, getGitApi,
+    workspace: wsData, lookupWorkspace,
     promptHarness, mergeAndRemove, mergeAndKeep, closeAndClean, removeTab,
     reviewComments: reviewCommentStore, gitController, updateTabState,
   } = useStore(workspace)
   const { getReviewComments, addReviewComment, deleteReviewComment, updateOutdatedReviewComments } = useStore(reviewCommentStore)
   const { refreshDiffStatus } = useStore(gitController)
-  const git = getGitApi()
+  const git = useGitApi(workspace)
   const workspaceId = wsData.id
   const parentWorkspace = parentWorkspaceId ? lookupWorkspace(parentWorkspaceId) : undefined
   const reviewState = wsData?.appStates[tabId]?.state as ReviewState | undefined
