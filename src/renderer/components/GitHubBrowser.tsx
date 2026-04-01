@@ -88,8 +88,8 @@ function ReviewsSection({ reviews }: { reviews: GitHubReview[] }) {
     <div className="github-section">
       <h3 className="github-section-title">Reviews</h3>
       <div className="github-section-list">
-        {reviews.map((review, i) => (
-          <div key={i} className="github-review-item">
+        {reviews.map((review) => (
+          <div key={`${review.author}-${review.state}`} className="github-review-item">
             <ReviewStateIcon state={review.state} />
             <span className="github-review-author">{review.author}</span>
             <span className="github-review-state">{formatReviewState(review.state)}</span>
@@ -127,8 +127,8 @@ function CheckRunsSection({ checkRuns }: { checkRuns: GitHubCheckRun[] }) {
     <div className="github-section">
       <h3 className="github-section-title">Checks</h3>
       <div className="github-section-list">
-        {checkRuns.map((check, i) => (
-          <div key={i} className="github-check-item">
+        {checkRuns.map((check) => (
+          <div key={check.name} className="github-check-item">
             <CheckRunIcon check={check} />
             <span className="github-check-name">{check.name}</span>
           </div>
@@ -165,8 +165,8 @@ function UnresolvedThreadsSection({ threads, prUrl }: { threads: GitHubReviewThr
     <div className="github-section">
       <h3 className="github-section-title">Unresolved Comments ({threads.length})</h3>
       <div className="github-section-list">
-        {threads.map((thread, i) => (
-          <div key={i} className="github-thread-item" onClick={() => window.open(prUrl, '_blank')}>
+        {threads.map((thread) => (
+          <div key={`${thread.path}:${thread.line ?? 'general'}-${thread.author}`} className="github-thread-item" onClick={() => window.open(prUrl, '_blank')}>
             <div className="github-thread-header">
               <span className="github-thread-path">{thread.path}{thread.line ? `:${thread.line}` : ''}</span>
               <span className="github-thread-author">{thread.author}</span>

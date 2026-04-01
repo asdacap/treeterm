@@ -78,7 +78,7 @@ export function MonacoDiffViewer({
     return () => {
       onScrollPositionChange?.(lastScrollTopRef.current)
     }
-  }, [])
+  }, [onScrollPositionChange])
 
   const updateLineChanges = () => {
     if (!diffEditorRef.current) return
@@ -330,8 +330,9 @@ export function MonacoDiffViewer({
 
     setCommentDisplayContainers(newContainers)
 
+    const currentZones = commentDisplayZonesRef.current
     return () => {
-      Array.from(commentDisplayZonesRef.current.values()).forEach(zone => {
+      Array.from(currentZones.values()).forEach(zone => {
         try {
           zone.editor.changeViewZones((accessor: editor.IViewZoneChangeAccessor) => {
             accessor.removeZone(zone.zoneId)
@@ -340,7 +341,7 @@ export function MonacoDiffViewer({
           // Editor may already be disposed
         }
       })
-      commentDisplayZonesRef.current.clear()
+      currentZones.clear()
     }
   }, [comments])
 

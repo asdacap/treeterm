@@ -27,7 +27,7 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
   // Persist messages to tab state
   useEffect(() => {
     workspaceStore.updateTabState<ChatState>(tab.id, () => ({ messages }))
-  }, [messages])
+  }, [messages, tab.id, workspaceStore])
 
   // Subscribe to LLM events
   useEffect(() => {

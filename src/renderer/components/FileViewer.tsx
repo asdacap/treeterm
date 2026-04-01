@@ -128,11 +128,11 @@ export function FileViewer({
     }
 
     loadFile()
-  }, [wsData.path, filePath])
+  }, [wsData.path, filePath, filesystem])
 
   useEffect(() => {
     setViewMode(onLineClick ? 'source' : 'preview')
-  }, [filePath])
+  }, [filePath, onLineClick])
 
   const handleEditorMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor
@@ -158,7 +158,7 @@ export function FileViewer({
     return () => {
       onScrollPositionChange?.(lastScrollTopRef.current)
     }
-  }, [])
+  }, [onScrollPositionChange])
 
   // Scroll to a specific line when requested, or restore scroll position
   useEffect(() => {
@@ -169,7 +169,7 @@ export function FileViewer({
     } else if (initialScrollTop) {
       editorRef.current.setScrollTop(initialScrollTop)
     }
-  }, [scrollToLine, fileState.loading])
+  }, [scrollToLine, fileState.loading, initialScrollTop, onScrollToLineUsed])
 
   // Add decorations for lines with comments
   useEffect(() => {
@@ -255,8 +255,9 @@ export function FileViewer({
 
     setCommentDisplayContainers(newContainers)
 
+    const currentZones = commentDisplayZonesRef.current
     return () => {
-      Array.from(commentDisplayZonesRef.current.values()).forEach(zone => {
+      Array.from(currentZones.values()).forEach(zone => {
         try {
           ed.changeViewZones((accessor: editor.IViewZoneChangeAccessor) => {
             accessor.removeZone(zone.zoneId)
@@ -265,7 +266,7 @@ export function FileViewer({
           // Editor may already be disposed
         }
       })
-      commentDisplayZonesRef.current.clear()
+      currentZones.clear()
     }
   }, [comments])
 
@@ -330,7 +331,7 @@ export function FileViewer({
       isDirty: false,
       viewMode: fileState.language === 'markdown' ? 'preview' : 'editor',
     })
-  }, [filePath, fileState, workspace])
+  }, [filePath, fileState, addTab])
 
   if (!filePath) {
     return (

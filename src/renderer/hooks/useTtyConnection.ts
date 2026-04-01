@@ -66,7 +66,7 @@ export function useTtyCreation(
       cancelled = true
       mountedRef.current = false
     }
-  }, [existingPtyId, cwd, sandbox?.enabled, startupCommand, sessionStore])
+  }, [existingPtyId, cwd, sandbox, startupCommand, onCreated, sessionStore])
 
   if (existingPtyId) {
     return { status: 'ready' }

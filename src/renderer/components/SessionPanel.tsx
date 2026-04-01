@@ -101,7 +101,11 @@ export default function SessionPanel({
   // Expand any workspace that gains children after mount
   useEffect(() => {
     const parentIds = Object.keys(workspaces)
-      .filter((id) => getChildren(id).length > 0)
+      .filter((id) =>
+        Object.entries(workspaces)
+          .filter(([, e]) => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === id)
+          .length > 0
+      )
     if (parentIds.length > 0) {
       setExpanded((prev) => {
         const next = new Set(prev)

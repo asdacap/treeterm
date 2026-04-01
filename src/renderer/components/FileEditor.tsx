@@ -77,7 +77,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
     if (state.status !== 'ready' || !state.originalContent) {
       loadFile()
     }
-  }, [state?.filePath, wsData.path, tabId, workspace])
+  }, [state?.filePath, wsData.path, tabId, filesystem, updateTabState, updateTabTitle, state?.status])
 
   // Update tab title with dirty indicator
   const isDirty = state?.status === 'ready' ? state.isDirty : false
@@ -86,7 +86,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
     const filename = getFilename(state.filePath)
     const title = isDirty ? `${filename} \u2022` : filename
     updateTabTitle(tabId, title)
-  }, [isDirty, state?.filePath, tabId, workspace])
+  }, [isDirty, state?.filePath, tabId, updateTabTitle])
 
   // Persist scroll position on unmount
   useEffect(() => {
@@ -96,7 +96,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
         return { ...s, scrollTop: lastScrollTopRef.current }
       })
     }
-  }, [])
+  }, [tabId, updateTabState])
 
   const handleSave = useCallback(async () => {
     if (!state || state.status !== 'ready' || !state.isDirty || saving) return
@@ -121,7 +121,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
     } finally {
       setSaving(false)
     }
-  }, [state, saving, tabId, workspace])
+  }, [state, saving, tabId, filesystem, updateTabState])
 
   const handleEditorMount: OnMount = useCallback(
     (editor) => {
@@ -151,7 +151,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
         return { ...s, currentContent: value, isDirty: value !== s.originalContent }
       })
     },
-    [tabId, workspace]
+    [tabId, updateTabState]
   )
 
   const toggleViewMode = useCallback(() => {
@@ -159,7 +159,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
       if (s.status !== 'ready') return s
       return { ...s, viewMode: s.viewMode === 'preview' ? 'editor' : 'preview' }
     })
-  }, [tabId, workspace])
+  }, [tabId, updateTabState])
 
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
 

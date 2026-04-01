@@ -89,7 +89,7 @@ export function FileTree({
     }
 
     performSearch()
-  }, [debouncedQuery, workspacePath])
+  }, [debouncedQuery, workspacePath, filesystem])
 
   const loadDirectory = useCallback(
     async (dirPath: string) => {
@@ -122,13 +122,13 @@ export function FileTree({
         }))
       }
     },
-    [workspacePath, dirContents]
+    [dirContents, filesystem]
   )
 
   // Load root directory on mount
   useEffect(() => {
     loadDirectory(workspacePath)
-  }, [workspacePath])
+  }, [workspacePath, loadDirectory])
 
   // Load expanded directories
   useEffect(() => {
@@ -137,7 +137,7 @@ export function FileTree({
         loadDirectory(dirPath)
       }
     }
-  }, [expandedDirs, loadDirectory])
+  }, [expandedDirs, loadDirectory, dirContents])
 
   const handleToggleDir = (dirPath: string) => {
     onToggleDir(dirPath)

@@ -49,7 +49,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
       console.error('[SettingsDialog] sandbox availability check failed:', error)
       setSandboxAvailable(false)
     })
-  }, [])
+  }, [sandbox])
 
   useEffect(() => {
     if (isOpen) {

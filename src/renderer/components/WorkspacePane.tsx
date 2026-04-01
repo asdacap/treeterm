@@ -115,7 +115,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   useEffect(() => {
     if (!activeHandle) return
     activeHandle.getState().requestFocus()
-  }, [activeWorkspaceId])
+  }, [activeWorkspaceId, activeHandle])
 
   // Auto-scroll loading output
   const outputLength = activeEntry?.status === 'loading' ? activeEntry.output.length : 0

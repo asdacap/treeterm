@@ -119,7 +119,7 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
       term.dispose()
       termRef.current = null
     }
-  }, [ptyId, terminalApi])
+  }, [ptyId, terminalApi, connectionId])
 
   if (status === 'error') {
     return (
@@ -166,7 +166,7 @@ export default function ActiveProcessesDialog({ workspaces, connectionId, onClos
 
   useEffect(() => {
     fetchSessions()
-  }, [])
+  }, [fetchSessions])
 
   const handleStop = useCallback(async () => {
     if (!selectedId) return

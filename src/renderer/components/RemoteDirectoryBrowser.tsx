@@ -100,7 +100,7 @@ export default function RemoteDirectoryBrowser({
           const path = i === 0 ? '/' : '/' + segments.slice(1, i + 1).join('/')
           const isLast = i === segments.length - 1
           return (
-            <span key={path + i}>
+            <span key={path}>
               <button
                 className={`remote-dir-breadcrumb-seg ${isLast ? 'active' : ''}`}
                 onClick={() => !isLast && navigateTo(path)}

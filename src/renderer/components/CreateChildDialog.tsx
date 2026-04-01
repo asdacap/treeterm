@@ -99,7 +99,7 @@ export default function CreateChildDialog({
         hasGitRootPath: !!parentWsData.gitRootPath
       })
     }
-  }, [mode, parentWsData.gitRootPath, parentWsData.gitBranch, parentWsData.parentId, openWorktreePaths])
+  }, [mode, parentWsData.gitRootPath, parentWsData.gitBranch, parentWsData.parentId, openWorktreePaths, git])
 
   // Load local branches when "branch" tab is selected
   useEffect(() => {
@@ -122,7 +122,7 @@ export default function CreateChildDialog({
         setError(`Failed to load branches: ${error instanceof Error ? error.message : 'Unknown error'}`)
       })
     }
-  }, [mode, parentWsData.gitRootPath])
+  }, [mode, parentWsData.gitRootPath, git])
 
   // Load remote branches when "remote" tab is selected
   useEffect(() => {
@@ -154,7 +154,7 @@ export default function CreateChildDialog({
         setError(`Failed to load remote branches: ${error instanceof Error ? error.message : 'Unknown error'}`)
       })
     }
-  }, [mode, parentWsData.gitRootPath])
+  }, [mode, parentWsData.gitRootPath, git])
 
   // Filter branches based on search
   const filteredBranches = useMemo(() => {

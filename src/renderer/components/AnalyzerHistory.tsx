@@ -112,7 +112,7 @@ function AnalyzerHistoryContent({ analyzer, workspace }: { analyzer: AiHarnessRe
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {reversed.map((entry, i) => (
               <div
-                key={entries.length - 1 - i}
+                key={`${entry.timestamp}-${entry.kind}`}
                 style={{
                   background: '#1e1e1e',
                   border: '1px solid #333',
