@@ -9,7 +9,6 @@
 import { GrpcDaemonClient } from './grpcClient'
 import type { ExecInput, ExecOutput } from '../generated/treeterm'
 import { join } from 'path'
-import { homedir } from 'os'
 
 export interface GitStatusEntry {
   path: string
@@ -454,15 +453,7 @@ export class GitClient {
     const rootPath = rootResult.stdout.trim()
 
     // Determine worktree path
-    let worktreePath: string
-    if (await this.isWorktreesDirInGitignore(rootPath)) {
-      const worktreesDir = `${rootPath}/.worktrees`
-      worktreePath = `${worktreesDir}/${worktreeName}`
-    } else {
-      const repoName = rootPath.substring(rootPath.lastIndexOf('/') + 1)
-      const worktreesDir = join(homedir(), '.treeterm', 'worktrees', repoName)
-      worktreePath = join(worktreesDir, worktreeName)
-    }
+    const worktreePath = await this.resolveWorktreePath(rootPath, worktreeName)
 
     const branchName = worktreeName
 
@@ -497,15 +488,7 @@ export class GitClient {
     const rootPath = rootResult.stdout.trim()
 
     // Determine worktree path
-    let worktreePath: string
-    if (await this.isWorktreesDirInGitignore(rootPath)) {
-      const worktreesDir = `${rootPath}/.worktrees`
-      worktreePath = `${worktreesDir}/${worktreeName}`
-    } else {
-      const repoName = rootPath.substring(rootPath.lastIndexOf('/') + 1)
-      const worktreesDir = join(homedir(), '.treeterm', 'worktrees', repoName)
-      worktreePath = join(worktreesDir, worktreeName)
-    }
+    const worktreePath = await this.resolveWorktreePath(rootPath, worktreeName)
 
     // Create worktree from existing branch
     const result = await this.exec(repoPath, ['worktree', 'add', worktreePath, branch], { onProgress })
@@ -536,15 +519,7 @@ export class GitClient {
     const rootPath = rootResult.stdout.trim()
 
     // Determine worktree path
-    let worktreePath: string
-    if (await this.isWorktreesDirInGitignore(rootPath)) {
-      const worktreesDir = `${rootPath}/.worktrees`
-      worktreePath = `${worktreesDir}/${worktreeName}`
-    } else {
-      const repoName = rootPath.substring(rootPath.lastIndexOf('/') + 1)
-      const worktreesDir = join(homedir(), '.treeterm', 'worktrees', repoName)
-      worktreePath = join(worktreesDir, worktreeName)
-    }
+    const worktreePath = await this.resolveWorktreePath(rootPath, worktreeName)
 
     // Create worktree with new branch tracking remote
     const result = await this.exec(repoPath, ['worktree', 'add', '-b', branchName, worktreePath, remoteBranch], { onProgress })
@@ -1043,6 +1018,55 @@ export class GitClient {
   }
 
   // Helper methods
+
+  /**
+   * Resolve home directory on the machine where the daemon is running.
+   * Uses the daemon's exec to run `echo $HOME` so it works for both local and SSH.
+   */
+  private async resolveHomedir(): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const stdout: Buffer[] = []
+      let resultReceived = false
+
+      const stream = this.daemonClient.execStream()
+      stream.write({
+        start: {
+          cwd: '/',
+          command: 'sh',
+          args: ['-c', 'echo $HOME'],
+          env: {},
+          timeoutMs: 5000
+        }
+      })
+      stream.end()
+
+      stream.on('data', (output: ExecOutput) => {
+        if (output.stdout) stdout.push(Buffer.from(output.stdout))
+        if (output.result) {
+          resultReceived = true
+          const home = Buffer.concat(stdout).toString('utf-8').trim()
+          if (output.result.exitCode === 0 && home) {
+            resolve(home)
+          } else {
+            reject(new Error('Failed to resolve remote home directory'))
+          }
+        }
+      })
+
+      stream.on('error', (err: Error) => {
+        if (!resultReceived) reject(err)
+      })
+    })
+  }
+
+  private async resolveWorktreePath(rootPath: string, worktreeName: string): Promise<string> {
+    if (await this.isWorktreesDirInGitignore(rootPath)) {
+      return `${rootPath}/.worktrees/${worktreeName}`
+    }
+    const repoName = rootPath.substring(rootPath.lastIndexOf('/') + 1)
+    const home = await this.resolveHomedir()
+    return join(home, '.treeterm', 'worktrees', repoName, worktreeName)
+  }
 
   private async isWorktreesDirInGitignore(rootPath: string): Promise<boolean> {
     try {
