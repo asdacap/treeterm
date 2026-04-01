@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { workspaceSettingsApplication } from './renderer'
 import type { Tab, Workspace } from '../../renderer/types'
+import { createMockGitApi, createMockFilesystemApi, createMockRunActionsApi } from '../../shared/mockApis'
 import { createStore } from 'zustand/vanilla'
 import type { WorkspaceStoreState } from '../../renderer/store/createWorkspaceStore'
 import type { GitControllerState } from '../../renderer/store/createGitControllerStore'
@@ -33,7 +34,7 @@ const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => ({
   initTab: vi.fn(), getTabRef: vi.fn().mockReturnValue(null),
   initAnalyzer: vi.fn(), createTty: vi.fn().mockResolvedValue('pty-1'),
   connectionId: 'local', updateSettings: vi.fn(),
-  getGitApi: vi.fn(), getFilesystemApi: vi.fn(), getRunActionsApi: vi.fn(),
+  gitApi: createMockGitApi(), filesystemApi: createMockFilesystemApi(), runActionsApi: createMockRunActionsApi(),
   focusTabId: null, requestFocus: vi.fn(), clearFocusRequest: vi.fn(),
   gitController: createStore<GitControllerState>()(() => ({
     hasUncommittedChanges: false, isDiffCleanFromParent: false,

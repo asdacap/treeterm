@@ -1,15 +1,14 @@
 import { useStore } from 'zustand'
-import { useRef } from 'react'
-import type { WorkspaceStore, WorkspaceGitApi, WorkspaceFilesystemApi } from '../types'
+import type { WorkspaceStore, WorkspaceGitApi, WorkspaceFilesystemApi, RunActionsApi } from '../types'
 
 export function useGitApi(workspace: WorkspaceStore): WorkspaceGitApi {
-  const { getGitApi } = useStore(workspace)
-  const ref = useRef(getGitApi())
-  return ref.current
+  return useStore(workspace, s => s.gitApi)
 }
 
 export function useFilesystemApi(workspace: WorkspaceStore): WorkspaceFilesystemApi {
-  const { getFilesystemApi } = useStore(workspace)
-  const ref = useRef(getFilesystemApi())
-  return ref.current
+  return useStore(workspace, s => s.filesystemApi)
+}
+
+export function useRunActionsApi(workspace: WorkspaceStore): RunActionsApi {
+  return useStore(workspace, s => s.runActionsApi)
 }

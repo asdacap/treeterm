@@ -74,14 +74,14 @@ export interface WorkspaceStoreState {
   updateSettings: (settings: Partial<WorktreeSettings>) => void
   updateStatus: (status: Workspace['status']) => void
 
-  // Git API (workspace-scoped)
-  getGitApi: () => WorkspaceGitApi
+  // Git API (workspace-scoped, created once at init)
+  gitApi: WorkspaceGitApi
 
-  // Filesystem API (workspace-scoped)
-  getFilesystemApi: () => WorkspaceFilesystemApi
+  // Filesystem API (workspace-scoped, created once at init)
+  filesystemApi: WorkspaceFilesystemApi
 
   // Run Actions API (connection-bound)
-  getRunActionsApi: () => RunActionsApi
+  runActionsApi: RunActionsApi
 
   // Cross-cutting (delegate to session)
   refreshGitInfo: () => Promise<void>
@@ -325,55 +325,49 @@ export function createWorkspaceStore(
       return true
     },
 
-    getGitApi: (): WorkspaceGitApi => {
-      const path = get().workspace.path
-      return {
-        getInfo: () => deps.git.getInfo(path),
-        createWorktree: (name, baseBranch?) => deps.git.createWorktree(path, name, baseBranch),
-        removeWorktree: (worktreePath, deleteBranch?) => deps.git.removeWorktree(path, worktreePath, deleteBranch),
-        listWorktrees: () => deps.git.listWorktrees(path),
-        listLocalBranches: () => deps.git.listLocalBranches(path),
-        listRemoteBranches: () => deps.git.listRemoteBranches(path),
-        getBranchesInWorktrees: () => deps.git.getBranchesInWorktrees(path),
-        createWorktreeFromBranch: (branch, worktreeName) => deps.git.createWorktreeFromBranch(path, branch, worktreeName),
-        createWorktreeFromRemote: (remoteBranch, worktreeName) => deps.git.createWorktreeFromRemote(path, remoteBranch, worktreeName),
-        getDiff: (parentBranch) => deps.git.getDiff(path, parentBranch),
-        getFileDiff: (parentBranch, filePath) => deps.git.getFileDiff(path, parentBranch, filePath),
-        checkMergeConflicts: (sourceBranch, targetBranch) => deps.git.checkMergeConflicts(path, sourceBranch, targetBranch),
-        merge: (worktreeBranch, squash?) => deps.git.merge(path, worktreeBranch, squash),
-        hasUncommittedChanges: () => deps.git.hasUncommittedChanges(path),
-        commitAll: (message) => deps.git.commitAll(path, message),
-        deleteBranch: (branchName) => deps.git.deleteBranch(path, branchName),
-        getUncommittedChanges: () => deps.git.getUncommittedChanges(path),
-        getUncommittedFileDiff: (filePath, staged) => deps.git.getUncommittedFileDiff(path, filePath, staged),
-        stageFile: (filePath) => deps.git.stageFile(path, filePath),
-        unstageFile: (filePath) => deps.git.unstageFile(path, filePath),
-        stageAll: () => deps.git.stageAll(path),
-        unstageAll: () => deps.git.unstageAll(path),
-        commitStaged: (message) => deps.git.commitStaged(path, message),
-        getFileContentsForDiff: (parentBranch, filePath) => deps.git.getFileContentsForDiff(path, parentBranch, filePath),
-        getUncommittedFileContentsForDiff: (filePath, staged) => deps.git.getUncommittedFileContentsForDiff(path, filePath, staged),
-        getHeadCommitHash: () => deps.git.getHeadCommitHash(path),
-        getLog: (parentBranch, skip, limit) => deps.git.getLog(path, parentBranch, skip, limit),
-        getCommitDiff: (commitHash) => deps.git.getCommitDiff(path, commitHash),
-        getCommitFileDiff: (commitHash, filePath) => deps.git.getCommitFileDiff(path, commitHash, filePath),
-        fetch: () => deps.git.fetch(path),
-        pull: () => deps.git.pull(path),
-        getBehindCount: () => deps.git.getBehindCount(path),
-      }
+    gitApi: {
+      getInfo: () => deps.git.getInfo(workspace.path),
+      createWorktree: (name, baseBranch?) => deps.git.createWorktree(workspace.path, name, baseBranch),
+      removeWorktree: (worktreePath, deleteBranch?) => deps.git.removeWorktree(workspace.path, worktreePath, deleteBranch),
+      listWorktrees: () => deps.git.listWorktrees(workspace.path),
+      listLocalBranches: () => deps.git.listLocalBranches(workspace.path),
+      listRemoteBranches: () => deps.git.listRemoteBranches(workspace.path),
+      getBranchesInWorktrees: () => deps.git.getBranchesInWorktrees(workspace.path),
+      createWorktreeFromBranch: (branch, worktreeName) => deps.git.createWorktreeFromBranch(workspace.path, branch, worktreeName),
+      createWorktreeFromRemote: (remoteBranch, worktreeName) => deps.git.createWorktreeFromRemote(workspace.path, remoteBranch, worktreeName),
+      getDiff: (parentBranch) => deps.git.getDiff(workspace.path, parentBranch),
+      getFileDiff: (parentBranch, filePath) => deps.git.getFileDiff(workspace.path, parentBranch, filePath),
+      checkMergeConflicts: (sourceBranch, targetBranch) => deps.git.checkMergeConflicts(workspace.path, sourceBranch, targetBranch),
+      merge: (worktreeBranch, squash?) => deps.git.merge(workspace.path, worktreeBranch, squash),
+      hasUncommittedChanges: () => deps.git.hasUncommittedChanges(workspace.path),
+      commitAll: (message) => deps.git.commitAll(workspace.path, message),
+      deleteBranch: (branchName) => deps.git.deleteBranch(workspace.path, branchName),
+      getUncommittedChanges: () => deps.git.getUncommittedChanges(workspace.path),
+      getUncommittedFileDiff: (filePath, staged) => deps.git.getUncommittedFileDiff(workspace.path, filePath, staged),
+      stageFile: (filePath) => deps.git.stageFile(workspace.path, filePath),
+      unstageFile: (filePath) => deps.git.unstageFile(workspace.path, filePath),
+      stageAll: () => deps.git.stageAll(workspace.path),
+      unstageAll: () => deps.git.unstageAll(workspace.path),
+      commitStaged: (message) => deps.git.commitStaged(workspace.path, message),
+      getFileContentsForDiff: (parentBranch, filePath) => deps.git.getFileContentsForDiff(workspace.path, parentBranch, filePath),
+      getUncommittedFileContentsForDiff: (filePath, staged) => deps.git.getUncommittedFileContentsForDiff(workspace.path, filePath, staged),
+      getHeadCommitHash: () => deps.git.getHeadCommitHash(workspace.path),
+      getLog: (parentBranch, skip, limit) => deps.git.getLog(workspace.path, parentBranch, skip, limit),
+      getCommitDiff: (commitHash) => deps.git.getCommitDiff(workspace.path, commitHash),
+      getCommitFileDiff: (commitHash, filePath) => deps.git.getCommitFileDiff(workspace.path, commitHash, filePath),
+      fetch: () => deps.git.fetch(workspace.path),
+      pull: () => deps.git.pull(workspace.path),
+      getBehindCount: () => deps.git.getBehindCount(workspace.path),
     },
 
-    getFilesystemApi: (): WorkspaceFilesystemApi => {
-      const path = get().workspace.path
-      return {
-        readDirectory: (dirPath) => deps.filesystem.readDirectory(path, dirPath),
-        readFile: (filePath) => deps.filesystem.readFile(path, filePath),
-        writeFile: (filePath, content) => deps.filesystem.writeFile(path, filePath, content),
-        searchFiles: (query) => deps.filesystem.searchFiles(path, query),
-      }
+    filesystemApi: {
+      readDirectory: (dirPath) => deps.filesystem.readDirectory(workspace.path, dirPath),
+      readFile: (filePath) => deps.filesystem.readFile(workspace.path, filePath),
+      writeFile: (filePath, content) => deps.filesystem.writeFile(workspace.path, filePath, content),
+      searchFiles: (query) => deps.filesystem.searchFiles(workspace.path, query),
     },
 
-    getRunActionsApi: (): RunActionsApi => deps.runActions,
+    runActionsApi: deps.runActions,
 
     // Cross-cutting operations — delegate to session
     refreshGitInfo: () => deps.refreshGitInfo(id),

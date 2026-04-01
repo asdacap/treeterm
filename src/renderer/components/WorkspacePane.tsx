@@ -412,7 +412,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                   {activeHandle && (
                     <RunActionDropdown
                       workspacePath={activeWorkspace.path}
-                      runActions={activeHandle.getState().getRunActionsApi()}
+                      runActions={activeHandle.getState().runActionsApi}
                       onRun={async (ptyId, actionId) => {
                         const tabId = activeHandle.getState().addTab('terminal', { ptyId, ptyHandle: null, keepOnExit: true })
                         activeHandle.getState().updateTabTitle(tabId, actionId)
