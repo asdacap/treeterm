@@ -594,6 +594,9 @@ export function createSessionStore(
       return result.sessionId
     },
 
+    // openTtyStream and getTtyWriter intentionally use separate streams.
+    // openTtyStream is tied to the terminal component lifecycle (unmounts on tab switch),
+    // while getTtyWriter lives longer and must not be affected by terminal unmount.
     openTtyStream: async (ptyId: string): Promise<{ tty: Tty }> => {
       const result = await deps.terminal.attach(connectionId, ptyId)
       if (!result.success) {

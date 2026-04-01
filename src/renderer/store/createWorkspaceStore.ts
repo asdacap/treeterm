@@ -58,6 +58,9 @@ export interface WorkspaceStoreState {
 
   // PTY creation (delegated from session)
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
+  // Pre-cache a TtyWriter for an existing ptyId so promptHarness
+  // doesn't open a redundant second stream (which blanks remote terminals)
+  ensureTtyWriter: (ptyId: string) => Promise<void>
   connectionId: string
 
   // Git controller (polling, diff status, PR status)
@@ -169,6 +172,10 @@ export function createWorkspaceStore(
 
     createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) =>
       deps.createTty(cwd, sandbox, startupCommand),
+
+    ensureTtyWriter: async (ptyId: string): Promise<void> => {
+      await deps.getTtyWriter(ptyId)
+    },
 
     connectionId: deps.connectionId,
 
