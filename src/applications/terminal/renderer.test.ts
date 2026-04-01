@@ -156,6 +156,62 @@ describe('Terminal Renderer', () => {
         expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
       })
 
+      it('creates PTY and updates tab state when ptyId is null', async () => {
+        let resolveTty!: (value: string) => void
+        const ttyPromise = new Promise<string>((resolve) => { resolveTty = resolve })
+        const mockCreateTty = vi.fn().mockReturnValue(ttyPromise)
+        const mockUpdateTabState = vi.fn()
+        const store = createStore<WorkspaceStoreState>()(() => ({
+          ...mockWorkspaceStoreStateData,
+          createTty: mockCreateTty,
+          updateTabState: mockUpdateTabState,
+        }))
+
+        const app = createTerminalApplication(mockDeps)
+        const tab: Tab = {
+          id: 'tab-1',
+          applicationId: 'terminal',
+          title: 'Terminal',
+          state: { ptyId: null }
+        }
+
+        app.onWorkspaceLoad(tab, store)
+
+        expect(mockCreateTty).toHaveBeenCalledWith('/test', undefined, undefined)
+        expect(mockUpdateTabState).not.toHaveBeenCalled()
+
+        resolveTty('pty-new')
+        await ttyPromise
+        // Flush the .then() microtask scheduled by createTty().then(...)
+        await new Promise(resolve => setTimeout(resolve, 0))
+
+        expect(mockUpdateTabState).toHaveBeenCalledWith('tab-1', expect.any(Function))
+
+        // Verify the state updater function produces correct state
+        const updater = mockUpdateTabState.mock.calls[0][1]
+        const updated = updater({ ptyId: null, ptyHandle: null, keepOnExit: false })
+        expect(updated).toEqual({
+          ptyId: 'pty-new',
+          ptyHandle: null,
+          keepOnExit: false,
+          connectionId: 'local',
+        })
+      })
+
+      it('does not call createTty when ptyId already exists', () => {
+        const app = createTerminalApplication(mockDeps)
+        const tab: Tab = {
+          id: 'tab-1',
+          applicationId: 'terminal',
+          title: 'Terminal',
+          state: { ptyId: 'existing-pty' }
+        }
+
+        app.onWorkspaceLoad(tab, mockWorkspaceStore)
+
+        expect(mockWorkspaceStoreStateData.createTty).not.toHaveBeenCalled()
+      })
+
       it('returns an AppRef with dispose method', () => {
         const app = createTerminalApplication(mockDeps)
         const tab: Tab = {

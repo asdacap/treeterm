@@ -67,6 +67,7 @@ describe('Chat Renderer', () => {
     const ref = chatApplication.onWorkspaceLoad(tab, mockWorkspaceStore)
     expect(ref).toHaveProperty('dispose')
     expect(typeof ref.dispose).toBe('function')
+    ref.dispose()
   })
 
   it('renders Chat component via createElement', () => {

@@ -105,6 +105,21 @@ describe('Comments Renderer', () => {
       })
     })
 
+    describe('onWorkspaceLoad', () => {
+      it('returns disposable ref', () => {
+        const tab: Tab = {
+          id: 'tab-1',
+          applicationId: 'comments',
+          title: 'Comments',
+          state: {}
+        }
+
+        const ref = commentsApplication.onWorkspaceLoad(tab, mockWorkspaceStore)
+        expect(typeof ref.dispose).toBe('function')
+        ref.dispose()
+      })
+    })
+
     describe('render', () => {
       it('renders CommentsList with correct props for valid state', () => {
         const tab: Tab = {

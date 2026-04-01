@@ -65,6 +65,7 @@ describe('WorkspaceSettings Renderer', () => {
     const tab = { id: 'tab-1', state: {} } as unknown as Tab
     const ref = workspaceSettingsApplication.onWorkspaceLoad(tab, mockWorkspaceStore)
     expect(typeof ref.dispose).toBe('function')
+    ref.dispose()
   })
 
   it('renders WorkspaceSettings with key and workspace', () => {

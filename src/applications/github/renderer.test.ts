@@ -65,6 +65,7 @@ describe('GitHub Renderer', () => {
     const tab = { id: 'tab-1', state: {} } as unknown as Tab
     const ref = githubApplication.onWorkspaceLoad(tab, mockWorkspaceStore)
     expect(typeof ref.dispose).toBe('function')
+    ref.dispose()
   })
 
   it('renders GitHubBrowser with key, workspace, and isVisible', () => {

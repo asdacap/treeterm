@@ -162,6 +162,81 @@ describe('AI Harness Renderer', () => {
       const mockAnalyzerState = { start: vi.fn(), stop: vi.fn(), getHistory: vi.fn().mockReturnValue([]) }
       const mockAnalyzer = { getState: vi.fn().mockReturnValue(mockAnalyzerState), setState: vi.fn(), subscribe: vi.fn() }
 
+      it('starts analyzer directly when tab has existing ptyId (restore path)', () => {
+        const mockAnalyzerState = { start: vi.fn(), stop: vi.fn(), getHistory: vi.fn().mockReturnValue([]) }
+        const mockAnalyzer = { getState: vi.fn().mockReturnValue(mockAnalyzerState), setState: vi.fn(), subscribe: vi.fn() }
+
+        const app = createAiHarnessVariant(mockInstance, mockDeps)
+        const tab: Tab = {
+          id: 'tab-1',
+          applicationId: 'aiharness-claude',
+          title: 'Claude',
+          state: {
+            ptyId: 'pty-existing',
+            sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] }
+          }
+        }
+
+        const store = createStore<WorkspaceStoreState>()(() => ({
+          ...mockWorkspaceStoreStateData,
+          initAnalyzer: vi.fn().mockReturnValue(mockAnalyzer),
+        }))
+
+        app.onWorkspaceLoad(tab, store)
+
+        expect(mockAnalyzerState.start).toHaveBeenCalledWith('pty-existing')
+        expect(mockWorkspaceStoreStateData.createTty).not.toHaveBeenCalled()
+      })
+
+      it('creates PTY and starts analyzer for new tab (no ptyId)', async () => {
+        const mockAnalyzerState = { start: vi.fn(), stop: vi.fn(), getHistory: vi.fn().mockReturnValue([]) }
+        const mockAnalyzer = { getState: vi.fn().mockReturnValue(mockAnalyzerState), setState: vi.fn(), subscribe: vi.fn() }
+
+        const app = createAiHarnessVariant(mockInstance, mockDeps)
+        const tab: Tab = {
+          id: 'tab-1',
+          applicationId: 'aiharness-claude',
+          title: 'Claude',
+          state: {
+            ptyId: null,
+            sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] }
+          }
+        }
+
+        let resolveTty!: (value: string) => void
+        const ttyPromise = new Promise<string>((resolve) => { resolveTty = resolve })
+        const mockCreateTty = vi.fn().mockReturnValue(ttyPromise)
+        const mockUpdateTabState = vi.fn()
+        const store = createStore<WorkspaceStoreState>()(() => ({
+          ...mockWorkspaceStoreStateData,
+          initAnalyzer: vi.fn().mockReturnValue(mockAnalyzer),
+          createTty: mockCreateTty,
+          updateTabState: mockUpdateTabState,
+        }))
+
+        app.onWorkspaceLoad(tab, store)
+
+        resolveTty('pty-new')
+        await ttyPromise
+        await new Promise(resolve => setTimeout(resolve, 0))
+
+        expect(mockCreateTty).toHaveBeenCalledWith(
+          '/test',
+          { enabled: true, allowNetwork: false, allowedPaths: [] },
+          'claude'
+        )
+        expect(mockUpdateTabState).toHaveBeenCalledWith('tab-1', expect.any(Function))
+        expect(mockAnalyzerState.start).toHaveBeenCalledWith('pty-new')
+
+        const updater = mockUpdateTabState.mock.calls[0][1]
+        const updated = updater({ ptyId: null, sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] } })
+        expect(updated).toEqual({
+          ptyId: 'pty-new',
+          sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] },
+          connectionId: 'local',
+        })
+      })
+
       it('dispose kills PTY when tab has ptyId', () => {
         const app = createAiHarnessVariant(mockInstance, mockDeps)
         const tab: Tab = {
