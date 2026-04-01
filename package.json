@@ -49,6 +49,7 @@
     "electron-builder": "^25.0.0",
     "electron-vite": "^2.3.0",
     "eslint": "^9.39.4",
+    "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
     "grpc-tools": "^1.13.1",
     "playwright": "^1.58.2",

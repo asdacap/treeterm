@@ -1,11 +1,11 @@
-interface TabErrorFallbackProps {
-  error: Error
+import type { FallbackProps } from './ErrorBoundary'
+
+interface TabErrorFallbackProps extends FallbackProps {
   tabTitle: string
-  onReset: () => void
   onClose: () => void
 }
 
-export default function TabErrorFallback({ error, tabTitle, onReset, onClose }: TabErrorFallbackProps) {
+export default function TabErrorFallback({ error, tabTitle, reset, onClose }: TabErrorFallbackProps) {
   return (
     <div className="tab-error-fallback">
       <div className="tab-error-content">
@@ -17,7 +17,7 @@ export default function TabErrorFallback({ error, tabTitle, onReset, onClose }: 
         </div>
 
         <div className="tab-error-actions">
-          <button className="tab-error-reload-btn" onClick={onReset}>
+          <button className="tab-error-reload-btn" onClick={reset}>
             Reload Tab
           </button>
           <button className="tab-error-close-btn" onClick={onClose}>

@@ -1,5 +1,6 @@
 import tseslint from '@typescript-eslint/eslint-plugin'
 import tsparser from '@typescript-eslint/parser'
+import reactPlugin from 'eslint-plugin-react'
 import reactHooks from 'eslint-plugin-react-hooks'
 
 export default [
@@ -57,10 +58,15 @@ export default [
     files: ['src/renderer/**/*.ts', 'src/renderer/**/*.tsx'],
     ignores: ['src/renderer/main.tsx'],
     plugins: {
+      'react': reactPlugin,
       'react-hooks': reactHooks
     },
     rules: {
+      'react/no-unstable-nested-components': 'error',
+      'react/jsx-no-constructed-context-values': 'error',
+      'react/no-array-index-key': 'warn',
       'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
       'no-restricted-syntax': ['error', {
         selector: "MemberExpression[object.name='window'][property.name='electron']",
         message: 'window.electron is only allowed in main.tsx. Use useAppStore() instead.'

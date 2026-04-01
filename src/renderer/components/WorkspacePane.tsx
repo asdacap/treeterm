@@ -338,7 +338,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   }, [activeHandle])
 
   return (
-    <ErrorBoundary fallback={(error, reset) => <WorkspaceErrorFallback error={error} onReset={reset} />}>
+    <ErrorBoundary FallbackComponent={WorkspaceErrorFallback}>
       <div className="workspace-content">
         {/* Show empty state when no workspace is active, but keep terminals mounted below */}
         {!activeWorkspace ? (
