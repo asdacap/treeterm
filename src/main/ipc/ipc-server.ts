@@ -55,9 +55,6 @@ const CHANNELS = {
   fsSearchFiles: 'fs:searchFiles',
   runActionsDetect: 'runActions:detect',
   runActionsRun: 'runActions:run',
-  sttTranscribeOpenai: 'stt:transcribe-openai',
-  sttTranscribeLocal: 'stt:transcribe-local',
-  sttCheckMicPermission: 'stt:check-mic-permission',
   sessionUpdate: 'session:update',
   daemonShutdown: 'daemon:shutdown',
   dialogSelectFolder: 'dialog:selectFolder',
@@ -597,37 +594,6 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.fsSearchFiles, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['fsSearchFiles']['params']))
-    )
-  }
-
-  // STT request handlers
-  onSttTranscribeOpenai(
-    handler: (
-      ...args: IpcRequests['sttTranscribeOpenai']['params']
-    ) => IpcRequests['sttTranscribeOpenai']['result'] | Promise<IpcRequests['sttTranscribeOpenai']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.sttTranscribeOpenai, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['sttTranscribeOpenai']['params']))
-    )
-  }
-
-  onSttTranscribeLocal(
-    handler: (
-      ...args: IpcRequests['sttTranscribeLocal']['params']
-    ) => IpcRequests['sttTranscribeLocal']['result'] | Promise<IpcRequests['sttTranscribeLocal']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.sttTranscribeLocal, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['sttTranscribeLocal']['params']))
-    )
-  }
-
-  onSttCheckMicPermission(
-    handler: (
-      ...args: IpcRequests['sttCheckMicPermission']['params']
-    ) => IpcRequests['sttCheckMicPermission']['result'] | Promise<IpcRequests['sttCheckMicPermission']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.sttCheckMicPermission, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['sttCheckMicPermission']['params']))
     )
   }
 

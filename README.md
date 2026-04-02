@@ -35,10 +35,6 @@ The daemon survives app restarts — terminal sessions and state persist when El
 - **Auto Workspace Naming** - Automatically generate workspace titles and descriptions
 - **Squash Merge** - Optional squash merge via dropdown on the merge button
 - **Daemon Persistence** - Terminal sessions survive app restarts via a background daemon process
-- **Speech-to-Text** - Push-to-talk functionality with multiple STT providers:
-  - Web Speech API (browser-based)
-  - OpenAI Whisper API
-  - Local Whisper (stub, not yet functional)
 - **Process Sandboxing** - Optional sandboxing with macOS sandbox-exec and Linux Bubblewrap
 - **Prefix Mode Keybindings** - tmux-style prefix key system for workspace and tab navigation
 - **Activity State Tracking** - Real-time indicators showing if applications are idle, working, or waiting for input, with AI-powered analysis
@@ -162,12 +158,6 @@ Settings are stored in the Electron userData directory:
 | Keybindings | prevTab | p |
 | Keybindings | openSettings | , |
 | Keybindings | workspaceFocus | w |
-| STT | enabled | true |
-| STT | provider | openaiWhisper |
-| STT | openaiApiKey | (empty) |
-| STT | localWhisperModelPath | (empty) |
-| STT | pushToTalkKey | Shift+Space |
-| STT | language | en |
 | Daemon | enabled | true |
 | Daemon | scrollbackLimit | 10000 |
 | SSH | savedConnections | [] |
@@ -197,12 +187,6 @@ Prefix mode provides tmux-style keybindings. Press the prefix key followed by an
 | Workspace Focus | `w` (then use arrows + Enter) |
 
 All keybindings are customizable in settings.
-
-#### Other Shortcuts
-
-| Action | Shortcut |
-|--------|----------|
-| Push-to-Talk (STT) | `Shift+Space` |
 
 ## Tech Stack
 

@@ -1,10 +1,10 @@
 import { app } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
-import type { Settings, TerminalInstance, AiHarnessInstance, CustomRunnerInstance, PrefixModeConfig, STTProvider, SSHConnectionConfig, ReasoningEffort } from '../shared/types'
+import type { Settings, TerminalInstance, AiHarnessInstance, CustomRunnerInstance, PrefixModeConfig, SSHConnectionConfig, ReasoningEffort } from '../shared/types'
 
 // Re-export for backward compatibility
-export type { Settings, TerminalInstance, AiHarnessInstance, CustomRunnerInstance, PrefixModeConfig, STTProvider, SSHConnectionConfig }
+export type { Settings, TerminalInstance, AiHarnessInstance, CustomRunnerInstance, PrefixModeConfig, SSHConnectionConfig }
 
 const defaultSettings: Settings = {
   terminal: {
@@ -51,14 +51,6 @@ const defaultSettings: Settings = {
     prevTab: 'p',
     openSettings: ',',
     workspaceFocus: 'w'
-  },
-  stt: {
-    enabled: true,
-    provider: 'openaiWhisper',
-    openaiApiKey: '',
-    localWhisperModelPath: '',
-    pushToTalkKey: 'Shift+Space',
-    language: 'en'
   },
   daemon: {
     mergeThreshold: 50 * 1024,
@@ -259,10 +251,6 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
       defaults.keybindings,
       loaded.keybindings as Record<string, string | { direct?: string; prefixMode?: string }> | undefined
     ),
-    stt: {
-      ...defaults.stt,
-      ...loaded.stt
-    },
     daemon: {
       ...defaults.daemon,
       ...loaded.daemon

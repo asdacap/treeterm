@@ -11,7 +11,6 @@ import AppErrorFallback from './components/AppErrorFallback'
 import { useAppStore } from './store/app'
 import { useNavigationStore } from './store/navigation'
 import { useSettingsStore } from './store/settings'
-import { STTApiContext } from './contexts/STTApiContext'
 
 // One-time migration: clear localStorage since daemon is now source of truth
 if (typeof localStorage !== 'undefined') {
@@ -27,7 +26,6 @@ export default function App() {
 
   const {
     platform,
-    stt,
     sandbox,
     appApi,
     selectFolder,
@@ -86,7 +84,6 @@ export default function App() {
 
   return (
     <ErrorBoundary fallback={<AppErrorFallback />}>
-      <STTApiContext.Provider value={stt}>
         <div
           className="app"
           onMouseMove={handleMouseMove}
@@ -156,7 +153,6 @@ export default function App() {
             onClose={() => useAppStore.setState({ showConnectionPicker: false })}
           />
         </div>
-      </STTApiContext.Provider>
     </ErrorBoundary>
   )
 }

@@ -24,7 +24,7 @@ import { githubApplication } from '../../applications/github/renderer'
 import type {
   Workspace, Session, Application,
   Platform, TerminalApi, RawGitApi, SessionApi, AppApi, DaemonApi,
-  RawFilesystemApi, STTApi, SandboxApi, SettingsApi, RawRunActionsApi,
+  RawFilesystemApi, SandboxApi, SettingsApi, RawRunActionsApi,
   TerminalInstance, AiHarnessInstance, CustomRunnerInstance,
   ConnectionInfo, SSHConnectionConfig, SSHApi, LlmApi, ClipboardApi, RawGitHubApi
 } from '../types'
@@ -39,7 +39,6 @@ export interface AppDeps {
   appApi: AppApi
   daemon: DaemonApi
   filesystem: RawFilesystemApi
-  stt: STTApi
   runActions: RawRunActionsApi
   sandbox: SandboxApi
   ssh: SSHApi
@@ -101,7 +100,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
   appApi: UNINITIALIZED,
   daemon: UNINITIALIZED,
   filesystem: UNINITIALIZED,
-  stt: UNINITIALIZED,
   runActions: UNINITIALIZED,
   sandbox: UNINITIALIZED,
   ssh: UNINITIALIZED,

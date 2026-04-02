@@ -11,7 +11,7 @@ interface SettingsDialogProps {
   platform: Platform
 }
 
-type TabId = 'general' | 'terminal' | 'sandbox' | 'ai-harness' | 'llm' | 'appearance' | 'keybindings' | 'terminal-profiles' | 'speech' | 'github' | 'debug' | 'custom-runners'
+type TabId = 'general' | 'terminal' | 'sandbox' | 'ai-harness' | 'llm' | 'appearance' | 'keybindings' | 'terminal-profiles' | 'github' | 'debug' | 'custom-runners'
 
 const tabs: { id: TabId; label: string }[] = [
   { id: 'general', label: 'General' },
@@ -23,7 +23,6 @@ const tabs: { id: TabId; label: string }[] = [
   { id: 'sandbox', label: 'Sandbox' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'keybindings', label: 'Keybindings' },
-  { id: 'speech', label: 'Speech' },
   { id: 'github', label: 'GitHub' },
   { id: 'debug', label: 'Debug' }
 ]
@@ -32,7 +31,6 @@ const tabs: { id: TabId; label: string }[] = [
 type RecordingState =
   | { type: 'keybinding'; action: keyof Settings['keybindings'] }
   | { type: 'prefixKey' }
-  | { type: 'pttKey' }
   | null
 
 export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: SettingsDialogProps) {
@@ -106,18 +104,6 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
         setRecording(null)
       }
 
-      if (recording.type === 'pttKey') {
-        // For push-to-talk key, just capture the single key (no modifiers)
-        const pttKey = key.length === 1 ? key : key
-        setLocalSettings((prev) => ({
-          ...prev,
-          stt: {
-            ...prev.stt,
-            pushToTalkKey: pttKey
-          }
-        }))
-        setRecording(null)
-      }
     },
     [recording]
   )
@@ -1122,152 +1108,6 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
               </div>
             )}
 
-            {activeTab === 'speech' && (
-              <div className="settings-section">
-                <div className="settings-group">
-                  <label className="settings-checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={localSettings.stt.enabled}
-                      onChange={(e) =>
-                        setLocalSettings((prev) => ({
-                          ...prev,
-                          stt: { ...prev.stt, enabled: e.target.checked }
-                        }))
-                      }
-                    />
-                    Enable Push-to-Talk
-                  </label>
-                  <p className="settings-hint">
-                    Enables speech-to-text in Claude terminal. Hold Caps Lock (or configured key) to
-                    speak.
-                  </p>
-                </div>
-
-                <div className="settings-group">
-                  <label className="settings-label">Speech Recognition Provider</label>
-                  <select
-                    className="settings-select"
-                    value={localSettings.stt.provider}
-                    onChange={(e) =>
-                      setLocalSettings((prev) => ({
-                        ...prev,
-                        stt: {
-                          ...prev.stt,
-                          provider: e.target.value as 'openaiWhisper' | 'localWhisper'
-                        }
-                      }))
-                    }
-                  >
-                    <option value="openaiWhisper">OpenAI Whisper API</option>
-                    <option value="localWhisper">Local Whisper (Not Implemented)</option>
-                  </select>
-                  <p className="settings-hint">
-                    OpenAI Whisper provides high-quality speech recognition. Get an API key at{' '}
-                    <a
-                      href="https://platform.openai.com/api-keys"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      platform.openai.com
-                    </a>
-                  </p>
-                </div>
-
-                <div className="settings-group">
-                  <label className="settings-label">OpenAI API Key</label>
-                  <input
-                    type="password"
-                    className="settings-input"
-                    value={localSettings.stt.openaiApiKey}
-                    onChange={(e) =>
-                      setLocalSettings((prev) => ({
-                        ...prev,
-                        stt: { ...prev.stt, openaiApiKey: e.target.value }
-                      }))
-                    }
-                    placeholder="sk-proj-..."
-                  />
-                  <p className="settings-hint">
-                    Required for speech recognition. Your API key is stored locally and only used to
-                    transcribe your audio.
-                  </p>
-                </div>
-
-                <div className="settings-group">
-                  <label className="settings-label">Language</label>
-                  <select
-                    className="settings-select"
-                    value={localSettings.stt.language}
-                    onChange={(e) =>
-                      setLocalSettings((prev) => ({
-                        ...prev,
-                        stt: { ...prev.stt, language: e.target.value }
-                      }))
-                    }
-                  >
-                    <option value="en">English</option>
-                    <option value="ms">Malay</option>
-                    <option value="zh">Chinese</option>
-                    <option value="es">Spanish</option>
-                    <option value="fr">French</option>
-                    <option value="de">German</option>
-                    <option value="ja">Japanese</option>
-                    <option value="ko">Korean</option>
-                    <option value="pt">Portuguese</option>
-                    <option value="ru">Russian</option>
-                    <option value="ar">Arabic</option>
-                    <option value="hi">Hindi</option>
-                    <option value="it">Italian</option>
-                    <option value="nl">Dutch</option>
-                    <option value="pl">Polish</option>
-                    <option value="tr">Turkish</option>
-                    <option value="vi">Vietnamese</option>
-                    <option value="th">Thai</option>
-                    <option value="id">Indonesian</option>
-                  </select>
-                  <p className="settings-hint">
-                    Language of your speech. This helps Whisper transcribe more accurately.
-                  </p>
-                </div>
-
-                {localSettings.stt.provider === 'localWhisper' && (
-                  <div className="settings-group">
-                    <label className="settings-label">Whisper Model Path</label>
-                    <input
-                      type="text"
-                      className="settings-input"
-                      value={localSettings.stt.localWhisperModelPath}
-                      onChange={(e) =>
-                        setLocalSettings((prev) => ({
-                          ...prev,
-                          stt: { ...prev.stt, localWhisperModelPath: e.target.value }
-                        }))
-                      }
-                      placeholder="/path/to/ggml-base.en.bin"
-                    />
-                    <p className="settings-hint">
-                      Path to local Whisper model file. This feature is not yet implemented.
-                    </p>
-                  </div>
-                )}
-
-                <div className="settings-group">
-                  <label className="settings-label">Push-to-Talk Key</label>
-                  <button
-                    className={`settings-keybinding ${recording?.type === 'pttKey' ? 'recording' : ''}`}
-                    onClick={() =>
-                      setRecording(recording?.type === 'pttKey' ? null : { type: 'pttKey' })
-                    }
-                  >
-                    {recording?.type === 'pttKey' ? 'Press key...' : localSettings.stt.pushToTalkKey}
-                  </button>
-                  <p className="settings-hint">
-                    Hold to record, release to transcribe (default: Ctrl+Space)
-                  </p>
-                </div>
-              </div>
-            )}
             {activeTab === 'github' && (
               <div className="settings-section">
                 <div className="settings-group">

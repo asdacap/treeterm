@@ -149,8 +149,6 @@ export interface PrefixModeConfig {
   timeout: number // ms (default: 1500)
 }
 
-export type STTProvider = 'openaiWhisper' | 'localWhisper'
-
 // === Run Action Types ===
 
 export interface RunAction {
@@ -192,14 +190,6 @@ export interface Settings {
     prevTab: string
     openSettings: string
     workspaceFocus: string
-  }
-  stt: {
-    enabled: boolean
-    provider: STTProvider
-    openaiApiKey: string
-    localWhisperModelPath: string
-    pushToTalkKey: string
-    language: string // ISO-639-1 code (e.g., 'en', 'ms', 'zh')
   }
   daemon: {
     mergeThreshold: number

@@ -16,7 +16,6 @@ window.electron.app.onReady(() => {
     terminal: e.terminal,
     git: e.git,
     filesystem: e.filesystem,
-    stt: e.stt,
     runActions: e.runActions,
     sandbox: e.sandbox,
     ssh: e.ssh,

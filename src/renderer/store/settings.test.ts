@@ -71,14 +71,6 @@ describe('SettingsStore', () => {
           openSettings: ',',
           workspaceFocus: 'w'
         },
-        stt: {
-          enabled: true,
-          provider: 'openaiWhisper',
-          openaiApiKey: '',
-          localWhisperModelPath: '',
-          pushToTalkKey: 'Shift+Space',
-          language: 'en'
-        },
         daemon: {
           mergeThreshold: 50 * 1024,
           compactedLimit: 1024 * 1024,
@@ -125,14 +117,6 @@ describe('SettingsStore', () => {
           prevTab: 'p',
           openSettings: ',',
           workspaceFocus: 'w'
-        },
-        stt: {
-          enabled: true,
-          provider: 'openaiWhisper',
-          openaiApiKey: '',
-          localWhisperModelPath: '',
-          pushToTalkKey: 'Shift+Space',
-          language: 'en'
         },
         daemon: {
           mergeThreshold: 50 * 1024,

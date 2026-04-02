@@ -24,7 +24,6 @@ for (const arg of process.argv) {
 }
 import { loadSettings, saveSettings, addRecentDirectory } from './settings'
 import { createApplicationMenu } from './menu'
-import { registerSTTHandlers } from './stt'
 import { startChatStream, cancelChatStream, completeChatCall, formatLlmError, parseLlmJson } from './llm'
 
 let mainWindow: BrowserWindow | null = null
@@ -107,16 +106,6 @@ function createWindow(): BrowserWindow {
 
   // Cleanup for session watch stream
   let unwatchSession: (() => void) | null = null
-
-  // Handle media permissions for speech recognition and microphone
-  window.webContents.session.setPermissionRequestHandler((_webContents, permission, callback) => {
-    if (permission === 'media') {
-      // Always allow microphone access for push-to-talk
-      callback(true)
-    } else {
-      callback(false)
-    }
-  })
 
   // Forward all keyboard events including Caps Lock to renderer
   window.webContents.on('before-input-event', (_event, input) => {
@@ -1356,7 +1345,6 @@ app.whenReady().then(async () => {
     loadingWindow = null
   }
 
-  registerSTTHandlers(server)
   mainWindow = createWindow()
   server.setWindow(mainWindow)
   createApplicationMenu(mainWindow, server, quitAndKillDaemon)

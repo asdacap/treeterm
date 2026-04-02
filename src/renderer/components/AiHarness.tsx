@@ -2,7 +2,6 @@ import { useCallback, useMemo } from 'react'
 import { useStore } from 'zustand'
 import type { Terminal as XTerm } from '@xterm/xterm'
 import BaseTerminal, { type BaseTerminalConfig } from './BaseTerminal'
-import PushToTalkButton from './PushToTalkButton'
 import { PromptCommitButton } from './PromptCommitButton'
 import { PromptRebaseButton } from './PromptRebaseButton'
 import { ReviewCommentsButton } from './ReviewCommentsButton'
@@ -80,7 +79,6 @@ export default function AiHarness({
     <AiHarnessContent
       workspace={workspace}
       tabId={tabId}
-      ptyId={ptyId}
       analyzer={ref.analyzer}
       backgroundColor={backgroundColor}
       disableScrollbar={disableScrollbar}
@@ -92,7 +90,6 @@ export default function AiHarness({
 interface AiHarnessContentProps {
   workspace: WorkspaceStore
   tabId: string
-  ptyId: string
   analyzer: AiHarnessRef['analyzer']
   backgroundColor: string
   disableScrollbar?: boolean
@@ -102,33 +99,12 @@ interface AiHarnessContentProps {
 function AiHarnessContent({
   workspace,
   tabId,
-  ptyId,
   analyzer,
   backgroundColor,
   disableScrollbar,
   stripScrollbackClear,
 }: AiHarnessContentProps) {
   const { aiState, analyzing, reason, autoApprove } = useStore(analyzer)
-
-  const handlePushToTalkTranscript = useCallback(async (text: string) => {
-    try {
-      const writer = await workspace.getState().getTtyWriter(ptyId)
-      writer.write(text)
-    } catch {
-      const writer = await workspace.getState().getTtyWriter(ptyId)
-      writer.write(text)
-    }
-  }, [ptyId, workspace])
-
-  const handlePushToTalkSubmit = useCallback(async () => {
-    try {
-      const writer = await workspace.getState().getTtyWriter(ptyId)
-      writer.write('\r')
-    } catch {
-      const writer = await workspace.getState().getTtyWriter(ptyId)
-      writer.write('\r')
-    }
-  }, [ptyId, workspace])
 
   const handleTerminalReady = useCallback((term: XTerm) => {
     term.onData((data) => {
@@ -181,10 +157,6 @@ function AiHarnessContent({
               <PromptRebaseButton workspace={workspace} />
               <ReviewCommentsButton workspace={workspace} />
               <PromptGitHubCommentsButton workspace={workspace} />
-              <PushToTalkButton
-                onTranscript={handlePushToTalkTranscript}
-                onSubmit={handlePushToTalkSubmit}
-              />
             </>
           }
         />

@@ -55,9 +55,6 @@ const CHANNELS = {
   fsSearchFiles: 'fs:searchFiles',
   runActionsDetect: 'runActions:detect',
   runActionsRun: 'runActions:run',
-  sttTranscribeOpenai: 'stt:transcribe-openai',
-  sttTranscribeLocal: 'stt:transcribe-local',
-  sttCheckMicPermission: 'stt:check-mic-permission',
   sessionUpdate: 'session:update',
   daemonShutdown: 'daemon:shutdown',
   dialogSelectFolder: 'dialog:selectFolder',
@@ -368,25 +365,6 @@ export class IpcClient {
     ...args: IpcRequests['runActionsRun']['params']
   ): Promise<IpcRequests['runActionsRun']['result']> {
     return ipcRenderer.invoke(CHANNELS.runActionsRun, ...args)
-  }
-
-  // STT requests
-  sttTranscribeOpenai(
-    ...args: IpcRequests['sttTranscribeOpenai']['params']
-  ): Promise<IpcRequests['sttTranscribeOpenai']['result']> {
-    return ipcRenderer.invoke(CHANNELS.sttTranscribeOpenai, ...args)
-  }
-
-  sttTranscribeLocal(
-    ...args: IpcRequests['sttTranscribeLocal']['params']
-  ): Promise<IpcRequests['sttTranscribeLocal']['result']> {
-    return ipcRenderer.invoke(CHANNELS.sttTranscribeLocal, ...args)
-  }
-
-  sttCheckMicPermission(
-    ...args: IpcRequests['sttCheckMicPermission']['params']
-  ): Promise<IpcRequests['sttCheckMicPermission']['result']> {
-    return ipcRenderer.invoke(CHANNELS.sttCheckMicPermission, ...args)
   }
 
   // Session requests

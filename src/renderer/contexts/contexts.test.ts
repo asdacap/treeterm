@@ -10,27 +10,11 @@ vi.mock('react', () => ({
   useContext: mockUseContext
 }))
 
-import { useSTTApi } from './STTApiContext'
 import { useSessionApi } from './SessionStoreContext'
 
 describe('Context hooks', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-  })
-
-  describe('useSTTApi', () => {
-    it('throws when context is null', () => {
-      mockUseContext.mockReturnValue(null)
-      expect(() => useSTTApi()).toThrow(
-        'useSTTApi must be used within a STTApiContext.Provider'
-      )
-    })
-
-    it('returns value when context is provided', () => {
-      const api = { startRecording: vi.fn() }
-      mockUseContext.mockReturnValue(api)
-      expect(useSTTApi()).toBe(api)
-    })
   })
 
   describe('useSessionApi', () => {

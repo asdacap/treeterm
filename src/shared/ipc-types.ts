@@ -237,20 +237,6 @@ export interface IpcRequests {
     result: IpcResult<{ entries: FileEntry[] }>
   }
 
-  // STT operations
-  sttTranscribeOpenai: {
-    params: [audioBuffer: ArrayBuffer, apiKey: string, language?: string]
-    result: { text: string }
-  }
-  sttTranscribeLocal: {
-    params: [audioBuffer: ArrayBuffer, modelPath: string, language?: string]
-    result: { text: string }
-  }
-  sttCheckMicPermission: {
-    params: []
-    result: boolean
-  }
-
   // Session operations
   sessionUpdate: {
     params: [sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number]

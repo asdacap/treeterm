@@ -14,7 +14,6 @@ import type {
   AiHarnessInstance,
   CustomRunnerInstance,
   PrefixModeConfig,
-  STTProvider,
   Settings,
   WorktreeSettings,
   RunAction,
@@ -39,7 +38,6 @@ export type {
   AiHarnessInstance,
   CustomRunnerInstance,
   PrefixModeConfig,
-  STTProvider,
   Settings,
   WorktreeSettings,
   RunAction,
@@ -471,12 +469,6 @@ export interface SandboxApi {
   isAvailable: () => Promise<boolean>
 }
 
-export interface STTApi {
-  transcribeOpenAI: (audioBuffer: ArrayBuffer, apiKey: string, language?: string) => Promise<{ text: string }>
-  transcribeLocal: (audioBuffer: ArrayBuffer, modelPath: string, language?: string) => Promise<{ text: string }>
-  checkMicPermission: () => Promise<boolean>
-}
-
 export interface AppApi {
   onReady: (callback: (session: Session | null) => void) => () => void
   onCloseConfirm: (callback: () => void) => () => void
@@ -540,7 +532,6 @@ export type PreloadApi = {
   filesystem: RawFilesystemApi
   runActions: RawRunActionsApi
   sandbox: SandboxApi
-  stt: STTApi
   getInitialWorkspace: () => Promise<string | null>
   app: AppApi
   daemon: DaemonApi

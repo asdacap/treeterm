@@ -372,21 +372,6 @@ const preloadApi: PreloadApi = {
       return client.sandboxIsAvailable()
     }
   },
-  stt: {
-    transcribeOpenAI: (audioBuffer: ArrayBuffer, apiKey: string, language?: string): Promise<{ text: string }> => {
-      return client.sttTranscribeOpenai(audioBuffer, apiKey, language)
-    },
-    transcribeLocal: (
-      audioBuffer: ArrayBuffer,
-      modelPath: string,
-      language?: string
-    ): Promise<{ text: string }> => {
-      return client.sttTranscribeLocal(audioBuffer, modelPath, language)
-    },
-    checkMicPermission: (): Promise<boolean> => {
-      return client.sttCheckMicPermission()
-    }
-  },
   getInitialWorkspace: (): Promise<string | null> => {
     return client.appGetInitialWorkspace()
   },
