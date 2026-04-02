@@ -163,7 +163,7 @@ describe('GrpcDaemonClient', () => {
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
       mockStream.on.mockReturnValue(mockStream)
 
-      const ptyStream = client.openPtyStream('pty-1', vi.fn())
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn())
       expect(ptyStream.handle).toBeDefined()
       expect(ptyStream.sessionId).toBe('pty-1')
       // Should have sent a start message
@@ -175,7 +175,7 @@ describe('GrpcDaemonClient', () => {
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
       mockStream.on.mockReturnValue(mockStream)
 
-      const ptyStream = client.openPtyStream('pty-1', vi.fn())
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn())
       ptyStream.write('hello')
       expect(mockStream.write).toHaveBeenCalledWith({
         write: { data: Buffer.from('hello', 'utf-8') }
@@ -187,7 +187,7 @@ describe('GrpcDaemonClient', () => {
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
       mockStream.on.mockReturnValue(mockStream)
 
-      const ptyStream = client.openPtyStream('pty-1', vi.fn())
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn())
       ptyStream.resize(120, 40)
       expect(mockStream.write).toHaveBeenCalledWith({
         resize: { cols: 120, rows: 40 }
@@ -199,7 +199,7 @@ describe('GrpcDaemonClient', () => {
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
       mockStream.on.mockReturnValue(mockStream)
 
-      const ptyStream = client.openPtyStream('pty-1', vi.fn())
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn())
       ptyStream.close()
       expect(mockStream.end).toHaveBeenCalled()
     })
@@ -209,7 +209,7 @@ describe('GrpcDaemonClient', () => {
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
       mockStream.on.mockReturnValue(mockStream)
 
-      const ptyStream = client.openPtyStream('pty-1', vi.fn())
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn())
       ptyStream.close()
       ptyStream.close()
       expect(mockStream.end).toHaveBeenCalledTimes(1)
@@ -220,7 +220,7 @@ describe('GrpcDaemonClient', () => {
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
       mockStream.on.mockReturnValue(mockStream)
 
-      const ptyStream = client.openPtyStream('pty-1', vi.fn())
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn())
       ptyStream.close()
       mockStream.write.mockClear()
 
@@ -235,7 +235,7 @@ describe('GrpcDaemonClient', () => {
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
       mockStream.on.mockReturnValue(mockStream)
 
-      const ptyStream = client.openPtyStream('pty-1', vi.fn())
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn())
       mockStream.write.mockImplementation(() => { throw new Error('broken pipe') })
 
       if (method === 'write') expect(() => ptyStream.write('data')).not.toThrow()
@@ -253,7 +253,7 @@ describe('GrpcDaemonClient', () => {
       })
 
       const cb = vi.fn()
-      client.openPtyStream('pty-1', cb)
+      client.openPtyStream('handle-1', 'pty-1', cb)
 
       dataHandlers[0]?.({ resize: { cols: 120, rows: 40 } })
       expect(cb).toHaveBeenCalledWith({ type: 'resize', cols: 120, rows: 40 })
@@ -308,7 +308,7 @@ describe('GrpcDaemonClient', () => {
       })
 
       const cb = vi.fn()
-      client.openPtyStream('pty-1', cb)
+      client.openPtyStream('handle-1', 'pty-1', cb)
 
       const expectedData = Buffer.from('hello')
       dataHandlers[0]?.({ data: { data: expectedData } })
@@ -326,7 +326,7 @@ describe('GrpcDaemonClient', () => {
       })
 
       const cb = vi.fn()
-      client.openPtyStream('pty-1', cb)
+      client.openPtyStream('handle-1', 'pty-1', cb)
 
       // Simulate stream exit event
       dataHandlers[0]?.({ exit: { exitCode: 0, signal: undefined } })

@@ -27,6 +27,8 @@ export type PtyEvent =
   | { type: 'data'; data: Uint8Array }
   | { type: 'exit'; exitCode: number; signal?: number }
   | { type: 'resize'; cols: number; rows: number }
+  | { type: 'error'; message: string }
+  | { type: 'end' }
 
 import type {
   GitInfo,
@@ -49,20 +51,16 @@ import type {
 export interface IpcRequests {
   // PTY operations
   ptyCreate: {
-    params: [connectionId: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string]
-    result: IpcResult<{ sessionId: string; handle: string }>
+    params: [connectionId: string, handle: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string]
+    result: IpcResult<{ sessionId: string }>
   }
   ptyAttach: {
-    params: [connectionId: string, sessionId: string]
-    result: IpcResult<{ handle: string }>
+    params: [connectionId: string, handle: string, sessionId: string]
+    result: IpcResult
   }
   ptyList: {
     params: [connectionId: string]
     result: TTYSessionInfo[]
-  }
-  ptyIsAlive: {
-    params: [connectionId: string, id: string]
-    result: boolean
   }
 
   // Git operations

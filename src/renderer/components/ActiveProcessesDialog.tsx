@@ -69,8 +69,22 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
     resizeObserver.observe(container)
     cleanups.push(() => resizeObserver.disconnect())
 
-    // Attach to PTY — scrollback, resize, and live data all arrive via onEvent
-    terminalApi.attach(connectionId, ptyId).then((result) => {
+    // Attach to PTY — register listener before starting stream
+    const handle = crypto.randomUUID()
+    handleRef = handle
+
+    const unsubEvent = terminalApi.onEvent(handle, (event) => {
+      if (event.type === 'data') {
+        term.write(event.data)
+      } else if (event.type === 'exit') {
+        term.write('\r\n\x1b[90m[Process exited]\x1b[0m\r\n')
+      } else if (event.type === 'resize') {
+        term.resize(event.cols, event.rows)
+      }
+    })
+    cleanups.push(unsubEvent)
+
+    terminalApi.attach(connectionId, handle, ptyId).then((result) => {
       if (cancelled) return
 
       if (!result.success) {
@@ -78,27 +92,6 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
         setErrorMessage(result.error ?? `Failed to attach to PTY session ${ptyId}`)
         return
       }
-
-      const handle = result.handle
-      if (!handle) {
-        setStatus('error')
-        setErrorMessage(`Attach succeeded but no handle returned for session ${ptyId}`)
-        return
-      }
-
-      handleRef = handle
-
-      // Subscribe to events — buffered scrollback flushes immediately
-      const unsubEvent = terminalApi.onEvent(handle, (event) => {
-        if (event.type === 'data') {
-          term.write(event.data)
-        } else if (event.type === 'exit') {
-          term.write('\r\n\x1b[90m[Process exited]\x1b[0m\r\n')
-        } else if (event.type === 'resize') {
-          term.resize(event.cols, event.rows)
-        }
-      })
-      cleanups.push(unsubEvent)
 
       // Forward input using handle
       const onDataDisposable = term.onData((data) => {

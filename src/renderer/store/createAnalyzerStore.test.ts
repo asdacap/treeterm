@@ -5,7 +5,7 @@ import type { Settings } from '../types'
 import type { TtyState } from './createTtyStore'
 import { createStore } from 'zustand/vanilla'
 
-/** Creates a mock Tty with controllable onEvent callback */
+/** Creates a mock Tty with controllable event emission via openTtyStream callback */
 function makeMockTty() {
   type PtyEvent = import('../../shared/ipc-types').PtyEvent
   let eventCallback: ((event: PtyEvent) => void) | null = null
@@ -15,11 +15,6 @@ function makeMockTty() {
     write: vi.fn(),
     resize: vi.fn(),
     kill: vi.fn(),
-    isAlive: vi.fn().mockResolvedValue(true),
-    onEvent: vi.fn((cb) => {
-      eventCallback = cb
-      return () => { eventCallback = null }
-    }),
   }
 
   const tty = createStore<TtyState>()(() => ttyState)
@@ -27,6 +22,7 @@ function makeMockTty() {
   return {
     tty,
     ttyState,
+    setEventCallback: (cb: (event: PtyEvent) => void) => { eventCallback = cb },
     emitData: (data: string) => eventCallback?.({ type: 'data', data: new TextEncoder().encode(data) }),
     emitExit: (code: number) => eventCallback?.({ type: 'exit', exitCode: code }),
   }
@@ -53,7 +49,11 @@ function makeDeps(overrides?: Partial<AnalyzerDeps>): AnalyzerDeps {
     getDisplayName: vi.fn().mockReturnValue(undefined),
     getDescription: vi.fn().mockReturnValue(undefined),
     setActivityTabState: vi.fn(),
-    openTtyStream: vi.fn().mockResolvedValue({ tty: makeMockTty().tty, scrollback: [], exitCode: undefined }),
+    openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => {
+      const mock = makeMockTty()
+      mock.setEventCallback(onEvent)
+      return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined })
+    }),
     cwd: '/test',
     renameBranch: vi.fn().mockResolvedValue(undefined),
     getGitBranch: vi.fn().mockReturnValue('old-branch'),
@@ -102,7 +102,7 @@ describe('createAnalyzerStore', () => {
   it('stop resets terminal reference', async () => {
     const mock = makeMockTty()
     deps = makeDeps({
-      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ echo hello\r\nhello\r\n$ '], exitCode: undefined }),
+      openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: ['$ echo hello\r\nhello\r\n$ '], exitCode: undefined }) }),
     })
     const store = createAnalyzerStore('tab-1', deps)
 
@@ -119,7 +119,7 @@ describe('createAnalyzerStore', () => {
     vi.useFakeTimers()
     const mock = makeMockTty()
     deps = makeDeps({
-      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+      openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
     })
     const store = createAnalyzerStore('tab-1', deps)
 
@@ -144,7 +144,7 @@ describe('createAnalyzerStore', () => {
         llm: { apiKey: '', baseUrl: '' },
         terminalAnalyzer: { model: '', systemPrompt: '', titleSystemPrompt: '', reasoningEffort: 'off', safePaths: [], bufferLines: 10 },
       } as unknown as Settings),
-      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+      openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
     })
     const store = createAnalyzerStore('tab-1', deps)
 
@@ -167,7 +167,7 @@ describe('createAnalyzerStore', () => {
     vi.useFakeTimers()
     const mock = makeMockTty()
     deps = makeDeps({
-      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+      openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
     })
     const store = createAnalyzerStore('tab-1', deps)
 
@@ -199,7 +199,7 @@ describe('createAnalyzerStore', () => {
         analyzeTerminal: vi.fn().mockResolvedValue({ error: 'API error' }),
         generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
       },
-      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+      openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
     })
     const store = createAnalyzerStore('tab-1', deps)
 
@@ -225,7 +225,7 @@ describe('createAnalyzerStore', () => {
         analyzeTerminal: vi.fn().mockRejectedValue(new Error('Network error')),
         generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
       },
-      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+      openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
     })
     const store = createAnalyzerStore('tab-1', deps)
 
@@ -252,7 +252,7 @@ describe('createAnalyzerStore', () => {
         analyzeTerminal: vi.fn().mockImplementation(() => new Promise(r => { calls.push(r) })),
         generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
       },
-      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+      openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
     })
 
     const store = createAnalyzerStore('tab-1', deps)
@@ -296,7 +296,7 @@ describe('createAnalyzerStore', () => {
         analyzeTerminal: vi.fn().mockImplementation(() => new Promise(r => { resolveAnalysis = r })),
         generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
       },
-      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+      openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
     })
 
     const store = createAnalyzerStore('tab-1', deps)
@@ -327,7 +327,7 @@ describe('createAnalyzerStore', () => {
     vi.useFakeTimers()
     const mock = makeMockTty()
     deps = makeDeps({
-      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+      openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
     })
     const store = createAnalyzerStore('tab-1', deps)
 
@@ -366,7 +366,7 @@ describe('createAnalyzerStore', () => {
         }),
         generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
       },
-      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+      openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
     })
     const store = createAnalyzerStore('tab-1', deps)
 
@@ -400,10 +400,13 @@ describe('createAnalyzerStore', () => {
   it('restores scrollback into headless terminal on start', async () => {
     const mock = makeMockTty()
     deps = makeDeps({
-      openTtyStream: vi.fn().mockResolvedValue({
-        tty: mock.tty,
-        scrollback: ['$ echo hello\r\nhello\r\n$ '],
-        exitCode: undefined,
+      openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => {
+        mock.setEventCallback(onEvent)
+        return Promise.resolve({
+          tty: mock.tty,
+          scrollback: ['$ echo hello\r\nhello\r\n$ '],
+          exitCode: undefined,
+        })
       }),
     })
     const store = createAnalyzerStore('tab-1', deps)
@@ -422,7 +425,7 @@ describe('createAnalyzerStore', () => {
     it('triggers title generation on first Enter key', async () => {
       const mock = makeMockTty()
       deps = makeDeps({
-        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }),
+        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }) }),
       })
       const store = createAnalyzerStore('tab-1', deps)
 
@@ -449,7 +452,7 @@ describe('createAnalyzerStore', () => {
     it('does not trigger title generation on non-Enter input', async () => {
       const mock = makeMockTty()
       deps = makeDeps({
-        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }),
+        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }) }),
       })
       const store = createAnalyzerStore('tab-1', deps)
 
@@ -467,7 +470,7 @@ describe('createAnalyzerStore', () => {
     it('does not trigger title generation twice', async () => {
       const mock = makeMockTty()
       deps = makeDeps({
-        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }),
+        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }) }),
       })
       const store = createAnalyzerStore('tab-1', deps)
 
@@ -494,7 +497,7 @@ describe('createAnalyzerStore', () => {
       deps = makeDeps({
         getDisplayName: vi.fn().mockReturnValue('Existing Title'),
         getDescription: vi.fn().mockReturnValue('Existing Description'),
-        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }),
+        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }) }),
       })
       const store = createAnalyzerStore('tab-1', deps)
 
@@ -514,7 +517,7 @@ describe('createAnalyzerStore', () => {
       deps = makeDeps({
         getDisplayName: vi.fn().mockReturnValue('Existing Title'),
         getDescription: vi.fn().mockReturnValue(undefined),
-        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }),
+        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }) }),
       })
       const store = createAnalyzerStore('tab-1', deps)
 
@@ -542,7 +545,7 @@ describe('createAnalyzerStore', () => {
     it('auto-approves safe permission requests via own TTY', async () => {
       const mock = makeMockTty()
       deps = makeDeps({
-        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
       })
 
       const store = createAnalyzerStore('tab-1', deps)
@@ -567,7 +570,7 @@ describe('createAnalyzerStore', () => {
     it('does not auto-approve when autoApprove is false', async () => {
       const mock = makeMockTty()
       deps = makeDeps({
-        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
       })
 
       const store = createAnalyzerStore('tab-1', deps)
@@ -583,7 +586,7 @@ describe('createAnalyzerStore', () => {
     it('does not auto-approve for non-safe states', async () => {
       const mock = makeMockTty()
       deps = makeDeps({
-        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
       })
 
       const store = createAnalyzerStore('tab-1', deps)
@@ -602,7 +605,7 @@ describe('createAnalyzerStore', () => {
     vi.useFakeTimers()
     const mock = makeMockTty()
     deps = makeDeps({
-      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+      openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
     })
     const store = createAnalyzerStore('tab-1', deps)
 
@@ -628,7 +631,7 @@ describe('createAnalyzerStore', () => {
       vi.useFakeTimers()
       const mock = makeMockTty()
       deps = makeDeps({
-        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
       })
       const store = createAnalyzerStore('tab-1', deps)
 
@@ -658,7 +661,7 @@ describe('createAnalyzerStore', () => {
           analyzeTerminal: vi.fn().mockResolvedValue({ error: 'API error' }),
           generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
         },
-        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
       })
       const store = createAnalyzerStore('tab-1', deps)
 
@@ -687,7 +690,7 @@ describe('createAnalyzerStore', () => {
           analyzeTerminal: vi.fn().mockRejectedValue(new Error('Network error')),
           generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
         },
-        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
       })
       const store = createAnalyzerStore('tab-1', deps)
 
@@ -716,7 +719,7 @@ describe('createAnalyzerStore', () => {
           analyzeTerminal: vi.fn().mockResolvedValue({ something: 'unexpected' }),
           generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
         },
-        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
       })
       const store = createAnalyzerStore('tab-1', deps)
 
@@ -740,7 +743,7 @@ describe('createAnalyzerStore', () => {
     it('logs title generation to history', async () => {
       const mock = makeMockTty()
       deps = makeDeps({
-        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }),
+        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }) }),
       })
       const store = createAnalyzerStore('tab-1', deps)
 
@@ -771,7 +774,7 @@ describe('createAnalyzerStore', () => {
     it('skips branch rename when branch is user-defined', async () => {
       const mock = makeMockTty()
       deps = makeDeps({
-        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }),
+        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }) }),
         getBranchIsUserDefined: vi.fn().mockReturnValue(true),
       })
       const store = createAnalyzerStore('tab-1', deps)
@@ -799,7 +802,7 @@ describe('createAnalyzerStore', () => {
     it('skips branch rename when workspace has no parent', async () => {
       const mock = makeMockTty()
       deps = makeDeps({
-        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }),
+        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }) }),
         getParentId: vi.fn().mockReturnValue(null),
       })
       const store = createAnalyzerStore('tab-1', deps)
@@ -831,7 +834,7 @@ describe('createAnalyzerStore', () => {
           analyzeTerminal: vi.fn().mockResolvedValue({ state: 'idle', reason: '' }),
           generateTitle: vi.fn().mockRejectedValue(new Error('Title API error')),
         },
-        openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }),
+        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }) }),
       })
       const store = createAnalyzerStore('tab-1', deps)
 
@@ -864,7 +867,7 @@ describe('createAnalyzerStore', () => {
     vi.useFakeTimers()
     const mock = makeMockTty()
     deps = makeDeps({
-      openTtyStream: vi.fn().mockResolvedValue({ tty: mock.tty, scrollback: [], exitCode: undefined }),
+      openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
     })
     const store = createAnalyzerStore('tab-1', deps)
 

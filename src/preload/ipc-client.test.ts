@@ -28,10 +28,10 @@ describe('IpcClient', () => {
 
   describe('invoke pattern (request methods)', () => {
     it('ptyCreate calls ipcRenderer.invoke with correct channel and args', async () => {
-      mockInvoke.mockResolvedValue('pty-123')
-      const result = await client.ptyCreate('local', '/home/user')
-      expect(mockInvoke).toHaveBeenCalledWith('pty:create', 'local', '/home/user')
-      expect(result).toBe('pty-123')
+      mockInvoke.mockResolvedValue({ success: true, sessionId: 'pty-123' })
+      const result = await client.ptyCreate('local', 'handle-1', '/home/user')
+      expect(mockInvoke).toHaveBeenCalledWith('pty:create', 'local', 'handle-1', '/home/user')
+      expect(result).toEqual({ success: true, sessionId: 'pty-123' })
     })
 
     it('gitGetInfo calls ipcRenderer.invoke with correct channel and args', async () => {
@@ -73,7 +73,6 @@ describe('IpcClient', () => {
     it.each([
       ['ptyAttach', 'pty:attach'],
       ['ptyList', 'pty:list'],
-      ['ptyIsAlive', 'pty:isAlive'],
       ['gitCreateWorktree', 'git:createWorktree'],
       ['gitRemoveWorktree', 'git:removeWorktree'],
       ['gitListWorktrees', 'git:listWorktrees'],

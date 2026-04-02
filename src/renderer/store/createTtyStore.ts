@@ -1,14 +1,11 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { PtyEvent } from '../../shared/ipc-types'
 
 /** Subset of TerminalApi needed by TtyStore (without connectionId params — bound by session store) */
 export interface TtyTerminalDeps {
   write: (handle: string, data: string) => void
   resize: (handle: string, cols: number, rows: number) => void
   kill: (sessionId: string) => void
-  isAlive: (id: string) => Promise<boolean>
-  onEvent: (handle: string, callback: (event: PtyEvent) => void) => () => void
 }
 
 export interface TtyState {
@@ -16,8 +13,6 @@ export interface TtyState {
   write(data: string): void
   resize(cols: number, rows: number): void
   kill(): void
-  isAlive(): Promise<boolean>
-  onEvent(cb: (event: PtyEvent) => void): () => void
 }
 
 export type Tty = StoreApi<TtyState>
@@ -28,8 +23,6 @@ export function createTtyStore(ptyId: string, handle: string, terminal: TtyTermi
     write: (data: string) => terminal.write(handle, data),
     resize: (cols: number, rows: number) => terminal.resize(handle, cols, rows),
     kill: () => terminal.kill(ptyId),
-    isAlive: () => terminal.isAlive(ptyId),
-    onEvent: (cb: (event: PtyEvent) => void) => terminal.onEvent(handle, cb),
   }))
 }
 

@@ -12,7 +12,6 @@ const CHANNELS = {
   ptyCreate: 'pty:create',
   ptyAttach: 'pty:attach',
   ptyList: 'pty:list',
-  ptyIsAlive: 'pty:isAlive',
   gitGetInfo: 'git:getInfo',
   gitCreateWorktree: 'git:createWorktree',
   gitRemoveWorktree: 'git:removeWorktree',
@@ -134,10 +133,6 @@ export class IpcClient {
 
   ptyList(...args: IpcRequests['ptyList']['params']): Promise<IpcRequests['ptyList']['result']> {
     return ipcRenderer.invoke(CHANNELS.ptyList, ...args)
-  }
-
-  ptyIsAlive(...args: IpcRequests['ptyIsAlive']['params']): Promise<IpcRequests['ptyIsAlive']['result']> {
-    return ipcRenderer.invoke(CHANNELS.ptyIsAlive, ...args)
   }
 
   // Git requests

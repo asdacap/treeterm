@@ -223,20 +223,20 @@ function createWindow(): BrowserWindow {
 }
 
 // IPC Handlers
-server.onPtyCreate(async (event, connectionId, cwd, sandbox, startupCommand) => {
+server.onPtyCreate(async (event, connectionId, handle, cwd, sandbox, startupCommand) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
 
   try {
     const client = getClientForConnection(connectionId)
     await client.ensureDaemonRunning()
     const sessionId = await client.createPtySession({ cwd, sandbox: sandbox as SandboxConfig | undefined, startupCommand })
-    const ptyStream = client.openPtyStream(sessionId, (evt) => {
-      event.sender.send('pty:event', ptyStream.handle, evt)
-      if (evt.type === 'exit') ptyStreams.delete(ptyStream.handle)
+    const ptyStream = client.openPtyStream(handle, sessionId, (evt) => {
+      event.sender.send('pty:event', handle, evt)
+      if (evt.type === 'end') ptyStreams.delete(handle)
     })
-    ptyStreams.set(ptyStream.handle, ptyStream)
+    ptyStreams.set(handle, ptyStream)
 
-    return { success: true, sessionId, handle: ptyStream.handle }
+    return { success: true, sessionId }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
     console.error('[main] failed to create PTY session via daemon:', error)
@@ -244,7 +244,7 @@ server.onPtyCreate(async (event, connectionId, cwd, sandbox, startupCommand) => 
   }
 })
 
-server.onPtyAttach(async (event, connectionId, sessionId) => {
+server.onPtyAttach(async (event, connectionId, handle, sessionId) => {
   if (!connectionManager) {
     return { success: false, error: 'ConnectionManager not initialized' }
   }
@@ -252,13 +252,13 @@ server.onPtyAttach(async (event, connectionId, sessionId) => {
   try {
     const client = getClientForConnection(connectionId)
     await client.ensureDaemonRunning()
-    const ptyStream = client.openPtyStream(sessionId, (evt) => {
-      event.sender.send('pty:event', ptyStream.handle, evt)
-      if (evt.type === 'exit') ptyStreams.delete(ptyStream.handle)
+    const ptyStream = client.openPtyStream(handle, sessionId, (evt) => {
+      event.sender.send('pty:event', handle, evt)
+      if (evt.type === 'end') ptyStreams.delete(handle)
     })
-    ptyStreams.set(ptyStream.handle, ptyStream)
+    ptyStreams.set(handle, ptyStream)
 
-    return { success: true, handle: ptyStream.handle }
+    return { success: true }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     console.error('[main] failed to attach to PTY session:', errorMessage)
@@ -298,11 +298,6 @@ server.onPtyKill((connectionId, sessionId) => {
   }
 })
 
-server.onPtyIsAlive(async (connectionId, id) => {
-  const client = getClientForConnection(connectionId)
-  const sessions = await client.listPtySessions()
-  return sessions.some(s => s.id === id)
-})
 
 // Terminal analyzer — non-streaming LLM call with buffer cache
 const analyzerCache: { buffer: string; result: { state: string; reason: string } }[] = []

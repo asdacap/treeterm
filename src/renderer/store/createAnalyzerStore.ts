@@ -1,7 +1,7 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
 import { Terminal } from '@xterm/xterm'
-import type { ActivityState, LlmApi, Settings } from '../types'
+import type { ActivityState, LlmApi, Settings, PtyEvent } from '../types'
 import type { Tty } from './createTtyStore'
 
 export interface AnalyzerDeps {
@@ -11,7 +11,7 @@ export interface AnalyzerDeps {
   getDisplayName: () => string | undefined
   getDescription: () => string | undefined
   setActivityTabState: (tabId: string, state: ActivityState) => void
-  openTtyStream: (ptyId: string) => Promise<{ tty: Tty; scrollback?: string[]; exitCode?: number }>
+  openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<{ tty: Tty; scrollback?: string[]; exitCode?: number }>
   cwd: string
   renameBranch: (oldName: string, newName: string) => Promise<void>
   getGitBranch: () => string | null
@@ -352,7 +352,20 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       // Create headless xterm (no DOM attachment needed)
       terminal = new Terminal()
 
-      deps.openTtyStream(ptyId).then(({ tty, scrollback, exitCode }) => {
+      deps.openTtyStream(ptyId, (event) => {
+        switch (event.type) {
+          case 'data':
+            terminal?.write(event.data)
+            dataVersion++
+            break
+          case 'exit':
+            store.getState().stop()
+            break
+          case 'resize':
+            terminal?.resize(event.cols, event.rows)
+            break
+        }
+      }).then(({ tty, scrollback, exitCode }) => {
         if (!running && !terminal) return // stopped before stream opened
 
         ownTty = tty
@@ -367,22 +380,6 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
         // If already exited, don't start polling
         if (exitCode !== undefined) return
-
-        // Subscribe to live events
-        unsubscribeEvents = tty.getState().onEvent((event) => {
-          switch (event.type) {
-            case 'data':
-              terminal?.write(event.data)
-              dataVersion++
-              break
-            case 'exit':
-              store.getState().stop()
-              break
-            case 'resize':
-              terminal?.resize(event.cols, event.rows)
-              break
-          }
-        })
       }).catch((err) => {
         console.error('[analyzer] failed to open TTY stream:', err)
       })

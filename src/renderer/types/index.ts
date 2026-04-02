@@ -97,7 +97,7 @@ export interface ApplicationRenderProps {
 export interface TerminalState {
   ptyId: string | null       // daemon sessionId — persisted for reconnection
   ptyHandle: string | null   // ephemeral stream handle — used for write/resize/onData/onExit
-  connectionId?: string      // which connection this PTY belongs to — used for routing kill/isAlive
+  connectionId?: string      // which connection this PTY belongs to — used for routing kill
   keepOnExit: boolean
 }
 
@@ -275,13 +275,12 @@ export interface ClipboardApi {
 }
 
 export interface TerminalApi {
-  create: (connectionId: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<IpcResult<{ sessionId: string; handle: string }>>
-  attach: (connectionId: string, sessionId: string) => Promise<IpcResult<{ handle: string }>>
+  create: (connectionId: string, handle: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<IpcResult<{ sessionId: string }>>
+  attach: (connectionId: string, handle: string, sessionId: string) => Promise<IpcResult>
   list: (connectionId: string) => Promise<TTYSessionInfo[]>
   write: (handle: string, data: string) => void
   resize: (handle: string, cols: number, rows: number) => void
   kill: (connectionId: string, sessionId: string) => void
-  isAlive: (connectionId: string, id: string) => Promise<boolean>
   onEvent: (handle: string, callback: (event: PtyEvent) => void) => () => void
   onActiveProcessesOpen: (callback: () => void) => () => void
 }

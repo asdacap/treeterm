@@ -11,7 +11,7 @@ function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStore
       get: vi.fn().mockReturnValue(null),
       getDefaultApp: vi.fn().mockReturnValue(null),
     },
-    openTtyStream: vi.fn().mockResolvedValue({ tty: null }),
+    openTtyStream: vi.fn().mockImplementation(() => Promise.resolve({ tty: null })),
     createTty: vi.fn().mockResolvedValue('pty-1'),
     connectionId: 'local',
     git: {} as any,

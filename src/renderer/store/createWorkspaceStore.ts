@@ -37,7 +37,7 @@ export interface CachedTerminal {
 
 export interface WorkspaceStoreDeps {
   appRegistry: AppRegistryApi
-  openTtyStream: (ptyId: string) => Promise<{ tty: Tty }>
+  openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<{ tty: Tty }>
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
   connectionId: string
   git: GitApi
@@ -232,7 +232,7 @@ export function createWorkspaceStore(
     getTtyWriter: async (ptyId: string): Promise<TtyWriter> => {
       const cached = ttyWriters[ptyId]
       if (cached) return cached
-      const { tty } = await deps.openTtyStream(ptyId)
+      const { tty } = await deps.openTtyStream(ptyId, () => {})
       const state = tty.getState()
       const writer: TtyWriter = { write: state.write, kill: state.kill }
       ttyWriters[ptyId] = writer

@@ -5,6 +5,7 @@ import { createWorkspaceStore } from './createWorkspaceStore'
 import type { WorkspaceStore, WorkspaceStoreDeps } from './createWorkspaceStore'
 import { createTtyStore } from './createTtyStore'
 import type { Tty, TtyTerminalDeps } from './createTtyStore'
+import type { PtyEvent } from '../../shared/ipc-types'
 import type {
   Workspace, Session, AppState, GitInfo,
   ConnectionInfo, ActivityState,
@@ -45,7 +46,7 @@ export interface SessionState {
   connection: ConnectionInfo | null
 
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
-  openTtyStream: (ptyId: string) => Promise<{ tty: Tty }>
+  openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<{ tty: Tty }>
   killTty: (ptyId: string) => void
   listTty: () => Promise<TTYSessionInfo[]>
 
@@ -185,7 +186,7 @@ export function createSessionStore(
   function makeHandleDeps(): WorkspaceStoreDeps {
     return {
       appRegistry: deps.appRegistry,
-      openTtyStream: (ptyId: string) => store.getState().openTtyStream(ptyId),
+      openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => store.getState().openTtyStream(ptyId, onEvent),
       createTty: (cwd, sandbox?, startupCommand?) => store.getState().createTty(cwd, sandbox, startupCommand),
       connectionId: config.connection?.id ?? 'local',
       git: deps.git,
@@ -565,8 +566,6 @@ export function createSessionStore(
     write: deps.terminal.write,
     resize: deps.terminal.resize,
     kill: (sessionId: string) => deps.terminal.kill(connectionId, sessionId),
-    isAlive: (id: string) => deps.terminal.isAlive(connectionId, id),
-    onEvent: deps.terminal.onEvent,
   }
 
   const store = createStore<SessionState>()((set, get) => ({
@@ -579,19 +578,23 @@ export function createSessionStore(
     connection: config.connection ?? null,
 
     createTty: async (cwd: string, sandbox?: SandboxConfig, startupCommand?: string): Promise<string> => {
-      const result = await deps.terminal.create(connectionId, cwd, sandbox, startupCommand)
+      const handle = crypto.randomUUID()
+      const result = await deps.terminal.create(connectionId, handle, cwd, sandbox, startupCommand)
       if (!result.success) {
         throw new Error(result.error || 'Failed to create PTY')
       }
       return result.sessionId
     },
 
-    openTtyStream: async (ptyId: string): Promise<{ tty: Tty }> => {
-      const result = await deps.terminal.attach(connectionId, ptyId)
+    openTtyStream: async (ptyId: string, onEvent: (event: PtyEvent) => void): Promise<{ tty: Tty }> => {
+      const handle = crypto.randomUUID()
+      const unsubscribe = deps.terminal.onEvent(handle, onEvent)
+      const result = await deps.terminal.attach(connectionId, handle, ptyId)
       if (!result.success) {
+        unsubscribe()
         throw new Error(result.error || 'Failed to attach to PTY')
       }
-      const tty = createTtyStore(ptyId, result.handle, boundTerminal)
+      const tty = createTtyStore(ptyId, handle, boundTerminal)
       return { tty }
     },
 

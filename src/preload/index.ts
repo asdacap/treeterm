@@ -6,8 +6,6 @@ import type { PreloadApi } from '../renderer/types'
 
 type PtyEventCallback = (event: PtyEvent) => void
 const ptyEventListeners = new Map<string, PtyEventCallback[]>()
-const ptyEventBuffer = new Map<string, PtyEvent[]>()
-const PTY_EVENT_BUFFER_MAX = 1000
 
 // Initialize IPC client
 const client = new IpcClient()
@@ -17,19 +15,9 @@ client.onPtyEvent((handle, event) => {
   const listeners = ptyEventListeners.get(handle)
   if (listeners) {
     listeners.forEach((cb) => cb(event))
-  } else {
-    // Buffer events until a listener registers (covers the gap between
-    // main forwarding live data and renderer subscribing after resize debounce)
-    if (!ptyEventBuffer.has(handle)) ptyEventBuffer.set(handle, [])
-    const buf = ptyEventBuffer.get(handle)!
-    buf.push(event)
-    if (buf.length > PTY_EVENT_BUFFER_MAX) {
-      buf.splice(0, buf.length - PTY_EVENT_BUFFER_MAX)
-    }
   }
-  if (event.type === 'exit') {
+  if (event.type === 'end') {
     ptyEventListeners.delete(handle)
-    ptyEventBuffer.delete(handle)
   }
 })
 
@@ -178,11 +166,11 @@ client.onSshPortForwardOutput((portForwardId, line) => {
 const preloadApi: PreloadApi = {
   platform: process.platform,
   terminal: {
-    create: (connectionId: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => {
-      return client.ptyCreate(connectionId, cwd, sandbox, startupCommand)
+    create: (connectionId: string, handle: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => {
+      return client.ptyCreate(connectionId, handle, cwd, sandbox, startupCommand)
     },
-    attach: (connectionId: string, sessionId: string) => {
-      return client.ptyAttach(connectionId, sessionId)
+    attach: (connectionId: string, handle: string, sessionId: string) => {
+      return client.ptyAttach(connectionId, handle, sessionId)
     },
     list: (connectionId: string): Promise<TTYSessionInfo[]> => {
       return client.ptyList(connectionId)
@@ -196,23 +184,11 @@ const preloadApi: PreloadApi = {
     kill: (connectionId: string, id: string): void => {
       client.ptyKill(connectionId, id)
     },
-    isAlive: (connectionId: string, id: string): Promise<boolean> => {
-      return client.ptyIsAlive(connectionId, id)
-    },
     onEvent: (id: string, callback: PtyEventCallback): (() => void) => {
       if (!ptyEventListeners.has(id)) {
         ptyEventListeners.set(id, [])
       }
       ptyEventListeners.get(id)!.push(callback)
-
-      // Flush any events that arrived before the listener registered
-      const buffered = ptyEventBuffer.get(id)
-      if (buffered) {
-        ptyEventBuffer.delete(id)
-        for (const event of buffered) {
-          callback(event)
-        }
-      }
 
       return () => {
         const listeners = ptyEventListeners.get(id)

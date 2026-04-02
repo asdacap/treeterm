@@ -12,7 +12,6 @@ const CHANNELS = {
   ptyCreate: 'pty:create',
   ptyAttach: 'pty:attach',
   ptyList: 'pty:list',
-  ptyIsAlive: 'pty:isAlive',
   gitGetInfo: 'git:getInfo',
   gitCreateWorktree: 'git:createWorktree',
   gitRemoveWorktree: 'git:removeWorktree',
@@ -164,16 +163,6 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.ptyList, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['ptyList']['params']))
-    )
-  }
-
-  onPtyIsAlive(
-    handler: (
-      ...args: IpcRequests['ptyIsAlive']['params']
-    ) => IpcRequests['ptyIsAlive']['result'] | Promise<IpcRequests['ptyIsAlive']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.ptyIsAlive, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['ptyIsAlive']['params']))
     )
   }
 

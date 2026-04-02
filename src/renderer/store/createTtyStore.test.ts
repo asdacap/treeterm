@@ -6,8 +6,6 @@ function makeMockTerminalDeps(): TtyTerminalDeps {
     write: vi.fn(),
     resize: vi.fn(),
     kill: vi.fn(),
-    isAlive: vi.fn().mockResolvedValue(true),
-    onEvent: vi.fn().mockReturnValue(() => {}),
   }
 }
 
@@ -37,21 +35,5 @@ describe('createTtyStore', () => {
     const tty = createTtyStore('pty-1', 'handle-1', terminal)
     tty.getState().kill()
     expect(terminal.kill).toHaveBeenCalledWith('pty-1')
-  })
-
-  it('isAlive delegates to terminal.isAlive with ptyId', async () => {
-    const terminal = makeMockTerminalDeps()
-    const tty = createTtyStore('pty-1', 'handle-1', terminal)
-    const result = await tty.getState().isAlive()
-    expect(result).toBe(true)
-    expect(terminal.isAlive).toHaveBeenCalledWith('pty-1')
-  })
-
-  it('onEvent delegates to terminal.onEvent with handle', () => {
-    const terminal = makeMockTerminalDeps()
-    const tty = createTtyStore('pty-1', 'handle-1', terminal)
-    const cb = vi.fn()
-    tty.getState().onEvent(cb)
-    expect(terminal.onEvent).toHaveBeenCalledWith('handle-1', cb)
   })
 })

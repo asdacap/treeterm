@@ -7,7 +7,6 @@ import * as grpc from '@grpc/grpc-js'
 import { spawn } from 'child_process'
 import * as path from 'path'
 import * as fs from 'fs'
-import { randomUUID } from 'crypto'
 import { app } from 'electron'
 import {
   TreeTermDaemonClient,
@@ -57,8 +56,8 @@ export class PtyStream {
   private stream: grpc.ClientDuplexStream<PtyInput, PtyOutput>
   private closed: boolean = false
 
-  constructor(client: TreeTermDaemonClient, sessionId: string, onEvent: (event: PtyEvent) => void) {
-    this.handle = randomUUID()
+  constructor(client: TreeTermDaemonClient, handle: string, sessionId: string, onEvent: (event: PtyEvent) => void) {
+    this.handle = handle
     this.sessionId = sessionId
     const metadata = new grpc.Metadata()
     this.stream = client.ptyStream(metadata)
@@ -76,10 +75,12 @@ export class PtyStream {
 
     this.stream.on('error', (error) => {
       console.error(`[PtyStream ${this.handle}] stream error for ${sessionId}:`, error)
+      onEvent({ type: 'error', message: error.message })
     })
 
     this.stream.on('end', () => {
       this.closed = true
+      onEvent({ type: 'end' })
     })
 
     this.stream.write({ start: { sessionId } })
@@ -167,11 +168,11 @@ export class GrpcDaemonClient {
    * Open a new independent PtyStream for a given session.
    * Each caller gets its own gRPC duplex stream — no shared state.
    */
-  openPtyStream(sessionId: string, onEvent: (event: PtyEvent) => void): PtyStream {
+  openPtyStream(handle: string, sessionId: string, onEvent: (event: PtyEvent) => void): PtyStream {
     if (!this.client) {
       throw new Error('Not connected to daemon')
     }
-    return new PtyStream(this.client, sessionId, onEvent)
+    return new PtyStream(this.client, handle, sessionId, onEvent)
   }
 
   onDisconnect(listener: DisconnectListener): () => void {

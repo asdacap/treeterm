@@ -75,6 +75,10 @@ function handleCachedEvent(cache: CachedTerminal, event: PtyEvent): void {
     case 'exit':
       cache.onExitUnmounted(event.exitCode)
       break
+    case 'error':
+    case 'end':
+      // Store for overlay display on next mount — handled by mountedHandler when re-mounted
+      break
   }
 }
 
@@ -309,6 +313,16 @@ export default function BaseTerminal({
             }
             break
           }
+          case 'error': {
+            console.error(`[${config.logPrefix} ${tabId}] PTY stream error:`, event.message)
+            setOverlay({ message: event.message, type: 'error' })
+            break
+          }
+          case 'end': {
+            console.log(`[${config.logPrefix} ${tabId}] PTY stream ended`)
+            setOverlay({ message: 'Terminal disconnected', type: 'error' })
+            break
+          }
         }
       }
 
@@ -376,20 +390,6 @@ export default function BaseTerminal({
           return
         }
 
-        let tty: Tty
-        try {
-          const result = await session.openTtyStream(currentExistingPtyId)
-          console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, currentExistingPtyId)
-          tty = result.tty
-        } catch (error) {
-          console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, currentExistingPtyId, error)
-          if (cancelled) return
-          setLoading(false)
-          setOverlay({ message: `Failed to reattach terminal: ${error instanceof Error ? error.message : 'Unknown error'}`, type: 'error' })
-          return
-        }
-
-        if (cancelled) return
         if (!containerRef.current) return
 
         setLoading(false)
@@ -411,11 +411,11 @@ export default function BaseTerminal({
 
         terminal.open(containerRef.current)
 
-        // Create cache entry with background subscription
+        // Create cache entry — event handler is registered before the stream starts
         const cache: CachedTerminal = {
           terminal,
-          tty,
-          unsubscribeEvents: () => {},  // set below
+          tty: null!,  // set after openTtyStream resolves
+          unsubscribeEvents: () => {},
           mountedHandler: null,
           stripScrollbackClear: config.stripScrollbackClear ?? false,
           connectedAt: Date.now(),
@@ -432,11 +432,23 @@ export default function BaseTerminal({
           },
         }
 
-        // Persistent background subscription — lives until removeTab
-        const ttyState = tty.getState()
-        cache.unsubscribeEvents = ttyState.onEvent((event) => {
-          handleCachedEvent(cache, event)
-        })
+        let tty: Tty
+        try {
+          const result = await session.openTtyStream(currentExistingPtyId, (event) => {
+            handleCachedEvent(cache, event)
+          })
+          console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, currentExistingPtyId)
+          tty = result.tty
+        } catch (error) {
+          console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, currentExistingPtyId, error)
+          if (cancelled) return
+          setOverlay({ message: `Failed to reattach terminal: ${error instanceof Error ? error.message : 'Unknown error'}`, type: 'error' })
+          return
+        }
+
+        if (cancelled) return
+
+        cache.tty = tty
 
         wsState.setCachedTerminal(tabId, cache)
 
