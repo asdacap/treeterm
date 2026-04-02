@@ -82,6 +82,8 @@ export interface WorkspaceStoreState {
   // Caches xterm.js Terminal + TTY subscription across mount/unmount cycles.
   getCachedTerminal: (tabId: string) => CachedTerminal | null
   setCachedTerminal: (tabId: string, entry: CachedTerminal) => void
+  /** Dispose all cached terminals. Called by session store on workspace removal. */
+  disposeAllCachedTerminals: () => void
 
   // Analyzer factory (used by applications in onWorkspaceLoad)
   initAnalyzer: (tabId: string) => Analyzer
@@ -186,6 +188,14 @@ export function createWorkspaceStore(
 
     getCachedTerminal: (tabId: string): CachedTerminal | null => cachedTerminals[tabId] ?? null,
     setCachedTerminal: (tabId: string, entry: CachedTerminal): void => { cachedTerminals[tabId] = entry },
+    disposeAllCachedTerminals: (): void => {
+      for (const [tabId, cached] of Object.entries(cachedTerminals)) {
+        cached.mountedHandler = null
+        cached.unsubscribeEvents()
+        cached.terminal.dispose()
+        delete cachedTerminals[tabId]
+      }
+    },
 
     initAnalyzer: (tabId: string): Analyzer => createAnalyzerStore(tabId, {
       getSettings: deps.getSettings,

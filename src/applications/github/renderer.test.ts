@@ -31,7 +31,7 @@ const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => ({
   mergeAndRemove: vi.fn(), mergeAndKeep: vi.fn(),
   closeAndClean: vi.fn(), lookupWorkspace: vi.fn(),
   remove: vi.fn(), removeKeepBranch: vi.fn(), removeKeepBoth: vi.fn(),
-  initTab: vi.fn(), getTabRef: vi.fn().mockReturnValue(null), getCachedTerminal: vi.fn().mockReturnValue(null), setCachedTerminal: vi.fn(),
+  initTab: vi.fn(), getTabRef: vi.fn().mockReturnValue(null), getCachedTerminal: vi.fn().mockReturnValue(null), setCachedTerminal: vi.fn(), disposeAllCachedTerminals: vi.fn(),
   initAnalyzer: vi.fn(), createTty: vi.fn().mockResolvedValue('pty-1'), ensureTtyWriter: vi.fn().mockResolvedValue(undefined),
   connectionId: 'local', updateSettings: vi.fn(),
   gitApi: createMockGitApi(), filesystemApi: createMockFilesystemApi(), runActionsApi: createMockRunActionsApi(),
