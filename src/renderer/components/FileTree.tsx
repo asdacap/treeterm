@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useStore } from 'zustand'
 import type { FileEntry, WorkspaceStore } from '../types'
 import { useFilesystemApi } from '../hooks/useWorkspaceApis'
@@ -35,6 +35,7 @@ export function FileTree({
   const workspacePath = wsData.path
   const filesystem = useFilesystemApi(workspace)
   const [dirContents, setDirContents] = useState<Record<string, DirectoryState>>({})
+  const requestedDirsRef = useRef<Set<string>>(new Set())
   const [search, setSearch] = useState<SearchState>({
     query: '',
     entries: [],
@@ -94,8 +95,8 @@ export function FileTree({
 
   const loadDirectory = useCallback(
     async (dirPath: string) => {
-      // Don't reload if already loaded
-      if (dirContents[dirPath]?.entries.length > 0) return
+      if (requestedDirsRef.current.has(dirPath)) return
+      requestedDirsRef.current.add(dirPath)
 
       setDirContents((prev) => ({
         ...prev,
@@ -111,19 +112,21 @@ export function FileTree({
             [dirPath]: { entries: result.contents.entries, loading: false, error: null }
           }))
         } else {
+          requestedDirsRef.current.delete(dirPath)
           setDirContents((prev) => ({
             ...prev,
             [dirPath]: { entries: [], loading: false, error: result.error || 'Failed to load' }
           }))
         }
       } catch (err) {
+        requestedDirsRef.current.delete(dirPath)
         setDirContents((prev) => ({
           ...prev,
           [dirPath]: { entries: [], loading: false, error: `Error: ${err}` }
         }))
       }
     },
-    [dirContents, filesystem]
+    [filesystem]
   )
 
   // Load root directory on mount
@@ -134,11 +137,9 @@ export function FileTree({
   // Load expanded directories
   useEffect(() => {
     for (const dirPath of expandedDirs) {
-      if (!dirContents[dirPath]) {
-        loadDirectory(dirPath)
-      }
+      loadDirectory(dirPath)
     }
-  }, [expandedDirs, loadDirectory, dirContents])
+  }, [expandedDirs, loadDirectory])
 
   const handleToggleDir = (dirPath: string) => {
     onToggleDir(dirPath)
