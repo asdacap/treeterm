@@ -118,13 +118,13 @@ export default function ReviewBrowser({
       await Promise.all([
         h.loadUncommittedChanges(),
         h.loadReviews(),
-        ...(parentWorkspace ? [h.loadDiff(), h.checkConflicts()] : []),
+        ...(hasParent ? [h.loadDiff(), h.checkConflicts()] : []),
       ])
       refreshDiffStatus()
     } finally {
       setRefreshing(false)
     }
-  }, [parentWorkspace, refreshDiffStatus])
+  }, [hasParent, refreshDiffStatus])
 
   // Auto-refresh when tab becomes visible (e.g., switching back from terminal)
   const wasVisibleRef = useRef<boolean | null>(null)
@@ -170,14 +170,17 @@ export default function ReviewBrowser({
     !!(reviewState?.selectedFilePath || reviewState?.selectedUncommittedFilePath)
   )
 
-  useEffect(() => {
-    if (!wsData) return
+  // Use stable primitives instead of object references to avoid re-running
+  // on every workspace store update (tab switches, scroll persistence, etc.)
+  const currentGitBranch = wsData?.gitBranch
+  const parentGitBranch = parentWorkspace?.gitBranch
 
+  useEffect(() => {
     const h = helpersRef.current
     h.loadUncommittedChanges()
     h.loadReviews()
 
-    if (parentWorkspace) {
+    if (parentWorkspaceId) {
       h.loadDiff()
       h.checkConflicts()
     } else {
@@ -188,7 +191,7 @@ export default function ReviewBrowser({
     if (viewMode === 'commits') {
       h.loadCommits()
     }
-  }, [workspaceId, parentWorkspaceId, wsData, parentWorkspace, viewMode])
+  }, [workspaceId, parentWorkspaceId, currentGitBranch, parentGitBranch, viewMode])
 
   // Auto-restore persisted file selection after initial data load
   useEffect(() => {
