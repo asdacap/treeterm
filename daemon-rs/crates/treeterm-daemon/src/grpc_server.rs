@@ -153,7 +153,14 @@ impl TreeTermDaemon for DaemonService {
                                 };
                                 if tx.send(Ok(msg)).await.is_err() { break; }
                             }
-                            None => break, // channel closed
+                            None => {
+                                // Subscriber was dropped because its buffer
+                                // filled (try_send failed in the read loop).
+                                let _ = tx.send(Err(Status::resource_exhausted(
+                                    "Stream buffer overflow: terminal output exceeded buffer capacity",
+                                ))).await;
+                                break;
+                            }
                         }
                     }
                     Ok((exit_code, signal)) = exit_rx.recv() => {

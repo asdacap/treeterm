@@ -320,7 +320,7 @@ export default function BaseTerminal({
           }
           case 'end': {
             console.log(`[${config.logPrefix} ${tabId}] PTY stream ended`)
-            setOverlay({ message: 'Terminal disconnected', type: 'error' })
+            setOverlay((prev) => prev ?? { message: 'Terminal disconnected', type: 'error' })
             break
           }
         }
