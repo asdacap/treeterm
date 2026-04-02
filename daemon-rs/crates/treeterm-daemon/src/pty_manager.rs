@@ -32,7 +32,7 @@ pub struct PtySession {
     pub created_at: i64,
     pub last_activity: i64,
     pub exit_code: Option<i32>,
-    pub data_tx: broadcast::Sender<Vec<u8>>,
+    pub data_subscribers: Vec<mpsc::Sender<Vec<u8>>>,
     pub exit_tx: broadcast::Sender<(i32, Option<i32>)>,
     pub resize_tx: broadcast::Sender<(i32, i32)>,
 }
@@ -118,7 +118,6 @@ impl PtyManager {
             libc::fcntl(master_fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
         }
 
-        let (data_tx, _) = broadcast::channel(256);
         let (exit_tx, _) = broadcast::channel(4);
         let (resize_tx, _) = broadcast::channel(16);
 
@@ -136,7 +135,7 @@ impl PtyManager {
             created_at: now,
             last_activity: now,
             exit_code: None,
-            data_tx: data_tx.clone(),
+            data_subscribers: vec![],
             exit_tx: exit_tx.clone(),
             resize_tx: resize_tx.clone(),
         };
@@ -144,9 +143,11 @@ impl PtyManager {
         let session = Arc::new(Mutex::new(session));
         self.sessions.write().await.insert(id.clone(), Arc::clone(&session));
 
-        // Subscribe for startup command detection before data_tx is moved into the reader
+        // Subscribe for startup command detection
         let startup_rx = if startup_command.as_deref().map_or(false, |s| !s.trim().is_empty()) {
-            Some(data_tx.subscribe())
+            let (tx, rx) = mpsc::channel(256);
+            session.lock().await.data_subscribers.push(tx);
+            Some(rx)
         } else {
             None
         };
@@ -155,7 +156,7 @@ impl PtyManager {
         let reader_session = Arc::clone(&session);
         let reader_id = id.clone();
         tokio::spawn(async move {
-            if let Err(e) = read_pty_loop(master_fd, data_tx, reader_session).await {
+            if let Err(e) = read_pty_loop(master_fd, reader_session).await {
                 tracing::debug!(session_id = %reader_id, error = %e, "pty reader ended");
             }
         });
@@ -172,13 +173,13 @@ impl PtyManager {
         });
 
         // Execute startup command once the shell is ready to accept input
-        if let Some((cmd, rx)) = startup_command
+        if let Some((cmd, mut rx)) = startup_command
             .filter(|s| !s.trim().is_empty())
             .zip(startup_rx)
         {
             let fd = master_fd;
             tokio::spawn(async move {
-                wait_for_shell_ready(rx).await;
+                wait_for_shell_ready(&mut rx).await;
                 let data = format!("exec {}\n", cmd.trim());
                 unsafe {
                     libc::write(fd, data.as_ptr() as *const libc::c_void, data.len());
@@ -326,19 +327,20 @@ impl PtyManager {
     /// This eliminates the race where data arriving between get_initial_state()
     /// and subscribe_data() would be lost, corrupting the terminal.
     ///
-    /// Uses broadcast + per-subscriber bridge: the broadcast fan-out is O(1) in
-    /// the read loop, while each subscriber gets its own ~10MB mpsc buffer so a
-    /// slow reader cannot block other subscribers.
+    /// Each subscriber gets its own ~10MB mpsc buffer. The read loop fans out
+    /// directly to all subscribers via try_send() — no intermediate broadcast
+    /// or bridge tasks. A slow gRPC client whose buffer fills is dropped.
     pub async fn subscribe_with_initial_state(
         &self,
         session_id: &str,
     ) -> Result<(Vec<BufferEvent>, mpsc::Receiver<Vec<u8>>), String> {
         let session = self.get_session(session_id).await?;
-        let session = session.lock().await;
+        let mut session = session.lock().await;
 
-        // Subscribe to broadcast first — any data arriving after this point
-        // queues in the broadcast ring buffer.
-        let mut broadcast_rx = session.data_tx.subscribe();
+        // Register subscriber first — any data arriving after this point
+        // goes into the mpsc buffer via the read loop.
+        let (tx, rx) = mpsc::channel(PTY_SUBSCRIBER_CAP);
+        session.data_subscribers.push(tx);
 
         // Snapshot state — guaranteed no gap between snapshot and subscription
         let mut events = Vec::new();
@@ -354,31 +356,6 @@ impl PtyManager {
         for event in &session.raw_buffer {
             events.push(event.clone());
         }
-
-        drop(session); // release lock before spawning
-
-        // Bridge task: drain broadcast into a per-subscriber mpsc buffer.
-        // If the mpsc fills (subscriber too slow) or broadcast lags, the
-        // bridge exits and the mpsc sender is dropped — the gRPC stream
-        // sees recv() → None and ends, prompting the client to reconnect.
-        let (tx, rx) = mpsc::channel(PTY_SUBSCRIBER_CAP);
-        tokio::spawn(async move {
-            loop {
-                match broadcast_rx.recv().await {
-                    Ok(data) => {
-                        if tx.try_send(data).is_err() {
-                            tracing::debug!("dropping slow PTY subscriber (buffer full)");
-                            break;
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Lagged(n)) => {
-                        tracing::debug!(skipped = n, "PTY subscriber lagged, disconnecting");
-                        break;
-                    }
-                    Err(broadcast::error::RecvError::Closed) => break,
-                }
-            }
-        });
 
         Ok((events, rx))
     }
@@ -443,7 +420,7 @@ impl PtyManager {
 ///
 /// Phase 1: wait for the first PTY output chunk (shell has started). 5s timeout.
 /// Phase 2: wait for 200ms of silence after the last output (shell prompt drawn, init done). 30s timeout.
-async fn wait_for_shell_ready(mut rx: broadcast::Receiver<Vec<u8>>) {
+async fn wait_for_shell_ready(rx: &mut mpsc::Receiver<Vec<u8>>) {
     // Phase 1: wait for first output (5s timeout)
     let phase1_timeout = tokio::time::sleep(std::time::Duration::from_secs(5));
     tokio::pin!(phase1_timeout);
@@ -452,9 +429,8 @@ async fn wait_for_shell_ready(mut rx: broadcast::Receiver<Vec<u8>>) {
         tokio::select! {
             result = rx.recv() => {
                 match result {
-                    Ok(_) => break,
-                    Err(broadcast::error::RecvError::Lagged(_)) => break,
-                    Err(broadcast::error::RecvError::Closed) => return,
+                    Some(_) => break,
+                    None => return,
                 }
             }
             _ = &mut phase1_timeout => {
@@ -473,9 +449,8 @@ async fn wait_for_shell_ready(mut rx: broadcast::Receiver<Vec<u8>>) {
         tokio::select! {
             result = rx.recv() => {
                 match result {
-                    Ok(_) => continue,
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => return,
+                    Some(_) => continue,
+                    None => return,
                 }
             }
             _ = silence => return,
@@ -498,7 +473,6 @@ impl AsRawFd for FdWrapper {
 
 async fn read_pty_loop(
     master_fd: RawFd,
-    data_tx: broadcast::Sender<Vec<u8>>,
     session: Arc<Mutex<PtySession>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let async_fd = AsyncFd::new(FdWrapper(master_fd))?;
@@ -522,13 +496,16 @@ async fn read_pty_loop(
             Ok(Ok(0)) => break, // EOF
             Ok(Ok(n)) => {
                 let chunk = buf[..n].to_vec();
-                // Broadcast to all subscriber bridge tasks (non-blocking, O(1))
-                let _ = data_tx.send(chunk.clone());
 
-                // Update raw_buffer under lock
+                // Fan out to subscribers + update raw_buffer under lock
                 {
                     let mut session = session.lock().await;
                     session.last_activity = chrono_now_millis();
+
+                    // Fan out directly to per-subscriber mpsc channels (non-blocking)
+                    session.data_subscribers.retain(|tx| {
+                        tx.try_send(chunk.clone()).is_ok()
+                    });
 
                     // Append to raw buffer in ≤1KB chunks for fine-grained eviction
                     for sub in chunk.chunks(RAW_BUFFER_CHUNK_CAP) {
@@ -923,17 +900,19 @@ mod tests {
 
     #[tokio::test]
     async fn wait_for_shell_ready_detects_silence() {
-        let (tx, rx) = broadcast::channel::<Vec<u8>>(16);
+        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(16);
 
         let start = std::time::Instant::now();
-        let handle = tokio::spawn(wait_for_shell_ready(rx));
+        let handle = tokio::spawn(async move {
+            wait_for_shell_ready(&mut rx).await;
+        });
 
         // Simulate shell producing output for 100ms
-        tx.send(b"some output".to_vec()).unwrap();
+        tx.send(b"some output".to_vec()).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        tx.send(b"more output".to_vec()).unwrap();
+        tx.send(b"more output".to_vec()).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        tx.send(b"prompt: ".to_vec()).unwrap();
+        tx.send(b"prompt: ".to_vec()).await.unwrap();
         // Then silence — wait_for_shell_ready should return after 200ms of silence
 
         handle.await.unwrap();
@@ -947,24 +926,24 @@ mod tests {
 
     #[tokio::test]
     async fn wait_for_shell_ready_channel_closed() {
-        let (tx, rx) = broadcast::channel::<Vec<u8>>(16);
+        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(16);
 
         // Send one chunk then drop sender (simulates channel close)
-        tx.send(b"output".to_vec()).unwrap();
+        tx.send(b"output".to_vec()).await.unwrap();
         drop(tx);
 
         let start = std::time::Instant::now();
-        wait_for_shell_ready(rx).await;
+        wait_for_shell_ready(&mut rx).await;
         // Should return quickly once channel closes
         assert!(start.elapsed() < std::time::Duration::from_secs(1));
     }
 
     #[tokio::test]
     async fn wait_for_shell_ready_no_output_times_out() {
-        let (_tx, rx) = broadcast::channel::<Vec<u8>>(16);
+        let (_tx, mut rx) = mpsc::channel::<Vec<u8>>(16);
 
         let start = std::time::Instant::now();
-        wait_for_shell_ready(rx).await;
+        wait_for_shell_ready(&mut rx).await;
         let elapsed = start.elapsed();
 
         // Should time out after 5s (Phase 1 timeout)
@@ -974,14 +953,16 @@ mod tests {
 
     #[tokio::test]
     async fn wait_for_shell_ready_continuous_output_waits_for_silence() {
-        let (tx, rx) = broadcast::channel::<Vec<u8>>(16);
+        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(16);
 
         let start = std::time::Instant::now();
-        let handle = tokio::spawn(wait_for_shell_ready(rx));
+        let handle = tokio::spawn(async move {
+            wait_for_shell_ready(&mut rx).await;
+        });
 
         // Simulate shell outputting continuously for 6 seconds (beyond old 5s shared timeout)
         for _ in 0..60 {
-            tx.send(b"loading...".to_vec()).unwrap();
+            tx.send(b"loading...".to_vec()).await.unwrap();
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
         // Stop sending — silence should be detected after 200ms
