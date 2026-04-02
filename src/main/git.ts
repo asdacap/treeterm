@@ -65,7 +65,7 @@ export class GitClient {
     cwd: string,
     args: string[],
     options: { timeoutMs?: number; env?: Record<string, string>; onProgress?: (data: string) => void } = {}
-  ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  ): Promise<{ exitCode: number; stdout: string; stderr: string; args: string[] }> {
     return new Promise((resolve, reject) => {
       const stdout: Buffer[] = []
       const stderr: Buffer[] = []
@@ -106,7 +106,8 @@ export class GitClient {
             resolve({
               exitCode: output.result.exitCode,
               stdout: Buffer.concat(stdout).toString('utf-8'),
-              stderr: Buffer.concat(stderr).toString('utf-8')
+              stderr: Buffer.concat(stderr).toString('utf-8'),
+              args
             })
           }
         })
@@ -121,7 +122,8 @@ export class GitClient {
             resolve({
               exitCode: -1,
               stdout: Buffer.concat(stdout).toString('utf-8'),
-              stderr: Buffer.concat(stderr).toString('utf-8') || 'Stream ended unexpectedly'
+              stderr: Buffer.concat(stderr).toString('utf-8') || 'Stream ended unexpectedly',
+              args
             })
           }
         })
@@ -1120,34 +1122,35 @@ export class GitClient {
     return langMap[ext.toLowerCase()] || 'plaintext'
   }
 
-  private interpretError(result: { exitCode: number; stdout: string; stderr: string }): Error {
+  private interpretError(result: { exitCode: number; stdout: string; stderr: string; args: string[] }): Error {
     const stderr = result.stderr.toLowerCase()
-    
+    const cmd = `git ${result.args.join(' ')}`
+
     if (stderr.includes('nothing to commit')) {
-      return new Error('No changes to commit')
+      return new Error(`No changes to commit (${cmd})`)
     }
     if (stderr.includes('merge conflict')) {
-      return new Error('Merge conflict detected')
+      return new Error(`Merge conflict detected (${cmd})`)
     }
     if (stderr.includes('already exists')) {
-      return new Error('Already exists')
+      return new Error(`Already exists (${cmd})`)
     }
     if (stderr.includes('not a git repository')) {
-      return new Error('Not a git repository')
+      return new Error(`Not a git repository (${cmd})`)
     }
     if (stderr.includes('pathspec') && stderr.includes('did not match')) {
-      return new Error('File not found')
+      return new Error(`File not found (${cmd})`)
     }
     if (stderr.includes('failed to merge')) {
-      return new Error('Merge failed')
+      return new Error(`Merge failed (${cmd})`)
     }
     if (stderr.includes('could not resolve')) {
-      return new Error('Could not resolve reference')
+      return new Error(`Could not resolve reference (${cmd})`)
     }
     if (result.exitCode !== 0 && result.stderr) {
-      return new Error(`Git error: ${result.stderr}`)
+      return new Error(`Git error [${cmd}]: ${result.stderr}`)
     }
-    
-    return new Error(`Git command failed with exit code ${result.exitCode}`)
+
+    return new Error(`Git command failed [${cmd}] with exit code ${result.exitCode}`)
   }
 }

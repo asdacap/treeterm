@@ -176,7 +176,7 @@ describe('GitClient', () => {
     it('falls back to generic git error with stderr', async () => {
       const client = makeMockClient([errorStream('some unknown error message')])
       const git = new GitClient(client)
-      await expect(git.getStatus('/repo')).rejects.toThrow('Git error:')
+      await expect(git.getStatus('/repo')).rejects.toThrow('Git error [git status --porcelain]:')
     })
   })
 
@@ -594,7 +594,7 @@ describe('GitClient', () => {
     it('falls back to exit code message when stderr is empty', async () => {
       const client = makeMockClient([buildMockStream([{ result: { exitCode: 128 } }])])
       const git = new GitClient(client)
-      await expect(git.getStatus('/repo')).rejects.toThrow('Git command failed with exit code 128')
+      await expect(git.getStatus('/repo')).rejects.toThrow('Git command failed [git status --porcelain] with exit code 128')
     })
   })
 
