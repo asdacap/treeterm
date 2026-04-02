@@ -232,9 +232,24 @@ export function createWorkspaceStore(
     getTtyWriter: async (ptyId: string): Promise<TtyWriter> => {
       const cached = ttyWriters[ptyId]
       if (cached) return cached
-      const { tty } = await deps.openTtyStream(ptyId, () => {})
+      let disconnected = false
+      const { tty } = await deps.openTtyStream(ptyId, (event) => {
+        if (event.type === 'end' || event.type === 'error') {
+          disconnected = true
+          delete ttyWriters[ptyId]
+        }
+      })
       const state = tty.getState()
-      const writer: TtyWriter = { write: state.write, kill: state.kill }
+      const writer: TtyWriter = {
+        write: (data: string) => {
+          if (disconnected) throw new Error(`TtyWriter for ${ptyId} is disconnected`)
+          state.write(data)
+        },
+        kill: () => {
+          if (disconnected) throw new Error(`TtyWriter for ${ptyId} is disconnected`)
+          state.kill()
+        },
+      }
       ttyWriters[ptyId] = writer
       return writer
     },
@@ -391,8 +406,13 @@ export function createWorkspaceStore(
 
       if (!ptyId || !tabId) return false
 
-      const writer = await get().getTtyWriter(ptyId)
-      writer.write(text + '\r')
+      try {
+        const writer = await get().getTtyWriter(ptyId)
+        writer.write(text + '\r')
+      } catch {
+        const writer = await get().getTtyWriter(ptyId)
+        writer.write(text + '\r')
+      }
       get().setActiveTab(tabId)
       return true
     },

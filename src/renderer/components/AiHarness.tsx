@@ -111,13 +111,23 @@ function AiHarnessContent({
   const { aiState, analyzing, reason, autoApprove } = useStore(analyzer)
 
   const handlePushToTalkTranscript = useCallback(async (text: string) => {
-    const writer = await workspace.getState().getTtyWriter(ptyId)
-    writer.write(text)
+    try {
+      const writer = await workspace.getState().getTtyWriter(ptyId)
+      writer.write(text)
+    } catch {
+      const writer = await workspace.getState().getTtyWriter(ptyId)
+      writer.write(text)
+    }
   }, [ptyId, workspace])
 
   const handlePushToTalkSubmit = useCallback(async () => {
-    const writer = await workspace.getState().getTtyWriter(ptyId)
-    writer.write('\r')
+    try {
+      const writer = await workspace.getState().getTtyWriter(ptyId)
+      writer.write('\r')
+    } catch {
+      const writer = await workspace.getState().getTtyWriter(ptyId)
+      writer.write('\r')
+    }
   }, [ptyId, workspace])
 
   const handleTerminalReady = useCallback((term: XTerm) => {
