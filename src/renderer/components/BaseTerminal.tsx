@@ -8,7 +8,8 @@ import { useActivityStateStore } from '../store/activityState'
 import { useSessionApi } from '../contexts/SessionStoreContext'
 import { createActivityStateDetector } from '../utils/activityStateDetector'
 import type { Tty } from '../store/createTtyStore'
-import type { SandboxConfig, TerminalState, WorkspaceStore } from '../types'
+import type { CachedTerminal } from '../store/createWorkspaceStore'
+import type { PtyEvent, SandboxConfig, TerminalState, WorkspaceStore } from '../types'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
 import '@xterm/xterm/css/xterm.css'
@@ -42,6 +43,62 @@ function formatRawChars(str: string): string {
   }
   return result
 }
+
+/**
+ * Background event handler for cached terminals.
+ * Dispatches to mountedHandler when the component is mounted,
+ * falls back to minimal buffer writes when unmounted.
+ */
+function handleCachedEvent(cache: CachedTerminal, event: PtyEvent): void {
+  // When component is mounted, forward everything to the full UI handler
+  if (cache.mountedHandler) {
+    cache.mountedHandler(event)
+    return
+  }
+
+  // Unmounted fallback: keep terminal buffer up to date
+  switch (event.type) {
+    case 'data': {
+      cache.dataVersion++
+      if (cache.stripScrollbackClear) {
+        const decoder = new TextDecoder('utf-8', { fatal: false })
+        const stripped = decoder.decode(event.data).replace(/\x1b\[3J/g, '')
+        cache.terminal.write(stripped)
+      } else {
+        cache.terminal.write(event.data)
+      }
+      break
+    }
+    case 'resize':
+      cache.terminal.resize(event.cols, event.rows)
+      break
+    case 'exit':
+      cache.onExitUnmounted(event.exitCode)
+      break
+  }
+}
+
+const TERMINAL_THEME_COLORS = {
+  foreground: '#d4d4d4',
+  cursor: '#d4d4d4',
+  selectionBackground: '#264f78',
+  black: '#000000',
+  red: '#cd3131',
+  green: '#0dbc79',
+  yellow: '#e5e510',
+  blue: '#2472c8',
+  magenta: '#bc3fbc',
+  cyan: '#11a8cd',
+  white: '#e5e5e5',
+  brightBlack: '#666666',
+  brightRed: '#f14c4c',
+  brightGreen: '#23d18b',
+  brightYellow: '#f5f543',
+  brightBlue: '#3b8eea',
+  brightMagenta: '#d670d6',
+  brightCyan: '#29b8db',
+  brightWhite: '#ffffff'
+} as const
 
 // Base state interface that all terminal-based states should extend
 export interface BaseTerminalState extends TerminalState {
@@ -104,105 +161,37 @@ export default function BaseTerminal({
 
   useEffect(() => {
     const currentExistingPtyId = existingPtyIdRef.current
-    console.log(`[${config.logPrefix} ${tabId}] useEffect running`, {
-      existingPtyId: currentExistingPtyId,
-      workspaceId
-    })
-
     if (!containerRef.current) return
 
     let cancelled = false
-    let terminal: XTerm | null = null
     let resizeTimeout: ReturnType<typeof setTimeout> | null = null
     let inputDisposable: { dispose(): void } | null = null
     let scrollDisposable: { dispose(): void } | null = null
     let bufferChangeDisposable: { dispose(): void } | null = null
     let resizeObserver: ResizeObserver | null = null
     let detector: ReturnType<typeof createActivityStateDetector> | null = null
-    let unsubscribe: (() => void) | null = null
     let unsubscribeFocus: (() => void) | null = null
     let rawChars = ''
-
     let initialResizeDone = false
 
-    const setupResizeObserver = (term: XTerm, resize: (cols: number, rows: number) => void) => {
-      resizeObserver = new ResizeObserver((entries) => {
-        const entry = entries[0]
-        if (!entry) return
-        if (!initialResizeDone) return
+    const wsState = workspace.getState()
+    const existingCache = wsState.getCachedTerminal(tabId)
 
-        console.log(`[${config.logPrefix} ${tabId}] resize (observer):`, { cols: term.cols, rows: term.rows })
-        fitTerminal(term, resize)
-      })
-      resizeObserver.observe(containerRef.current!)
-    }
+    /** Attach all DOM-level handlers to a terminal. Shared by first mount and remount. */
+    const attachMountedState = (terminal: XTerm, tty: Tty, cache: CachedTerminal) => {
+      terminalRef.current = terminal
+      ttyRef.current = tty
+      dataVersionRef.current = cache.dataVersion
 
-    const session = sessionStore.getState()
-
-    const init = async () => {
-      // Phase 1: Resolve TTY
-      if (!currentExistingPtyId) {
-        setLoading(false)
-        setOverlay({ message: 'No PTY available for this terminal', type: 'error' })
-        return
+      const rawResize = tty.getState().resize
+      const resize = (cols: number, rows: number) => {
+        requestedSizeRef.current = { cols, rows }
+        rawResize(cols, rows)
       }
 
-      let tty: Tty
-      try {
-        const result = await session.openTtyStream(currentExistingPtyId)
-        console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, currentExistingPtyId)
-        tty = result.tty
-      } catch (error) {
-        console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, currentExistingPtyId, error)
-        if (cancelled) return
-        setLoading(false)
-        setOverlay({ message: `Failed to reattach terminal: ${error instanceof Error ? error.message : 'Unknown error'}`, type: 'error' })
-        return
-      }
-
-      if (cancelled) return
-      if (!containerRef.current) return
-
-      // Phase 2: Create terminal
-      setLoading(false)
-      terminal = new XTerm({
-        cursorBlink: settings.terminal.cursorBlink,
-        cursorStyle: settings.terminal.cursorStyle,
-        fontSize: settings.terminal.fontSize,
-        fontFamily: settings.terminal.fontFamily,
-        scrollback: 50000,
-        linkHandler: {
-          activate: (_event, uri) => window.open(uri, '_blank')
-        },
-        theme: {
-          background: config.themeBackground,
-          foreground: '#d4d4d4',
-          cursor: '#d4d4d4',
-          cursorAccent: config.themeBackground,
-          selectionBackground: '#264f78',
-          black: '#000000',
-          red: '#cd3131',
-          green: '#0dbc79',
-          yellow: '#e5e510',
-          blue: '#2472c8',
-          magenta: '#bc3fbc',
-          cyan: '#11a8cd',
-          white: '#e5e5e5',
-          brightBlack: '#666666',
-          brightRed: '#f14c4c',
-          brightGreen: '#23d18b',
-          brightYellow: '#f5f543',
-          brightBlue: '#3b8eea',
-          brightMagenta: '#d670d6',
-          brightCyan: '#29b8db',
-          brightWhite: '#ffffff'
-        }
-      })
-
-      terminal.open(containerRef.current)
-
+      // Scroll tracking
       scrollDisposable = terminal.onScroll(() => {
-        const buf = terminal!.buffer.active
+        const buf = terminal.buffer.active
         if (buf.baseY === 0) {
           setScrollPosition('bottom')
         } else if (buf.viewportY === 0) {
@@ -218,167 +207,270 @@ export default function BaseTerminal({
         setIsAlternateScreen(buf.type === 'alternate')
       })
 
-      const rawResize = tty.getState().resize
-      const resize = (cols: number, rows: number) => {
-        requestedSizeRef.current = { cols, rows }
-        rawResize(cols, rows)
-      }
-
-      terminalRef.current = terminal
-
-
-      // Create activity state detector with optional custom patterns
-      // Skip when LLM-based analysis handles state (disableActivityDetector)
+      // Activity state detector
       detector = config.disableActivityDetector
         ? null
         : createActivityStateDetector(
             (state) => setTabState(tabId, state),
             config.promptPatterns ? { promptPatterns: config.promptPatterns } : undefined
           )
-      // Notify parent that terminal is ready
-      config.onTerminalReady?.(terminal, dataVersionRef)
 
-      // Subscribe to focus requests — focuses terminal when focusTabId matches
+      // Focus subscription
       unsubscribeFocus = workspace.subscribe((state) => {
         if (state.focusTabId === tabId && terminalRef.current) {
           terminalRef.current.focus()
           state.clearFocusRequest()
         }
       })
-      // Check if focus was already requested before subscribing
-      const wsState = workspace.getState()
-      if (wsState.focusTabId === tabId) {
+      const currentWsState = workspace.getState()
+      if (currentWsState.focusTabId === tabId) {
         terminal.focus()
-        wsState.clearFocusRequest()
+        currentWsState.clearFocusRequest()
       }
 
-      setupResizeObserver(terminal, resize)
-      // Wait for layout to settle before fitting and connecting the stream.
-      // All events (scrollback, resize, exit, live data) flow through onEvent uniformly —
-      // the preload layer buffers them until we subscribe.
+      // Set mounted handler — the background subscription forwards all events here
+      cache.mountedHandler = (event: PtyEvent) => {
+        switch (event.type) {
+          case 'data': {
+            cache.dataVersion++
+            dataVersionRef.current = cache.dataVersion
+            setOverlay(null)
+
+            const buf = terminal.buffer.active
+            const wasAtBottom = buf.baseY - buf.viewportY <= 1
+
+            const afterWrite = () => {
+              if (wasAtBottom && terminal.buffer.active.baseY - terminal.buffer.active.viewportY > 1) {
+                terminal.scrollToBottom()
+              }
+            }
+
+            if (config.stripScrollbackClear) {
+              const decoder = new TextDecoder('utf-8', { fatal: false })
+              const dataStr = decoder.decode(event.data)
+              const stripped = dataStr.replace(/\x1b\[3J/g, '')
+              terminal.write(stripped, afterWrite)
+            } else {
+              terminal.write(event.data, afterWrite)
+            }
+
+            setIsAlternateScreen(terminal.buffer.active.type === 'alternate')
+
+            if (detector) {
+              const decoder = new TextDecoder('utf-8', { fatal: false })
+              detector.processData(decoder.decode(event.data))
+            }
+            if (settings.terminal.showRawChars) {
+              const decoder = new TextDecoder('utf-8', { fatal: false })
+              rawChars = (rawChars + decoder.decode(event.data)).slice(-50)
+              console.log('[RAW]', formatRawChars(rawChars))
+            }
+            break
+          }
+          case 'exit': {
+            console.log(`[${config.logPrefix} ${tabId}] PTY exited with code:`, event.exitCode)
+            if (!cancelled) {
+              const currentTab = workspace.getState().workspace?.appStates[tabId]
+              const keepOnExit = (currentTab?.state as BaseTerminalState | undefined)?.keepOnExit
+              const immediateFailure = event.exitCode !== 0 && (Date.now() - cache.connectedAt) < 1000
+              if (immediateFailure) {
+                setOverlay({ message: `Process exited immediately with code ${event.exitCode}`, type: 'error' })
+              } else if (keepOnExit) {
+                terminal.write(`\r\n\x1b[2mProcess exited with exit code ${event.exitCode}\x1b[0m\r\n`)
+              } else {
+                removeTab(tabId)
+              }
+            }
+            break
+          }
+          case 'resize': {
+            const buf = terminal.buffer.active
+            const prevViewportY = buf.viewportY
+            const prevBaseY = buf.baseY
+            const wasAtBottom = prevBaseY - prevViewportY <= 3
+            const scrollRatio = prevBaseY > 0 ? prevViewportY / prevBaseY : 0
+
+            terminal.resize(event.cols, event.rows)
+
+            // Check if daemon-echoed size matches what we requested
+            const req = requestedSizeRef.current
+            if (req && (req.cols !== event.cols || req.rows !== event.rows)) {
+              setSizeMismatch({ requested: req, actual: { cols: event.cols, rows: event.rows } })
+            } else {
+              setSizeMismatch(null)
+            }
+
+            if (wasAtBottom) {
+              terminal.scrollToBottom()
+            } else {
+              const newScrollLine = Math.round(terminal.buffer.active.baseY * scrollRatio)
+              terminal.scrollToLine(newScrollLine)
+            }
+            break
+          }
+        }
+      }
+
+      // ResizeObserver — gated on initialResizeDone to prevent resize during mount
+      resizeObserver = new ResizeObserver((entries) => {
+        const entry = entries[0]
+        if (!entry) return
+        if (!initialResizeDone) return
+        fitTerminal(terminal, resize)
+      })
+      resizeObserver.observe(containerRef.current!)
+
+      // Wait for layout to settle, then fit (only sends resize if size actually changed)
       if (resizeTimeout) clearTimeout(resizeTimeout)
       resizeTimeout = setTimeout(() => {
         if (cancelled) return
-        fitTerminal(terminal!, resize)
-        console.log(`[${config.logPrefix} ${tabId}] resize (initial):`, { cols: terminal!.cols, rows: terminal!.rows })
+        fitTerminal(terminal, resize)
+        console.log(`[${config.logPrefix} ${tabId}] resize (initial):`, { cols: terminal.cols, rows: terminal.rows })
         initialResizeDone = true
+      }, 100)
 
-        // Connect TTY — buffered events (scrollback, resize, possibly exit) flush immediately
-        ttyRef.current = tty
-        const ttyState = tty.getState()
-        const connectedAt = Date.now()
+      // Forward terminal input to PTY
+      inputDisposable = terminal.onData((data) => {
+        writeChunked(ttyRef.current!.getState(), data)
+      })
+    }
 
-        unsubscribe = ttyState.onEvent((event) => {
-          switch (event.type) {
-            case 'data': {
-              dataVersionRef.current++
-              setOverlay(null)
+    if (existingCache) {
+      // === REMOUNT PATH: reuse cached terminal ===
+      console.log(`[${config.logPrefix} ${tabId}] remount from cache`)
+      const terminal = existingCache.terminal
 
-              const buf = terminal!.buffer.active
-              const wasAtBottom = buf.baseY - buf.viewportY <= 1
+      // Apply current settings (font, cursor, theme may have changed)
+      terminal.options.fontSize = settings.terminal.fontSize
+      terminal.options.fontFamily = settings.terminal.fontFamily
+      terminal.options.cursorBlink = settings.terminal.cursorBlink
+      terminal.options.cursorStyle = settings.terminal.cursorStyle
+      terminal.options.theme = {
+        ...TERMINAL_THEME_COLORS,
+        background: config.themeBackground,
+        cursorAccent: config.themeBackground,
+      }
 
-              const afterWrite = () => {
-                if (wasAtBottom && terminal!.buffer.active.baseY - terminal!.buffer.active.viewportY > 1) {
-                  terminal!.scrollToBottom()
-                }
-              }
+      // Reparent terminal element to the new container
+      setLoading(false)
+      if (terminal.element) {
+        containerRef.current.appendChild(terminal.element)
+        terminal.refresh(0, terminal.rows - 1)
+      }
 
-              if (config.stripScrollbackClear) {
-                const decoder = new TextDecoder('utf-8', { fatal: false })
-                const dataStr = decoder.decode(event.data)
-                const stripped = dataStr.replace(/\x1b\[3J/g, '')
-                terminal!.write(stripped, afterWrite)
-              } else {
-                terminal!.write(event.data, afterWrite)
-              }
+      attachMountedState(terminal, existingCache.tty, existingCache)
+    } else {
+      // === FIRST MOUNT PATH: create terminal and cache it ===
+      console.log(`[${config.logPrefix} ${tabId}] first mount`, {
+        existingPtyId: currentExistingPtyId,
+        workspaceId
+      })
 
-              setIsAlternateScreen(terminal!.buffer.active.type === 'alternate')
+      const session = sessionStore.getState()
 
-              if (detector) {
-                const decoder = new TextDecoder('utf-8', { fatal: false })
-                detector.processData(decoder.decode(event.data))
-              }
-              if (settings.terminal.showRawChars) {
-                const decoder = new TextDecoder('utf-8', { fatal: false })
-                rawChars = (rawChars + decoder.decode(event.data)).slice(-50)
-                console.log('[RAW]', formatRawChars(rawChars))
-              }
-              break
-            }
-            case 'exit': {
-              console.log(`[${config.logPrefix} ${tabId}] PTY exited with code:`, event.exitCode)
-              if (!cancelled) {
-                const currentTab = workspace.getState().workspace?.appStates[tabId]
-                const keepOnExit = (currentTab?.state as BaseTerminalState | undefined)?.keepOnExit
-                const immediateFailure = event.exitCode !== 0 && (Date.now() - connectedAt) < 1000
-                if (immediateFailure) {
-                  setOverlay({ message: `Process exited immediately with code ${event.exitCode}`, type: 'error' })
-                } else if (keepOnExit) {
-                  terminal!.write(`\r\n\x1b[2mProcess exited with exit code ${event.exitCode}\x1b[0m\r\n`)
-                } else {
-                  removeTab(tabId)
-                }
-              }
-              break
-            }
-            case 'resize': {
-              const buf = terminal!.buffer.active
-              const prevViewportY = buf.viewportY
-              const prevBaseY = buf.baseY
-              const wasAtBottom = prevBaseY - prevViewportY <= 3
-              const scrollRatio = prevBaseY > 0 ? prevViewportY / prevBaseY : 0
+      const init = async () => {
+        if (!currentExistingPtyId) {
+          setLoading(false)
+          setOverlay({ message: 'No PTY available for this terminal', type: 'error' })
+          return
+        }
 
-              terminal!.resize(event.cols, event.rows)
+        let tty: Tty
+        try {
+          const result = await session.openTtyStream(currentExistingPtyId)
+          console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, currentExistingPtyId)
+          tty = result.tty
+        } catch (error) {
+          console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, currentExistingPtyId, error)
+          if (cancelled) return
+          setLoading(false)
+          setOverlay({ message: `Failed to reattach terminal: ${error instanceof Error ? error.message : 'Unknown error'}`, type: 'error' })
+          return
+        }
 
-              // Check if daemon-echoed size matches what we requested
-              const req = requestedSizeRef.current
-              if (req && (req.cols !== event.cols || req.rows !== event.rows)) {
-                setSizeMismatch({ requested: req, actual: { cols: event.cols, rows: event.rows } })
-              } else {
-                setSizeMismatch(null)
-              }
+        if (cancelled) return
+        if (!containerRef.current) return
 
-              if (wasAtBottom) {
-                terminal!.scrollToBottom()
-              } else {
-                const newScrollLine = Math.round(terminal!.buffer.active.baseY * scrollRatio)
-                terminal!.scrollToLine(newScrollLine)
-              }
-              break
-            }
+        setLoading(false)
+        const terminal = new XTerm({
+          cursorBlink: settings.terminal.cursorBlink,
+          cursorStyle: settings.terminal.cursorStyle,
+          fontSize: settings.terminal.fontSize,
+          fontFamily: settings.terminal.fontFamily,
+          scrollback: 50000,
+          linkHandler: {
+            activate: (_event, uri) => window.open(uri, '_blank')
+          },
+          theme: {
+            ...TERMINAL_THEME_COLORS,
+            background: config.themeBackground,
+            cursorAccent: config.themeBackground,
           }
         })
 
-        // Forward terminal input to PTY
-        inputDisposable = terminal!.onData((data) => {
-          writeChunked(ttyRef.current!.getState(), data)
+        terminal.open(containerRef.current)
+
+        // Create cache entry with background subscription
+        const cache: CachedTerminal = {
+          terminal,
+          tty,
+          unsubscribeEvents: () => {},  // set below
+          mountedHandler: null,
+          stripScrollbackClear: config.stripScrollbackClear ?? false,
+          connectedAt: Date.now(),
+          dataVersion: 0,
+          onExitUnmounted: (exitCode: number) => {
+            console.log(`[${config.logPrefix} ${tabId}] PTY exited while unmounted, code:`, exitCode)
+            const currentTab = workspace.getState().workspace?.appStates[tabId]
+            const keepOnExit = (currentTab?.state as BaseTerminalState | undefined)?.keepOnExit
+            if (keepOnExit) {
+              terminal.write(`\r\n\x1b[2mProcess exited with exit code ${exitCode}\x1b[0m\r\n`)
+            } else {
+              workspace.getState().removeTab(tabId)
+            }
+          },
+        }
+
+        // Persistent background subscription — lives until removeTab
+        const ttyState = tty.getState()
+        cache.unsubscribeEvents = ttyState.onEvent((event) => {
+          handleCachedEvent(cache, event)
         })
-      }, 100)
+
+        wsState.setCachedTerminal(tabId, cache)
+
+        // Notify parent that terminal is ready (first mount only — handlers persist on the cached terminal)
+        config.onTerminalReady?.(terminal, dataVersionRef)
+
+        attachMountedState(terminal, tty, cache)
+      }
+
+      init()
     }
 
-    init()
-
-    // Cleanup - DON'T kill PTY here, just unsubscribe
-    // PTY is explicitly killed in removeWorkspace/removeTab
+    // Cleanup — detach mounted state but keep terminal + TTY subscription alive
     return () => {
-      console.log(`[${config.logPrefix} ${tabId}] cleanup running (PTY preserved):`, {
-        ptyId: ttyRef.current?.getState().ptyId,
-        workspaceId
-      })
+      console.log(`[${config.logPrefix} ${tabId}] cleanup (terminal cached, PTY preserved)`)
       cancelled = true
       if (resizeTimeout) clearTimeout(resizeTimeout)
+
+      // Disconnect mounted UI state
       inputDisposable?.dispose()
       scrollDisposable?.dispose()
       bufferChangeDisposable?.dispose()
       resizeObserver?.disconnect()
-      unsubscribe?.()
       unsubscribeFocus?.()
       detector?.destroy()
+
+      // Clear mounted handler so background fallback takes over
+      const cache = workspace.getState().getCachedTerminal(tabId)
+      if (cache) {
+        cache.mountedHandler = null
+      }
+
       terminalRef.current = null
       ttyRef.current = null
-      // Note: We intentionally don't kill the PTY here
-      // The PTY lifecycle is managed by removeWorkspace/removeTab in workspace.ts
-      terminal?.dispose()
+      // Do NOT dispose terminal or unsubscribe TTY — they stay cached
     }
   }, [tabId, workspaceId, config, settings, removeTab, setTabState, sessionStore, workspace])
 

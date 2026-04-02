@@ -1,7 +1,8 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, AppRef, AppRegistryApi, GitApi, FilesystemApi, RunActionsApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi } from '../types'
+import type { Workspace, AppRef, AppRegistryApi, GitApi, FilesystemApi, RunActionsApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi, PtyEvent } from '../types'
 import { getTabs, isAiHarnessState } from '../types'
+import type { Terminal as XTerm } from '@xterm/xterm'
 import type { Tty, TtyWriter } from './createTtyStore'
 import { createAnalyzerStore } from './createAnalyzerStore'
 import type { Analyzer } from './createAnalyzerStore'
@@ -9,6 +10,30 @@ import { createGitControllerStore } from './createGitControllerStore'
 import type { GitController } from './createGitControllerStore'
 import { createReviewCommentStore } from './createReviewCommentStore'
 import type { ReviewCommentStore } from './createReviewCommentStore'
+
+/**
+ * Cached xterm.js terminal for BaseTerminal-derived tabs only (Terminal, AiHarness).
+ * Survives component mount/unmount to avoid re-streaming PTY data on tab switch.
+ * NOT serialized — purely in-memory, renderer-side cache.
+ */
+export interface CachedTerminal {
+  terminal: XTerm
+  tty: Tty
+  /** Unsubscribe the background TTY event subscription (called only on dispose) */
+  unsubscribeEvents: () => void
+  /** Set by BaseTerminal on mount, cleared to null on unmount.
+   *  When set, all events forward to this handler for full UI handling.
+   *  When null, the background fallback writes data to the terminal buffer. */
+  mountedHandler: ((event: PtyEvent) => void) | null
+  /** Config flag for background handler — strips CSI 3J from PTY data */
+  stripScrollbackClear: boolean
+  /** Timestamp when the TTY stream was opened (for immediate-failure detection) */
+  connectedAt: number
+  /** Persistent data version counter (survives across mounts) */
+  dataVersion: number
+  /** Exit handling when component is unmounted */
+  onExitUnmounted: (exitCode: number) => void
+}
 
 export interface WorkspaceStoreDeps {
   appRegistry: AppRegistryApi
@@ -52,6 +77,11 @@ export interface WorkspaceStoreState {
   // Tab lifecycle
   initTab: (tabId: string) => void
   getTabRef: (tabId: string) => AppRef | null
+
+  // Terminal cache for BaseTerminal-derived tabs (Terminal, AiHarness only).
+  // Caches xterm.js Terminal + TTY subscription across mount/unmount cycles.
+  getCachedTerminal: (tabId: string) => CachedTerminal | null
+  setCachedTerminal: (tabId: string, entry: CachedTerminal) => void
 
   // Analyzer factory (used by applications in onWorkspaceLoad)
   initAnalyzer: (tabId: string) => Analyzer
@@ -120,6 +150,10 @@ export function createWorkspaceStore(
   // Closure-level tab ref registry (non-serialized per-tab runtime state)
   const tabRefs: Record<string, AppRef> = {}
 
+  // Cached xterm.js Terminal instances for BaseTerminal-derived tabs only
+  // (Terminal, AiHarness). Survives mount/unmount; disposed on removeTab.
+  const cachedTerminals: Record<string, CachedTerminal> = {}
+
   const gitController = createGitControllerStore({
     git: deps.git,
     github: deps.github,
@@ -149,6 +183,9 @@ export function createWorkspaceStore(
     },
 
     getTabRef: (tabId: string): AppRef | null => tabRefs[tabId] ?? null,
+
+    getCachedTerminal: (tabId: string): CachedTerminal | null => cachedTerminals[tabId] ?? null,
+    setCachedTerminal: (tabId: string, entry: CachedTerminal): void => { cachedTerminals[tabId] = entry },
 
     initAnalyzer: (tabId: string): Analyzer => createAnalyzerStore(tabId, {
       getSettings: deps.getSettings,
@@ -224,6 +261,15 @@ export function createWorkspaceStore(
       if (ref) {
         ref.dispose()
         delete tabRefs[tabId]
+      }
+
+      // Dispose cached terminal (unsubscribe background events, dispose xterm)
+      const cached = cachedTerminals[tabId]
+      if (cached) {
+        cached.mountedHandler = null
+        cached.unsubscribeEvents()
+        cached.terminal.dispose()
+        delete cachedTerminals[tabId]
       }
 
       updateWorkspace((ws) => {

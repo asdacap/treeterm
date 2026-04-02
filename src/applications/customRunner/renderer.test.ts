@@ -63,6 +63,8 @@ const mockWorkspaceStoreStateData = {
   runActionsApi: createMockRunActionsApi(),
   initTab: vi.fn(),
   getTabRef: vi.fn().mockReturnValue(null),
+  getCachedTerminal: vi.fn().mockReturnValue(null),
+  setCachedTerminal: vi.fn(),
   initAnalyzer: vi.fn(),
   createTty: vi.fn().mockResolvedValue('pty-1'), ensureTtyWriter: vi.fn().mockResolvedValue(undefined),
   connectionId: 'local',
