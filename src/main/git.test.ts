@@ -811,6 +811,7 @@ describe('GitClient', () => {
       const client = makeMockClient([
         resultStream('/repo'),                       // rev-parse
         errorStream('.worktrees is not ignored'),     // check-ignore (exit 1 = not ignored)
+        resultStream('/home/user'),                  // resolveHomedir (echo $HOME)
         resultStream(''),                            // worktree add
       ])
       const git = new GitClient(client)
