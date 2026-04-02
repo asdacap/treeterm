@@ -37,7 +37,7 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
       if (state.ptyId) {
         // Restore: PTY already exists, just start analyzer
         // Pre-cache writer so promptHarness doesn't open a second stream
-        ws.ensureTtyWriter(state.ptyId)
+        ws.getTtyWriter(state.ptyId)
         analyzer.getState().start(state.ptyId)
       } else {
         // New tab: create PTY then start analyzer

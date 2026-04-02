@@ -38,7 +38,6 @@ export interface CachedTerminal {
 export interface WorkspaceStoreDeps {
   appRegistry: AppRegistryApi
   openTtyStream: (ptyId: string) => Promise<{ tty: Tty }>
-  getTtyWriter: (ptyId: string) => Promise<TtyWriter>
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
   connectionId: string
   git: GitApi
@@ -90,9 +89,8 @@ export interface WorkspaceStoreState {
 
   // PTY creation (delegated from session)
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
-  // Pre-cache a TtyWriter for an existing ptyId so promptHarness
-  // doesn't open a redundant second stream (which blanks remote terminals)
-  ensureTtyWriter: (ptyId: string) => Promise<void>
+  // Write-only PTY access (cached per workspace, separate stream from terminal events)
+  getTtyWriter: (ptyId: string) => Promise<TtyWriter>
   connectionId: string
 
   // Git controller (polling, diff status, PR status)
@@ -155,6 +153,9 @@ export function createWorkspaceStore(
   // Cached xterm.js Terminal instances for BaseTerminal-derived tabs only
   // (Terminal, AiHarness). Survives mount/unmount; disposed on removeTab.
   const cachedTerminals: Record<string, CachedTerminal> = {}
+
+  // Write-only PTY handles, cached per workspace (separate stream from terminal events)
+  const ttyWriters: Record<string, TtyWriter> = {}
 
   const gitController = createGitControllerStore({
     git: deps.git,
@@ -220,8 +221,14 @@ export function createWorkspaceStore(
     createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) =>
       deps.createTty(cwd, sandbox, startupCommand),
 
-    ensureTtyWriter: async (ptyId: string): Promise<void> => {
-      await deps.getTtyWriter(ptyId)
+    getTtyWriter: async (ptyId: string): Promise<TtyWriter> => {
+      const cached = ttyWriters[ptyId]
+      if (cached) return cached
+      const { tty } = await deps.openTtyStream(ptyId)
+      const state = tty.getState()
+      const writer: TtyWriter = { write: state.write, kill: state.kill }
+      ttyWriters[ptyId] = writer
+      return writer
     },
 
     connectionId: deps.connectionId,
@@ -382,7 +389,7 @@ export function createWorkspaceStore(
 
       if (!ptyId || !tabId) return false
 
-      const writer = await deps.getTtyWriter(ptyId)
+      const writer = await get().getTtyWriter(ptyId)
       writer.write(text + '\r')
       get().setActiveTab(tabId)
       return true

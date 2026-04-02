@@ -70,7 +70,7 @@ function createMockWorkspaceStoreStateData(overrides?: Partial<WorkspaceStoreSta
     setCachedTerminal: vi.fn(),
     disposeAllCachedTerminals: vi.fn(),
     initAnalyzer: vi.fn(),
-    createTty: vi.fn().mockResolvedValue('pty-1'), ensureTtyWriter: vi.fn().mockResolvedValue(undefined),
+    createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn(), kill: vi.fn() }),
     connectionId: 'local',
     focusTabId: null,
     requestFocus: vi.fn(),

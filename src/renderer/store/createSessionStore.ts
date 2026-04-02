@@ -3,8 +3,8 @@ import type { StoreApi } from 'zustand'
 import { humanId } from 'human-id'
 import { createWorkspaceStore } from './createWorkspaceStore'
 import type { WorkspaceStore, WorkspaceStoreDeps } from './createWorkspaceStore'
-import { createTtyStore, createTtyWriter } from './createTtyStore'
-import type { Tty, TtyWriter, TtyTerminalDeps } from './createTtyStore'
+import { createTtyStore } from './createTtyStore'
+import type { Tty, TtyTerminalDeps } from './createTtyStore'
 import type {
   Workspace, Session, AppState, GitInfo,
   ConnectionInfo, ActivityState,
@@ -44,11 +44,8 @@ export interface SessionState {
   // SSH connection for this session (transitions: connecting → connected/error)
   connection: ConnectionInfo | null
 
-  // TTY writers (write-only, keyed by ptyId)
-  ttyWriters: Record<string, TtyWriter>
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
   openTtyStream: (ptyId: string) => Promise<{ tty: Tty }>
-  getTtyWriter: (ptyId: string) => Promise<TtyWriter>
   killTty: (ptyId: string) => void
   listTty: () => Promise<TTYSessionInfo[]>
 
@@ -189,7 +186,6 @@ export function createSessionStore(
     return {
       appRegistry: deps.appRegistry,
       openTtyStream: (ptyId: string) => store.getState().openTtyStream(ptyId),
-      getTtyWriter: (ptyId: string) => store.getState().getTtyWriter(ptyId),
       createTty: (cwd, sandbox?, startupCommand?) => store.getState().createTty(cwd, sandbox, startupCommand),
       connectionId: config.connection?.id ?? 'local',
       git: deps.git,
@@ -575,7 +571,6 @@ export function createSessionStore(
 
   const store = createStore<SessionState>()((set, get) => ({
     sessionId: config.sessionId,
-    ttyWriters: {},
     workspaces: {},
     activeWorkspaceId: null,
     isRestoring: false,
@@ -588,16 +583,9 @@ export function createSessionStore(
       if (!result.success) {
         throw new Error(result.error || 'Failed to create PTY')
       }
-      const writer = createTtyWriter(result.sessionId, result.handle, boundTerminal)
-      set((s) => ({
-        ttyWriters: { ...s.ttyWriters, [result.sessionId]: writer }
-      }))
       return result.sessionId
     },
 
-    // openTtyStream and getTtyWriter intentionally use separate streams.
-    // openTtyStream is tied to the terminal component lifecycle (unmounts on tab switch),
-    // while getTtyWriter lives longer and must not be affected by terminal unmount.
     openTtyStream: async (ptyId: string): Promise<{ tty: Tty }> => {
       const result = await deps.terminal.attach(connectionId, ptyId)
       if (!result.success) {
@@ -605,20 +593,6 @@ export function createSessionStore(
       }
       const tty = createTtyStore(ptyId, result.handle, boundTerminal)
       return { tty }
-    },
-
-    getTtyWriter: async (ptyId: string): Promise<TtyWriter> => {
-      const cached = get().ttyWriters[ptyId]
-      if (cached) return cached
-      const result = await deps.terminal.attach(connectionId, ptyId)
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to attach to PTY')
-      }
-      const writer = createTtyWriter(ptyId, result.handle, boundTerminal)
-      set((s) => ({
-        ttyWriters: { ...s.ttyWriters, [ptyId]: writer }
-      }))
-      return writer
     },
 
     killTty: (ptyId: string): void => {

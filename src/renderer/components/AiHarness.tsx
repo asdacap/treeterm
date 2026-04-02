@@ -7,7 +7,6 @@ import { PromptCommitButton } from './PromptCommitButton'
 import { PromptRebaseButton } from './PromptRebaseButton'
 import { ReviewCommentsButton } from './ReviewCommentsButton'
 import { PromptGitHubCommentsButton } from './PromptGitHubCommentsButton'
-import { useSessionApi } from '../contexts/SessionStoreContext'
 import type { ActivityState, SandboxConfig, WorkspaceStore } from '../types'
 import { isAiHarnessState } from '../types'
 import type { AiHarnessRef } from '../../applications/aiHarness/renderer'
@@ -109,18 +108,17 @@ function AiHarnessContent({
   disableScrollbar,
   stripScrollbackClear,
 }: AiHarnessContentProps) {
-  const sessionStore = useSessionApi()
   const { aiState, analyzing, reason, autoApprove } = useStore(analyzer)
 
   const handlePushToTalkTranscript = useCallback(async (text: string) => {
-    const writer = await sessionStore.getState().getTtyWriter(ptyId)
+    const writer = await workspace.getState().getTtyWriter(ptyId)
     writer.write(text)
-  }, [ptyId, sessionStore])
+  }, [ptyId, workspace])
 
   const handlePushToTalkSubmit = useCallback(async () => {
-    const writer = await sessionStore.getState().getTtyWriter(ptyId)
+    const writer = await workspace.getState().getTtyWriter(ptyId)
     writer.write('\r')
-  }, [ptyId, sessionStore])
+  }, [ptyId, workspace])
 
   const handleTerminalReady = useCallback((term: XTerm) => {
     term.onData((data) => {

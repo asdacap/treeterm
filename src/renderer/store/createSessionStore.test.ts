@@ -167,63 +167,6 @@ describe('createSessionStore', () => {
     })
   })
 
-  describe('TTY management', () => {
-    it('createTty creates a PTY and stores writer', async () => {
-      const ptyId = await store.getState().createTty('/home')
-      expect(ptyId).toBe('pty-1')
-      expect(store.getState().ttyWriters['pty-1']).toBeDefined()
-      expect(store.getState().ttyWriters['pty-1'].write).toBeDefined()
-      expect(store.getState().ttyWriters['pty-1'].kill).toBeDefined()
-      expect(deps.terminal.create).toHaveBeenCalledWith('local', '/home', undefined, undefined)
-    })
-
-    it('createTty throws when terminal.create returns error', async () => {
-      vi.mocked(deps.terminal.create).mockResolvedValue({ success: false, error: 'Failed to create PTY' })
-      await expect(store.getState().createTty('/home')).rejects.toThrow('Failed to create PTY')
-    })
-
-    it('openTtyStream opens a stream and returns Tty without storing', async () => {
-      const result = await store.getState().openTtyStream('pty-2')
-      expect(result.tty).toBeDefined()
-      // Should NOT be stored in ttyWriters
-      expect(store.getState().ttyWriters['pty-2']).toBeUndefined()
-    })
-
-    it('openTtyStream throws when attach fails', async () => {
-      vi.mocked(deps.terminal.attach).mockResolvedValue({ success: false, error: 'not found' })
-      await expect(store.getState().openTtyStream('pty-x')).rejects.toThrow('not found')
-    })
-
-    it('getTtyWriter auto-creates writer by attaching', async () => {
-      const writer = await store.getState().getTtyWriter('pty-1')
-      expect(writer.write).toBeDefined()
-      expect(deps.terminal.attach).toHaveBeenCalledWith('local', 'pty-1')
-    })
-
-    it('getTtyWriter returns cached writer after createTty', async () => {
-      await store.getState().createTty('/home')
-      const writer = await store.getState().getTtyWriter('pty-1')
-      expect(writer.write).toBeDefined()
-      expect(deps.terminal.attach).not.toHaveBeenCalled()
-    })
-
-    it('getTtyWriter throws when attach fails', async () => {
-      vi.mocked(deps.terminal.attach).mockResolvedValue({ success: false, error: 'not found' })
-      await expect(store.getState().getTtyWriter('pty-x')).rejects.toThrow('not found')
-    })
-
-    it('killTty kills the PTY', () => {
-      store.getState().killTty('pty-1')
-      expect(deps.terminal.kill).toHaveBeenCalledWith('local', 'pty-1')
-    })
-
-    it('listTty delegates to terminal.list', async () => {
-      vi.mocked(deps.terminal.list).mockResolvedValue([{ id: 'pty-1', cwd: '/home', cols: 80, rows: 24, createdAt: Date.now(), lastActivity: Date.now() }])
-      const result = await store.getState().listTty()
-      expect(result).toHaveLength(1)
-    })
-  })
-
   describe('workspace management', () => {
     it('addWorkspace creates workspace and sets active', async () => {
       const id = store.getState().addWorkspace('/my/project')
