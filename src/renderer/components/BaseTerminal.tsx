@@ -135,7 +135,7 @@ export default function BaseTerminal({
   config,
   extraButtons,
 }: BaseTerminalProps) {
-  const { workspace: wsData, removeTab } = useStore(workspace)
+  const { workspace: wsData, removeTab, disposeCachedTerminal } = useStore(workspace)
   const workspaceId = wsData.id
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
@@ -146,6 +146,7 @@ export default function BaseTerminal({
   const [scrollPosition, setScrollPosition] = useState<'top' | 'bottom' | 'middle'>('bottom')
   const [isAlternateScreen, setIsAlternateScreen] = useState(false)
   const [sizeMismatch, setSizeMismatch] = useState<{ requested: { cols: number; rows: number }; actual: { cols: number; rows: number } } | null>(null)
+  const [refreshCounter, setRefreshCounter] = useState(0)
   const requestedSizeRef = useRef<{ cols: number; rows: number } | null>(null)
 
   const sessionStore = useSessionApi()
@@ -472,7 +473,7 @@ export default function BaseTerminal({
       ttyRef.current = null
       // Do NOT dispose terminal or unsubscribe TTY — they stay cached
     }
-  }, [tabId, workspaceId, config, settings, removeTab, setTabState, sessionStore, workspace])
+  }, [tabId, workspaceId, config, settings, removeTab, setTabState, sessionStore, workspace, refreshCounter])
 
   const handleScrollDown = useCallback(() => {
     terminalRef.current?.scrollToBottom()
@@ -481,6 +482,16 @@ export default function BaseTerminal({
   const handleScrollToTop = useCallback(() => {
     terminalRef.current?.scrollToTop()
   }, [terminalRef])
+
+  const handleRefreshStream = useCallback(() => {
+    disposeCachedTerminal(tabId)
+    if (containerRef.current) {
+      containerRef.current.innerHTML = ''
+    }
+    setLoading(true)
+    setOverlay(null)
+    setRefreshCounter((c) => c + 1)
+  }, [tabId, disposeCachedTerminal])
 
   const handleBadgeClick = scrollPosition === 'bottom' ? handleScrollToTop : handleScrollDown
 
@@ -571,6 +582,9 @@ export default function BaseTerminal({
       )}
       <div className="terminal-floating-buttons">
         {extraButtons}
+        <button className="terminal-circle-btn" onClick={handleRefreshStream} title="Refresh stream">
+          ↻
+        </button>
         <button className="scroll-down-btn terminal-circle-btn" onClick={handleScrollDown} title="Scroll to bottom">
           ↓
         </button>

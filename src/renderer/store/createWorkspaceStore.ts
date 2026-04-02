@@ -81,6 +81,8 @@ export interface WorkspaceStoreState {
   // Caches xterm.js Terminal + TTY subscription across mount/unmount cycles.
   getCachedTerminal: (tabId: string) => CachedTerminal | null
   setCachedTerminal: (tabId: string, entry: CachedTerminal) => void
+  /** Dispose a single cached terminal (unsubscribe events, dispose xterm, remove from cache) */
+  disposeCachedTerminal: (tabId: string) => void
   /** Dispose all cached terminals. Called by session store on workspace removal. */
   disposeAllCachedTerminals: () => void
 
@@ -189,12 +191,18 @@ export function createWorkspaceStore(
 
     getCachedTerminal: (tabId: string): CachedTerminal | null => cachedTerminals[tabId] ?? null,
     setCachedTerminal: (tabId: string, entry: CachedTerminal): void => { cachedTerminals[tabId] = entry },
-    disposeAllCachedTerminals: (): void => {
-      for (const [tabId, cached] of Object.entries(cachedTerminals)) {
+    disposeCachedTerminal: (tabId: string): void => {
+      const cached = cachedTerminals[tabId]
+      if (cached) {
         cached.mountedHandler = null
         cached.unsubscribeEvents()
         cached.terminal.dispose()
         delete cachedTerminals[tabId]
+      }
+    },
+    disposeAllCachedTerminals: (): void => {
+      for (const tabId of Object.keys(cachedTerminals)) {
+        get().disposeCachedTerminal(tabId)
       }
     },
 
@@ -281,13 +289,7 @@ export function createWorkspaceStore(
       }
 
       // Dispose cached terminal (unsubscribe background events, dispose xterm)
-      const cached = cachedTerminals[tabId]
-      if (cached) {
-        cached.mountedHandler = null
-        cached.unsubscribeEvents()
-        cached.terminal.dispose()
-        delete cachedTerminals[tabId]
-      }
+      get().disposeCachedTerminal(tabId)
 
       updateWorkspace((ws) => {
         const { [tabId]: removed, ...remainingStates } = ws.appStates
