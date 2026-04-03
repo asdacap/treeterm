@@ -76,6 +76,8 @@ export interface WorkspaceStoreState {
   // Tab lifecycle
   initTab: (tabId: string) => void
   getTabRef: (tabId: string) => AppRef | null
+  /** Dispose a tab's runtime resources (tabRef + cached terminal) without modifying appStates or syncing to daemon. */
+  disposeTabResources: (tabId: string) => void
 
   // Terminal cache for BaseTerminal-derived tabs (Terminal, AiHarness only).
   // Caches xterm.js Terminal + TTY subscription across mount/unmount cycles.
@@ -180,6 +182,7 @@ export function createWorkspaceStore(
     reviewComments,
 
     initTab: (tabId: string): void => {
+      if (tabRefs[tabId]) return
       const appState = get().workspace.appStates[tabId]
       if (!appState) return
       const app = deps.appRegistry.get(appState.applicationId)
@@ -188,6 +191,15 @@ export function createWorkspaceStore(
     },
 
     getTabRef: (tabId: string): AppRef | null => tabRefs[tabId] ?? null,
+
+    disposeTabResources: (tabId: string): void => {
+      const ref = tabRefs[tabId]
+      if (ref) {
+        ref.dispose()
+        delete tabRefs[tabId]
+      }
+      get().disposeCachedTerminal(tabId)
+    },
 
     getCachedTerminal: (tabId: string): CachedTerminal | null => cachedTerminals[tabId] ?? null,
     setCachedTerminal: (tabId: string, entry: CachedTerminal): void => { cachedTerminals[tabId] = entry },
@@ -296,15 +308,7 @@ export function createWorkspaceStore(
       if (!app) return
       if (!app.canClose) return
 
-      // Dispose tab ref (stops analyzer, kills PTY, etc.)
-      const ref = tabRefs[tabId]
-      if (ref) {
-        ref.dispose()
-        delete tabRefs[tabId]
-      }
-
-      // Dispose cached terminal (unsubscribe background events, dispose xterm)
-      get().disposeCachedTerminal(tabId)
+      get().disposeTabResources(tabId)
 
       updateWorkspace((ws) => {
         const { [tabId]: removed, ...remainingStates } = ws.appStates

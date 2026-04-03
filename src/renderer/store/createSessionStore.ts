@@ -1073,17 +1073,35 @@ function restoreWorkspaceTabs(
 ): void {
   const entry = store.getState().workspaces[workspaceId]
   if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
-  const ws = entry.store.getState().workspace
+
+  const wsState = entry.store.getState()
+  const oldTabIds = Object.keys(wsState.workspace.appStates)
+  const newTabIds = Object.keys(daemonWorkspace.appStates)
+  const newTabIdSet: Record<string, true> = {}
+  for (const tabId of newTabIds) { newTabIdSet[tabId] = true }
+
+  // Dispose resources for tabs removed externally
+  for (const tabId of oldTabIds) {
+    if (!newTabIdSet[tabId]) {
+      wsState.disposeTabResources(tabId)
+    }
+  }
+
   entry.store.setState({
     workspace: {
-      ...ws,
+      ...wsState.workspace,
       appStates: daemonWorkspace.appStates,
-      activeTabId: daemonWorkspace.activeTabId || Object.keys(daemonWorkspace.appStates)[0] || null
+      activeTabId: daemonWorkspace.activeTabId || newTabIds[0] || null
     }
   })
 
-  for (const tabId of Object.keys(daemonWorkspace.appStates)) {
-    entry.store.getState().initTab(tabId)
+  // Only init genuinely new tabs
+  const oldTabIdSet: Record<string, true> = {}
+  for (const tabId of oldTabIds) { oldTabIdSet[tabId] = true }
+  for (const tabId of newTabIds) {
+    if (!oldTabIdSet[tabId]) {
+      entry.store.getState().initTab(tabId)
+    }
   }
 }
 
