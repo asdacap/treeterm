@@ -12,6 +12,7 @@ import { useKeybindingStore } from '../store/keybinding'
 import { useSessionNamesStore } from '../store/sessionNames'
 import CreateChildDialog from './CreateChildDialog'
 import OpenWorkspaceDialog from './OpenWorkspaceDialog'
+import UpstreamWarningDialog from './UpstreamWarningDialog'
 import type { ReviewState, WorktreeSettings, Workspace } from '../types'
 
 // Import WorkspaceIcon from TreePane
@@ -65,6 +66,12 @@ export default function SessionPanel({
   })
   const [createChildDialogParentId, setCreateChildDialogParentId] = useState<string | null>(null)
   const [isOpenWorkspaceDialogOpen, setIsOpenWorkspaceDialogOpen] = useState(false)
+  const [upstreamWarning, setUpstreamWarning] = useState<{
+    workspaceId: string
+    behindCount: number
+    workspaceName: string
+    action: 'quickFork' | 'createChild'
+  } | null>(null)
 
   // Session name editing
   const displayName = useSessionNamesStore(s => s.names[sessionId]?.name)
@@ -146,14 +153,55 @@ export default function SessionPanel({
 
   const handleCreateChild = (parentId: string) => {
     closeContextMenu()
+    const entry = workspaces[parentId]
+    if (entry && (entry.status === 'loaded' || entry.status === 'operation-error')) {
+      const behindCount = entry.store.getState().gitController.getState().behindCount
+      if (behindCount > 0) {
+        setUpstreamWarning({
+          workspaceId: parentId,
+          behindCount,
+          workspaceName: entry.data.metadata?.displayName || entry.data.name,
+          action: 'createChild'
+        })
+        return
+      }
+    }
     setCreateChildDialogParentId(parentId)
   }
 
 
   const handleQuickFork = async (wsId: string) => {
+    const entry = workspaces[wsId]
+    if (entry && (entry.status === 'loaded' || entry.status === 'operation-error')) {
+      const behindCount = entry.store.getState().gitController.getState().behindCount
+      if (behindCount > 0) {
+        setUpstreamWarning({
+          workspaceId: wsId,
+          behindCount,
+          workspaceName: entry.data.metadata?.displayName || entry.data.name,
+          action: 'quickFork'
+        })
+        return
+      }
+    }
     const result = await quickForkWorkspace(wsId)
     if (result.success) {
       setExpanded((prev) => new Set([...Array.from(prev), wsId]))
+    }
+  }
+
+  const handleUpstreamWarningConfirm = async () => {
+    if (!upstreamWarning) return
+    const { workspaceId, action } = upstreamWarning
+    setUpstreamWarning(null)
+
+    if (action === 'quickFork') {
+      const result = await quickForkWorkspace(workspaceId)
+      if (result.success) {
+        setExpanded((prev) => new Set([...Array.from(prev), workspaceId]))
+      }
+    } else {
+      setCreateChildDialogParentId(workspaceId)
     }
   }
 
@@ -358,6 +406,16 @@ export default function SessionPanel({
           Disconnect
         </div>
       </ContextMenu>
+
+      {/* Upstream Warning Dialog */}
+      {upstreamWarning && (
+        <UpstreamWarningDialog
+          behindCount={upstreamWarning.behindCount}
+          workspaceName={upstreamWarning.workspaceName}
+          onConfirm={handleUpstreamWarningConfirm}
+          onCancel={() => setUpstreamWarning(null)}
+        />
+      )}
 
       {/* Create Child Dialog */}
       {createChildDialogParentHandle && (
