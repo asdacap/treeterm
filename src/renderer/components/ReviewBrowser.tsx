@@ -169,6 +169,8 @@ export default function ReviewBrowser({
   const pendingRestoreRef = useRef<boolean>(
     !!(reviewState?.selectedFilePath || reviewState?.selectedUncommittedFilePath)
   )
+  // Capture initial viewMode for mount-only commits loading (tab click handler loads on interaction)
+  const initialViewModeRef = useRef(viewMode)
 
   // Use stable primitives instead of object references to avoid re-running
   // on every workspace store update (tab switches, scroll persistence, etc.)
@@ -188,10 +190,10 @@ export default function ReviewBrowser({
     }
 
     // If commits tab was persisted, load commits on mount
-    if (viewMode === 'commits') {
+    if (initialViewModeRef.current === 'commits') {
       h.loadCommits()
     }
-  }, [workspaceId, parentWorkspaceId, currentGitBranch, parentGitBranch, viewMode])
+  }, [workspaceId, parentWorkspaceId, currentGitBranch, parentGitBranch])
 
   // Auto-restore persisted file selection after initial data load
   useEffect(() => {
@@ -247,7 +249,9 @@ export default function ReviewBrowser({
     const ws = wsData
     if (!ws?.gitBranch || !parentWorkspace?.gitBranch) return
 
-    setLoading(true)
+    if (!diff) {
+      setLoading(true)
+    }
     setError(null)
     try {
       const result = await git.getDiff(parentWorkspace.gitBranch)
