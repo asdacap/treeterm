@@ -148,18 +148,15 @@ export default function ActiveProcessesDialog({ workspaces, connectionId, onClos
   const [sessions, setSessions] = useState<TTYSessionInfo[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
-  const fetchSessions = useCallback(async () => {
-    const list = await terminalApi.list(connectionId)
-    setSessions(list)
-    // Clear selection if selected PTY no longer exists
-    if (selectedId && !list.find((s) => s.id === selectedId)) {
-      setSelectedId(null)
-    }
-  }, [terminalApi, connectionId, selectedId])
-
   useEffect(() => {
-    fetchSessions()
-  }, [fetchSessions])
+    void terminalApi.list(connectionId).then(list => {
+      setSessions(list)
+      // Clear selection if selected PTY no longer exists
+      if (selectedId && !list.find((s) => s.id === selectedId)) {
+        setSelectedId(null)
+      }
+    })
+  }, [terminalApi, connectionId, selectedId])
 
   const handleStop = useCallback(async () => {
     if (!selectedId) return

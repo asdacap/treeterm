@@ -73,6 +73,17 @@ export default function CreateChildDialog({
   // Get available apps
   const availableApps = useMemo(() => Object.values(applications).filter(app => app.showInNewTabMenu), [applications])
 
+  // Set loading flags during render when mode/gitRootPath changes
+  const [prevMode, setPrevMode] = useState(mode)
+  const [prevGitRootPath, setPrevGitRootPath] = useState(parentWsData.gitRootPath)
+  if (mode !== prevMode || parentWsData.gitRootPath !== prevGitRootPath) {
+    setPrevMode(mode)
+    setPrevGitRootPath(parentWsData.gitRootPath)
+    if (mode === 'existing' && parentWsData.gitRootPath) setIsLoadingWorktrees(true)
+    if (mode === 'branch' && parentWsData.gitRootPath) setIsLoadingBranches(true)
+    if (mode === 'remote' && parentWsData.gitRootPath) setIsLoadingRemoteBranches(true)
+  }
+
   // Load existing worktrees when "existing" tab is selected
   useEffect(() => {
     if (mode === 'existing' && parentWsData.gitRootPath) {
@@ -81,7 +92,6 @@ export default function CreateChildDialog({
         gitBranch: parentWsData.gitBranch,
         openWorktreePaths
       })
-      setIsLoadingWorktrees(true)
       git.listWorktrees().then(worktrees => {
         console.log('[CreateChildDialog] Received worktrees:', worktrees)
         // Filter out worktrees that are already open
@@ -105,7 +115,6 @@ export default function CreateChildDialog({
   // Load local branches when "branch" tab is selected
   useEffect(() => {
     if (mode === 'branch' && parentWsData.gitRootPath) {
-      setIsLoadingBranches(true)
       Promise.all([
         git.listLocalBranches(),
         git.getBranchesInWorktrees()
@@ -128,7 +137,6 @@ export default function CreateChildDialog({
   // Load remote branches when "remote" tab is selected
   useEffect(() => {
     if (mode === 'remote' && parentWsData.gitRootPath) {
-      setIsLoadingRemoteBranches(true)
       Promise.all([
         git.listRemoteBranches(),
         git.getBranchesInWorktrees(),

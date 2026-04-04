@@ -49,11 +49,13 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
     })
   }, [sandbox])
 
-  useEffect(() => {
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen)
+  if (isOpen !== prevIsOpen) {
+    setPrevIsOpen(isOpen)
     if (isOpen) {
       setLocalSettings(savedSettings)
     }
-  }, [isOpen, savedSettings])
+  }
 
   const handleSave = useCallback(async () => {
     await saveSettings(localSettings)

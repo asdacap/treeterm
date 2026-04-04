@@ -105,8 +105,10 @@ export default function SessionPanel({
 
   const isActiveSession = activeView?.type === 'workspace' && activeView.sessionId === sessionId
 
-  // Expand any workspace that gains children after mount
-  useEffect(() => {
+  // Expand any workspace that gains children
+  const [prevWorkspaces, setPrevWorkspaces] = useState(workspaces)
+  if (workspaces !== prevWorkspaces) {
+    setPrevWorkspaces(workspaces)
     const parentIds = Object.keys(workspaces)
       .filter((id) =>
         Object.entries(workspaces)
@@ -120,7 +122,7 @@ export default function SessionPanel({
         return next
       })
     }
-  }, [workspaces])
+  }
 
   // Compute paths of already-open worktrees
   const openWorktreePaths = useMemo(() => {

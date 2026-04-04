@@ -113,6 +113,10 @@ the error UI.
 - What should not be nullable, do not mark as nullable. Prefer no nullable parameter where possible.
 - Do not add code for cases that cannot or should not happen. For example, workspace should always be possible in a tab, or session should be always available in a workspace. So dont care for case where workspace it not available in a tab. 
 - No overengineering unless explicitly told to. No `useMemo`!
+- For issues with read linter, consult the doc:
+  - https://react.dev/reference/eslint-plugin-react-hooks/lints/set-state-in-effect
+  - https://react.dev/reference/eslint-plugin-react-hooks/lints/set-state-in-render
+  - https://react.dev/reference/eslint-plugin-react-hooks/lints/exhaustive-deps
 
 ### Worktree and File Changes
 All file/worktree mutations **must go through the daemon** (via gRPC `WriteFile`). No `fs.writeFile` in Main or Renderer.

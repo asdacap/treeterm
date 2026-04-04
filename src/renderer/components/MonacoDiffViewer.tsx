@@ -68,10 +68,14 @@ export function MonacoDiffViewer({
   const [commentDisplayContainers, setCommentDisplayContainers] = useState<Map<string, { container: HTMLDivElement; comments: ReviewComment[] }>>(new Map())
 
   // Reset when content changes
-  useEffect(() => {
+  const [prevOriginalContent, setPrevOriginalContent] = useState(originalContent)
+  const [prevModifiedContent, setPrevModifiedContent] = useState(modifiedContent)
+  if (originalContent !== prevOriginalContent || modifiedContent !== prevModifiedContent) {
+    setPrevOriginalContent(originalContent)
+    setPrevModifiedContent(modifiedContent)
     setLineChanges(null)
     setCurrentChangeIndex(-1)
-  }, [originalContent, modifiedContent])
+  }
 
   // Persist scroll position on unmount
   useEffect(() => {
@@ -328,6 +332,7 @@ export function MonacoDiffViewer({
       newContainers.set(key, { container, comments: groupComments })
     })
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync with Monaco view zones for React portals
     setCommentDisplayContainers(newContainers)
 
     const currentZones = commentDisplayZonesRef.current
@@ -367,6 +372,7 @@ export function MonacoDiffViewer({
         })
 
         viewZoneIdRef.current = null
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- sync with Monaco view zones for React portals
         setCommentContainer(null)
       }
       return

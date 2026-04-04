@@ -91,11 +91,20 @@ export function FileViewer({
   const commentDisplayZonesRef = useRef<Map<string, { zoneId: string; container: HTMLDivElement }>>(new Map())
   const [commentDisplayContainers, setCommentDisplayContainers] = useState<Map<string, { container: HTMLDivElement; comments: ReviewComment[] }>>(new Map())
 
-  useEffect(() => {
+  // Reset file state and view mode when file path or onLineClick changes
+  const [prevFilePath, setPrevFilePath] = useState(filePath)
+  const [prevHasLineClick, setPrevHasLineClick] = useState(!!onLineClick)
+  if (filePath !== prevFilePath || !!onLineClick !== prevHasLineClick) {
+    setPrevFilePath(filePath)
+    setPrevHasLineClick(!!onLineClick)
     if (!filePath) {
       setFileState({ content: '', language: 'plaintext', loading: false, error: null })
-      return
     }
+    setViewMode(onLineClick ? 'source' : 'preview')
+  }
+
+  useEffect(() => {
+    if (!filePath) return
 
     const loadFile = async () => {
       setFileState((prev) => ({ ...prev, loading: true, error: null }))
@@ -130,10 +139,6 @@ export function FileViewer({
 
     loadFile()
   }, [wsData.path, filePath, filesystem])
-
-  useEffect(() => {
-    setViewMode(onLineClick ? 'source' : 'preview')
-  }, [filePath, onLineClick])
 
   const handleEditorMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor
@@ -254,6 +259,7 @@ export function FileViewer({
       newContainers.set(key, { container, comments: groupComments })
     })
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync with Monaco view zones for React portals
     setCommentDisplayContainers(newContainers)
 
     const currentZones = commentDisplayZonesRef.current
@@ -283,6 +289,7 @@ export function FileViewer({
           }
         })
         viewZoneIdRef.current = null
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- sync with Monaco view zones for React portals
         setCommentContainer(null)
       }
       return

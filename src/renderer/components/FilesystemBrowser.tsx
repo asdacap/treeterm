@@ -89,9 +89,11 @@ function FilesystemBrowserContent({
   }, [workspacePath, git, updateOutdatedReviewComments, wsData.isGitRepo])
 
   // Clear comment input when selected file changes
-  useEffect(() => {
+  const [prevSelectedPath, setPrevSelectedPath] = useState(state.selectedPath)
+  if (state.selectedPath !== prevSelectedPath) {
+    setPrevSelectedPath(state.selectedPath)
     setCommentInput(null)
-  }, [state.selectedPath])
+  }
 
   const handleLineClick = (lineNumber: number) => {
     setCommentInput({ lineNumber })

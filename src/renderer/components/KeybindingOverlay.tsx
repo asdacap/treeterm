@@ -37,11 +37,16 @@ function getAvailableKeybindings(settings: Settings): KeybindingItem[] {
 function TimeoutProgress({ timeout, activatedAt }: { timeout: number; activatedAt: number | null }) {
   const [remaining, setRemaining] = useState(100)
 
-  useEffect(() => {
+  const [prevActivatedAt, setPrevActivatedAt] = useState(activatedAt)
+  if (activatedAt !== prevActivatedAt) {
+    setPrevActivatedAt(activatedAt)
     if (!activatedAt) {
       setRemaining(100)
-      return
     }
+  }
+
+  useEffect(() => {
+    if (!activatedAt) return
 
     const interval = setInterval(() => {
       const elapsed = Date.now() - activatedAt

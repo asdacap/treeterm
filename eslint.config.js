@@ -67,6 +67,8 @@ export default [
       'react/no-array-index-key': 'warn',
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'warn',
+      'react-hooks/set-state-in-effect': 'error',
+      'react-hooks/set-state-in-render': 'error',
       'no-restricted-syntax': ['error', {
         selector: "MemberExpression[object.name='window'][property.name='electron']",
         message: 'window.electron is only allowed in main.tsx. Use useAppStore() instead.'

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import type { IpcResult, DirectoryContents } from '../types'
 
 interface RemoteDirectoryBrowserProps {
@@ -22,31 +22,29 @@ export default function RemoteDirectoryBrowser({
 }: RemoteDirectoryBrowserProps): JSX.Element {
   const [currentPath, setCurrentPath] = useState(initialPath)
   const [pathInput, setPathInput] = useState(initialPath)
-  const [dirState, setDirState] = useState<DirState>({ entries: [], loading: false, error: null })
+  const [dirState, setDirState] = useState<DirState>({ entries: [], loading: true, error: null })
 
-  const loadDirectory = useCallback(
-    async (dirPath: string) => {
-      setDirState({ entries: [], loading: true, error: null })
-      try {
-        const result = await readDirectory(dirPath)
-        if (result.success) {
-          const dirs = result.contents.entries
-            .filter((e) => e.isDirectory)
-            .map((e) => ({ name: e.name, path: e.path }))
-          setDirState({ entries: dirs, loading: false, error: null })
-        } else {
-          setDirState({ entries: [], loading: false, error: result.error })
-        }
-      } catch (err) {
-        setDirState({ entries: [], loading: false, error: String(err) })
-      }
-    },
-    [readDirectory],
-  )
+  // Set loading when path changes during render
+  const [prevCurrentPath, setPrevCurrentPath] = useState(currentPath)
+  if (currentPath !== prevCurrentPath) {
+    setPrevCurrentPath(currentPath)
+    setDirState({ entries: [], loading: true, error: null })
+  }
 
   useEffect(() => {
-    loadDirectory(currentPath)
-  }, [currentPath, loadDirectory])
+    void readDirectory(currentPath).then(result => {
+      if (result.success) {
+        const dirs = result.contents.entries
+          .filter((e) => e.isDirectory)
+          .map((e) => ({ name: e.name, path: e.path }))
+        setDirState({ entries: dirs, loading: false, error: null })
+      } else {
+        setDirState({ entries: [], loading: false, error: result.error })
+      }
+    }).catch(err => {
+      setDirState({ entries: [], loading: false, error: String(err) })
+    })
+  }, [currentPath, readDirectory])
 
   const navigateTo = (path: string) => {
     setCurrentPath(path)
