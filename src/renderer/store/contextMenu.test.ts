@@ -1,9 +1,6 @@
+// @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useContextMenuStore, handleClickOutside, installClickListener } from './contextMenu'
-
-vi.mock('../utils/contextMenuPosition', () => ({
-  clampContextMenuPosition: (x: number, y: number) => ({ x, y }),
-}))
 
 describe('ContextMenuStore', () => {
   beforeEach(() => {
@@ -65,5 +62,15 @@ describe('ContextMenuStore', () => {
     installClickListener({ addEventListener })
 
     expect(addEventListener).toHaveBeenCalledWith('click', expect.any(Function), true)
+  })
+
+  it('clamps position to viewport bounds', () => {
+    // jsdom defaults: innerWidth=1024, innerHeight=768
+    useContextMenuStore.getState().open('menu-a', 950, 700)
+
+    const { position } = useContextMenuStore.getState()
+    // default menuWidth=160, menuHeight=200
+    expect(position.x).toBe(1024 - 160)
+    expect(position.y).toBe(768 - 200)
   })
 })
