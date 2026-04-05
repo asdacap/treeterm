@@ -1,11 +1,13 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // Stub window for node environment (activate uses window.setTimeout)
+const addEventListenerMock = vi.fn()
+const removeEventListenerMock = vi.fn()
 vi.stubGlobal('window', {
   setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
   clearTimeout: (id: number) => clearTimeout(id),
-  addEventListener: vi.fn(),
-  removeEventListener: vi.fn(),
+  addEventListener: addEventListenerMock,
+  removeEventListener: removeEventListenerMock,
 })
 
 // Mock dependencies
@@ -23,13 +25,34 @@ vi.mock('./settings', () => ({
   }
 }))
 vi.mock('tinykeys', () => ({
-  parseKeybinding: vi.fn(() => [])
+  parseKeybinding: vi.fn(() => [[['Control'], 'b']])
 }))
 vi.mock('../utils/keybindingConverter', () => ({
   convertDirectKeybinding: vi.fn(() => '$mod+b')
 }))
 
 import { useKeybindingStore, matchesKeybinding } from './keybinding'
+
+function createKeyEvent(overrides: Partial<KeyboardEvent> = {}): KeyboardEvent {
+  return {
+    key: '',
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    metaKey: false,
+    defaultPrevented: false,
+    preventDefault: vi.fn(),
+    stopPropagation: vi.fn(),
+    ...overrides,
+  } as unknown as KeyboardEvent
+}
+
+/** Call init(), return the captured handleKeyDown listener */
+function initAndGetHandler(): (e: KeyboardEvent) => void {
+  addEventListenerMock.mockClear()
+  useKeybindingStore.getState().init()
+  return addEventListenerMock.mock.calls[0][1]
+}
 
 describe('useKeybindingStore', () => {
   beforeEach(() => {
@@ -41,6 +64,8 @@ describe('useKeybindingStore', () => {
       workspaceIds: [],
       handlers: {}
     })
+    addEventListenerMock.mockClear()
+    removeEventListenerMock.mockClear()
   })
 
   describe('initial state', () => {
@@ -133,13 +158,186 @@ describe('useKeybindingStore', () => {
       expect(useKeybindingStore.getState().handlers.newTab).toBe(handler)
     })
   })
+
+  describe('handleKeyDown', () => {
+    it('pressing prefix key in idle mode activates', () => {
+      const handleKeyDown = initAndGetHandler()
+
+      handleKeyDown(createKeyEvent({ key: 'b', ctrlKey: true }))
+      expect(useKeybindingStore.getState().prefixState).toBe('active')
+    })
+
+    it('pressing prefix key in active mode deactivates (toggle)', () => {
+      const handleKeyDown = initAndGetHandler()
+
+      handleKeyDown(createKeyEvent({ key: 'b', ctrlKey: true }))
+      expect(useKeybindingStore.getState().prefixState).toBe('active')
+
+      handleKeyDown(createKeyEvent({ key: 'b', ctrlKey: true }))
+      expect(useKeybindingStore.getState().prefixState).toBe('idle')
+    })
+
+    it('prefix key preventDefault and stopPropagation', () => {
+      const handleKeyDown = initAndGetHandler()
+      const event = createKeyEvent({ key: 'b', ctrlKey: true })
+
+      handleKeyDown(event)
+      expect(event.preventDefault).toHaveBeenCalled()
+      expect(event.stopPropagation).toHaveBeenCalled()
+    })
+
+    describe('in active prefix mode', () => {
+      let handleKeyDown: (e: KeyboardEvent) => void
+
+      beforeEach(() => {
+        handleKeyDown = initAndGetHandler()
+        // Activate prefix mode
+        handleKeyDown(createKeyEvent({ key: 'b', ctrlKey: true }))
+      })
+
+      it.each([
+        { key: 'c', handler: 'newTab' },
+        { key: 'x', handler: 'closeTab' },
+        { key: 'n', handler: 'nextTab' },
+        { key: 'p', handler: 'prevTab' },
+        { key: ',', handler: 'openSettings' },
+        { key: 'w', handler: 'workspaceFocus' },
+      ])('pressing "$key" calls $handler handler and deactivates', ({ key, handler }) => {
+        const handlerFn = vi.fn()
+        useKeybindingStore.getState().setHandlers({ [handler]: handlerFn })
+
+        handleKeyDown(createKeyEvent({ key }))
+        expect(handlerFn).toHaveBeenCalledTimes(1)
+        expect(useKeybindingStore.getState().prefixState).toBe('idle')
+      })
+
+      it('Escape deactivates without calling handlers', () => {
+        const newTab = vi.fn()
+        useKeybindingStore.getState().setHandlers({ newTab })
+
+        handleKeyDown(createKeyEvent({ key: 'Escape' }))
+        expect(useKeybindingStore.getState().prefixState).toBe('idle')
+        expect(newTab).not.toHaveBeenCalled()
+      })
+
+      it('unknown non-modifier key deactivates', () => {
+        handleKeyDown(createKeyEvent({ key: 'z' }))
+        expect(useKeybindingStore.getState().prefixState).toBe('idle')
+      })
+
+      it('modifier-only key (Shift) does NOT deactivate', () => {
+        handleKeyDown(createKeyEvent({ key: 'Shift', shiftKey: true }))
+        expect(useKeybindingStore.getState().prefixState).toBe('active')
+      })
+
+      it('modifier-only key (Meta) does NOT deactivate', () => {
+        handleKeyDown(createKeyEvent({ key: 'Meta', metaKey: true }))
+        expect(useKeybindingStore.getState().prefixState).toBe('active')
+      })
+    })
+
+    describe('in workspace_focus mode', () => {
+      let handleKeyDown: (e: KeyboardEvent) => void
+
+      beforeEach(() => {
+        handleKeyDown = initAndGetHandler()
+        useKeybindingStore.getState().enterWorkspaceFocus(['ws1', 'ws2', 'ws3'], 1)
+      })
+
+      it('Escape deactivates', () => {
+        handleKeyDown(createKeyEvent({ key: 'Escape' }))
+        expect(useKeybindingStore.getState().prefixState).toBe('idle')
+      })
+
+      it('Enter selects workspace and calls setActiveWorkspace', () => {
+        const setActiveWorkspace = vi.fn()
+        useKeybindingStore.getState().setHandlers({ setActiveWorkspace })
+
+        handleKeyDown(createKeyEvent({ key: 'Enter' }))
+        expect(setActiveWorkspace).toHaveBeenCalledWith('ws2')
+        expect(useKeybindingStore.getState().prefixState).toBe('idle')
+      })
+
+      it('ArrowUp navigates up', () => {
+        handleKeyDown(createKeyEvent({ key: 'ArrowUp' }))
+        expect(useKeybindingStore.getState().focusedWorkspaceIndex).toBe(0)
+      })
+
+      it('ArrowDown navigates down', () => {
+        handleKeyDown(createKeyEvent({ key: 'ArrowDown' }))
+        expect(useKeybindingStore.getState().focusedWorkspaceIndex).toBe(2)
+      })
+    })
+
+    describe('in idle mode', () => {
+      it('Cmd+1-9 calls switchToTab with index', () => {
+        const handleKeyDown = initAndGetHandler()
+        const switchToTab = vi.fn()
+        useKeybindingStore.getState().setHandlers({ switchToTab })
+
+        handleKeyDown(createKeyEvent({ key: '3', metaKey: true }))
+        expect(switchToTab).toHaveBeenCalledWith(2)
+      })
+
+      it('Ctrl+1-9 calls switchToTab with index', () => {
+        const handleKeyDown = initAndGetHandler()
+        const switchToTab = vi.fn()
+        useKeybindingStore.getState().setHandlers({ switchToTab })
+
+        handleKeyDown(createKeyEvent({ key: '1', ctrlKey: true }))
+        expect(switchToTab).toHaveBeenCalledWith(0)
+      })
+    })
+  })
+
+  describe('timeout', () => {
+    beforeEach(() => vi.useFakeTimers())
+    afterEach(() => vi.useRealTimers())
+
+    it('activate auto-deactivates after timeout', () => {
+      useKeybindingStore.getState().activate()
+      expect(useKeybindingStore.getState().prefixState).toBe('active')
+
+      vi.advanceTimersByTime(1500)
+      expect(useKeybindingStore.getState().prefixState).toBe('idle')
+    })
+
+    it('enterWorkspaceFocus auto-deactivates after timeout', () => {
+      useKeybindingStore.getState().enterWorkspaceFocus(['ws1'], 0)
+      expect(useKeybindingStore.getState().prefixState).toBe('workspace_focus')
+
+      vi.advanceTimersByTime(1500)
+      expect(useKeybindingStore.getState().prefixState).toBe('idle')
+    })
+
+    it('dispose clears timeout so it does not fire', () => {
+      useKeybindingStore.getState().activate()
+      expect(useKeybindingStore.getState().prefixState).toBe('active')
+
+      useKeybindingStore.getState().dispose()
+
+      // Re-activate — if timeout wasn't cleared, it would fire and deactivate
+      useKeybindingStore.getState().activate()
+      vi.advanceTimersByTime(1400) // less than timeout
+      expect(useKeybindingStore.getState().prefixState).toBe('active')
+    })
+  })
+
+  describe('init/dispose lifecycle', () => {
+    it('init registers keydown listener', () => {
+      useKeybindingStore.getState().init()
+      expect(addEventListenerMock).toHaveBeenCalledWith('keydown', expect.any(Function), true)
+    })
+
+    it('dispose removes keydown listener', () => {
+      useKeybindingStore.getState().init()
+      useKeybindingStore.getState().dispose()
+      expect(removeEventListenerMock).toHaveBeenCalledWith('keydown', expect.any(Function), true)
+    })
+  })
 })
 
 describe('matchesKeybinding', () => {
-  function createKeyEvent(overrides: Partial<KeyboardEvent> = {}): KeyboardEvent {
-    return { key: '', ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...overrides } as KeyboardEvent
-  }
-
   it.each([
     { key: 't', modifiers: [] as string[], event: { key: 't' }, expected: true, desc: 'plain key' },
     { key: 't', modifiers: [] as string[], event: { key: 'x' }, expected: false, desc: 'different key' },
@@ -153,6 +351,7 @@ describe('matchesKeybinding', () => {
     { key: 'x', modifiers: ['Alt'], event: { key: 'x', altKey: true }, expected: true, desc: 'Alt modifier' },
     { key: 'z', modifiers: ['Control', 'Shift', 'Alt', 'Meta'], event: { key: 'z', ctrlKey: true, shiftKey: true, altKey: true, metaKey: true }, expected: true, desc: 'all four modifiers' },
   ])('$desc -> $expected', ({ key, modifiers, event, expected }) => {
-    expect(matchesKeybinding(createKeyEvent(event), modifiers, key)).toBe(expected)
+    const e = { key: '', ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...event } as KeyboardEvent
+    expect(matchesKeybinding(e, modifiers, key)).toBe(expected)
   })
 })
