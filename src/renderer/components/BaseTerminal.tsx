@@ -509,6 +509,8 @@ export default function BaseTerminal({
 
   const openContextMenu = useContextMenuStore((s) => s.open)
   const closeContextMenu = useContextMenuStore((s) => s.close)
+  const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
+  const menuPosition = useContextMenuStore((s) => s.position)
   const contextMenuId = `terminal-${tabId}`
 
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -563,7 +565,7 @@ export default function BaseTerminal({
         <span className="debug-badge">DEBUG</span>
       )}
 
-      <ContextMenu menuId={contextMenuId}>
+      <ContextMenu menuId={contextMenuId} activeMenuId={activeMenuId} position={menuPosition}>
         <div className="context-menu-item" onClick={handleCopy}>
           Copy
         </div>

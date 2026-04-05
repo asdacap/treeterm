@@ -5,16 +5,11 @@ import React from 'react'
 import { createStore } from 'zustand/vanilla'
 import WorkspaceSettings from './WorkspaceSettings'
 
-// Mock useAppStore to return application list
-vi.mock('../store/app', () => ({
-  useAppStore: vi.fn((selector: (s: any) => any) => selector({
-    applications: {
-      terminal: { id: 'terminal', name: 'Terminal', showInNewTabMenu: true },
-      editor: { id: 'editor', name: 'Editor', showInNewTabMenu: true },
-      hidden: { id: 'hidden', name: 'Hidden', showInNewTabMenu: false },
-    }
-  })),
-}))
+const applications = {
+  terminal: { id: 'terminal', name: 'Terminal', showInNewTabMenu: true },
+  editor: { id: 'editor', name: 'Editor', showInNewTabMenu: true },
+  hidden: { id: 'hidden', name: 'Hidden', showInNewTabMenu: false },
+} as any
 
 function makeWorkspaceStore(overrides: Record<string, any> = {}) {
   const updateMetadata = vi.fn()
@@ -42,21 +37,21 @@ describe('WorkspaceSettings', () => {
 
   it('renders name input with displayName from metadata', () => {
     const { store } = makeWorkspaceStore()
-    render(<WorkspaceSettings workspace={store} />)
+    render(<WorkspaceSettings workspace={store} applications={applications} />)
     const input = screen.getByDisplayValue('My Workspace')
     expect(input).toBeDefined()
   })
 
   it('renders description textarea', () => {
     const { store } = makeWorkspaceStore()
-    render(<WorkspaceSettings workspace={store} />)
+    render(<WorkspaceSettings workspace={store} applications={applications} />)
     const textarea = screen.getByDisplayValue('A test workspace')
     expect(textarea).toBeDefined()
   })
 
   it('calls updateMetadata with displayName on name blur', () => {
     const { store, updateMetadata } = makeWorkspaceStore()
-    render(<WorkspaceSettings workspace={store} />)
+    render(<WorkspaceSettings workspace={store} applications={applications} />)
 
     const input = screen.getByDisplayValue('My Workspace')
     fireEvent.change(input, { target: { value: 'New Name' } })
@@ -67,7 +62,7 @@ describe('WorkspaceSettings', () => {
 
   it('does not call updateMetadata when name is empty on blur', () => {
     const { store, updateMetadata } = makeWorkspaceStore()
-    render(<WorkspaceSettings workspace={store} />)
+    render(<WorkspaceSettings workspace={store} applications={applications} />)
 
     const input = screen.getByDisplayValue('My Workspace')
     fireEvent.change(input, { target: { value: '   ' } })
@@ -78,7 +73,7 @@ describe('WorkspaceSettings', () => {
 
   it('calls updateMetadata with description on textarea blur', () => {
     const { store, updateMetadata } = makeWorkspaceStore()
-    render(<WorkspaceSettings workspace={store} />)
+    render(<WorkspaceSettings workspace={store} applications={applications} />)
 
     const textarea = screen.getByDisplayValue('A test workspace')
     fireEvent.change(textarea, { target: { value: 'Updated desc' } })
@@ -89,7 +84,7 @@ describe('WorkspaceSettings', () => {
 
   it('calls updateSettings on default app change', () => {
     const { store, updateSettings } = makeWorkspaceStore()
-    render(<WorkspaceSettings workspace={store} />)
+    render(<WorkspaceSettings workspace={store} applications={applications} />)
 
     const select = screen.getByDisplayValue('Use Global Default')
     fireEvent.change(select, { target: { value: 'terminal' } })
@@ -99,7 +94,7 @@ describe('WorkspaceSettings', () => {
 
   it('renders only showInNewTabMenu apps in dropdown', () => {
     const { store } = makeWorkspaceStore()
-    render(<WorkspaceSettings workspace={store} />)
+    render(<WorkspaceSettings workspace={store} applications={applications} />)
 
     expect(screen.getByText('Terminal')).toBeDefined()
     expect(screen.getByText('Editor')).toBeDefined()
@@ -114,7 +109,7 @@ describe('WorkspaceSettings', () => {
 
   it('toggles raw JSON on click', () => {
     const { store } = makeWorkspaceStore()
-    render(<WorkspaceSettings workspace={store} />)
+    render(<WorkspaceSettings workspace={store} applications={applications} />)
 
     // Initially collapsed
     expect(screen.queryByText(/"ws-1"/)).toBeNull()
@@ -128,7 +123,7 @@ describe('WorkspaceSettings', () => {
 
   it('falls back to workspace name when no displayName', () => {
     const { store } = makeWorkspaceStore({ metadata: {} })
-    render(<WorkspaceSettings workspace={store} />)
+    render(<WorkspaceSettings workspace={store} applications={applications} />)
     expect(screen.getByDisplayValue('test-workspace')).toBeDefined()
   })
 })

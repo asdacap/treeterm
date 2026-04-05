@@ -1,15 +1,14 @@
 import { useState } from 'react'
 import { useStore } from 'zustand'
-import { useAppStore } from '../store/app'
-import type { WorkspaceStore } from '../types'
+import type { Application, WorkspaceStore } from '../types'
 
 interface WorkspaceSettingsProps {
   workspace: WorkspaceStore
+  applications: Record<string, Application>
 }
 
-export default function WorkspaceSettings({ workspace }: WorkspaceSettingsProps) {
+export default function WorkspaceSettings({ workspace, applications }: WorkspaceSettingsProps) {
   const { workspace: ws, updateMetadata, updateSettings } = useStore(workspace)
-  const applications = useAppStore((s) => s.applications)
   const appList = Object.values(applications).filter((app) => app.showInNewTabMenu)
 
   const [name, setName] = useState(ws.metadata?.displayName ?? ws.name)

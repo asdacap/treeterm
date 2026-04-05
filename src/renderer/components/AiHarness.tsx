@@ -114,6 +114,8 @@ function AiHarnessContent({
 
   const openContextMenu = useContextMenuStore((s) => s.open)
   const closeContextMenu = useContextMenuStore((s) => s.close)
+  const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
+  const menuPosition = useContextMenuStore((s) => s.position)
   const badgeMenuId = `ai-badge-${tabId}`
 
   const handleBadgeContextMenu = (e: React.MouseEvent) => {
@@ -181,7 +183,7 @@ function AiHarnessContent({
           <span className="ai-harness-toggle-label">Auto-approve safe</span>
         </label>
       </div>
-      <ContextMenu menuId={badgeMenuId}>
+      <ContextMenu menuId={badgeMenuId} activeMenuId={activeMenuId} position={menuPosition}>
         <div className="context-menu-item" onClick={handleDebugAnalyzer}>
           Debug System Prompt
         </div>

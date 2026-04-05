@@ -7,12 +7,17 @@ import type { WorkspaceStoreState } from '../../renderer/store/createWorkspaceSt
 import type { GitControllerState } from '../../renderer/store/createGitControllerStore'
 import type { ReviewCommentState } from '../../renderer/store/createReviewCommentStore'
 
-vi.mock('react', () => ({
+vi.mock('react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('react')>()),
   createElement: vi.fn((component: unknown, props: unknown) => ({ component, props }))
 }))
 
 vi.mock('../../renderer/components/WorkspaceSettings', () => ({
   default: vi.fn(() => null)
+}))
+
+vi.mock('../../renderer/store/app', () => ({
+  useAppStore: vi.fn(() => ({})),
 }))
 
 const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => ({
@@ -69,13 +74,14 @@ describe('WorkspaceSettings Renderer', () => {
     ref.dispose()
   })
 
-  it('renders WorkspaceSettings with key and workspace', () => {
+  it('renders WorkspaceSettingsConnected with key, tab and workspace', () => {
     const tab = { id: 'tab-1', state: {} } as unknown as Tab
     const result = workspaceSettingsApplication.render({ tab, workspace: mockWorkspaceStore, isVisible: true })
     expect(result).toEqual({
       component: expect.any(Function),
       props: {
         key: 'tab-1',
+        tab,
         workspace: mockWorkspaceStore,
       },
     })

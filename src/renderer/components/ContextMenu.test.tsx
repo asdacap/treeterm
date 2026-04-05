@@ -1,29 +1,13 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import React from 'react'
-
-let mockActiveMenuId: string | null = null
-let mockPosition = { x: 0, y: 0 }
-
-vi.mock('../store/contextMenu', () => ({
-  useContextMenuStore: (selector: (s: any) => any) =>
-    selector({ activeMenuId: mockActiveMenuId, position: mockPosition }),
-}))
-
 import ContextMenu from './ContextMenu'
 
 describe('ContextMenu', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockActiveMenuId = null
-    mockPosition = { x: 0, y: 0 }
-  })
-
   it('renders null when activeMenuId does not match menuId', () => {
-    mockActiveMenuId = 'other-menu'
     const { container } = render(
-      <ContextMenu menuId="my-menu">
+      <ContextMenu menuId="my-menu" activeMenuId="other-menu" position={{ x: 0, y: 0 }}>
         <div>menu item</div>
       </ContextMenu>
     )
@@ -31,9 +15,8 @@ describe('ContextMenu', () => {
   })
 
   it('renders null when activeMenuId is null', () => {
-    mockActiveMenuId = null
     const { container } = render(
-      <ContextMenu menuId="my-menu">
+      <ContextMenu menuId="my-menu" activeMenuId={null} position={{ x: 0, y: 0 }}>
         <div>menu item</div>
       </ContextMenu>
     )
@@ -41,20 +24,17 @@ describe('ContextMenu', () => {
   })
 
   it('renders children when activeMenuId matches menuId', () => {
-    mockActiveMenuId = 'my-menu'
     render(
-      <ContextMenu menuId="my-menu">
+      <ContextMenu menuId="my-menu" activeMenuId="my-menu" position={{ x: 0, y: 0 }}>
         <div>menu item</div>
       </ContextMenu>
     )
     expect(screen.getByText('menu item')).toBeDefined()
   })
 
-  it('positions the menu at the store position coordinates', () => {
-    mockActiveMenuId = 'my-menu'
-    mockPosition = { x: 100, y: 200 }
+  it('positions the menu at the given coordinates', () => {
     const { container } = render(
-      <ContextMenu menuId="my-menu">
+      <ContextMenu menuId="my-menu" activeMenuId="my-menu" position={{ x: 100, y: 200 }}>
         <div>item</div>
       </ContextMenu>
     )

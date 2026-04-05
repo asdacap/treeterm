@@ -53,6 +53,8 @@ export default function SessionPanel({
 
   const openContextMenu = useContextMenuStore((s) => s.open)
   const closeContextMenu = useContextMenuStore((s) => s.close)
+  const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
+  const menuPosition = useContextMenuStore((s) => s.position)
   const getChildren = (parentId: string) =>
     Object.entries(workspaces)
       .filter(([, e]) => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === parentId)
@@ -403,7 +405,7 @@ export default function SessionPanel({
       </div>
 
       {/* Session Context Menu */}
-      <ContextMenu menuId="session-context">
+      <ContextMenu menuId="session-context" activeMenuId={activeMenuId} position={menuPosition}>
         <div className="context-menu-item danger" onClick={handleDisconnectSession}>
           Disconnect
         </div>
@@ -475,6 +477,8 @@ function WorkspaceTreeItem({
   children, renderChild,
 }: WorkspaceTreeItemProps): JSX.Element {
   const openContextMenu = useContextMenuStore((s) => s.open)
+  const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
+  const menuPosition = useContextMenuStore((s) => s.position)
   const menuId = `ws-context-${id}`
 
   const ws = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined
@@ -529,7 +533,7 @@ function WorkspaceTreeItem({
         </span>
       </div>
 
-      <ContextMenu menuId={menuId}>
+      <ContextMenu menuId={menuId} activeMenuId={activeMenuId} position={menuPosition}>
         {ws && (
           <div className="context-menu-item" onClick={() => onOpenSettings(id)}>
             Settings

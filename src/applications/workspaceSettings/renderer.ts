@@ -1,6 +1,12 @@
 import type { Application } from '../../renderer/types'
 import WorkspaceSettings from '../../renderer/components/WorkspaceSettings'
+import { useAppStore } from '../../renderer/store/app'
 import { createElement } from 'react'
+
+function WorkspaceSettingsConnected({ tab, workspace }: { tab: { id: string }; workspace: any }) {
+  const applications = useAppStore((s) => s.applications)
+  return createElement(WorkspaceSettings, { key: tab.id, workspace, applications })
+}
 
 export const workspaceSettingsApplication: Application = {
   id: 'workspace-settings',
@@ -12,7 +18,7 @@ export const workspaceSettingsApplication: Application = {
   onWorkspaceLoad: () => ({ dispose: () => {} }),
 
   render: ({ tab, workspace }) =>
-    createElement(WorkspaceSettings, { key: tab.id, workspace }),
+    createElement(WorkspaceSettingsConnected, { key: tab.id, tab, workspace }),
 
   canClose: true,
   showInNewTabMenu: false,

@@ -41,6 +41,8 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const menuApplications = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
   const openContextMenu = useContextMenuStore((s) => s.open)
   const closeContextMenu = useContextMenuStore((s) => s.close)
+  const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
+  const menuPosition = useContextMenuStore((s) => s.position)
   const branchBadgeMenuId = 'branch-badge'
 
   const [branchCopied, setBranchCopied] = useState(false)
@@ -405,7 +407,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                         }}
                         title="Copy branch name"
                       >{branchCopied ? 'Copied!' : activeWorkspace.gitBranch}</span>
-                      <ContextMenu menuId={branchBadgeMenuId}>
+                      <ContextMenu menuId={branchBadgeMenuId} activeMenuId={activeMenuId} position={menuPosition}>
                         <div className="context-menu-item" onClick={() => {
                           closeContextMenu()
                           clipboard.writeText(activeWorkspace.path)
