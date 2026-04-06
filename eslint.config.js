@@ -79,8 +79,7 @@ export default [
       'react-hooks/exhaustive-deps': 'warn',
       'react-hooks/set-state-in-effect': 'error',
       'react-hooks/set-state-in-render': 'error',
-      // use-store-selectors disabled: rule incorrectly flags useStore(storeApi, selector) with 2 args
-      // Our custom no-restricted-syntax rules below handle unstable selectors instead
+      // use-store-selectors disabled: rule targets singleton create() pattern, not vanilla useStore(storeApi, selector)
       'zustand-rules/use-store-selectors': 'off',
       'zustand-rules/no-state-mutation': 'error',
       'zustand-rules/enforce-use-setstate': 'error',
