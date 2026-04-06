@@ -37,17 +37,9 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [menuAnchor])
 
-  const tabs = workspace ? getTabs(workspace) : []
   const activeTabId = workspace?.activeTabId ?? null
-  const tabsRef = useRef(tabs)
-  tabsRef.current = tabs
-  const activeTabIdRef = useRef(activeTabId)
-  activeTabIdRef.current = activeTabId
 
   const [model, setModel] = useState<Model | null>(null)
-  const layoutRef = useRef<Layout>(null)
-  // Track tab IDs we've synced into the model to detect adds/removes
-  const syncedTabIdsRef = useRef<Set<string>>(new Set())
   // Suppress model→store sync while we're applying store→model updates
   const suppressModelChangeRef = useRef(false)
 
@@ -56,8 +48,8 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
     const currentWorkspace = ws.getState().workspace
     if (!currentWorkspace) return
 
-    const currentTabs = tabsRef.current
-    const currentActiveTabId = activeTabIdRef.current
+    const currentTabs = getTabs(currentWorkspace)
+    const currentActiveTabId = currentWorkspace.activeTabId ?? null
     let json: IJsonModel
     const saved = currentWorkspace.metadata?.layoutModel
     if (saved) {
@@ -71,8 +63,8 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
     }
 
     const m = Model.fromJson(json)
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- FlexLayout model is constructed asynchronously from saved metadata
     setModel(m)
-    syncedTabIdsRef.current = new Set(currentTabs.map(t => t.id))
   }, [workspace?.id, getApplication, ws])
 
   // Sync store tab changes → model (adds/removes)
@@ -80,14 +72,19 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
   useEffect(() => {
     if (!model || !appStates) return
 
-    const currentTabs = tabsRef.current
+    const currentWorkspace = ws.getState().workspace
+    if (!currentWorkspace) return
+    const currentTabs = getTabs(currentWorkspace)
     const currentIds = new Set(currentTabs.map(t => t.id))
-    const synced = syncedTabIdsRef.current
+
+    // Derive already-synced tab IDs from the model itself
+    const modelTabIds = new Set<string>()
+    model.visitNodes(node => { if (node instanceof TabNode) modelTabIds.add(node.getId()) })
 
     // Detect added tabs
-    const added = currentTabs.filter(t => !synced.has(t.id))
+    const added = currentTabs.filter(t => !modelTabIds.has(t.id))
     // Detect removed tabs
-    const removed = Array.from(synced).filter(id => !currentIds.has(id))
+    const removed = Array.from(modelTabIds).filter(id => !currentIds.has(id))
 
     suppressModelChangeRef.current = true
 
@@ -134,14 +131,14 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
       }
     }
 
-    syncedTabIdsRef.current = currentIds
     suppressModelChangeRef.current = false
 
     // Force re-render after model mutations
     if (added.length > 0 || removed.length > 0 || reconciled) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- FlexLayout model mutations are imperative; setState forces React to re-render with updated model
       setModel(model)
     }
-  }, [model, appStates, getApplication])
+  }, [model, appStates, getApplication, ws])
 
   // Sync store active tab → model selected tab
   useEffect(() => {
@@ -187,7 +184,8 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
   // Customize tab rendering with icons and activity indicators
   const handleRenderTab = useCallback((node: TabNode, renderValues: ITabRenderValues) => {
     const tabId = node.getId()
-    const tab = tabsRef.current.find(t => t.id === tabId)
+    const wsState = ws.getState().workspace
+    const tab = wsState ? getTabs(wsState).find(t => t.id === tabId) : undefined
     if (tab) {
       const app = getApplication(tab.applicationId)
       if (app) {
@@ -197,7 +195,7 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
         <TabActivityIndicator key="activity" tabId={tabId} />
       )
     }
-  }, [getApplication])
+  }, [getApplication, ws])
 
   // Add "+" button to each tabset header; menu renders via portal
   const handleRenderTabSet = useCallback((node: TabSetNode | BorderNode, renderValues: ITabSetRenderValues) => {
@@ -227,7 +225,6 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
   return (
     <>
       <Layout
-        ref={layoutRef}
         model={model}
         factory={factory}
         onAction={handleAction}

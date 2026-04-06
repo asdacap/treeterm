@@ -113,6 +113,10 @@ the error UI.
 - What should not be nullable, do not mark as nullable. Prefer no nullable parameter where possible.
 - Do not add code for cases that cannot or should not happen. For example, workspace should always be possible in a tab, or session should be always available in a workspace. So dont care for case where workspace it not available in a tab. 
 - No overengineering unless explicitly told to. No `useMemo`!
+- `useRef` are evil. Dont use it unless you have to.
+  - Really, if its a pure mutation, just do it in the renderer function. Dont need to complicate stuff.
+- Dependency array cannot take array or object.
+  - If you need to depend on an array, then MAYBE it should be wrapped in an inner react compponent.
 - For issues with read linter, consult the doc:
   - https://react.dev/reference/eslint-plugin-react-hooks/lints/set-state-in-effect
   - https://react.dev/reference/eslint-plugin-react-hooks/lints/set-state-in-render

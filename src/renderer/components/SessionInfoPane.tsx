@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+
+let nextLineId = 0
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import { Loader2 } from 'lucide-react'
@@ -68,7 +70,6 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
   const [showPortForwardDialog, setShowPortForwardDialog] = useState(false)
   const [expandedPfOutput, setExpandedPfOutput] = useState<Record<string, OutputLine[]>>({})
   const scrollRef = useRef<HTMLDivElement>(null)
-  const nextLineIdRef = useRef(0)
 
   // Session data for JSON tab
   const rawSessionId = useStore(sessionStore, s => s.sessionId)
@@ -82,10 +83,10 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
     if (!isRemote || !connection) return
     let unsubscribe: (() => void) | undefined
     ssh.watchOutput(connection.id, (line) => {
-      const id = nextLineIdRef.current++
+      const id = nextLineId++
       setOutput(prev => [...prev, { id, line }])
     }).then(({ scrollback, unsubscribe: unsub }) => {
-      setOutput(scrollback.map(line => ({ id: nextLineIdRef.current++, line })))
+      setOutput(scrollback.map(line => ({ id: nextLineId++, line })))
       unsubscribe = unsub
     }).catch(console.error)
     return () => { unsubscribe?.() }
@@ -132,13 +133,13 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
       })
     } else {
       ssh.watchPortForwardOutput(pfId, (line) => {
-        const id = nextLineIdRef.current++
+        const id = nextLineId++
         setExpandedPfOutput(prev => ({
           ...prev,
           [pfId]: [...(prev[pfId] ?? []), { id, line }]
         }))
       }).then(({ scrollback, unsubscribe: _ }) => {
-        setExpandedPfOutput(prev => ({ ...prev, [pfId]: scrollback.map(line => ({ id: nextLineIdRef.current++, line })) }))
+        setExpandedPfOutput(prev => ({ ...prev, [pfId]: scrollback.map(line => ({ id: nextLineId++, line })) }))
       }).catch(console.error)
       setExpandedPfOutput(prev => ({ ...prev, [pfId]: [] }))
     }

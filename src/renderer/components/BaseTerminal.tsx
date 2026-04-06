@@ -122,8 +122,8 @@ export interface BaseTerminalConfig {
   stripScrollbackClear?: boolean
   // Whether to disable the regex-based activity state detector (e.g. when using LLM-based analysis)
   disableActivityDetector?: boolean
-  // Callback when terminal is ready, provides terminal instance and data version ref
-  onTerminalReady?: (terminal: XTerm, dataVersionRef: React.MutableRefObject<number>) => void
+  // Callback when terminal is ready, provides terminal instance
+  onTerminalReady?: (terminal: XTerm) => void
 }
 
 interface BaseTerminalProps {
@@ -144,14 +144,12 @@ export default function BaseTerminal({
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
   const ttyRef = useRef<Tty | null>(null)
-  const dataVersionRef = useRef(0)
   const [overlay, setOverlay] = useState<{ message: string; type: 'info' | 'error' } | null>(null)
   const [loading, setLoading] = useState(true)
   const [scrollPosition, setScrollPosition] = useState<'top' | 'bottom' | 'middle'>('bottom')
   const [isAlternateScreen, setIsAlternateScreen] = useState(false)
   const [sizeMismatch, setSizeMismatch] = useState<{ requested: { cols: number; rows: number }; actual: { cols: number; rows: number } } | null>(null)
   const [refreshCounter, setRefreshCounter] = useState(0)
-  const requestedSizeRef = useRef<{ cols: number; rows: number } | null>(null)
 
   const sessionStore = useSessionApi()
   const setTabState = useActivityStateStore((state) => state.setTabState)
@@ -178,6 +176,7 @@ export default function BaseTerminal({
     let unsubscribeFocus: (() => void) | null = null
     let rawChars = ''
     let initialResizeDone = false
+    let requestedSize: { cols: number; rows: number } | null = null
 
     const wsState = workspace.getState()
     const existingCache = wsState.getCachedTerminal(tabId)
@@ -186,11 +185,10 @@ export default function BaseTerminal({
     const attachMountedState = (terminal: XTerm, tty: Tty, cache: CachedTerminal) => {
       terminalRef.current = terminal
       ttyRef.current = tty
-      dataVersionRef.current = cache.dataVersion
 
       const rawResize = tty.getState().resize
       const resize = (cols: number, rows: number) => {
-        requestedSizeRef.current = { cols, rows }
+        requestedSize = { cols, rows }
         rawResize(cols, rows)
       }
 
@@ -238,7 +236,6 @@ export default function BaseTerminal({
         switch (event.type) {
           case 'data': {
             cache.dataVersion++
-            dataVersionRef.current = cache.dataVersion
             setOverlay(null)
 
             const buf = terminal.buffer.active
@@ -298,7 +295,7 @@ export default function BaseTerminal({
             terminal.resize(event.cols, event.rows)
 
             // Check if daemon-echoed size matches what we requested
-            const req = requestedSizeRef.current
+            const req = requestedSize
             if (req && (req.cols !== event.cols || req.rows !== event.rows)) {
               setSizeMismatch({ requested: req, actual: { cols: event.cols, rows: event.rows } })
             } else {
@@ -453,7 +450,7 @@ export default function BaseTerminal({
         wsState.setCachedTerminal(tabId, cache)
 
         // Notify parent that terminal is ready (first mount only — handlers persist on the cached terminal)
-        config.onTerminalReady?.(terminal, dataVersionRef)
+        config.onTerminalReady?.(terminal)
 
         attachMountedState(terminal, tty, cache)
       }

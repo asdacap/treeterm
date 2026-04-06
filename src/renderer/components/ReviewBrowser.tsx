@@ -170,7 +170,7 @@ export default function ReviewBrowser({
     !!(reviewState?.selectedFilePath || reviewState?.selectedUncommittedFilePath)
   )
   // Capture initial viewMode for mount-only commits loading (tab click handler loads on interaction)
-  const initialViewModeRef = useRef(viewMode)
+  const [initialViewMode] = useState(viewMode)
 
   // Use stable primitives instead of object references to avoid re-running
   // on every workspace store update (tab switches, scroll persistence, etc.)
@@ -190,9 +190,10 @@ export default function ReviewBrowser({
     }
 
     // If commits tab was persisted, load commits on mount
-    if (initialViewModeRef.current === 'commits') {
+    if (initialViewMode === 'commits') {
       h.loadCommits()
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- initialViewMode is intentionally excluded: it captures the mount-time value and should not re-trigger the effect
   }, [workspaceId, parentWorkspaceId, currentGitBranch, parentGitBranch])
 
   // Auto-restore persisted file selection after initial data load

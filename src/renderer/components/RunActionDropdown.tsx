@@ -17,14 +17,10 @@ export default function RunActionDropdown({ workspacePath, runActions: runAction
   const menuRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
 
-  const storeRef = useRef<ReturnType<typeof createRunActionsStore> | null>(null)
-  if (!storeRef.current) {
-    storeRef.current = createRunActionsStore(workspacePath, {
-      detect: runActionsApi.detect,
-      run: runActionsApi.run
-    })
-  }
-  const store = storeRef.current
+  const [store] = useState(() => createRunActionsStore(workspacePath, {
+    detect: runActionsApi.detect,
+    run: runActionsApi.run
+  }))
 
   const actions = useStore(store, s => s.actions)
   const detecting = useStore(store, s => s.detecting)

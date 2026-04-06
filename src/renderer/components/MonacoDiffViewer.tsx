@@ -54,7 +54,7 @@ export function MonacoDiffViewer({
 }: MonacoDiffViewerProps): JSX.Element {
   const diffEditorRef = useRef<editor.IStandaloneDiffEditor | null>(null)
   const lastScrollTopRef = useRef<number>(initialScrollTop ?? 0)
-  const shouldRestoreScrollRef = useRef<boolean>(!!initialScrollTop && initialScrollTop > 0)
+  let shouldRestoreScroll = !!initialScrollTop && initialScrollTop > 0
   const [lineChanges, setLineChanges] = useState<editor.ILineChange[] | null>(null)
   const [currentChangeIndex, setCurrentChangeIndex] = useState<number>(-1)
   const [isSplitView, setIsSplitView] = useState<boolean>(false)
@@ -91,8 +91,8 @@ export function MonacoDiffViewer({
     setLineChanges(changes || [])
 
     // Restore saved scroll position instead of auto-scrolling to first change
-    if (shouldRestoreScrollRef.current) {
-      shouldRestoreScrollRef.current = false
+    if (shouldRestoreScroll) {
+      shouldRestoreScroll = false
       if (changes && changes.length > 0) {
         setCurrentChangeIndex(0)
       }
@@ -332,7 +332,6 @@ export function MonacoDiffViewer({
       newContainers.set(key, { container, comments: groupComments })
     })
 
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync with Monaco view zones for React portals
     setCommentDisplayContainers(newContainers)
 
     const currentZones = commentDisplayZonesRef.current
@@ -372,7 +371,6 @@ export function MonacoDiffViewer({
         })
 
         viewZoneIdRef.current = null
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- sync with Monaco view zones for React portals
         setCommentContainer(null)
       }
       return

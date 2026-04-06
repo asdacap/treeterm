@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useStore } from 'zustand'
 import type { FileEntry, WorkspaceStore } from '../types'
 import { useFilesystemApi } from '../hooks/useWorkspaceApis'
@@ -35,7 +35,6 @@ export function FileTree({
   const workspacePath = wsData.path
   const filesystem = useFilesystemApi(workspace)
   const [dirContents, setDirContents] = useState<Record<string, DirectoryState>>({})
-  const requestedDirsRef = useRef<Set<string>>(new Set())
   const [search, setSearch] = useState<SearchState>({
     query: '',
     entries: [],
@@ -95,13 +94,17 @@ export function FileTree({
 
   const loadDirectory = useCallback(
     async (dirPath: string) => {
-      if (requestedDirsRef.current.has(dirPath)) return
-      requestedDirsRef.current.add(dirPath)
-
-      setDirContents((prev) => ({
-        ...prev,
-        [dirPath]: { entries: [], loading: true, error: null }
-      }))
+      // Atomically check-and-set loading state to prevent duplicate requests
+      let alreadyRequested = false
+      setDirContents((prev) => {
+        const existing = prev[dirPath]
+        if (existing && !existing.error) {
+          alreadyRequested = true
+          return prev
+        }
+        return { ...prev, [dirPath]: { entries: [], loading: true, error: null } }
+      })
+      if (alreadyRequested) return
 
       try {
         const result = await filesystem.readDirectory(dirPath)
@@ -112,14 +115,12 @@ export function FileTree({
             [dirPath]: { entries: result.contents.entries, loading: false, error: null }
           }))
         } else {
-          requestedDirsRef.current.delete(dirPath)
           setDirContents((prev) => ({
             ...prev,
             [dirPath]: { entries: [], loading: false, error: result.error || 'Failed to load' }
           }))
         }
       } catch (err) {
-        requestedDirsRef.current.delete(dirPath)
         setDirContents((prev) => ({
           ...prev,
           [dirPath]: { entries: [], loading: false, error: `Error: ${err}` }
