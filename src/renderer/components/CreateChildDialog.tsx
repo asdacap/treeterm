@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { useStore } from 'zustand'
 import type { WorktreeInfo, BranchInfo, WorktreeSettings, WorkspaceStore } from '../types'
 import { useAppStore } from '../store/app'
@@ -62,16 +62,12 @@ export default function CreateChildDialog({
   const applications = useAppStore((s) => s.applications)
 
   // Get inherited app name
-  const inheritedApp = useMemo(() => {
-    if (parentWsData.settings?.defaultApplicationId) {
-      const app = applications[parentWsData.settings.defaultApplicationId]
-      if (app) return app
-    }
-    return null
-  }, [parentWsData.settings, applications])
+  const inheritedApp = parentWsData.settings?.defaultApplicationId
+    ? applications[parentWsData.settings.defaultApplicationId] ?? null
+    : null
 
   // Get available apps
-  const availableApps = useMemo(() => Object.values(applications).filter(app => app.showInNewTabMenu), [applications])
+  const availableApps = Object.values(applications).filter(app => app.showInNewTabMenu)
 
   // Set loading flags during render when mode/gitRootPath changes
   const [prevMode, setPrevMode] = useState(mode)
@@ -166,27 +162,19 @@ export default function CreateChildDialog({
   }, [mode, parentWsData.gitRootPath, git])
 
   // Filter branches based on search
-  const filteredBranches = useMemo(() => {
-    if (!branchSearch.trim()) return branches
-    const searchLower = branchSearch.toLowerCase()
-    return branches.filter(b => b.name.toLowerCase().includes(searchLower))
-  }, [branches, branchSearch])
+  const filteredBranches = !branchSearch.trim()
+    ? branches
+    : branches.filter(b => b.name.toLowerCase().includes(branchSearch.toLowerCase()))
 
   // Filter remote branches based on search
-  const filteredRemoteBranches = useMemo(() => {
-    if (!remoteBranchSearch.trim()) return remoteBranches
-    const searchLower = remoteBranchSearch.toLowerCase()
-    return remoteBranches.filter(b => b.name.toLowerCase().includes(searchLower))
-  }, [remoteBranches, remoteBranchSearch])
+  const filteredRemoteBranches = !remoteBranchSearch.trim()
+    ? remoteBranches
+    : remoteBranches.filter(b => b.name.toLowerCase().includes(remoteBranchSearch.toLowerCase()))
 
   // Validate name for '/' character
-  const nameValidationError = useMemo(() => {
-    if (!name.trim()) return null
-    if (name.includes('/')) {
-      return 'Name cannot contain "/" - use simple names only'
-    }
-    return null
-  }, [name])
+  const nameValidationError = !name.trim() ? null
+    : name.includes('/') ? 'Name cannot contain "/" - use simple names only'
+    : null
 
   // Build settings object for child worktree
   const buildSettings = (): WorktreeSettings | undefined => {

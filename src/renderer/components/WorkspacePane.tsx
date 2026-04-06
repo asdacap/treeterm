@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState, useRef, useMemo } from 'react'
+import { useEffect, useCallback, useState, useRef } from 'react'
 import { ChevronDown, Github, Loader2, ArrowDownToLine, RefreshCw, AlertTriangle, CircleDot, Check } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
@@ -38,7 +38,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const enterWorkspaceFocus = useKeybindingStore(s => s.enterWorkspaceFocus)
   const applications = useAppStore((s) => s.applications)
   const clipboard = useAppStore((s) => s.clipboard)
-  const menuApplications = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
+  const menuApplications = Object.values(applications).filter((app) => app.showInNewTabMenu)
   const openContextMenu = useContextMenuStore((s) => s.open)
   const closeContextMenu = useContextMenuStore((s) => s.close)
   const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
@@ -154,13 +154,11 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   )
 
   // Compute paths of already-open worktrees
-  const openWorktreePaths = useMemo(() => {
-    return Object.values(workspaces)
-      .filter((e): e is Extract<typeof e, { status: 'loaded' | 'operation-error' }> =>
-        e.status === 'loaded' || e.status === 'operation-error')
-      .filter(e => e.data.isWorktree)
-      .map(e => e.data.path)
-  }, [workspaces])
+  const openWorktreePaths = Object.values(workspaces)
+    .filter((e): e is Extract<typeof e, { status: 'loaded' | 'operation-error' }> =>
+      e.status === 'loaded' || e.status === 'operation-error')
+    .filter(e => e.data.isWorktree)
+    .map(e => e.data.path)
 
   // Fork handler - create new worktree
   const handleCreateChildSubmit = (name: string, isDetached: boolean, settings?: import('../types').WorktreeSettings, description?: string) => {
@@ -267,9 +265,8 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   }
 
   // Compute flattened workspace list for navigation
-  const flattenedWorkspaceIds = useMemo(() => {
+  const flattenedWorkspaceIds = (() => {
     const result: string[] = []
-    // Build parent lookup for loaded entries
     const parentMap = new Map<string | null, string[]>()
     for (const [id, entry] of Object.entries(workspaces)) {
       const parentId = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data.parentId : null
@@ -282,11 +279,10 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
       const children = parentMap.get(wsId) ?? []
       children.forEach(traverse)
     }
-    // Start from root workspaces
     const roots = parentMap.get(null) ?? []
     roots.forEach(traverse)
     return result
-  }, [workspaces])
+  })()
 
   // Handle legacy workspaces - migrate terminals to tabs format
   const tabs = activeWorkspace ? getTabs(activeWorkspace) : []

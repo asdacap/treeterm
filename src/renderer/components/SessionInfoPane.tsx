@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import { Loader2 } from 'lucide-react'
@@ -91,16 +91,14 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
     return () => { unsubscribe?.() }
   }, [isRemote, connection, ssh])
 
-  const sshOutput = useMemo(() => ({
-    bootstrap: filterLines(output, BOOTSTRAP_PREFIXES),
-    tunnel: filterLines(output, TUNNEL_PREFIXES),
-  }), [output])
+  const bootstrapLines = filterLines(output, BOOTSTRAP_PREFIXES)
+  const tunnelLines = filterLines(output, TUNNEL_PREFIXES)
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [sshOutput.bootstrap.length, sshOutput.tunnel.length])
+  }, [bootstrapLines.length, tunnelLines.length])
 
   // Port forwards (only when connected + remote)
   useEffect(() => {
@@ -299,20 +297,20 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
         </div>
       ) : sshSubTab === 'bootstrap' ? (
         <div className="ssh-pane-output" ref={scrollRef}>
-          {sshOutput.bootstrap.length === 0 ? (
+          {bootstrapLines.length === 0 ? (
             <div className="ssh-pane-output-empty">No bootstrap output yet...</div>
           ) : (
-            sshOutput.bootstrap.map((item) => (
+            bootstrapLines.map((item) => (
               <div key={item.id} className="ssh-pane-output-line">{item.line}</div>
             ))
           )}
         </div>
       ) : sshSubTab === 'tunnel' ? (
         <div className="ssh-pane-output" ref={scrollRef}>
-          {sshOutput.tunnel.length === 0 ? (
+          {tunnelLines.length === 0 ? (
             <div className="ssh-pane-output-empty">No tunnel output yet...</div>
           ) : (
-            sshOutput.tunnel.map((item) => (
+            tunnelLines.map((item) => (
               <div key={item.id} className="ssh-pane-output-line">{item.line}</div>
             ))
           )}

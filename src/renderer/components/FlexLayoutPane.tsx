@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Layout, type ITabSetRenderValues, type ITabRenderValues } from '@aptre/flex-layout'
 import { Model, Actions, TabNode, TabSetNode, BorderNode, DockLocation, type Action } from '@aptre/flex-layout'
@@ -19,7 +19,7 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
   const { workspace, removeTab, setActiveTab, updateMetadata } = useStore(ws)
   const applications = useAppStore((s) => s.applications)
   const getApplication = useCallback((id: string) => applications[id], [applications])
-  const menuApplications = useMemo(() => Object.values(applications).filter((app) => app.showInNewTabMenu), [applications])
+  const menuApplications = Object.values(applications).filter((app) => app.showInNewTabMenu)
 
   // Menu state: anchor position for the portal-rendered dropdown
   const [menuAnchor, setMenuAnchor] = useState<{ top: number; left: number; right: number } | null>(null)

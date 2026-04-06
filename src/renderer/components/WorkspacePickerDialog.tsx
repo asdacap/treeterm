@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import type { Workspace, Session } from '../types'
 
 interface WorkspacePickerDialogProps {
@@ -19,16 +19,14 @@ export default function WorkspacePickerDialog({
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
 
-  const filteredSessions = useMemo(() => {
-    if (!searchQuery.trim()) return sessions
-    const query = searchQuery.toLowerCase()
-    return sessions.filter(session =>
-      session.workspaces.some(w =>
-        w.name.toLowerCase().includes(query) ||
-        w.path.toLowerCase().includes(query)
+  const filteredSessions = !searchQuery.trim()
+    ? sessions
+    : sessions.filter(session =>
+        session.workspaces.some(w =>
+          w.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          w.path.toLowerCase().includes(searchQuery.toLowerCase())
+        )
       )
-    )
-  }, [sessions, searchQuery])
 
   // Build workspace hierarchy for each session
   const buildWorkspaceHierarchy = (workspaces: Workspace[]) => {

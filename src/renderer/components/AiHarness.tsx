@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback } from 'react'
 import { useStore } from 'zustand'
 import type { Terminal as XTerm } from '@xterm/xterm'
 import BaseTerminal, { type BaseTerminalConfig } from './BaseTerminal'
@@ -136,7 +136,7 @@ function AiHarnessContent({
     workspace.getState().addTab<{ sourceTabId: string }>('analyzer-history', { sourceTabId: tabId })
   }
 
-  const config = useMemo<BaseTerminalConfig>(() => ({
+  const config: BaseTerminalConfig = {
     themeBackground: backgroundColor,
     promptPatterns: [/❯\s/],
     logPrefix: 'AiHarness',
@@ -144,7 +144,7 @@ function AiHarnessContent({
     stripScrollbackClear,
     disableActivityDetector: true,
     onTerminalReady: handleTerminalReady,
-  }), [backgroundColor, disableScrollbar, stripScrollbackClear, handleTerminalReady])
+  }
 
   return (
     <div className="ai-harness-wrapper">

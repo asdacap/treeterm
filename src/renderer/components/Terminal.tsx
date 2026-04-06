@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import { useStore } from 'zustand'
 import BaseTerminal, { type BaseTerminalConfig, type BaseTerminalState } from './BaseTerminal'
 import type { SandboxConfig, WorkspaceStore } from '../types'
@@ -18,10 +17,10 @@ export default function Terminal({ cwd: _cwd, workspace, tabId, startupCommand: 
   const existingPtyId = (appState?.state as BaseTerminalState | undefined)?.ptyId
 
   const isSandboxed = sandbox?.enabled ?? false
-  const terminalConfig = useMemo<BaseTerminalConfig>(() => ({
+  const terminalConfig: BaseTerminalConfig = {
     themeBackground: isSandboxed ? '#1a1a2e' : '#1e1e1e',
     logPrefix: 'Terminal'
-  }), [isSandboxed])
+  }
 
   if (!existingPtyId) {
     return <div style={{ padding: 16, color: '#888' }}>Creating terminal...</div>

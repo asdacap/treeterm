@@ -1,9 +1,9 @@
-import type { Application } from '../../renderer/types'
+import type { Application, WorkspaceStore } from '../../renderer/types'
 import WorkspaceSettings from '../../renderer/components/WorkspaceSettings'
 import { useAppStore } from '../../renderer/store/app'
 import { createElement } from 'react'
 
-function WorkspaceSettingsConnected({ tab, workspace }: { tab: { id: string }; workspace: any }) {
+function WorkspaceSettingsConnected({ tab, workspace }: { tab: { id: string }; workspace: WorkspaceStore }) {
   const applications = useAppStore((s) => s.applications)
   return createElement(WorkspaceSettings, { key: tab.id, workspace, applications })
 }

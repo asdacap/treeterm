@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import type { Settings, ReasoningEffort } from '../types'
 import { useSettingsStore, defaultSettings } from '../store/settings'
 import { useAppStore } from '../store/app'
@@ -36,7 +36,7 @@ type RecordingState =
 export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: SettingsDialogProps) {
   const { settings: savedSettings, saveSettings } = useSettingsStore()
   const applications = useAppStore((s) => s.applications)
-  const allApplications = useMemo(() => Object.values(applications), [applications])
+  const allApplications = Object.values(applications)
   const [localSettings, setLocalSettings] = useState<Settings>(savedSettings)
   const [activeTab, setActiveTab] = useState<TabId>('terminal')
   const [recording, setRecording] = useState<RecordingState>(null)

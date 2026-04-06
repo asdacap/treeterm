@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useStore } from 'zustand'
 import { createRunActionsStore } from '../store/createRunActionsStore'
@@ -17,24 +17,22 @@ export default function RunActionDropdown({ workspacePath, runActions: runAction
   const menuRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
 
-  const store = useMemo(() =>
-    createRunActionsStore(workspacePath, {
+  const storeRef = useRef<ReturnType<typeof createRunActionsStore> | null>(null)
+  if (!storeRef.current) {
+    storeRef.current = createRunActionsStore(workspacePath, {
       detect: runActionsApi.detect,
       run: runActionsApi.run
-    }),
-    [workspacePath, runActionsApi]
-  )
+    })
+  }
+  const store = storeRef.current
 
   const actions = useStore(store, s => s.actions)
   const detecting = useStore(store, s => s.detecting)
   const applications = useAppStore((s) => s.applications)
-  const customRunnerApps = useMemo(() =>
-    Object.values(applications).filter(app => app.id.startsWith('customrunner-')),
-    [applications]
-  )
+  const customRunnerApps = Object.values(applications).filter(app => app.id.startsWith('customrunner-'))
 
   // Group actions by source
-  const grouped = useMemo(() => {
+  const grouped = (() => {
     const map = new Map<string, RunAction[]>()
     for (const action of actions) {
       const group = map.get(action.source) || []
@@ -42,7 +40,7 @@ export default function RunActionDropdown({ workspacePath, runActions: runAction
       map.set(action.source, group)
     }
     return map
-  }, [actions])
+  })()
 
   // Close menu on click outside
   useEffect(() => {

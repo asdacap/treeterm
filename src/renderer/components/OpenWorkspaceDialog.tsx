@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import { useAppStore } from '../store/app'
 import { useRecentDirectoriesStore } from '../store/recentDirectories'
 import RemoteDirectoryBrowser from './RemoteDirectoryBrowser'
@@ -25,7 +25,7 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, co
   const addRecent = useRecentDirectoriesStore(s => s.addRecent)
 
   const applications = useAppStore((s) => s.applications)
-  const availableApps = useMemo(() => Object.values(applications).filter(app => app.showInNewTabMenu), [applications])
+  const availableApps = Object.values(applications).filter(app => app.showInNewTabMenu)
 
   const handleSelectFolder = async () => {
     setIsSelecting(true)

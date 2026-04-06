@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import type { ReactNode } from 'react'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
@@ -127,13 +127,11 @@ export default function SessionPanel({
   }
 
   // Compute paths of already-open worktrees
-  const openWorktreePaths = useMemo(() => {
-    return Object.values(workspaces)
-      .filter((e): e is Extract<typeof e, { status: 'loaded' | 'operation-error' }> =>
-        e.status === 'loaded' || e.status === 'operation-error')
-      .filter(e => e.data.isWorktree)
-      .map(e => e.data.path)
-  }, [workspaces])
+  const openWorktreePaths = Object.values(workspaces)
+    .filter((e): e is Extract<typeof e, { status: 'loaded' | 'operation-error' }> =>
+      e.status === 'loaded' || e.status === 'operation-error')
+    .filter(e => e.data.isWorktree)
+    .map(e => e.data.path)
 
   const handleAddWorkspace = () => {
     setIsOpenWorkspaceDialogOpen(true)
