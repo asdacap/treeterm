@@ -135,13 +135,6 @@ export function FileTree({
     loadDirectory(workspacePath)
   }, [workspacePath, loadDirectory])
 
-  // Load expanded directories
-  useEffect(() => {
-    for (const dirPath of expandedDirs) {
-      loadDirectory(dirPath)
-    }
-  }, [expandedDirs, loadDirectory])
-
   const handleToggleDir = (dirPath: string) => {
     onToggleDir(dirPath)
     if (!expandedDirs.includes(dirPath)) {
@@ -266,6 +259,10 @@ export function FileTree({
 
   return (
     <div className="file-tree">
+      {/* Load expanded directories — each DirectoryLoader triggers loadDirectory on mount */}
+      {expandedDirs.map(dirPath => (
+        <DirectoryLoader key={dirPath} dirPath={dirPath} loadDirectory={loadDirectory} />
+      ))}
       {/* Search Input */}
       <div className="file-tree-search">
         <input
@@ -328,4 +325,13 @@ export function FileTree({
       )}
     </div>
   )
+}
+
+/** Triggers directory load on mount — renders nothing */
+function DirectoryLoader({ dirPath, loadDirectory }: { dirPath: string; loadDirectory: (path: string) => void }) {
+  useEffect(() => {
+    loadDirectory(dirPath)
+  }, [dirPath, loadDirectory])
+
+  return null
 }

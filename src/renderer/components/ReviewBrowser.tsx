@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { ChevronDown, RefreshCw, Loader2 } from 'lucide-react'
 import { useStore } from 'zustand'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
@@ -72,7 +72,6 @@ export default function ReviewBrowser({
   const [isProcessing, setIsProcessing] = useState(false)
   const [processingAction, setProcessingAction] = useState<'merge' | 'squash' | 'merge-keep' | 'squash-keep' | null>(null)
   const [mergeDropdownOpen, setMergeDropdownOpen] = useState(false)
-  const mergeDropdownRef = useRef<HTMLDivElement>(null)
 
   // Reviews state
   const reviews = getReviewComments()
@@ -220,18 +219,6 @@ export default function ReviewBrowser({
       }
     }
   }, [uncommitted, viewMode, reviewState?.selectedUncommittedFilePath])
-
-  // Close merge dropdown on click outside
-  useEffect(() => {
-    if (!mergeDropdownOpen) return
-    const handleClickOutside = (e: MouseEvent) => {
-      if (mergeDropdownRef.current && !mergeDropdownRef.current.contains(e.target as Node)) {
-        setMergeDropdownOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [mergeDropdownOpen])
 
   const loadReviews = async () => {
     try {
@@ -804,7 +791,7 @@ export default function ReviewBrowser({
                   Prompt Rebase
                 </button>
               )}
-              <div className="merge-btn-group" ref={mergeDropdownRef}>
+              <div className="merge-btn-group">
                 <button
                   className="review-action-btn review-merge-btn merge-btn-main"
                   onClick={() => handleMerge(false)}
@@ -823,7 +810,7 @@ export default function ReviewBrowser({
                   <ChevronDown size={14} />
                 </button>
                 {mergeDropdownOpen && (
-                  <div className="merge-dropdown-menu">
+                  <ClickOutsideDiv className="merge-dropdown-menu" onClickOutside={() => setMergeDropdownOpen(false)}>
                     <button
                       className="merge-dropdown-item"
                       onClick={() => { setMergeDropdownOpen(false); handleMerge(true) }}
@@ -851,7 +838,7 @@ export default function ReviewBrowser({
                       {processingAction === 'squash-keep' ? <><span className="btn-spinner" />Squashing...</> : 'Squash Merge and Keep'}
                       {hasConflicts && ' (has conflicts)'}
                     </button>
-                  </div>
+                  </ClickOutsideDiv>
                 )}
               </div>
               <button
@@ -1207,4 +1194,25 @@ export default function ReviewBrowser({
 
     </div>
   )
+}
+
+/** Div that detects clicks outside itself and calls onClickOutside */
+function ClickOutsideDiv({ className, onClickOutside, children }: {
+  className?: string
+  onClickOutside: () => void
+  children: React.ReactNode
+}) {
+  const ref = React.useRef<HTMLDivElement>(null)
+
+  React.useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        onClickOutside()
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClickOutside])
+
+  return <div className={className} ref={ref}>{children}</div>
 }

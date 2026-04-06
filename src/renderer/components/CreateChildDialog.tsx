@@ -38,21 +38,13 @@ export default function CreateChildDialog({
   const [isDetached, setIsDetached] = useState(false)
 
   // For existing worktrees tab
-  const [existingWorktrees, setExistingWorktrees] = useState<WorktreeInfo[]>([])
-  const [isLoadingWorktrees, setIsLoadingWorktrees] = useState(false)
   const [selectedWorktree, setSelectedWorktree] = useState<WorktreeInfo | null>(null)
 
   // For branch tab
-  const [branches, setBranches] = useState<BranchInfo[]>([])
-  const [isLoadingBranches, setIsLoadingBranches] = useState(false)
   const [selectedBranch, setSelectedBranch] = useState<BranchInfo | null>(null)
-  const [branchSearch, setBranchSearch] = useState('')
 
   // For remote tab
-  const [remoteBranches, setRemoteBranches] = useState<BranchInfo[]>([])
-  const [isLoadingRemoteBranches, setIsLoadingRemoteBranches] = useState(false)
   const [selectedRemoteBranch, setSelectedRemoteBranch] = useState<BranchInfo | null>(null)
-  const [remoteBranchSearch, setRemoteBranchSearch] = useState('')
 
   // Settings section state
   const [settingsExpanded, setSettingsExpanded] = useState(false)
@@ -68,108 +60,6 @@ export default function CreateChildDialog({
 
   // Get available apps
   const availableApps = Object.values(applications).filter(app => app.showInNewTabMenu)
-
-  // Set loading flags during render when mode/gitRootPath changes
-  const [prevMode, setPrevMode] = useState(mode)
-  const [prevGitRootPath, setPrevGitRootPath] = useState(parentWsData.gitRootPath)
-  if (mode !== prevMode || parentWsData.gitRootPath !== prevGitRootPath) {
-    setPrevMode(mode)
-    setPrevGitRootPath(parentWsData.gitRootPath)
-    if (mode === 'existing' && parentWsData.gitRootPath) setIsLoadingWorktrees(true)
-    if (mode === 'branch' && parentWsData.gitRootPath) setIsLoadingBranches(true)
-    if (mode === 'remote' && parentWsData.gitRootPath) setIsLoadingRemoteBranches(true)
-  }
-
-  // Load existing worktrees when "existing" tab is selected
-  useEffect(() => {
-    if (mode === 'existing' && parentWsData.gitRootPath) {
-      console.log('[CreateChildDialog] Loading worktrees for:', {
-        gitRootPath: parentWsData.gitRootPath,
-        gitBranch: parentWsData.gitBranch,
-        openWorktreePaths
-      })
-      git.listWorktrees().then(worktrees => {
-        console.log('[CreateChildDialog] Received worktrees:', worktrees)
-        // Filter out worktrees that are already open
-        const available = worktrees.filter(wt => !openWorktreePaths.includes(wt.path))
-        console.log('[CreateChildDialog] Available worktrees after filtering:', available)
-        setExistingWorktrees(available)
-        setIsLoadingWorktrees(false)
-      }).catch((error) => {
-        console.error('[CreateChildDialog] Error loading worktrees:', error)
-        setExistingWorktrees([])
-        setIsLoadingWorktrees(false)
-      })
-    } else {
-      console.log('[CreateChildDialog] Skipping worktree load:', {
-        mode,
-        hasGitRootPath: !!parentWsData.gitRootPath
-      })
-    }
-  }, [mode, parentWsData.gitRootPath, parentWsData.gitBranch, parentWsData.parentId, openWorktreePaths, git])
-
-  // Load local branches when "branch" tab is selected
-  useEffect(() => {
-    if (mode === 'branch' && parentWsData.gitRootPath) {
-      Promise.all([
-        git.listLocalBranches(),
-        git.getBranchesInWorktrees()
-      ]).then(([allBranches, branchesInWorktrees]) => {
-        const branchInfos: BranchInfo[] = allBranches.map(name => ({
-          name,
-          isInWorktree: branchesInWorktrees.includes(name)
-        }))
-        setBranches(branchInfos)
-        setIsLoadingBranches(false)
-      }).catch((error) => {
-        console.error('[CreateChildDialog] Error loading local branches:', error)
-        setBranches([])
-        setIsLoadingBranches(false)
-        setError(`Failed to load branches: ${error instanceof Error ? error.message : 'Unknown error'}`)
-      })
-    }
-  }, [mode, parentWsData.gitRootPath, git])
-
-  // Load remote branches when "remote" tab is selected
-  useEffect(() => {
-    if (mode === 'remote' && parentWsData.gitRootPath) {
-      Promise.all([
-        git.listRemoteBranches(),
-        git.getBranchesInWorktrees(),
-        git.listLocalBranches()
-      ]).then(([remoteBranchNames, branchesInWorktrees, localBranches]) => {
-        const branchInfos: BranchInfo[] = remoteBranchNames.map(name => {
-          // Extract local name from remote branch (e.g., origin/feature -> feature)
-          const localName = name.split('/').slice(1).join('/')
-          // Check if already in worktree by checking both remote and local names
-          const isInWorktree = branchesInWorktrees.includes(name) ||
-                               branchesInWorktrees.includes(localName) ||
-                               localBranches.includes(localName)
-          return {
-            name,
-            isInWorktree
-          }
-        })
-        setRemoteBranches(branchInfos)
-        setIsLoadingRemoteBranches(false)
-      }).catch((error) => {
-        console.error('[CreateChildDialog] Error loading remote branches:', error)
-        setRemoteBranches([])
-        setIsLoadingRemoteBranches(false)
-        setError(`Failed to load remote branches: ${error instanceof Error ? error.message : 'Unknown error'}`)
-      })
-    }
-  }, [mode, parentWsData.gitRootPath, git])
-
-  // Filter branches based on search
-  const filteredBranches = !branchSearch.trim()
-    ? branches
-    : branches.filter(b => b.name.toLowerCase().includes(branchSearch.toLowerCase()))
-
-  // Filter remote branches based on search
-  const filteredRemoteBranches = !remoteBranchSearch.trim()
-    ? remoteBranches
-    : remoteBranches.filter(b => b.name.toLowerCase().includes(remoteBranchSearch.toLowerCase()))
 
   // Validate name for '/' character
   const nameValidationError = !name.trim() ? null
@@ -316,13 +206,13 @@ export default function CreateChildDialog({
           </button>
           <button
             className={`create-child-tab ${mode === 'branch' ? 'active' : ''}`}
-            onClick={() => { setMode('branch'); setError(null); setSelectedBranch(null); setBranchSearch('') }}
+            onClick={() => { setMode('branch'); setError(null); setSelectedBranch(null) }}
           >
             Open Branch
           </button>
           <button
             className={`create-child-tab ${mode === 'remote' ? 'active' : ''}`}
-            onClick={() => { setMode('remote'); setError(null); setSelectedRemoteBranch(null); setRemoteBranchSearch('') }}
+            onClick={() => { setMode('remote'); setError(null); setSelectedRemoteBranch(null) }}
           >
             Open Remote
           </button>
@@ -355,94 +245,33 @@ export default function CreateChildDialog({
             </>
           ) : mode === 'existing' ? (
             /* Open Existing Tab */
-            <div className="create-child-existing-list">
-              {isLoadingWorktrees ? (
-                <div className="create-child-loading">Loading worktrees...</div>
-              ) : existingWorktrees.length === 0 ? (
-                <div className="create-child-empty">
-                  No available child worktrees found
-                </div>
-              ) : (
-                existingWorktrees.map(wt => (
-                  <div
-                    key={wt.path}
-                    className={`create-child-worktree-item ${selectedWorktree?.path === wt.path ? 'selected' : ''}`}
-                    onClick={() => setSelectedWorktree(wt)}
-                  >
-                    <span className="worktree-name">{wt.branch}</span>
-                    <span className="worktree-branch">{wt.branch}</span>
-                  </div>
-                ))
-              )}
-            </div>
+            <ExistingWorktreesLoader
+              key={parentWsData.gitRootPath}
+              git={git}
+              openWorktreePaths={openWorktreePaths}
+              selectedWorktree={selectedWorktree}
+              onSelect={setSelectedWorktree}
+            />
           ) : mode === 'branch' ? (
             /* Open Branch Tab */
-            <>
-              <div className="create-child-search-field">
-                <input
-                  type="text"
-                  value={branchSearch}
-                  onChange={(e) => setBranchSearch(e.target.value)}
-                  placeholder="Search branches..."
-                  disabled={isProcessing}
-                />
-              </div>
-              <div className="create-child-existing-list">
-                {isLoadingBranches ? (
-                  <div className="create-child-loading">Loading branches...</div>
-                ) : filteredBranches.length === 0 ? (
-                  <div className="create-child-empty">
-                    {branchSearch.trim() ? 'No branches match your search' : 'No local branches found'}
-                  </div>
-                ) : (
-                  filteredBranches.map(branch => (
-                    <div
-                      key={branch.name}
-                      className={`create-child-worktree-item ${selectedBranch?.name === branch.name ? 'selected' : ''} ${branch.isInWorktree ? 'disabled' : ''}`}
-                      onClick={() => !branch.isInWorktree && setSelectedBranch(branch)}
-                      title={branch.isInWorktree ? 'Branch is already in a worktree' : undefined}
-                    >
-                      <span className="worktree-name">{branch.name}</span>
-                      {branch.isInWorktree && <span className="worktree-badge">In Worktree</span>}
-                    </div>
-                  ))
-                )}
-              </div>
-            </>
+            <LocalBranchesLoader
+              key={parentWsData.gitRootPath}
+              git={git}
+              isProcessing={isProcessing}
+              selectedBranch={selectedBranch}
+              onSelect={setSelectedBranch}
+              onError={setError}
+            />
           ) : (
             /* Open Remote Tab */
-            <>
-              <div className="create-child-search-field">
-                <input
-                  type="text"
-                  value={remoteBranchSearch}
-                  onChange={(e) => setRemoteBranchSearch(e.target.value)}
-                  placeholder="Search remote branches..."
-                  disabled={isProcessing}
-                />
-              </div>
-              <div className="create-child-existing-list">
-                {isLoadingRemoteBranches ? (
-                  <div className="create-child-loading">Loading remote branches...</div>
-                ) : filteredRemoteBranches.length === 0 ? (
-                  <div className="create-child-empty">
-                    {remoteBranchSearch.trim() ? 'No branches match your search' : 'No remote branches found'}
-                  </div>
-                ) : (
-                  filteredRemoteBranches.map(branch => (
-                    <div
-                      key={branch.name}
-                      className={`create-child-worktree-item ${selectedRemoteBranch?.name === branch.name ? 'selected' : ''} ${branch.isInWorktree ? 'disabled' : ''}`}
-                      onClick={() => !branch.isInWorktree && setSelectedRemoteBranch(branch)}
-                      title={branch.isInWorktree ? 'Branch is already in a worktree' : undefined}
-                    >
-                      <span className="worktree-name">{branch.name}</span>
-                      {branch.isInWorktree && <span className="worktree-badge">In Worktree</span>}
-                    </div>
-                  ))
-                )}
-              </div>
-            </>
+            <RemoteBranchesLoader
+              key={parentWsData.gitRootPath}
+              git={git}
+              isProcessing={isProcessing}
+              selectedBranch={selectedRemoteBranch}
+              onSelect={setSelectedRemoteBranch}
+              onError={setError}
+            />
           )}
 
           {/* Description */}
@@ -578,5 +407,166 @@ export default function CreateChildDialog({
         </div>
       </div>
     </div>
+  )
+}
+
+/** Loads existing worktrees on mount */
+function ExistingWorktreesLoader({ git, openWorktreePaths, selectedWorktree, onSelect }: {
+  git: ReturnType<typeof useGitApi>
+  openWorktreePaths: string[]
+  selectedWorktree: WorktreeInfo | null
+  onSelect: (wt: WorktreeInfo) => void
+}) {
+  const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    git.listWorktrees().then(result => {
+      setWorktrees(result.filter(wt => !openWorktreePaths.includes(wt.path)))
+      setLoading(false)
+    }).catch(() => {
+      setWorktrees([])
+      setLoading(false)
+    })
+  }, [git, openWorktreePaths])
+
+  return (
+    <div className="create-child-existing-list">
+      {loading ? (
+        <div className="create-child-loading">Loading worktrees...</div>
+      ) : worktrees.length === 0 ? (
+        <div className="create-child-empty">No available child worktrees found</div>
+      ) : (
+        worktrees.map(wt => (
+          <div
+            key={wt.path}
+            className={`create-child-worktree-item ${selectedWorktree?.path === wt.path ? 'selected' : ''}`}
+            onClick={() => onSelect(wt)}
+          >
+            <span className="worktree-name">{wt.branch}</span>
+            <span className="worktree-branch">{wt.branch}</span>
+          </div>
+        ))
+      )}
+    </div>
+  )
+}
+
+/** Loads local branches on mount */
+function LocalBranchesLoader({ git, isProcessing, selectedBranch, onSelect, onError }: {
+  git: ReturnType<typeof useGitApi>
+  isProcessing: boolean
+  selectedBranch: BranchInfo | null
+  onSelect: (b: BranchInfo) => void
+  onError: (msg: string) => void
+}) {
+  const [branches, setBranches] = useState<BranchInfo[]>([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    Promise.all([
+      git.listLocalBranches(),
+      git.getBranchesInWorktrees()
+    ]).then(([allBranches, branchesInWorktrees]) => {
+      setBranches(allBranches.map(name => ({ name, isInWorktree: branchesInWorktrees.includes(name) })))
+      setLoading(false)
+    }).catch((error) => {
+      setBranches([])
+      setLoading(false)
+      onError(`Failed to load branches: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    })
+  }, [git, onError])
+
+  const filtered = !search.trim() ? branches : branches.filter(b => b.name.toLowerCase().includes(search.toLowerCase()))
+
+  return (
+    <>
+      <div className="create-child-search-field">
+        <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search branches..." disabled={isProcessing} />
+      </div>
+      <div className="create-child-existing-list">
+        {loading ? (
+          <div className="create-child-loading">Loading branches...</div>
+        ) : filtered.length === 0 ? (
+          <div className="create-child-empty">{search.trim() ? 'No branches match your search' : 'No local branches found'}</div>
+        ) : (
+          filtered.map(branch => (
+            <div
+              key={branch.name}
+              className={`create-child-worktree-item ${selectedBranch?.name === branch.name ? 'selected' : ''} ${branch.isInWorktree ? 'disabled' : ''}`}
+              onClick={() => !branch.isInWorktree && onSelect(branch)}
+              title={branch.isInWorktree ? 'Branch is already in a worktree' : undefined}
+            >
+              <span className="worktree-name">{branch.name}</span>
+              {branch.isInWorktree && <span className="worktree-badge">In Worktree</span>}
+            </div>
+          ))
+        )}
+      </div>
+    </>
+  )
+}
+
+/** Loads remote branches on mount */
+function RemoteBranchesLoader({ git, isProcessing, selectedBranch, onSelect, onError }: {
+  git: ReturnType<typeof useGitApi>
+  isProcessing: boolean
+  selectedBranch: BranchInfo | null
+  onSelect: (b: BranchInfo) => void
+  onError: (msg: string) => void
+}) {
+  const [branches, setBranches] = useState<BranchInfo[]>([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    Promise.all([
+      git.listRemoteBranches(),
+      git.getBranchesInWorktrees(),
+      git.listLocalBranches()
+    ]).then(([remoteBranchNames, branchesInWorktrees, localBranches]) => {
+      setBranches(remoteBranchNames.map(name => {
+        const localName = name.split('/').slice(1).join('/')
+        return {
+          name,
+          isInWorktree: branchesInWorktrees.includes(name) || branchesInWorktrees.includes(localName) || localBranches.includes(localName)
+        }
+      }))
+      setLoading(false)
+    }).catch((error) => {
+      setBranches([])
+      setLoading(false)
+      onError(`Failed to load remote branches: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    })
+  }, [git, onError])
+
+  const filtered = !search.trim() ? branches : branches.filter(b => b.name.toLowerCase().includes(search.toLowerCase()))
+
+  return (
+    <>
+      <div className="create-child-search-field">
+        <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search remote branches..." disabled={isProcessing} />
+      </div>
+      <div className="create-child-existing-list">
+        {loading ? (
+          <div className="create-child-loading">Loading remote branches...</div>
+        ) : filtered.length === 0 ? (
+          <div className="create-child-empty">{search.trim() ? 'No branches match your search' : 'No remote branches found'}</div>
+        ) : (
+          filtered.map(branch => (
+            <div
+              key={branch.name}
+              className={`create-child-worktree-item ${selectedBranch?.name === branch.name ? 'selected' : ''} ${branch.isInWorktree ? 'disabled' : ''}`}
+              onClick={() => !branch.isInWorktree && onSelect(branch)}
+              title={branch.isInWorktree ? 'Branch is already in a worktree' : undefined}
+            >
+              <span className="worktree-name">{branch.name}</span>
+              {branch.isInWorktree && <span className="worktree-badge">In Worktree</span>}
+            </div>
+          ))
+        )}
+      </div>
+    </>
   )
 }

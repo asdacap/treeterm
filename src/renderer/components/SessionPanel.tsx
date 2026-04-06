@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import type { ReactNode } from 'react'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
@@ -81,7 +81,6 @@ export default function SessionPanel({
   const removeSessionName = useSessionNamesStore(s => s.removeName)
   const [isEditingName, setIsEditingName] = useState(false)
   const [editName, setEditName] = useState('')
-  const nameInputRef = useRef<HTMLInputElement>(null)
 
   const handleStartEditName = useCallback(() => {
     setEditName(displayName || sessionId)
@@ -97,13 +96,6 @@ export default function SessionPanel({
     }
     setIsEditingName(false)
   }, [editName, sessionId, setSessionName, removeSessionName])
-
-  useEffect(() => {
-    if (isEditingName && nameInputRef.current) {
-      nameInputRef.current.focus()
-      nameInputRef.current.select()
-    }
-  }, [isEditingName])
 
   const isActiveSession = activeView?.type === 'workspace' && activeView.sessionId === sessionId
 
@@ -357,10 +349,11 @@ export default function SessionPanel({
       <div className="session-panel-header" onClick={() => setActiveView({ type: 'session', sessionId })} onContextMenu={handleSessionContextMenu}>
         {isEditingName ? (
           <input
-            ref={nameInputRef}
+            autoFocus
             className="tree-title-input"
             value={editName}
             onChange={(e) => setEditName(e.target.value)}
+            onFocus={(e) => e.target.select()}
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleSaveName()
               if (e.key === 'Escape') setIsEditingName(false)

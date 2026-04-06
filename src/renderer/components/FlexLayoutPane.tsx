@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Layout, type ITabSetRenderValues, type ITabRenderValues } from '@aptre/flex-layout'
 import { Model, Actions, TabNode, TabSetNode, BorderNode, DockLocation, type Action } from '@aptre/flex-layout'
@@ -41,22 +41,6 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
   const applications = useAppStore((s) => s.applications)
   const getApplication = useCallback((id: string) => applications[id], [applications])
   const menuApplications = Object.values(applications).filter((app) => app.showInNewTabMenu)
-
-  // Menu state: anchor position for the portal-rendered dropdown
-  const [menuAnchor, setMenuAnchor] = useState<{ top: number; left: number; right: number } | null>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
-
-  // Close menu on click outside
-  useEffect(() => {
-    if (!menuAnchor) return
-    const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuAnchor(null)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [menuAnchor])
 
   const activeTabId = workspace?.activeTabId ?? null
 
@@ -200,6 +184,9 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
     }
   }, [getApplication, ws])
 
+  // Menu state: anchor position for the portal-rendered dropdown
+  const [menuAnchor, setMenuAnchor] = useState<{ top: number; left: number; right: number } | null>(null)
+
   // Add "+" button to each tabset header; menu renders via portal
   const handleRenderTabSet = useCallback((node: TabSetNode | BorderNode, renderValues: ITabSetRenderValues) => {
     if (node instanceof TabSetNode) {
@@ -235,36 +222,61 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
         onRenderTab={handleRenderTab}
         onRenderTabSet={handleRenderTabSet}
       />
-      {menuAnchor && createPortal(
-        <div
-          className="app-menu"
-          ref={menuRef}
-          style={{
-            position: 'fixed',
-            top: menuAnchor.top,
-            right: 'auto', // override CSS right: 0 so width is content-based
-            // Right-align to button if there's room (140px min-width), otherwise left-align
-            ...(menuAnchor.right >= 140
-              ? { left: menuAnchor.right, transform: 'translateX(-100%)' }
-              : { left: menuAnchor.left }),
-          }}
-        >
-          {menuApplications.map((app) => (
-            <div
-              key={app.id}
-              className="app-menu-item"
-              onClick={() => {
-                onNewTab(app.id)
-                setMenuAnchor(null)
-              }}
-            >
-              <span className="app-menu-icon">{app.icon}</span>
-              <span className="app-menu-name">{app.name}</span>
-            </div>
-          ))}
-        </div>,
-        document.body
+      {menuAnchor && (
+        <NewTabDropdownMenu
+          anchor={menuAnchor}
+          applications={menuApplications}
+          onNewTab={(appId) => { onNewTab(appId); setMenuAnchor(null) }}
+          onClose={() => setMenuAnchor(null)}
+        />
       )}
     </>
+  )
+}
+
+/** Self-contained dropdown menu that handles its own click-outside detection */
+function NewTabDropdownMenu({ anchor, applications, onNewTab, onClose }: {
+  anchor: { top: number; left: number; right: number }
+  applications: { id: string; icon: string; name: string }[]
+  onNewTab: (appId: string) => void
+  onClose: () => void
+}) {
+  const menuRef = React.useRef<HTMLDivElement>(null)
+
+  React.useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        onClose()
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [onClose])
+
+  return createPortal(
+    <div
+      className="app-menu"
+      ref={menuRef}
+      style={{
+        position: 'fixed',
+        top: anchor.top,
+        right: 'auto',
+        ...(anchor.right >= 140
+          ? { left: anchor.right, transform: 'translateX(-100%)' }
+          : { left: anchor.left }),
+      }}
+    >
+      {applications.map((app) => (
+        <div
+          key={app.id}
+          className="app-menu-item"
+          onClick={() => onNewTab(app.id)}
+        >
+          <span className="app-menu-icon">{app.icon}</span>
+          <span className="app-menu-name">{app.name}</span>
+        </div>
+      ))}
+    </div>,
+    document.body
   )
 }

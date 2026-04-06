@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState, useRef } from 'react'
+import React, { useEffect, useCallback, useState } from 'react'
 import { ChevronDown, Github, Loader2, ArrowDownToLine, RefreshCw, AlertTriangle, CircleDot, Check } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
@@ -50,7 +50,6 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const activeEntry = activeWorkspaceId ? workspaces[activeWorkspaceId] ?? null : null
   const activeWorkspace = activeEntry && (activeEntry.status === 'loaded' || activeEntry.status === 'operation-error') ? activeEntry.data : null
   const activeHandle = activeEntry && (activeEntry.status === 'loaded' || activeEntry.status === 'operation-error') ? activeEntry.store : null
-  const outputRef = useRef<HTMLPreElement>(null)
 
   // Dialog state
   const [showCreateChildDialog, setShowCreateChildDialog] = useState(false)
@@ -60,8 +59,6 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const [isEditingDescription, setIsEditingDescription] = useState(false)
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
-  const nameInputRef = useRef<HTMLInputElement>(null)
-  const descriptionRef = useRef<HTMLTextAreaElement>(null)
 
   const handleStartEditName = useCallback(() => {
     if (!activeWorkspace) return
@@ -90,42 +87,19 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     setIsEditingDescription(false)
   }, [activeHandle, editDescription])
 
-  // Focus name input when entering edit mode
-  useEffect(() => {
-    if (isEditingName && nameInputRef.current) {
-      nameInputRef.current.focus()
-      nameInputRef.current.select()
-    }
-  }, [isEditingName])
-
-  // Focus description textarea when entering edit mode
-  useEffect(() => {
-    if (isEditingDescription && descriptionRef.current) {
-      descriptionRef.current.focus()
-      descriptionRef.current.style.height = 'auto'
-      descriptionRef.current.style.height = descriptionRef.current.scrollHeight + 'px'
-    }
-  }, [isEditingDescription])
-
-  // Cancel edit mode when switching workspaces
-  useEffect(() => {
+  // Cancel edit mode when switching workspaces (setState-in-render pattern)
+  const [prevActiveWorkspaceId, setPrevActiveWorkspaceId] = useState(activeWorkspaceId)
+  if (activeWorkspaceId !== prevActiveWorkspaceId) {
+    setPrevActiveWorkspaceId(activeWorkspaceId)
     setIsEditingName(false)
     setIsEditingDescription(false)
-  }, [activeWorkspaceId])
+  }
 
   // Signal active tab to focus after workspace switch (keyboard navigation)
   useEffect(() => {
     if (!activeHandle) return
     activeHandle.getState().requestFocus()
   }, [activeWorkspaceId, activeHandle])
-
-  // Auto-scroll loading output
-  const outputLength = activeEntry?.status === 'loading' ? activeEntry.output.length : 0
-  useEffect(() => {
-    if (outputRef.current) {
-      outputRef.current.scrollTop = outputRef.current.scrollHeight
-    }
-  }, [outputLength])
 
   // Create new tab using the first available application
   const handleNewDefaultTab = useCallback(() => {
@@ -216,53 +190,6 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     })
   }
 
-  // Abandon dropdown state
-  const [abandonMenuOpen, setAbandonMenuOpen] = useState(false)
-  const abandonMenuRef = useRef<HTMLDivElement>(null)
-  const abandonButtonRef = useRef<HTMLButtonElement>(null)
-
-  // Close abandon dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        abandonMenuOpen &&
-        abandonMenuRef.current &&
-        !abandonMenuRef.current.contains(e.target as Node) &&
-        abandonButtonRef.current &&
-        !abandonButtonRef.current.contains(e.target as Node)
-      ) {
-        setAbandonMenuOpen(false)
-      }
-    }
-
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [abandonMenuOpen])
-
-  // Abandon handlers — these are only callable when activeHandle exists (past the early return)
-  const handleAbandon = async () => {
-    if (!confirm('Are you sure you want to abandon this workspace? All changes will be discarded.')) {
-      return
-    }
-    setAbandonMenuOpen(false)
-    await activeHandle!.getState().remove()
-  }
-
-  const handleAbandonKeepBranch = async () => {
-    if (!confirm('Abandon this workspace but keep the branch? The worktree will be removed but the branch will be kept.')) {
-      return
-    }
-    setAbandonMenuOpen(false)
-    await activeHandle!.getState().removeKeepBranch()
-  }
-
-  const handleAbandonKeepBoth = async () => {
-    if (!confirm('Abandon this workspace but keep both the worktree and branch? They will remain but will no longer be tracked in TreeTerm.')) {
-      return
-    }
-    setAbandonMenuOpen(false)
-    await activeHandle!.getState().removeKeepBoth()
-  }
 
   // Compute flattened workspace list for navigation
   const flattenedWorkspaceIds = (() => {
@@ -346,9 +273,9 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
               <span>{activeEntry.message}</span>
             </div>
             {activeEntry.output.length > 0 && (
-              <pre className="workspace-loading-output" ref={outputRef}>
+              <AutoScrollPre className="workspace-loading-output">
                 {activeEntry.output.join('')}
-              </pre>
+              </AutoScrollPre>
             )}
           </div>
         ) : !activeWorkspace ? (
@@ -364,10 +291,11 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
               <div className="workspace-header-top">
                 {isEditingName ? (
                   <input
-                    ref={nameInputRef}
+                    autoFocus
                     className="workspace-edit-input"
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
+                    onFocus={(e) => e.target.select()}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') handleSaveName()
                       else if (e.key === 'Escape') setIsEditingName(false)
@@ -438,14 +366,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                   {activeWorkspace.isWorktree && activeWorkspace.parentId && activeHandle && (
                     <MergeAbandonButton
                       workspace={activeHandle}
-                      abandonMenuOpen={abandonMenuOpen}
-                      abandonMenuRef={abandonMenuRef}
-                      abandonButtonRef={abandonButtonRef}
-                      onToggleMenu={() => setAbandonMenuOpen(!abandonMenuOpen)}
                       onOpenReview={handleOpenReview}
-                      onAbandon={handleAbandon}
-                      onAbandonKeepBranch={handleAbandonKeepBranch}
-                      onAbandonKeepBoth={handleAbandonKeepBoth}
                     />
                   )}
                 </div>
@@ -453,9 +374,13 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
               <div className="workspace-header-description-row">
                 {isEditingDescription ? (
                   <textarea
-                    ref={descriptionRef}
+                    autoFocus
                     className="workspace-edit-textarea"
                     value={editDescription}
+                    onFocus={(e) => {
+                      e.target.style.height = 'auto'
+                      e.target.style.height = e.target.scrollHeight + 'px'
+                    }}
                     onChange={(e) => {
                       setEditDescription(e.target.value)
                       e.target.style.height = 'auto'
@@ -574,25 +499,51 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
 
 interface MergeAbandonButtonProps {
   workspace: WorkspaceStore
-  abandonMenuOpen: boolean
-  abandonMenuRef: React.Ref<HTMLDivElement>
-  abandonButtonRef: React.Ref<HTMLButtonElement>
-  onToggleMenu: () => void
   onOpenReview: () => void
-  onAbandon: () => void
-  onAbandonKeepBranch: () => void
-  onAbandonKeepBoth: () => void
 }
 
-function MergeAbandonButton({
-  workspace, abandonMenuOpen, abandonMenuRef, abandonButtonRef,
-  onToggleMenu, onOpenReview, onAbandon, onAbandonKeepBranch, onAbandonKeepBoth,
-}: MergeAbandonButtonProps) {
+function MergeAbandonButton({ workspace, onOpenReview }: MergeAbandonButtonProps) {
   const { gitController } = useStore(workspace)
   const { isDiffCleanFromParent } = useStore(gitController)
 
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = React.useRef<HTMLDivElement>(null)
+  const buttonRef = React.useRef<HTMLButtonElement>(null)
+
+  React.useEffect(() => {
+    if (!menuOpen) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        menuRef.current && !menuRef.current.contains(e.target as Node) &&
+        buttonRef.current && !buttonRef.current.contains(e.target as Node)
+      ) {
+        setMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [menuOpen])
+
+  const handleAbandon = async () => {
+    if (!confirm('Are you sure you want to abandon this workspace? All changes will be discarded.')) return
+    setMenuOpen(false)
+    await workspace.getState().remove()
+  }
+
+  const handleAbandonKeepBranch = async () => {
+    if (!confirm('Abandon this workspace but keep the branch? The worktree will be removed but the branch will be kept.')) return
+    setMenuOpen(false)
+    await workspace.getState().removeKeepBranch()
+  }
+
+  const handleAbandonKeepBoth = async () => {
+    if (!confirm('Abandon this workspace but keep both the worktree and branch? They will remain but will no longer be tracked in TreeTerm.')) return
+    setMenuOpen(false)
+    await workspace.getState().removeKeepBoth()
+  }
+
   const mainLabel = isDiffCleanFromParent ? 'Abandon' : 'Review & Merge'
-  const mainAction = isDiffCleanFromParent ? onAbandon : onOpenReview
+  const mainAction = isDiffCleanFromParent ? handleAbandon : onOpenReview
   const mainTitle = isDiffCleanFromParent
     ? 'Abandon: No changes to merge — delete worktree and branch'
     : 'Review & Merge: Review changes and merge this workspace'
@@ -607,15 +558,15 @@ function MergeAbandonButton({
         {mainLabel}
       </button>
       <button
-        ref={abandonButtonRef}
+        ref={buttonRef}
         className="workspace-action-btn workspace-action-btn-merge abandon-dropdown-btn"
-        onClick={onToggleMenu}
+        onClick={() => setMenuOpen(!menuOpen)}
         title="More options"
       >
         <ChevronDown size={14} />
       </button>
-      {abandonMenuOpen && (
-        <div className="abandon-menu" ref={abandonMenuRef}>
+      {menuOpen && (
+        <div className="abandon-menu" ref={menuRef}>
           {isDiffCleanFromParent && (
             <div className="abandon-menu-item" onClick={onOpenReview}>
               Review & Merge
@@ -623,16 +574,16 @@ function MergeAbandonButton({
             </div>
           )}
           {!isDiffCleanFromParent && (
-            <div className="abandon-menu-item" onClick={onAbandon}>
+            <div className="abandon-menu-item" onClick={handleAbandon}>
               Abandon
               <span className="abandon-menu-hint">Delete worktree and branch</span>
             </div>
           )}
-          <div className="abandon-menu-item" onClick={onAbandonKeepBranch}>
+          <div className="abandon-menu-item" onClick={handleAbandonKeepBranch}>
             Abandon (Keep Branch)
             <span className="abandon-menu-hint">Delete worktree, keep branch</span>
           </div>
-          <div className="abandon-menu-item" onClick={onAbandonKeepBoth}>
+          <div className="abandon-menu-item" onClick={handleAbandonKeepBoth}>
             Abandon (Keep Both)
             <span className="abandon-menu-hint">Keep worktree and branch</span>
           </div>
@@ -640,6 +591,17 @@ function MergeAbandonButton({
       )}
     </div>
   )
+}
+
+/** Auto-scrolls to bottom whenever children change */
+function AutoScrollPre({ className, children }: { className?: string; children: React.ReactNode }) {
+  const ref = React.useRef<HTMLPreElement>(null)
+  React.useEffect(() => {
+    if (ref.current) {
+      ref.current.scrollTop = ref.current.scrollHeight
+    }
+  })
+  return <pre className={className} ref={ref}>{children}</pre>
 }
 
 interface GitStatusButtonProps {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useStore } from 'zustand'
@@ -15,14 +15,8 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [reasoning, setReasoning] = useState<ReasoningEffort>('off')
-  const activeRequestId = useRef<string | null>(null)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const activeRequestId = React.useRef<string | null>(null)
   const workspaceStore = useStore(workspace)
-
-  // Scroll to bottom when messages change
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
 
   // Persist messages to tab state
   useEffect(() => {
@@ -158,7 +152,7 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
           </div>
         ))}
         {error && <div className="chat-error">{error}</div>}
-        <div ref={messagesEndRef} />
+        <ScrollAnchor />
       </div>
       <div className="chat-input-area">
         <div className="chat-input-options">
@@ -203,4 +197,13 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
       </div>
     </div>
   )
+}
+
+/** Scrolls into view on every render (mount + update) */
+function ScrollAnchor() {
+  const ref = React.useRef<HTMLDivElement>(null)
+  React.useEffect(() => {
+    ref.current?.scrollIntoView({ behavior: 'smooth' })
+  })
+  return <div ref={ref} />
 }
