@@ -19,7 +19,8 @@ export default function Terminal({ cwd: _cwd, workspace, tabId, startupCommand: 
   const isSandboxed = sandbox?.enabled ?? false
   const terminalConfig: BaseTerminalConfig = {
     themeBackground: isSandboxed ? '#1a1a2e' : '#1e1e1e',
-    logPrefix: 'Terminal'
+    logPrefix: 'Terminal',
+    disableActivityDetector: true,
   }
 
   if (!existingPtyId) {
