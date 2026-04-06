@@ -75,6 +75,7 @@ export interface SessionState {
   updateGitInfo: (id: string, gitInfo: GitInfo) => void
   refreshGitInfo: (id: string) => Promise<void>
   quickForkWorkspace: (workspaceId: string) => Promise<{ success: boolean; error?: string }>
+  reorderWorkspace: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after') => void
   syncToDaemon: () => Promise<void>
 
   // Session lifecycle
@@ -131,6 +132,21 @@ export function createSessionStore(
   deps: SessionDeps
 ): StoreApi<SessionState> {
   let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+  function nextSortOrder(parentId: string | null): string {
+    const workspaces = store.getState().workspaces
+    let max = -1
+    for (const entry of Object.values(workspaces)) {
+      if (entry.status !== 'loaded' && entry.status !== 'operation-error') continue
+      const ws = entry.data
+      const isMatch = parentId === null ? !ws.parentId : ws.parentId === parentId
+      if (isMatch) {
+        const order = parseInt(ws.metadata.sortOrder || '0')
+        if (order > max) max = order
+      }
+    }
+    return String(max + 1)
+  }
 
   async function syncSessionToDaemon(isRestoring: boolean = false): Promise<void> {
     try {
@@ -311,6 +327,7 @@ export function createSessionStore(
           activeTabId,
           settings: options.settings ?? { defaultApplicationId: '' },
           metadata: {
+            sortOrder: nextSortOrder(parentId),
             ...(options.description ? { description: options.description } : {}),
             ...(options.initialBranch ? { branchIsUserDefined: 'true' } : {}),
           },
@@ -379,7 +396,7 @@ export function createSessionStore(
       appStates,
       activeTabId,
       settings: options.settings ?? { defaultApplicationId: '' },
-      metadata: options.metadata ?? {},
+      metadata: { sortOrder: nextSortOrder(parentId), ...(options.metadata ?? {}) },
       createdAt: Date.now(),
       lastActivity: Date.now(),
     }
@@ -668,7 +685,7 @@ export function createSessionStore(
           appStates,
           activeTabId,
           settings: options?.settings ?? { defaultApplicationId: '' },
-          metadata: {},
+          metadata: { sortOrder: nextSortOrder(null) },
           createdAt: Date.now(),
           lastActivity: Date.now(),
         }
@@ -955,6 +972,56 @@ export function createSessionStore(
       }
 
       return get().addChildWorkspace(workspaceId, name, false)
+    },
+
+    reorderWorkspace: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after') => {
+      const workspaces = get().workspaces
+      const dragEntry = workspaces[workspaceId]
+      const targetEntry = workspaces[targetWorkspaceId]
+      if (!dragEntry || !targetEntry) return
+      if (dragEntry.status !== 'loaded' && dragEntry.status !== 'operation-error') return
+      if (targetEntry.status !== 'loaded' && targetEntry.status !== 'operation-error') return
+      if (workspaceId === targetWorkspaceId) return
+
+      const dragParent = dragEntry.data.parentId
+      const targetParent = targetEntry.data.parentId
+      if (dragParent !== targetParent) return
+
+      // Gather siblings sorted by current sortOrder
+      const siblings: { id: string; entry: Extract<WorkspaceEntry, { status: 'loaded' | 'operation-error' }> }[] = []
+      for (const [id, entry] of Object.entries(workspaces)) {
+        if (entry.status !== 'loaded' && entry.status !== 'operation-error') continue
+        const isMatch = dragParent === null ? !entry.data.parentId : entry.data.parentId === dragParent
+        if (isMatch) siblings.push({ id, entry })
+      }
+      siblings.sort((a, b) =>
+        parseInt(a.entry.data.metadata.sortOrder || '0') - parseInt(b.entry.data.metadata.sortOrder || '0')
+      )
+
+      // Remove dragged, insert at target position
+      const ordered = siblings.filter(s => s.id !== workspaceId)
+      const targetIdx = ordered.findIndex(s => s.id === targetWorkspaceId)
+      const insertIdx = position === 'before' ? targetIdx : targetIdx + 1
+      const dragSibling = siblings.find(s => s.id === workspaceId)!
+      ordered.splice(insertIdx, 0, dragSibling)
+
+      // Reassign sortOrder on all siblings
+      for (let i = 0; i < ordered.length; i++) {
+        const { id, entry } = ordered[i]
+        const newMetadata = { ...entry.data.metadata, sortOrder: String(i) }
+        entry.store.setState(s => ({
+          workspace: { ...s.workspace, metadata: newMetadata }
+        }))
+        // Also update the session store snapshot
+        set(s => ({
+          workspaces: {
+            ...s.workspaces,
+            [id]: { ...entry, data: { ...entry.data, metadata: newMetadata } }
+          }
+        }))
+      }
+
+      debouncedSyncToDaemon()
     },
 
     syncToDaemon: async () => {
