@@ -3,6 +3,7 @@ import { createSessionStore } from './createSessionStore'
 import type { SessionDeps, SessionState } from './createSessionStore'
 import type { Workspace, Application, GitInfo } from '../types'
 import type { StoreApi } from 'zustand'
+import { createMockExecApi } from '../../shared/mockApis'
 
 const flushPromises = () => new Promise(r => setTimeout(r, 0))
 
@@ -55,6 +56,7 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       detect: vi.fn().mockResolvedValue([]),
       run: vi.fn().mockResolvedValue(null),
     },
+    exec: createMockExecApi(),
     sessionApi: {
       update: vi.fn().mockResolvedValue({ success: true }),
       onSync: vi.fn().mockReturnValue(() => {}),

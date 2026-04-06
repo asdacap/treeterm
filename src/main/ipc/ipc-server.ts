@@ -89,6 +89,11 @@ const CHANNELS = {
   clipboardReadText: 'clipboard:readText',
   clipboardWriteText: 'clipboard:writeText',
 
+  // Exec operations
+  execStart: 'exec:start',
+  execKill: 'exec:kill',
+  execEvent: 'exec:event',
+
   // Send channels
   ptyWrite: 'pty:write',
   ptyResize: 'pty:resize',
@@ -925,6 +930,23 @@ export class IpcServer {
     ipcMain.handle(CHANNELS.clipboardReadText, () => handler())
   }
 
+  // Exec handlers
+  onExecStart(
+    handler: (
+      ...args: IpcRequests['execStart']['params']
+    ) => IpcRequests['execStart']['result'] | Promise<IpcRequests['execStart']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.execStart, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['execStart']['params']))
+    )
+  }
+
+  onExecKill(handler: (...args: IpcSends['execKill']['params']) => void): void {
+    ipcMain.on(CHANNELS.execKill, (_event: IpcMainEvent, ...args: unknown[]) =>
+      handler(...(args as IpcSends['execKill']['params']))
+    )
+  }
+
   // ==================== Event Emitters (main → renderer) ====================
 
   ptyEvent(...args: IpcEvents['ptyEvent']['params']): void {
@@ -985,5 +1007,9 @@ export class IpcServer {
 
   gitOutput(...args: IpcEvents['gitOutput']['params']): void {
     this.window?.webContents.send(CHANNELS.gitOutput, ...args)
+  }
+
+  execEvent(...args: IpcEvents['execEvent']['params']): void {
+    this.window?.webContents.send(CHANNELS.execEvent, ...args)
   }
 }

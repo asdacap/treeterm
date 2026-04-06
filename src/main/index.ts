@@ -34,6 +34,8 @@ let connectionManager: ConnectionManager | null = null
 const sessionConnectionMap = new Map<string, string>()
 // Simple object storage — each entry is an independent terminal's stream.
 const ptyStreams = new Map<string, PtyStream>()
+// Active exec streams keyed by execId for streaming output and kill support.
+const execStreams = new Map<string, ReturnType<GrpcDaemonClient['execStream']>>()
 
 // Helper: get the daemon client for a given connectionId
 function getClientForConnection(connId: string): GrpcDaemonClient {
@@ -970,6 +972,54 @@ server.onFsWriteFile(async (connectionId, workspacePath, filePath, content) => {
 
 server.onFsSearchFiles(async (connectionId, workspacePath, query) => {
   return getClientForConnection(connectionId).searchFiles(workspacePath, query)
+})
+
+// Exec IPC Handlers
+server.onExecStart(async (connectionId, cwd, command, args) => {
+  try {
+    const client = getClientForConnection(connectionId)
+    const execId = randomUUID()
+    const stream = client.execStream()
+    execStreams.set(execId, stream)
+
+    const startInput: ExecInput = {
+      start: { cwd, command, args, env: {}, timeoutMs: 30000 }
+    }
+    stream.write(startInput)
+    stream.end()
+
+    stream.on('data', (output: ExecOutput) => {
+      if (output.stdout) {
+        server.execEvent(execId, { type: 'stdout', data: output.stdout.data.toString('utf-8') })
+      } else if (output.stderr) {
+        server.execEvent(execId, { type: 'stderr', data: output.stderr.data.toString('utf-8') })
+      } else if (output.result) {
+        server.execEvent(execId, { type: 'exit', exitCode: output.result.exitCode })
+        execStreams.delete(execId)
+      }
+    })
+
+    stream.on('error', (error) => {
+      server.execEvent(execId, { type: 'error', message: error.message })
+      execStreams.delete(execId)
+    })
+
+    stream.on('end', () => {
+      execStreams.delete(execId)
+    })
+
+    return { success: true, execId }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+server.onExecKill((execId) => {
+  const stream = execStreams.get(execId)
+  if (stream) {
+    stream.cancel()
+    execStreams.delete(execId)
+  }
 })
 
 // Sandbox IPC Handlers

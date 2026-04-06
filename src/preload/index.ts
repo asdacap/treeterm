@@ -1,11 +1,14 @@
 import { contextBridge } from 'electron'
 import type { SandboxConfig, Session, TTYSessionInfo, WorkspaceInput, Settings, SSHConnectionConfig, ConnectionInfo, PortForwardConfig, PortForwardInfo, ReasoningEffort } from '../shared/types'
-import type { PtyEvent } from '../shared/ipc-types'
+import type { PtyEvent, ExecEvent } from '../shared/ipc-types'
 import { IpcClient } from './ipc-client'
 import type { PreloadApi } from '../renderer/types'
 
 type PtyEventCallback = (event: PtyEvent) => void
 const ptyEventListeners = new Map<string, PtyEventCallback[]>()
+
+type ExecEventCallback = (event: ExecEvent) => void
+const execEventListeners = new Map<string, ExecEventCallback[]>()
 
 // Initialize IPC client
 const client = new IpcClient()
@@ -18,6 +21,17 @@ client.onPtyEvent((handle, event) => {
   }
   if (event.type === 'end') {
     ptyEventListeners.delete(handle)
+  }
+})
+
+// Listen for exec events from main process
+client.onExecEvent((execId, event) => {
+  const listeners = execEventListeners.get(execId)
+  if (listeners) {
+    listeners.forEach((cb) => cb(event))
+  }
+  if (event.type === 'exit' || event.type === 'error') {
+    execEventListeners.delete(execId)
   }
 })
 
@@ -357,6 +371,28 @@ const preloadApi: PreloadApi = {
     },
     searchFiles: (connectionId: string, workspacePath: string, query: string) => {
       return client.fsSearchFiles(connectionId, workspacePath, query)
+    }
+  },
+  exec: {
+    start: (connectionId: string, cwd: string, command: string, args: string[]) => {
+      return client.execStart(connectionId, cwd, command, args)
+    },
+    kill: (execId: string): void => {
+      client.execKill(execId)
+    },
+    onEvent: (execId: string, callback: ExecEventCallback): (() => void) => {
+      if (!execEventListeners.has(execId)) {
+        execEventListeners.set(execId, [])
+      }
+      execEventListeners.get(execId)!.push(callback)
+
+      return () => {
+        const listeners = execEventListeners.get(execId)
+        if (listeners) {
+          const index = listeners.indexOf(callback)
+          if (index > -1) listeners.splice(index, 1)
+        }
+      }
     }
   },
   runActions: {

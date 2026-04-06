@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createCustomRunnerVariant, resolveTemplate } from './renderer'
 import type { Tab, Workspace, CustomRunnerInstance } from '../../renderer/types'
-import { createMockGitApi, createMockFilesystemApi, createMockRunActionsApi } from '../../shared/mockApis'
+import { createMockGitApi, createMockFilesystemApi, createMockRunActionsApi, createMockExecApi } from '../../shared/mockApis'
 import { createStore } from 'zustand/vanilla'
 import type { WorkspaceStoreState } from '../../renderer/store/createWorkspaceStore'
 import type { GitControllerState } from '../../renderer/store/createGitControllerStore'
@@ -61,6 +61,7 @@ const mockWorkspaceStoreStateData = {
   gitApi: createMockGitApi(),
   filesystemApi: createMockFilesystemApi(),
   runActionsApi: createMockRunActionsApi(),
+  execApi: createMockExecApi(),
   initTab: vi.fn(),
   getTabRef: vi.fn().mockReturnValue(null),
   getCachedTerminal: vi.fn().mockReturnValue(null),

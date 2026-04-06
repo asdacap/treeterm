@@ -24,8 +24,8 @@ import type {
   PortForwardInfo,
   ReasoningEffort
 } from '../../shared/types'
-import type { PtyEvent, IpcResult } from '../../shared/ipc-types'
-export type { PtyEvent, IpcResult }
+import type { PtyEvent, ExecEvent, IpcResult } from '../../shared/ipc-types'
+export type { PtyEvent, ExecEvent, IpcResult }
 
 export type {
   SandboxConfig,
@@ -136,8 +136,8 @@ export interface ChatState {
 }
 
 export type EditorState =
-  | { status: 'loading'; filePath: string }
-  | { status: 'ready'; filePath: string; originalContent: string; currentContent: string; language: string; isDirty: boolean; viewMode: 'editor' | 'preview'; scrollTop?: number }
+  | { status: 'loading'; filePath: string; scrollToLine?: number }
+  | { status: 'ready'; filePath: string; originalContent: string; currentContent: string; language: string; isDirty: boolean; viewMode: 'editor' | 'preview'; scrollTop?: number; scrollToLine?: number }
   | { status: 'error'; filePath: string; error: string }
 
 export interface FileEntry {
@@ -174,6 +174,12 @@ export interface WorkspaceFilesystemApi {
   readFile: (filePath: string) => Promise<IpcResult<{ file: FileContents }>>
   writeFile: (filePath: string, content: string) => Promise<IpcResult>
   searchFiles: (query: string) => Promise<IpcResult<{ entries: FileEntry[] }>>
+}
+
+export interface ExecApi {
+  start: (connectionId: string, cwd: string, command: string, args: string[]) => Promise<IpcResult<{ execId: string }>>
+  kill: (execId: string) => void
+  onEvent: (execId: string, callback: (event: ExecEvent) => void) => () => void
 }
 
 export type GitInfo =
@@ -530,6 +536,7 @@ export type PreloadApi = {
   github: RawGitHubApi
   settings: SettingsApi
   filesystem: RawFilesystemApi
+  exec: ExecApi
   runActions: RawRunActionsApi
   sandbox: SandboxApi
   getInitialWorkspace: () => Promise<string | null>

@@ -30,6 +30,13 @@ export type PtyEvent =
   | { type: 'error'; message: string }
   | { type: 'end' }
 
+/** Discriminated union for exec output events (mirrors PtyEvent pattern) */
+export type ExecEvent =
+  | { type: 'stdout'; data: string }
+  | { type: 'stderr'; data: string }
+  | { type: 'exit'; exitCode: number }
+  | { type: 'error'; message: string }
+
 import type {
   GitInfo,
   WorktreeResult,
@@ -376,6 +383,12 @@ export interface IpcRequests {
     params: []
     result: string
   }
+
+  // Exec operations (streaming command execution)
+  execStart: {
+    params: [connectionId: string, cwd: string, command: string, args: string[]]
+    result: IpcResult<{ execId: string }>
+  }
 }
 
 // === Fire-and-Forget Types (renderer sends, no response) ===
@@ -401,6 +414,9 @@ export interface IpcSends {
   }
   clipboardWriteText: {
     params: [text: string]
+  }
+  execKill: {
+    params: [execId: string]
   }
 }
 
@@ -460,6 +476,9 @@ export interface IpcEvents {
   }
   gitOutput: {
     params: [operationId: string, data: string]
+  }
+  execEvent: {
+    params: [execId: string, event: ExecEvent]
   }
 }
 

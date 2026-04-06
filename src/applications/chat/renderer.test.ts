@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { chatApplication } from './renderer'
 import type { Tab, Workspace } from '../../renderer/types'
-import { createMockGitApi, createMockFilesystemApi, createMockRunActionsApi } from '../../shared/mockApis'
+import { createMockGitApi, createMockFilesystemApi, createMockRunActionsApi, createMockExecApi } from '../../shared/mockApis'
 import { createStore } from 'zustand/vanilla'
 import type { WorkspaceStoreState } from '../../renderer/store/createWorkspaceStore'
 import type { GitControllerState } from '../../renderer/store/createGitControllerStore'
@@ -34,7 +34,7 @@ const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => ({
   initTab: vi.fn(), getTabRef: vi.fn().mockReturnValue(null), getCachedTerminal: vi.fn().mockReturnValue(null), setCachedTerminal: vi.fn(), disposeCachedTerminal: vi.fn(), disposeAllCachedTerminals: vi.fn(), disposeTabResources: vi.fn(),
   initAnalyzer: vi.fn(), createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn(), kill: vi.fn() }),
   connectionId: 'local', updateSettings: vi.fn(),
-  gitApi: createMockGitApi(), filesystemApi: createMockFilesystemApi(), runActionsApi: createMockRunActionsApi(),
+  gitApi: createMockGitApi(), filesystemApi: createMockFilesystemApi(), runActionsApi: createMockRunActionsApi(), execApi: createMockExecApi(),
   focusTabId: null, requestFocus: vi.fn(), clearFocusRequest: vi.fn(),
   gitController: createStore<GitControllerState>()(() => ({
     hasUncommittedChanges: false, isDiffCleanFromParent: false,

@@ -3,7 +3,9 @@ import Editor, { OnMount, OnChange } from '@monaco-editor/react'
 import { editor, KeyMod, KeyCode } from 'monaco-editor'
 import { useStore } from 'zustand'
 import type { EditorState, WorkspaceStore } from '../types'
-import { useFilesystemApi } from '../hooks/useWorkspaceApis'
+import { useFilesystemApi, useExecApi } from '../hooks/useWorkspaceApis'
+import { monacoNavigationBridge } from '../monaco-config'
+import { searchDefinition } from '../utils/definitionSearch'
 import { MarkdownPreview } from './MarkdownPreview'
 
 interface FileEditorProps {
@@ -23,14 +25,17 @@ function getFilename(filePath: string): string {
 }
 
 export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
-  const { workspace: wsData, updateTabState, updateTabTitle } = useStore(workspace)
+  const { workspace: wsData, updateTabState, updateTabTitle, addTab, connectionId } = useStore(workspace)
   const filesystem = useFilesystemApi(workspace)
+  const execApi = useExecApi(workspace)
   const appState = wsData?.appStates[tabId]
   const state = appState?.state as EditorState | undefined
 
   const scrollTop = state?.status === 'ready' ? state.scrollTop ?? 0 : 0
   const lastScrollTopRef = useRef<number>(scrollTop)
   const [saving, setSaving] = useState(false)
+
+  const pendingScrollToLine = state && state.status !== 'error' ? state.scrollToLine : undefined
 
   // Load file content on mount
   useEffect(() => {
@@ -39,7 +44,8 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
     const loadFile = async () => {
       updateTabState<EditorState>(tabId, () => ({
         status: 'loading',
-        filePath: state.filePath
+        filePath: state.filePath,
+        scrollToLine: pendingScrollToLine,
       }))
 
       try {
@@ -56,6 +62,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
             language,
             viewMode: language === 'markdown' ? 'preview' : 'editor',
             isDirty: false,
+            scrollToLine: pendingScrollToLine,
           }))
 
           updateTabTitle(tabId, getFilename(state.filePath))
@@ -78,7 +85,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
     if (state.status !== 'ready') {
       loadFile()
     }
-  }, [state?.filePath, wsData.path, tabId, filesystem, updateTabState, updateTabTitle, state?.status])
+  }, [state?.filePath, wsData.path, tabId, filesystem, updateTabState, updateTabTitle, state?.status, pendingScrollToLine])
 
   // Update tab title with dirty indicator
   const isDirty = state?.status === 'ready' ? state.isDirty : false
@@ -132,15 +139,30 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
         lastScrollTopRef.current = e.scrollTop
       })
 
-      // Restore scroll position after content is ready
-      if (lastScrollTopRef.current > 0) {
+      // Scroll to specific line if requested (from go-to-definition)
+      if (state?.status === 'ready' && state.scrollToLine) {
+        editor.revealLineInCenter(state.scrollToLine)
+        updateTabState<EditorState>(tabId, (s) => {
+          if (s.status !== 'ready') return s
+          return { ...s, scrollToLine: undefined }
+        })
+      } else if (lastScrollTopRef.current > 0) {
+        // Restore scroll position after content is ready
         editor.setScrollTop(lastScrollTopRef.current)
       }
 
       // Add Cmd/Ctrl+S keybinding for save
       editor.addCommand(KeyMod.CtrlCmd | KeyCode.KeyS, () => handleSave())
+
+      // Wire navigation bridge for go-to-definition
+      monacoNavigationBridge.searchDefinition = (symbol, language) =>
+        searchDefinition(execApi, connectionId, wsData.path, symbol, language)
+      monacoNavigationBridge.openFileAtLine = (targetFilePath, line) => {
+        addTab<EditorState>('editor', { status: 'loading', filePath: targetFilePath, scrollToLine: line })
+      }
+      monacoNavigationBridge.getWorkspacePath = () => wsData.path
     },
-    [handleSave]
+    [handleSave, state, tabId, updateTabState, execApi, connectionId, wsData.path, addTab]
   )
 
   const handleEditorChange: OnChange = useCallback(

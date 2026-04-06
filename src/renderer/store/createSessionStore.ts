@@ -9,7 +9,7 @@ import type { PtyEvent } from '../../shared/ipc-types'
 import type {
   Workspace, Session, AppState, GitInfo,
   ConnectionInfo, ActivityState,
-  TerminalApi, GitApi, FilesystemApi, SessionApi, Settings, WorktreeSettings,
+  TerminalApi, GitApi, FilesystemApi, ExecApi, SessionApi, Settings, WorktreeSettings,
   Application, SandboxConfig, TTYSessionInfo, LlmApi, GitHubApi, RunActionsApi
 } from '../types'
 
@@ -29,6 +29,7 @@ export interface AppRegistryApi {
 export interface SessionDeps {
   git: GitApi
   filesystem: FilesystemApi
+  exec: ExecApi
   runActions: RunActionsApi
   sessionApi: SessionApi
   terminal: TerminalApi
@@ -191,6 +192,7 @@ export function createSessionStore(
       connectionId: config.connection?.id ?? 'local',
       git: deps.git,
       filesystem: deps.filesystem,
+      exec: deps.exec,
       runActions: deps.runActions,
       getSettings: deps.getSettings,
       llm: deps.llm,

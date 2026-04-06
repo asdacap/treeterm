@@ -4,7 +4,9 @@ import Editor, { OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
 import { useStore } from 'zustand'
 import type { EditorState, ReviewComment, WorkspaceStore } from '../types'
-import { useFilesystemApi } from '../hooks/useWorkspaceApis'
+import { useFilesystemApi, useExecApi } from '../hooks/useWorkspaceApis'
+import { monacoNavigationBridge } from '../monaco-config'
+import { searchDefinition } from '../utils/definitionSearch'
 import { MarkdownPreview } from './MarkdownPreview'
 import { CommentInput } from './CommentInput'
 import { CommentDisplay } from './CommentDisplay'
@@ -73,8 +75,9 @@ export function FileViewer({
   initialScrollTop,
   onScrollPositionChange
 }: FileViewerProps): JSX.Element {
-  const { workspace: wsData, addTab } = useStore(workspace)
+  const { workspace: wsData, addTab, connectionId } = useStore(workspace)
   const filesystem = useFilesystemApi(workspace)
+  const execApi = useExecApi(workspace)
   const [fileState, setFileState] = useState<FileState>({
     content: '',
     language: 'plaintext',
@@ -157,7 +160,15 @@ export function FileViewer({
         }
       })
     }
-  }, [onLineClick])
+
+    // Wire navigation bridge for go-to-definition
+    monacoNavigationBridge.searchDefinition = (symbol, language) =>
+      searchDefinition(execApi, connectionId, wsData.path, symbol, language)
+    monacoNavigationBridge.openFileAtLine = (targetFilePath, line) => {
+      addTab<EditorState>('editor', { status: 'loading', filePath: targetFilePath, scrollToLine: line })
+    }
+    monacoNavigationBridge.getWorkspacePath = () => wsData.path
+  }, [onLineClick, execApi, connectionId, wsData.path, addTab])
 
   // Persist scroll position on unmount
   useEffect(() => {

@@ -24,7 +24,7 @@ import { githubApplication } from '../../applications/github/renderer'
 import type {
   Workspace, Session, Application,
   Platform, TerminalApi, RawGitApi, SessionApi, AppApi, DaemonApi,
-  RawFilesystemApi, SandboxApi, SettingsApi, RawRunActionsApi,
+  RawFilesystemApi, ExecApi, SandboxApi, SettingsApi, RawRunActionsApi,
   TerminalInstance, AiHarnessInstance, CustomRunnerInstance,
   ConnectionInfo, SSHConnectionConfig, SSHApi, LlmApi, ClipboardApi, RawGitHubApi
 } from '../types'
@@ -39,6 +39,7 @@ export interface AppDeps {
   appApi: AppApi
   daemon: DaemonApi
   filesystem: RawFilesystemApi
+  exec: ExecApi
   runActions: RawRunActionsApi
   sandbox: SandboxApi
   ssh: SSHApi
@@ -100,6 +101,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   appApi: UNINITIALIZED,
   daemon: UNINITIALIZED,
   filesystem: UNINITIALIZED,
+  exec: UNINITIALIZED,
   runActions: UNINITIALIZED,
   sandbox: UNINITIALIZED,
   ssh: UNINITIALIZED,
@@ -450,7 +452,7 @@ function getOrCreateSession(
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
   connection?: ConnectionInfo
 ): StoreApi<SessionState> {
-  const { sessionStores, windowUuid, git, filesystem, runActions, sessionApi, terminal, llm, github } = get()
+  const { sessionStores, windowUuid, git, filesystem, exec, runActions, sessionApi, terminal, llm, github } = get()
   const existing = sessionStores[sessionId]
   if (existing) {
     console.log(`[renderer:app] getOrCreateSession: reusing existing session store for session=${sessionId}`)
@@ -467,6 +469,7 @@ function getOrCreateSession(
     {
       git: boundGit,
       filesystem: boundFilesystem,
+      exec,
       runActions: boundRunActions,
       sessionApi,
       terminal,

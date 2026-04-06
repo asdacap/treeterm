@@ -4,6 +4,7 @@ import type { WorkspaceStoreDeps } from './createWorkspaceStore'
 import { getUnmergedSubWorkspaces } from './createSessionStore'
 import type { WorkspaceEntry } from './createSessionStore'
 import type { Workspace, Application } from '../types'
+import { createMockExecApi } from '../../shared/mockApis'
 
 function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStoreDeps {
   return {
@@ -17,6 +18,7 @@ function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStore
     git: {} as any,
     filesystem: {} as any,
     runActions: { detect: vi.fn().mockResolvedValue([]), run: vi.fn().mockResolvedValue(null) },
+    exec: createMockExecApi(),
     syncToDaemon: vi.fn(),
     removeWorkspace: vi.fn().mockResolvedValue(undefined),
     removeWorkspaceKeepBranch: vi.fn().mockResolvedValue(undefined),

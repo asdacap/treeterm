@@ -87,6 +87,11 @@ const CHANNELS = {
   clipboardReadText: 'clipboard:readText',
   clipboardWriteText: 'clipboard:writeText',
 
+  // Exec operations
+  execStart: 'exec:start',
+  execKill: 'exec:kill',
+  execEvent: 'exec:event',
+
   // Send channels
   ptyWrite: 'pty:write',
   ptyResize: 'pty:resize',
@@ -529,6 +534,15 @@ export class IpcClient {
     return ipcRenderer.invoke(CHANNELS.clipboardReadText)
   }
 
+  // Exec methods
+  execStart(...args: IpcRequests['execStart']['params']): Promise<IpcRequests['execStart']['result']> {
+    return ipcRenderer.invoke(CHANNELS.execStart, ...args)
+  }
+
+  execKill(...args: IpcSends['execKill']['params']): void {
+    ipcRenderer.send(CHANNELS.execKill, ...args)
+  }
+
   // ==================== Event Listeners (on pattern, returns unsubscribe function) ====================
 
   onPtyEvent(callback: (...args: IpcEvents['ptyEvent']['params']) => void): () => void {
@@ -651,5 +665,12 @@ export class IpcClient {
       callback(...(args as IpcEvents['gitOutput']['params']))
     ipcRenderer.on(CHANNELS.gitOutput, handler)
     return () => ipcRenderer.removeListener(CHANNELS.gitOutput, handler)
+  }
+
+  onExecEvent(callback: (...args: IpcEvents['execEvent']['params']) => void): () => void {
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
+      callback(...(args as IpcEvents['execEvent']['params']))
+    ipcRenderer.on(CHANNELS.execEvent, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.execEvent, handler)
   }
 }

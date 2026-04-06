@@ -1,6 +1,6 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, AppRef, AppRegistryApi, GitApi, FilesystemApi, RunActionsApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi, PtyEvent } from '../types'
+import type { Workspace, AppRef, AppRegistryApi, GitApi, FilesystemApi, ExecApi, RunActionsApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi, PtyEvent } from '../types'
 import { getTabs, isAiHarnessState } from '../types'
 import type { Terminal as XTerm } from '@xterm/xterm'
 import type { Tty, TtyWriter } from './createTtyStore'
@@ -42,6 +42,7 @@ export interface WorkspaceStoreDeps {
   connectionId: string
   git: GitApi
   filesystem: FilesystemApi
+  exec: ExecApi
   runActions: RunActionsApi
   getSettings: () => Settings
   llm: Pick<LlmApi, 'analyzeTerminal' | 'generateTitle'>
@@ -116,6 +117,9 @@ export interface WorkspaceStoreState {
 
   // Filesystem API (workspace-scoped, created once at init)
   filesystemApi: WorkspaceFilesystemApi
+
+  // Exec API (connection-bound)
+  execApi: ExecApi
 
   // Run Actions API (connection-bound)
   runActionsApi: RunActionsApi
@@ -462,6 +466,8 @@ export function createWorkspaceStore(
       writeFile: (filePath, content) => deps.filesystem.writeFile(workspace.path, filePath, content),
       searchFiles: (query) => deps.filesystem.searchFiles(workspace.path, query),
     },
+
+    execApi: deps.exec,
 
     runActionsApi: deps.runActions,
 
