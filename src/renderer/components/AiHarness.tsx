@@ -1,5 +1,6 @@
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import { useStore } from 'zustand'
+import type { StoreApi } from 'zustand'
 import type { Terminal as XTerm } from '@xterm/xterm'
 import BaseTerminal, { type BaseTerminalConfig } from './BaseTerminal'
 import { PromptCommitButton } from './PromptCommitButton'
@@ -9,6 +10,7 @@ import { PromptGitHubCommentsButton } from './PromptGitHubCommentsButton'
 import type { ActivityState, SandboxConfig, WorkspaceStore } from '../types'
 import { isAiHarnessState } from '../types'
 import type { AiHarnessRef } from '../../applications/aiHarness/renderer'
+import type { AnalyzerState } from '../store/createAnalyzerStore'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
 
@@ -104,13 +106,56 @@ function AiHarnessContent({
   disableScrollbar,
   stripScrollbackClear,
 }: AiHarnessContentProps) {
-  const { aiState, analyzing, reason, autoApprove } = useStore(analyzer)
-
   const handleTerminalReady = useCallback((term: XTerm) => {
     term.onData((data) => {
       analyzer.getState().onUserInput(data)
     })
   }, [analyzer])
+
+  // Stable config — useState initializer runs once, so BaseTerminal never re-renders from config changes
+  const [config] = useState<BaseTerminalConfig>(() => ({
+    themeBackground: backgroundColor,
+    promptPatterns: [/❯\s/],
+    logPrefix: 'AiHarness',
+    disableScrollbar,
+    stripScrollbackClear,
+    disableActivityDetector: true,
+    onTerminalReady: handleTerminalReady,
+  }))
+
+  return (
+    <div className="ai-harness-wrapper">
+      <div className="ai-harness-terminal">
+        <BaseTerminal
+          workspace={workspace}
+          tabId={tabId}
+          config={config}
+          extraButtons={
+            <>
+              <PromptCommitButton workspace={workspace} />
+              <PromptRebaseButton workspace={workspace} />
+              <ReviewCommentsButton workspace={workspace} />
+              <PromptGitHubCommentsButton workspace={workspace} />
+            </>
+          }
+        />
+      </div>
+      <AiHarnessStatusBar analyzer={analyzer} workspace={workspace} tabId={tabId} />
+    </div>
+  )
+}
+
+interface AiHarnessStatusBarProps {
+  analyzer: StoreApi<AnalyzerState>
+  workspace: WorkspaceStore
+  tabId: string
+}
+
+function AiHarnessStatusBar({ analyzer, workspace, tabId }: AiHarnessStatusBarProps) {
+  const aiState = useStore(analyzer, s => s.aiState)
+  const analyzing = useStore(analyzer, s => s.analyzing)
+  const reason = useStore(analyzer, s => s.reason)
+  const autoApprove = useStore(analyzer, s => s.autoApprove)
 
   const openContextMenu = useContextMenuStore((s) => s.open)
   const closeContextMenu = useContextMenuStore((s) => s.close)
@@ -136,33 +181,8 @@ function AiHarnessContent({
     workspace.getState().addTab<{ sourceTabId: string }>('analyzer-history', { sourceTabId: tabId })
   }
 
-  const config: BaseTerminalConfig = {
-    themeBackground: backgroundColor,
-    promptPatterns: [/❯\s/],
-    logPrefix: 'AiHarness',
-    disableScrollbar,
-    stripScrollbackClear,
-    disableActivityDetector: true,
-    onTerminalReady: handleTerminalReady,
-  }
-
   return (
-    <div className="ai-harness-wrapper">
-      <div className="ai-harness-terminal">
-        <BaseTerminal
-          workspace={workspace}
-          tabId={tabId}
-          config={config}
-          extraButtons={
-            <>
-              <PromptCommitButton workspace={workspace} />
-              <PromptRebaseButton workspace={workspace} />
-              <ReviewCommentsButton workspace={workspace} />
-              <PromptGitHubCommentsButton workspace={workspace} />
-            </>
-          }
-        />
-      </div>
+    <>
       <div className="ai-harness-status-bar">
         <div
           className="ai-state-badge"
@@ -191,6 +211,6 @@ function AiHarnessContent({
           History
         </div>
       </ContextMenu>
-    </div>
+    </>
   )
 }
