@@ -40,6 +40,7 @@ export default function SessionPanel({
     createWorktreeFromRemote,
     quickForkWorkspace,
     setActiveWorkspace,
+    reorderWorkspace,
   } = useStore(sessionStore)
   const { activeView, setActiveView } = useNavigationStore()
   const {
@@ -59,6 +60,7 @@ export default function SessionPanel({
     Object.entries(workspaces)
       .filter(([, e]) => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === parentId)
       .map(([, e]) => (e as Extract<typeof e, { status: 'loaded' | 'operation-error' }>).data)
+      .sort((a, b) => parseInt(a.metadata.sortOrder || '0') - parseInt(b.metadata.sortOrder || '0'))
 
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     return new Set(
@@ -73,6 +75,13 @@ export default function SessionPanel({
     behindCount: number
     workspaceName: string
     action: 'quickFork' | 'createChild'
+  } | null>(null)
+
+  // Drag-and-drop state for workspace reordering
+  const [dragState, setDragState] = useState<{
+    dragId: string
+    overId: string
+    position: 'before' | 'after'
   } | null>(null)
 
   // Session name editing
@@ -304,6 +313,11 @@ export default function SessionPanel({
       if (e.status === 'loaded' || e.status === 'operation-error') return !e.data.parentId
       return true // loading/error entries are always top-level
     })
+    .sort(([, a], [, b]) => {
+      const aOrder = (a.status === 'loaded' || a.status === 'operation-error') ? parseInt(a.data.metadata.sortOrder || '0') : Infinity
+      const bOrder = (b.status === 'loaded' || b.status === 'operation-error') ? parseInt(b.data.metadata.sortOrder || '0') : Infinity
+      return aOrder - bOrder
+    })
     .map(([id]) => id)
 
   // Get create child dialog parent handle
@@ -316,6 +330,41 @@ export default function SessionPanel({
   const handleWorkspaceClick = (id: string) => {
     setActiveWorkspace(id)
     setActiveView({ type: 'workspace', workspaceId: id, sessionId })
+  }
+
+  const handleDragStart = (id: string) => {
+    setDragState({ dragId: id, overId: '', position: 'before' })
+  }
+
+  const handleDragOver = (e: React.DragEvent, id: string) => {
+    e.preventDefault()
+    if (!dragState) return
+    // Only allow drop on same-parent siblings
+    const dragEntry = workspaces[dragState.dragId]
+    const overEntry = workspaces[id]
+    if (!dragEntry || !overEntry) return
+    if (dragEntry.status !== 'loaded' && dragEntry.status !== 'operation-error') return
+    if (overEntry.status !== 'loaded' && overEntry.status !== 'operation-error') return
+    if (dragEntry.data.parentId !== overEntry.data.parentId) return
+
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const position: 'before' | 'after' = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+    if (dragState.overId !== id || dragState.position !== position) {
+      setDragState({ ...dragState, overId: id, position })
+    }
+  }
+
+  const handleDrop = () => {
+    if (!dragState || !dragState.overId || dragState.dragId === dragState.overId) {
+      setDragState(null)
+      return
+    }
+    reorderWorkspace(dragState.dragId, dragState.overId, dragState.position)
+    setDragState(null)
+  }
+
+  const handleDragEnd = () => {
+    setDragState(null)
   }
 
   const renderWorkspace = (id: string, depth: number = 0): ReactNode => {
@@ -342,6 +391,12 @@ export default function SessionPanel({
         onOpenSettings={handleOpenSettings}
         children={children}
         renderChild={renderWorkspace}
+        isDragging={dragState?.dragId === id}
+        dragOverPosition={dragState?.overId === id ? dragState.position : null}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        onDragEnd={handleDragEnd}
       />
     )
   }
@@ -470,12 +525,19 @@ interface WorkspaceTreeItemProps {
   onOpenSettings: (id: string) => void
   children: Workspace[]
   renderChild: (id: string, depth: number) => ReactNode
+  isDragging: boolean
+  dragOverPosition: 'before' | 'after' | null
+  onDragStart: (id: string) => void
+  onDragOver: (e: React.DragEvent, id: string) => void
+  onDrop: () => void
+  onDragEnd: () => void
 }
 
 function WorkspaceTreeItem({
   id, depth, entry, isActive, isFocused, isExpanded,
   onToggleExpand, onClick, onQuickFork, onCreateChild, onRemove, onOpenSettings,
   children, renderChild,
+  isDragging, dragOverPosition, onDragStart, onDragOver, onDrop, onDragEnd,
 }: WorkspaceTreeItemProps): JSX.Element {
   const openContextMenu = useContextMenuStore((s) => s.open)
   const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
@@ -493,14 +555,25 @@ function WorkspaceTreeItem({
     openContextMenu(menuId, e.clientX, e.clientY)
   }
 
+  const dragClasses = [
+    isDragging ? 'dragging' : '',
+    dragOverPosition === 'before' ? 'drag-before' : '',
+    dragOverPosition === 'after' ? 'drag-after' : '',
+  ].filter(Boolean).join(' ')
+
   return (
     <div>
       <div
-        className={`tree-item ${depth === 0 ? 'tree-item-root' : ''} ${isActive ? 'active' : ''} ${isFocused ? 'focused' : ''}`}
+        className={`tree-item ${depth === 0 ? 'tree-item-root' : ''} ${isActive ? 'active' : ''} ${isFocused ? 'focused' : ''} ${dragClasses}`}
         style={{ paddingLeft: 4 + depth * 4 }}
         onClick={() => onClick(id)}
         onContextMenu={handleContextMenu}
         title={ws?.metadata?.description ? `${ws.path}\n\n${ws.metadata.description}` : ws?.path}
+        draggable={ws !== undefined}
+        onDragStart={(e) => { e.stopPropagation(); onDragStart(id) }}
+        onDragOver={(e) => { e.stopPropagation(); onDragOver(e, id) }}
+        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); onDrop() }}
+        onDragEnd={onDragEnd}
       >
         {hasChildren ? (
           <span
@@ -577,11 +650,17 @@ export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSess
     Object.entries(workspaces)
       .filter(([, e]) => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === parentId)
       .map(([, e]) => (e as Extract<typeof e, { status: 'loaded' | 'operation-error' }>).data)
+      .sort((a, b) => parseInt(a.metadata.sortOrder || '0') - parseInt(b.metadata.sortOrder || '0'))
 
   const rootWorkspaceIds = Object.entries(workspaces)
     .filter(([, e]) => {
       if (e.status === 'loaded' || e.status === 'operation-error') return !e.data.parentId
       return true
+    })
+    .sort(([, a], [, b]) => {
+      const aOrder = (a.status === 'loaded' || a.status === 'operation-error') ? parseInt(a.data.metadata.sortOrder || '0') : Infinity
+      const bOrder = (b.status === 'loaded' || b.status === 'operation-error') ? parseInt(b.data.metadata.sortOrder || '0') : Infinity
+      return aOrder - bOrder
     })
     .map(([id]) => id)
 

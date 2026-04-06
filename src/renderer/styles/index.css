@@ -220,6 +220,18 @@ body,
   outline-offset: -2px;
 }
 
+.tree-item.dragging {
+  opacity: 0.4;
+}
+
+.tree-item.drag-before {
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+
+.tree-item.drag-after {
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+}
+
 .tree-item-icon {
   margin-right: 8px;
   font-size: 14px;
