@@ -75,7 +75,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
       }
     }
 
-    if (state.status !== 'ready' || !state.originalContent) {
+    if (state.status !== 'ready') {
       loadFile()
     }
   }, [state?.filePath, wsData.path, tabId, filesystem, updateTabState, updateTabTitle, state?.status])
