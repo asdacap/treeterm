@@ -15,6 +15,27 @@ interface FlexLayoutPaneProps {
   onNewTab: (applicationId: string) => void
 }
 
+function buildModel(ws: WorkspaceStore, getApplication: (id: string) => ReturnType<typeof useAppStore.getState>['applications'][string]): Model | null {
+  const currentWorkspace = ws.getState().workspace
+  if (!currentWorkspace) return null
+
+  const currentTabs = getTabs(currentWorkspace)
+  const currentActiveTabId = currentWorkspace.activeTabId ?? null
+  let json: IJsonModel
+  const saved = currentWorkspace.metadata?.layoutModel
+  if (saved) {
+    try {
+      json = JSON.parse(saved)
+    } catch {
+      json = createDefaultLayoutModel(currentTabs, currentActiveTabId, getApplication)
+    }
+  } else {
+    json = createDefaultLayoutModel(currentTabs, currentActiveTabId, getApplication)
+  }
+
+  return Model.fromJson(json)
+}
+
 export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPaneProps) {
   const { workspace, removeTab, setActiveTab, updateMetadata } = useStore(ws)
   const applications = useAppStore((s) => s.applications)
@@ -39,33 +60,16 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
 
   const activeTabId = workspace?.activeTabId ?? null
 
-  const [model, setModel] = useState<Model | null>(null)
+  // Initialize model — recreate when workspace changes (setState-during-render pattern)
+  const [model, setModel] = useState<Model | null>(() => buildModel(ws, getApplication))
+  const [modelWorkspaceId, setModelWorkspaceId] = useState(workspace?.id)
+  if (workspace?.id !== modelWorkspaceId) {
+    setModelWorkspaceId(workspace?.id)
+    setModel(buildModel(ws, getApplication))
+  }
+
   // Suppress model→store sync while we're applying store→model updates
   const suppressModelChangeRef = useRef(false)
-
-  // Initialize model from metadata or create default
-  useEffect(() => {
-    const currentWorkspace = ws.getState().workspace
-    if (!currentWorkspace) return
-
-    const currentTabs = getTabs(currentWorkspace)
-    const currentActiveTabId = currentWorkspace.activeTabId ?? null
-    let json: IJsonModel
-    const saved = currentWorkspace.metadata?.layoutModel
-    if (saved) {
-      try {
-        json = JSON.parse(saved)
-      } catch {
-        json = createDefaultLayoutModel(currentTabs, currentActiveTabId, getApplication)
-      }
-    } else {
-      json = createDefaultLayoutModel(currentTabs, currentActiveTabId, getApplication)
-    }
-
-    const m = Model.fromJson(json)
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- FlexLayout model is constructed asynchronously from saved metadata
-    setModel(m)
-  }, [workspace?.id, getApplication, ws])
 
   // Sync store tab changes → model (adds/removes)
   const appStates = workspace?.appStates
@@ -133,12 +137,11 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
 
     suppressModelChangeRef.current = false
 
-    // Force re-render after model mutations
+    // Persist final model state after bulk mutations (onModelChange was suppressed during mutations)
     if (added.length > 0 || removed.length > 0 || reconciled) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- FlexLayout model mutations are imperative; setState forces React to re-render with updated model
-      setModel(model)
+      updateMetadata('layoutModel', JSON.stringify(model.toJson()))
     }
-  }, [model, appStates, getApplication, ws])
+  }, [model, appStates, getApplication, ws, updateMetadata])
 
   // Sync store active tab → model selected tab
   useEffect(() => {
