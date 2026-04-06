@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest'
 import { render } from '@testing-library/react'
-import React from 'react'
+
 import type { ActivityState } from '../types'
 
 vi.mock('lucide-react', () => ({

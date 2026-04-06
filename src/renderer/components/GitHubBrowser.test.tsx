@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import React from 'react'
+
 import { createStore } from 'zustand/vanilla'
 import GitHubBrowser from './GitHubBrowser'
 import type { GitHubPrInfo } from '../types'
@@ -27,6 +27,7 @@ function makePrInfo(overrides: Partial<GitHubPrInfo> = {}): GitHubPrInfo {
     reviews: [],
     checkRuns: [],
     unresolvedThreads: [],
+    unresolvedCount: 0,
     ...overrides,
   }
 }
@@ -111,7 +112,7 @@ describe('GitHubBrowser', () => {
 
   it('renders unresolved threads', () => {
     const { workspaceStore } = makeStores(makePrInfo({
-      unresolvedThreads: [{ path: 'src/app.ts', line: 42, author: 'reviewer', body: 'Fix this' }],
+      unresolvedThreads: [{ path: 'src/app.ts', line: 42, author: 'reviewer', body: 'Fix this', isResolved: false }],
     }))
     render(<GitHubBrowser workspace={workspaceStore} isVisible={true} />)
     expect(screen.getByText('Unresolved Comments (1)')).toBeDefined()

@@ -351,7 +351,7 @@ describe('matchesKeybinding', () => {
     { key: 'x', modifiers: ['Alt'], event: { key: 'x', altKey: true }, expected: true, desc: 'Alt modifier' },
     { key: 'z', modifiers: ['Control', 'Shift', 'Alt', 'Meta'], event: { key: 'z', ctrlKey: true, shiftKey: true, altKey: true, metaKey: true }, expected: true, desc: 'all four modifiers' },
   ])('$desc -> $expected', ({ key, modifiers, event, expected }) => {
-    const e = { key: '', ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...event } as KeyboardEvent
+    const e = { ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...event } as KeyboardEvent
     expect(matchesKeybinding(e, modifiers, key)).toBe(expected)
   })
 })

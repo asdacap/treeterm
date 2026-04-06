@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import React from 'react'
 import { createStore } from 'zustand/vanilla'
 import { PromptRebaseButton } from './PromptRebaseButton'
 
@@ -12,7 +11,7 @@ function makeStores(opts: {
   parentWorkspace?: { gitBranch: string | null } | null
 }) {
   const promptHarness = vi.fn()
-  const lookupWorkspace = vi.fn((id: string) =>
+  const lookupWorkspace = vi.fn((_id: string) =>
     opts.parentWorkspace !== undefined ? opts.parentWorkspace : { gitBranch: 'main' }
   )
   const gitControllerStore = createStore<any>()(() => ({

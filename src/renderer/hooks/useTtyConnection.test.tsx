@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, waitFor, act } from '@testing-library/react'
+import { renderHook, waitFor } from '@testing-library/react'
 import React from 'react'
 import { createStore } from 'zustand/vanilla'
 import { SessionStoreContext } from '../contexts/SessionStoreContext'

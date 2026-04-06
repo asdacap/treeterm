@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import React from 'react'
+
 import CloseConfirmDialog from './CloseConfirmDialog'
 import type { Workspace } from '../../shared/types'
 
@@ -22,6 +22,7 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     settings: { defaultApplicationId: '' },
     metadata: {},
     createdAt: Date.now(),
+    lastActivity: Date.now(),
     ...overrides,
   }
 }

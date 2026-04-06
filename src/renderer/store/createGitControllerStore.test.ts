@@ -47,8 +47,6 @@ function makeDeps(overrides: Partial<GitControllerDeps> = {}): GitControllerDeps
   }
 }
 
-const flushPromises = () => new Promise((r) => setTimeout(r, 0))
-
 describe('createGitControllerStore', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -99,7 +97,7 @@ describe('createGitControllerStore', () => {
         getWorkspace: vi.fn().mockReturnValue(ws),
         lookupWorkspace: vi.fn().mockReturnValue(parentWs),
       })
-      vi.mocked(deps.git.getDiff).mockResolvedValue({ success: true, diff: { files: [] } })
+      vi.mocked(deps.git.getDiff).mockResolvedValue({ success: true, diff: { files: [], totalAdditions: 0, totalDeletions: 0, baseBranch: 'main', headBranch: 'feat' } })
       const store = createGitControllerStore(deps)
       store.getState().dispose()
 
@@ -115,7 +113,7 @@ describe('createGitControllerStore', () => {
         getWorkspace: vi.fn().mockReturnValue(ws),
         lookupWorkspace: vi.fn().mockReturnValue(parentWs),
       })
-      vi.mocked(deps.git.getDiff).mockResolvedValue({ success: true, diff: { files: [{ path: 'a.ts' }] } })
+      vi.mocked(deps.git.getDiff).mockResolvedValue({ success: true, diff: { files: [{ path: 'a.ts', status: 'modified', additions: 1, deletions: 0 }], totalAdditions: 1, totalDeletions: 0, baseBranch: 'main', headBranch: 'feat' } })
       const store = createGitControllerStore(deps)
       store.getState().dispose()
 
@@ -132,7 +130,7 @@ describe('createGitControllerStore', () => {
         lookupWorkspace: vi.fn().mockReturnValue(parentWs),
       })
       vi.mocked(deps.git.hasUncommittedChanges).mockResolvedValue(true)
-      vi.mocked(deps.git.getDiff).mockResolvedValue({ success: true, diff: { files: [] } })
+      vi.mocked(deps.git.getDiff).mockResolvedValue({ success: true, diff: { files: [], totalAdditions: 0, totalDeletions: 0, baseBranch: 'main', headBranch: 'feat' } })
       const store = createGitControllerStore(deps)
       store.getState().dispose()
 
@@ -172,7 +170,7 @@ describe('createGitControllerStore', () => {
         getWorkspace: vi.fn().mockReturnValue(ws),
         lookupWorkspace: vi.fn().mockReturnValue(parentWs),
       })
-      vi.mocked(deps.git.getDiff).mockResolvedValue({ success: false })
+      vi.mocked(deps.git.getDiff).mockResolvedValue({ success: false, error: 'diff failed' })
       const store = createGitControllerStore(deps)
       store.getState().dispose()
 
@@ -188,7 +186,7 @@ describe('createGitControllerStore', () => {
         getWorkspace: vi.fn().mockReturnValue(ws),
         lookupWorkspace: vi.fn().mockReturnValue(parentWs),
       })
-      vi.mocked(deps.git.checkMergeConflicts).mockResolvedValue({ success: true, conflicts: { hasConflicts: true } })
+      vi.mocked(deps.git.checkMergeConflicts).mockResolvedValue({ success: true, conflicts: { hasConflicts: true, conflictedFiles: ['a.ts'], messages: ['conflict'] } })
       const store = createGitControllerStore(deps)
       store.getState().dispose()
 
@@ -204,7 +202,7 @@ describe('createGitControllerStore', () => {
         getWorkspace: vi.fn().mockReturnValue(ws),
         lookupWorkspace: vi.fn().mockReturnValue(parentWs),
       })
-      vi.mocked(deps.git.checkMergeConflicts).mockResolvedValue({ success: false })
+      vi.mocked(deps.git.checkMergeConflicts).mockResolvedValue({ success: false, error: 'check failed' })
       const store = createGitControllerStore(deps)
       store.getState().dispose()
 
@@ -329,7 +327,7 @@ describe('createGitControllerStore', () => {
         getWorkspace: vi.fn().mockReturnValue(ws),
         lookupWorkspace: vi.fn().mockReturnValue(parentWs),
       })
-      const prInfo = { url: 'https://github.com/pr/1', title: 'PR', number: 1 }
+      const prInfo = { url: 'https://github.com/pr/1', title: 'PR', number: 1, state: 'OPEN' as const, reviews: [], checkRuns: [], unresolvedThreads: [], unresolvedCount: 0 }
       vi.mocked(deps.github.getPrInfo).mockResolvedValue({ prInfo })
       const store = createGitControllerStore(deps)
       store.getState().dispose()
@@ -440,7 +438,7 @@ describe('createGitControllerStore', () => {
         getWorkspace: vi.fn().mockReturnValue(ws),
         lookupWorkspace: vi.fn().mockReturnValue(parentWs),
       })
-      const prInfo = { url: 'https://github.com/pr/1', title: 'PR', number: 1 }
+      const prInfo = { url: 'https://github.com/pr/1', title: 'PR', number: 1, state: 'OPEN' as const, reviews: [], checkRuns: [], unresolvedThreads: [], unresolvedCount: 0 }
       vi.mocked(deps.github.getPrInfo).mockResolvedValue({ prInfo })
       const store = createGitControllerStore(deps)
       store.getState().dispose()
