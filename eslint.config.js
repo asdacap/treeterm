@@ -2,6 +2,15 @@ import tseslint from '@typescript-eslint/eslint-plugin'
 import tsparser from '@typescript-eslint/parser'
 import reactPlugin from 'eslint-plugin-react'
 import reactHooks from 'eslint-plugin-react-hooks'
+import { createRequire } from 'module'
+const require = createRequire(import.meta.url)
+const zustandRulesPlugin = {
+  rules: {
+    'use-store-selectors': require('eslint-plugin-zustand-rules/lib/rules/use-store-selectors'),
+    'no-state-mutation': require('eslint-plugin-zustand-rules/lib/rules/no-state-mutation'),
+    'enforce-use-setstate': require('eslint-plugin-zustand-rules/lib/rules/enforce-use-setstate'),
+  }
+}
 
 export default [
   {
@@ -59,7 +68,8 @@ export default [
     ignores: ['src/renderer/main.tsx'],
     plugins: {
       'react': reactPlugin,
-      'react-hooks': reactHooks
+      'react-hooks': reactHooks,
+      'zustand-rules': zustandRulesPlugin
     },
     rules: {
       'react/no-unstable-nested-components': 'error',
@@ -69,6 +79,11 @@ export default [
       'react-hooks/exhaustive-deps': 'warn',
       'react-hooks/set-state-in-effect': 'error',
       'react-hooks/set-state-in-render': 'error',
+      // use-store-selectors disabled: rule incorrectly flags useStore(storeApi, selector) with 2 args
+      // Our custom no-restricted-syntax rules below handle unstable selectors instead
+      'zustand-rules/use-store-selectors': 'off',
+      'zustand-rules/no-state-mutation': 'error',
+      'zustand-rules/enforce-use-setstate': 'error',
       'no-restricted-syntax': ['error', {
         selector: "MemberExpression[object.name='window'][property.name='electron']",
         message: 'window.electron is only allowed in main.tsx. Use useAppStore() instead.'
