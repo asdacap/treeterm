@@ -97,6 +97,8 @@ export default function SessionPanel({
     setIsEditingName(false)
   }, [editName, sessionId, setSessionName, removeSessionName])
 
+  const [isSessionCollapsed, setIsSessionCollapsed] = useState(false)
+
   const isActiveSession = activeView?.type === 'workspace' && activeView.sessionId === sessionId
 
   // Expand any workspace that gains children
@@ -347,6 +349,12 @@ export default function SessionPanel({
   return (
     <div className="session-panel">
       <div className="session-panel-header" onClick={() => setActiveView({ type: 'session', sessionId })} onContextMenu={handleSessionContextMenu}>
+        <span
+          className="session-panel-expand"
+          onClick={(e) => { e.stopPropagation(); setIsSessionCollapsed(!isSessionCollapsed) }}
+        >
+          {isSessionCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+        </span>
         {isEditingName ? (
           <input
             autoFocus
@@ -383,17 +391,19 @@ export default function SessionPanel({
         )}
       </div>
 
-      <div className="tree-list">
-        {connection?.status === 'connecting' ? (
-          <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>Connecting...</div>
-        ) : connection?.status === 'error' ? (
-          <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{connection.error}</div>
-        ) : rootWorkspaceIds.length === 0 ? (
-          <div className="tree-empty">No workspaces. Click + to add one.</div>
-        ) : (
-          rootWorkspaceIds.map((id) => renderWorkspace(id))
-        )}
-      </div>
+      {!isSessionCollapsed && (
+        <div className="tree-list">
+          {connection?.status === 'connecting' ? (
+            <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>Connecting...</div>
+          ) : connection?.status === 'error' ? (
+            <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{connection.error}</div>
+          ) : rootWorkspaceIds.length === 0 ? (
+            <div className="tree-empty">No workspaces. Click + to add one.</div>
+          ) : (
+            rootWorkspaceIds.map((id) => renderWorkspace(id))
+          )}
+        </div>
+      )}
 
       {/* Session Context Menu */}
       <ContextMenu menuId="session-context" activeMenuId={activeMenuId} position={menuPosition}>

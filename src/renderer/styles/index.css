@@ -119,6 +119,19 @@ body,
   background: var(--bg-hover);
 }
 
+.session-panel-expand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.session-panel-expand:hover {
+  opacity: 1;
+}
+
 .session-panel-header .tree-title {
   flex: 1;
 }
