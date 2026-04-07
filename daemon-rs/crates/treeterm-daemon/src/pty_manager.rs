@@ -302,11 +302,13 @@ impl PtyManager {
         let removed = self.sessions.write().await.remove(session_id);
         if let Some(session) = removed {
             let mut session = session.lock().await;
-            // Abort reader task FIRST — drops AsyncFd, deregisters fd from epoll.
-            // This prevents stale AsyncFd from corrupting tokio's I/O driver
-            // when the fd number is reused by a subsequent forkpty() call.
+            // Abort reader task and AWAIT it — abort() only schedules cancellation;
+            // the task (and its AsyncFd) may still be alive until tokio processes it.
+            // Awaiting ensures the AsyncFd is fully dropped and deregistered from epoll
+            // BEFORE we close the fd, preventing fd-reuse corruption in tokio's I/O driver.
             if let Some(handle) = session.reader_handle.take() {
                 handle.abort();
+                let _ = handle.await;
             }
             unsafe {
                 libc::kill(session.child_pid, libc::SIGTERM);
@@ -421,6 +423,7 @@ impl PtyManager {
             let mut session = session.lock().await;
             if let Some(handle) = session.reader_handle.take() {
                 handle.abort();
+                let _ = handle.await;
             }
             unsafe {
                 libc::kill(session.child_pid, libc::SIGTERM);
