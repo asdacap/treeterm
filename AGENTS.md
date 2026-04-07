@@ -74,6 +74,8 @@ Never silently swallow errors or return empty/default values on failure. Throw e
 ### Prefer non-nullable and non-undefined
 - Nullable and undefined is treated similarly with this rules, which is to say, they are both bad.
 - Prefer to use union type with discriminator key rather than making properties nullable. Nullable adds further conditional check which make branch coverage worst.
+- The discriminator key must be an enum.
+- For react component that conditionally render based on the union type, use `Record<StateType, () => ReactNode>`. 
 - If a prop can be nullable then just return early rather than making further state nullable. Same case with type check, if the type assumption fail, then return error rather than making the type nullable.
 
 ### Onclosed ID on large object

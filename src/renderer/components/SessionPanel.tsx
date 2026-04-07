@@ -14,6 +14,7 @@ import CreateChildDialog from './CreateChildDialog'
 import OpenWorkspaceDialog from './OpenWorkspaceDialog'
 import UpstreamWarningDialog from './UpstreamWarningDialog'
 import type { ReviewState, WorktreeSettings, Workspace } from '../types'
+import type { ConnectionStatus } from '../../shared/types'
 
 // Import WorkspaceIcon from TreePane
 import { WorkspaceIcon } from './TreePane'
@@ -401,6 +402,20 @@ export default function SessionPanel({
     )
   }
 
+  const statusIcon: Record<ConnectionStatus, () => ReactNode> = {
+    connecting: () => <Loader2 size={14} className="spinning" />,
+    connected: () => null,
+    disconnected: () => <AlertCircle size={14} style={{ color: '#f44336' }} />,
+    error: () => <AlertCircle size={14} style={{ color: '#f44336' }} />,
+  }
+
+  const statusContent: Record<ConnectionStatus, () => ReactNode> = {
+    connecting: () => <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>Connecting...</div>,
+    connected: () => null,
+    disconnected: () => <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{(connection && 'error' in connection && connection.error) || 'Disconnected'}</div>,
+    error: () => <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{connection && 'error' in connection && connection.error}</div>,
+  }
+
   return (
     <div className="session-panel">
       <div className="session-panel-header" onClick={() => setActiveView({ type: 'session', sessionId })} onContextMenu={handleSessionContextMenu}>
@@ -430,8 +445,7 @@ export default function SessionPanel({
             onDoubleClick={(e) => { e.stopPropagation(); handleStartEditName() }}
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            {connection?.status === 'connecting' && <Loader2 size={14} className="spinning" />}
-            {connection?.status === 'error' && <AlertCircle size={14} style={{ color: '#f44336' }} />}
+            {connection && statusIcon[connection.status]()}
             {displayName || sessionId}
           </span>
         )}
@@ -448,10 +462,8 @@ export default function SessionPanel({
 
       {!isSessionCollapsed && (
         <div className="tree-list">
-          {connection?.status === 'connecting' ? (
-            <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>Connecting...</div>
-          ) : connection?.status === 'error' ? (
-            <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{connection.error}</div>
+          {connection && statusContent[connection.status]() ? (
+            statusContent[connection.status]()
           ) : rootWorkspaceIds.length === 0 ? (
             <div className="tree-empty">No workspaces. Click + to add one.</div>
           ) : (
