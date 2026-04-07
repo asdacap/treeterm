@@ -38,7 +38,7 @@ vi.mock('@grpc/grpc-js', () => {
 
 vi.mock('../generated/treeterm', () => {
   return {
-    TreeTermDaemonClient: class { constructor() { Object.assign(this, mocks.mockClientInstance) } }
+    TreeTermDaemonClient: function TreeTermDaemonClient() { Object.assign(this, mocks.mockClientInstance) }
   }
 })
 
@@ -78,7 +78,7 @@ function makeMockSessionStream() {
 }
 
 // Helper to make the client connected
-function connectClient(_client: GrpcDaemonClient): void {
+function connectClient(): void {
   mockClientInstance.ptyStream.mockReturnValue(makeMockSessionStream())
 
   mockClientInstance.waitForReady.mockImplementation((_deadline: number, cb: (err?: Error) => void) => {
@@ -96,7 +96,7 @@ describe('GrpcDaemonClient', () => {
 
   describe('connection lifecycle', () => {
     it('connect succeeds when socket exists and client is ready', async () => {
-      connectClient(client)
+      connectClient()
       await client.connect()
       expect(client.isConnected()).toBe(true)
     })
@@ -109,7 +109,7 @@ describe('GrpcDaemonClient', () => {
     })
 
     it('connect returns immediately if already connected', async () => {
-      connectClient(client)
+      connectClient()
       await client.connect()
       await client.connect() // second call
       expect(mockClientInstance.waitForReady).toHaveBeenCalledTimes(1)
@@ -124,7 +124,7 @@ describe('GrpcDaemonClient', () => {
     })
 
     it('disconnect closes stream and client', async () => {
-      connectClient(client)
+      connectClient()
       await client.connect()
       client.disconnect()
       expect(client.isConnected()).toBe(false)
@@ -138,7 +138,7 @@ describe('GrpcDaemonClient', () => {
 
   describe('PTY methods', () => {
     beforeEach(async () => {
-      connectClient(client)
+      connectClient()
       await client.connect()
     })
 
@@ -286,7 +286,7 @@ describe('GrpcDaemonClient', () => {
 
   describe('PtyStream callbacks', () => {
     beforeEach(async () => {
-      connectClient(client)
+      connectClient()
       await client.connect()
     })
 
@@ -336,7 +336,7 @@ describe('GrpcDaemonClient', () => {
 
   describe('session methods', () => {
     beforeEach(async () => {
-      connectClient(client)
+      connectClient()
       await client.connect()
     })
 
@@ -383,7 +383,7 @@ describe('GrpcDaemonClient', () => {
 
   describe('proto conversion', () => {
     beforeEach(async () => {
-      connectClient(client)
+      connectClient()
       await client.connect()
     })
 
@@ -459,7 +459,7 @@ describe('GrpcDaemonClient', () => {
 
   describe('filesystem methods', () => {
     beforeEach(async () => {
-      connectClient(client)
+      connectClient()
       await client.connect()
     })
 
@@ -485,7 +485,7 @@ describe('GrpcDaemonClient', () => {
         { end: { success: true } }
       ]
 
-      mockClientInstance.readFile.mockImplementation((_req: any) => {
+      mockClientInstance.readFile.mockImplementation(() => {
         const stream = {
           on: (event: string, handler: (data: any) => void) => {
             if (event === 'data') {
@@ -519,7 +519,8 @@ describe('GrpcDaemonClient', () => {
         { cb(null, { success: true, entries: [{ name: 'file.txt' }] }); }
       )
       const result = await client.searchFiles('/ws', 'file')
-      expect(result).toMatchObject({ success: true, entries: expect.arrayContaining([expect.any(Object)]) })
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      expect(result).toMatchObject({ success: true, entries: expect.arrayContaining([expect.any(Object) as unknown]) })
     })
 
     it('readFile rejects when stream returns success=false', async () => {
@@ -550,7 +551,7 @@ describe('GrpcDaemonClient', () => {
 
   describe('watchSession', () => {
     beforeEach(async () => {
-      connectClient(client)
+      connectClient()
       await client.connect()
     })
 
@@ -642,7 +643,7 @@ describe('GrpcDaemonClient', () => {
 
   describe('execStream', () => {
     beforeEach(async () => {
-      connectClient(client)
+      connectClient()
       await client.connect()
     })
 

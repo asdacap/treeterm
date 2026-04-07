@@ -141,7 +141,9 @@ describe('Comments Renderer', () => {
         })
 
         expect(result).toEqual({
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           component: expect.any(Function),
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           props: expect.objectContaining({
             key: 'tab-1',
             workspace: mockWorkspaceStore,

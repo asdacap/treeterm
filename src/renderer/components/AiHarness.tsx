@@ -47,12 +47,8 @@ interface AiHarnessProps {
 }
 
 export default function AiHarness({
-  cwd: _cwd,
   workspace,
   tabId,
-  sandbox: _sandbox,
-  isVisible: _isVisible,
-  command: _command,
   backgroundColor,
   disableScrollbar,
   stripScrollbackClear,
@@ -60,6 +56,7 @@ export default function AiHarness({
   const { workspace: wsData } = useStore(workspace)
   const appState = wsData.appStates[tabId]
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!appState) {
     return <div style={{ padding: 16, color: '#888' }}>Loading AI harness...</div>
   }

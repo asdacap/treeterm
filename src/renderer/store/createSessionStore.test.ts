@@ -220,7 +220,7 @@ describe('createSessionStore', () => {
       expect(Object.keys(ws.appStates)).toHaveLength(0)
     })
 
-    it('setActiveWorkspace updates active workspace id', async () => {
+    it('setActiveWorkspace updates active workspace id', () => {
       const id = store.getState().addWorkspace('/test')
       store.getState().setActiveWorkspace(null)
       expect(store.getState().activeWorkspaceId).toBeNull()
@@ -252,8 +252,8 @@ describe('createSessionStore', () => {
       expect(children[0].isWorktree).toBe(true)
     })
 
-    it('addChildWorkspace fails when parent not found', async () => {
-      const result = await store.getState().addChildWorkspace('nonexistent', 'feat')
+    it('addChildWorkspace fails when parent not found', () => {
+      const result = store.getState().addChildWorkspace('nonexistent', 'feat')
       expect(result).toEqual({ success: false, error: 'Parent workspace not found' })
     })
 
@@ -273,7 +273,7 @@ describe('createSessionStore', () => {
       const workspaces = store.getState().workspaces
       const errorEntry = Object.values(workspaces).find(e => e.status === 'error')
       expect(errorEntry).toBeDefined()
-      if (errorEntry && errorEntry.status === 'error') {
+      if (errorEntry) {
         expect(errorEntry.status).toBe('error')
         expect(errorEntry.error).toBe('git error')
       }
@@ -319,8 +319,8 @@ describe('createSessionStore', () => {
       expect(deps.git.createWorktreeFromRemote).toHaveBeenCalledWith('/repo', 'origin/feature', 'feature', expect.any(String))
     })
 
-    it('createWorktreeFromRemote fails for non-existent parent', async () => {
-      const result = await store.getState().createWorktreeFromRemote('bad', 'origin/feat', false)
+    it('createWorktreeFromRemote fails for non-existent parent', () => {
+      const result = store.getState().createWorktreeFromRemote('bad', 'origin/feat', false)
       expect(result).toEqual({ success: false, error: 'Parent workspace not found' })
     })
   })

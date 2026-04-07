@@ -75,8 +75,8 @@ describe('Chat Renderer', () => {
     const tab = { id: 'tab-1', state: { messages: [] } } as unknown as Tab
     const result = chatApplication.render({ tab, workspace: mockWorkspaceStore, isVisible: true })
     expect(result).toEqual({
-      component: expect.any(Function),
-      props: expect.objectContaining({ tab }),
+      component: expect.any(Function) as unknown,
+      props: expect.objectContaining({ tab }) as unknown,
     })
   })
 })

@@ -576,8 +576,7 @@ export function isAiHarnessState(state: unknown): state is AiHarnessState {
   return (
     isTerminalState(state) &&
     'sandbox' in (state as unknown as Record<string, unknown>) &&
-    typeof (state as AiHarnessState).sandbox === 'object' &&
-    (state as AiHarnessState).sandbox !== null
+    typeof (state as AiHarnessState).sandbox === 'object'
   )
 }
 

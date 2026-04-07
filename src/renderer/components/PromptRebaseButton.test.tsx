@@ -11,7 +11,7 @@ function makeStores(opts: {
   parentWorkspace?: { gitBranch: string | null } | null
 }) {
   const promptHarness = vi.fn<(prompt: string) => void>()
-  const lookupWorkspace = vi.fn((_id: string) =>
+  const lookupWorkspace = vi.fn(() =>
     opts.parentWorkspace !== undefined ? opts.parentWorkspace : { gitBranch: 'main' }
   )
   const gitControllerStore = createStore<any>()(() => ({

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useStore } from 'zustand'
 import { useAppStore } from '../store/app'
 import { generateReviewPrompt } from '../utils/reviewPrompt'
@@ -30,7 +30,7 @@ function extractCodeContext(
 
 export default function CommentsList({
   workspace,
-}: CommentsListProps): JSX.Element {
+}: CommentsListProps): React.JSX.Element {
   const { workspace: wsData, reviewComments: reviewCommentStore, addTab } = useStore(workspace)
   const { getReviewComments, toggleReviewCommentAddressed, deleteReviewComment } = useStore(reviewCommentStore)
   const clipboard = useAppStore((state) => state.clipboard)
@@ -53,7 +53,7 @@ export default function CommentsList({
         missing.map(async (filePath) => {
           try {
             const result = await filesystem.readFile(filePath)
-            if (result.success && result.file) {
+            if (result.success) {
               newContents.set(filePath, result.file.content)
             }
           } catch {

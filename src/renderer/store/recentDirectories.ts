@@ -17,6 +17,7 @@ export const useRecentDirectoriesStore = create<RecentDirectoriesState>()(
       addRecent: (connectionKey: string, path: string) => {
         set((state) => {
           const existing = state.directories[connectionKey]
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
           const filtered = (existing ?? []).filter(d => d !== path)
           const updated = [path, ...filtered].slice(0, MAX_RECENT)
           return { directories: { ...state.directories, [connectionKey]: updated } }

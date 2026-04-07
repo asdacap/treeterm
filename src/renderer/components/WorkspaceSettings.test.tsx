@@ -8,7 +8,7 @@ const applications = {
   terminal: { id: 'terminal', name: 'Terminal', showInNewTabMenu: true },
   editor: { id: 'editor', name: 'Editor', showInNewTabMenu: true },
   hidden: { id: 'hidden', name: 'Hidden', showInNewTabMenu: false },
-} as any
+} as unknown as Record<string, import('../types').Application>
 
 function makeWorkspaceStore(overrides: Record<string, any> = {}) {
   const updateMetadata = vi.fn<(...args: any[]) => void>()

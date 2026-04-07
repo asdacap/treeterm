@@ -24,7 +24,7 @@ export function createRunActionsStore(
   workspacePath: string,
   deps: RunActionsDeps
 ) {
-  const store = createStore<RunActionsState>()((set, _get) => ({
+  const store = createStore<RunActionsState>()((set) => ({
     actions: [],
     detecting: false,
 

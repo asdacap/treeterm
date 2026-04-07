@@ -130,13 +130,13 @@ describe('Review Renderer', () => {
         })
 
         expect(result).toEqual({
-          component: expect.any(Function),
+          component: expect.any(Function) as unknown,
           props: expect.objectContaining({
             key: 'tab-1',
             workspace: mockWorkspaceStore,
             tabId: 'tab-1',
             parentWorkspaceId: undefined
-          })
+          }) as unknown,
         })
       })
 
@@ -264,7 +264,7 @@ describe('Review Renderer', () => {
           applicationId: 'review',
           title: 'Review',
           state: {
-            parentWorkspaceId: 123 as any
+            parentWorkspaceId: 123 as unknown
           }
         }
 

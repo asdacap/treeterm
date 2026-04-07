@@ -142,8 +142,8 @@ describe('ConnectionManager', () => {
     it('returns connection info for existing connection', () => {
       const info = manager.getConnection('local')
       expect(info).toBeDefined()
-      expect(info!.id).toBe('local')
-      expect(info!.status).toBe('connected')
+      expect(info?.id).toBe('local')
+      expect(info?.status).toBe('connected')
     })
 
     it('returns undefined for missing connection', () => {
@@ -180,7 +180,7 @@ describe('ConnectionManager', () => {
       const cb = vi.fn()
       const result = manager.watchConnectionStatus('local', cb)
       expect(result.initial).toBeDefined()
-      expect(result.initial!.id).toBe('local')
+      expect(result.initial?.id).toBe('local')
       expect(typeof result.unsubscribe).toBe('function')
     })
 

@@ -1,3 +1,4 @@
+import React from 'react'
 import type { ReviewComment } from '../types'
 
 interface CommentDisplayProps {
@@ -6,7 +7,7 @@ interface CommentDisplayProps {
   hideLineRef?: boolean
 }
 
-export function CommentDisplay({ comment, onDelete, hideLineRef }: CommentDisplayProps): JSX.Element {
+export function CommentDisplay({ comment, onDelete, hideLineRef }: CommentDisplayProps): React.JSX.Element {
   const showHeader = !hideLineRef || comment.isOutdated
   return (
     <div className={`comment-display ${comment.isOutdated ? 'outdated' : ''}`}>

@@ -706,6 +706,7 @@ function GitHubButton({ workspace }: GitHubButtonProps) {
       disabled={loading}
       title={title}
     >
+      {/* eslint-disable-next-line @typescript-eslint/no-deprecated */}
       <Github size={14} />
       {hasUnresolved && <span className="github-comment-count">Address {String(unresolvedCount)} comment{unresolvedCount === 1 ? '' : 's'}</span>}
     </button>

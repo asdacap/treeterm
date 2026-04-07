@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { ErrorBoundary } from './ErrorBoundary'
 import type { FallbackProps } from './ErrorBoundary'
@@ -10,7 +10,7 @@ function Bomb({ shouldThrow }: { shouldThrow: boolean }) {
 }
 
 describe('ErrorBoundary', () => {
-  let consoleErrorSpy: ReturnType<typeof vi.spyOn>
+  let consoleErrorSpy: MockInstance
 
   beforeEach(() => {
     vi.clearAllMocks()

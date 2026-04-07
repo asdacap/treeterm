@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import type { Terminal } from '@xterm/xterm'
 
 vi.stubGlobal('window', {
   getComputedStyle: vi.fn<(elt: Element) => CSSStyleDeclaration>().mockReturnValue({
@@ -53,7 +54,7 @@ function makeTerminal(overrides: {
     element: hasElement ? { parentElement } : null,
     cols,
     rows,
-  } as any
+  } as unknown as Terminal
 }
 
 describe('fitTerminal', () => {

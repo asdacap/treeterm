@@ -297,7 +297,9 @@ describe('createCustomRunnerVariant', () => {
       })
 
       expect(result).toEqual(expect.objectContaining({
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         component: expect.any(Function),
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         props: expect.objectContaining({
           key: 'tab-1',
           cwd: '/test/project',

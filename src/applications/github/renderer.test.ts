@@ -73,6 +73,7 @@ describe('GitHub Renderer', () => {
     const tab = { id: 'tab-1', state: {} } as unknown as Tab
     const result = githubApplication.render({ tab, workspace: mockWorkspaceStore, isVisible: true })
     expect(result).toEqual({
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       component: expect.any(Function),
       props: {
         key: 'tab-1',

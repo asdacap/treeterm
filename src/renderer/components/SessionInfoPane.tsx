@@ -127,7 +127,8 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
   const handleTogglePfOutput = (pfId: string, currentlyExpanded: boolean) => {
     if (currentlyExpanded) {
       setExpandedPfOutput(prev => {
-        const { [pfId]: _removed, ...rest } = prev
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { [pfId]: _, ...rest } = prev
         return rest
       })
     } else {
@@ -207,7 +208,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
         {isRemote && connection.status === 'connecting' && (
           <Loader2 size={14} className="spinning" style={{ marginLeft: 8 }} />
         )}
-        {isRemote && connection.status && (
+        {isRemote && (
           <span className="ssh-pane-status-text">({connection.status})</span>
         )}
         {!isRemote && (

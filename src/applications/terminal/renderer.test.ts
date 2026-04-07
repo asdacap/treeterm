@@ -328,14 +328,14 @@ describe('Terminal Renderer', () => {
         })
 
         expect(result).toEqual(expect.objectContaining({
-          component: expect.any(Function),
+          component: expect.any(Function) as unknown,
           props: expect.objectContaining({
             key: 'tab-1',
             cwd: '/test',
             workspace: mockWorkspaceStore,
             tabId: 'tab-1',
             isVisible: true
-          })
+          }) as unknown,
         }))
       })
     })
@@ -488,7 +488,7 @@ describe('Terminal Renderer', () => {
         })
 
         expect(result).toEqual(expect.objectContaining({
-          component: expect.any(Function),
+          component: expect.any(Function) as unknown,
           props: expect.objectContaining({
             key: 'tab-1',
             cwd: '/test',
@@ -496,7 +496,7 @@ describe('Terminal Renderer', () => {
             tabId: 'tab-1',
             isVisible: true,
             startupCommand: 'echo "Hello"'
-          })
+          }) as unknown,
         }))
       })
 

@@ -476,7 +476,7 @@ describe('createGitControllerStore', () => {
       expect(deps.git.hasUncommittedChanges).not.toHaveBeenCalled()
     })
 
-    it('calls refreshDiffStatus immediately for git repo', async () => {
+    it('calls refreshDiffStatus immediately for git repo', () => {
       const deps = makeDeps()
       const store = createGitControllerStore(deps)
 
@@ -485,7 +485,7 @@ describe('createGitControllerStore', () => {
       store.getState().dispose()
     })
 
-    it('polls refreshDiffStatus every 10 seconds', async () => {
+    it('polls refreshDiffStatus every 10 seconds', () => {
       const deps = makeDeps()
       const store = createGitControllerStore(deps)
 
@@ -502,7 +502,7 @@ describe('createGitControllerStore', () => {
       store.getState().dispose()
     })
 
-    it('dispose stops polling', async () => {
+    it('dispose stops polling', () => {
       const deps = makeDeps()
       const store = createGitControllerStore(deps)
 

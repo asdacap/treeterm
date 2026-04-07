@@ -83,6 +83,7 @@ describe('startChatStream', () => {
       { choices: [{ delta: { content: ' world' } }] },
     ]
     mockCreate.mockResolvedValue({
+      // eslint-disable-next-line @typescript-eslint/require-await
       [Symbol.asyncIterator]: async function* () {
         for (const chunk of chunks) yield chunk
       },
@@ -91,13 +92,17 @@ describe('startChatStream', () => {
     const sender = makeMockSender()
     await startChatStream('req-1', [{ role: 'user', content: 'hi' }], mockSettings, sender)
 
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     expect(sender.send).toHaveBeenCalledWith('llm:chat:delta', 'req-1', 'Hello')
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     expect(sender.send).toHaveBeenCalledWith('llm:chat:delta', 'req-1', ' world')
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     expect(sender.send).toHaveBeenCalledWith('llm:chat:done', 'req-1')
   })
 
   it('skips chunks without content', async () => {
     mockCreate.mockResolvedValue({
+      // eslint-disable-next-line @typescript-eslint/require-await
       [Symbol.asyncIterator]: async function* () {
         yield { choices: [{ delta: {} }] }
         yield { choices: [{ delta: { content: 'data' } }] }
@@ -107,6 +112,7 @@ describe('startChatStream', () => {
     const sender = makeMockSender()
     await startChatStream('req-2', [], mockSettings, sender)
 
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     expect(sender.send).toHaveBeenCalledTimes(2) // one delta + done
   })
 
@@ -116,11 +122,13 @@ describe('startChatStream', () => {
     const sender = makeMockSender()
     await startChatStream('req-3', [], mockSettings, sender)
 
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     expect(sender.send).toHaveBeenCalledWith('llm:chat:error', 'req-3', 'network error')
   })
 
   it('passes reasoning_effort when reasoning is enabled', async () => {
     mockCreate.mockResolvedValue({
+       
       [Symbol.asyncIterator]: async function* () {
         // empty stream
       },
@@ -186,6 +194,7 @@ describe('cancelChatStream', () => {
 
   it('aborts an active stream', async () => {
     mockCreate.mockResolvedValue({
+      // eslint-disable-next-line @typescript-eslint/require-await
       [Symbol.asyncIterator]: async function* () {
         yield { choices: [{ delta: { content: 'hi' } }] }
       },
@@ -197,10 +206,12 @@ describe('cancelChatStream', () => {
     // Stream is done, activeStreams is cleaned up in finally — but we can test the abort path
     // by starting a new stream and immediately canceling
     let abortCalled = false
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     const realAbort: (reason?: any) => void = AbortController.prototype.abort
     AbortController.prototype.abort = function(this: AbortController, reason?: any) { abortCalled = true; realAbort.call(this, reason) }
 
     mockCreate.mockResolvedValue({
+      // eslint-disable-next-line @typescript-eslint/require-await
       [Symbol.asyncIterator]: async function* () {
         yield { choices: [{ delta: { content: 'data' } }] }
       },

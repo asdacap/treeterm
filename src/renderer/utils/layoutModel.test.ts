@@ -18,9 +18,9 @@ const testApp: Application = {
 
 const makeTabs = (count: number): Tab[] =>
   Array.from({ length: count }, (_, i) => ({
-    id: `tab-${i}`,
+    id: `tab-${String(i)}`,
     applicationId: 'test-terminal',
-    title: `Terminal ${i + 1}`,
+    title: `Terminal ${String(i + 1)}`,
     state: {},
   }))
 

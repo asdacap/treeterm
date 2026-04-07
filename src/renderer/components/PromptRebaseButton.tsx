@@ -1,7 +1,8 @@
+import React from 'react'
 import { useStore } from 'zustand'
 import type { WorkspaceStore } from '../types'
 
-export function PromptRebaseButton({ workspace }: { workspace: WorkspaceStore }): JSX.Element | null {
+export function PromptRebaseButton({ workspace }: { workspace: WorkspaceStore }): React.JSX.Element | null {
   const { gitController, promptHarness, workspace: wsData, lookupWorkspace } = useStore(workspace)
   const { hasConflictsWithParent } = useStore(gitController)
 
@@ -12,7 +13,7 @@ export function PromptRebaseButton({ workspace }: { workspace: WorkspaceStore })
   return (
     <button
       className="review-comments-button"
-      onClick={() => { void promptHarness(`rebase local branch ${wsData.gitBranch} onto ${parentBranch}`); }}
+      onClick={() => { void promptHarness(`rebase local branch ${wsData.gitBranch ?? 'unknown'} onto ${parentBranch}`); }}
       title="Prompt AI to rebase onto parent branch"
     >
       Prompt Rebase

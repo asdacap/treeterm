@@ -95,7 +95,7 @@ export function parseLlmJson(raw: string): Record<string, unknown> {
 
   const result = parsed as Record<string, unknown>
 
-  for (const [_key, value] of Object.entries(result)) {
+  for (const [, value] of Object.entries(result)) {
     if (typeof value !== 'string') continue
     const inner = value.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
     if (inner.startsWith('{')) {

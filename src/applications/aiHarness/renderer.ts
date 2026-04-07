@@ -37,7 +37,7 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
       if (state.ptyId) {
         // Restore: PTY already exists, just start analyzer
         // Pre-cache writer so promptHarness doesn't open a second stream
-        ws.getTtyWriter(state.ptyId)
+        void ws.getTtyWriter(state.ptyId)
         analyzer.getState().start(state.ptyId)
       } else {
         // New tab: create PTY then start analyzer
@@ -56,6 +56,7 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
         dispose: () => {
           analyzer.getState().stop()
           // Read current state for up-to-date ptyId (may have been set after onWorkspaceLoad)
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
           const current = workspaceStore.getState().workspace.appStates[tab.id]?.state as AiHarnessState | undefined
           const ptyId = current?.ptyId ?? state.ptyId
           if (ptyId) {

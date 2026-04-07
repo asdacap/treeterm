@@ -175,12 +175,12 @@ describe('Editor Renderer', () => {
         })
 
         expect(result).toEqual({
-          component: expect.any(Function),
+          component: expect.any(Function) as unknown,
           props: expect.objectContaining({
             key: 'tab-1',
             workspace: mockWorkspaceStore,
             tabId: 'tab-1'
-          })
+          }) as unknown,
         })
       })
 

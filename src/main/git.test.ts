@@ -252,9 +252,13 @@ describe('GitClient', () => {
 
   describe('getDiff', () => {
     it('parses numstat and name-status output', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const currentBranchStream: any = resultStream('feature')
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const mergeBaseStream: any = resultStream('base123')
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const numstatStream: any = resultStream('10\t5\tsrc/app.ts\n3\t0\tsrc/new.ts')
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const nameStatusStream: any = resultStream('M\tsrc/app.ts\nA\tsrc/new.ts')
 
       const client = makeMockClient([

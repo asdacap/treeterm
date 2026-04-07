@@ -254,6 +254,7 @@ export class GrpcDaemonClient {
         if (error) {
           reject(new Error(error.message))
         } else {
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
           resolve(response?.sessions as TTYSessionInfo[] ?? [])
         }
       })
@@ -398,14 +399,14 @@ export class GrpcDaemonClient {
       const chunks: Buffer[] = []
       let fileMetadata: { path: string; size: number; language: string } | null = null
 
-      stream.on('data', (chunk) => {
+      stream.on('data', (chunk: { header?: { path: string; size: number | string; language: string }; data?: { data: Buffer }; end?: { success: boolean; error?: string } }) => {
         if (chunk.header) {
           fileMetadata = { path: chunk.header.path, size: Number(chunk.header.size), language: chunk.header.language }
         } else if (chunk.data) {
           chunks.push(chunk.data.data)
         } else if (chunk.end) {
           if (!chunk.end.success) {
-            resolve({ success: false, error: chunk.end.error })
+            resolve({ success: false as const, error: chunk.end.error ?? 'Unknown error' })
           } else if (fileMetadata) {
             const isImage = isImageFile(fileMetadata.path)
             resolve({
@@ -537,6 +538,7 @@ export class GrpcDaemonClient {
       appStates,
       activeTabId: protoWorkspace.activeTabId || null,
       settings: { defaultApplicationId: '' },
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       metadata: protoWorkspace.metadata?.length ? JSON.parse(protoWorkspace.metadata.toString('utf-8')) as Record<string, string> : {},
       createdAt: protoWorkspace.createdAt,
       lastActivity: protoWorkspace.lastActivity

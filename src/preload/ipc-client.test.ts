@@ -44,6 +44,7 @@ describe('IpcClient', () => {
     it('sessionUpdate calls ipcRenderer.invoke with correct channel and args', async () => {
       const workspaces = [{ id: 'ws-1', path: '/test' }]
       mockInvoke.mockResolvedValue({ success: true, session: { id: 'session-1' } })
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       const result = await client.sessionUpdate('session-1', workspaces as any, 'uuid-1', 5)
       expect(mockInvoke).toHaveBeenCalledWith('session:update', 'session-1', workspaces, 'uuid-1', 5)
       expect(result).toEqual({ success: true, session: { id: 'session-1' } })
@@ -111,6 +112,7 @@ describe('IpcClient', () => {
       ['appGetInitialWorkspace', 'app:getInitialWorkspace'],
     ] as const)('%s calls ipcRenderer.invoke with %s channel', async (method, channel) => {
       mockInvoke.mockResolvedValue('test-result')
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
       const result = await (client as any)[method]('arg1', 'arg2') as string
       expect(mockInvoke).toHaveBeenCalledWith(channel, 'arg1', 'arg2')
       expect(result).toBe('test-result')
@@ -215,6 +217,7 @@ describe('IpcClient', () => {
       ['onDaemonSessions', 'daemon:sessions'],
     ] as const)('%s registers listener on %s and unsubscribe works', (method, channel) => {
       const callback = vi.fn<(...args: any[]) => void>()
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
       const unsub = (client as any)[method](callback) as () => void
       expect(mockOn).toHaveBeenCalledWith(channel, expect.any(Function))
       const handler = mockOn.mock.calls[0][1] as (...args: any[]) => void

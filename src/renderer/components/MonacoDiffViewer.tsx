@@ -1,5 +1,5 @@
 import { DiffEditor, DiffOnMount } from '@monaco-editor/react'
-import { useRef, useState, useEffect } from 'react'
+import React, { useRef, useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import type { editor } from 'monaco-editor'
 import type { ReviewComment } from '../types'
@@ -51,7 +51,7 @@ export function MonacoDiffViewer({
   onCommentDelete,
   initialScrollTop,
   onScrollPositionChange
-}: MonacoDiffViewerProps): JSX.Element {
+}: MonacoDiffViewerProps): React.JSX.Element {
   const diffEditorRef = useRef<editor.IStandaloneDiffEditor | null>(null)
   const lastScrollTopRef = useRef(initialScrollTop ?? 0)
   let shouldRestoreScroll = !!initialScrollTop && initialScrollTop > 0
@@ -178,6 +178,7 @@ export function MonacoDiffViewer({
       const originalEditor = editor.getOriginalEditor()
 
       modifiedEditor.onMouseDown((e) => {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
         if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
           const lineNumber = e.target.position?.lineNumber
           if (lineNumber) {
@@ -187,6 +188,7 @@ export function MonacoDiffViewer({
       })
 
       originalEditor.onMouseDown((e) => {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
         if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
           const lineNumber = e.target.position?.lineNumber
           if (lineNumber) {

@@ -147,10 +147,11 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
   const handleAction = useCallback((action: Action): Action | undefined => {
     if (action.type === Actions.DELETE_TAB) {
       const tabId = action.data.node
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (!workspace.appStates[tabId]) {
         return action // Orphan tab — let FlexLayout remove it directly
       }
-      removeTab(tabId)
+      void removeTab(tabId)
       return undefined // Prevent FlexLayout from handling it — store will sync
     }
     if (action.type === Actions.SELECT_TAB) {
@@ -160,7 +161,7 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
   }, [workspace, removeTab, setActiveTab])
 
   // Serialize model changes to metadata
-  const handleModelChange = useCallback((m: Model, _action: Action) => {
+  const handleModelChange = useCallback((m: Model) => {
     if (suppressModelChangeRef.current) return
     const json = JSON.stringify(m.toJson())
     updateMetadata('layoutModel', json)
@@ -173,6 +174,7 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
     const tab = getTabs(wsState).find(t => t.id === tabId)
     if (tab) {
       const app = getApplication(tab.applicationId)
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (app) {
         renderValues.leading = <span className="tab-icon">{app.icon}</span>
       }

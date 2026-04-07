@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createWorkspaceStore } from './createWorkspaceStore'
-import type { WorkspaceStoreDeps } from './createWorkspaceStore'
+import type { WorkspaceStoreDeps, CachedTerminal } from './createWorkspaceStore'
 import { getUnmergedSubWorkspaces } from './createSessionStore'
 import type { WorkspaceEntry } from './createSessionStore'
 import type { Workspace, Application } from '../types'
 import { createMockExecApi } from '../../shared/mockApis'
+
+interface TestComment { id: string; filePath: string; lineNumber: number; text: string; commitHash: string | null; createdAt: number; isOutdated: boolean; addressed: boolean; side: string }
 
 function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStoreDeps {
   return {
@@ -15,8 +17,8 @@ function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStore
     openTtyStream: vi.fn<(...args: any[]) => any>().mockImplementation(() => Promise.resolve({ tty: null })),
     createTty: vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('pty-1'),
     connectionId: 'local',
-    git: {} as any,
-    filesystem: {} as any,
+    git: {} as unknown as WorkspaceStoreDeps['git'],
+    filesystem: {} as unknown as WorkspaceStoreDeps['filesystem'],
     runActions: { detect: vi.fn<(...args: any[]) => Promise<any[]>>().mockResolvedValue([]), run: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue(null) },
     exec: createMockExecApi(),
     syncToDaemon: vi.fn<() => void>(),
@@ -365,7 +367,7 @@ describe('createWorkspaceStore', () => {
       })
 
       const wsState = store.getState().workspace
-      const comments = JSON.parse(wsState.metadata.reviewComments)
+      const comments = JSON.parse(wsState.metadata.reviewComments) as TestComment[]
       expect(comments).toHaveLength(1)
       expect(comments[0].text).toBe('Fix this')
       expect(comments[0].filePath).toBe('test.ts')
@@ -385,7 +387,7 @@ describe('createWorkspaceStore', () => {
       store.getState().reviewComments.getState().deleteReviewComment('c1')
 
       const wsState = store.getState().workspace
-      const comments = JSON.parse(wsState.metadata.reviewComments)
+      const comments = JSON.parse(wsState.metadata.reviewComments) as TestComment[]
       expect(comments).toHaveLength(1)
       expect(comments[0].id).toBe('c2')
     })
@@ -401,7 +403,7 @@ describe('createWorkspaceStore', () => {
       store.getState().reviewComments.getState().toggleReviewCommentAddressed('c1')
 
       const wsState = store.getState().workspace
-      const comments = JSON.parse(wsState.metadata.reviewComments)
+      const comments = JSON.parse(wsState.metadata.reviewComments) as TestComment[]
       expect(comments[0].addressed).toBe(true)
     })
 
@@ -417,7 +419,7 @@ describe('createWorkspaceStore', () => {
       store.getState().reviewComments.getState().updateOutdatedReviewComments('new')
 
       const wsState = store.getState().workspace
-      const comments = JSON.parse(wsState.metadata.reviewComments)
+      const comments = JSON.parse(wsState.metadata.reviewComments) as TestComment[]
       expect(comments[0].isOutdated).toBe(true)
       expect(comments[1].isOutdated).toBe(false)
     })
@@ -433,7 +435,7 @@ describe('createWorkspaceStore', () => {
       store.getState().reviewComments.getState().updateOutdatedReviewComments('any-hash')
 
       const wsState = store.getState().workspace
-      const comments = JSON.parse(wsState.metadata.reviewComments)
+      const comments = JSON.parse(wsState.metadata.reviewComments) as TestComment[]
       expect(comments[0].isOutdated).toBe(false)
     })
 
@@ -448,7 +450,7 @@ describe('createWorkspaceStore', () => {
       store.getState().reviewComments.getState().clearReviewComments()
 
       const wsState = store.getState().workspace
-      const comments = JSON.parse(wsState.metadata.reviewComments)
+      const comments = JSON.parse(wsState.metadata.reviewComments) as TestComment[]
       expect(comments).toHaveLength(0)
     })
   })
@@ -640,7 +642,7 @@ describe('createWorkspaceStore', () => {
           hasUncommittedChanges: vi.fn<(...args: any[]) => Promise<boolean>>().mockResolvedValue(false),
           checkMergeConflicts: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true }),
           pull: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true }),
-        } as any,
+        } as unknown as WorkspaceStoreDeps['git'],
       })
     }
 
@@ -688,7 +690,7 @@ describe('createWorkspaceStore', () => {
           readFile: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue('content'),
           writeFile: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue(undefined),
           searchFiles: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue([]),
-        } as any,
+        } as unknown as WorkspaceStoreDeps['filesystem'],
       })
     }
 
@@ -787,7 +789,7 @@ describe('createWorkspaceStore', () => {
       const disposeFns = [vi.fn<() => void>(), vi.fn<() => void>()]
       const terminalMocks = disposeFns.map((unsub) => ({
         terminal: { dispose: vi.fn<() => void>() },
-        tty: {} as any,
+        tty: {} as unknown as CachedTerminal['tty'],
         unsubscribeEvents: unsub,
         mountedHandler: null,
         stripScrollbackClear: false,
@@ -796,8 +798,8 @@ describe('createWorkspaceStore', () => {
         onExitUnmounted: vi.fn<(...args: any[]) => void>(),
       }))
 
-      store.getState().setCachedTerminal('tab-a', terminalMocks[0] as any)
-      store.getState().setCachedTerminal('tab-b', terminalMocks[1] as any)
+      store.getState().setCachedTerminal('tab-a', terminalMocks[0] as unknown as CachedTerminal)
+      store.getState().setCachedTerminal('tab-b', terminalMocks[1] as unknown as CachedTerminal)
       expect(store.getState().getCachedTerminal('tab-a')).not.toBeNull()
       expect(store.getState().getCachedTerminal('tab-b')).not.toBeNull()
 

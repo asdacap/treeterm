@@ -181,6 +181,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
       requestInFlight = false
 
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (!running) return
 
       if (dataVersion !== requestVersion) {
@@ -342,7 +343,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     ownTty.getState().write('\r')
   }
 
-  const store = createStore<AnalyzerState>()((set, _get) => ({
+  const store = createStore<AnalyzerState>()((set) => ({
     tabId,
     aiState: 'idle',
     analyzing: false,

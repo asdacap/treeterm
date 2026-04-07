@@ -132,6 +132,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   unregisterApplication: (id: string) => {
     set((state) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { [id]: _removed, ...rest } = state.applications
       return { applications: rest }
     })
@@ -155,6 +156,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   getDefaultApplication: (appId?: string) => {
     const apps = get().applications
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (appId && apps[appId]) {
       return apps[appId]
     }
@@ -285,6 +287,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const unsubSync = sessionApi.onSync((connectionId, session) => {
       console.log(`[App] Received session:sync from connection ${connectionId} with ${String(session.workspaces.length)} workspaces for session ${session.id}`)
       const entry = get().sessionStores[session.id]
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (!entry) return
       const storeConnId = entry.store.getState().connection?.id ?? 'local'
       if (storeConnId !== connectionId) {
@@ -323,7 +326,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const { activeView } = useNavigationStore.getState()
       const sessionId = activeView?.type === 'workspace' ? activeView.sessionId : null
       const sessionEntry = sessionId ? get().sessionStores[sessionId] : Object.values(get().sessionStores)[0]
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       const connStatus = sessionEntry?.store.getState().connection?.status
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (sessionEntry && connStatus !== 'connecting') {
         const { workspaces, addWorkspace, setActiveWorkspace } = sessionEntry.store.getState()
         const existingId = Object.entries(workspaces).find(
@@ -351,6 +356,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   disconnectSession: (sessionId: string) => {
     set((state) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { [sessionId]: _removed, ...remainingSessions } = state.sessionStores
       return { sessionStores: remainingSessions }
     })
@@ -376,6 +382,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     // Reuse existing store (created eagerly in startRemoteConnect) or create new one
     const existingEntry = get().sessionStores[connection.id]
     let store: StoreApi<SessionState>
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (existingEntry) {
       store = existingEntry.store
       // Update session ID and connection status on the existing store
@@ -383,6 +390,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       // Re-key from connection.id to session.id
       if (connection.id !== session.id) {
         set((state) => {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           const { [connection.id]: _removed, ...rest } = state.sessionStores
           return { sessionStores: { ...rest, [session.id]: { store } } }
         })
@@ -432,6 +440,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   removeSession: (id: string) => {
     set((state) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { [id]: _removed, ...rest } = state.sessionStores
       return { sessionStores: rest }
     })
@@ -448,6 +457,7 @@ function getOrCreateSession(
 ): StoreApi<SessionState> {
   const { sessionStores, windowUuid, git, filesystem, exec, runActions, sessionApi, terminal, llm, github } = get()
   const existing = sessionStores[sessionId]
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (existing) {
     console.log(`[renderer:app] getOrCreateSession: reusing existing session store for session=${sessionId}`)
     return existing.store

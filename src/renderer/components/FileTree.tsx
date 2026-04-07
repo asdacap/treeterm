@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useStore } from 'zustand'
 import type { FileEntry, WorkspaceStore } from '../types'
 import { useFilesystemApi } from '../hooks/useWorkspaceApis'
@@ -30,7 +30,7 @@ export function FileTree({
   expandedDirs,
   onSelectFile,
   onToggleDir
-}: FileTreeProps): JSX.Element {
+}: FileTreeProps): React.JSX.Element {
   const { workspace: wsData } = useStore(workspace)
   const workspacePath = wsData.path
   const filesystem = useFilesystemApi(workspace)
@@ -98,12 +98,14 @@ export function FileTree({
       let alreadyRequested = false
       setDirContents((prev) => {
         const existing = prev[dirPath]
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         if (existing && !existing.error) {
           alreadyRequested = true
           return prev
         }
         return { ...prev, [dirPath]: { entries: [], loading: true, error: null } }
       })
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (alreadyRequested) return
 
       try {
@@ -156,7 +158,7 @@ export function FileTree({
   }
 
   // Highlight matching text in filename
-  const highlightMatch = (name: string, query: string): JSX.Element => {
+  const highlightMatch = (name: string, query: string): React.JSX.Element => {
     if (!query.trim()) return <>{name}</>
 
     const lowerName = name.toLowerCase()
@@ -179,7 +181,7 @@ export function FileTree({
   }
 
   // Render a tree entry (file or directory)
-  const renderEntry = (entry: FileEntry, depth: number): JSX.Element => {
+  const renderEntry = (entry: FileEntry, depth: number): React.JSX.Element => {
     const isExpanded = expandedDirs.includes(entry.path)
     const isSelected = selectedPath === entry.path
     const dirState = dirContents[entry.path]
@@ -205,11 +207,13 @@ export function FileTree({
         </div>
         {entry.isDirectory && isExpanded && (
           <div className="file-tree-children">
+            {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition */}
             {dirState?.loading && (
               <div className="file-tree-item" style={{ paddingLeft: `${String((depth + 1) * 16 + 8)}px` }}>
                 <span className="file-tree-loading">Loading...</span>
               </div>
             )}
+            {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition */}
             {dirState?.error && (
               <div
                 className="file-tree-item file-tree-error"
@@ -218,6 +222,7 @@ export function FileTree({
                 <span>{dirState.error}</span>
               </div>
             )}
+            {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition */}
             {dirState?.entries.map((child) => renderEntry(child, depth + 1))}
           </div>
         )}
@@ -226,7 +231,7 @@ export function FileTree({
   }
 
   // Render a search result entry
-  const renderSearchResult = (entry: FileEntry): JSX.Element => {
+  const renderSearchResult = (entry: FileEntry): React.JSX.Element => {
     const isSelected = selectedPath === entry.path
 
     return (
@@ -310,16 +315,19 @@ export function FileTree({
       {/* Normal Tree View (shown when not searching) */}
       {!isSearching && (
         <>
+          {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition */}
           {rootState?.loading && (
             <div className="file-tree-item">
               <span className="file-tree-loading">Loading...</span>
             </div>
           )}
+          {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition */}
           {rootState?.error && (
             <div className="file-tree-item file-tree-error">
               <span>{rootState.error}</span>
             </div>
           )}
+          {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition */}
           {rootState?.entries.map((entry) => renderEntry(entry, 0))}
         </>
       )}
@@ -328,9 +336,9 @@ export function FileTree({
 }
 
 /** Triggers directory load on mount — renders nothing */
-function DirectoryLoader({ dirPath, loadDirectory }: { dirPath: string; loadDirectory: (path: string) => void }) {
+function DirectoryLoader({ dirPath, loadDirectory }: { dirPath: string; loadDirectory: (path: string) => Promise<void> }) {
   useEffect(() => {
-    loadDirectory(dirPath)
+    void loadDirectory(dirPath)
   }, [dirPath, loadDirectory])
 
   return null

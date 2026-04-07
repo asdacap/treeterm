@@ -562,6 +562,7 @@ describe('createAnalyzerStore', () => {
       // Simulate state change to safe_permission_requested
       store.setState({ aiState: 'safe_permission_requested' })
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(mock.ttyState.write).toHaveBeenCalledWith('\r')
 
       store.getState().stop()
@@ -579,6 +580,7 @@ describe('createAnalyzerStore', () => {
 
       store.setState({ aiState: 'safe_permission_requested' })
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(mock.ttyState.write).not.toHaveBeenCalled()
       store.getState().stop()
     })
@@ -596,6 +598,7 @@ describe('createAnalyzerStore', () => {
       store.getState().setAutoApprove(true)
       store.setState({ aiState: 'permission_request' })
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(mock.ttyState.write).not.toHaveBeenCalled()
       store.getState().stop()
     })

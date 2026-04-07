@@ -583,7 +583,7 @@ const preloadApi: PreloadApi = {
         scrollback: result.scrollback,
         unsubscribe: () => {
           sshOutputWatchCallbacks.delete(connectionId)
-          client.sshUnwatchOutput(connectionId).catch((_e: unknown) => {})
+          client.sshUnwatchOutput(connectionId).catch(() => {})
         }
       }
     },
@@ -594,7 +594,7 @@ const preloadApi: PreloadApi = {
         initial: result.initial,
         unsubscribe: () => {
           sshStatusWatchCallbacks.delete(connectionId)
-          client.sshUnwatchConnectionStatus(connectionId).catch((_e: unknown) => {})
+          client.sshUnwatchConnectionStatus(connectionId).catch(() => {})
         }
       }
     },
@@ -621,7 +621,7 @@ const preloadApi: PreloadApi = {
         scrollback: result.scrollback,
         unsubscribe: () => {
           portForwardOutputWatchCallbacks.delete(portForwardId)
-          client.sshUnwatchPortForwardOutput(portForwardId).catch((_e: unknown) => {})
+          client.sshUnwatchPortForwardOutput(portForwardId).catch(() => {})
         }
       }
     }

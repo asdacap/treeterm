@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useKeybindingStore } from '../store/keybinding'
 import { useSettingsStore } from '../store/settings'
 import type { Settings, Platform } from '../types'
@@ -71,7 +71,7 @@ function TimeoutProgress({ timeout, activatedAt }: { timeout: number; activatedA
   )
 }
 
-export default function KeybindingOverlay({ platform }: { platform: Platform }): JSX.Element | null {
+export default function KeybindingOverlay({ platform }: { platform: Platform }): React.JSX.Element | null {
   const { prefixState, activatedAt } = useKeybindingStore()
   const { settings } = useSettingsStore()
 

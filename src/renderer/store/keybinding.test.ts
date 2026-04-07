@@ -182,7 +182,9 @@ describe('useKeybindingStore', () => {
       const event = createKeyEvent({ key: 'b', ctrlKey: true })
 
       handleKeyDown(event)
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(event.preventDefault).toHaveBeenCalled()
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(event.stopPropagation).toHaveBeenCalled()
     })
 

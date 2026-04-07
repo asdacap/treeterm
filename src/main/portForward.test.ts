@@ -133,6 +133,7 @@ describe('PortForwardProcess', () => {
       expect(pf.status).toBe('error')
       expect(pf.toInfo()).toEqual(expect.objectContaining({
         status: 'error',
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         error: expect.stringContaining('exited (code 1)'),
       }))
     })
@@ -145,6 +146,7 @@ describe('PortForwardProcess', () => {
       expect(pf.status).toBe('error')
       expect(pf.toInfo()).toEqual(expect.objectContaining({
         status: 'error',
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         error: expect.stringContaining('ENOENT'),
       }))
     })

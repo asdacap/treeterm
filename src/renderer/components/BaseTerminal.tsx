@@ -186,6 +186,7 @@ export default function BaseTerminal({
       terminalRef.current = terminal
       ttyRef.current = tty
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       const { resize: rawResize } = tty.getState()
       const resize = (cols: number, rows: number) => {
         requestedSize = { cols, rows }

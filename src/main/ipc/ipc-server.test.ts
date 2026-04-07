@@ -13,6 +13,8 @@ vi.mock('electron', () => ({
   BrowserWindow: vi.fn<(...args: any[]) => any>()
 }))
 
+import type { BrowserWindow } from 'electron'
+import type { Session, ConnectionInfo, TTYSessionInfo } from '../../shared/types'
 import { IpcServer } from './ipc-server'
 
 describe('IpcServer', () => {
@@ -32,6 +34,7 @@ describe('IpcServer', () => {
 
     it('onPtyCreate wrapper forwards event and args to handler', async () => {
       const handler = vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('pty-123')
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       server.onPtyCreate(handler as any)
       const wrapper = mockHandle.mock.calls[0][1] as (...args: any[]) => Promise<string>
       const fakeEvent = { sender: {} }
@@ -66,6 +69,7 @@ describe('IpcServer', () => {
 
     it('onFsReadFile wrapper forwards args and returns result', async () => {
       const handler = vi.fn<(...args: any[]) => Promise<{ success: boolean }>>().mockResolvedValue({ success: true })
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       server.onFsReadFile(handler as any)
       const wrapper = mockHandle.mock.calls[0][1] as (...args: any[]) => Promise<{ success: boolean }>
       const result = await wrapper({}, '/ws', '/file.txt')
@@ -132,6 +136,7 @@ describe('IpcServer', () => {
       ['onSshUnwatchConnectionStatus', 'ssh:unwatchConnectionStatus'],
     ] as const)('%s registers handler on %s channel', (method, channel) => {
       const handler = vi.fn<(...args: any[]) => any>()
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
       ;(server as any)[method](handler)
       expect(mockHandle).toHaveBeenCalledWith(channel, expect.any(Function))
     })
@@ -145,8 +150,10 @@ describe('IpcServer', () => {
       ['onDialogSelectFolder', 'dialog:selectFolder'],
       ['onSandboxIsAvailable', 'sandbox:isAvailable'],
       ['onAppGetInitialWorkspace', 'app:getInitialWorkspace'],
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     ] as const)('%s wrapper forwards args to handler and returns result', async (method, _channel) => {
       const handler = vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('result')
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
       ;(server as any)[method](handler)
       const wrapper = mockHandle.mock.calls[0][1] as (...args: any[]) => Promise<string>
       const result = await wrapper({}, 'arg1', 'arg2')
@@ -158,8 +165,10 @@ describe('IpcServer', () => {
       ['onPtyCreate', 'pty:create'],
       ['onPtyAttach', 'pty:attach'],
       ['onLlmChatSend', 'llm:chat:send'],
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     ] as const)('%s wrapper forwards event and args to handler', async (method, _channel) => {
       const handler = vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('result')
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
       ;(server as any)[method](handler)
       const wrapper = mockHandle.mock.calls[0][1] as (...args: any[]) => Promise<string>
       const mockEvent = { sender: {} }
@@ -200,7 +209,7 @@ describe('IpcServer', () => {
   describe('event emitters (main → renderer)', () => {
     it('ptyEvent sends to window webContents with correct channel and args', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as any
+      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
       server.setWindow(mockWindow)
 
       const dataBytes = new TextEncoder().encode('hello-data')
@@ -210,7 +219,7 @@ describe('IpcServer', () => {
 
     it('ptyEvent sends exit to window webContents with correct channel and args', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as any
+      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
       server.setWindow(mockWindow)
 
       server.ptyEvent('pty-1', { type: 'exit', exitCode: 0 })
@@ -219,7 +228,7 @@ describe('IpcServer', () => {
 
     it('settingsOpen sends to window webContents with correct channel', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as any
+      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
       server.setWindow(mockWindow)
 
       server.settingsOpen()
@@ -228,7 +237,7 @@ describe('IpcServer', () => {
 
     it('appConfirmClose sends to window webContents', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as any
+      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
       server.setWindow(mockWindow)
 
       server.appConfirmClose()
@@ -237,17 +246,17 @@ describe('IpcServer', () => {
 
     it('sessionSync sends to window with correct args', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as any
+      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
       server.setWindow(mockWindow)
 
-      const sessionData = { id: 'session-1' }
-      server.sessionSync('local', sessionData as any)
+      const sessionData = { id: 'session-1' } as unknown as Session
+      server.sessionSync('local', sessionData)
       expect(mockSend).toHaveBeenCalledWith('session:sync', 'local', sessionData)
     })
 
     it('daemonDisconnected sends to window', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as any
+      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
       server.setWindow(mockWindow)
 
       server.daemonDisconnected()
@@ -256,35 +265,35 @@ describe('IpcServer', () => {
 
     it('appReady sends to window webContents', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as any
+      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
       server.setWindow(mockWindow)
 
-      server.appReady('uuid-1' as any)
+      server.appReady('uuid-1' as unknown as Session | null)
       expect(mockSend).toHaveBeenCalledWith('app:ready', 'uuid-1')
     })
 
     it('capsLockEvent sends to window webContents', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as any
+      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
       server.setWindow(mockWindow)
 
-      server.capsLockEvent(true as any)
+      server.capsLockEvent(true as unknown as { type: string; key: string; code: string })
       expect(mockSend).toHaveBeenCalledWith('capslock-event', true)
     })
 
     it('daemonSessions sends to window webContents', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as any
+      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
       server.setWindow(mockWindow)
 
-      const sessions = [{ id: 's1' }] as any
+      const sessions = [{ id: 's1' }] as unknown as TTYSessionInfo[]
       server.daemonSessions(sessions)
       expect(mockSend).toHaveBeenCalledWith('daemon:sessions', sessions)
     })
 
     it('activeProcessesOpen sends to window webContents', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as any
+      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
       server.setWindow(mockWindow)
 
       server.activeProcessesOpen()
@@ -293,17 +302,17 @@ describe('IpcServer', () => {
 
     it('sshConnectionStatus sends to window webContents', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as any
+      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
       server.setWindow(mockWindow)
 
-      const info = { id: 'conn-1', status: 'connected' } as any
+      const info = { id: 'conn-1', status: 'connected' } as unknown as ConnectionInfo
       server.sshConnectionStatus(info)
       expect(mockSend).toHaveBeenCalledWith('ssh:connectionStatus', info)
     })
 
     it('sshOutput sends to window webContents', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as any
+      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
       server.setWindow(mockWindow)
 
       server.sshOutput('conn-1', 'log line')
@@ -312,7 +321,7 @@ describe('IpcServer', () => {
 
     it('gitOutput sends to window webContents', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as any
+      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
       server.setWindow(mockWindow)
 
       server.gitOutput('op-1', 'Preparing worktree')
@@ -323,7 +332,7 @@ describe('IpcServer', () => {
   describe('setWindow', () => {
     it('sets the window for event emission', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as any
+      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
       server.setWindow(mockWindow)
 
       server.ptyEvent('pty-1', { type: 'data', data: new TextEncoder().encode('data') })

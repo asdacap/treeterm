@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import React, { useState } from 'react'
 import type { DiffFile, UncommittedFile } from '../types'
 
 interface TreeNode {
@@ -107,7 +107,7 @@ interface CommittedTreeProps {
   files: DiffFile[]
   selectedFile: string | null
   onSelectFile: (path: string) => void
-  getStatusIcon: (status: DiffFile['status']) => JSX.Element
+  getStatusIcon: (status: DiffFile['status']) => React.JSX.Element
 }
 
 export function CommittedDiffFileTree({
@@ -115,7 +115,7 @@ export function CommittedDiffFileTree({
   selectedFile,
   onSelectFile,
   getStatusIcon,
-}: CommittedTreeProps): JSX.Element {
+}: CommittedTreeProps): React.JSX.Element {
   const tree = buildTree(files)
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => getAllDirPaths(tree))
 
@@ -131,7 +131,7 @@ export function CommittedDiffFileTree({
     })
   }
 
-  function renderNode(node: TreeNode, depth: number): JSX.Element {
+  function renderNode(node: TreeNode, depth: number): React.JSX.Element {
     if (node.file !== null) {
       const file = node.file as DiffFile
       return (
@@ -176,7 +176,7 @@ interface UncommittedTreeProps {
   files: UncommittedFile[]
   selectedFile: UncommittedFile | null
   onSelectFile: (file: UncommittedFile) => void
-  getStatusIcon: (status: UncommittedFile['status']) => JSX.Element
+  getStatusIcon: (status: UncommittedFile['status']) => React.JSX.Element
   onAction: (path: string) => void
   actionLabel: string
   stagingInProgress: boolean
@@ -190,7 +190,7 @@ export function UncommittedDiffFileTree({
   onAction,
   actionLabel,
   stagingInProgress,
-}: UncommittedTreeProps): JSX.Element {
+}: UncommittedTreeProps): React.JSX.Element {
   const tree = buildTree(files)
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => getAllDirPaths(tree))
 
@@ -206,7 +206,7 @@ export function UncommittedDiffFileTree({
     })
   }
 
-  function renderNode(node: TreeNode, depth: number): JSX.Element {
+  function renderNode(node: TreeNode, depth: number): React.JSX.Element {
     if (node.file !== null) {
       const file = node.file as UncommittedFile
       return (

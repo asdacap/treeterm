@@ -21,6 +21,7 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, co
   const [selectedAppId, setSelectedAppId] = useState('')
   const [showBrowser, setShowBrowser] = useState(false)
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   const recentDirectories = useRecentDirectoriesStore(s => s.directories[connectionKey]) ?? EMPTY_RECENT
   const addRecent = useRecentDirectoriesStore(s => s.addRecent)
 

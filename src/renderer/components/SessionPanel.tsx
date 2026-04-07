@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import React, { useState, useCallback } from 'react'
 import type { ReactNode } from 'react'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
@@ -29,7 +29,7 @@ export default function SessionPanel({
   sessionId,
   sessionStore,
   selectFolder,
-}: SessionPanelProps): JSX.Element {
+}: SessionPanelProps): React.JSX.Element {
   const connection = useStore(sessionStore, s => s.connection)
   const {
     workspaces,
@@ -86,6 +86,7 @@ export default function SessionPanel({
   } | null>(null)
 
   // Session name editing
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   const displayName = useSessionNamesStore(s => s.names[sessionId]?.name)
   const setSessionName = useSessionNamesStore(s => s.setName)
   const removeSessionName = useSessionNamesStore(s => s.removeName)
@@ -160,6 +161,7 @@ export default function SessionPanel({
   const handleCreateChild = (parentId: string) => {
     closeContextMenu()
     const entry = workspaces[parentId]
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (entry && (entry.status === 'loaded' || entry.status === 'operation-error')) {
       const behindCount = entry.store.getState().gitController.getState().behindCount
       if (behindCount > 0) {
@@ -178,6 +180,7 @@ export default function SessionPanel({
 
   const handleQuickFork = async (wsId: string) => {
     const entry = workspaces[wsId]
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (entry && (entry.status === 'loaded' || entry.status === 'operation-error')) {
       const behindCount = entry.store.getState().gitController.getState().behindCount
       if (behindCount > 0) {
@@ -269,6 +272,7 @@ export default function SessionPanel({
   const handleRemove = async (id: string) => {
     closeContextMenu()
     const entry = workspaces[id]
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
     const ws = entry.data
 
@@ -291,6 +295,7 @@ export default function SessionPanel({
   const handleOpenSettings = (workspaceId: string) => {
     closeContextMenu()
     const entry = workspaces[workspaceId]
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (entry && (entry.status === 'loaded' || entry.status === 'operation-error')) {
       entry.store.getState().addTab('workspace-settings')
     }
@@ -343,6 +348,7 @@ export default function SessionPanel({
     // Only allow drop on same-parent siblings
     const dragEntry = workspaces[dragState.dragId]
     const overEntry = workspaces[id]
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (!dragEntry || !overEntry) return
     if (dragEntry.status !== 'loaded' && dragEntry.status !== 'operation-error') return
     if (overEntry.status !== 'loaded' && overEntry.status !== 'operation-error') return
@@ -370,6 +376,7 @@ export default function SessionPanel({
 
   const renderWorkspace = (id: string, depth: number = 0): ReactNode => {
     const entry = workspaces[id]
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (!entry) return null
 
     const children = getChildren(id)
@@ -402,18 +409,22 @@ export default function SessionPanel({
     )
   }
 
-  const statusIcon: Record<ConnectionStatus, () => ReactNode> = {
-    connecting: () => <Loader2 size={14} className="spinning" />,
-    connected: () => null,
-    disconnected: () => <AlertCircle size={14} style={{ color: '#f44336' }} />,
-    error: () => <AlertCircle size={14} style={{ color: '#f44336' }} />,
+  const renderStatusIcon = (status: ConnectionStatus): ReactNode => {
+    switch (status) {
+      case 'connecting': return <Loader2 size={14} className="spinning" />
+      case 'connected': return null
+      case 'disconnected': return <AlertCircle size={14} style={{ color: '#f44336' }} />
+      case 'error': return <AlertCircle size={14} style={{ color: '#f44336' }} />
+    }
   }
 
-  const statusContent: Record<ConnectionStatus, () => ReactNode> = {
-    connecting: () => <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>Connecting...</div>,
-    connected: () => null,
-    disconnected: () => <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{(connection && 'error' in connection && connection.error) || 'Disconnected'}</div>,
-    error: () => <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{connection && 'error' in connection && connection.error}</div>,
+  const renderStatusContent = (status: ConnectionStatus): ReactNode => {
+    switch (status) {
+      case 'connecting': return <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>Connecting...</div>
+      case 'connected': return null
+      case 'disconnected': return <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{(connection && 'error' in connection && connection.error) || 'Disconnected'}</div>
+      case 'error': return <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{connection && 'error' in connection && connection.error}</div>
+    }
   }
 
   return (
@@ -445,7 +456,7 @@ export default function SessionPanel({
             onDoubleClick={(e) => { e.stopPropagation(); handleStartEditName() }}
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            {connection && statusIcon[connection.status]()}
+            {connection && renderStatusIcon(connection.status)}
             {displayName || sessionId}
           </span>
         )}
@@ -462,8 +473,8 @@ export default function SessionPanel({
 
       {!isSessionCollapsed && (
         <div className="tree-list">
-          {connection && statusContent[connection.status]() ? (
-            statusContent[connection.status]()
+          {connection && renderStatusContent(connection.status) ? (
+            renderStatusContent(connection.status)
           ) : rootWorkspaceIds.length === 0 ? (
             <div className="tree-empty">No workspaces. Click + to add one.</div>
           ) : (
@@ -550,7 +561,7 @@ function WorkspaceTreeItem({
   onToggleExpand, onClick, onQuickFork, onCreateChild, onRemove, onOpenSettings,
   children, renderChild,
   isDragging, dragOverPosition, onDragStart, onDragOver, onDrop, onDragEnd,
-}: WorkspaceTreeItemProps): JSX.Element {
+}: WorkspaceTreeItemProps): React.JSX.Element {
   const openContextMenu = useContextMenuStore((s) => s.open)
   const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
   const menuPosition = useContextMenuStore((s) => s.position)
@@ -580,7 +591,7 @@ function WorkspaceTreeItem({
         style={{ paddingLeft: 4 + depth * 4 }}
         onClick={() => { onClick(id); }}
         onContextMenu={handleContextMenu}
-        title={ws?.metadata?.description ? `${ws.path}\n\n${ws.metadata.description}` : ws?.path}
+        title={ws?.metadata.description ? `${ws.path}\n\n${ws.metadata.description}` : ws?.path}
         draggable={ws !== undefined}
         onDragStart={(e) => { e.stopPropagation(); onDragStart(id) }}
         onDragOver={(e) => { e.stopPropagation(); onDragOver(e, id) }}
@@ -630,7 +641,7 @@ function WorkspaceTreeItem({
             Open Existing Branch
           </div>
         )}
-        {ws?.isWorktree && ws?.parentId && (
+        {ws?.isWorktree && ws.parentId && (
           <div className="context-menu-item" onClick={() => { onRemove(id); }}>
             Review & Merge
           </div>
@@ -653,7 +664,7 @@ interface CollapsedSessionPanelProps {
   sessionStore: StoreApi<SessionState>
 }
 
-export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSessionPanelProps): JSX.Element {
+export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSessionPanelProps): React.JSX.Element {
   const { workspaces, activeWorkspaceId, setActiveWorkspace } = useStore(sessionStore)
   const { activeView, setActiveView } = useNavigationStore()
   const isActiveSession = activeView?.type === 'workspace' && activeView.sessionId === sessionId
@@ -683,6 +694,7 @@ export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSess
 
   const renderIcon = (id: string): ReactNode => {
     const entry = workspaces[id]
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (!entry) return null
 
     const ws = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined

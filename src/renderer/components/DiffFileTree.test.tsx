@@ -256,7 +256,7 @@ describe('UncommittedDiffFileTree', () => {
         stagingInProgress={true}
       />
     )
-    expect((screen.getByText('Stage') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText<HTMLButtonElement>('Stage').disabled).toBe(true)
   })
 
   it('action button click does not trigger onSelectFile', () => {

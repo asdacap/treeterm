@@ -25,7 +25,7 @@ vi.mock('./windowManager', () => ({
 }))
 
 import { Menu, app, shell, BrowserWindow } from 'electron'
-import { windowManager } from './windowManager'
+import { windowManager, type WindowInfo } from './windowManager'
 import { createApplicationMenu } from './menu'
 
 type MenuItem = {
@@ -125,9 +125,9 @@ describe('menu', () => {
     it('uses focused window ipcServer when available', () => {
       const focusedServer = { settingsOpen: vi.fn(), activeProcessesOpen: vi.fn() }
       // eslint-disable-next-line @typescript-eslint/unbound-method
-      vi.mocked(BrowserWindow.getFocusedWindow).mockReturnValue({ id: 1 } as any)
+      vi.mocked(BrowserWindow.getFocusedWindow).mockReturnValue({ id: 1 } as unknown as BrowserWindow)
       // eslint-disable-next-line @typescript-eslint/unbound-method
-      vi.mocked(windowManager.getWindow).mockReturnValue({ ipcServer: focusedServer } as any)
+      vi.mocked(windowManager.getWindow).mockReturnValue({ ipcServer: focusedServer } as unknown as WindowInfo)
 
       Object.defineProperty(process, 'platform', { value: 'darwin' })
       createApplicationMenu(null, mockServer as unknown as IpcServer)

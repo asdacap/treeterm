@@ -301,7 +301,7 @@ export interface IpcRequests {
   }
   sshDisconnect: {
     params: [connectionId: string]
-    result: void
+    result: undefined
   }
   sshListConnections: {
     params: []
@@ -309,7 +309,7 @@ export interface IpcRequests {
   }
   sshSaveConnection: {
     params: [config: SSHConnectionConfig]
-    result: void
+    result: undefined
   }
   sshGetSavedConnections: {
     params: []
@@ -317,7 +317,7 @@ export interface IpcRequests {
   }
   sshRemoveSavedConnection: {
     params: [id: string]
-    result: void
+    result: undefined
   }
   sshGetOutput: {
     params: [connectionId: string]
@@ -329,7 +329,7 @@ export interface IpcRequests {
   }
   sshUnwatchOutput: {
     params: [connectionId: string]
-    result: void
+    result: undefined
   }
   sshWatchConnectionStatus: {
     params: [connectionId: string]
@@ -337,7 +337,7 @@ export interface IpcRequests {
   }
   sshUnwatchConnectionStatus: {
     params: [connectionId: string]
-    result: void
+    result: undefined
   }
   sshAddPortForward: {
     params: [config: PortForwardConfig]
@@ -345,7 +345,7 @@ export interface IpcRequests {
   }
   sshRemovePortForward: {
     params: [portForwardId: string]
-    result: void
+    result: undefined
   }
   sshListPortForwards: {
     params: [connectionId: string]
@@ -357,13 +357,13 @@ export interface IpcRequests {
   }
   sshUnwatchPortForwardOutput: {
     params: [portForwardId: string]
-    result: void
+    result: undefined
   }
 
   // LLM operations
   llmChatSend: {
     params: [requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string; reasoning: ReasoningEffort }]
-    result: void
+    result: undefined
   }
   llmAnalyzeTerminal: {
     params: [buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; reasoningEffort: ReasoningEffort; safePaths: string[] }]
@@ -371,7 +371,7 @@ export interface IpcRequests {
   }
   llmClearAnalyzerCache: {
     params: []
-    result: void
+    result: undefined
   }
   llmGenerateTitle: {
     params: [buffer: string, settings: { baseUrl: string; apiKey: string; model: string; titleSystemPrompt: string; reasoningEffort: ReasoningEffort }]

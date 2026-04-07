@@ -30,11 +30,13 @@ export const useSessionNamesStore = create<SessionNamesState>()(
       },
       removeName: (sessionId: string) => {
         set((state) => {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           const { [sessionId]: _removed, ...rest } = state.names
           return { names: rest }
         })
       },
       getName: (sessionId: string) => {
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         return get().names[sessionId]?.name
       },
       cleanupStale: () => {

@@ -330,7 +330,7 @@ export default function ReviewBrowser({
       )
       if (result.success) {
         setConflictInfo(result.conflicts)
-      } else if (!result.success) {
+      } else {
         setConflictError(result.error || 'Failed to check for conflicts')
       }
     } catch (err) {
@@ -518,7 +518,7 @@ export default function ReviewBrowser({
     try {
       const result = await mergeAndRemove(squash)
       if (!result.success) {
-        alert(`Merge failed: ${result.error}`)
+        alert(`Merge failed: ${String(result.error)}`)
         return
       }
     } catch (err) {
@@ -559,7 +559,7 @@ export default function ReviewBrowser({
     try {
       const result = await mergeAndKeep(squash)
       if (!result.success) {
-        alert(`Merge failed: ${result.error}`)
+        alert(`Merge failed: ${String(result.error)}`)
         setIsProcessing(false)
         setProcessingAction(null)
         return
@@ -585,7 +585,7 @@ export default function ReviewBrowser({
     try {
       const result = await closeAndClean()
       if (!result.success) {
-        alert(`Close failed: ${result.error}`)
+        alert(`Close failed: ${String(result.error)}`)
       }
     } catch (err) {
       alert(`Close failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
