@@ -10,9 +10,10 @@ import { useSessionNamesStore } from '../store/sessionNames'
 import type { PortForwardConfig, PortForwardInfo } from '../types'
 import PortForwardDialog from './PortForwardDialog'
 import JsonViewer from './JsonViewer'
+import SystemMonitor from './SystemMonitor'
 
 type TabId = 'info' | 'ssh' | 'json'
-type SshSubTab = 'bootstrap' | 'tunnel' | 'portforwards'
+type SshSubTab = 'bootstrap' | 'tunnel' | 'portforwards' | 'monitor'
 
 const BOOTSTRAP_PREFIXES = ['[bootstrap]', '[bootstrap:err]', '[ssh]', '[start]', '[start:err]']
 const TUNNEL_PREFIXES = ['[tunnel]', '[tunnel:err]']
@@ -60,6 +61,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
   const connectionError = (connection?.status === 'error' || connection?.status === 'disconnected') ? connection.error : undefined
 
   const ssh = useAppStore(s => s.ssh)
+  const exec = useAppStore(s => s.exec)
   const disconnectSession = useAppStore(s => s.disconnectSession)
   const displayName = useSessionNamesStore(s => s.names.get(sessionId)?.name ?? sessionId)
 
@@ -175,7 +177,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
 
   // SSH sub-tabs: Bootstrap + Tunnel always, Port Forwards when connected
   const sshSubTabs: { id: SshSubTab; label: string }[] = isConnected
-    ? [{ id: 'bootstrap', label: 'Bootstrap' }, { id: 'tunnel', label: 'Tunnel' }, { id: 'portforwards', label: 'Port Forwards' }]
+    ? [{ id: 'bootstrap', label: 'Bootstrap' }, { id: 'tunnel', label: 'Tunnel' }, { id: 'portforwards', label: 'Port Forwards' }, { id: 'monitor', label: 'Monitor' }]
     : [{ id: 'bootstrap', label: 'Bootstrap' }, { id: 'tunnel', label: 'Tunnel' }]
 
   const sessionData = {
@@ -316,6 +318,8 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
             ))
           )}
         </div>
+      ) : sshSubTab === 'monitor' && connection ? (
+        <SystemMonitor connectionId={connection.id} exec={exec} />
       ) : (
         <div className="ssh-pane-output">
           {portForwards.length === 0 ? (

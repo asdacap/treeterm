@@ -5863,6 +5863,180 @@ body,
   font-family: monospace;
 }
 
+/* System Monitor */
+.system-monitor {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  font-size: 12px;
+}
+
+.system-monitor-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px;
+  color: var(--text-secondary);
+}
+
+.system-monitor-error {
+  padding: 12px;
+}
+
+.system-monitor-error-text {
+  color: #f44336;
+  font-family: monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.system-monitor-retry {
+  margin-top: 8px;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.system-monitor-retry:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.system-monitor-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.system-monitor-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+
+.system-monitor-gauge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: monospace;
+}
+
+.system-monitor-gauge-label {
+  width: 36px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.system-monitor-gauge-bar {
+  flex: 1;
+  height: 14px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+  min-width: 60px;
+}
+
+.system-monitor-gauge-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.system-monitor-gauge-value {
+  width: 48px;
+  text-align: right;
+  color: var(--text-primary);
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.system-monitor-gauge-detail {
+  color: var(--text-secondary);
+  font-size: 10px;
+  flex-shrink: 0;
+  min-width: 100px;
+}
+
+.system-monitor-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.system-monitor-stat {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+
+.system-monitor-stat-label {
+  color: var(--text-secondary);
+  font-size: 10px;
+  margin-bottom: 3px;
+}
+
+.system-monitor-stat-value {
+  color: var(--text-primary);
+  font-family: monospace;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.system-monitor-processes {
+  font-family: monospace;
+  font-size: 11px;
+}
+
+.system-monitor-processes-header {
+  display: grid;
+  grid-template-columns: 56px 72px 52px 52px 1fr;
+  gap: 4px;
+  padding: 4px 0;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+  font-weight: 600;
+  font-size: 10px;
+}
+
+.system-monitor-process-row {
+  display: grid;
+  grid-template-columns: 56px 72px 52px 52px 1fr;
+  gap: 4px;
+  padding: 3px 0;
+  color: var(--text-primary);
+}
+
+.system-monitor-process-row:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.system-monitor-process-cmd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.system-monitor-timestamp {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-align: right;
+  padding-top: 4px;
+}
+
 /* Chat Application */
 .chat-container {
   display: flex;
