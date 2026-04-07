@@ -10,7 +10,7 @@ TreeTerm uses a three-layer architecture connected by IPC and gRPC:
 
 - **Renderer** (React) — UI components, Zustand state, thin orchestration layer
 - **Main** (Electron) — High-level business logic, Git operations, IPC bridge, gRPC client
-- **Daemon** (persistent process) — Low-level primitives: PTY, exec, file I/O, session persistence
+- **Daemon** (Rust, persistent process) — Low-level primitives: PTY, exec, file I/O, session persistence
 
 Communication: Renderer ↔ Main via Electron IPC; Main ↔ Daemon via gRPC over Unix socket.
 
@@ -23,21 +23,27 @@ The daemon survives app restarts — terminal sessions and state persist when El
 - **Git Integration** - Full Git support including worktree management, merging with optional squashing, conflict detection, and diff viewing
 - **Built-in Applications**:
   - **Terminal** - Full PTY support with xterm.js, run in the persistent daemon
-  - **Terminal Variants** - Custom terminal instances with configurable startup commands
+  - **Custom Runner** - Custom terminal instances with configurable startup commands
   - **Filesystem** - File browser and viewer
-  - **Editor** - Monaco-based code editor with vim mode support
+  - **Editor** - Monaco-based code editor with vim mode, go-to-definition via grep-based search
   - **AI Harness** - Integration with configurable AI CLI tools (Claude is the default)
   - **Review** - Review and merge changes from parent workspaces with collapsible diff tree view
   - **Chat** - Built-in LLM chat with configurable model, reasoning, and effort level settings
-  - **System Prompt Debugger** - Debug and inspect AI system prompts with model/reasoning/timing controls
-- **SSH Connections** - Connect to remote machines with session panel, connection info tab, and saved connection deduplication
+  - **Comments** - Comment display and management
+  - **Terminal Analyzer Debugger** - Debug and inspect AI system prompts with model/reasoning/timing controls
+  - **Analyzer History** - Browse past terminal analyzer results
+  - **Workspace Settings** - Per-workspace configuration
+- **SSH Connections** - Connect to remote machines with session panel, system monitor, remote directory browser, port forwarding with persistence, and connected session indicator
 - **Terminal Analyzer** - AI-powered terminal state estimation that syncs activity state from terminal buffer content
 - **Auto Workspace Naming** - Automatically generate workspace titles and descriptions
 - **Squash Merge** - Optional squash merge via dropdown on the merge button
-- **Daemon Persistence** - Terminal sessions survive app restarts via a background daemon process
+- **Daemon Persistence** - Terminal sessions survive app restarts via a background Rust daemon process
 - **Process Sandboxing** - Optional sandboxing with macOS sandbox-exec and Linux Bubblewrap
 - **Prefix Mode Keybindings** - tmux-style prefix key system for workspace and tab navigation
 - **Activity State Tracking** - Real-time indicators showing if applications are idle, working, or waiting for input, with AI-powered analysis
+- **Drag-and-Drop Workspace Reordering** - Reorder workspaces in the sidebar with drag and drop, persisted across sessions
+- **Collapsible Sidebar** - Collapse the left panel to a compact icon rail
+- **Collapsible Session Panels** - Collapse/expand workspace list per session in the sidebar
 - **Status Bar** - Bottom status bar with auto-approve safe permissions toggle
 - **Persistent State** - Workspaces and tabs persist across sessions
 
@@ -115,12 +121,15 @@ treeterm --help        # Show help
 ## Project Structure
 
 ```
+daemon-rs/              # Rust daemon (persistent process)
+├── crates/
+│   ├── treeterm-proto/ # Generated gRPC stubs from treeterm.proto
+│   └── treeterm-daemon/# Daemon logic + binary (PTY, exec, filesystem, sessions)
 src/
-├── daemon/           # Persistent daemon process (gRPC server, PTY, filesystem, exec, sessions)
 ├── main/             # Electron main process (git, IPC bridge, gRPC client, settings)
 ├── preload/          # Electron context bridge
 ├── renderer/         # React UI (components, Zustand stores, hooks)
-├── applications/     # Application type definitions (terminal, aiHarness, editor, filesystem, review, chat, comments, terminalAnalyzerDebugger)
+├── applications/     # Application type definitions (terminal, aiHarness, editor, filesystem, review, chat, comments, terminalAnalyzerDebugger, analyzerHistory, customRunner, workspaceSettings)
 ├── proto/            # Protobuf definitions (treeterm.proto)
 ├── generated/        # Auto-generated protobuf TypeScript
 └── shared/           # Shared types (IPC types, common types)
@@ -143,11 +152,11 @@ Settings are stored in the Electron userData directory:
 | Terminal | cursorStyle | block |
 | Terminal | cursorBlink | true |
 | Terminal | showRawChars | false |
-| Terminal | startByDefault | true |
 | Terminal | instances | [] (custom terminal variants) |
 | Sandbox | enabledByDefault | false |
 | Sandbox | allowNetworkByDefault | true |
 | AI Harness | instances | [{id: claude, command: claude, ...}] |
+| Custom Runner | instances | [] |
 | Appearance | theme | dark |
 | Prefix Mode | enabled | true |
 | Prefix Mode | prefixKey | Control+B |
@@ -158,18 +167,22 @@ Settings are stored in the Electron userData directory:
 | Keybindings | prevTab | p |
 | Keybindings | openSettings | , |
 | Keybindings | workspaceFocus | w |
-| Daemon | enabled | true |
-| Daemon | scrollbackLimit | 10000 |
+| Daemon | scrollbackLines | 10000 |
+| Daemon | mergeThreshold | 51200 |
+| Daemon | compactedLimit | 1048576 |
 | SSH | savedConnections | [] |
 | LLM | baseUrl | https://openrouter.ai/api/v1 |
 | LLM | apiKey | (empty) |
 | LLM | model | gpt-4o |
 | Terminal Analyzer | model | openai/gpt-oss-safeguard-20b |
-| Terminal Analyzer | reasoningEffort | off |
+| Terminal Analyzer | reasoningEffort | low |
 | Terminal Analyzer | bufferLines | 30 |
 | Terminal Analyzer | safePaths | [/tmp] |
+| GitHub | pat | (empty) |
+| GitHub | autodetectViaGh | true |
 | Global | globalDefaultApplicationId | terminal |
 | Global | recentDirectories | [] |
+| Debug | showBadge | false |
 
 ### Keybindings
 
@@ -195,7 +208,7 @@ All keybindings are customizable in settings.
 - **TypeScript** - Type-safe language
 - **Zustand** - State management
 - **xterm.js** - Terminal emulation
-- **node-pty** - Pseudo-terminal creation (runs in the daemon)
+- **forkpty** - Pseudo-terminal creation (in the Rust daemon via libc)
 - **@grpc/grpc-js** + **ts-proto** - gRPC communication between Main and Daemon
 - **Monaco Editor** - Code editor with vim mode support (monaco-vim)
 - **pino** - Structured logging
@@ -203,6 +216,7 @@ All keybindings are customizable in settings.
 - **OpenAI SDK** - Speech-to-text via Whisper API
 - **tinykeys** - Keybinding management
 - **react-markdown** - Markdown rendering
+- **@aptre/flex-layout** - Flexible panel layout
 - **electron-vite** - Build tooling
 - **Vitest** - Unit and integration tests
 - **Playwright** - End-to-end tests
