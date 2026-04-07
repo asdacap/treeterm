@@ -146,7 +146,7 @@ export class PortForwardProcess {
       '-o', 'StrictHostKeyChecking=accept-new',
       '-o', 'BatchMode=yes',
       '-o', 'ExitOnForwardFailure=yes',
-      '-o', 'ServerAliveInterval=30',
+      '-o', 'ServerAliveInterval=10',
       '-o', 'ServerAliveCountMax=3',
       '-p', String(port),
     ]

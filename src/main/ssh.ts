@@ -416,7 +416,7 @@ export class SSHTunnel {
     sshArgs.push(
       '-L', `${this.localSocketPath}:${remoteSocketPath}`,
       '-o', 'ExitOnForwardFailure=yes',
-      '-o', 'ServerAliveInterval=30',
+      '-o', 'ServerAliveInterval=10',
       '-o', 'ServerAliveCountMax=3',
       // Keep connection alive with a shell (no -N so we can see output)
       'cat' // Simple command that keeps the connection open

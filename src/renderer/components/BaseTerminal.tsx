@@ -147,8 +147,8 @@ export default function BaseTerminal({
   const ttyRef = useRef<Tty | null>(null)
   const [overlay, setOverlay] = useState<{ message: string; type: 'info' | 'error' } | null>(null)
   const [loading, setLoading] = useState(true)
-  const [scrollPosition, setScrollPosition] = useState<ScrollPosition>(ScrollPosition.Bottom)
-  const scrollPositionRef = useRef<ScrollPosition>(ScrollPosition.Bottom)
+  const [scrollPosition, setScrollPosition] = useState(ScrollPosition.Bottom)
+  const scrollPositionRef = useRef(ScrollPosition.Bottom)
   scrollPositionRef.current = scrollPosition
   const [isAlternateScreen, setIsAlternateScreen] = useState(false)
   const [sizeMismatch, setSizeMismatch] = useState<{ requested: { cols: number; rows: number }; actual: { cols: number; rows: number } } | null>(null)
