@@ -3,7 +3,7 @@ import { useSessionNamesStore } from './sessionNames'
 
 describe('SessionNamesStore', () => {
   beforeEach(() => {
-    useSessionNamesStore.setState({ names: {} })
+    useSessionNamesStore.setState({ names: new Map() })
     vi.useFakeTimers()
   })
 
@@ -40,7 +40,7 @@ describe('SessionNamesStore', () => {
 
     it('does nothing for non-existent session', () => {
       useSessionNamesStore.getState().removeName('nonexistent')
-      expect(useSessionNamesStore.getState().names).toEqual({})
+      expect(useSessionNamesStore.getState().names).toEqual(new Map())
     })
   })
 

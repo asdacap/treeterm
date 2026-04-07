@@ -197,7 +197,7 @@ describe('SettingsStore', () => {
       await new Promise(resolve => setTimeout(resolve, 10))
       
       expect(mockSaveSettings).toHaveBeenCalled()
-      const savedSettings = mockSaveSettings.mock.calls[0][0] as import('../types').Settings
+      const savedSettings = mockSaveSettings.mock.calls[0]![0] as import('../types').Settings
       expect(savedSettings.terminal.fontSize).toBe(20)
     })
 
@@ -220,7 +220,7 @@ describe('SettingsStore', () => {
       // Wait for async save
       await new Promise(resolve => setTimeout(resolve, 10))
       
-      const savedSettings = mockSaveSettings.mock.calls[0][0] as import('../types').Settings
+      const savedSettings = mockSaveSettings.mock.calls[0]![0] as import('../types').Settings
       expect(savedSettings.terminal.fontFamily).toBe('Menlo, Monaco, Consolas, monospace')
       expect(savedSettings.terminal.fontSize).toBe(20)
     })

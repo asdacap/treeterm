@@ -44,7 +44,7 @@ describe('filesystem', () => {
       mockDaemonReadDirectory.mockResolvedValue(expected)
 
       registerFilesystemHandlers(mockServer as unknown as IpcServer, mockDaemonClient as unknown as GrpcDaemonClient)
-      const handler = mockServer.onFsReadDirectory.mock.calls[0][0] as (...args: any[]) => Promise<{ success: boolean; contents?: any; error?: string }>
+      const handler = mockServer.onFsReadDirectory.mock.calls[0]![0] as (...args: any[]) => Promise<{ success: boolean; contents?: any; error?: string }>
 
       const result = await handler('/workspace', '/workspace')
 
@@ -56,7 +56,7 @@ describe('filesystem', () => {
       mockDaemonReadDirectory.mockRejectedValue(new Error('Connection failed'))
 
       registerFilesystemHandlers(mockServer as unknown as IpcServer, mockDaemonClient as unknown as GrpcDaemonClient)
-      const handler = mockServer.onFsReadDirectory.mock.calls[0][0] as (...args: any[]) => Promise<{ success: boolean; error?: string }>
+      const handler = mockServer.onFsReadDirectory.mock.calls[0]![0] as (...args: any[]) => Promise<{ success: boolean; error?: string }>
 
       const result = await handler('/workspace', '/workspace')
 
@@ -74,7 +74,7 @@ describe('filesystem', () => {
       mockDaemonReadFile.mockResolvedValue(expected)
 
       registerFilesystemHandlers(mockServer as unknown as IpcServer, mockDaemonClient as unknown as GrpcDaemonClient)
-      const handler = mockServer.onFsReadFile.mock.calls[0][0] as (...args: any[]) => Promise<{ success: boolean; file?: any; error?: string }>
+      const handler = mockServer.onFsReadFile.mock.calls[0]![0] as (...args: any[]) => Promise<{ success: boolean; file?: any; error?: string }>
 
       const result = await handler('/workspace', '/workspace/test.ts')
 
@@ -86,7 +86,7 @@ describe('filesystem', () => {
       mockDaemonReadFile.mockRejectedValue(new Error('File not found'))
 
       registerFilesystemHandlers(mockServer as unknown as IpcServer, mockDaemonClient as unknown as GrpcDaemonClient)
-      const handler = mockServer.onFsReadFile.mock.calls[0][0] as (...args: any[]) => Promise<{ success: boolean; error?: string }>
+      const handler = mockServer.onFsReadFile.mock.calls[0]![0] as (...args: any[]) => Promise<{ success: boolean; error?: string }>
 
       const result = await handler('/workspace', '/workspace/missing.txt')
 
@@ -100,7 +100,7 @@ describe('filesystem', () => {
       mockDaemonWriteFile.mockResolvedValue({ success: true })
 
       registerFilesystemHandlers(mockServer as unknown as IpcServer, mockDaemonClient as unknown as GrpcDaemonClient)
-      const handler = mockServer.onFsWriteFile.mock.calls[0][0] as (...args: any[]) => Promise<{ success: boolean; error?: string }>
+      const handler = mockServer.onFsWriteFile.mock.calls[0]![0] as (...args: any[]) => Promise<{ success: boolean; error?: string }>
 
       const result = await handler('/workspace', '/workspace/test.txt', 'new content')
 
@@ -112,7 +112,7 @@ describe('filesystem', () => {
       mockDaemonWriteFile.mockRejectedValue(new Error('Permission denied'))
 
       registerFilesystemHandlers(mockServer as unknown as IpcServer, mockDaemonClient as unknown as GrpcDaemonClient)
-      const handler = mockServer.onFsWriteFile.mock.calls[0][0] as (...args: any[]) => Promise<{ success: boolean; error?: string }>
+      const handler = mockServer.onFsWriteFile.mock.calls[0]![0] as (...args: any[]) => Promise<{ success: boolean; error?: string }>
 
       const result = await handler('/workspace', '/workspace/test.txt', 'content')
 

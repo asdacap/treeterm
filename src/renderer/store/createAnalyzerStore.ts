@@ -96,7 +96,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     }
     const idx = cache.findIndex((entry) => entry.buffer === buffer)
     if (idx !== -1) {
-      const hit = cache[idx]
+      const hit = cache[idx]!
       cache.splice(idx, 1)
       cache.push(hit)
       return { action: 'reuse', result: hit.result }

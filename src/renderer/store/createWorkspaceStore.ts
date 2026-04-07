@@ -190,7 +190,7 @@ export function createWorkspaceStore(
       if (tabRefs.has(tabId)) return
        
       const appState = get().workspace.appStates[tabId]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+       
       if (!appState) return
       const app = deps.appRegistry.get(appState.applicationId)
       if (!app) return
@@ -310,7 +310,7 @@ export function createWorkspaceStore(
       const ws = get().workspace
        
       const appState = ws.appStates[tabId]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+       
       if (!appState) return Promise.resolve()
 
       const app = deps.appRegistry.get(appState.applicationId)
@@ -357,7 +357,7 @@ export function createWorkspaceStore(
         ...ws,
         appStates: {
           ...ws.appStates,
-          [tabId]: { ...ws.appStates[tabId], title }
+          [tabId]: { ...ws.appStates[tabId]!, title }
         }
       }))
       deps.syncToDaemon()
@@ -365,7 +365,7 @@ export function createWorkspaceStore(
 
     updateTabState: <T,>(tabId: string, updater: (state: T) => T): void => {
       updateWorkspace((ws) => {
-        const appState = ws.appStates[tabId]
+        const appState = ws.appStates[tabId]!
         return {
           ...ws,
           appStates: {
@@ -376,7 +376,7 @@ export function createWorkspaceStore(
       })
       // Only sync if the tab state contains a ptyId (persisted state)
       const appState = get().workspace.appStates[tabId]
-      if (appState.state && (appState.state as { ptyId?: string }).ptyId) {
+      if (appState?.state && (appState.state as { ptyId?: string }).ptyId) {
         deps.syncToDaemon()
       }
     },

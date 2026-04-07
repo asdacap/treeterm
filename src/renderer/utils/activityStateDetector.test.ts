@@ -230,7 +230,7 @@ describe('createActivityStateDetector', () => {
     vi.advanceTimersByTime(10)
 
     // Should have gone back to 'working', not 'user_input_required'
-    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1][0] as string
+    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1]![0] as string
     expect(lastCall).toBe('working')
   })
 

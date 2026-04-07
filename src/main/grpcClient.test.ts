@@ -420,9 +420,9 @@ describe('GrpcDaemonClient', () => {
       mockClientInstance.updateSession.mockImplementation((_req: any, cb: (err: any, res: any) => void) => { cb(null, protoSession); })
       const session = await client.updateSession([])
       expect(session).not.toBeNull()
-      expect(session.workspaces[0].appStates['tab-1'].state).toEqual({ ptyId: 'pty-1' })
-      expect(session.workspaces[0].parentId).toBe('parent-1')
-      expect(session.workspaces[0].gitBranch).toBe('main')
+      expect(session.workspaces[0]!.appStates['tab-1']!.state).toEqual({ ptyId: 'pty-1' })
+      expect(session.workspaces[0]!.parentId).toBe('parent-1')
+      expect(session.workspaces[0]!.gitBranch).toBe('main')
     })
 
     it('convertFromProtoWorkspace handles null/undefined optional fields', async () => {
@@ -450,10 +450,10 @@ describe('GrpcDaemonClient', () => {
 
       mockClientInstance.updateSession.mockImplementation((_req: any, cb: (err: any, res: any) => void) => { cb(null, protoSession); })
       const session = await client.updateSession([])
-      expect(session.workspaces[0].parentId).toBeNull()
-      expect(session.workspaces[0].gitBranch).toBeNull()
-      expect(session.workspaces[0].gitRootPath).toBeNull()
-      expect(session.workspaces[0].activeTabId).toBeNull()
+      expect(session.workspaces[0]!.parentId).toBeNull()
+      expect(session.workspaces[0]!.gitBranch).toBeNull()
+      expect(session.workspaces[0]!.gitRootPath).toBeNull()
+      expect(session.workspaces[0]!.activeTabId).toBeNull()
     })
   })
 
@@ -585,7 +585,7 @@ describe('GrpcDaemonClient', () => {
       const result = client.watchSession('listener-1', onUpdate)
 
       const mockProto = { id: 'session-1', workspaces: [], createdAt: 1000, lastActivity: 2000 }
-      handlers.data({ session: mockProto })
+      handlers['data']!({ session: mockProto })
 
       const session = await result.initial
       expect(session.id).toBe('session-1')
@@ -605,10 +605,10 @@ describe('GrpcDaemonClient', () => {
       const result = client.watchSession('listener-1', onUpdate)
 
       const mockProto = { id: 'session-1', workspaces: [], createdAt: 1000, lastActivity: 2000 }
-      handlers.data({ session: mockProto }) // first = initial
+      handlers['data']!({ session: mockProto }) // first = initial
       await result.initial
 
-      handlers.data({ session: mockProto }) // second = onUpdate
+      handlers['data']!({ session: mockProto }) // second = onUpdate
       expect(onUpdate).toHaveBeenCalledTimes(1)
     })
 
@@ -627,10 +627,10 @@ describe('GrpcDaemonClient', () => {
       const result = client.watchSession('listener-1', onUpdate, onError)
 
       const mockProto = { id: 'session-1', workspaces: [], createdAt: 1000, lastActivity: 2000 }
-      handlers.data({ session: mockProto })
+      handlers['data']!({ session: mockProto })
       await result.initial
 
-      handlers.error(new Error('stream broken'))
+      handlers['error']!(new Error('stream broken'))
       expect(onError).toHaveBeenCalledWith(expect.any(Error))
     })
 

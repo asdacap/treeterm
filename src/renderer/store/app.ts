@@ -62,7 +62,7 @@ interface AppState extends AppDeps {
   showConnectionPicker: boolean
 
   // Application registry
-  applications: Record<string, Application>
+  applications: Map<string, Application>
   registerApplication: (app: Application) => void
   unregisterApplication: (id: string) => void
   getApplication: (id: string) => Application | undefined
@@ -76,7 +76,7 @@ interface AppState extends AppDeps {
   registerCustomRunnerVariants: (instances: CustomRunnerInstance[]) => void
 
   // Session management
-  sessionStores: Record<string, SessionEntry>
+  sessionStores: Map<string, SessionEntry>
 
   // Actions
   initialize: (deps: AppDeps) => Promise<() => void>
@@ -119,49 +119,48 @@ export const useAppStore = create<AppState>()((set, get) => ({
   showCloseConfirm: false,
   unmergedWorkspaces: [],
   showConnectionPicker: false,
-  sessionStores: {},
+  sessionStores: new Map<string, SessionEntry>(),
 
   // Application registry
-  applications: {},
+  applications: new Map<string, Application>(),
 
   registerApplication: (app: Application) => {
     set((state) => ({
-      applications: { ...state.applications, [app.id]: app }
+      applications: new Map(state.applications).set(app.id, app)
     }))
   },
 
   unregisterApplication: (id: string) => {
     set((state) => {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { [id]: _removed, ...rest } = state.applications
+      const rest = new Map(state.applications)
+      rest.delete(id)
       return { applications: rest }
     })
   },
 
   getApplication: (id: string) => {
-    return get().applications[id]
+    return get().applications.get(id)
   },
 
   getAllApplications: () => {
-    return Object.values(get().applications)
+    return Array.from(get().applications.values())
   },
 
   getMenuApplications: () => {
-    return Object.values(get().applications).filter((app) => app.showInNewTabMenu)
+    return Array.from(get().applications.values()).filter((app) => app.showInNewTabMenu)
   },
 
   getDefaultApplications: () => {
-    return Object.values(get().applications).filter((app) => app.isDefault)
+    return Array.from(get().applications.values()).filter((app) => app.isDefault)
   },
 
   getDefaultApplication: (appId?: string) => {
     const apps = get().applications
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    if (appId && apps[appId]) {
-      return apps[appId]
+    if (appId && apps.has(appId)) {
+      return apps.get(appId) ?? null
     }
-    const allApps = Object.values(apps)
-    return allApps.length > 0 ? allApps[0] : null
+    const allApps = Array.from(apps.values())
+    return allApps[0] ?? null
   },
 
   initializeApplications: () => {
@@ -184,7 +183,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const deps = { terminal: { kill: terminal.kill.bind(terminal) } }
 
     // Unregister existing dynamic terminals
-    const allApps = Object.values(get().applications)
+    const allApps = Array.from(get().applications.values())
     for (const app of allApps) {
       if (app.id.startsWith('terminal-')) {
         get().unregisterApplication(app.id)
@@ -202,7 +201,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const deps = { terminal: { kill: terminal.kill.bind(terminal) } }
 
     // Unregister existing dynamic AI Harness apps
-    const allApps = Object.values(get().applications)
+    const allApps = Array.from(get().applications.values())
     for (const app of allApps) {
       if (app.id.startsWith('aiharness-')) {
         get().unregisterApplication(app.id)
@@ -220,7 +219,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const deps = { terminal: { kill: terminal.kill.bind(terminal) } }
 
     // Unregister existing dynamic custom runner apps
-    const allApps = Object.values(get().applications)
+    const allApps = Array.from(get().applications.values())
     for (const app of allApps) {
       if (app.id.startsWith('customrunner-')) {
         get().unregisterApplication(app.id)
@@ -259,7 +258,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
     const unsubClose = appApi.onCloseConfirm(() => {
       const allUnmerged: Workspace[] = []
-      for (const entry of Object.values(get().sessionStores)) {
+      for (const entry of Array.from(get().sessionStores.values())) {
         allUnmerged.push(...getUnmergedSubWorkspaces(entry.store.getState().workspaces))
       }
       if (allUnmerged.length > 0) {
@@ -278,7 +277,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         }
         if (session.workspaces.length > 0) {
           void sessionStore.getState().handleRestore(session)
-          const firstWs = session.workspaces[0]
+          const firstWs = session.workspaces[0]!
           useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: session.id })
         }
       }
@@ -286,8 +285,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
     const unsubSync = sessionApi.onSync((connectionId, session) => {
       console.log(`[App] Received session:sync from connection ${connectionId} with ${String(session.workspaces.length)} workspaces for session ${session.id}`)
-      const entry = get().sessionStores[session.id]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      const entry = get().sessionStores.get(session.id)
       if (!entry) return
       const storeConnId = entry.store.getState().connection?.id ?? 'local'
       if (storeConnId !== connectionId) {
@@ -312,7 +310,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     })
 
     const unsubSshStatus = ssh.onConnectionStatus((info) => {
-      for (const entry of Object.values(get().sessionStores)) {
+      for (const entry of Array.from(get().sessionStores.values())) {
         const conn = entry.store.getState().connection
         if (conn && conn.id === info.id) {
           entry.store.setState({ connection: info })
@@ -325,15 +323,17 @@ export const useAppStore = create<AppState>()((set, get) => ({
     if (initialPath) {
       const { activeView } = useNavigationStore.getState()
       const sessionId = activeView?.type === 'workspace' ? activeView.sessionId : null
-      const sessionEntry = sessionId ? get().sessionStores[sessionId] : Object.values(get().sessionStores)[0]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      const sessionEntry = sessionId ? get().sessionStores.get(sessionId) : Array.from(get().sessionStores.values())[0]
       const connStatus = sessionEntry?.store.getState().connection?.status
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (sessionEntry && connStatus !== 'connecting') {
         const { workspaces, addWorkspace, setActiveWorkspace } = sessionEntry.store.getState()
-        const existingId = Object.entries(workspaces).find(
-          ([, e]) => (e.status === 'loaded' || e.status === 'operation-error') && e.data.path === initialPath
-        )?.[0]
+        let existingId: string | undefined
+        for (const [wsId, e] of Array.from(workspaces.entries())) {
+          if ((e.status === 'loaded' || e.status === 'operation-error') && e.data.path === initialPath) {
+            existingId = wsId
+            break
+          }
+        }
         if (existingId) {
           setActiveWorkspace(existingId)
         } else {
@@ -356,22 +356,23 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   disconnectSession: (sessionId: string) => {
     set((state) => {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { [sessionId]: _removed, ...remainingSessions } = state.sessionStores
-      return { sessionStores: remainingSessions }
+      const remaining = new Map(state.sessionStores)
+      remaining.delete(sessionId)
+      return { sessionStores: remaining }
     })
     // Clear navigation if it pointed to this session
     const { activeView } = useNavigationStore.getState()
     if (activeView && 'sessionId' in activeView && activeView.sessionId === sessionId) {
-      const remainingIds = Object.keys(get().sessionStores)
-      if (remainingIds.length > 0) {
-        const nextEntry = get().sessionStores[remainingIds[0]]
+      const remainingIds = Array.from(get().sessionStores.keys())
+      const nextSessionId = remainingIds[0]
+      if (nextSessionId) {
+        const nextEntry = get().sessionStores.get(nextSessionId)!
         const workspaces = nextEntry.store.getState().workspaces
-        const firstWsId = Object.keys(workspaces)[0]
+        const firstWsId = Array.from(workspaces.keys())[0]
         if (firstWsId) {
-          useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWsId, sessionId: remainingIds[0] })
+          useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWsId, sessionId: nextSessionId })
         } else {
-          useNavigationStore.getState().setActiveView({ type: 'session', sessionId: remainingIds[0] })
+          useNavigationStore.getState().setActiveView({ type: 'session', sessionId: nextSessionId })
         }
       }
     }
@@ -380,9 +381,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
   addRemoteSession: async (session: Session, connection: ConnectionInfo) => {
     console.log(`[renderer:app] addRemoteSession called: session=${session.id}, connection=${connection.id}, status=${connection.status}, workspaces=${String(session.workspaces.length)}`)
     // Reuse existing store (created eagerly in startRemoteConnect) or create new one
-    const existingEntry = get().sessionStores[connection.id]
+    const existingEntry = get().sessionStores.get(connection.id)
     let store: StoreApi<SessionState>
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (existingEntry) {
       store = existingEntry.store
       // Update session ID and connection status on the existing store
@@ -390,9 +390,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
       // Re-key from connection.id to session.id
       if (connection.id !== session.id) {
         set((state) => {
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const { [connection.id]: _removed, ...rest } = state.sessionStores
-          return { sessionStores: { ...rest, [session.id]: { store } } }
+          const updated = new Map(state.sessionStores)
+          updated.delete(connection.id)
+          updated.set(session.id, { store })
+          return { sessionStores: updated }
         })
       }
     } else {
@@ -409,7 +410,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     if (session.workspaces.length > 0) {
       console.log(`[renderer:app] Restoring ${String(session.workspaces.length)} workspaces for session=${session.id}`)
       await store.getState().handleRestore(session)
-      const firstWs = session.workspaces[0]
+      const firstWs = session.workspaces[0]!
       useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: session.id })
     } else if (connection.target.type === 'remote') {
       const defaultPath = `/home/${connection.target.config.user}`
@@ -431,7 +432,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   setSessionError: (connectionId: string, error: string) => {
-    const entry = get().sessionStores[connectionId]
+    const entry = get().sessionStores.get(connectionId)!
     const conn = entry.store.getState().connection
     if (conn) {
       entry.store.setState({ connection: { ...conn, status: 'error' as const, error } })
@@ -440,8 +441,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   removeSession: (id: string) => {
     set((state) => {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { [id]: _removed, ...rest } = state.sessionStores
+      const rest = new Map(state.sessionStores)
+      rest.delete(id)
       return { sessionStores: rest }
     })
   },
@@ -456,8 +457,7 @@ function getOrCreateSession(
   connection?: ConnectionInfo
 ): StoreApi<SessionState> {
   const { sessionStores, windowUuid, git, filesystem, exec, runActions, sessionApi, terminal, llm, github } = get()
-  const existing = sessionStores[sessionId]
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  const existing = sessionStores.get(sessionId)
   if (existing) {
     console.log(`[renderer:app] getOrCreateSession: reusing existing session store for session=${sessionId}`)
     return existing.store
@@ -479,7 +479,7 @@ function getOrCreateSession(
       terminal,
       getSettings: () => useSettingsStore.getState().settings,
       appRegistry: {
-        get: (id: string) => get().applications[id],
+        get: (id: string) => get().applications.get(id),
         getDefaultApp: (appId?: string) => get().getDefaultApplication(appId),
       },
       github: boundGithub,
@@ -488,8 +488,8 @@ function getOrCreateSession(
     }
   )
   set((state) => ({
-    sessionStores: { ...state.sessionStores, [sessionId]: { store } }
+    sessionStores: new Map(state.sessionStores).set(sessionId, { store })
   }))
-  console.log(`[renderer:app] getOrCreateSession: session store added to sessionStores, total sessions=${String(Object.keys(get().sessionStores).length)}`)
+  console.log(`[renderer:app] getOrCreateSession: session store added to sessionStores, total sessions=${String(get().sessionStores.size)}`)
   return store
 }

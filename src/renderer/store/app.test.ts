@@ -158,7 +158,7 @@ describe('useAppStore', () => {
       isSettingsOpen: false,
       showCloseConfirm: false,
       unmergedWorkspaces: [],
-      sessionStores: {}
+      sessionStores: new Map()
     })
     useNavigationStore.setState({ activeView: null })
   })
@@ -173,7 +173,7 @@ describe('useAppStore', () => {
     })
 
     it('has empty sessionStores by default', () => {
-      expect(useAppStore.getState().sessionStores).toEqual({})
+      expect(useAppStore.getState().sessionStores).toEqual(new Map())
     })
 
     it('has isSettingsOpen false by default', () => {
@@ -185,29 +185,29 @@ describe('useAppStore', () => {
   describe('disconnectSession', () => {
     it('removes session from sessionStores', () => {
       const mockStore = {
-        getState: vi.fn<() => any>().mockReturnValue({ workspaces: {} }),
+        getState: vi.fn<() => any>().mockReturnValue({ workspaces: new Map() }),
         setState: vi.fn<(...args: any[]) => void>(),
         subscribe: vi.fn<(...args: any[]) => any>()
       } as never
-      useAppStore.setState({ sessionStores: {
-        's1': { store: mockStore },
-        's2': { store: mockStore }
-      } })
+      useAppStore.setState({ sessionStores: new Map([
+        ['s1', { store: mockStore }],
+        ['s2', { store: mockStore }]
+      ]) })
       useAppStore.getState().disconnectSession('s1')
-      expect(useAppStore.getState().sessionStores['s1']).toBeUndefined()
-      expect(useAppStore.getState().sessionStores['s2']).toBeDefined()
+      expect(useAppStore.getState().sessionStores.get('s1')).toBeUndefined()
+      expect(useAppStore.getState().sessionStores.get('s2')).toBeDefined()
     })
 
     it('clears navigation when disconnecting viewed session', () => {
       const mockStore = {
-        getState: vi.fn<() => any>().mockReturnValue({ workspaces: { 'ws-1': { id: 'ws-1' } } }),
+        getState: vi.fn<() => any>().mockReturnValue({ workspaces: new Map([['ws-1', { id: 'ws-1' }]]) }),
         setState: vi.fn<(...args: any[]) => void>(),
         subscribe: vi.fn<(...args: any[]) => any>()
       } as never
-      useAppStore.setState({ sessionStores: {
-        's1': { store: mockStore },
-        's2': { store: mockStore }
-      } })
+      useAppStore.setState({ sessionStores: new Map([
+        ['s1', { store: mockStore }],
+        ['s2', { store: mockStore }]
+      ]) })
       useNavigationStore.setState({ activeView: { type: 'workspace', workspaceId: 'ws-x', sessionId: 's1' } })
       useAppStore.getState().disconnectSession('s1')
       // Should switch to remaining session's first workspace
@@ -275,7 +275,7 @@ describe('useAppStore', () => {
       }
 
       // Trigger onReady with the session
-      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0][0] as (session: any) => void
+      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
       readyCallback(session)
 
       // Workspaces restored via handleRestore (not addWorkspace)
@@ -298,7 +298,7 @@ describe('useAppStore', () => {
         ]
       }
 
-      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0][0] as (session: any) => void
+      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
       readyCallback(session)
 
       // Child should still be restored via handleRestore
@@ -323,7 +323,7 @@ describe('useAppStore', () => {
         ]
       }
 
-      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0][0] as (session: any) => void
+      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
       readyCallback(session)
 
       // terminal.list() should NOT have been called
@@ -346,7 +346,7 @@ describe('useAppStore', () => {
         ]
       }
 
-      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0][0] as (session: any) => void
+      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
       readyCallback(session)
 
       expect(mockAddWorkspace).not.toHaveBeenCalled()
@@ -368,7 +368,7 @@ describe('useAppStore', () => {
         ]
       }
 
-      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0][0] as (session: any) => void
+      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
       readyCallback(session)
 
       expect(mockSyncToDaemon).not.toHaveBeenCalled()
@@ -402,7 +402,7 @@ describe('useAppStore', () => {
 
     it('onCloseConfirm confirms close when no active store', async () => {
       const cleanup = await useAppStore.getState().initialize(mockDeps)
-      const closeCallback = vi.mocked(mockDeps.appApi.onCloseConfirm).mock.calls[0][0] as () => void
+      const closeCallback = vi.mocked(mockDeps.appApi.onCloseConfirm).mock.calls[0]![0] as () => void
       closeCallback()
       expect(mockDeps.appApi.confirmClose).toHaveBeenCalled()
       cleanup()
@@ -413,7 +413,7 @@ describe('useAppStore', () => {
       vi.mocked(getUnmergedSubWorkspaces).mockReturnValue([])
 
       const cleanup = await useAppStore.getState().initialize(mockDeps)
-      const closeCallback = vi.mocked(mockDeps.appApi.onCloseConfirm).mock.calls[0][0] as () => void
+      const closeCallback = vi.mocked(mockDeps.appApi.onCloseConfirm).mock.calls[0]![0] as () => void
       closeCallback()
       expect(mockDeps.appApi.confirmClose).toHaveBeenCalled()
       cleanup()
@@ -439,10 +439,10 @@ describe('useAppStore', () => {
       const cleanup = await useAppStore.getState().initialize(mockDeps)
 
       // Trigger onReady to create a session store
-      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0][0] as (session: any) => void
+      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
       readyCallback({ id: 'session-1', workspaces: [] })
 
-      const closeCallback = vi.mocked(mockDeps.appApi.onCloseConfirm).mock.calls[0][0] as () => void
+      const closeCallback = vi.mocked(mockDeps.appApi.onCloseConfirm).mock.calls[0]![0] as () => void
       closeCallback()
 
       expect(useAppStore.getState().showCloseConfirm).toBe(true)
@@ -471,7 +471,7 @@ describe('useAppStore', () => {
       } as unknown as StoreApi<SessionState>)
 
       const cleanup = await useAppStore.getState().initialize(mockDeps)
-      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0][0] as (session: any) => void
+      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
 
       const session = {
         id: 'session-ready',
@@ -482,24 +482,24 @@ describe('useAppStore', () => {
       }
       readyCallback(session)
 
-      expect(useAppStore.getState().sessionStores['session-ready']).toBeDefined()
+      expect(useAppStore.getState().sessionStores.get('session-ready')).toBeDefined()
       cleanup()
     })
 
     it('onReady creates store for session with no workspaces', async () => {
       const cleanup = await useAppStore.getState().initialize(mockDeps)
-      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0][0] as (session: any) => void
+      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
 
       readyCallback({ id: 'empty-session', workspaces: [] })
 
-      expect(useAppStore.getState().sessionStores['empty-session']).toBeDefined()
+      expect(useAppStore.getState().sessionStores.get('empty-session')).toBeDefined()
       cleanup()
     })
 
     it('onDisconnected sets daemonDisconnected', async () => {
       const cleanup = await useAppStore.getState().initialize(mockDeps)
 
-      const disconnectCallback = vi.mocked(mockDeps.daemon.onDisconnected).mock.calls[0][0] as () => void
+      const disconnectCallback = vi.mocked(mockDeps.daemon.onDisconnected).mock.calls[0]![0] as () => void
       disconnectCallback()
 
       expect(useAppStore.getState().daemonDisconnected).toBe(true)
@@ -511,7 +511,7 @@ describe('useAppStore', () => {
       const { createSessionStore } = await import('./createSessionStore')
       vi.mocked(createSessionStore).mockReturnValue({
         getState: vi.fn<() => any>().mockReturnValue({
-          workspaces: { 'ws-existing': { status: 'loaded', data: { id: 'ws-existing', path: '/projects/existing', name: 'existing' }, store: {} } },
+          workspaces: new Map([['ws-existing', { status: 'loaded', data: { id: 'ws-existing', path: '/projects/existing', name: 'existing' }, store: {} }]]),
           activeWorkspaceId: null,
           isRestoring: false,
           addWorkspace: vi.fn<(...args: any[]) => any>(),
@@ -543,7 +543,7 @@ describe('useAppStore', () => {
       // Create a mock session store directly
       const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', windowUuid: null }, {} as unknown as SessionDeps)
       useAppStore.setState({
-        sessionStores: { 'pre-session': { store: mockSessionStoreInstance } }
+        sessionStores: new Map([['pre-session', { store: mockSessionStoreInstance }]])
       })
 
       const cleanup = await useAppStore.getState().initialize(deps)
@@ -556,7 +556,7 @@ describe('useAppStore', () => {
       const { createSessionStore } = await import('./createSessionStore')
       vi.mocked(createSessionStore).mockReturnValue({
         getState: vi.fn<() => any>().mockReturnValue({
-          workspaces: {},
+          workspaces: new Map(),
           activeWorkspaceId: null,
           isRestoring: false,
           addWorkspace: mockAddWorkspace,
@@ -571,7 +571,7 @@ describe('useAppStore', () => {
 
       const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', windowUuid: null }, {} as unknown as SessionDeps)
       useAppStore.setState({
-        sessionStores: { 'pre-session': { store: mockSessionStoreInstance } }
+        sessionStores: new Map([['pre-session', { store: mockSessionStoreInstance }]])
       })
 
       const deps = { ...mockDeps, getInitialWorkspace: vi.fn<() => Promise<string>>().mockResolvedValue('/new/path') }
@@ -625,11 +625,11 @@ describe('useAppStore', () => {
         subscribe: vi.fn<(...args: any[]) => any>()
       }
       useAppStore.setState((state) => ({
-        sessionStores: { ...state.sessionStores, [sessionId]: { store: mockStore as unknown as StoreApi<SessionState> } }
+        sessionStores: new Map(state.sessionStores).set(sessionId, { store: mockStore as unknown as StoreApi<SessionState> })
       }))
 
       // Trigger onSync with matching connectionId
-      const syncCallback = vi.mocked(mockDeps.sessionApi.onSync).mock.calls[0][0] as (connectionId: string, session: any) => void
+      const syncCallback = vi.mocked(mockDeps.sessionApi.onSync).mock.calls[0]![0] as (connectionId: string, session: any) => void
       syncCallback('local', session)
 
       // handleExternalUpdate called to sync workspaces
@@ -650,11 +650,11 @@ describe('useAppStore', () => {
         subscribe: vi.fn<(...args: any[]) => any>()
       }
       useAppStore.setState((state) => ({
-        sessionStores: { ...state.sessionStores, [sessionId]: { store: mockStore as unknown as StoreApi<SessionState> } }
+        sessionStores: new Map(state.sessionStores).set(sessionId, { store: mockStore as unknown as StoreApi<SessionState> })
       }))
 
       // Trigger onSync with matching connectionId
-      const syncCallback = vi.mocked(mockDeps.sessionApi.onSync).mock.calls[0][0] as (connectionId: string, session: any) => void
+      const syncCallback = vi.mocked(mockDeps.sessionApi.onSync).mock.calls[0]![0] as (connectionId: string, session: any) => void
       syncCallback('local', session)
 
       // handleExternalUpdate is responsible for removing orphan workspaces internally
@@ -668,7 +668,7 @@ describe('useAppStore', () => {
       }
 
       // Trigger onSync without pre-populating session store
-      const syncCallback = vi.mocked(mockDeps.sessionApi.onSync).mock.calls[0][0] as (connectionId: string, session: any) => void
+      const syncCallback = vi.mocked(mockDeps.sessionApi.onSync).mock.calls[0]![0] as (connectionId: string, session: any) => void
       syncCallback('local', session)
 
       // handleExternalUpdate should NOT be called
@@ -686,11 +686,11 @@ describe('useAppStore', () => {
         subscribe: vi.fn<(...args: any[]) => any>()
       }
       useAppStore.setState((state) => ({
-        sessionStores: { ...state.sessionStores, [sessionId]: { store: mockStore as unknown as StoreApi<SessionState> } }
+        sessionStores: new Map(state.sessionStores).set(sessionId, { store: mockStore as unknown as StoreApi<SessionState> })
       }))
 
       // Trigger onSync with wrong connectionId
-      const syncCallback = vi.mocked(mockDeps.sessionApi.onSync).mock.calls[0][0] as (connectionId: string, session: any) => void
+      const syncCallback = vi.mocked(mockDeps.sessionApi.onSync).mock.calls[0]![0] as (connectionId: string, session: any) => void
       syncCallback('local', session)
 
       // handleExternalUpdate should NOT be called — wrong connection
@@ -721,18 +721,18 @@ describe('useAppStore', () => {
     }
 
     beforeEach(() => {
-      useAppStore.setState({ applications: {} })
+      useAppStore.setState({ applications: new Map() })
     })
 
     it('registerApplication adds app to state', () => {
       useAppStore.getState().registerApplication(mockApp)
-      expect(useAppStore.getState().applications['test-app']).toEqual(mockApp)
+      expect(useAppStore.getState().applications.get('test-app')).toEqual(mockApp)
     })
 
     it('unregisterApplication removes app from state', () => {
       useAppStore.getState().registerApplication(mockApp)
       useAppStore.getState().unregisterApplication('test-app')
-      expect(useAppStore.getState().applications['test-app']).toBeUndefined()
+      expect(useAppStore.getState().applications.get('test-app')).toBeUndefined()
     })
 
     it('getApplication returns app by id', () => {
@@ -756,7 +756,7 @@ describe('useAppStore', () => {
       useAppStore.getState().registerApplication(mockApp2)
       const menu = useAppStore.getState().getMenuApplications()
       expect(menu).toHaveLength(1)
-      expect(menu[0].id).toBe('test-app')
+      expect(menu[0]!.id).toBe('test-app')
     })
 
     it('getDefaultApplications filters by isDefault', () => {
@@ -764,7 +764,7 @@ describe('useAppStore', () => {
       useAppStore.getState().registerApplication(mockApp2)
       const defaults = useAppStore.getState().getDefaultApplications()
       expect(defaults).toHaveLength(1)
-      expect(defaults[0].id).toBe('test-app-2')
+      expect(defaults[0]!.id).toBe('test-app-2')
     })
 
     it('getDefaultApplication returns app by id', () => {
@@ -790,11 +790,11 @@ describe('useAppStore', () => {
     it('initializeApplications registers core apps', async () => {
       const cleanup = await useAppStore.getState().initialize(mockDeps)
       const apps = useAppStore.getState().applications
-      expect(apps['terminal']).toBeDefined()
-      expect(apps['filesystem']).toBeDefined()
-      expect(apps['review']).toBeDefined()
-      expect(apps['editor']).toBeDefined()
-      expect(apps['comments']).toBeDefined()
+      expect(apps.get('terminal')).toBeDefined()
+      expect(apps.get('filesystem')).toBeDefined()
+      expect(apps.get('review')).toBeDefined()
+      expect(apps.get('editor')).toBeDefined()
+      expect(apps.get('comments')).toBeDefined()
       cleanup()
     })
 
@@ -804,7 +804,7 @@ describe('useAppStore', () => {
         [{ id: 'custom', name: 'Custom', icon: '>', startupCommand: 'bash', isDefault: false }]
       )
       // Base terminal re-registered
-      expect(useAppStore.getState().applications['terminal']).toBeDefined()
+      expect(useAppStore.getState().applications.get('terminal')).toBeDefined()
       cleanup()
     })
 
@@ -851,21 +851,21 @@ describe('useAppStore', () => {
 
   describe('session auto-naming', () => {
     beforeEach(async () => {
-      useSessionNamesStore.setState({ names: {} })
+      useSessionNamesStore.setState({ names: new Map() })
       const cleanup = await useAppStore.getState().initialize(mockDeps)
       cleanup()
     })
 
     describe('local session via onReady', () => {
       it('names local session LOCAL', () => {
-        const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0][0] as (session: any) => void
+        const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
         readyCallback({ id: 'local-session-1', workspaces: [] })
         expect(useSessionNamesStore.getState().getName('local-session-1')).toBe('LOCAL')
       })
 
       it('does not overwrite existing custom name', () => {
         useSessionNamesStore.getState().setName('local-session-2', 'My Custom Name')
-        const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0][0] as (session: any) => void
+        const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
         readyCallback({ id: 'local-session-2', workspaces: [] })
         expect(useSessionNamesStore.getState().getName('local-session-2')).toBe('My Custom Name')
       })

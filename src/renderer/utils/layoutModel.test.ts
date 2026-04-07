@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { createDefaultLayoutModel, tabToFlexNode } from './layoutModel'
 import type { Tab } from '../types'
 import type { Application } from '../types'
+import type { IJsonTabSetNode } from '@aptre/flex-layout'
 
 const testApp: Application = {
   id: 'test-terminal',
@@ -35,9 +36,9 @@ describe('createDefaultLayoutModel', () => {
     expect(model.layout.type).toBe('row')
     expect(model.layout.children).toHaveLength(1)
 
-    const tabset = model.layout.children[0]
+    const tabset = model.layout.children[0]! as IJsonTabSetNode
     expect(tabset.type).toBe('tabset')
-    if (tabset.type === 'tabset') {
+    {
       expect(tabset.children).toHaveLength(3)
       expect(tabset.selected).toBe(0)
       expect(tabset.active).toBe(true)
@@ -48,8 +49,8 @@ describe('createDefaultLayoutModel', () => {
     const tabs = makeTabs(3)
     const model = createDefaultLayoutModel(tabs, 'tab-2')
 
-    const tabset = model.layout.children[0]
-    if (tabset.type === 'tabset') {
+    const tabset = model.layout.children[0]! as IJsonTabSetNode
+    {
       expect(tabset.selected).toBe(2)
     }
   })
@@ -58,8 +59,8 @@ describe('createDefaultLayoutModel', () => {
     const tabs = makeTabs(2)
     const model = createDefaultLayoutModel(tabs, null)
 
-    const tabset = model.layout.children[0]
-    if (tabset.type === 'tabset') {
+    const tabset = model.layout.children[0]! as IJsonTabSetNode
+    {
       expect(tabset.selected).toBe(0)
     }
   })
@@ -68,8 +69,8 @@ describe('createDefaultLayoutModel', () => {
     const tabs = makeTabs(2)
     const model = createDefaultLayoutModel(tabs, 'nonexistent')
 
-    const tabset = model.layout.children[0]
-    if (tabset.type === 'tabset') {
+    const tabset = model.layout.children[0]! as IJsonTabSetNode
+    {
       expect(tabset.selected).toBe(0)
     }
   })
@@ -77,8 +78,8 @@ describe('createDefaultLayoutModel', () => {
   it('creates model with empty tabs', () => {
     const model = createDefaultLayoutModel([], null)
 
-    const tabset = model.layout.children[0]
-    if (tabset.type === 'tabset') {
+    const tabset = model.layout.children[0]! as IJsonTabSetNode
+    {
       expect(tabset.children).toHaveLength(0)
     }
   })
@@ -98,8 +99,8 @@ describe('createDefaultLayoutModel', () => {
     const tabs = makeTabs(2)
     const model = createDefaultLayoutModel(tabs, null, appLookup)
 
-    const tabset = model.layout.children[0]
-    if (tabset.type === 'tabset') {
+    const tabset = model.layout.children[0]! as IJsonTabSetNode
+    {
       for (const child of tabset.children) {
         expect((child as { enableClose?: boolean }).enableClose).toBe(true)
       }
@@ -110,8 +111,8 @@ describe('createDefaultLayoutModel', () => {
     const tabs = makeTabs(1)
     const model = createDefaultLayoutModel(tabs, null)
 
-    const tabset = model.layout.children[0]
-    if (tabset.type === 'tabset') {
+    const tabset = model.layout.children[0]! as IJsonTabSetNode
+    {
       expect((tabset.children[0] as { enableClose?: boolean }).enableClose).toBe(false)
     }
   })

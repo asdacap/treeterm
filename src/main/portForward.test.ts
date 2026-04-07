@@ -225,7 +225,7 @@ describe('PortForwardProcess', () => {
 
       mockProcess.stdout.emit('data', Buffer.from('hello\n'))
       // Only start() output lines, not 'hello' since we unsubscribed
-      const callsWithHello = (cb.mock.calls as string[][]).filter((c) => c[0].includes('hello'))
+      const callsWithHello = (cb.mock.calls as string[][]).filter((c) => c[0]!.includes('hello'))
       expect(callsWithHello).toHaveLength(0)
     })
 

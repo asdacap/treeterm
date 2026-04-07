@@ -58,14 +58,14 @@ export default function SessionPanel({
   const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
   const menuPosition = useContextMenuStore((s) => s.position)
   const getChildren = (parentId: string) =>
-    Object.entries(workspaces)
-      .filter(([, e]) => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === parentId)
-      .map(([, e]) => (e as Extract<typeof e, { status: 'loaded' | 'operation-error' }>).data)
+    Array.from(workspaces.values())
+      .filter((e): e is Extract<typeof e, { status: 'loaded' | 'operation-error' }> => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === parentId)
+      .map(e => e.data)
       .sort((a, b) => parseInt(a.metadata.sortOrder || '0') - parseInt(b.metadata.sortOrder || '0'))
 
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     return new Set(
-      Object.keys(workspaces)
+      Array.from(workspaces.keys())
         .filter((id) => getChildren(id).length > 0)
     )
   })
@@ -86,8 +86,7 @@ export default function SessionPanel({
   } | null>(null)
 
   // Session name editing
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  const displayName = useSessionNamesStore(s => s.names[sessionId]?.name)
+  const displayName = useSessionNamesStore(s => s.names.get(sessionId)?.name)
   const setSessionName = useSessionNamesStore(s => s.setName)
   const removeSessionName = useSessionNamesStore(s => s.removeName)
   const [isEditingName, setIsEditingName] = useState(false)
@@ -116,10 +115,10 @@ export default function SessionPanel({
   const [prevWorkspaces, setPrevWorkspaces] = useState(workspaces)
   if (workspaces !== prevWorkspaces) {
     setPrevWorkspaces(workspaces)
-    const parentIds = Object.keys(workspaces)
+    const parentIds = Array.from(workspaces.keys())
       .filter((id) =>
-        Object.entries(workspaces)
-          .filter(([, e]) => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === id)
+        Array.from(workspaces.values())
+          .filter(e => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === id)
           .length > 0
       )
     if (parentIds.length > 0) {
@@ -132,7 +131,7 @@ export default function SessionPanel({
   }
 
   // Compute paths of already-open worktrees
-  const openWorktreePaths = Object.values(workspaces)
+  const openWorktreePaths = Array.from(workspaces.values())
     .filter((e): e is Extract<typeof e, { status: 'loaded' | 'operation-error' }> =>
       e.status === 'loaded' || e.status === 'operation-error')
     .filter(e => e.data.isWorktree)
@@ -160,8 +159,7 @@ export default function SessionPanel({
 
   const handleCreateChild = (parentId: string) => {
     closeContextMenu()
-    const entry = workspaces[parentId]
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    const entry = workspaces.get(parentId)
     if (entry && (entry.status === 'loaded' || entry.status === 'operation-error')) {
       const behindCount = entry.store.getState().gitController.getState().behindCount
       if (behindCount > 0) {
@@ -179,8 +177,7 @@ export default function SessionPanel({
 
 
   const handleQuickFork = async (wsId: string) => {
-    const entry = workspaces[wsId]
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    const entry = workspaces.get(wsId)
     if (entry && (entry.status === 'loaded' || entry.status === 'operation-error')) {
       const behindCount = entry.store.getState().gitController.getState().behindCount
       if (behindCount > 0) {
@@ -271,8 +268,7 @@ export default function SessionPanel({
 
   const handleRemove = async (id: string) => {
     closeContextMenu()
-    const entry = workspaces[id]
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    const entry = workspaces.get(id)
     if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
     const ws = entry.data
 
@@ -294,8 +290,7 @@ export default function SessionPanel({
 
   const handleOpenSettings = (workspaceId: string) => {
     closeContextMenu()
-    const entry = workspaces[workspaceId]
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    const entry = workspaces.get(workspaceId)
     if (entry && (entry.status === 'loaded' || entry.status === 'operation-error')) {
       entry.store.getState().addTab('workspace-settings')
     }
@@ -314,7 +309,7 @@ export default function SessionPanel({
   }
 
   // Get root workspaces (those without parents) — includes loading/error entries (no parentId)
-  const rootWorkspaceIds = Object.entries(workspaces)
+  const rootWorkspaceIds = Array.from(workspaces.entries())
     .filter(([, e]) => {
       if (e.status === 'loaded' || e.status === 'operation-error') return !e.data.parentId
       return true // loading/error entries are always top-level
@@ -327,7 +322,7 @@ export default function SessionPanel({
     .map(([id]) => id)
 
   // Get create child dialog parent handle
-  const createChildDialogParentEntry = createChildDialogParentId ? workspaces[createChildDialogParentId] : undefined
+  const createChildDialogParentEntry = createChildDialogParentId ? workspaces.get(createChildDialogParentId) : undefined
   const createChildDialogParentHandle = createChildDialogParentEntry &&
     (createChildDialogParentEntry.status === 'loaded' || createChildDialogParentEntry.status === 'operation-error')
     ? createChildDialogParentEntry.store
@@ -346,9 +341,8 @@ export default function SessionPanel({
     e.preventDefault()
     if (!dragState) return
     // Only allow drop on same-parent siblings
-    const dragEntry = workspaces[dragState.dragId]
-    const overEntry = workspaces[id]
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    const dragEntry = workspaces.get(dragState.dragId)
+    const overEntry = workspaces.get(id)
     if (!dragEntry || !overEntry) return
     if (dragEntry.status !== 'loaded' && dragEntry.status !== 'operation-error') return
     if (overEntry.status !== 'loaded' && overEntry.status !== 'operation-error') return
@@ -375,8 +369,7 @@ export default function SessionPanel({
   }
 
   const renderWorkspace = (id: string, depth: number = 0): ReactNode => {
-    const entry = workspaces[id]
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    const entry = workspaces.get(id)
     if (!entry) return null
 
     const children = getChildren(id)
@@ -670,12 +663,12 @@ export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSess
   const isActiveSession = activeView?.type === 'workspace' && activeView.sessionId === sessionId
 
   const getChildren = (parentId: string): Workspace[] =>
-    Object.entries(workspaces)
-      .filter(([, e]) => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === parentId)
-      .map(([, e]) => (e as Extract<typeof e, { status: 'loaded' | 'operation-error' }>).data)
+    Array.from(workspaces.values())
+      .filter((e): e is Extract<typeof e, { status: 'loaded' | 'operation-error' }> => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === parentId)
+      .map(e => e.data)
       .sort((a, b) => parseInt(a.metadata.sortOrder || '0') - parseInt(b.metadata.sortOrder || '0'))
 
-  const rootWorkspaceIds = Object.entries(workspaces)
+  const rootWorkspaceIds = Array.from(workspaces.entries())
     .filter(([, e]) => {
       if (e.status === 'loaded' || e.status === 'operation-error') return !e.data.parentId
       return true
@@ -693,8 +686,7 @@ export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSess
   }
 
   const renderIcon = (id: string): ReactNode => {
-    const entry = workspaces[id]
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    const entry = workspaces.get(id)
     if (!entry) return null
 
     const ws = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined

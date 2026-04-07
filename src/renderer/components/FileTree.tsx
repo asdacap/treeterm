@@ -34,7 +34,7 @@ export function FileTree({
   const { workspace: wsData } = useStore(workspace)
   const workspacePath = wsData.path
   const filesystem = useFilesystemApi(workspace)
-  const [dirContents, setDirContents] = useState<Record<string, DirectoryState>>({})
+  const [dirContents, setDirContents] = useState<Map<string, DirectoryState>>(new Map())
   const [search, setSearch] = useState<SearchState>({
     query: '',
     entries: [],
@@ -97,36 +97,32 @@ export function FileTree({
       // Atomically check-and-set loading state to prevent duplicate requests
       let alreadyRequested = false
       setDirContents((prev) => {
-        const existing = prev[dirPath]
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        const existing = prev.get(dirPath)
         if (existing && !existing.error) {
           alreadyRequested = true
           return prev
         }
-        return { ...prev, [dirPath]: { entries: [], loading: true, error: null } }
+        return new Map(prev).set(dirPath, { entries: [], loading: true, error: null })
       })
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated synchronously in setState callback above
       if (alreadyRequested) return
 
       try {
         const result = await filesystem.readDirectory(dirPath)
 
         if (result.success) {
-          setDirContents((prev) => ({
-            ...prev,
-            [dirPath]: { entries: result.contents.entries, loading: false, error: null }
-          }))
+          setDirContents((prev) =>
+            new Map(prev).set(dirPath, { entries: result.contents.entries, loading: false, error: null })
+          )
         } else {
-          setDirContents((prev) => ({
-            ...prev,
-            [dirPath]: { entries: [], loading: false, error: result.error || 'Failed to load' }
-          }))
+          setDirContents((prev) =>
+            new Map(prev).set(dirPath, { entries: [], loading: false, error: result.error || 'Failed to load' })
+          )
         }
       } catch (err) {
-        setDirContents((prev) => ({
-          ...prev,
-          [dirPath]: { entries: [], loading: false, error: `Error: ${String(err)}` }
-        }))
+        setDirContents((prev) =>
+          new Map(prev).set(dirPath, { entries: [], loading: false, error: `Error: ${String(err)}` })
+        )
       }
     },
     [filesystem]
@@ -184,7 +180,7 @@ export function FileTree({
   const renderEntry = (entry: FileEntry, depth: number): React.JSX.Element => {
     const isExpanded = expandedDirs.includes(entry.path)
     const isSelected = selectedPath === entry.path
-    const dirState = dirContents[entry.path]
+    const dirState = dirContents.get(entry.path)
 
     return (
       <div key={entry.path}>
@@ -207,13 +203,11 @@ export function FileTree({
         </div>
         {entry.isDirectory && isExpanded && (
           <div className="file-tree-children">
-            {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition */}
             {dirState?.loading && (
               <div className="file-tree-item" style={{ paddingLeft: `${String((depth + 1) * 16 + 8)}px` }}>
                 <span className="file-tree-loading">Loading...</span>
               </div>
             )}
-            {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition */}
             {dirState?.error && (
               <div
                 className="file-tree-item file-tree-error"
@@ -222,7 +216,6 @@ export function FileTree({
                 <span>{dirState.error}</span>
               </div>
             )}
-            {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition */}
             {dirState?.entries.map((child) => renderEntry(child, depth + 1))}
           </div>
         )}
@@ -259,7 +252,7 @@ export function FileTree({
     )
   }
 
-  const rootState = dirContents[workspacePath]
+  const rootState = dirContents.get(workspacePath)
   const isSearching = search.query.trim().length > 0
 
   return (
@@ -315,19 +308,16 @@ export function FileTree({
       {/* Normal Tree View (shown when not searching) */}
       {!isSearching && (
         <>
-          {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition */}
           {rootState?.loading && (
             <div className="file-tree-item">
               <span className="file-tree-loading">Loading...</span>
             </div>
           )}
-          {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition */}
           {rootState?.error && (
             <div className="file-tree-item file-tree-error">
               <span>{rootState.error}</span>
             </div>
           )}
-          {/* eslint-disable-next-line @typescript-eslint/no-unnecessary-condition */}
           {rootState?.entries.map((entry) => renderEntry(entry, 0))}
         </>
       )}

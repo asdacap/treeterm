@@ -407,6 +407,7 @@ server.onDialogSelectFolder(async () => {
     return null
   }
   const selectedPath = result.filePaths[0]
+  if (!selectedPath) return null
   // Add to recent directories
   try {
     const settings = loadSettings()
@@ -730,10 +731,10 @@ function execCommand(
 function parseGitHubOwnerRepo(remoteUrl: string): { owner: string; repo: string } | null {
   // Handle SSH: git@github.com:owner/repo.git
   const sshMatch = remoteUrl.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/)
-  if (sshMatch) return { owner: sshMatch[1], repo: sshMatch[2] }
+  if (sshMatch?.[1] && sshMatch[2]) return { owner: sshMatch[1], repo: sshMatch[2] }
   // Handle HTTPS: https://github.com/owner/repo.git
   const httpsMatch = remoteUrl.match(/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?$/)
-  if (httpsMatch) return { owner: httpsMatch[1], repo: httpsMatch[2] }
+  if (httpsMatch?.[1] && httpsMatch[2]) return { owner: httpsMatch[1], repo: httpsMatch[2] }
   return null
 }
 
@@ -774,7 +775,8 @@ server.onGithubGetPrInfo(async (connectionId, repoPath, head, base) => {
       return { noPr: true as const, createUrl: `https://github.com/${owner}/${repo}/compare/${base}...${head}?expand=1` }
     }
 
-    const pr = prs[0]
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length checked above
+    const pr = prs[0]!
     const prUrl = `https://github.com/${owner}/${repo}/pull/${String(pr.number)}`
 
     // Fetch rich PR info via GraphQL
@@ -1468,10 +1470,14 @@ void app.whenReady().then(async () => {
 function parseSSHTarget(target: string): SSHConnectionConfig | null {
   const match = target.match(/^([^@]+)@([^:]+)(?::(\d+))?$/)
   if (!match) return null
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- regex groups guaranteed by match
+  const user = match[1]!
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- regex groups guaranteed by match
+  const host = match[2]!
   return {
-    id: `ssh-${match[2]}-${String(Date.now())}`,
-    user: match[1],
-    host: match[2],
+    id: `ssh-${host}-${String(Date.now())}`,
+    user,
+    host,
     port: match[3] ? parseInt(match[3], 10) : 22,
     label: target,
     portForwards: [],

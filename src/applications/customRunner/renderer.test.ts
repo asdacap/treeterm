@@ -221,7 +221,7 @@ describe('createCustomRunnerVariant', () => {
       expect(mockCreateTty).toHaveBeenCalledWith('/test/project', undefined, 'rider /test/project')
       expect(mockUpdateTabState).toHaveBeenCalledWith('tab-1', expect.any(Function))
 
-      const updater = mockUpdateTabState.mock.calls[0][1] as (prev: Record<string, unknown>) => Record<string, unknown>
+      const updater = mockUpdateTabState.mock.calls[0]![1] as (prev: Record<string, unknown>) => Record<string, unknown>
       const updated = updater({ ptyId: null, ptyHandle: null, keepOnExit: false })
       expect(updated).toEqual({
         ptyId: 'pty-new',

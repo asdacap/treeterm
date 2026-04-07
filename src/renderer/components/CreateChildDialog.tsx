@@ -56,11 +56,11 @@ export default function CreateChildDialog({
   // Get inherited app name
   const inheritedApp = parentWsData.settings.defaultApplicationId
      
-    ? applications[parentWsData.settings.defaultApplicationId] ?? null
+    ? applications.get(parentWsData.settings.defaultApplicationId) ?? null
     : null
 
   // Get available apps
-  const availableApps = Object.values(applications).filter(app => app.showInNewTabMenu)
+  const availableApps = Array.from(applications.values()).filter(app => app.showInNewTabMenu)
 
   // Validate name for '/' character
   const nameValidationError = !name.trim() ? null

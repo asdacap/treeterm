@@ -95,7 +95,7 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>
     )
     expect(onError).toHaveBeenCalledTimes(1)
-    const errorArg = onError.mock.calls[0][0] as Error
+    const errorArg = onError.mock.calls[0]![0] as Error
     expect(errorArg).toBeInstanceOf(Error)
     expect(errorArg.message).toBe('boom')
   })

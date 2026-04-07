@@ -272,14 +272,14 @@ describe('createAnalyzerStore', () => {
     expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
 
     // Resolve the first request — should drain pending
-    calls[0]({ state: 'idle', reason: 'prompt visible' })
+    calls[0]!({ state: 'idle', reason: 'prompt visible' })
     await vi.advanceTimersByTimeAsync(0)
 
     // Now the pending analyze should have fired
     expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(2)
 
     // Resolve second
-    calls[1]({ state: 'idle', reason: 'tests passed' })
+    calls[1]!({ state: 'idle', reason: 'tests passed' })
     await vi.advanceTimersByTimeAsync(0)
 
     store.getState().stop()
@@ -647,10 +647,10 @@ describe('createAnalyzerStore', () => {
 
       const history = store.getState().getHistory()
       expect(history).toHaveLength(1)
-      expect(history[0].kind).toBe('analyzer')
-      expect(history[0].error).toBeUndefined()
-      expect(history[0].model).toBe('test-model')
-      expect(history[0].response).toBe(JSON.stringify({ state: 'idle', reason: 'prompt visible' }))
+      expect(history[0]!.kind).toBe('analyzer')
+      expect(history[0]!.error).toBeUndefined()
+      expect(history[0]!.model).toBe('test-model')
+      expect(history[0]!.response).toBe(JSON.stringify({ state: 'idle', reason: 'prompt visible' }))
 
       store.getState().stop()
       vi.useRealTimers()
@@ -677,9 +677,9 @@ describe('createAnalyzerStore', () => {
 
       const history = store.getState().getHistory()
       expect(history).toHaveLength(1)
-      expect(history[0].kind).toBe('analyzer')
-      expect(history[0].error).toBe('API error')
-      expect(history[0].response).toBe(JSON.stringify({ error: 'API error' }))
+      expect(history[0]!.kind).toBe('analyzer')
+      expect(history[0]!.error).toBe('API error')
+      expect(history[0]!.response).toBe(JSON.stringify({ error: 'API error' }))
 
       store.getState().stop()
       vi.useRealTimers()
@@ -706,9 +706,9 @@ describe('createAnalyzerStore', () => {
 
       const history = store.getState().getHistory()
       expect(history).toHaveLength(1)
-      expect(history[0].kind).toBe('analyzer')
-      expect(history[0].error).toBe('Network error')
-      expect(history[0].response).toBe('')
+      expect(history[0]!.kind).toBe('analyzer')
+      expect(history[0]!.error).toBe('Network error')
+      expect(history[0]!.response).toBe('')
 
       store.getState().stop()
       vi.useRealTimers()
@@ -735,9 +735,9 @@ describe('createAnalyzerStore', () => {
 
       const history = store.getState().getHistory()
       expect(history).toHaveLength(1)
-      expect(history[0].kind).toBe('analyzer')
-      expect(history[0].error).toBe('[unexpected] no state in result')
-      expect(history[0].response).toBe(JSON.stringify({ something: 'unexpected' }))
+      expect(history[0]!.kind).toBe('analyzer')
+      expect(history[0]!.error).toBe('[unexpected] no state in result')
+      expect(history[0]!.response).toBe(JSON.stringify({ something: 'unexpected' }))
 
       store.getState().stop()
       vi.useRealTimers()

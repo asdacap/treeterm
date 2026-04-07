@@ -36,7 +36,7 @@ describe('IpcServer', () => {
       const handler = vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('pty-123')
       // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       server.onPtyCreate(handler as any)
-      const wrapper = mockHandle.mock.calls[0][1] as (...args: any[]) => Promise<string>
+      const wrapper = mockHandle.mock.calls[0]![1] as (...args: any[]) => Promise<string>
       const fakeEvent = { sender: {} }
       const result = await wrapper(fakeEvent, '/home/user', undefined, undefined)
       expect(handler).toHaveBeenCalledWith(fakeEvent, '/home/user', undefined, undefined)
@@ -71,7 +71,7 @@ describe('IpcServer', () => {
       const handler = vi.fn<(...args: any[]) => Promise<{ success: boolean }>>().mockResolvedValue({ success: true })
       // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       server.onFsReadFile(handler as any)
-      const wrapper = mockHandle.mock.calls[0][1] as (...args: any[]) => Promise<{ success: boolean }>
+      const wrapper = mockHandle.mock.calls[0]![1] as (...args: any[]) => Promise<{ success: boolean }>
       const result = await wrapper({}, '/ws', '/file.txt')
       expect(handler).toHaveBeenCalledWith('/ws', '/file.txt')
       expect(result).toEqual({ success: true })
@@ -155,7 +155,7 @@ describe('IpcServer', () => {
       const handler = vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('result')
       // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
       ;(server as any)[method](handler)
-      const wrapper = mockHandle.mock.calls[0][1] as (...args: any[]) => Promise<string>
+      const wrapper = mockHandle.mock.calls[0]![1] as (...args: any[]) => Promise<string>
       const result = await wrapper({}, 'arg1', 'arg2')
       expect(handler).toHaveBeenCalledWith('arg1', 'arg2')
       expect(result).toBe('result')
@@ -170,7 +170,7 @@ describe('IpcServer', () => {
       const handler = vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('result')
       // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
       ;(server as any)[method](handler)
-      const wrapper = mockHandle.mock.calls[0][1] as (...args: any[]) => Promise<string>
+      const wrapper = mockHandle.mock.calls[0]![1] as (...args: any[]) => Promise<string>
       const mockEvent = { sender: {} }
       const result = await wrapper(mockEvent, 'arg1', 'arg2')
       expect(handler).toHaveBeenCalledWith(mockEvent, 'arg1', 'arg2')
@@ -200,7 +200,7 @@ describe('IpcServer', () => {
     it('onLlmChatCancel wrapper forwards args to handler', () => {
       const handler = vi.fn<(...args: any[]) => void>()
       server.onLlmChatCancel(handler)
-      const wrapper = mockOn.mock.calls[0][1] as (...args: any[]) => void
+      const wrapper = mockOn.mock.calls[0]![1] as (...args: any[]) => void
       wrapper({}, 'request-123')
       expect(handler).toHaveBeenCalledWith('request-123')
     })

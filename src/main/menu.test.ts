@@ -37,7 +37,7 @@ type MenuItem = {
 
 function getTemplate(): MenuItem[] {
   // eslint-disable-next-line @typescript-eslint/unbound-method
-  return vi.mocked(Menu.buildFromTemplate).mock.calls[0][0] as unknown as MenuItem[]
+  return vi.mocked(Menu.buildFromTemplate).mock.calls[0]![0] as unknown as MenuItem[]
 }
 
 describe('menu', () => {
@@ -66,7 +66,7 @@ describe('menu', () => {
       createApplicationMenu(null, mockServer as unknown as IpcServer)
 
       const template = getTemplate()
-      expect(template[0].label).toBe('TreeTerm')
+      expect(template[0]!.label).toBe('TreeTerm')
     })
 
     it('includes settings in File menu on non-macOS', () => {
@@ -85,7 +85,7 @@ describe('menu', () => {
       createApplicationMenu(null, mockServer as unknown as IpcServer)
 
       const template = getTemplate()
-      const appMenu = template[0]
+      const appMenu = template[0]!
       const preferencesItem = appMenu.submenu?.find((item) => item.label === 'Preferences...')
 
       preferencesItem?.click?.()
@@ -133,7 +133,7 @@ describe('menu', () => {
       createApplicationMenu(null, mockServer as unknown as IpcServer)
 
       const template = getTemplate()
-      const appMenu = template[0]
+      const appMenu = template[0]!
       const preferencesItem = appMenu.submenu?.find((item) => item.label === 'Preferences...')
       preferencesItem?.click?.()
 

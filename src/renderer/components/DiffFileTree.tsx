@@ -16,7 +16,8 @@ function buildTree(files: (DiffFile | UncommittedFile)[]): TreeNode[] {
     let current = root
 
     for (let i = 0; i < parts.length; i++) {
-      const part = parts[i]
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- i is bounds-checked by loop
+      const part = parts[i]!
       const isFile = i === parts.length - 1
 
       if (isFile) {
@@ -46,8 +47,10 @@ function buildTree(files: (DiffFile | UncommittedFile)[]): TreeNode[] {
   function collapse(node: TreeNode): TreeNode {
     node.children = node.children.map(collapse)
 
-    if (node.file === null && node.children.length === 1 && node.children[0].file === null) {
-      const child = node.children[0]
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length === 1 guarantees index 0
+    if (node.file === null && node.children.length === 1 && node.children[0]!.file === null) {
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length === 1 guarantees index 0
+      const child = node.children[0]!
       return {
         name: node.name + '/' + child.name,
         path: child.path,

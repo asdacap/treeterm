@@ -91,16 +91,16 @@ function toLoaded(ws: Workspace): WorkspaceEntry {
 
 describe('getUnmergedSubWorkspaces', () => {
   it('returns empty array when no workspaces', () => {
-    expect(getUnmergedSubWorkspaces({})).toEqual([])
+    expect(getUnmergedSubWorkspaces(new Map())).toEqual([])
   })
 
   it('returns only active worktree workspaces', () => {
-    const workspaces: Record<string, WorkspaceEntry> = {
-      root: toLoaded(makeWorkspace({ id: 'root', isWorktree: false, status: 'active' })),
-      child1: toLoaded(makeWorkspace({ id: 'child1', isWorktree: true, status: 'active' })),
-      child2: toLoaded(makeWorkspace({ id: 'child2', isWorktree: true, status: 'merged' })),
-      child3: toLoaded(makeWorkspace({ id: 'child3', isWorktree: true, status: 'active' }))
-    }
+    const workspaces = new Map<string, WorkspaceEntry>([
+      ['root', toLoaded(makeWorkspace({ id: 'root', isWorktree: false, status: 'active' }))],
+      ['child1', toLoaded(makeWorkspace({ id: 'child1', isWorktree: true, status: 'active' }))],
+      ['child2', toLoaded(makeWorkspace({ id: 'child2', isWorktree: true, status: 'merged' }))],
+      ['child3', toLoaded(makeWorkspace({ id: 'child3', isWorktree: true, status: 'active' }))],
+    ])
     const result = getUnmergedSubWorkspaces(workspaces)
     expect(result).toHaveLength(2)
     expect(result.map(w => w.id)).toContain('child1')
@@ -108,9 +108,9 @@ describe('getUnmergedSubWorkspaces', () => {
   })
 
   it('excludes non-worktree workspaces even if active', () => {
-    const workspaces: Record<string, WorkspaceEntry> = {
-      root: toLoaded(makeWorkspace({ id: 'root', isWorktree: false, status: 'active' }))
-    }
+    const workspaces = new Map<string, WorkspaceEntry>([
+      ['root', toLoaded(makeWorkspace({ id: 'root', isWorktree: false, status: 'active' }))],
+    ])
     expect(getUnmergedSubWorkspaces(workspaces)).toEqual([])
   })
 })
@@ -164,7 +164,7 @@ describe('createWorkspaceStore', () => {
 
     store.getState().updateTabTitle('tab-1', 'my shell')
 
-    expect(store.getState().workspace.appStates['tab-1'].title).toBe('my shell')
+    expect(store.getState().workspace.appStates['tab-1']!.title).toBe('my shell')
   })
 
   it('setActiveTab updates the workspace activeTabId', () => {
@@ -201,7 +201,7 @@ describe('createWorkspaceStore', () => {
       const tabId = store.getState().addTab('terminal')
 
       const wsState = store.getState().workspace
-      const newTab = wsState.appStates[tabId]
+      const newTab = wsState.appStates[tabId]!
       expect(newTab).toBeDefined()
       expect(newTab.title).toBe('Terminal 2')
       expect(wsState.activeTabId).toBe(tabId)
@@ -231,7 +231,7 @@ describe('createWorkspaceStore', () => {
 
       const tabId = store.getState().addTab('terminal', { cwd: '/custom' })
 
-      const tab = store.getState().workspace.appStates[tabId]
+      const tab = store.getState().workspace.appStates[tabId]!
       expect(tab).toBeDefined()
       expect(tab.state).toEqual({ ptyId: null, cwd: '/custom' })
     })
@@ -327,7 +327,7 @@ describe('createWorkspaceStore', () => {
 
       store.getState().updateTabState<{ count: number }>('tab-1', (s) => ({ ...s, count: s.count + 1 }))
 
-      const tab = store.getState().workspace.appStates['tab-1']
+      const tab = store.getState().workspace.appStates['tab-1']!
       expect(tab.state).toEqual({ count: 1 })
     })
 
@@ -367,12 +367,12 @@ describe('createWorkspaceStore', () => {
       })
 
       const wsState = store.getState().workspace
-      const comments = JSON.parse(wsState.metadata.reviewComments) as TestComment[]
+      const comments = JSON.parse(wsState.metadata.reviewComments!) as TestComment[]
       expect(comments).toHaveLength(1)
-      expect(comments[0].text).toBe('Fix this')
-      expect(comments[0].filePath).toBe('test.ts')
-      expect(comments[0].id).toBeDefined()
-      expect(comments[0].createdAt).toBeDefined()
+      expect(comments[0]!.text).toBe('Fix this')
+      expect(comments[0]!.filePath).toBe('test.ts')
+      expect(comments[0]!.id).toBeDefined()
+      expect(comments[0]!.createdAt).toBeDefined()
     })
 
     it('deleteReviewComment removes a comment', () => {
@@ -387,9 +387,9 @@ describe('createWorkspaceStore', () => {
       store.getState().reviewComments.getState().deleteReviewComment('c1')
 
       const wsState = store.getState().workspace
-      const comments = JSON.parse(wsState.metadata.reviewComments) as TestComment[]
+      const comments = JSON.parse(wsState.metadata.reviewComments!) as TestComment[]
       expect(comments).toHaveLength(1)
-      expect(comments[0].id).toBe('c2')
+      expect(comments[0]!.id).toBe('c2')
     })
 
     it('toggleReviewCommentAddressed toggles addressed flag', () => {
@@ -403,8 +403,8 @@ describe('createWorkspaceStore', () => {
       store.getState().reviewComments.getState().toggleReviewCommentAddressed('c1')
 
       const wsState = store.getState().workspace
-      const comments = JSON.parse(wsState.metadata.reviewComments) as TestComment[]
-      expect(comments[0].addressed).toBe(true)
+      const comments = JSON.parse(wsState.metadata.reviewComments!) as TestComment[]
+      expect(comments[0]!.addressed).toBe(true)
     })
 
     it('updateOutdatedReviewComments marks comments with different hash as outdated', () => {
@@ -419,9 +419,9 @@ describe('createWorkspaceStore', () => {
       store.getState().reviewComments.getState().updateOutdatedReviewComments('new')
 
       const wsState = store.getState().workspace
-      const comments = JSON.parse(wsState.metadata.reviewComments) as TestComment[]
-      expect(comments[0].isOutdated).toBe(true)
-      expect(comments[1].isOutdated).toBe(false)
+      const comments = JSON.parse(wsState.metadata.reviewComments!) as TestComment[]
+      expect(comments[0]!.isOutdated).toBe(true)
+      expect(comments[1]!.isOutdated).toBe(false)
     })
 
     it('updateOutdatedReviewComments never marks null-commitHash comments as outdated', () => {
@@ -435,8 +435,8 @@ describe('createWorkspaceStore', () => {
       store.getState().reviewComments.getState().updateOutdatedReviewComments('any-hash')
 
       const wsState = store.getState().workspace
-      const comments = JSON.parse(wsState.metadata.reviewComments) as TestComment[]
-      expect(comments[0].isOutdated).toBe(false)
+      const comments = JSON.parse(wsState.metadata.reviewComments!) as TestComment[]
+      expect(comments[0]!.isOutdated).toBe(false)
     })
 
     it('clearReviewComments empties the comments', () => {
@@ -450,7 +450,7 @@ describe('createWorkspaceStore', () => {
       store.getState().reviewComments.getState().clearReviewComments()
 
       const wsState = store.getState().workspace
-      const comments = JSON.parse(wsState.metadata.reviewComments) as TestComment[]
+      const comments = JSON.parse(wsState.metadata.reviewComments!) as TestComment[]
       expect(comments).toHaveLength(0)
     })
   })
@@ -809,8 +809,8 @@ describe('createWorkspaceStore', () => {
       expect(store.getState().getCachedTerminal('tab-b')).toBeNull()
       expect(disposeFns[0]).toHaveBeenCalled()
       expect(disposeFns[1]).toHaveBeenCalled()
-      expect(terminalMocks[0].terminal.dispose).toHaveBeenCalled()
-      expect(terminalMocks[1].terminal.dispose).toHaveBeenCalled()
+      expect(terminalMocks[0]!.terminal.dispose).toHaveBeenCalled()
+      expect(terminalMocks[1]!.terminal.dispose).toHaveBeenCalled()
     })
   })
 

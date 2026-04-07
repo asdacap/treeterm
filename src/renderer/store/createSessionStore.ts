@@ -52,7 +52,7 @@ export interface SessionState {
   listTty: () => Promise<TTYSessionInfo[]>
 
   // Workspace collection
-  workspaces: Record<string, WorkspaceEntry>
+  workspaces: Map<string, WorkspaceEntry>
   activeWorkspaceId: string | null
   isRestoring: boolean
   sessionVersion: number
@@ -119,8 +119,8 @@ function getDefaultAppForWorktree(
 /**
  * Helper function to find unmerged sub-workspaces (worktrees with status 'active')
  */
-export function getUnmergedSubWorkspaces(workspaces: Record<string, WorkspaceEntry>): Workspace[] {
-  return Object.values(workspaces)
+export function getUnmergedSubWorkspaces(workspaces: Map<string, WorkspaceEntry>): Workspace[] {
+  return Array.from(workspaces.values())
     .filter((e): e is Extract<WorkspaceEntry, { status: 'loaded' | 'operation-error' }> =>
       e.status === 'loaded' || e.status === 'operation-error')
     .map(e => e.data)
@@ -136,7 +136,7 @@ export function createSessionStore(
   function nextSortOrder(parentId: string | null): string {
     const workspaces = store.getState().workspaces
     let max = -1
-    for (const entry of Object.values(workspaces)) {
+    for (const entry of Array.from(workspaces.values())) {
       if (entry.status !== 'loaded' && entry.status !== 'operation-error') continue
       const ws = entry.data
       const isMatch = parentId === null ? !ws.parentId : ws.parentId === parentId
@@ -151,7 +151,7 @@ export function createSessionStore(
   async function syncSessionToDaemon(isRestoring: boolean = false): Promise<void> {
     try {
       const { workspaces, connection } = store.getState()
-      console.log('[session] syncSessionToDaemon called - workspaces:', Object.keys(workspaces).length, 'isRestoring:', isRestoring)
+      console.log('[session] syncSessionToDaemon called - workspaces:', workspaces.size, 'isRestoring:', isRestoring)
 
       if (connection && connection.status !== 'connected') {
         console.log('[session] connection not yet established, skipping sync')
@@ -163,7 +163,7 @@ export function createSessionStore(
         return
       }
 
-      const daemonWorkspaces = Object.values(workspaces)
+      const daemonWorkspaces = Array.from(workspaces.values())
         .filter((e): e is Extract<WorkspaceEntry, { status: 'loaded' }> => e.status === 'loaded')
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         .map(e => { const { createdAt: _createdAt, lastActivity: _lastActivity, ...ws } = e.data; return ws })
@@ -224,8 +224,7 @@ export function createSessionStore(
       quickForkWorkspace: (id) => store.getState().quickForkWorkspace(id),
       refreshGitInfo: (id) => store.getState().refreshGitInfo(id),
       lookupWorkspace: (id) => {
-        const entry = store.getState().workspaces[id]
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+        const entry = store.getState().workspaces.get(id)
         return entry && (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined
       },
       github: deps.github,
@@ -238,11 +237,10 @@ export function createSessionStore(
     // Keep the workspaces snapshot in sync when handle state changes
     handle.subscribe((state) => {
       store.setState((s) => {
-        const entry = s.workspaces[state.workspace.id]
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+        const entry = s.workspaces.get(state.workspace.id)
         if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return s
         return {
-          workspaces: { ...s.workspaces, [state.workspace.id]: { ...entry, data: state.workspace } }
+          workspaces: new Map(s.workspaces).set(state.workspace.id, { ...entry, data: state.workspace })
         }
       })
     })
@@ -265,25 +263,23 @@ export function createSessionStore(
     }
   ): { success: true } {
     const state = store.getState()
-    const parentEntry = state.workspaces[parentId]
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+    const parentEntry = state.workspaces.get(parentId)
     const parent = parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error') ? parentEntry.data : undefined
 
     const id = generateId()
     const operationId = generateId()
 
     store.setState((s) => ({
-      workspaces: { ...s.workspaces, [id]: { status: 'loading' as const, name: worktreeName, message: options.message, output: [] } },
+      workspaces: new Map(s.workspaces).set(id, { status: 'loading' as const, name: worktreeName, message: options.message, output: [] }),
       activeWorkspaceId: id,
     }))
 
     const unsubOutput = deps.git.onOutput((opId, data) => {
       if (opId !== operationId) return
-      const entry = store.getState().workspaces[id]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+      const entry = store.getState().workspaces.get(id)
       if (entry?.status === 'loading') {
         store.setState(s => ({
-          workspaces: { ...s.workspaces, [id]: { ...entry, output: [...entry.output, data] } }
+          workspaces: new Map(s.workspaces).set(id, { ...entry, output: [...entry.output, data] })
         }))
       }
     })
@@ -298,7 +294,7 @@ export function createSessionStore(
 
         if (!result.success) {
           store.setState(s => ({
-            workspaces: { ...s.workspaces, [id]: { status: 'error', name: worktreeName, error: result.error || 'Operation failed' } }
+            workspaces: new Map(s.workspaces).set(id, { status: 'error', name: worktreeName, error: result.error || 'Operation failed' })
           }))
           return
         }
@@ -346,12 +342,12 @@ export function createSessionStore(
         }
 
         store.setState(s => ({
-          workspaces: { ...s.workspaces, [id]: { status: 'loaded', data: childWorkspace, store: handle } }
+          workspaces: new Map(s.workspaces).set(id, { status: 'loaded', data: childWorkspace, store: handle })
         }))
         await syncSessionToDaemon(store.getState().isRestoring)
       } catch (err) {
         store.setState(s => ({
-          workspaces: { ...s.workspaces, [id]: { status: 'error', name: worktreeName, error: err instanceof Error ? err.message : String(err) } }
+          workspaces: new Map(s.workspaces).set(id, { status: 'error', name: worktreeName, error: err instanceof Error ? err.message : String(err) })
         }))
       } finally {
         unsubOutput()
@@ -369,8 +365,7 @@ export function createSessionStore(
     branch: string,
     options: { isDetached?: boolean; isWorktree?: boolean; settings?: WorktreeSettings; metadata?: Record<string, string> } = {}
   ): Promise<string> {
-    const parentEntry = store.getState().workspaces[parentId]
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+    const parentEntry = store.getState().workspaces.get(parentId)
     const parent = parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error') ? parentEntry.data : undefined
 
     const id = generateId()
@@ -410,7 +405,7 @@ export function createSessionStore(
     const handle = createHandleForWorkspace(childWorkspace)
 
     store.setState((s) => ({
-      workspaces: { ...s.workspaces, [id]: { status: 'loaded', data: childWorkspace, store: handle } },
+      workspaces: new Map(s.workspaces).set(id, { status: 'loaded', data: childWorkspace, store: handle }),
       activeWorkspaceId: id
     }))
 
@@ -427,14 +422,13 @@ export function createSessionStore(
     id: string,
     options: { keepBranch: boolean; keepWorktree: boolean; operationId?: string }
   ): Promise<void> {
-    const entry = store.getState().workspaces[id]
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+    const entry = store.getState().workspaces.get(id)
     if (!entry) return
     const workspace = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined
     const handle = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.store : undefined
 
     // Recursively remove children first (derived from parentId)
-    const childIds = Object.entries(store.getState().workspaces)
+    const childIds = Array.from(store.getState().workspaces.entries())
       .filter(([, e]) => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === id)
       .map(([childId]) => childId)
     for (const childId of childIds) {
@@ -468,8 +462,8 @@ export function createSessionStore(
 
     // Remove workspace entry
     store.setState((s) => {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { [id]: _, ...remaining } = s.workspaces
+      const remaining = new Map(s.workspaces)
+      remaining.delete(id)
       return {
         workspaces: remaining,
         activeWorkspaceId: s.activeWorkspaceId === id ? null : s.activeWorkspaceId
@@ -484,15 +478,14 @@ export function createSessionStore(
     id: string,
     options: { keepBranch: boolean; keepWorktree: boolean }
   ): Promise<void> {
-    const entry = store.getState().workspaces[id]
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+    const entry = store.getState().workspaces.get(id)
     if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
     const { data, store: wsStore } = entry
 
     const operationId = generateId()
     // Temporarily show loading in the main pane — preserve data+store for recovery
     store.setState(s => ({
-      workspaces: { ...s.workspaces, [id]: { status: 'loaded', data, store: wsStore } }
+      workspaces: new Map(s.workspaces).set(id, { status: 'loaded', data, store: wsStore })
     }))
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const unsubOutput = deps.git.onOutput((opId, _data) => {
@@ -503,7 +496,7 @@ export function createSessionStore(
       await removeWorkspaceInternal(id, { ...options, operationId })
     } catch (err) {
       store.setState(s => ({
-        workspaces: { ...s.workspaces, [id]: { status: 'operation-error', data, store: wsStore, error: err instanceof Error ? err.message : String(err) } }
+        workspaces: new Map(s.workspaces).set(id, { status: 'operation-error', data, store: wsStore, error: err instanceof Error ? err.message : String(err) })
       }))
     } finally {
       unsubOutput()
@@ -517,8 +510,7 @@ export function createSessionStore(
     squash: boolean
   ): Promise<{ success: boolean; error?: string; operationId?: string }> {
      
-    const entry = store.getState().workspaces[id]
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+    const entry = store.getState().workspaces.get(id)
     if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) {
       return { success: false, error: 'Workspace not found' }
     }
@@ -528,8 +520,7 @@ export function createSessionStore(
       return { success: false, error: 'Not a worktree workspace' }
     }
 
-    const parentEntry = store.getState().workspaces[workspace.parentId]
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+    const parentEntry = store.getState().workspaces.get(workspace.parentId)
     const parent = parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error') ? parentEntry.data : undefined
     if (!parent || !parent.gitRootPath || !parent.gitBranch) {
       return { success: false, error: 'Parent workspace not found or not a git repo' }
@@ -548,7 +539,7 @@ export function createSessionStore(
       const parentHasChanges = await deps.git.hasUncommittedChanges(parent.path)
       if (parentHasChanges) {
         store.setState(s => ({
-          workspaces: { ...s.workspaces, [id]: { status: 'operation-error', data: workspace, store: wsStore, error: 'Parent workspace has uncommitted changes. Commit or stash them before merging.' } }
+          workspaces: new Map(s.workspaces).set(id, { status: 'operation-error', data: workspace, store: wsStore, error: 'Parent workspace has uncommitted changes. Commit or stash them before merging.' })
         }))
         return { success: false, error: 'Parent workspace has uncommitted changes. Commit or stash them before merging.' }
       }
@@ -561,7 +552,7 @@ export function createSessionStore(
         )
         if (!commitResult.success) {
           store.setState(s => ({
-            workspaces: { ...s.workspaces, [id]: { status: 'operation-error', data: workspace, store: wsStore, error: `Failed to commit changes: ${commitResult.error}` } }
+            workspaces: new Map(s.workspaces).set(id, { status: 'operation-error', data: workspace, store: wsStore, error: `Failed to commit changes: ${commitResult.error}` })
           }))
           return { success: false, error: `Failed to commit changes: ${commitResult.error}` }
         }
@@ -576,7 +567,7 @@ export function createSessionStore(
 
       if (!mergeResult.success) {
         store.setState(s => ({
-          workspaces: { ...s.workspaces, [id]: { status: 'operation-error', data: workspace, store: wsStore, error: `Merge failed: ${mergeResult.error}` } }
+          workspaces: new Map(s.workspaces).set(id, { status: 'operation-error', data: workspace, store: wsStore, error: `Merge failed: ${mergeResult.error}` })
         }))
         return { success: false, error: `Merge failed: ${mergeResult.error}` }
       }
@@ -584,7 +575,7 @@ export function createSessionStore(
       return { success: true, operationId }
     } catch (err) {
       store.setState(s => ({
-        workspaces: { ...s.workspaces, [id]: { status: 'operation-error', data: workspace, store: wsStore, error: err instanceof Error ? err.message : String(err) } }
+        workspaces: new Map(s.workspaces).set(id, { status: 'operation-error', data: workspace, store: wsStore, error: err instanceof Error ? err.message : String(err) })
       }))
       return { success: false, error: err instanceof Error ? err.message : String(err) }
     } finally {
@@ -603,7 +594,7 @@ export function createSessionStore(
 
   const store = createStore<SessionState>()((set, get) => ({
     sessionId: config.sessionId,
-    workspaces: {},
+    workspaces: new Map<string, WorkspaceEntry>(),
     activeWorkspaceId: null,
     isRestoring: false,
     sessionVersion: 0,
@@ -640,18 +631,17 @@ export function createSessionStore(
     },
 
     clearWorkspaceError: (id: string): void => {
-      const entry = get().workspaces[id]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+      const entry = get().workspaces.get(id)
       if (!entry || entry.status !== 'operation-error') return
       set((s) => ({
-        workspaces: { ...s.workspaces, [id]: { status: 'loaded', data: entry.data, store: entry.store } }
+        workspaces: new Map(s.workspaces).set(id, { status: 'loaded', data: entry.data, store: entry.store })
       }))
     },
 
     closeWorkspace: (id: string): void => {
       set((s) => {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { [id]: _, ...rest } = s.workspaces
+        const rest = new Map(s.workspaces)
+        rest.delete(id)
         return {
           workspaces: rest,
           activeWorkspaceId: s.activeWorkspaceId === id ? null : s.activeWorkspaceId
@@ -665,7 +655,7 @@ export function createSessionStore(
       const name = getNameFromPath(path)
 
       set((s) => ({
-        workspaces: { ...s.workspaces, [id]: { status: 'loading' as const, name, message: 'Loading workspace...', output: [] } },
+        workspaces: new Map(s.workspaces).set(id, { status: 'loading' as const, name, message: 'Loading workspace...', output: [] }),
         activeWorkspaceId: id,
       }))
 
@@ -712,12 +702,12 @@ export function createSessionStore(
         }
 
         set(s => ({
-          workspaces: { ...s.workspaces, [id]: { status: 'loaded', data: workspace, store: handle } }
+          workspaces: new Map(s.workspaces).set(id, { status: 'loaded', data: workspace, store: handle })
         }))
         void syncSessionToDaemon(get().isRestoring)
       }).catch((err: unknown) => {
         set(s => ({
-          workspaces: { ...s.workspaces, [id]: { status: 'error', name, error: err instanceof Error ? err.message : String(err) } }
+          workspaces: new Map(s.workspaces).set(id, { status: 'error', name, error: err instanceof Error ? err.message : String(err) })
         }))
       })
 
@@ -725,8 +715,7 @@ export function createSessionStore(
     },
 
     addChildWorkspace: (parentId: string, name: string, isDetached: boolean = false, settings?: WorktreeSettings, description?: string) => {
-      const parentEntry = get().workspaces[parentId]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+      const parentEntry = get().workspaces.get(parentId)
       const parent = parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error') ? parentEntry.data : undefined
 
       if (!parent) {
@@ -747,8 +736,7 @@ export function createSessionStore(
           }
         },
         gitOperation: (operationId) => {
-          const currentParentEntry = get().workspaces[parentId]
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+          const currentParentEntry = get().workspaces.get(parentId)
           const currentParent = currentParentEntry && (currentParentEntry.status === 'loaded' || currentParentEntry.status === 'operation-error') ? currentParentEntry.data : undefined
           return deps.git.createWorktree(
             parent.gitRootPath ?? '',
@@ -761,13 +749,12 @@ export function createSessionStore(
     },
 
     adoptExistingWorktree: async (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => {
-      const parentEntry = get().workspaces[parentId]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+      const parentEntry = get().workspaces.get(parentId)
       if (!parentEntry || (parentEntry.status !== 'loaded' && parentEntry.status !== 'operation-error')) {
         return { success: false, error: 'Parent workspace not found' }
       }
 
-      const alreadyOpen = Object.values(get().workspaces).some(
+      const alreadyOpen = Array.from(get().workspaces.values()).some(
         e => (e.status === 'loaded' || e.status === 'operation-error') && e.data.path === worktreePath
       )
       if (alreadyOpen) {
@@ -781,8 +768,7 @@ export function createSessionStore(
 
     createWorktreeFromBranch: (parentId: string, branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => {
       console.log('[session] createWorktreeFromBranch called:', { parentId, branch, isDetached })
-      const parentEntry = get().workspaces[parentId]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+      const parentEntry = get().workspaces.get(parentId)
       const parent = parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error') ? parentEntry.data : undefined
 
       if (!parent) {
@@ -809,8 +795,7 @@ export function createSessionStore(
 
     createWorktreeFromRemote: (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => {
       console.log('[session] createWorktreeFromRemote called:', { parentId, remoteBranch, isDetached })
-      const parentEntry = get().workspaces[parentId]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+      const parentEntry = get().workspaces.get(parentId)
       const parent = parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error') ? parentEntry.data : undefined
 
       if (!parent) {
@@ -845,11 +830,10 @@ export function createSessionStore(
       removeWorkspaceWithLoading(id, { keepBranch: true, keepWorktree: true }),
 
     removeOrphanWorkspace: (id: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
-      if (!get().workspaces[id]) return
+      if (!get().workspaces.has(id)) return
       set((s) => {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { [id]: _, ...remaining } = s.workspaces
+        const remaining = new Map(s.workspaces)
+        remaining.delete(id)
         return {
           workspaces: remaining,
           activeWorkspaceId: s.activeWorkspaceId === id ? null : s.activeWorkspaceId
@@ -862,8 +846,7 @@ export function createSessionStore(
     },
 
     updateGitInfo: (id: string, gitInfo: GitInfo) => {
-      const entry = get().workspaces[id]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+      const entry = get().workspaces.get(id)
       if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
       entry.store.setState(s => ({
         workspace: {
@@ -877,8 +860,7 @@ export function createSessionStore(
     },
 
     refreshGitInfo: async (id: string) => {
-      const entry = get().workspaces[id]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+      const entry = get().workspaces.get(id)
       if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
       const gitInfo = await deps.git.getInfo(entry.data.path)
       get().updateGitInfo(id, gitInfo)
@@ -888,8 +870,7 @@ export function createSessionStore(
       const result = await mergeWorkspaceCore(id, squash)
       if (!result.success) return result
 
-      const entry = get().workspaces[id]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+      const entry = get().workspaces.get(id)
       if (entry && (entry.status === 'loaded' || entry.status === 'operation-error')) {
         entry.store.getState().updateStatus('merged')
       }
@@ -898,22 +879,19 @@ export function createSessionStore(
         await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: false, operationId: result.operationId })
       } catch (err) {
         // Merge succeeded but removal failed — show operation error
-        const currentEntry = get().workspaces[id]
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+        const currentEntry = get().workspaces.get(id)
         if (currentEntry && (currentEntry.status === 'loaded' || currentEntry.status === 'operation-error')) {
           store.setState(s => ({
-            workspaces: { ...s.workspaces, [id]: { status: 'operation-error', data: currentEntry.data, store: currentEntry.store, error: `Merge succeeded but cleanup failed: ${err instanceof Error ? err.message : String(err)}` } }
+            workspaces: new Map(s.workspaces).set(id, { status: 'operation-error', data: currentEntry.data, store: currentEntry.store, error: `Merge succeeded but cleanup failed: ${err instanceof Error ? err.message : String(err)}` })
           }))
         }
         return { success: false, error: err instanceof Error ? err.message : String(err) }
       }
 
       // Refresh parent's remote status after merge
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- entry may have been removed
       const wsData = entry && (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined
       if (wsData?.parentId) {
-        const parentEntry = get().workspaces[wsData.parentId]
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+        const parentEntry = get().workspaces.get(wsData.parentId)
         if (parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error')) {
           void parentEntry.store.getState().gitController.getState().refreshRemoteStatus()
         }
@@ -927,27 +905,23 @@ export function createSessionStore(
       if (!result.success) return result
 
       // On success, ensure workspace is back to loaded status
-      const entry = get().workspaces[id]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+      const entry = get().workspaces.get(id)
       if (entry && entry.status === 'operation-error') {
         store.setState(s => ({
-          workspaces: { ...s.workspaces, [id]: { status: 'loaded', data: entry.data, store: entry.store } }
+          workspaces: new Map(s.workspaces).set(id, { status: 'loaded', data: entry.data, store: entry.store })
         }))
       }
 
       // Refresh workspace diff status and git info
-      const currentEntry = get().workspaces[id]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+      const currentEntry = get().workspaces.get(id)
       if (currentEntry && currentEntry.status === 'loaded') {
         void currentEntry.store.getState().gitController.getState().refreshDiffStatus()
       }
       void get().refreshGitInfo(id)
 
       // Refresh parent's remote status after merge
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
       if (currentEntry && currentEntry.status === 'loaded' && currentEntry.data.parentId) {
-        const parentEntry = get().workspaces[currentEntry.data.parentId]
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+        const parentEntry = get().workspaces.get(currentEntry.data.parentId)
         if (parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error')) {
           void parentEntry.store.getState().gitController.getState().refreshRemoteStatus()
         }
@@ -957,8 +931,7 @@ export function createSessionStore(
     },
 
     closeAndCleanWorkspace: async (id: string) => {
-      const entry = get().workspaces[id]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+      const entry = get().workspaces.get(id)
       if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) {
         return { success: false, error: 'Workspace not found' }
       }
@@ -968,8 +941,7 @@ export function createSessionStore(
         return { success: false, error: 'Not a worktree workspace' }
       }
 
-      const parentEntry = get().workspaces[workspace.parentId]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+      const parentEntry = get().workspaces.get(workspace.parentId)
       if (!parentEntry || (parentEntry.status !== 'loaded' && parentEntry.status !== 'operation-error') || !parentEntry.data.gitRootPath) {
         return { success: false, error: 'Parent workspace not found or not a git repo' }
       }
@@ -979,8 +951,7 @@ export function createSessionStore(
     },
 
     quickForkWorkspace: async (workspaceId: string) => {
-      const entry = get().workspaces[workspaceId]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+      const entry = get().workspaces.get(workspaceId)
       if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) {
         return { success: false, error: 'Workspace not found' }
       }
@@ -1012,9 +983,8 @@ export function createSessionStore(
 
     reorderWorkspace: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after') => {
       const workspaces = get().workspaces
-      const dragEntry = workspaces[workspaceId]
-      const targetEntry = workspaces[targetWorkspaceId]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+      const dragEntry = workspaces.get(workspaceId)
+      const targetEntry = workspaces.get(targetWorkspaceId)
       if (!dragEntry || !targetEntry) return
       if (dragEntry.status !== 'loaded' && dragEntry.status !== 'operation-error') return
       if (targetEntry.status !== 'loaded' && targetEntry.status !== 'operation-error') return
@@ -1026,7 +996,7 @@ export function createSessionStore(
 
       // Gather siblings sorted by current sortOrder
       const siblings: { id: string; entry: Extract<WorkspaceEntry, { status: 'loaded' | 'operation-error' }> }[] = []
-      for (const [id, entry] of Object.entries(workspaces)) {
+      for (const [id, entry] of Array.from(workspaces.entries())) {
         if (entry.status !== 'loaded' && entry.status !== 'operation-error') continue
         const isMatch = dragParent === null ? !entry.data.parentId : entry.data.parentId === dragParent
         if (isMatch) siblings.push({ id, entry })
@@ -1044,17 +1014,16 @@ export function createSessionStore(
 
       // Reassign sortOrder on all siblings
       for (let i = 0; i < ordered.length; i++) {
-        const { id, entry } = ordered[i]
+        const item = ordered[i]
+        if (!item) continue
+        const { id, entry } = item
         const newMetadata = { ...entry.data.metadata, sortOrder: String(i) }
         entry.store.setState(s => ({
           workspace: { ...s.workspace, metadata: newMetadata }
         }))
         // Also update the session store snapshot
         set(s => ({
-          workspaces: {
-            ...s.workspaces,
-            [id]: { ...entry, data: { ...entry.data, metadata: newMetadata } }
-          }
+          workspaces: new Map(s.workspaces).set(id, { ...entry, data: { ...entry.data, metadata: newMetadata } })
         }))
       }
 
@@ -1073,7 +1042,7 @@ export function createSessionStore(
       applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: true })
       set({ isRestoring: false })
 
-      console.log('[Session] Session restore complete, workspace count:', Object.keys(get().workspaces).length)
+      console.log('[Session] Session restore complete, workspace count:', get().workspaces.size)
     },
 
     // eslint-disable-next-line @typescript-eslint/require-await -- interface requires Promise<void> but implementation is synchronous
@@ -1092,7 +1061,7 @@ export function createSessionStore(
       // Remove workspaces not present in daemon session (skip non-loaded workspaces)
       const incomingPaths = new Set(daemonSession.workspaces.map(ws => ws.path))
       const updatedState = get()
-      for (const [id, entry] of Object.entries(updatedState.workspaces)) {
+      for (const [id, entry] of Array.from(updatedState.workspaces.entries())) {
         if (entry.status === 'loaded' && !incomingPaths.has(entry.data.path)) {
           get().removeOrphanWorkspace(id)
         }
@@ -1112,8 +1081,7 @@ function updateWorkspaceFields(
   existingId: string,
   daemonWorkspace: Workspace
 ): void {
-  const entry = store.getState().workspaces[existingId]
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+  const entry = store.getState().workspaces.get(existingId)
   if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
   const ws = entry.store.getState().workspace
   entry.store.setState({
@@ -1126,7 +1094,7 @@ function findLoadedByPath(
   store: StoreApi<SessionState>,
   path: string
 ): { id: string } | undefined {
-  for (const [id, entry] of Object.entries(store.getState().workspaces)) {
+  for (const [id, entry] of Array.from(store.getState().workspaces.entries())) {
     if ((entry.status === 'loaded' || entry.status === 'operation-error') && entry.data.path === path) {
       return { id }
     }
@@ -1180,20 +1148,17 @@ function restoreWorkspaceTabs(
   workspaceId: string,
   daemonWorkspace: Workspace
 ): void {
-  const entry = store.getState().workspaces[workspaceId]
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
+  const entry = store.getState().workspaces.get(workspaceId)
   if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
 
   const wsState = entry.store.getState()
   const oldTabIds = Object.keys(wsState.workspace.appStates)
   const newTabIds = Object.keys(daemonWorkspace.appStates)
-  const newTabIdSet: Record<string, true> = {}
-  for (const tabId of newTabIds) { newTabIdSet[tabId] = true }
+  const newTabIdSet = new Set(newTabIds)
 
   // Dispose resources for tabs removed externally
   for (const tabId of oldTabIds) {
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
-    if (!newTabIdSet[tabId]) {
+    if (!newTabIdSet.has(tabId)) {
       wsState.disposeTabResources(tabId)
     }
   }
@@ -1207,11 +1172,9 @@ function restoreWorkspaceTabs(
   })
 
   // Only init genuinely new tabs
-  const oldTabIdSet: Record<string, true> = {}
-  for (const tabId of oldTabIds) { oldTabIdSet[tabId] = true }
+  const oldTabIdSet = new Set(oldTabIds)
   for (const tabId of newTabIds) {
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
-    if (!oldTabIdSet[tabId]) {
+    if (!oldTabIdSet.has(tabId)) {
       entry.store.getState().initTab(tabId)
     }
   }
@@ -1229,13 +1192,13 @@ function reconstructWorkspace(
   const workspace: Workspace = {
     ...daemonWorkspace,
     id,
-    activeTabId: daemonWorkspace.activeTabId || (Object.keys(daemonWorkspace.appStates).length > 0 ? Object.keys(daemonWorkspace.appStates)[0] : null)
+    activeTabId: daemonWorkspace.activeTabId || (Object.keys(daemonWorkspace.appStates).length > 0 ? Object.keys(daemonWorkspace.appStates)[0] ?? null : null)
   }
 
   const handle = createHandleForWorkspace(workspace)
 
   store.setState((s) => ({
-    workspaces: { ...s.workspaces, [id]: { status: 'loaded' as const, data: workspace, store: handle } },
+    workspaces: new Map(s.workspaces).set(id, { status: 'loaded' as const, data: workspace, store: handle }),
     activeWorkspaceId: id
   }))
 

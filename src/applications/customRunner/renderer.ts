@@ -36,7 +36,6 @@ export function createCustomRunnerVariant(instance: CustomRunnerInstance, deps: 
       }
       return {
         dispose: () => {
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
           const current = workspaceStore.getState().workspace.appStates[tab.id]?.state as TerminalState | undefined
           const ptyId = current?.ptyId ?? state.ptyId
           if (ptyId) {

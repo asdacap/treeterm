@@ -28,9 +28,10 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
     const unsubDelta = llm.onDelta((requestId, text) => {
       if (requestId !== activeRequestId.current) return
       setMessages((prev) => {
-        const last = prev[prev.length - 1]
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- prev always has at least one message
+        const last = prev[prev.length - 1]!
         if (last.role === 'assistant') {
-          return [...prev.slice(0, -1), { ...last, content: last.content + text }]
+          return [...prev.slice(0, -1), { ...last, content: last.content + text }] as ChatMessage[]
         }
         return prev
       })

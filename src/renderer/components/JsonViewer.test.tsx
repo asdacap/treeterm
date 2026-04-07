@@ -63,7 +63,7 @@ describe('JsonViewer', () => {
     // Click the expand toggle (▸ button)
     const toggles = document.querySelectorAll('.json-viewer-toggle')
     // The second toggle is the nested one
-    fireEvent.click(toggles[toggles.length - 1])
+    fireEvent.click(toggles[toggles.length - 1]!)
 
     // Now nested keys should be visible
     expect(document.querySelector('.json-viewer-key[class]')).toBeDefined()
@@ -83,8 +83,8 @@ describe('JsonViewer', () => {
     render(<JsonViewer data={['a', 'b']} />)
     // Top-level array is expanded, indices shown
     const indices = document.querySelectorAll('.json-viewer-index')
-    expect(indices[0].textContent).toBe('0')
-    expect(indices[1].textContent).toBe('1')
+    expect(indices[0]!.textContent).toBe('0')
+    expect(indices[1]!.textContent).toBe('1')
   })
 
   it('wraps output in .json-viewer div', () => {

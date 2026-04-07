@@ -3,7 +3,7 @@ import { useRecentDirectoriesStore } from './recentDirectories'
 
 describe('RecentDirectoriesStore', () => {
   beforeEach(() => {
-    useRecentDirectoriesStore.setState({ directories: {} })
+    useRecentDirectoriesStore.setState({ directories: new Map() })
   })
 
   describe('getRecent', () => {

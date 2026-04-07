@@ -43,7 +43,7 @@ export default function App() {
   // Derive active session entry from activeView
   const activeSessionId = activeView && 'sessionId' in activeView ? activeView.sessionId : null
   const activeSessionEntry = activeSessionId
-    ? sessionStores[activeSessionId] ?? null
+    ? sessionStores.get(activeSessionId) ?? null
     : null
   const activeSessionStore = activeSessionEntry?.store ?? null
 
@@ -140,7 +140,7 @@ export default function App() {
           {isActiveProcessesOpen && activeSessionStore && (
             <ActiveProcessesDialog
               workspaces={Object.fromEntries(
-                Object.entries(activeSessionStore.getState().workspaces)
+                Array.from(activeSessionStore.getState().workspaces.entries())
                   .filter(([, e]) => e.status === 'loaded' || e.status === 'operation-error')
                   .map(([id, e]) => [id, (e as Extract<typeof e, { status: 'loaded' | 'operation-error' }>).data])
               )}

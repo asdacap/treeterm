@@ -56,20 +56,21 @@ export default function TabContentPortals({ sessionStore, activeWorkspaceId }: T
   }, [])
 
   // Collect tab IDs for the active workspace to detect unassigned portal slots
-  const activeEntry = activeWorkspaceId ? workspaces[activeWorkspaceId] : null
+  const activeEntry = activeWorkspaceId ? workspaces.get(activeWorkspaceId) ?? null : null
   const activeWsData = activeEntry && (activeEntry.status === 'loaded' || activeEntry.status === 'operation-error') ? activeEntry.data : null
   const activeTabIds = activeWsData ? new Set(getTabs(activeWsData).map(t => t.id)) : new Set<string>()
 
   return (
     <SessionStoreContext.Provider value={sessionStore}>
-      {Object.entries(workspaces).map(([wsId, entry]) => {
+      {Array.from(workspaces.entries()).map(([wsId, entry]) => {
         if (entry.status !== 'loaded' && entry.status !== 'operation-error') return null
         const workspace = entry.data
         const wsTabs = getTabs(workspace)
         const isActiveWorkspace = wsId === activeWorkspaceId
 
         return wsTabs.map(tab => {
-          const app = applications[tab.applicationId]
+          const app = applications.get(tab.applicationId)
+          if (!app) return null
 
           // All tabs stay mounted (hidden when workspace is inactive)
 

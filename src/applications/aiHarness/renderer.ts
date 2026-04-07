@@ -56,7 +56,6 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
         dispose: () => {
           analyzer.getState().stop()
           // Read current state for up-to-date ptyId (may have been set after onWorkspaceLoad)
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- accessed via Record indexing
           const current = workspaceStore.getState().workspace.appStates[tab.id]?.state as AiHarnessState | undefined
           const ptyId = current?.ptyId ?? state.ptyId
           if (ptyId) {

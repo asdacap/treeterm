@@ -29,7 +29,7 @@ interface TreePaneProps {
 
 export default function TreePane({ selectFolder, isCollapsed, onToggleCollapse }: TreePaneProps): React.JSX.Element {
   const sessionStores = useAppStore(s => s.sessionStores)
-  const sessionIds = Object.keys(sessionStores)
+  const sessionIds = Array.from(sessionStores.keys())
 
   if (isCollapsed) {
     return (
@@ -48,7 +48,8 @@ export default function TreePane({ selectFolder, isCollapsed, onToggleCollapse }
             <CollapsedSessionPanel
               key={sessionId}
               sessionId={sessionId}
-              sessionStore={sessionStores[sessionId].store}
+              // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- sessionId from sessionStores.keys()
+              sessionStore={sessionStores.get(sessionId)!.store}
             />
           ))}
         </div>
@@ -82,7 +83,8 @@ export default function TreePane({ selectFolder, isCollapsed, onToggleCollapse }
           <SessionPanel
             key={sessionId}
             sessionId={sessionId}
-            sessionStore={sessionStores[sessionId].store}
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- sessionId from sessionStores.keys()
+            sessionStore={sessionStores.get(sessionId)!.store}
             selectFolder={selectFolder}
           />
         ))}

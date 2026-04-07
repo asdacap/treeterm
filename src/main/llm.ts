@@ -51,7 +51,7 @@ export async function startChatStream(
 
     for await (const chunk of stream) {
       if (controller.signal.aborted) break
-      const delta = chunk.choices[0]?.delta?.content
+      const delta = chunk.choices[0]?.delta.content
       if (delta) {
         sender.send('llm:chat:delta', requestId, delta)
       }
@@ -84,7 +84,7 @@ export async function completeChatCall(
     ...(settings.reasoning !== 'off' ? { reasoning_effort: settings.reasoning } : {})
   })
 
-  return response.choices[0]?.message?.content ?? ''
+  return response.choices[0]?.message.content ?? ''
 }
 
 /** Strip markdown fences and parse JSON. If a field value is itself a markdown-wrapped JSON string, re-parse and merge. */

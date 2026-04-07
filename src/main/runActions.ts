@@ -34,7 +34,7 @@ function createNpmProvider(daemonClient: GrpcDaemonClient): RunActionProvider {
         id: `npm:${name}`,
         name,
         source: 'npm',
-        description: scriptsRecord[name]
+        description: scriptsRecord[name] ?? ''
       }))
     },
     run: async (_actionId, workspacePath) => {
@@ -141,7 +141,7 @@ export function parseMakeTargets(content: string): RunAction[] {
   let match: RegExpExecArray | null
   while ((match = regex.exec(content)) !== null) {
     const name = match[1]
-    if (name.startsWith('.')) continue // skip .PHONY, .DEFAULT, etc.
+    if (!name || name.startsWith('.')) continue // skip .PHONY, .DEFAULT, etc.
     actions.push({ id: `make:${name}`, name, source: 'make', description: '' })
   }
   return actions
@@ -154,6 +154,7 @@ export function parseJustRecipes(content: string): RunAction[] {
   let match: RegExpExecArray | null
   while ((match = regex.exec(content)) !== null) {
     const name = match[1]
+    if (!name) continue
     actions.push({ id: `just:${name}`, name, source: 'just', description: '' })
   }
   return actions
@@ -173,6 +174,7 @@ export function parseTaskfileNames(content: string): RunAction[] {
     const taskMatch = line.match(/^  ([a-zA-Z_][a-zA-Z0-9_-]*):\s*$/)
     if (taskMatch) {
       const name = taskMatch[1]
+      if (!name) continue
       actions.push({ id: `task:${name}`, name, source: 'task', description: '' })
     }
   }
@@ -248,7 +250,7 @@ export class RunActionsClient {
   async run(workspacePath: string, actionId: string): Promise<{ success: true; ptyId: string } | { success: false; error: string }> {
     const source = actionId.split(':')[0]
     const provider = this.providers.find(p => p.source === source)
-    if (!provider) return { success: false, error: `No provider found for action source: ${source}` }
+    if (!provider) return { success: false, error: `No provider found for action source: ${String(source)}` }
     const ptyId = await provider.run(actionId, workspacePath)
     return { success: true, ptyId }
   }

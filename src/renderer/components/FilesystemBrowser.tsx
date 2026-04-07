@@ -15,7 +15,8 @@ export function FilesystemBrowser({
   tabId,
 }: FilesystemBrowserProps): React.JSX.Element {
   const { workspace: wsData } = useStore(workspace)
-  const appState = wsData.appStates[tabId]
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist in appStates
+  const appState = wsData.appStates[tabId]!
   const state = appState.state as FilesystemState | undefined
 
   if (!state) {

@@ -90,7 +90,7 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
       const prefixParts = parseKeybinding(prefixKeybinding) as [string[], string][]
 
       if (prefixParts.length > 0) {
-        const [modifiers, key] = prefixParts[0]
+        const [modifiers, key] = prefixParts[0]!
         if (matchesKeybinding(e, modifiers, key)) {
           e.preventDefault()
           e.stopPropagation()

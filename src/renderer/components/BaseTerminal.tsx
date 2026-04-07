@@ -38,7 +38,7 @@ function formatRawChars(str: string): string {
     } else if (code < 0x20) {
       result += `\\x${code.toString(16).padStart(2, '0')}`
     } else {
-      result += str[i]
+      result += str[i] ?? ''
     }
   }
   return result
@@ -157,7 +157,8 @@ export default function BaseTerminal({
   const clipboard = useAppStore((state) => state.clipboard)
 
   // Get existing ptyId from store for reconnection
-  const appState = wsData.appStates[tabId]
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist in appStates
+  const appState = wsData.appStates[tabId]!
   const existingPtyId = (appState.state as BaseTerminalState | undefined)?.ptyId
   const existingPtyIdRef = useRef(existingPtyId)
   existingPtyIdRef.current = existingPtyId
@@ -273,7 +274,8 @@ export default function BaseTerminal({
           case 'exit': {
             console.log(`[${config.logPrefix} ${tabId}] PTY exited with code:`, event.exitCode)
             if (!cancelled) {
-              const currentTab = workspace.getState().workspace.appStates[tabId]
+              // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist in appStates
+              const currentTab = workspace.getState().workspace.appStates[tabId]!
               const keepOnExit = (currentTab.state as BaseTerminalState | undefined)?.keepOnExit
               const immediateFailure = event.exitCode !== 0 && (Date.now() - cache.connectedAt) < 1000
               if (immediateFailure) {
@@ -422,7 +424,8 @@ export default function BaseTerminal({
           dataVersion: 0,
           onExitUnmounted: (exitCode: number) => {
             console.log(`[${config.logPrefix} ${tabId}] PTY exited while unmounted, code:`, exitCode)
-            const currentTab = workspace.getState().workspace.appStates[tabId]
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist in appStates
+            const currentTab = workspace.getState().workspace.appStates[tabId]!
             const keepOnExit = (currentTab.state as BaseTerminalState | undefined)?.keepOnExit
             if (keepOnExit) {
               terminal.write(`\r\n\x1b[2mProcess exited with exit code ${String(exitCode)}\x1b[0m\r\n`)

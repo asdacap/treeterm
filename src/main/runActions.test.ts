@@ -39,14 +39,14 @@ build:
 `
     const actions = parseMakeTargets(content)
     expect(actions).toHaveLength(1)
-    expect(actions[0].name).toBe('build')
+    expect(actions[0]!.name).toBe('build')
   })
 
   it('handles targets with dots and dashes', () => {
     const content = `my-target.all:\n\techo hi\n`
     const actions = parseMakeTargets(content)
     expect(actions).toHaveLength(1)
-    expect(actions[0].name).toBe('my-target.all')
+    expect(actions[0]!.name).toBe('my-target.all')
   })
 
   it('returns empty for empty content', () => {
@@ -155,7 +155,7 @@ describe('parseVscodeLaunch', () => {
 
   it('returns empty description when config has no type', () => {
     const actions = parseVscodeLaunch('{"configurations": [{"name": "Run"}]}')
-    expect(actions[0].description).toBe('')
+    expect(actions[0]!.description).toBe('')
   })
 
   it('returns empty for no configurations', () => {
@@ -197,7 +197,7 @@ describe('parseVscodeTasks', () => {
   it('uses type as description when no command', () => {
     const content = '{"tasks": [{"label": "Watch", "type": "typescript"}]}'
     const actions = parseVscodeTasks(content)
-    expect(actions[0].description).toBe('typescript')
+    expect(actions[0]!.description).toBe('typescript')
   })
 
   it('filters tasks without labels', () => {
@@ -209,7 +209,7 @@ describe('parseVscodeTasks', () => {
     }`
     const actions = parseVscodeTasks(content)
     expect(actions).toHaveLength(1)
-    expect(actions[0].name).toBe('Build')
+    expect(actions[0]!.name).toBe('Build')
   })
 })
 
@@ -235,8 +235,8 @@ describe('RunActionsClient', () => {
     const client = new RunActionsClient({} as unknown as GrpcDaemonClient, [p1, p2])
     const actions = await client.detect('/workspace')
     expect(actions).toHaveLength(2)
-    expect(actions[0].id).toBe('npm:build')
-    expect(actions[1].id).toBe('make:test')
+    expect(actions[0]!.id).toBe('npm:build')
+    expect(actions[1]!.id).toBe('make:test')
   })
 
   it('detect handles provider failures gracefully', async () => {
@@ -251,7 +251,7 @@ describe('RunActionsClient', () => {
     const client = new RunActionsClient({} as unknown as GrpcDaemonClient, [p1, p2])
     const actions = await client.detect('/workspace')
     expect(actions).toHaveLength(1)
-    expect(actions[0].id).toBe('make:all')
+    expect(actions[0]!.id).toBe('make:all')
   })
 
   it('detect returns empty when all providers fail', async () => {
@@ -358,7 +358,7 @@ describe('RunActionsClient', () => {
     // Should have found at least the npm build script
     const npmActions = actions.filter(a => a.source === 'npm')
     expect(npmActions.length).toBeGreaterThanOrEqual(1)
-    expect(npmActions[0].name).toBe('build')
+    expect(npmActions[0]!.name).toBe('build')
   })
 
   it('detect handles readFile returning null content', async () => {

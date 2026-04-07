@@ -61,9 +61,9 @@ describe('GitClient', () => {
       const entries = await git.getStatus('/repo')
 
       expect(entries).toHaveLength(1)
-      expect(entries[0].path).toBe('src/app.ts')
-      expect(entries[0].status).toBe('modified')
-      expect(entries[0].staged).toBe(false)
+      expect(entries[0]!.path).toBe('src/app.ts')
+      expect(entries[0]!.status).toBe('modified')
+      expect(entries[0]!.staged).toBe(false)
     })
 
     it('parses added staged file', async () => {
@@ -71,8 +71,8 @@ describe('GitClient', () => {
       const git = new GitClient(client)
       const entries = await git.getStatus('/repo')
 
-      expect(entries[0].status).toBe('added')
-      expect(entries[0].staged).toBe(true)
+      expect(entries[0]!.status).toBe('added')
+      expect(entries[0]!.staged).toBe(true)
     })
 
     it('parses deleted file', async () => {
@@ -80,7 +80,7 @@ describe('GitClient', () => {
       const git = new GitClient(client)
       const entries = await git.getStatus('/repo')
 
-      expect(entries[0].status).toBe('deleted')
+      expect(entries[0]!.status).toBe('deleted')
     })
 
     it('parses untracked file', async () => {
@@ -88,8 +88,8 @@ describe('GitClient', () => {
       const git = new GitClient(client)
       const entries = await git.getStatus('/repo')
 
-      expect(entries[0].status).toBe('untracked')
-      expect(entries[0].staged).toBe(false)
+      expect(entries[0]!.status).toBe('untracked')
+      expect(entries[0]!.staged).toBe(false)
     })
 
     it('parses renamed file', async () => {
@@ -97,9 +97,9 @@ describe('GitClient', () => {
       const git = new GitClient(client)
       const entries = await git.getStatus('/repo')
 
-      expect(entries[0].status).toBe('renamed')
-      expect(entries[0].path).toBe('old.ts')
-      expect(entries[0].originalPath).toBe('new.ts')
+      expect(entries[0]!.status).toBe('renamed')
+      expect(entries[0]!.path).toBe('old.ts')
+      expect(entries[0]!.originalPath).toBe('new.ts')
     })
 
     it('parses file with both staged andunstaged changes', async () => {
@@ -122,8 +122,8 @@ describe('GitClient', () => {
       const entries = await git.getStatus('/repo')
 
       expect(entries).toHaveLength(1)
-      expect(entries[0].staged).toBe(true)
-      expect(entries[0].status).toBe('modified')
+      expect(entries[0]!.staged).toBe(true)
+      expect(entries[0]!.status).toBe('modified')
     })
 
     it('throws when getStatus fails', async () => {
@@ -237,10 +237,10 @@ describe('GitClient', () => {
       const worktrees = await git.listWorktrees('/repo')
 
       expect(worktrees).toHaveLength(2)
-      expect(worktrees[0].path).toBe('/repo')
-      expect(worktrees[0].branch).toBe('main')
-      expect(worktrees[1].path).toBe('/repo/.worktrees/feature')
-      expect(worktrees[1].branch).toBe('feature')
+      expect(worktrees[0]!.path).toBe('/repo')
+      expect(worktrees[0]!.branch).toBe('main')
+      expect(worktrees[1]!.path).toBe('/repo/.worktrees/feature')
+      expect(worktrees[1]!.branch).toBe('feature')
     })
 
     it('throws when worktree list fails', async () => {
@@ -520,9 +520,9 @@ describe('GitClient', () => {
       const git = new GitClient(client)
       const result = await git.getUncommittedChanges('/repo')
       expect(result.files).toHaveLength(1)
-      expect(result.files[0].path).toBe('src/app.ts')
-      expect(result.files[0].additions).toBe(5)
-      expect(result.files[0].deletions).toBe(2)
+      expect(result.files[0]!.path).toBe('src/app.ts')
+      expect(result.files[0]!.additions).toBe(5)
+      expect(result.files[0]!.deletions).toBe(2)
       expect(result.totalAdditions).toBe(5)
       expect(result.totalDeletions).toBe(2)
     })
@@ -697,11 +697,11 @@ describe('GitClient', () => {
       const result = await git.getLog('/repo', 'main', 0, 10)
 
       expect(result.commits).toHaveLength(1)
-      expect(result.commits[0].hash).toBe('abc123')
-      expect(result.commits[0].shortHash).toBe('abc')
-      expect(result.commits[0].author).toBe('Author')
-      expect(result.commits[0].message).toBe('commit msg')
-      expect(result.commits[0].parentHashes).toEqual(['def456'])
+      expect(result.commits[0]!.hash).toBe('abc123')
+      expect(result.commits[0]!.shortHash).toBe('abc')
+      expect(result.commits[0]!.author).toBe('Author')
+      expect(result.commits[0]!.message).toBe('commit msg')
+      expect(result.commits[0]!.parentHashes).toEqual(['def456'])
       expect(result.hasMore).toBe(false)
     })
 
@@ -712,7 +712,7 @@ describe('GitClient', () => {
       const result = await git.getLog('/repo', null, 0, 10)
 
       expect(result.commits).toHaveLength(1)
-      expect(result.commits[0].parentHashes).toEqual([])
+      expect(result.commits[0]!.parentHashes).toEqual([])
     })
 
     it('detects hasMore when results exceed limit', async () => {
@@ -759,8 +759,8 @@ describe('GitClient', () => {
       ])
       const git = new GitClient(client)
       const files = await git.getCommitDiff('/repo', 'abc123')
-      expect(files[0].additions).toBe(0)
-      expect(files[0].deletions).toBe(0)
+      expect(files[0]!.additions).toBe(0)
+      expect(files[0]!.deletions).toBe(0)
     })
 
     it('throws on failure', async () => {

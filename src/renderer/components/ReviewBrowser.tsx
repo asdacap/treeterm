@@ -35,7 +35,8 @@ export default function ReviewBrowser({
   const git = useGitApi(workspace)
   const workspaceId = wsData.id
   const parentWorkspace = parentWorkspaceId ? lookupWorkspace(parentWorkspaceId) : undefined
-  const reviewState = wsData.appStates[tabId].state as ReviewState | undefined
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist in appStates
+  const reviewState = wsData.appStates[tabId]!.state as ReviewState | undefined
 
   // For top-level worktrees, we only show uncommitted changes (no parent to compare against)
   const hasParent = !!parentWorkspaceId
@@ -631,7 +632,8 @@ export default function ReviewBrowser({
 
   const handlePreviousFile = () => {
     if (currentFileIndex > 0) {
-      const prevFilePath = fileList[currentFileIndex - 1]
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- currentFileIndex > 0 guarantees valid index
+      const prevFilePath = fileList[currentFileIndex - 1]!
       if (viewMode === 'committed') {
         void loadFileDiff(prevFilePath)
       } else {
@@ -643,7 +645,8 @@ export default function ReviewBrowser({
 
   const handleNextFile = () => {
     if (currentFileIndex < fileList.length - 1) {
-      const nextFilePath = fileList[currentFileIndex + 1]
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- currentFileIndex < length - 1 guarantees valid index
+      const nextFilePath = fileList[currentFileIndex + 1]!
       if (viewMode === 'committed') {
         void loadFileDiff(nextFilePath)
       } else {

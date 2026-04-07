@@ -252,7 +252,7 @@ export class GitClient {
       if (stagedChar !== ' ' && stagedChar !== '?') {
         entries.push({
           path,
-          status: getStatusFromChar(stagedChar),
+          status: getStatusFromChar(stagedChar ?? ''),
           staged: true,
           originalPath
         })
@@ -262,7 +262,7 @@ export class GitClient {
       if (unstagedChar !== ' ' && unstagedChar !== '?') {
         entries.push({
           path,
-          status: getStatusFromChar(unstagedChar),
+          status: getStatusFromChar(unstagedChar ?? ''),
           staged: false,
           originalPath
         })
@@ -643,8 +643,9 @@ export class GitClient {
     
     for (const line of nameStatusLines) {
       const [status, ...pathParts] = line.split('\t')
-      const filePath = pathParts[pathParts.length - 1] // Handle renames
-      
+      const filePath = pathParts[pathParts.length - 1] ?? '' // Handle renames
+      if (!status) continue
+
       if (status.startsWith('A')) statusMap.set(filePath, 'added')
       else if (status.startsWith('M')) statusMap.set(filePath, 'modified')
       else if (status.startsWith('D')) statusMap.set(filePath, 'deleted')
@@ -653,15 +654,16 @@ export class GitClient {
 
     // Parse numstat
     const statLines = statResult.stdout.trim().split('\n').filter(Boolean)
-    
+
     for (const line of statLines) {
       const [add, del, filePath] = line.split('\t')
-      const additions = add === '-' ? 0 : parseInt(add, 10) || 0
-      const deletions = del === '-' ? 0 : parseInt(del, 10) || 0
+      const additions = (add ?? '') === '-' ? 0 : parseInt(add ?? '', 10) || 0
+      const deletions = (del ?? '') === '-' ? 0 : parseInt(del ?? '', 10) || 0
+      const resolvedPath = filePath ?? ''
 
       files.push({
-        path: filePath,
-        status: statusMap.get(filePath) || 'modified',
+        path: resolvedPath,
+        status: statusMap.get(resolvedPath) || 'modified',
         additions,
         deletions
       })
@@ -784,21 +786,23 @@ export class GitClient {
     
     for (const line of stagedStatResult.stdout.trim().split('\n').filter(Boolean)) {
       const [add, del, filePath] = line.split('\t')
+      if (!filePath) continue
       stagedStatMap.set(filePath, {
-        additions: add === '-' ? 0 : parseInt(add, 10) || 0,
-        deletions: del === '-' ? 0 : parseInt(del, 10) || 0
+        additions: (add ?? '') === '-' ? 0 : parseInt(add ?? '', 10) || 0,
+        deletions: (del ?? '') === '-' ? 0 : parseInt(del ?? '', 10) || 0
       })
     }
 
     // Get unstaged diff stats (working tree changes)
     const unstagedStatResult = await this.exec(repoPath, ['diff', '--numstat'])
     const unstagedStatMap = new Map<string, { additions: number; deletions: number }>()
-    
+
     for (const line of unstagedStatResult.stdout.trim().split('\n').filter(Boolean)) {
       const [add, del, filePath] = line.split('\t')
+      if (!filePath) continue
       unstagedStatMap.set(filePath, {
-        additions: add === '-' ? 0 : parseInt(add, 10) || 0,
-        deletions: del === '-' ? 0 : parseInt(del, 10) || 0
+        additions: (add ?? '') === '-' ? 0 : parseInt(add ?? '', 10) || 0,
+        deletions: (del ?? '') === '-' ? 0 : parseInt(del ?? '', 10) || 0
       })
     }
 
@@ -947,11 +951,11 @@ export class GitClient {
     const commits: GitLogCommit[] = commitLines.map(line => {
       const [hash, shortHash, author, date, message, parents] = line.split('\x1e')
       return {
-        hash,
-        shortHash,
-        author,
-        date,
-        message,
+        hash: hash ?? '',
+        shortHash: shortHash ?? '',
+        author: author ?? '',
+        date: date ?? '',
+        message: message ?? '',
         parentHashes: parents ? parents.split(' ').filter(Boolean) : []
       }
     })
@@ -975,7 +979,8 @@ export class GitClient {
     const statusMap = new Map<string, GitDiffFile['status']>()
     for (const line of nameStatusResult.stdout.trim().split('\n').filter(Boolean)) {
       const [status, ...pathParts] = line.split('\t')
-      const filePath = pathParts[pathParts.length - 1]
+      const filePath = pathParts[pathParts.length - 1] ?? ''
+      if (!status) continue
       if (status.startsWith('A')) statusMap.set(filePath, 'added')
       else if (status.startsWith('M')) statusMap.set(filePath, 'modified')
       else if (status.startsWith('D')) statusMap.set(filePath, 'deleted')
@@ -985,11 +990,12 @@ export class GitClient {
     const files: GitDiffFile[] = []
     for (const line of statResult.stdout.trim().split('\n').filter(Boolean)) {
       const [add, del, filePath] = line.split('\t')
+      const resolvedPath = filePath ?? ''
       files.push({
-        path: filePath,
-        status: statusMap.get(filePath) || 'modified',
-        additions: add === '-' ? 0 : parseInt(add, 10) || 0,
-        deletions: del === '-' ? 0 : parseInt(del, 10) || 0
+        path: resolvedPath,
+        status: statusMap.get(resolvedPath) || 'modified',
+        additions: (add ?? '') === '-' ? 0 : parseInt(add ?? '', 10) || 0,
+        deletions: (del ?? '') === '-' ? 0 : parseInt(del ?? '', 10) || 0
       })
     }
 

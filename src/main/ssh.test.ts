@@ -260,7 +260,7 @@ describe('SSHTunnel', () => {
       const promise = priv(tunnel).bootstrapRemoteDaemon()
 
       // Check the bootstrap script contains REFRESH_DAEMON=1
-      const spawnCall = vi.mocked(spawn).mock.calls[0]
+      const spawnCall = vi.mocked(spawn).mock.calls[0]!
       const scriptArg = spawnCall[1][spawnCall[1].length - 1]
       expect(scriptArg).toContain('REFRESH_DAEMON=1')
 
@@ -277,7 +277,7 @@ describe('SSHTunnel', () => {
       const tunnel = new SSHTunnel(makeConfig())
       void priv(tunnel).bootstrapRemoteDaemon()
 
-      const spawnCall = vi.mocked(spawn).mock.calls[0]
+      const spawnCall = vi.mocked(spawn).mock.calls[0]!
       const scriptArg = spawnCall[1][spawnCall[1].length - 1]
       expect(scriptArg).toContain('sha256sum')
       expect(scriptArg).toContain('TREETERM_REMOTE_HASH')
@@ -387,7 +387,7 @@ describe('SSHTunnel', () => {
       const tunnel = new SSHTunnel(makeConfig())
       priv(tunnel).startTunnel('/tmp/remote.sock')
 
-      const call = vi.mocked(spawn).mock.calls[0]
+      const call = vi.mocked(spawn).mock.calls[0]!
       expect(call[0]).toBe('ssh')
       expect(call[1]).toContain('-L')
       // Should include the local:remote socket mapping

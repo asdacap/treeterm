@@ -156,7 +156,7 @@ describe('IpcClient', () => {
     it('onPtyEvent callback strips IpcRendererEvent arg', () => {
       const callback = vi.fn<(...args: any[]) => void>()
       client.onPtyEvent(callback)
-      const registeredHandler = mockOn.mock.calls[0][1] as (...args: any[]) => void
+      const registeredHandler = mockOn.mock.calls[0]![1] as (...args: any[]) => void
       const fakeEvent = {} // IpcRendererEvent
       registeredHandler(fakeEvent, 'pty-1', { type: 'data', data: 'data-chunk' })
       expect(callback).toHaveBeenCalledWith('pty-1', { type: 'data', data: 'data-chunk' })
@@ -165,7 +165,7 @@ describe('IpcClient', () => {
     it('onPtyEvent unsubscribe calls removeListener', () => {
       const callback = vi.fn<(...args: any[]) => void>()
       const unsubscribe = client.onPtyEvent(callback)
-      const registeredHandler = mockOn.mock.calls[0][1] as (...args: any[]) => void
+      const registeredHandler = mockOn.mock.calls[0]![1] as (...args: any[]) => void
       unsubscribe()
       expect(mockRemoveListener).toHaveBeenCalledWith('pty:event', registeredHandler)
     })
@@ -174,7 +174,7 @@ describe('IpcClient', () => {
       const callback = vi.fn<(...args: any[]) => void>()
       client.onSessionSync(callback)
       expect(mockOn).toHaveBeenCalledWith('session:sync', expect.any(Function))
-      const handler = mockOn.mock.calls[0][1] as (...args: any[]) => void
+      const handler = mockOn.mock.calls[0]![1] as (...args: any[]) => void
       handler({}, { id: 'session-1' })
       expect(callback).toHaveBeenCalledWith({ id: 'session-1' })
     })
@@ -188,7 +188,7 @@ describe('IpcClient', () => {
     it('onDaemonDisconnected unsubscribe works', () => {
       const callback = vi.fn<() => void>()
       const unsub = client.onDaemonDisconnected(callback)
-      const handler = mockOn.mock.calls[0][1] as (...args: any[]) => void
+      const handler = mockOn.mock.calls[0]![1] as (...args: any[]) => void
       unsub()
       expect(mockRemoveListener).toHaveBeenCalledWith('daemon:disconnected', handler)
     })
@@ -197,7 +197,7 @@ describe('IpcClient', () => {
       const callback = vi.fn<() => void>()
       client.onSettingsOpen(callback)
       expect(mockOn).toHaveBeenCalledWith('settings:open', expect.any(Function))
-      const handler = mockOn.mock.calls[0][1] as (...args: any[]) => void
+      const handler = mockOn.mock.calls[0]![1] as (...args: any[]) => void
       handler()
       expect(callback).toHaveBeenCalled()
     })
@@ -206,7 +206,7 @@ describe('IpcClient', () => {
       const callback = vi.fn<() => void>()
       client.onAppConfirmClose(callback)
       expect(mockOn).toHaveBeenCalledWith('app:confirm-close', expect.any(Function))
-      const handler = mockOn.mock.calls[0][1] as (...args: any[]) => void
+      const handler = mockOn.mock.calls[0]![1] as (...args: any[]) => void
       handler()
       expect(callback).toHaveBeenCalled()
     })
@@ -220,7 +220,7 @@ describe('IpcClient', () => {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
       const unsub = (client as any)[method](callback) as () => void
       expect(mockOn).toHaveBeenCalledWith(channel, expect.any(Function))
-      const handler = mockOn.mock.calls[0][1] as (...args: any[]) => void
+      const handler = mockOn.mock.calls[0]![1] as (...args: any[]) => void
       unsub()
       expect(mockRemoveListener).toHaveBeenCalledWith(channel, handler)
     })

@@ -104,9 +104,9 @@ describe('ConnectionManager', () => {
     it('registers local connection as connected', () => {
       const connections = manager.listConnections()
       expect(connections).toHaveLength(1)
-      expect(connections[0].id).toBe('local')
-      expect(connections[0].status).toBe('connected')
-      expect(connections[0].target).toEqual({ type: 'local' })
+      expect(connections[0]!.id).toBe('local')
+      expect(connections[0]!.status).toBe('connected')
+      expect(connections[0]!.target).toEqual({ type: 'local' })
     })
   })
 
@@ -376,7 +376,7 @@ describe('ConnectionManager', () => {
       manager.addPortForward(pfConfig)
       const list = manager.listPortForwards('remote-1')
       expect(list).toHaveLength(1)
-      expect(list[0].id).toBe('pf-1')
+      expect(list[0]!.id).toBe('pf-1')
     })
 
     it('listPortForwards returns empty for connection with no forwards', async () => {

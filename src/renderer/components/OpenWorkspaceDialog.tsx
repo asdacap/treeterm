@@ -21,12 +21,11 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, co
   const [selectedAppId, setSelectedAppId] = useState('')
   const [showBrowser, setShowBrowser] = useState(false)
 
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  const recentDirectories = useRecentDirectoriesStore(s => s.directories[connectionKey]) ?? EMPTY_RECENT
+  const recentDirectories = useRecentDirectoriesStore(s => s.directories.get(connectionKey)) ?? EMPTY_RECENT
   const addRecent = useRecentDirectoriesStore(s => s.addRecent)
 
   const applications = useAppStore((s) => s.applications)
-  const availableApps = Object.values(applications).filter(app => app.showInNewTabMenu)
+  const availableApps = Array.from(applications.values()).filter(app => app.showInNewTabMenu)
 
   const handleSelectFolder = async () => {
     setIsSelecting(true)

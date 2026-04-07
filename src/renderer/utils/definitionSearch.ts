@@ -71,10 +71,10 @@ function parseGrepOutput(stdout: string): DefinitionLocation[] {
     // grep -rn output: file:lineNumber:content
     const match = line.match(/^(.+?):(\d+):/)
     if (match) {
-      const filePath = match[1].startsWith('./') ? match[1].slice(2) : match[1]
+      const filePath = match[1]!.startsWith('./') ? match[1]!.slice(2) : match[1]!
       results.push({
         filePath,
-        lineNumber: parseInt(match[2], 10),
+        lineNumber: parseInt(match[2]!, 10),
       })
     }
   }

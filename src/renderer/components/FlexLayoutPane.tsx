@@ -15,7 +15,7 @@ interface FlexLayoutPaneProps {
   onNewTab: (applicationId: string) => void
 }
 
-function buildModel(ws: WorkspaceStore, getApplication: (id: string) => ReturnType<typeof useAppStore.getState>['applications'][string]): Model | null {
+function buildModel(ws: WorkspaceStore, getApplication: (id: string) => ReturnType<ReturnType<typeof useAppStore.getState>['applications']['get']>): Model | null {
   const currentWorkspace = ws.getState().workspace
 
   const currentTabs = getTabs(currentWorkspace)
@@ -38,8 +38,8 @@ function buildModel(ws: WorkspaceStore, getApplication: (id: string) => ReturnTy
 export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPaneProps) {
   const { workspace, removeTab, setActiveTab, updateMetadata } = useStore(ws)
   const applications = useAppStore((s) => s.applications)
-  const getApplication = useCallback((id: string) => applications[id], [applications])
-  const menuApplications = Object.values(applications).filter((app) => app.showInNewTabMenu)
+  const getApplication = useCallback((id: string) => applications.get(id), [applications])
+  const menuApplications = Array.from(applications.values()).filter((app) => app.showInNewTabMenu)
 
   const activeTabId = workspace.activeTabId ?? null
 
@@ -147,7 +147,6 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
   const handleAction = useCallback((action: Action): Action | undefined => {
     if (action.type === Actions.DELETE_TAB) {
       const tabId = action.data.node
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (!workspace.appStates[tabId]) {
         return action // Orphan tab — let FlexLayout remove it directly
       }
@@ -174,7 +173,6 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
     const tab = getTabs(wsState).find(t => t.id === tabId)
     if (tab) {
       const app = getApplication(tab.applicationId)
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (app) {
         renderValues.leading = <span className="tab-icon">{app.icon}</span>
       }

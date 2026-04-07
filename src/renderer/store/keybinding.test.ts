@@ -51,7 +51,7 @@ function createKeyEvent(overrides: Partial<KeyboardEvent> = {}): KeyboardEvent {
 function initAndGetHandler(): (e: KeyboardEvent) => void {
   addEventListenerMock.mockClear()
   useKeybindingStore.getState().init()
-  return addEventListenerMock.mock.calls[0][1] as (e: KeyboardEvent) => void
+  return addEventListenerMock.mock.calls[0]![1] as (e: KeyboardEvent) => void
 }
 
 describe('useKeybindingStore', () => {

@@ -51,9 +51,9 @@ describe('createReviewCommentStore', () => {
 
     store.getState().markAllReviewCommentsAddressed()
 
-    const result = JSON.parse(deps.getMetadata().reviewComments) as { addressed: boolean }[]
-    expect(result[0].addressed).toBe(true)
-    expect(result[1].addressed).toBe(true)
+    const result = JSON.parse(deps.getMetadata().reviewComments!) as { addressed: boolean }[]
+    expect(result[0]!.addressed).toBe(true)
+    expect(result[1]!.addressed).toBe(true)
   })
 
   it('markAllReviewCommentsAddressed skips already-addressed comments', () => {
@@ -66,8 +66,8 @@ describe('createReviewCommentStore', () => {
 
     store.getState().markAllReviewCommentsAddressed()
 
-    const result = JSON.parse(deps.getMetadata().reviewComments) as { addressed: boolean }[]
-    expect(result[0].addressed).toBe(true)
-    expect(result[1].addressed).toBe(true)
+    const result = JSON.parse(deps.getMetadata().reviewComments!) as { addressed: boolean }[]
+    expect(result[0]!.addressed).toBe(true)
+    expect(result[1]!.addressed).toBe(true)
   })
 })

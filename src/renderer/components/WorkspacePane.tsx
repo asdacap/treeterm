@@ -39,7 +39,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const enterWorkspaceFocus = useKeybindingStore(s => s.enterWorkspaceFocus)
   const applications = useAppStore((s) => s.applications)
   const clipboard = useAppStore((s) => s.clipboard)
-  const menuApplications = Object.values(applications).filter((app) => app.showInNewTabMenu)
+  const menuApplications = Array.from(applications.values()).filter((app) => app.showInNewTabMenu)
   const openContextMenu = useContextMenuStore((s) => s.open)
   const closeContextMenu = useContextMenuStore((s) => s.close)
   const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
@@ -48,7 +48,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
 
   const [branchCopied, setBranchCopied] = useState(false)
 
-  const activeEntry = activeWorkspaceId ? workspaces[activeWorkspaceId] ?? null : null
+  const activeEntry = activeWorkspaceId ? workspaces.get(activeWorkspaceId) ?? null : null
   const activeWorkspace = activeEntry && (activeEntry.status === 'loaded' || activeEntry.status === 'operation-error') ? activeEntry.data : null
   const activeHandle = activeEntry && (activeEntry.status === 'loaded' || activeEntry.status === 'operation-error') ? activeEntry.store : null
 
@@ -104,7 +104,8 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
 
   // Create new tab using the first available application
   const handleNewDefaultTab = useCallback(() => {
-    const defaultApp = menuApplications[0]
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- menuApplications always has at least one entry
+    const defaultApp = menuApplications[0]!
     if (activeHandle) {
       activeHandle.getState().addTab(defaultApp.id)
     }
@@ -129,7 +130,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   )
 
   // Compute paths of already-open worktrees
-  const openWorktreePaths = Object.values(workspaces)
+  const openWorktreePaths = Array.from(workspaces.values())
     .filter((e): e is Extract<typeof e, { status: 'loaded' | 'operation-error' }> =>
       e.status === 'loaded' || e.status === 'operation-error')
     .filter(e => e.data.isWorktree)
@@ -196,7 +197,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const flattenedWorkspaceIds = (() => {
     const result: string[] = []
     const parentMap = new Map<string | null, string[]>()
-    for (const [id, entry] of Object.entries(workspaces)) {
+    for (const [id, entry] of workspaces.entries()) {
       const parentId = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data.parentId : null
       const children = parentMap.get(parentId) ?? []
       children.push(id)
@@ -228,13 +229,15 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
       if (!activeWorkspace) return
       const currentIndex = tabs.findIndex((t) => t.id === activeWorkspace.activeTabId)
       const newIndex = currentIndex < tabs.length - 1 ? currentIndex + 1 : 0
-      handleSelectTab(tabs[newIndex].id)
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- newIndex is always in bounds
+      handleSelectTab(tabs[newIndex]!.id)
     },
     prevTab: () => {
       if (!activeWorkspace) return
       const currentIndex = tabs.findIndex((t) => t.id === activeWorkspace.activeTabId)
       const newIndex = currentIndex > 0 ? currentIndex - 1 : tabs.length - 1
-      handleSelectTab(tabs[newIndex].id)
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- newIndex is always in bounds
+      handleSelectTab(tabs[newIndex]!.id)
     },
     workspaceFocus: () => {
       const currentIndex = activeWorkspaceId
@@ -245,7 +248,8 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     switchToTab: (index: number) => {
       if (!activeWorkspace) return
       if (index < tabs.length) {
-        handleSelectTab(tabs[index].id)
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- index is bounds-checked above
+        handleSelectTab(tabs[index]!.id)
       }
     }
   })
@@ -452,7 +456,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
           </>
         )}
         <div className="workspace-terminal" style={{ display: activeEntry?.status === 'loaded' ? 'flex' : 'none' }}>
-          {Object.entries(workspaces).map(([wsId, entry]) => {
+          {Array.from(workspaces.entries()).map(([wsId, entry]) => {
             if (entry.status !== 'loaded' && entry.status !== 'operation-error') return null
             const isActive = wsId === activeWorkspaceId
             return (
@@ -461,9 +465,9 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                   workspace={entry.store}
                   onNewTab={(applicationId: string) => {
                     if (applicationId === 'review') {
-                      entry.store.getState().addTab<ReviewState>('review', {
+                      entry.store.getState().addTab('review', {
                         parentWorkspaceId: entry.data.parentId ?? undefined
-                      })
+                      } as Partial<ReviewState>)
                     } else {
                       entry.store.getState().addTab(applicationId)
                     }

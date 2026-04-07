@@ -210,7 +210,8 @@ export class SSHTunnel {
     if (!startMatch) {
       throw new Error('Daemon failed to start after upload — check daemon log on remote')
     }
-    return startMatch[1].trim()
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- regex capture group guaranteed by match
+    return startMatch[1]!.trim()
   }
 
   private async bootstrapRemoteDaemon(): Promise<string> {

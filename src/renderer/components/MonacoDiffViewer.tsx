@@ -113,7 +113,8 @@ export function MonacoDiffViewer({
     const changesToUse = changes || lineChanges
     if (!changesToUse || changesToUse.length === 0) return
 
-    const change = changesToUse[index]
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- index is bounds-checked by caller
+    const change = changesToUse[index]!
     const lineNumber = change.modifiedStartLineNumber || change.originalStartLineNumber
     const modifiedEditor = diffEditorRef.current.getModifiedEditor()
     modifiedEditor.revealLineInCenter(lineNumber)
@@ -301,7 +302,7 @@ export function MonacoDiffViewer({
     const newContainers = new Map<string, { container: HTMLDivElement; comments: ReviewComment[] }>()
 
     Array.from(groups.entries()).forEach(([key, groupComments]) => {
-      const [side, lineStr] = key.split(':')
+      const [side, lineStr] = key.split(':') as [string, string]
       const lineNumber = parseInt(lineStr, 10)
       const targetEditor = side === 'modified' ? modifiedEditor : originalEditor
 
@@ -419,7 +420,8 @@ export function MonacoDiffViewer({
       return
     }
 
-    const change = lineChanges[currentChangeIndex]
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- currentChangeIndex is bounds-checked above
+    const change = lineChanges[currentChangeIndex]!
     const highlightOpts = { isWholeLine: true, className: 'current-change-highlight' }
 
     const modifiedDecs = change.modifiedStartLineNumber > 0 ? [{

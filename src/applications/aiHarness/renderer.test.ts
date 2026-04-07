@@ -233,7 +233,7 @@ describe('AI Harness Renderer', () => {
         expect(mockUpdateTabState).toHaveBeenCalledWith('tab-1', expect.any(Function))
         expect(mockAnalyzerState.start).toHaveBeenCalledWith('pty-new')
 
-        const updater = mockUpdateTabState.mock.calls[0][1] as (prev: Record<string, unknown>) => Record<string, unknown>
+        const updater = mockUpdateTabState.mock.calls[0]![1] as (prev: Record<string, unknown>) => Record<string, unknown>
         const updated = updater({ ptyId: null, sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] } })
         expect(updated).toEqual({
           ptyId: 'pty-new',

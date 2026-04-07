@@ -199,7 +199,7 @@ describe('Terminal Renderer', () => {
         expect(mockUpdateTabState).toHaveBeenCalledWith('tab-1', expect.any(Function))
 
         // Verify the state updater function produces correct state
-        const updater = mockUpdateTabState.mock.calls[0][1] as (prev: Record<string, unknown>) => Record<string, unknown>
+        const updater = mockUpdateTabState.mock.calls[0]![1] as (prev: Record<string, unknown>) => Record<string, unknown>
         const updated = updater({ ptyId: null, ptyHandle: null, keepOnExit: false })
         expect(updated).toEqual({
           ptyId: 'pty-new',

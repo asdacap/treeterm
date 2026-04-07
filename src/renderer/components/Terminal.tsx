@@ -14,7 +14,6 @@ interface TerminalProps {
 export default function Terminal({ workspace, tabId, sandbox }: TerminalProps) {
   const { workspace: wsData } = useStore(workspace)
   const appState = wsData.appStates[tabId]
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   const existingPtyId = (appState?.state as BaseTerminalState | undefined)?.ptyId
 
   const isSandboxed = sandbox?.enabled ?? false
