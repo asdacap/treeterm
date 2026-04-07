@@ -149,7 +149,7 @@ export default function SessionPanel({
   const handleSessionContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    openContextMenu('session-context', e.clientX, e.clientY)
+    openContextMenu(`session-context-${sessionId}`, e.clientX, e.clientY)
   }
 
   const handleDisconnectSession = () => {
@@ -477,7 +477,7 @@ export default function SessionPanel({
       )}
 
       {/* Session Context Menu */}
-      <ContextMenu menuId="session-context" activeMenuId={activeMenuId} position={menuPosition}>
+      <ContextMenu menuId={`session-context-${sessionId}`} activeMenuId={activeMenuId} position={menuPosition}>
         <div className="context-menu-item danger" onClick={handleDisconnectSession}>
           Disconnect
         </div>
