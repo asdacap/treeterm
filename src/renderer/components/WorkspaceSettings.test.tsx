@@ -11,8 +11,8 @@ const applications = {
 } as any
 
 function makeWorkspaceStore(overrides: Record<string, any> = {}) {
-  const updateMetadata = vi.fn()
-  const updateSettings = vi.fn()
+  const updateMetadata = vi.fn<(...args: any[]) => void>()
+  const updateSettings = vi.fn<(...args: any[]) => void>()
   const ws = {
     id: 'ws-1',
     name: 'test-workspace',

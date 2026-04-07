@@ -33,7 +33,7 @@ function buildMockStream(outputs: ExecOutput[]): any {
 function makeMockClient(streams: any[], extras: Record<string, any> = {}): GrpcDaemonClient {
   let callIndex = 0
   return {
-    execStream: vi.fn(() => streams[callIndex++] ?? buildMockStream([])),
+    execStream: vi.fn<(...args: any[]) => any>((): any => streams[callIndex++] ?? buildMockStream([])),
     ...extras,
   } as unknown as GrpcDaemonClient
 }
@@ -112,8 +112,8 @@ describe('GitClient', () => {
       const unstaged = entries.find(e => e.path === 'src/app.ts' && !e.staged)
       expect(staged).toBeDefined()
       expect(unstaged).toBeDefined()
-      expect(staged!.status).toBe('modified')
-      expect(unstaged!.status).toBe('modified')
+      expect(staged?.status).toBe('modified')
+      expect(unstaged?.status).toBe('modified')
     })
 
     it('parses file with only staged changes', async () => {
@@ -252,10 +252,10 @@ describe('GitClient', () => {
 
   describe('getDiff', () => {
     it('parses numstat and name-status output', async () => {
-      const currentBranchStream = resultStream('feature')
-      const mergeBaseStream = resultStream('base123')
-      const numstatStream = resultStream('10\t5\tsrc/app.ts\n3\t0\tsrc/new.ts')
-      const nameStatusStream = resultStream('M\tsrc/app.ts\nA\tsrc/new.ts')
+      const currentBranchStream: any = resultStream('feature')
+      const mergeBaseStream: any = resultStream('base123')
+      const numstatStream: any = resultStream('10\t5\tsrc/app.ts\n3\t0\tsrc/new.ts')
+      const nameStatusStream: any = resultStream('M\tsrc/app.ts\nA\tsrc/new.ts')
 
       const client = makeMockClient([
         currentBranchStream,
@@ -273,13 +273,13 @@ describe('GitClient', () => {
       expect(diff.files).toHaveLength(2)
 
       const appFile = diff.files.find(f => f.path === 'src/app.ts')
-      expect(appFile!.status).toBe('modified')
-      expect(appFile!.additions).toBe(10)
-      expect(appFile!.deletions).toBe(5)
+      expect(appFile?.status).toBe('modified')
+      expect(appFile?.additions).toBe(10)
+      expect(appFile?.deletions).toBe(5)
 
       const newFile = diff.files.find(f => f.path === 'src/new.ts')
-      expect(newFile!.status).toBe('added')
-      expect(newFile!.additions).toBe(3)
+      expect(newFile?.status).toBe('added')
+      expect(newFile?.additions).toBe(3)
     })
 
     it('handles binary files (- in numstat)', async () => {
@@ -293,8 +293,8 @@ describe('GitClient', () => {
       const diff = await git.getDiff('/repo', 'main')
 
       const imageFile = diff.files.find(f => f.path === 'image.png')
-      expect(imageFile!.additions).toBe(0)
-      expect(imageFile!.deletions).toBe(0)
+      expect(imageFile?.additions).toBe(0)
+      expect(imageFile?.deletions).toBe(0)
     })
   })
 
@@ -624,7 +624,7 @@ describe('GitClient', () => {
       const client = makeMockClient([errorStream('merge conflict')])
       const git = new GitClient(client)
       const result = await git.pull('/repo')
-      expect(result).toMatchObject({ success: false, error: expect.stringContaining('merge conflict') })
+      expect(result).toMatchObject({ success: false, error: expect.stringContaining('merge conflict') as unknown as string })
     })
 
     it('uses fallback message when stderr is empty', async () => {
@@ -713,7 +713,7 @@ describe('GitClient', () => {
 
     it('detects hasMore when results exceed limit', async () => {
       const lines = Array.from({ length: 3 }, (_, i) =>
-        `hash${i}\x1eh${i}\x1eAuthor\x1e2024-01-01\x1emsg${i}\x1e`
+        `hash${String(i)}\x1eh${String(i)}\x1eAuthor\x1e2024-01-01\x1emsg${String(i)}\x1e`
       ).join('\n')
       const client = makeMockClient([resultStream(lines)])
       const git = new GitClient(client)
@@ -742,10 +742,10 @@ describe('GitClient', () => {
       const files = await git.getCommitDiff('/repo', 'abc123')
 
       expect(files).toHaveLength(4)
-      expect(files.find(f => f.path === 'new.ts')!.status).toBe('added')
-      expect(files.find(f => f.path === 'mod.ts')!.status).toBe('modified')
-      expect(files.find(f => f.path === 'del.ts')!.status).toBe('deleted')
-      expect(files.find(f => f.path === 'renamed.ts')!.status).toBe('renamed')
+      expect(files.find(f => f.path === 'new.ts')?.status).toBe('added')
+      expect(files.find(f => f.path === 'mod.ts')?.status).toBe('modified')
+      expect(files.find(f => f.path === 'del.ts')?.status).toBe('deleted')
+      expect(files.find(f => f.path === 'renamed.ts')?.status).toBe('renamed')
     })
 
     it('handles binary files', async () => {
@@ -831,6 +831,7 @@ describe('GitClient', () => {
       await git.createWorktree('/repo', 'feature', 'main')
 
       // Verify the third exec call includes 'main' in args
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       const calls = vi.mocked(client.execStream).mock.calls
       expect(calls.length).toBe(3)
     })

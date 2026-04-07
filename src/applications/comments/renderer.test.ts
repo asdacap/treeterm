@@ -55,7 +55,7 @@ const mockWorkspaceStoreStateData = {
   setCachedTerminal: vi.fn(),
   disposeCachedTerminal: vi.fn(), disposeAllCachedTerminals: vi.fn(), disposeTabResources: vi.fn(),
   initAnalyzer: vi.fn(),
-  createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn(), kill: vi.fn() }),
+  createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
   connectionId: 'local',
   updateSettings: vi.fn(),
   focusTabId: null,

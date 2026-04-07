@@ -104,7 +104,9 @@ describe('CloseConfirmDialog', () => {
     const { container } = render(
       <CloseConfirmDialog unmergedWorkspaces={[]} onConfirm={onConfirm} onCancel={onCancel} />
     )
-    fireEvent.click(container.querySelector('.dialog-overlay')!)
+    const overlay = container.querySelector('.dialog-overlay')
+    expect(overlay).toBeDefined()
+    if (overlay) fireEvent.click(overlay)
     expect(onCancel).toHaveBeenCalledTimes(1)
   })
 
@@ -112,7 +114,9 @@ describe('CloseConfirmDialog', () => {
     const { container } = render(
       <CloseConfirmDialog unmergedWorkspaces={[]} onConfirm={onConfirm} onCancel={onCancel} />
     )
-    fireEvent.click(container.querySelector('.close-confirm-dialog')!)
+    const dialog = container.querySelector('.close-confirm-dialog')
+    expect(dialog).toBeDefined()
+    if (dialog) fireEvent.click(dialog)
     expect(onCancel).not.toHaveBeenCalled()
   })
 
@@ -120,7 +124,9 @@ describe('CloseConfirmDialog', () => {
     const { container } = render(
       <CloseConfirmDialog unmergedWorkspaces={[]} onConfirm={onConfirm} onCancel={onCancel} />
     )
-    fireEvent.keyDown(container.querySelector('.dialog-overlay')!, { key: 'Escape' })
+    const overlayEl = container.querySelector('.dialog-overlay')
+    expect(overlayEl).toBeDefined()
+    if (overlayEl) fireEvent.keyDown(overlayEl, { key: 'Escape' })
     expect(onCancel).toHaveBeenCalledTimes(1)
   })
 })

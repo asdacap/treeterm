@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const { mockHandle, mockOn } = vi.hoisted(() => ({
-  mockHandle: vi.fn(),
-  mockOn: vi.fn()
+  mockHandle: vi.fn<(...args: any[]) => any>(),
+  mockOn: vi.fn<(...args: any[]) => any>()
 }))
 
 vi.mock('electron', () => ({
@@ -10,7 +10,7 @@ vi.mock('electron', () => ({
     handle: mockHandle,
     on: mockOn
   },
-  BrowserWindow: vi.fn()
+  BrowserWindow: vi.fn<(...args: any[]) => any>()
 }))
 
 import { IpcServer } from './ipc-server'
@@ -25,15 +25,15 @@ describe('IpcServer', () => {
 
   describe('handle registration (invoke pattern)', () => {
     it('onPtyCreate registers handler on pty:create channel', () => {
-      const handler = vi.fn()
+      const handler = vi.fn<(...args: any[]) => any>()
       server.onPtyCreate(handler)
       expect(mockHandle).toHaveBeenCalledWith('pty:create', expect.any(Function))
     })
 
     it('onPtyCreate wrapper forwards event and args to handler', async () => {
-      const handler = vi.fn().mockResolvedValue('pty-123')
-      server.onPtyCreate(handler)
-      const wrapper = mockHandle.mock.calls[0][1]
+      const handler = vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('pty-123')
+      server.onPtyCreate(handler as any)
+      const wrapper = mockHandle.mock.calls[0][1] as (...args: any[]) => Promise<string>
       const fakeEvent = { sender: {} }
       const result = await wrapper(fakeEvent, '/home/user', undefined, undefined)
       expect(handler).toHaveBeenCalledWith(fakeEvent, '/home/user', undefined, undefined)
@@ -41,40 +41,40 @@ describe('IpcServer', () => {
     })
 
     it('onGitGetInfo registers handler on git:getInfo channel', () => {
-      const handler = vi.fn()
+      const handler = vi.fn<(...args: any[]) => any>()
       server.onGitGetInfo(handler)
       expect(mockHandle).toHaveBeenCalledWith('git:getInfo', expect.any(Function))
     })
 
     it('onSessionUpdate registers handler on session:update channel', () => {
-      const handler = vi.fn()
+      const handler = vi.fn<(...args: any[]) => any>()
       server.onSessionUpdate(handler)
       expect(mockHandle).toHaveBeenCalledWith('session:update', expect.any(Function))
     })
 
     it('onSettingsLoad registers handler on settings:load channel', () => {
-      const handler = vi.fn()
+      const handler = vi.fn<(...args: any[]) => any>()
       server.onSettingsLoad(handler)
       expect(mockHandle).toHaveBeenCalledWith('settings:load', expect.any(Function))
     })
 
     it('onFsReadFile registers handler on fs:readFile channel', () => {
-      const handler = vi.fn()
+      const handler = vi.fn<(...args: any[]) => any>()
       server.onFsReadFile(handler)
       expect(mockHandle).toHaveBeenCalledWith('fs:readFile', expect.any(Function))
     })
 
     it('onFsReadFile wrapper forwards args and returns result', async () => {
-      const handler = vi.fn().mockResolvedValue({ success: true })
-      server.onFsReadFile(handler)
-      const wrapper = mockHandle.mock.calls[0][1]
+      const handler = vi.fn<(...args: any[]) => Promise<{ success: boolean }>>().mockResolvedValue({ success: true })
+      server.onFsReadFile(handler as any)
+      const wrapper = mockHandle.mock.calls[0][1] as (...args: any[]) => Promise<{ success: boolean }>
       const result = await wrapper({}, '/ws', '/file.txt')
       expect(handler).toHaveBeenCalledWith('/ws', '/file.txt')
       expect(result).toEqual({ success: true })
     })
 
     it('onAppGetWindowUuid registers handler on app:getWindowUuid channel', () => {
-      const handler = vi.fn()
+      const handler = vi.fn<(...args: any[]) => any>()
       server.onAppGetWindowUuid(handler)
       expect(mockHandle).toHaveBeenCalledWith('app:getWindowUuid', expect.any(Function))
     })
@@ -131,7 +131,7 @@ describe('IpcServer', () => {
       ['onSshWatchConnectionStatus', 'ssh:watchConnectionStatus'],
       ['onSshUnwatchConnectionStatus', 'ssh:unwatchConnectionStatus'],
     ] as const)('%s registers handler on %s channel', (method, channel) => {
-      const handler = vi.fn()
+      const handler = vi.fn<(...args: any[]) => any>()
       ;(server as any)[method](handler)
       expect(mockHandle).toHaveBeenCalledWith(channel, expect.any(Function))
     })
@@ -146,9 +146,9 @@ describe('IpcServer', () => {
       ['onSandboxIsAvailable', 'sandbox:isAvailable'],
       ['onAppGetInitialWorkspace', 'app:getInitialWorkspace'],
     ] as const)('%s wrapper forwards args to handler and returns result', async (method, _channel) => {
-      const handler = vi.fn().mockResolvedValue('result')
+      const handler = vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('result')
       ;(server as any)[method](handler)
-      const wrapper = mockHandle.mock.calls[0][1]
+      const wrapper = mockHandle.mock.calls[0][1] as (...args: any[]) => Promise<string>
       const result = await wrapper({}, 'arg1', 'arg2')
       expect(handler).toHaveBeenCalledWith('arg1', 'arg2')
       expect(result).toBe('result')
@@ -159,9 +159,9 @@ describe('IpcServer', () => {
       ['onPtyAttach', 'pty:attach'],
       ['onLlmChatSend', 'llm:chat:send'],
     ] as const)('%s wrapper forwards event and args to handler', async (method, _channel) => {
-      const handler = vi.fn().mockResolvedValue('result')
+      const handler = vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('result')
       ;(server as any)[method](handler)
-      const wrapper = mockHandle.mock.calls[0][1]
+      const wrapper = mockHandle.mock.calls[0][1] as (...args: any[]) => Promise<string>
       const mockEvent = { sender: {} }
       const result = await wrapper(mockEvent, 'arg1', 'arg2')
       expect(handler).toHaveBeenCalledWith(mockEvent, 'arg1', 'arg2')
@@ -171,27 +171,27 @@ describe('IpcServer', () => {
 
   describe('on registration (send pattern)', () => {
     it('onAppCloseConfirmed registers handler on app:close-confirmed channel', () => {
-      const handler = vi.fn()
+      const handler = vi.fn<(...args: any[]) => void>()
       server.onAppCloseConfirmed(handler)
       expect(mockOn).toHaveBeenCalledWith('app:close-confirmed', expect.any(Function))
     })
 
     it('onAppCloseCancelled registers handler on app:close-cancelled channel', () => {
-      const handler = vi.fn()
+      const handler = vi.fn<(...args: any[]) => void>()
       server.onAppCloseCancelled(handler)
       expect(mockOn).toHaveBeenCalledWith('app:close-cancelled', expect.any(Function))
     })
 
     it('onLlmChatCancel registers handler on llm:chat:cancel channel', () => {
-      const handler = vi.fn()
+      const handler = vi.fn<(...args: any[]) => void>()
       server.onLlmChatCancel(handler)
       expect(mockOn).toHaveBeenCalledWith('llm:chat:cancel', expect.any(Function))
     })
 
     it('onLlmChatCancel wrapper forwards args to handler', () => {
-      const handler = vi.fn()
+      const handler = vi.fn<(...args: any[]) => void>()
       server.onLlmChatCancel(handler)
-      const wrapper = mockOn.mock.calls[0][1]
+      const wrapper = mockOn.mock.calls[0][1] as (...args: any[]) => void
       wrapper({}, 'request-123')
       expect(handler).toHaveBeenCalledWith('request-123')
     })
@@ -199,7 +199,7 @@ describe('IpcServer', () => {
 
   describe('event emitters (main → renderer)', () => {
     it('ptyEvent sends to window webContents with correct channel and args', () => {
-      const mockSend = vi.fn()
+      const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as any
       server.setWindow(mockWindow)
 
@@ -209,7 +209,7 @@ describe('IpcServer', () => {
     })
 
     it('ptyEvent sends exit to window webContents with correct channel and args', () => {
-      const mockSend = vi.fn()
+      const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as any
       server.setWindow(mockWindow)
 
@@ -218,7 +218,7 @@ describe('IpcServer', () => {
     })
 
     it('settingsOpen sends to window webContents with correct channel', () => {
-      const mockSend = vi.fn()
+      const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as any
       server.setWindow(mockWindow)
 
@@ -227,7 +227,7 @@ describe('IpcServer', () => {
     })
 
     it('appConfirmClose sends to window webContents', () => {
-      const mockSend = vi.fn()
+      const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as any
       server.setWindow(mockWindow)
 
@@ -236,7 +236,7 @@ describe('IpcServer', () => {
     })
 
     it('sessionSync sends to window with correct args', () => {
-      const mockSend = vi.fn()
+      const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as any
       server.setWindow(mockWindow)
 
@@ -246,7 +246,7 @@ describe('IpcServer', () => {
     })
 
     it('daemonDisconnected sends to window', () => {
-      const mockSend = vi.fn()
+      const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as any
       server.setWindow(mockWindow)
 
@@ -255,7 +255,7 @@ describe('IpcServer', () => {
     })
 
     it('appReady sends to window webContents', () => {
-      const mockSend = vi.fn()
+      const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as any
       server.setWindow(mockWindow)
 
@@ -264,7 +264,7 @@ describe('IpcServer', () => {
     })
 
     it('capsLockEvent sends to window webContents', () => {
-      const mockSend = vi.fn()
+      const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as any
       server.setWindow(mockWindow)
 
@@ -273,7 +273,7 @@ describe('IpcServer', () => {
     })
 
     it('daemonSessions sends to window webContents', () => {
-      const mockSend = vi.fn()
+      const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as any
       server.setWindow(mockWindow)
 
@@ -283,7 +283,7 @@ describe('IpcServer', () => {
     })
 
     it('activeProcessesOpen sends to window webContents', () => {
-      const mockSend = vi.fn()
+      const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as any
       server.setWindow(mockWindow)
 
@@ -292,7 +292,7 @@ describe('IpcServer', () => {
     })
 
     it('sshConnectionStatus sends to window webContents', () => {
-      const mockSend = vi.fn()
+      const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as any
       server.setWindow(mockWindow)
 
@@ -302,7 +302,7 @@ describe('IpcServer', () => {
     })
 
     it('sshOutput sends to window webContents', () => {
-      const mockSend = vi.fn()
+      const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as any
       server.setWindow(mockWindow)
 
@@ -311,7 +311,7 @@ describe('IpcServer', () => {
     })
 
     it('gitOutput sends to window webContents', () => {
-      const mockSend = vi.fn()
+      const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as any
       server.setWindow(mockWindow)
 
@@ -322,7 +322,7 @@ describe('IpcServer', () => {
 
   describe('setWindow', () => {
     it('sets the window for event emission', () => {
-      const mockSend = vi.fn()
+      const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as any
       server.setWindow(mockWindow)
 
@@ -333,13 +333,13 @@ describe('IpcServer', () => {
     it('null window does not throw on emit', () => {
       const dataBytes = new TextEncoder().encode('data')
       server.setWindow(null)
-      expect(() => server.ptyEvent('pty-1', { type: 'data', data: dataBytes })).not.toThrow()
-      expect(() => server.settingsOpen()).not.toThrow()
-      expect(() => server.daemonDisconnected()).not.toThrow()
+      expect(() => { server.ptyEvent('pty-1', { type: 'data', data: dataBytes }); }).not.toThrow()
+      expect(() => { server.settingsOpen(); }).not.toThrow()
+      expect(() => { server.daemonDisconnected(); }).not.toThrow()
     })
 
     it('no window set (default) does not throw on emit', () => {
-      expect(() => server.ptyEvent('pty-1', { type: 'data', data: new TextEncoder().encode('data') })).not.toThrow()
+      expect(() => { server.ptyEvent('pty-1', { type: 'data', data: new TextEncoder().encode('data') }); }).not.toThrow()
     })
   })
 })

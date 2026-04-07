@@ -12,7 +12,7 @@ function makeSessionStore(overrides: Partial<SessionState> = {}) {
     createTty: vi.fn().mockResolvedValue('pty-new'),
     killTty: vi.fn(),
     ...overrides,
-  }) as any)
+  }) as unknown as SessionState)
 }
 
 function makeWrapper(sessionStore: ReturnType<typeof makeSessionStore>) {
@@ -64,7 +64,7 @@ describe('useTtyCreation', () => {
   it('returns error when createTty rejects', async () => {
     const sessionStore = makeSessionStore({
       createTty: vi.fn().mockRejectedValue(new Error('pty creation failed')),
-    } as any)
+    } as unknown as Partial<SessionState>)
     const onCreated = vi.fn()
 
     const { result } = renderHook(
@@ -89,7 +89,7 @@ describe('useTtyCreation', () => {
     const sandbox = { enabled: true, allowNetwork: false }
 
     renderHook(
-      () => useTtyCreation(null, '/test', sandbox as any, 'echo hi', onCreated),
+      () => useTtyCreation(null, '/test', sandbox as unknown as import('../../shared/types').SandboxConfig, 'echo hi', onCreated),
       { wrapper: makeWrapper(sessionStore) }
     )
 

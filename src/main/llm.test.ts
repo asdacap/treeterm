@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const { mockCreate } = vi.hoisted(() => ({
-  mockCreate: vi.fn(),
+  mockCreate: vi.fn<(...args: any[]) => any>(),
 }))
 
 vi.mock('openai', () => {
@@ -43,7 +43,7 @@ const mockSettings = {
 }
 
 function makeMockSender() {
-  return { send: vi.fn() } as unknown as Electron.WebContents
+  return { send: vi.fn<(...args: any[]) => void>() } as unknown as Electron.WebContents
 }
 
 describe('formatLlmError', () => {
@@ -197,8 +197,8 @@ describe('cancelChatStream', () => {
     // Stream is done, activeStreams is cleaned up in finally — but we can test the abort path
     // by starting a new stream and immediately canceling
     let abortCalled = false
-    const realAbort = AbortController.prototype.abort
-    AbortController.prototype.abort = function() { abortCalled = true; realAbort.call(this) }
+    const realAbort: (reason?: any) => void = AbortController.prototype.abort
+    AbortController.prototype.abort = function(this: AbortController, reason?: any) { abortCalled = true; realAbort.call(this, reason) }
 
     mockCreate.mockResolvedValue({
       [Symbol.asyncIterator]: async function* () {

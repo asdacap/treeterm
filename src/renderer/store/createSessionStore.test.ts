@@ -273,8 +273,10 @@ describe('createSessionStore', () => {
       const workspaces = store.getState().workspaces
       const errorEntry = Object.values(workspaces).find(e => e.status === 'error')
       expect(errorEntry).toBeDefined()
-      expect(errorEntry!.status).toBe('error')
-      expect((errorEntry as Extract<typeof errorEntry, { status: 'error' }>).error).toBe('git error')
+      if (errorEntry && errorEntry.status === 'error') {
+        expect(errorEntry.status).toBe('error')
+        expect(errorEntry.error).toBe('git error')
+      }
     })
 
     it('adoptExistingWorktree adds existing worktree', async () => {
@@ -333,8 +335,9 @@ describe('createSessionStore', () => {
       store.getState().addChildWorkspace(parentId, 'child')
       await flushPromises()
       const childEntry = Object.values(store.getState().workspaces)
-        .find((e): e is Extract<typeof e, { status: 'loaded' }> => e.status === 'loaded' && e.data.name === 'child')!
-      childId = childEntry.data.id
+        .find((e): e is Extract<typeof e, { status: 'loaded' }> => e.status === 'loaded' && e.data.name === 'child')
+      expect(childEntry).toBeDefined()
+      childId = childEntry?.data.id ?? ''
     })
 
     it('removeWorkspace removes child and cleans up git', async () => {
@@ -421,8 +424,9 @@ describe('createSessionStore', () => {
       store.getState().addChildWorkspace(parentId, 'child')
       await flushPromises()
       const childEntry = Object.values(store.getState().workspaces)
-        .find((e): e is Extract<typeof e, { status: 'loaded' }> => e.status === 'loaded' && e.data.name === 'child')!
-      childId = childEntry.data.id
+        .find((e): e is Extract<typeof e, { status: 'loaded' }> => e.status === 'loaded' && e.data.name === 'child')
+      expect(childEntry).toBeDefined()
+      childId = childEntry?.data.id ?? ''
     })
 
     it('mergeAndRemoveWorkspace merges, removes, and cleans up', async () => {

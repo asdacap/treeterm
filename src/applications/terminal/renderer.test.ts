@@ -13,7 +13,7 @@ import type { ReviewCommentState } from '../../renderer/store/createReviewCommen
 
 // Mock React
 vi.mock('react', () => ({
-  createElement: vi.fn((component: any, props: any) => ({ component, props }))
+  createElement: vi.fn((component: unknown, props: unknown) => ({ component, props }))
 }))
 
 // Mock Terminal component
@@ -22,7 +22,7 @@ vi.mock('../../renderer/components/Terminal', () => ({
 }))
 
 // Mock activity state store
-const mockRemoveTabState = vi.fn()
+const mockRemoveTabState = vi.fn<(tabId: string) => void>()
 vi.mock('../../renderer/store/activityState', () => ({
   useActivityStateStore: {
     getState: vi.fn(() => ({
@@ -31,11 +31,11 @@ vi.mock('../../renderer/store/activityState', () => ({
   }
 }))
 
-const mockTerminalKill = vi.fn()
+const mockTerminalKill = vi.fn<(connectionId: string, ptyId: string) => void>()
 const mockDeps = { terminal: { kill: mockTerminalKill } }
 
 function createMockAnalyzer() {
-  const state = { start: vi.fn(), stop: vi.fn(), getHistory: vi.fn().mockReturnValue([]) }
+  const state = { start: vi.fn(), stop: vi.fn(), getHistory: vi.fn<() => unknown[]>().mockReturnValue([]) }
   return { getState: vi.fn().mockReturnValue(state), setState: vi.fn(), subscribe: vi.fn(), _state: state }
 }
 
@@ -77,7 +77,7 @@ const mockWorkspaceStoreStateData = {
   setCachedTerminal: vi.fn(),
   disposeCachedTerminal: vi.fn(), disposeAllCachedTerminals: vi.fn(), disposeTabResources: vi.fn(),
   initAnalyzer: vi.fn().mockReturnValue(createMockAnalyzer()),
-  createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn(), kill: vi.fn() }),
+  createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
   connectionId: 'local',
   updateSettings: vi.fn(),
   focusTabId: null,
@@ -199,7 +199,7 @@ describe('Terminal Renderer', () => {
         expect(mockUpdateTabState).toHaveBeenCalledWith('tab-1', expect.any(Function))
 
         // Verify the state updater function produces correct state
-        const updater = mockUpdateTabState.mock.calls[0][1]
+        const updater = mockUpdateTabState.mock.calls[0][1] as (prev: Record<string, unknown>) => Record<string, unknown>
         const updated = updater({ ptyId: null, ptyHandle: null, keepOnExit: false })
         expect(updated).toEqual({
           ptyId: 'pty-new',

@@ -35,7 +35,7 @@ function makeDeps(overrides: Partial<GitControllerDeps> = {}): GitControllerDeps
       fetch: vi.fn().mockResolvedValue({ success: true }),
       getBehindCount: vi.fn().mockResolvedValue(0),
       pull: vi.fn().mockResolvedValue({ success: true }),
-    } as any,
+    } as unknown as GitControllerDeps['git'],
     github: {
       getPrInfo: vi.fn().mockResolvedValue({ noPr: true, createUrl: 'https://github.com/test/repo/compare/main...feat?expand=1' }),
     },
@@ -348,7 +348,7 @@ describe('createGitControllerStore', () => {
       const store = createGitControllerStore(deps)
       store.getState().dispose()
 
-      store.setState({ prInfo: { url: 'old' } as any })
+      store.setState({ prInfo: { url: 'old' } as unknown as import('../types').GitHubPrInfo })
       await store.getState().refreshPrStatus()
       expect(store.getState().prInfo).toBeNull()
     })

@@ -92,7 +92,7 @@ describe('PortForwardProcess', () => {
       pf.start()
 
       // Get the most recent spawn call
-      const lastCall = (spawn as Mock).mock.calls.at(-1)!
+      const lastCall = (spawn as Mock).mock.calls.at(-1) as unknown[]
       const args = lastCall[1] as string[]
       expect(args).toContain('-i')
       expect(args).toContain('/home/admin/.ssh/id_rsa')
@@ -188,7 +188,7 @@ describe('PortForwardProcess', () => {
 
       // Push enough lines to exceed 1000 total, triggering the trim
       for (let i = 0; i < 999; i++) {
-        mockProcess.stdout.emit('data', Buffer.from(`line-${i}\n`))
+        mockProcess.stdout.emit('data', Buffer.from(`line-${String(i)}\n`))
       }
       // Now at 1001 lines, trim fires: slices to last 500
       const output = pf.getOutput()
@@ -223,7 +223,7 @@ describe('PortForwardProcess', () => {
 
       mockProcess.stdout.emit('data', Buffer.from('hello\n'))
       // Only start() output lines, not 'hello' since we unsubscribed
-      const callsWithHello = cb.mock.calls.filter((c: string[]) => c[0].includes('hello'))
+      const callsWithHello = (cb.mock.calls as string[][]).filter((c) => c[0].includes('hello'))
       expect(callsWithHello).toHaveLength(0)
     })
 

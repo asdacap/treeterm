@@ -15,10 +15,10 @@ import { useSettingsStore } from './settings'
 import type { Settings } from '../types'
 
 // Mock settings API
-const mockLoadSettings = vi.fn()
-const mockSaveSettings = vi.fn()
-const mockSettingsApi = { load: mockLoadSettings, save: mockSaveSettings, onOpen: vi.fn() }
-const mockTerminalKill = vi.fn()
+const mockLoadSettings = vi.fn<() => Promise<unknown>>()
+const mockSaveSettings = vi.fn<(settings: unknown) => Promise<void>>()
+const mockSettingsApi = { load: mockLoadSettings, save: mockSaveSettings, onOpen: vi.fn<(cb: () => void) => () => void>() }
+const mockTerminalKill = vi.fn<(connectionId: string, id: string) => void>()
 
 describe('SettingsStore', () => {
   beforeEach(() => {
@@ -178,7 +178,7 @@ describe('SettingsStore', () => {
       mockLoadSettings.mockResolvedValue(useSettingsStore.getState().settings)
       useSettingsStore.setState({ settingsApi: null, terminalKill: null })
 
-      useSettingsStore.getState().init(mockSettingsApi as any, mockTerminalKill)
+      useSettingsStore.getState().init(mockSettingsApi as unknown as import('../types').SettingsApi, mockTerminalKill)
 
       expect(useSettingsStore.getState().settingsApi).toBe(mockSettingsApi)
       expect(useSettingsStore.getState().terminalKill).toBe(mockTerminalKill)
@@ -197,7 +197,7 @@ describe('SettingsStore', () => {
       await new Promise(resolve => setTimeout(resolve, 10))
       
       expect(mockSaveSettings).toHaveBeenCalled()
-      const savedSettings = mockSaveSettings.mock.calls[0][0]
+      const savedSettings = mockSaveSettings.mock.calls[0][0] as import('../types').Settings
       expect(savedSettings.terminal.fontSize).toBe(20)
     })
 
@@ -220,7 +220,7 @@ describe('SettingsStore', () => {
       // Wait for async save
       await new Promise(resolve => setTimeout(resolve, 10))
       
-      const savedSettings = mockSaveSettings.mock.calls[0][0]
+      const savedSettings = mockSaveSettings.mock.calls[0][0] as import('../types').Settings
       expect(savedSettings.terminal.fontFamily).toBe('Menlo, Monaco, Consolas, monospace')
       expect(savedSettings.terminal.fontSize).toBe(20)
     })

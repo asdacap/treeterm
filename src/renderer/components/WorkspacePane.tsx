@@ -1,5 +1,5 @@
 import React, { useEffect, useCallback, useState } from 'react'
-// eslint-disable-next-line @typescript-eslint/no-deprecated -- Github icon has no non-deprecated replacement in lucide-react
+ 
 import { ChevronDown, Github, Loader2, ArrowDownToLine, RefreshCw, AlertTriangle, CircleDot, Check } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'

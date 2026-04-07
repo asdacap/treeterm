@@ -6,15 +6,15 @@ import { useGitApi, useFilesystemApi, useRunActionsApi } from './useWorkspaceApi
 import type { WorkspaceStoreState } from '../store/createWorkspaceStore'
 
 function makeWorkspaceStore() {
-  const gitApi = { getInfo: () => Promise.resolve({}) } as any
-  const filesystemApi = { readDirectory: () => Promise.resolve([]) } as any
-  const runActionsApi = { detect: () => Promise.resolve([]), run: () => Promise.resolve(null) } as any
+  const gitApi = { getInfo: () => Promise.resolve({}) } as unknown as WorkspaceStoreState['gitApi']
+  const filesystemApi = { readDirectory: () => Promise.resolve([]) } as unknown as WorkspaceStoreState['filesystemApi']
+  const runActionsApi = { detect: () => Promise.resolve([]), run: () => Promise.resolve(null) } as unknown as WorkspaceStoreState['runActionsApi']
 
   return createStore<WorkspaceStoreState>()(() => ({
     gitApi,
     filesystemApi,
     runActionsApi,
-  }) as any)
+  }) as unknown as WorkspaceStoreState)
 }
 
 describe('useWorkspaceApis', () => {

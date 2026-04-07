@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { EventEmitter } from 'events'
+import type { ChildProcess } from 'child_process'
 
 // Mock child_process
 vi.mock('child_process', () => ({
@@ -24,6 +25,32 @@ import * as fs from 'fs'
 import { SSHTunnel } from './ssh'
 import type { SSHConnectionConfig } from '../shared/types'
 
+type MockProcess = EventEmitter & {
+  stdout: EventEmitter
+  stderr: EventEmitter
+  stdin: { write: ReturnType<typeof vi.fn> }
+  kill: ReturnType<typeof vi.fn>
+}
+
+/** Type exposing private members of SSHTunnel for test access */
+type SSHTunnelPrivate = {
+  sshProcess: ChildProcess | null
+  _connected: boolean
+  appendOutput: (line: string) => void
+  disconnectListeners: Set<(error?: string) => void>
+  buildBaseSSHArgs: () => string[]
+  bootstrapRemoteDaemon: () => Promise<string>
+  startTunnel: (remoteSocketPath: string) => void
+  waitForSocket: () => Promise<void>
+  getLocalDaemonChecksum: (arch: string) => string
+  getDaemonBinaryPath: (arch: string) => string
+}
+
+/** Get typed access to private members of SSHTunnel */
+function priv(tunnel: SSHTunnel): SSHTunnelPrivate {
+  return tunnel as unknown as SSHTunnelPrivate
+}
+
 function makeConfig(overrides?: Partial<SSHConnectionConfig>): SSHConnectionConfig {
   return {
     id: 'conn-1',
@@ -35,8 +62,8 @@ function makeConfig(overrides?: Partial<SSHConnectionConfig>): SSHConnectionConf
   }
 }
 
-function makeMockProcess() {
-  const proc = new EventEmitter() as any
+function makeMockProcess(): MockProcess {
+  const proc = new EventEmitter() as MockProcess
   proc.stdout = new EventEmitter()
   proc.stderr = new EventEmitter()
   proc.stdin = { write: vi.fn() }
@@ -61,8 +88,8 @@ describe('SSHTunnel', () => {
     it('kills ssh process and cleans up socket', () => {
       const tunnel = new SSHTunnel(makeConfig())
       const mockProc = makeMockProcess()
-      ;(tunnel as any).sshProcess = mockProc
-      ;(tunnel as any)._connected = true
+      priv(tunnel).sshProcess = mockProc as unknown as ChildProcess
+      priv(tunnel)._connected = true
 
       vi.mocked(fs.existsSync).mockReturnValue(true)
 
@@ -81,7 +108,7 @@ describe('SSHTunnel', () => {
 
     it('ignores cleanup errors', () => {
       const tunnel = new SSHTunnel(makeConfig())
-      ;(tunnel as any)._connected = true
+      priv(tunnel)._connected = true
       vi.mocked(fs.existsSync).mockReturnValue(true)
       vi.mocked(fs.unlinkSync).mockImplementation(() => { throw new Error('ENOENT') })
 
@@ -92,8 +119,8 @@ describe('SSHTunnel', () => {
   describe('output management', () => {
     it('getOutput returns copy of buffer', () => {
       const tunnel = new SSHTunnel(makeConfig())
-      ;(tunnel as any).appendOutput('line 1')
-      ;(tunnel as any).appendOutput('line 2')
+      priv(tunnel).appendOutput('line 1')
+      priv(tunnel).appendOutput('line 2')
 
       const output = tunnel.getOutput()
       expect(output).toEqual(['line 1', 'line 2'])
@@ -106,7 +133,7 @@ describe('SSHTunnel', () => {
       const cb = vi.fn()
       tunnel.onOutput(cb)
 
-      ;(tunnel as any).appendOutput('test line')
+      priv(tunnel).appendOutput('test line')
       expect(cb).toHaveBeenCalledWith('test line')
     })
 
@@ -116,14 +143,14 @@ describe('SSHTunnel', () => {
       const unsub = tunnel.onOutput(cb)
 
       unsub()
-      ;(tunnel as any).appendOutput('test')
+      priv(tunnel).appendOutput('test')
       expect(cb).not.toHaveBeenCalled()
     })
 
     it('output buffer is bounded', () => {
       const tunnel = new SSHTunnel(makeConfig())
       for (let i = 0; i < 1100; i++) {
-        ;(tunnel as any).appendOutput(`line ${i}`)
+        priv(tunnel).appendOutput(`line ${String(i)}`)
       }
       const output = tunnel.getOutput()
       expect(output.length).toBeLessThanOrEqual(1000)
@@ -136,12 +163,12 @@ describe('SSHTunnel', () => {
       const cb = vi.fn()
       const unsub = tunnel.onDisconnect(cb)
 
-      ;(tunnel as any).disconnectListeners.forEach((c: any) => c('test error'))
+      priv(tunnel).disconnectListeners.forEach((c) => { c('test error') })
       expect(cb).toHaveBeenCalledWith('test error')
 
       unsub()
       cb.mockClear()
-      ;(tunnel as any).disconnectListeners.forEach((c: any) => c('test'))
+      priv(tunnel).disconnectListeners.forEach((c) => { c('test') })
       expect(cb).not.toHaveBeenCalled()
     })
   })
@@ -149,7 +176,7 @@ describe('SSHTunnel', () => {
   describe('buildBaseSSHArgs', () => {
     it('builds args with standard options', () => {
       const tunnel = new SSHTunnel(makeConfig())
-      const args = (tunnel as any).buildBaseSSHArgs()
+      const args = priv(tunnel).buildBaseSSHArgs()
 
       expect(args).toContain('StrictHostKeyChecking=accept-new')
       expect(args).toContain('BatchMode=yes')
@@ -159,7 +186,7 @@ describe('SSHTunnel', () => {
 
     it('includes identity file when configured', () => {
       const tunnel = new SSHTunnel(makeConfig({ identityFile: '/home/user/.ssh/id_rsa' }))
-      const args = (tunnel as any).buildBaseSSHArgs()
+      const args = priv(tunnel).buildBaseSSHArgs()
 
       expect(args).toContain('-i')
       expect(args).toContain('/home/user/.ssh/id_rsa')
@@ -167,7 +194,7 @@ describe('SSHTunnel', () => {
 
     it('uses custom port', () => {
       const tunnel = new SSHTunnel(makeConfig({ port: 2222 }))
-      const args = (tunnel as any).buildBaseSSHArgs()
+      const args = priv(tunnel).buildBaseSSHArgs()
       expect(args).toContain('2222')
     })
   })
@@ -175,10 +202,10 @@ describe('SSHTunnel', () => {
   describe('bootstrapRemoteDaemon', () => {
     it('resolves with socket path on success', async () => {
       const proc = makeMockProcess()
-      vi.mocked(spawn).mockReturnValue(proc as any)
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
 
       const tunnel = new SSHTunnel(makeConfig())
-      const promise = (tunnel as any).bootstrapRemoteDaemon()
+      const promise = priv(tunnel).bootstrapRemoteDaemon()
 
       proc.stdout.emit('data', Buffer.from('TREETERM_ARCH:x86_64\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n'))
       proc.emit('close', 0)
@@ -189,10 +216,10 @@ describe('SSHTunnel', () => {
 
     it('rejects on non-zero exit code', async () => {
       const proc = makeMockProcess()
-      vi.mocked(spawn).mockReturnValue(proc as any)
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
 
       const tunnel = new SSHTunnel(makeConfig())
-      const promise = (tunnel as any).bootstrapRemoteDaemon()
+      const promise = priv(tunnel).bootstrapRemoteDaemon()
 
       proc.stderr.emit('data', Buffer.from('Permission denied\n'))
       proc.emit('close', 1)
@@ -202,10 +229,10 @@ describe('SSHTunnel', () => {
 
     it('rejects on spawn error', async () => {
       const proc = makeMockProcess()
-      vi.mocked(spawn).mockReturnValue(proc as any)
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
 
       const tunnel = new SSHTunnel(makeConfig())
-      const promise = (tunnel as any).bootstrapRemoteDaemon()
+      const promise = priv(tunnel).bootstrapRemoteDaemon()
 
       proc.emit('error', new Error('spawn ENOENT'))
 
@@ -214,10 +241,10 @@ describe('SSHTunnel', () => {
 
     it('rejects when TREETERM_ARCH marker is missing', async () => {
       const proc = makeMockProcess()
-      vi.mocked(spawn).mockReturnValue(proc as any)
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
 
       const tunnel = new SSHTunnel(makeConfig())
-      const promise = (tunnel as any).bootstrapRemoteDaemon()
+      const promise = priv(tunnel).bootstrapRemoteDaemon()
 
       proc.stdout.emit('data', Buffer.from('uid=1001\n'))
       proc.emit('close', 0)
@@ -227,14 +254,14 @@ describe('SSHTunnel', () => {
 
     it('includes REFRESH_DAEMON=1 when refreshDaemon option set', async () => {
       const proc = makeMockProcess()
-      vi.mocked(spawn).mockReturnValue(proc as any)
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
 
       const tunnel = new SSHTunnel(makeConfig(), { refreshDaemon: true })
-      const promise = (tunnel as any).bootstrapRemoteDaemon()
+      const promise = priv(tunnel).bootstrapRemoteDaemon()
 
       // Check the bootstrap script contains REFRESH_DAEMON=1
       const spawnCall = vi.mocked(spawn).mock.calls[0]
-      const scriptArg = spawnCall[1][spawnCall[1].length - 1] as string
+      const scriptArg = spawnCall[1][spawnCall[1].length - 1]
       expect(scriptArg).toContain('REFRESH_DAEMON=1')
 
       proc.stdout.emit('data', Buffer.from('TREETERM_ARCH:x86_64\nTREETERM_SOCKET:/tmp/daemon.sock\n'))
@@ -243,15 +270,15 @@ describe('SSHTunnel', () => {
       await promise
     })
 
-    it('bootstrap script includes sha256sum checksum reporting', async () => {
+    it('bootstrap script includes sha256sum checksum reporting', () => {
       const proc = makeMockProcess()
-      vi.mocked(spawn).mockReturnValue(proc as any)
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
 
       const tunnel = new SSHTunnel(makeConfig())
-      ;(tunnel as any).bootstrapRemoteDaemon()
+      void priv(tunnel).bootstrapRemoteDaemon()
 
       const spawnCall = vi.mocked(spawn).mock.calls[0]
-      const scriptArg = spawnCall[1][spawnCall[1].length - 1] as string
+      const scriptArg = spawnCall[1][spawnCall[1].length - 1]
       expect(scriptArg).toContain('sha256sum')
       expect(scriptArg).toContain('TREETERM_REMOTE_HASH')
 
@@ -261,12 +288,12 @@ describe('SSHTunnel', () => {
 
     it('resolves immediately when hash matches', async () => {
       const proc = makeMockProcess()
-      vi.mocked(spawn).mockReturnValue(proc as any)
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
 
       const tunnel = new SSHTunnel(makeConfig())
-      vi.spyOn(tunnel as any, 'getLocalDaemonChecksum').mockReturnValue('aabbccdd11223344')
+      vi.spyOn(priv(tunnel), 'getLocalDaemonChecksum').mockReturnValue('aabbccdd11223344')
 
-      const promise = (tunnel as any).bootstrapRemoteDaemon()
+      const promise = priv(tunnel).bootstrapRemoteDaemon()
 
       proc.stdout.emit(
         'data',
@@ -288,18 +315,18 @@ describe('SSHTunnel', () => {
       const scpProc = makeMockProcess()
       const startProc = makeMockProcess()
       vi.mocked(spawn)
-        .mockReturnValueOnce(bootstrapProc as any)  // bootstrap
-        .mockReturnValueOnce(killProc as any)        // kill-old-daemon
-        .mockReturnValueOnce(scpProc as any)         // scp upload
-        .mockReturnValueOnce(startProc as any)       // start new daemon
+        .mockReturnValueOnce(bootstrapProc as unknown as ChildProcess)
+        .mockReturnValueOnce(killProc as unknown as ChildProcess)
+        .mockReturnValueOnce(scpProc as unknown as ChildProcess)
+        .mockReturnValueOnce(startProc as unknown as ChildProcess)
 
       vi.mocked(fs.existsSync).mockReturnValue(false)
 
       const tunnel = new SSHTunnel(makeConfig())
-      vi.spyOn(tunnel as any, 'getLocalDaemonChecksum').mockReturnValue('localhash000')
-      vi.spyOn(tunnel as any, 'getDaemonBinaryPath').mockReturnValue('/mock/path/treeterm-daemon-x86_64-linux')
+      vi.spyOn(priv(tunnel), 'getLocalDaemonChecksum').mockReturnValue('localhash000')
+      vi.spyOn(priv(tunnel), 'getDaemonBinaryPath').mockReturnValue('/mock/path/treeterm-daemon-x86_64-linux')
 
-      const promise = (tunnel as any).bootstrapRemoteDaemon()
+      const promise = priv(tunnel).bootstrapRemoteDaemon()
 
       // Bootstrap reports mismatched hash
       bootstrapProc.stdout.emit(
@@ -332,10 +359,10 @@ describe('SSHTunnel', () => {
 
     it('trusts running daemon when sha256sum is unavailable (NONE hash)', async () => {
       const proc = makeMockProcess()
-      vi.mocked(spawn).mockReturnValue(proc as any)
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
 
       const tunnel = new SSHTunnel(makeConfig())
-      const promise = (tunnel as any).bootstrapRemoteDaemon()
+      const promise = priv(tunnel).bootstrapRemoteDaemon()
 
       proc.stdout.emit(
         'data',
@@ -355,10 +382,10 @@ describe('SSHTunnel', () => {
   describe('startTunnel', () => {
     it('spawns ssh with socket forwarding args', () => {
       const proc = makeMockProcess()
-      vi.mocked(spawn).mockReturnValue(proc as any)
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
 
       const tunnel = new SSHTunnel(makeConfig())
-      ;(tunnel as any).startTunnel('/tmp/remote.sock')
+      priv(tunnel).startTunnel('/tmp/remote.sock')
 
       const call = vi.mocked(spawn).mock.calls[0]
       expect(call[0]).toBe('ssh')
@@ -369,11 +396,11 @@ describe('SSHTunnel', () => {
 
     it('notifies disconnect listeners on process close when connected', () => {
       const proc = makeMockProcess()
-      vi.mocked(spawn).mockReturnValue(proc as any)
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
 
       const tunnel = new SSHTunnel(makeConfig())
-      ;(tunnel as any)._connected = true
-      ;(tunnel as any).startTunnel('/tmp/remote.sock')
+      priv(tunnel)._connected = true
+      priv(tunnel).startTunnel('/tmp/remote.sock')
 
       const cb = vi.fn()
       tunnel.onDisconnect(cb)
@@ -386,10 +413,10 @@ describe('SSHTunnel', () => {
 
     it('notifies disconnect listeners on process error', () => {
       const proc = makeMockProcess()
-      vi.mocked(spawn).mockReturnValue(proc as any)
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
 
       const tunnel = new SSHTunnel(makeConfig())
-      ;(tunnel as any).startTunnel('/tmp/remote.sock')
+      priv(tunnel).startTunnel('/tmp/remote.sock')
 
       const cb = vi.fn()
       tunnel.onDisconnect(cb)
@@ -406,9 +433,9 @@ describe('SSHTunnel', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true)
 
       const tunnel = new SSHTunnel(makeConfig())
-      ;(tunnel as any).sshProcess = {} // not null
+      priv(tunnel).sshProcess = {} as ChildProcess // not null
 
-      await (tunnel as any).waitForSocket()
+      await priv(tunnel).waitForSocket()
       // Should not throw
     })
 
@@ -416,9 +443,9 @@ describe('SSHTunnel', () => {
       vi.mocked(fs.existsSync).mockReturnValue(false)
 
       const tunnel = new SSHTunnel(makeConfig())
-      ;(tunnel as any).sshProcess = null
+      priv(tunnel).sshProcess = null
 
-      await expect((tunnel as any).waitForSocket()).rejects.toThrow('SSH process exited')
+      await expect(priv(tunnel).waitForSocket()).rejects.toThrow('SSH process exited')
     })
   })
 })

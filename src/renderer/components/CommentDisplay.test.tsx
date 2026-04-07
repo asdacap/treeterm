@@ -41,8 +41,9 @@ describe('CommentDisplay', () => {
     const { container } = render(
       <CommentDisplay comment={makeComment()} onDelete={onDelete} />
     )
-    const meta = container.querySelector('.comment-display-meta')!
-    expect(meta.textContent).toBe(new Date(1700000000000).toLocaleString())
+    const meta = container.querySelector('.comment-display-meta')
+    expect(meta).toBeDefined()
+    expect(meta?.textContent).toBe(new Date(1700000000000).toLocaleString())
   })
 
   it('shows "Outdated" badge when comment is outdated', () => {
@@ -95,8 +96,9 @@ describe('CommentDisplay', () => {
     const { container } = render(
       <CommentDisplay comment={makeComment({ id: 'c42' })} onDelete={onDelete} />
     )
-    const btn = container.querySelector('.comment-delete-btn')!
-    fireEvent.click(btn)
+    const btn = container.querySelector('.comment-delete-btn')
+    expect(btn).toBeDefined()
+    if (btn) fireEvent.click(btn)
     expect(onDelete).toHaveBeenCalledWith('c42')
   })
 
@@ -108,8 +110,9 @@ describe('CommentDisplay', () => {
         hideLineRef
       />
     )
-    const btn = container.querySelector('.comment-delete-btn.inline')!
-    fireEvent.click(btn)
+    const btn = container.querySelector('.comment-delete-btn.inline')
+    expect(btn).toBeDefined()
+    if (btn) fireEvent.click(btn)
     expect(onDelete).toHaveBeenCalledWith('c99')
   })
 })

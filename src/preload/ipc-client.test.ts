@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const { mockInvoke, mockSend, mockOn, mockRemoveListener } = vi.hoisted(() => ({
-  mockInvoke: vi.fn(),
-  mockSend: vi.fn(),
-  mockOn: vi.fn(),
-  mockRemoveListener: vi.fn()
+  mockInvoke: vi.fn<(...args: any[]) => any>(),
+  mockSend: vi.fn<(...args: any[]) => void>(),
+  mockOn: vi.fn<(...args: any[]) => any>(),
+  mockRemoveListener: vi.fn<(...args: any[]) => void>()
 }))
 
 vi.mock('electron', () => ({
@@ -111,7 +111,7 @@ describe('IpcClient', () => {
       ['appGetInitialWorkspace', 'app:getInitialWorkspace'],
     ] as const)('%s calls ipcRenderer.invoke with %s channel', async (method, channel) => {
       mockInvoke.mockResolvedValue('test-result')
-      const result = await (client as any)[method]('arg1', 'arg2')
+      const result = await (client as any)[method]('arg1', 'arg2') as string
       expect(mockInvoke).toHaveBeenCalledWith(channel, 'arg1', 'arg2')
       expect(result).toBe('test-result')
     })
@@ -146,65 +146,65 @@ describe('IpcClient', () => {
 
   describe('event listener pattern (on methods)', () => {
     it('onPtyEvent registers listener on correct channel', () => {
-      const callback = vi.fn()
+      const callback = vi.fn<(...args: any[]) => void>()
       client.onPtyEvent(callback)
       expect(mockOn).toHaveBeenCalledWith('pty:event', expect.any(Function))
     })
 
     it('onPtyEvent callback strips IpcRendererEvent arg', () => {
-      const callback = vi.fn()
+      const callback = vi.fn<(...args: any[]) => void>()
       client.onPtyEvent(callback)
-      const registeredHandler = mockOn.mock.calls[0][1]
+      const registeredHandler = mockOn.mock.calls[0][1] as (...args: any[]) => void
       const fakeEvent = {} // IpcRendererEvent
       registeredHandler(fakeEvent, 'pty-1', { type: 'data', data: 'data-chunk' })
       expect(callback).toHaveBeenCalledWith('pty-1', { type: 'data', data: 'data-chunk' })
     })
 
     it('onPtyEvent unsubscribe calls removeListener', () => {
-      const callback = vi.fn()
+      const callback = vi.fn<(...args: any[]) => void>()
       const unsubscribe = client.onPtyEvent(callback)
-      const registeredHandler = mockOn.mock.calls[0][1]
+      const registeredHandler = mockOn.mock.calls[0][1] as (...args: any[]) => void
       unsubscribe()
       expect(mockRemoveListener).toHaveBeenCalledWith('pty:event', registeredHandler)
     })
 
     it('onSessionSync registers and forwards correctly', () => {
-      const callback = vi.fn()
+      const callback = vi.fn<(...args: any[]) => void>()
       client.onSessionSync(callback)
       expect(mockOn).toHaveBeenCalledWith('session:sync', expect.any(Function))
-      const handler = mockOn.mock.calls[0][1]
+      const handler = mockOn.mock.calls[0][1] as (...args: any[]) => void
       handler({}, { id: 'session-1' })
       expect(callback).toHaveBeenCalledWith({ id: 'session-1' })
     })
 
     it('onDaemonDisconnected registers on correct channel', () => {
-      const callback = vi.fn()
+      const callback = vi.fn<() => void>()
       client.onDaemonDisconnected(callback)
       expect(mockOn).toHaveBeenCalledWith('daemon:disconnected', expect.any(Function))
     })
 
     it('onDaemonDisconnected unsubscribe works', () => {
-      const callback = vi.fn()
+      const callback = vi.fn<() => void>()
       const unsub = client.onDaemonDisconnected(callback)
-      const handler = mockOn.mock.calls[0][1]
+      const handler = mockOn.mock.calls[0][1] as (...args: any[]) => void
       unsub()
       expect(mockRemoveListener).toHaveBeenCalledWith('daemon:disconnected', handler)
     })
 
     it('onSettingsOpen registers and fires callback', () => {
-      const callback = vi.fn()
+      const callback = vi.fn<() => void>()
       client.onSettingsOpen(callback)
       expect(mockOn).toHaveBeenCalledWith('settings:open', expect.any(Function))
-      const handler = mockOn.mock.calls[0][1]
+      const handler = mockOn.mock.calls[0][1] as (...args: any[]) => void
       handler()
       expect(callback).toHaveBeenCalled()
     })
 
     it('onAppConfirmClose registers and fires callback', () => {
-      const callback = vi.fn()
+      const callback = vi.fn<() => void>()
       client.onAppConfirmClose(callback)
       expect(mockOn).toHaveBeenCalledWith('app:confirm-close', expect.any(Function))
-      const handler = mockOn.mock.calls[0][1]
+      const handler = mockOn.mock.calls[0][1] as (...args: any[]) => void
       handler()
       expect(callback).toHaveBeenCalled()
     })
@@ -214,10 +214,10 @@ describe('IpcClient', () => {
       ['onCapsLockEvent', 'capslock-event'],
       ['onDaemonSessions', 'daemon:sessions'],
     ] as const)('%s registers listener on %s and unsubscribe works', (method, channel) => {
-      const callback = vi.fn()
-      const unsub = (client as any)[method](callback)
+      const callback = vi.fn<(...args: any[]) => void>()
+      const unsub = (client as any)[method](callback) as () => void
       expect(mockOn).toHaveBeenCalledWith(channel, expect.any(Function))
-      const handler = mockOn.mock.calls[0][1]
+      const handler = mockOn.mock.calls[0][1] as (...args: any[]) => void
       unsub()
       expect(mockRemoveListener).toHaveBeenCalledWith(channel, handler)
     })

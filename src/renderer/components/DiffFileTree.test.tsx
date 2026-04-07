@@ -175,8 +175,9 @@ describe('CommittedDiffFileTree', () => {
       />
     )
     // Click the directory header
-    const dirHeader = container.querySelector('.diff-tree-dir')!
-    fireEvent.click(dirHeader)
+    const dirHeader = container.querySelector('.diff-tree-dir')
+    expect(dirHeader).toBeDefined()
+    if (dirHeader) fireEvent.click(dirHeader)
 
     // Files should be hidden
     expect(screen.queryByText('a.ts')).toBeNull()

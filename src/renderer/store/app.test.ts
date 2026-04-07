@@ -2,12 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // Mock application renderers that depend on browser APIs (xterm)
 vi.mock('../../applications/terminal/renderer', () => ({
-  createTerminalApplication: vi.fn().mockReturnValue({
+  createTerminalApplication: vi.fn<(...args: any[]) => any>().mockReturnValue({
     id: 'terminal', name: 'Terminal', icon: '>', createInitialState: () => ({}),
     render: () => null, onWorkspaceLoad: () => ({ dispose: () => {} }), canClose: true, showInNewTabMenu: true,
     displayStyle: 'flex', isDefault: true
   }),
-  createTerminalVariant: vi.fn().mockReturnValue({
+  createTerminalVariant: vi.fn<(...args: any[]) => any>().mockReturnValue({
     id: 'terminal-custom', name: 'Custom', icon: '>', createInitialState: () => ({}),
     render: () => null, onWorkspaceLoad: () => ({ dispose: () => {} }), canClose: true, showInNewTabMenu: true,
     displayStyle: 'flex', isDefault: false
@@ -23,7 +23,7 @@ vi.mock('../../applications/filesystem/renderer', () => ({
 }))
 
 vi.mock('../../applications/aiHarness/renderer', () => ({
-  createAiHarnessVariant: vi.fn().mockReturnValue({
+  createAiHarnessVariant: vi.fn<(...args: any[]) => any>().mockReturnValue({
     id: 'aiharness-test', name: 'AI', icon: 'A', createInitialState: () => ({}),
     render: () => null, onWorkspaceLoad: () => ({ dispose: () => {} }), canClose: true, showInNewTabMenu: true,
     displayStyle: 'flex', isDefault: false
@@ -31,7 +31,7 @@ vi.mock('../../applications/aiHarness/renderer', () => ({
 }))
 
 vi.mock('../../applications/customRunner/renderer', () => ({
-  createCustomRunnerVariant: vi.fn().mockReturnValue({
+  createCustomRunnerVariant: vi.fn<(...args: any[]) => any>().mockReturnValue({
     id: 'customrunner-test', name: 'Runner', icon: '▶', createInitialState: () => ({}),
     render: () => null, onWorkspaceLoad: () => ({ dispose: () => {} }), canClose: true, showInNewTabMenu: true,
     displayStyle: 'flex', isDefault: false
@@ -69,30 +69,30 @@ import { useSessionNamesStore } from './sessionNames'
 
 // Mock createSessionStore and its utilities
 vi.mock('./createSessionStore', () => ({
-  createSessionStore: vi.fn().mockImplementation(() => ({
-    getState: vi.fn().mockReturnValue({
+  createSessionStore: vi.fn<(...args: any[]) => any>().mockImplementation(() => ({
+    getState: vi.fn<() => any>().mockReturnValue({
       workspaces: {},
       workspaceStores: {},
       activeWorkspaceId: null,
       isRestoring: false,
-      addWorkspace: vi.fn(),
-      setActiveWorkspace: vi.fn(),
-      getWorkspace: vi.fn().mockReturnValue(null),
-      syncToDaemon: vi.fn().mockResolvedValue(undefined),
-      handleRestore: vi.fn().mockResolvedValue(undefined),
-      handleExternalUpdate: vi.fn().mockResolvedValue(undefined),
-      removeOrphanWorkspace: vi.fn(),
+      addWorkspace: vi.fn<(...args: any[]) => any>(),
+      setActiveWorkspace: vi.fn<(...args: any[]) => void>(),
+      getWorkspace: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
+      syncToDaemon: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      handleRestore: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
+      handleExternalUpdate: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
+      removeOrphanWorkspace: vi.fn<(...args: any[]) => void>(),
     }),
-    setState: vi.fn(),
-    subscribe: vi.fn()
+    setState: vi.fn<(...args: any[]) => void>(),
+    subscribe: vi.fn<(...args: any[]) => any>()
   })),
-  getUnmergedSubWorkspaces: vi.fn().mockReturnValue([])
+  getUnmergedSubWorkspaces: vi.fn<(...args: any[]) => any[]>().mockReturnValue([])
 }))
 
 vi.mock('./settings', () => ({
   useSettingsStore: {
-    getState: vi.fn().mockReturnValue({
-      init: vi.fn()
+    getState: vi.fn<() => any>().mockReturnValue({
+      init: vi.fn<(...args: any[]) => void>()
     })
   }
 }))
@@ -100,49 +100,49 @@ vi.mock('./settings', () => ({
 // Mock deps for initialize
 const mockDeps = {
   platform: 'darwin' as const,
-  getWindowUuid: vi.fn().mockResolvedValue('test-uuid'),
-  getInitialWorkspace: vi.fn().mockResolvedValue(null),
-  settingsApi: { onOpen: vi.fn().mockReturnValue(() => {}) },
+  getWindowUuid: vi.fn<() => Promise<string>>().mockResolvedValue('test-uuid'),
+  getInitialWorkspace: vi.fn<() => Promise<string | null>>().mockResolvedValue(null),
+  settingsApi: { onOpen: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}) },
   appApi: {
-    onCloseConfirm: vi.fn().mockReturnValue(() => {}),
-    onReady: vi.fn().mockReturnValue(() => {}),
-    onSshAutoConnected: vi.fn().mockReturnValue(() => {}),
-    confirmClose: vi.fn(),
-    cancelClose: vi.fn()
+    onCloseConfirm: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
+    onReady: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
+    onSshAutoConnected: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
+    confirmClose: vi.fn<() => void>(),
+    cancelClose: vi.fn<() => void>()
   },
   sessionApi: {
-    onSync: vi.fn().mockReturnValue(() => {}),
-    update: vi.fn().mockResolvedValue({ success: true, session: { id: 'test-session' } })
+    onSync: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
+    update: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true, session: { id: 'test-session' } })
   },
-  daemon: { onDisconnected: vi.fn().mockReturnValue(() => {}) },
+  daemon: { onDisconnected: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}) },
   terminal: {
-    onActiveProcessesOpen: vi.fn().mockReturnValue(() => {}),
-    list: vi.fn().mockResolvedValue([]),
-    kill: vi.fn(),
-    bind: vi.fn().mockReturnThis()
+    onActiveProcessesOpen: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
+    list: vi.fn<(...args: any[]) => Promise<any[]>>().mockResolvedValue([]),
+    kill: vi.fn<(...args: any[]) => void>(),
+    bind: vi.fn<(...args: any[]) => any>().mockReturnThis()
   },
-  git: { onOutput: vi.fn().mockReturnValue(() => {}) },
-  github: { getPrInfo: vi.fn() },
+  git: { onOutput: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}) },
+  github: { getPrInfo: vi.fn<(...args: any[]) => any>() },
   filesystem: {},
   reviews: {},
   stt: {},
-  runActions: { detect: vi.fn().mockResolvedValue([]), run: vi.fn().mockResolvedValue(null) },
+  runActions: { detect: vi.fn<(...args: any[]) => Promise<any[]>>().mockResolvedValue([]), run: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue(null) },
   sandbox: {},
   ssh: {
-    connect: vi.fn().mockResolvedValue({ id: 'test', target: { type: 'remote' }, status: 'connected' }),
-    disconnect: vi.fn().mockResolvedValue(undefined),
-    listConnections: vi.fn().mockResolvedValue([]),
-    saveConnection: vi.fn().mockResolvedValue(undefined),
-    getSavedConnections: vi.fn().mockResolvedValue([]),
-    removeSavedConnection: vi.fn().mockResolvedValue(undefined),
-    getOutput: vi.fn().mockResolvedValue([]),
-    onConnectionStatus: vi.fn().mockReturnValue(() => {}),
-    onOutput: vi.fn().mockReturnValue(() => {})
+    connect: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ id: 'test', target: { type: 'remote' }, status: 'connected' }),
+    disconnect: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
+    listConnections: vi.fn<(...args: any[]) => Promise<any[]>>().mockResolvedValue([]),
+    saveConnection: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
+    getSavedConnections: vi.fn<(...args: any[]) => Promise<any[]>>().mockResolvedValue([]),
+    removeSavedConnection: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
+    getOutput: vi.fn<(...args: any[]) => Promise<any[]>>().mockResolvedValue([]),
+    onConnectionStatus: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
+    onOutput: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {})
   },
-  selectFolder: vi.fn(),
+  selectFolder: vi.fn<(...args: any[]) => any>(),
   llm: {
-    analyzeTerminal: vi.fn(),
-    generateTitle: vi.fn(),
+    analyzeTerminal: vi.fn<(...args: any[]) => any>(),
+    generateTitle: vi.fn<(...args: any[]) => any>(),
   },
 } as any
 
@@ -182,9 +182,9 @@ describe('useAppStore', () => {
   describe('disconnectSession', () => {
     it('removes session from sessionStores', () => {
       const mockStore = {
-        getState: vi.fn().mockReturnValue({ workspaces: {} }),
-        setState: vi.fn(),
-        subscribe: vi.fn()
+        getState: vi.fn<() => any>().mockReturnValue({ workspaces: {} }),
+        setState: vi.fn<(...args: any[]) => void>(),
+        subscribe: vi.fn<(...args: any[]) => any>()
       } as never
       useAppStore.setState({ sessionStores: {
         's1': { store: mockStore },
@@ -197,9 +197,9 @@ describe('useAppStore', () => {
 
     it('clears navigation when disconnecting viewed session', () => {
       const mockStore = {
-        getState: vi.fn().mockReturnValue({ workspaces: { 'ws-1': { id: 'ws-1' } } }),
-        setState: vi.fn(),
-        subscribe: vi.fn()
+        getState: vi.fn<() => any>().mockReturnValue({ workspaces: { 'ws-1': { id: 'ws-1' } } }),
+        setState: vi.fn<(...args: any[]) => void>(),
+        subscribe: vi.fn<(...args: any[]) => any>()
       } as never
       useAppStore.setState({ sessionStores: {
         's1': { store: mockStore },
@@ -219,28 +219,28 @@ describe('useAppStore', () => {
     let mockHandleRestore: ReturnType<typeof vi.fn>
 
     beforeEach(async () => {
-      mockAddWorkspace = vi.fn().mockResolvedValue('ws-new-id')
-      mockSyncToDaemon = vi.fn().mockResolvedValue(undefined)
-      mockHandleRestore = vi.fn().mockResolvedValue(undefined)
+      mockAddWorkspace = vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('ws-new-id')
+      mockSyncToDaemon = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
+      mockHandleRestore = vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined)
 
       // Import and configure the mock
       const { createSessionStore } = await import('./createSessionStore')
       const mockedCreate = vi.mocked(createSessionStore)
       mockedCreate.mockImplementation(() => ({
-        getState: vi.fn().mockReturnValue({
+        getState: vi.fn<() => any>().mockReturnValue({
           workspaces: {},
           workspaceStores: {},
           activeWorkspaceId: null,
           isRestoring: false,
           addWorkspace: mockAddWorkspace,
-          setActiveWorkspace: vi.fn(),
-          getWorkspace: vi.fn().mockReturnValue(null),
+          setActiveWorkspace: vi.fn<(...args: any[]) => void>(),
+          getWorkspace: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
           syncToDaemon: mockSyncToDaemon,
           handleRestore: mockHandleRestore,
-          handleExternalUpdate: vi.fn().mockResolvedValue(undefined),
+          handleExternalUpdate: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
         }),
-        setState: vi.fn(),
-        subscribe: vi.fn()
+        setState: vi.fn<(...args: any[]) => void>(),
+        subscribe: vi.fn<(...args: any[]) => any>()
       }) as any)
 
       // Initialize the store with deps so terminal/git/etc are available
@@ -272,7 +272,7 @@ describe('useAppStore', () => {
       }
 
       // Trigger onReady with the session
-      const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0]
+      const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0] as (session: any) => void
       readyCallback(session)
 
       // Workspaces restored via handleRestore (not addWorkspace)
@@ -295,7 +295,7 @@ describe('useAppStore', () => {
         ]
       }
 
-      const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0]
+      const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0] as (session: any) => void
       readyCallback(session)
 
       // Child should still be restored via handleRestore
@@ -320,7 +320,7 @@ describe('useAppStore', () => {
         ]
       }
 
-      const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0]
+      const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0] as (session: any) => void
       readyCallback(session)
 
       // terminal.list() should NOT have been called
@@ -343,7 +343,7 @@ describe('useAppStore', () => {
         ]
       }
 
-      const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0]
+      const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0] as (session: any) => void
       readyCallback(session)
 
       expect(mockAddWorkspace).not.toHaveBeenCalled()
@@ -365,7 +365,7 @@ describe('useAppStore', () => {
         ]
       }
 
-      const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0]
+      const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0] as (session: any) => void
       readyCallback(session)
 
       expect(mockSyncToDaemon).not.toHaveBeenCalled()
@@ -399,7 +399,7 @@ describe('useAppStore', () => {
 
     it('onCloseConfirm confirms close when no active store', async () => {
       const cleanup = await useAppStore.getState().initialize(mockDeps)
-      const closeCallback = mockDeps.appApi.onCloseConfirm.mock.calls[0][0]
+      const closeCallback = mockDeps.appApi.onCloseConfirm.mock.calls[0][0] as () => void
       closeCallback()
       expect(mockDeps.appApi.confirmClose).toHaveBeenCalled()
       cleanup()
@@ -410,7 +410,7 @@ describe('useAppStore', () => {
       vi.mocked(getUnmergedSubWorkspaces).mockReturnValue([])
 
       const cleanup = await useAppStore.getState().initialize(mockDeps)
-      const closeCallback = mockDeps.appApi.onCloseConfirm.mock.calls[0][0]
+      const closeCallback = mockDeps.appApi.onCloseConfirm.mock.calls[0][0] as () => void
       closeCallback()
       expect(mockDeps.appApi.confirmClose).toHaveBeenCalled()
       cleanup()
@@ -422,24 +422,24 @@ describe('useAppStore', () => {
       vi.mocked(getUnmergedSubWorkspaces).mockReturnValue([mockWs as any])
 
       const mockStore = {
-        getState: vi.fn().mockReturnValue({
+        getState: vi.fn<() => any>().mockReturnValue({
           workspaces: { 'ws-1': mockWs },
           workspaceStores: {},
-          handleRestore: vi.fn().mockResolvedValue(undefined),
-          handleExternalUpdate: vi.fn().mockResolvedValue(undefined),
+          handleRestore: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
+          handleExternalUpdate: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
         }),
-        setState: vi.fn(),
-        subscribe: vi.fn()
+        setState: vi.fn<(...args: any[]) => void>(),
+        subscribe: vi.fn<(...args: any[]) => any>()
       }
       vi.mocked(createSessionStore).mockReturnValue(mockStore as any)
 
       const cleanup = await useAppStore.getState().initialize(mockDeps)
 
       // Trigger onReady to create a session store
-      const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0]
+      const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0] as (session: any) => void
       readyCallback({ id: 'session-1', workspaces: [] })
 
-      const closeCallback = mockDeps.appApi.onCloseConfirm.mock.calls[0][0]
+      const closeCallback = mockDeps.appApi.onCloseConfirm.mock.calls[0][0] as () => void
       closeCallback()
 
       expect(useAppStore.getState().showCloseConfirm).toBe(true)
@@ -449,26 +449,26 @@ describe('useAppStore', () => {
 
     it('onReady restores session with workspaces', async () => {
       const { createSessionStore } = await import('./createSessionStore')
-      const mockSetState = vi.fn()
+      const mockSetState = vi.fn<(...args: any[]) => void>()
       vi.mocked(createSessionStore).mockReturnValue({
-        getState: vi.fn().mockReturnValue({
+        getState: vi.fn<() => any>().mockReturnValue({
           workspaces: {},
           workspaceStores: {},
           activeWorkspaceId: null,
           isRestoring: false,
-          addWorkspace: vi.fn(),
-          setActiveWorkspace: vi.fn(),
-          getWorkspace: vi.fn().mockReturnValue(null),
-          syncToDaemon: vi.fn(),
-          handleRestore: vi.fn().mockResolvedValue(undefined),
-          handleExternalUpdate: vi.fn().mockResolvedValue(undefined),
+          addWorkspace: vi.fn<(...args: any[]) => any>(),
+          setActiveWorkspace: vi.fn<(...args: any[]) => void>(),
+          getWorkspace: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
+          syncToDaemon: vi.fn<() => void>(),
+          handleRestore: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
+          handleExternalUpdate: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
         }),
         setState: mockSetState,
-        subscribe: vi.fn()
+        subscribe: vi.fn<(...args: any[]) => any>()
       } as any)
 
       const cleanup = await useAppStore.getState().initialize(mockDeps)
-      const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0]
+      const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0] as (session: any) => void
 
       const session = {
         id: 'session-ready',
@@ -485,7 +485,7 @@ describe('useAppStore', () => {
 
     it('onReady creates store for session with no workspaces', async () => {
       const cleanup = await useAppStore.getState().initialize(mockDeps)
-      const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0]
+      const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0] as (session: any) => void
 
       readyCallback({ id: 'empty-session', workspaces: [] })
 
@@ -496,7 +496,7 @@ describe('useAppStore', () => {
     it('onDisconnected sets daemonDisconnected', async () => {
       const cleanup = await useAppStore.getState().initialize(mockDeps)
 
-      const disconnectCallback = mockDeps.daemon.onDisconnected.mock.calls[0][0]
+      const disconnectCallback = mockDeps.daemon.onDisconnected.mock.calls[0][0] as () => void
       disconnectCallback()
 
       expect(useAppStore.getState().daemonDisconnected).toBe(true)
@@ -504,37 +504,37 @@ describe('useAppStore', () => {
     })
 
     it('initial workspace activates existing workspace', async () => {
-      const mockSetActiveWorkspace = vi.fn()
+      const mockSetActiveWorkspace = vi.fn<(...args: any[]) => void>()
       const { createSessionStore } = await import('./createSessionStore')
       vi.mocked(createSessionStore).mockReturnValue({
-        getState: vi.fn().mockReturnValue({
+        getState: vi.fn<() => any>().mockReturnValue({
           workspaces: { 'ws-existing': { status: 'loaded', data: { id: 'ws-existing', path: '/projects/existing', name: 'existing' }, store: {} } },
           activeWorkspaceId: null,
           isRestoring: false,
-          addWorkspace: vi.fn(),
+          addWorkspace: vi.fn<(...args: any[]) => any>(),
           setActiveWorkspace: mockSetActiveWorkspace,
-          syncToDaemon: vi.fn(),
-          handleRestore: vi.fn().mockResolvedValue(undefined),
-          handleExternalUpdate: vi.fn().mockResolvedValue(undefined),
+          syncToDaemon: vi.fn<() => void>(),
+          handleRestore: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
+          handleExternalUpdate: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
         }),
-        setState: vi.fn(),
-        subscribe: vi.fn()
+        setState: vi.fn<(...args: any[]) => void>(),
+        subscribe: vi.fn<(...args: any[]) => any>()
       } as any)
 
       // Set up initial workspace to return a path
       const deps = {
         ...mockDeps,
-        getInitialWorkspace: vi.fn().mockResolvedValue('/projects/existing'),
+        getInitialWorkspace: vi.fn<() => Promise<string>>().mockResolvedValue('/projects/existing'),
         appApi: {
           ...mockDeps.appApi,
-          onReady: vi.fn().mockImplementation((cb: any) => {
+          onReady: vi.fn<(...args: any[]) => () => void>().mockImplementation((cb: any) => {
             // Immediately fire onReady with a session so the store exists
             setTimeout(() => cb({ id: 'session-init', workspaces: [] }), 0)
             return () => {}
           }),
-          onCloseConfirm: vi.fn().mockReturnValue(() => {}),
+          onCloseConfirm: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
         }
-      } as any
+      }
 
       // We need the store to exist before getInitialWorkspace resolves
       // Create a mock session store directly
@@ -549,21 +549,21 @@ describe('useAppStore', () => {
     })
 
     it('initial workspace adds new workspace when not existing', async () => {
-      const mockAddWorkspace = vi.fn().mockResolvedValue('ws-new')
+      const mockAddWorkspace = vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('ws-new')
       const { createSessionStore } = await import('./createSessionStore')
       vi.mocked(createSessionStore).mockReturnValue({
-        getState: vi.fn().mockReturnValue({
+        getState: vi.fn<() => any>().mockReturnValue({
           workspaces: {},
           activeWorkspaceId: null,
           isRestoring: false,
           addWorkspace: mockAddWorkspace,
-          setActiveWorkspace: vi.fn(),
-          syncToDaemon: vi.fn(),
-          handleRestore: vi.fn().mockResolvedValue(undefined),
-          handleExternalUpdate: vi.fn().mockResolvedValue(undefined),
+          setActiveWorkspace: vi.fn<(...args: any[]) => void>(),
+          syncToDaemon: vi.fn<() => void>(),
+          handleRestore: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
+          handleExternalUpdate: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
         }),
-        setState: vi.fn(),
-        subscribe: vi.fn()
+        setState: vi.fn<(...args: any[]) => void>(),
+        subscribe: vi.fn<(...args: any[]) => any>()
       } as any)
 
       const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', windowUuid: null }, {} as any) as any
@@ -571,7 +571,7 @@ describe('useAppStore', () => {
         sessionStores: { 'pre-session': { store: mockSessionStoreInstance } }
       })
 
-      const deps = { ...mockDeps, getInitialWorkspace: vi.fn().mockResolvedValue('/new/path') } as any
+      const deps = { ...mockDeps, getInitialWorkspace: vi.fn<() => Promise<string>>().mockResolvedValue('/new/path') }
       const cleanup = await useAppStore.getState().initialize(deps)
       expect(mockAddWorkspace).toHaveBeenCalledWith('/new/path')
       cleanup()
@@ -582,23 +582,23 @@ describe('useAppStore', () => {
     let mockHandleExternalUpdate: ReturnType<typeof vi.fn>
 
     beforeEach(async () => {
-      mockHandleExternalUpdate = vi.fn().mockResolvedValue(undefined)
+      mockHandleExternalUpdate = vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined)
       const { createSessionStore } = await import('./createSessionStore')
       vi.mocked(createSessionStore).mockReturnValue({
-        getState: vi.fn().mockReturnValue({
+        getState: vi.fn<() => any>().mockReturnValue({
           workspaces: {},
           workspaceStores: {},
           activeWorkspaceId: null,
           isRestoring: false,
-          addWorkspace: vi.fn(),
-          setActiveWorkspace: vi.fn(),
-          getWorkspace: vi.fn().mockReturnValue(null),
-          syncToDaemon: vi.fn(),
-          handleRestore: vi.fn().mockResolvedValue(undefined),
+          addWorkspace: vi.fn<(...args: any[]) => any>(),
+          setActiveWorkspace: vi.fn<(...args: any[]) => void>(),
+          getWorkspace: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
+          syncToDaemon: vi.fn<() => void>(),
+          handleRestore: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
           handleExternalUpdate: mockHandleExternalUpdate,
         }),
-        setState: vi.fn(),
-        subscribe: vi.fn()
+        setState: vi.fn<(...args: any[]) => void>(),
+        subscribe: vi.fn<(...args: any[]) => any>()
       } as any)
 
       const cleanup = await useAppStore.getState().initialize(mockDeps)
@@ -617,16 +617,16 @@ describe('useAppStore', () => {
 
       // Pre-populate session store so onSync finds it (local connection)
       const mockStore = {
-        getState: vi.fn().mockReturnValue({ connection: null, handleExternalUpdate: mockHandleExternalUpdate }),
-        setState: vi.fn(),
-        subscribe: vi.fn()
+        getState: vi.fn<() => any>().mockReturnValue({ connection: null, handleExternalUpdate: mockHandleExternalUpdate }),
+        setState: vi.fn<(...args: any[]) => void>(),
+        subscribe: vi.fn<(...args: any[]) => any>()
       }
       useAppStore.setState((state) => ({
         sessionStores: { ...state.sessionStores, [sessionId]: { store: mockStore as any } }
       }))
 
       // Trigger onSync with matching connectionId
-      const syncCallback = mockDeps.sessionApi.onSync.mock.calls[0][0]
+      const syncCallback = mockDeps.sessionApi.onSync.mock.calls[0][0] as (connectionId: string, session: any) => Promise<void>
       await syncCallback('local', session)
 
       // handleExternalUpdate called to sync workspaces
@@ -642,16 +642,16 @@ describe('useAppStore', () => {
 
       // Pre-populate session store so onSync finds it (local connection)
       const mockStore = {
-        getState: vi.fn().mockReturnValue({ connection: null, handleExternalUpdate: mockHandleExternalUpdate }),
-        setState: vi.fn(),
-        subscribe: vi.fn()
+        getState: vi.fn<() => any>().mockReturnValue({ connection: null, handleExternalUpdate: mockHandleExternalUpdate }),
+        setState: vi.fn<(...args: any[]) => void>(),
+        subscribe: vi.fn<(...args: any[]) => any>()
       }
       useAppStore.setState((state) => ({
         sessionStores: { ...state.sessionStores, [sessionId]: { store: mockStore as any } }
       }))
 
       // Trigger onSync with matching connectionId
-      const syncCallback = mockDeps.sessionApi.onSync.mock.calls[0][0]
+      const syncCallback = mockDeps.sessionApi.onSync.mock.calls[0][0] as (connectionId: string, session: any) => Promise<void>
       await syncCallback('local', session)
 
       // handleExternalUpdate is responsible for removing orphan workspaces internally
@@ -665,7 +665,7 @@ describe('useAppStore', () => {
       }
 
       // Trigger onSync without pre-populating session store
-      const syncCallback = mockDeps.sessionApi.onSync.mock.calls[0][0]
+      const syncCallback = mockDeps.sessionApi.onSync.mock.calls[0][0] as (connectionId: string, session: any) => Promise<void>
       await syncCallback('local', session)
 
       // handleExternalUpdate should NOT be called
@@ -678,16 +678,16 @@ describe('useAppStore', () => {
 
       // Pre-populate session store with remote connection
       const mockStore = {
-        getState: vi.fn().mockReturnValue({ connection: { id: 'ssh-remote' }, handleExternalUpdate: mockHandleExternalUpdate }),
-        setState: vi.fn(),
-        subscribe: vi.fn()
+        getState: vi.fn<() => any>().mockReturnValue({ connection: { id: 'ssh-remote' }, handleExternalUpdate: mockHandleExternalUpdate }),
+        setState: vi.fn<(...args: any[]) => void>(),
+        subscribe: vi.fn<(...args: any[]) => any>()
       }
       useAppStore.setState((state) => ({
         sessionStores: { ...state.sessionStores, [sessionId]: { store: mockStore as any } }
       }))
 
       // Trigger onSync with wrong connectionId
-      const syncCallback = mockDeps.sessionApi.onSync.mock.calls[0][0]
+      const syncCallback = mockDeps.sessionApi.onSync.mock.calls[0][0] as (connectionId: string, session: any) => Promise<void>
       await syncCallback('local', session)
 
       // handleExternalUpdate should NOT be called — wrong connection
@@ -855,14 +855,14 @@ describe('useAppStore', () => {
 
     describe('local session via onReady', () => {
       it('names local session LOCAL', () => {
-        const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0]
+        const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0] as (session: any) => void
         readyCallback({ id: 'local-session-1', workspaces: [] })
         expect(useSessionNamesStore.getState().getName('local-session-1')).toBe('LOCAL')
       })
 
       it('does not overwrite existing custom name', () => {
         useSessionNamesStore.getState().setName('local-session-2', 'My Custom Name')
-        const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0]
+        const readyCallback = mockDeps.appApi.onReady.mock.calls[0][0] as (session: any) => void
         readyCallback({ id: 'local-session-2', workspaces: [] })
         expect(useSessionNamesStore.getState().getName('local-session-2')).toBe('My Custom Name')
       })

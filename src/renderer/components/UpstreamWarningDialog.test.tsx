@@ -22,8 +22,9 @@ describe('UpstreamWarningDialog', () => {
     const { container } = render(
       <UpstreamWarningDialog behindCount={1} workspaceName="my-branch" onConfirm={onConfirm} onCancel={onCancel} />
     )
-    const strong = container.querySelector('strong')!
-    expect(strong.textContent).toBe('my-branch')
+    const strong = container.querySelector('strong')
+    expect(strong).toBeDefined()
+    expect(strong?.textContent).toBe('my-branch')
   })
 
   it('shows singular "commit" when behindCount is 1', () => {
@@ -68,7 +69,9 @@ describe('UpstreamWarningDialog', () => {
     const { container } = render(
       <UpstreamWarningDialog behindCount={1} workspaceName="ws" onConfirm={onConfirm} onCancel={onCancel} />
     )
-    fireEvent.click(container.querySelector('.dialog-overlay')!)
+    const overlay = container.querySelector('.dialog-overlay')
+    expect(overlay).toBeDefined()
+    if (overlay) fireEvent.click(overlay)
     expect(onCancel).toHaveBeenCalledTimes(1)
   })
 
@@ -76,7 +79,9 @@ describe('UpstreamWarningDialog', () => {
     const { container } = render(
       <UpstreamWarningDialog behindCount={1} workspaceName="ws" onConfirm={onConfirm} onCancel={onCancel} />
     )
-    fireEvent.click(container.querySelector('.upstream-warning-dialog')!)
+    const dialog = container.querySelector('.upstream-warning-dialog')
+    expect(dialog).toBeDefined()
+    if (dialog) fireEvent.click(dialog)
     expect(onCancel).not.toHaveBeenCalled()
   })
 
@@ -84,7 +89,9 @@ describe('UpstreamWarningDialog', () => {
     const { container } = render(
       <UpstreamWarningDialog behindCount={1} workspaceName="ws" onConfirm={onConfirm} onCancel={onCancel} />
     )
-    fireEvent.keyDown(container.querySelector('.dialog-overlay')!, { key: 'Escape' })
+    const overlayEl = container.querySelector('.dialog-overlay')
+    expect(overlayEl).toBeDefined()
+    if (overlayEl) fireEvent.keyDown(overlayEl, { key: 'Escape' })
     expect(onCancel).toHaveBeenCalledTimes(1)
   })
 })

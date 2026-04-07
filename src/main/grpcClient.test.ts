@@ -2,31 +2,31 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mocks = vi.hoisted(() => {
   const mockClientInstance = {
-    waitForReady: vi.fn(),
-    createPty: vi.fn(),
-    killPty: vi.fn(),
-    listPtySessions: vi.fn(),
-    shutdown: vi.fn(),
-    ptyStream: vi.fn(),
-    execStream: vi.fn(),
-    updateSession: vi.fn(),
-    sessionWatch: vi.fn(),
-    readDirectory: vi.fn(),
-    readFile: vi.fn(),
-    writeFile: vi.fn(),
-    searchFiles: vi.fn(),
-    close: vi.fn()
+    waitForReady: vi.fn<(...args: any[]) => any>(),
+    createPty: vi.fn<(...args: any[]) => any>(),
+    killPty: vi.fn<(...args: any[]) => any>(),
+    listPtySessions: vi.fn<(...args: any[]) => any>(),
+    shutdown: vi.fn<(...args: any[]) => any>(),
+    ptyStream: vi.fn<(...args: any[]) => any>(),
+    execStream: vi.fn<(...args: any[]) => any>(),
+    updateSession: vi.fn<(...args: any[]) => any>(),
+    sessionWatch: vi.fn<(...args: any[]) => any>(),
+    readDirectory: vi.fn<(...args: any[]) => any>(),
+    readFile: vi.fn<(...args: any[]) => any>(),
+    writeFile: vi.fn<(...args: any[]) => any>(),
+    searchFiles: vi.fn<(...args: any[]) => any>(),
+    close: vi.fn<() => void>()
   }
   return { mockClientInstance }
 })
 
 vi.mock('@grpc/grpc-js', () => {
   class MockMetadata {
-    set = vi.fn()
+    set = vi.fn<(...args: any[]) => void>()
   }
   return {
     credentials: {
-      createInsecure: vi.fn().mockReturnValue('insecure-creds')
+      createInsecure: vi.fn<() => string>().mockReturnValue('insecure-creds')
     },
     Metadata: MockMetadata,
     status: {
@@ -43,23 +43,23 @@ vi.mock('../generated/treeterm', () => {
 })
 
 vi.mock('fs', () => ({
-  existsSync: vi.fn().mockReturnValue(true),
-  openSync: vi.fn().mockReturnValue(3)
+  existsSync: vi.fn<(...args: any[]) => boolean>().mockReturnValue(true),
+  openSync: vi.fn<(...args: any[]) => number>().mockReturnValue(3)
 }))
 
 vi.mock('child_process', () => ({
-  spawn: vi.fn().mockReturnValue({ unref: vi.fn(), pid: 1234 })
+  spawn: vi.fn<(...args: any[]) => any>().mockReturnValue({ unref: vi.fn<() => void>(), pid: 1234 })
 }))
 
 vi.mock('electron', () => ({
   app: {
     isPackaged: false,
-    getPath: vi.fn().mockReturnValue('/tmp')
+    getPath: vi.fn<(...args: any[]) => string>().mockReturnValue('/tmp')
   }
 }))
 
 vi.mock('./socketPath', () => ({
-  getDefaultSocketPath: vi.fn().mockReturnValue('/tmp/test.sock')
+  getDefaultSocketPath: vi.fn<() => string>().mockReturnValue('/tmp/test.sock')
 }))
 
 import { GrpcDaemonClient } from './grpcClient'
@@ -69,11 +69,11 @@ const { mockClientInstance } = mocks
 // Helper to create a mock per-session stream
 function makeMockSessionStream() {
   return {
-    on: vi.fn(),
-    write: vi.fn(),
-    end: vi.fn(),
-    cancel: vi.fn(),
-    removeListener: vi.fn()
+    on: vi.fn<(...args: any[]) => any>(),
+    write: vi.fn<(...args: any[]) => any>(),
+    end: vi.fn<() => void>(),
+    cancel: vi.fn<() => void>(),
+    removeListener: vi.fn<(...args: any[]) => void>()
   }
 }
 
@@ -143,13 +143,13 @@ describe('GrpcDaemonClient', () => {
     })
 
     it('createPtySession resolves with sessionId on success', async () => {
-      mockClientInstance.createPty.mockImplementation((_req: any, cb: any) => cb(null, { sessionId: 'pty-1' }))
+      mockClientInstance.createPty.mockImplementation((_req: any, cb: (err: any, res: any) => void) => { cb(null, { sessionId: 'pty-1' }); })
       const result = await client.createPtySession({ cwd: '/home' })
       expect(result).toBe('pty-1')
     })
 
     it('createPtySession rejects on error', async () => {
-      mockClientInstance.createPty.mockImplementation((_req: any, cb: any) => cb({ message: 'fail' }))
+      mockClientInstance.createPty.mockImplementation((_req: any, cb: (err: any, res: any) => void) => { cb({ message: 'fail' }, null); })
       await expect(client.createPtySession({ cwd: '/home' })).rejects.toThrow('fail')
     })
 
@@ -163,7 +163,7 @@ describe('GrpcDaemonClient', () => {
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
       mockStream.on.mockReturnValue(mockStream)
 
-      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn())
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn<(...args: any[]) => void>())
       expect(ptyStream.handle).toBeDefined()
       expect(ptyStream.sessionId).toBe('pty-1')
       // Should have sent a start message
@@ -175,7 +175,7 @@ describe('GrpcDaemonClient', () => {
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
       mockStream.on.mockReturnValue(mockStream)
 
-      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn())
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn<(...args: any[]) => void>())
       ptyStream.write('hello')
       expect(mockStream.write).toHaveBeenCalledWith({
         write: { data: Buffer.from('hello', 'utf-8') }
@@ -187,7 +187,7 @@ describe('GrpcDaemonClient', () => {
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
       mockStream.on.mockReturnValue(mockStream)
 
-      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn())
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn<(...args: any[]) => void>())
       ptyStream.resize(120, 40)
       expect(mockStream.write).toHaveBeenCalledWith({
         resize: { cols: 120, rows: 40 }
@@ -199,7 +199,7 @@ describe('GrpcDaemonClient', () => {
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
       mockStream.on.mockReturnValue(mockStream)
 
-      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn())
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn<(...args: any[]) => void>())
       ptyStream.close()
       expect(mockStream.end).toHaveBeenCalled()
     })
@@ -209,7 +209,7 @@ describe('GrpcDaemonClient', () => {
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
       mockStream.on.mockReturnValue(mockStream)
 
-      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn())
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn<(...args: any[]) => void>())
       ptyStream.close()
       ptyStream.close()
       expect(mockStream.end).toHaveBeenCalledTimes(1)
@@ -220,7 +220,7 @@ describe('GrpcDaemonClient', () => {
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
       mockStream.on.mockReturnValue(mockStream)
 
-      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn())
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn<(...args: any[]) => void>())
       ptyStream.close()
       mockStream.write.mockClear()
 
@@ -235,24 +235,24 @@ describe('GrpcDaemonClient', () => {
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
       mockStream.on.mockReturnValue(mockStream)
 
-      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn())
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn<(...args: any[]) => void>())
       mockStream.write.mockImplementation(() => { throw new Error('broken pipe') })
 
-      if (method === 'write') expect(() => ptyStream.write('data')).not.toThrow()
-      else expect(() => ptyStream.resize(80, 24)).not.toThrow()
+      if (method === 'write') expect(() => { ptyStream.write('data'); }).not.toThrow()
+      else expect(() => { ptyStream.resize(80, 24); }).not.toThrow()
     })
 
     it('PtyStream receives resize events from stream via constructor callback', () => {
       const mockStream = makeMockSessionStream()
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
 
-      const dataHandlers: Function[] = []
-      mockStream.on.mockImplementation((event: string, handler: Function) => {
+      const dataHandlers: Array<(data: any) => void> = []
+      mockStream.on.mockImplementation((event: string, handler: (data: any) => void) => {
         if (event === 'data') dataHandlers.push(handler)
         return mockStream
       })
 
-      const cb = vi.fn()
+      const cb = vi.fn<(...args: any[]) => void>()
       client.openPtyStream('handle-1', 'pty-1', cb)
 
       dataHandlers[0]?.({ resize: { cols: 120, rows: 40 } })
@@ -260,25 +260,25 @@ describe('GrpcDaemonClient', () => {
     })
 
     it('killPtySession resolves on success', async () => {
-      mockClientInstance.killPty.mockImplementation((_req: any, cb: any) => cb(null))
+      mockClientInstance.killPty.mockImplementation((_req: any, cb: (err: any) => void) => { cb(null); })
       await client.killPtySession('pty-1')
     })
 
     it('killPtySession rejects on error', async () => {
-      mockClientInstance.killPty.mockImplementation((_req: any, cb: any) => cb({ message: 'fail' }))
+      mockClientInstance.killPty.mockImplementation((_req: any, cb: (err: any) => void) => { cb({ message: 'fail' }); })
       await expect(client.killPtySession('pty-1')).rejects.toThrow('fail')
     })
 
     it('listPtySessions resolves with sessions', async () => {
-      mockClientInstance.listPtySessions.mockImplementation((_req: any, cb: any) =>
-        cb(null, { sessions: [{ id: 'pty-1', cwd: '/home' }] })
+      mockClientInstance.listPtySessions.mockImplementation((_req: any, cb: (err: any, res: any) => void) =>
+        { cb(null, { sessions: [{ id: 'pty-1', cwd: '/home' }] }); }
       )
       const result = await client.listPtySessions()
       expect(result).toEqual([{ id: 'pty-1', cwd: '/home' }])
     })
 
     it('listPtySessions returns empty array when no response', async () => {
-      mockClientInstance.listPtySessions.mockImplementation((_req: any, cb: any) => cb(null, null))
+      mockClientInstance.listPtySessions.mockImplementation((_req: any, cb: (err: any, res: any) => void) => { cb(null, null); })
       const result = await client.listPtySessions()
       expect(result).toEqual([])
     })
@@ -291,7 +291,7 @@ describe('GrpcDaemonClient', () => {
     })
 
     it('onDisconnect registers listener and returns unsubscribe', () => {
-      const cb = vi.fn()
+      const cb = vi.fn<() => void>()
       const unsub = client.onDisconnect(cb)
       expect(typeof unsub).toBe('function')
       unsub()
@@ -301,13 +301,13 @@ describe('GrpcDaemonClient', () => {
       const mockStream = makeMockSessionStream()
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
 
-      const dataHandlers: Function[] = []
-      mockStream.on.mockImplementation((event: string, handler: Function) => {
+      const dataHandlers: Array<(data: any) => void> = []
+      mockStream.on.mockImplementation((event: string, handler: (data: any) => void) => {
         if (event === 'data') dataHandlers.push(handler)
         return mockStream
       })
 
-      const cb = vi.fn()
+      const cb = vi.fn<(...args: any[]) => void>()
       client.openPtyStream('handle-1', 'pty-1', cb)
 
       const expectedData = Buffer.from('hello')
@@ -319,13 +319,13 @@ describe('GrpcDaemonClient', () => {
       const mockStream = makeMockSessionStream()
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
 
-      const dataHandlers: Function[] = []
-      mockStream.on.mockImplementation((event: string, handler: Function) => {
+      const dataHandlers: Array<(data: any) => void> = []
+      mockStream.on.mockImplementation((event: string, handler: (data: any) => void) => {
         if (event === 'data') dataHandlers.push(handler)
         return mockStream
       })
 
-      const cb = vi.fn()
+      const cb = vi.fn<(...args: any[]) => void>()
       client.openPtyStream('handle-1', 'pty-1', cb)
 
       // Simulate stream exit event
@@ -370,7 +370,7 @@ describe('GrpcDaemonClient', () => {
     }
 
     it('updateSession resolves with converted session', async () => {
-      mockClientInstance.updateSession.mockImplementation((_req: any, cb: any) => cb(null, mockProtoSession))
+      mockClientInstance.updateSession.mockImplementation((_req: any, cb: (err: any, res: any) => void) => { cb(null, mockProtoSession); })
       const result = await client.updateSession([])
       expect(result.id).toBe('session-1')
     })
@@ -417,7 +417,7 @@ describe('GrpcDaemonClient', () => {
         lastActivity: 2000
       }
 
-      mockClientInstance.updateSession.mockImplementation((_req: any, cb: any) => cb(null, protoSession))
+      mockClientInstance.updateSession.mockImplementation((_req: any, cb: (err: any, res: any) => void) => { cb(null, protoSession); })
       const session = await client.updateSession([])
       expect(session).not.toBeNull()
       expect(session.workspaces[0].appStates['tab-1'].state).toEqual({ ptyId: 'pty-1' })
@@ -448,7 +448,7 @@ describe('GrpcDaemonClient', () => {
         lastActivity: 2000
       }
 
-      mockClientInstance.updateSession.mockImplementation((_req: any, cb: any) => cb(null, protoSession))
+      mockClientInstance.updateSession.mockImplementation((_req: any, cb: (err: any, res: any) => void) => { cb(null, protoSession); })
       const session = await client.updateSession([])
       expect(session.workspaces[0].parentId).toBeNull()
       expect(session.workspaces[0].gitBranch).toBeNull()
@@ -464,16 +464,16 @@ describe('GrpcDaemonClient', () => {
     })
 
     it('readDirectory resolves with result', async () => {
-      mockClientInstance.readDirectory.mockImplementation((_req: any, cb: any) =>
-        cb(null, { success: true, contents: { files: [] } })
+      mockClientInstance.readDirectory.mockImplementation((_req: any, cb: (err: any, res: any) => void) =>
+        { cb(null, { success: true, contents: { files: [] } }); }
       )
       const result = await client.readDirectory('/ws', '.')
       expect(result.success).toBe(true)
     })
 
     it('readDirectory rejects on error', async () => {
-      mockClientInstance.readDirectory.mockImplementation((_req: any, cb: any) =>
-        cb({ message: 'fail' })
+      mockClientInstance.readDirectory.mockImplementation((_req: any, cb: (err: any) => void) =>
+        { cb({ message: 'fail' }); }
       )
       await expect(client.readDirectory('/ws', '.')).rejects.toThrow('fail')
     })
@@ -487,7 +487,7 @@ describe('GrpcDaemonClient', () => {
 
       mockClientInstance.readFile.mockImplementation((_req: any) => {
         const stream = {
-          on: (event: string, handler: Function) => {
+          on: (event: string, handler: (data: any) => void) => {
             if (event === 'data') {
               setTimeout(() => {
                 for (const chunk of chunks) {
@@ -506,17 +506,17 @@ describe('GrpcDaemonClient', () => {
     })
 
     it('writeFile resolves with result', async () => {
-      mockClientInstance.writeFile.mockImplementation((cb: any) => {
-        setTimeout(() => cb(null, { success: true }), 0)
-        return { write: vi.fn(), end: vi.fn() }
+      mockClientInstance.writeFile.mockImplementation((cb: (err: any, res: any) => void) => {
+        setTimeout(() => { cb(null, { success: true }); }, 0)
+        return { write: vi.fn<(...args: any[]) => void>(), end: vi.fn<() => void>() }
       })
       const result = await client.writeFile('/ws', '/file.txt', 'content')
       expect(result.success).toBe(true)
     })
 
     it('searchFiles resolves with result', async () => {
-      mockClientInstance.searchFiles.mockImplementation((_req: any, cb: any) =>
-        cb(null, { success: true, entries: [{ name: 'file.txt' }] })
+      mockClientInstance.searchFiles.mockImplementation((_req: any, cb: (err: any, res: any) => void) =>
+        { cb(null, { success: true, entries: [{ name: 'file.txt' }] }); }
       )
       const result = await client.searchFiles('/ws', 'file')
       expect(result).toMatchObject({ success: true, entries: expect.arrayContaining([expect.any(Object)]) })
@@ -525,9 +525,9 @@ describe('GrpcDaemonClient', () => {
     it('readFile rejects when stream returns success=false', async () => {
       mockClientInstance.readFile.mockImplementation(() => {
         const stream = {
-          on: (event: string, handler: Function) => {
+          on: (event: string, handler: (data: any) => void) => {
             if (event === 'data') {
-              setTimeout(() => handler({ end: { success: false, error: 'not found' } }), 0)
+              setTimeout(() => { handler({ end: { success: false, error: 'not found' } }); }, 0)
             }
             return stream
           }
@@ -555,32 +555,32 @@ describe('GrpcDaemonClient', () => {
     })
 
     it('returns initial promise and unsubscribe', () => {
-      const mockStream = { on: vi.fn(), cancel: vi.fn() }
+      const mockStream = { on: vi.fn<(...args: any[]) => any>(), cancel: vi.fn<() => void>() }
       mockClientInstance.sessionWatch.mockReturnValue(mockStream)
-      const result = client.watchSession('listener-1', vi.fn())
+      const result = client.watchSession('listener-1', vi.fn<(...args: any[]) => void>())
       expect(result.initial).toBeInstanceOf(Promise)
       expect(typeof result.unsubscribe).toBe('function')
     })
 
     it('unsubscribe cancels stream', () => {
-      const mockStream = { on: vi.fn(), cancel: vi.fn() }
+      const mockStream = { on: vi.fn<(...args: any[]) => any>(), cancel: vi.fn<() => void>() }
       mockClientInstance.sessionWatch.mockReturnValue(mockStream)
-      const result = client.watchSession('listener-1', vi.fn())
+      const result = client.watchSession('listener-1', vi.fn<(...args: any[]) => void>())
       result.unsubscribe()
       expect(mockStream.cancel).toHaveBeenCalled()
     })
 
     it('resolves initial with session on first data event', async () => {
-      const mockStream = { on: vi.fn(), cancel: vi.fn() }
+      const mockStream = { on: vi.fn<(...args: any[]) => any>(), cancel: vi.fn<() => void>() }
       mockClientInstance.sessionWatch.mockReturnValue(mockStream)
 
-      const handlers: Record<string, Function> = {}
-      mockStream.on.mockImplementation((event: string, handler: Function) => {
+      const handlers: Record<string, (...args: any[]) => void> = {}
+      mockStream.on.mockImplementation((event: string, handler: (...args: any[]) => void) => {
         handlers[event] = handler
         return mockStream
       })
 
-      const onUpdate = vi.fn()
+      const onUpdate = vi.fn<(...args: any[]) => void>()
       const result = client.watchSession('listener-1', onUpdate)
 
       const mockProto = { id: 'session-1', workspaces: [], createdAt: 1000, lastActivity: 2000 }
@@ -591,16 +591,16 @@ describe('GrpcDaemonClient', () => {
     })
 
     it('calls onUpdate for subsequent data events after initial', async () => {
-      const mockStream = { on: vi.fn(), cancel: vi.fn() }
+      const mockStream = { on: vi.fn<(...args: any[]) => any>(), cancel: vi.fn<() => void>() }
       mockClientInstance.sessionWatch.mockReturnValue(mockStream)
 
-      const handlers: Record<string, Function> = {}
-      mockStream.on.mockImplementation((event: string, handler: Function) => {
+      const handlers: Record<string, (...args: any[]) => void> = {}
+      mockStream.on.mockImplementation((event: string, handler: (...args: any[]) => void) => {
         handlers[event] = handler
         return mockStream
       })
 
-      const onUpdate = vi.fn()
+      const onUpdate = vi.fn<(...args: any[]) => void>()
       const result = client.watchSession('listener-1', onUpdate)
 
       const mockProto = { id: 'session-1', workspaces: [], createdAt: 1000, lastActivity: 2000 }
@@ -612,17 +612,17 @@ describe('GrpcDaemonClient', () => {
     })
 
     it('calls onError when stream errors after initial', async () => {
-      const mockStream = { on: vi.fn(), cancel: vi.fn() }
+      const mockStream = { on: vi.fn<(...args: any[]) => any>(), cancel: vi.fn<() => void>() }
       mockClientInstance.sessionWatch.mockReturnValue(mockStream)
 
-      const handlers: Record<string, Function> = {}
-      mockStream.on.mockImplementation((event: string, handler: Function) => {
+      const handlers: Record<string, (...args: any[]) => void> = {}
+      mockStream.on.mockImplementation((event: string, handler: (...args: any[]) => void) => {
         handlers[event] = handler
         return mockStream
       })
 
-      const onUpdate = vi.fn()
-      const onError = vi.fn()
+      const onUpdate = vi.fn<(...args: any[]) => void>()
+      const onError = vi.fn<(err: Error) => void>()
       const result = client.watchSession('listener-1', onUpdate, onError)
 
       const mockProto = { id: 'session-1', workspaces: [], createdAt: 1000, lastActivity: 2000 }
@@ -635,7 +635,7 @@ describe('GrpcDaemonClient', () => {
 
     it('returns rejected initial when not connected', async () => {
       client.disconnect()
-      const result = client.watchSession('listener-1', vi.fn())
+      const result = client.watchSession('listener-1', vi.fn<(...args: any[]) => void>())
       await expect(result.initial).rejects.toThrow('Not connected')
     })
   })
@@ -647,7 +647,7 @@ describe('GrpcDaemonClient', () => {
     })
 
     it('returns exec stream from client', () => {
-      const mockStream = { on: vi.fn(), write: vi.fn() }
+      const mockStream = { on: vi.fn<(...args: any[]) => any>(), write: vi.fn<(...args: any[]) => void>() }
       mockClientInstance.execStream.mockReturnValue(mockStream)
       const stream = client.execStream()
       expect(stream).toBe(mockStream)

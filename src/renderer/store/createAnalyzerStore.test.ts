@@ -362,7 +362,7 @@ describe('createAnalyzerStore', () => {
       llm: {
         analyzeTerminal: vi.fn().mockImplementation(() => {
           callCount++
-          return Promise.resolve({ state: 'idle', reason: `call-${callCount}` })
+          return Promise.resolve({ state: 'idle', reason: `call-${String(callCount)}` })
         }),
         generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
       },
@@ -554,7 +554,7 @@ describe('createAnalyzerStore', () => {
         expect(deps.openTtyStream).toHaveBeenCalled()
       })
       // Wait for stream to be connected
-      await vi.advanceTimersByTimeAsync?.(0).catch(() => {})
+      await vi.advanceTimersByTimeAsync(0).catch(() => {})
       await new Promise(r => setTimeout(r, 0))
 
       store.getState().setAutoApprove(true)
@@ -764,9 +764,10 @@ describe('createAnalyzerStore', () => {
       })
 
       const history = store.getState().getHistory()
-      const titleEntry = history.find(h => h.kind === 'title')!
-      expect(titleEntry.error).toBeUndefined()
-      expect(titleEntry.response).toBe(JSON.stringify({ title: 'Test Title', description: 'Test Description', branchName: 'test-title' }))
+      const titleEntry = history.find(h => h.kind === 'title')
+      expect(titleEntry).toBeDefined()
+      expect(titleEntry?.error).toBeUndefined()
+      expect(titleEntry?.response).toBe(JSON.stringify({ title: 'Test Title', description: 'Test Description', branchName: 'test-title' }))
 
       store.getState().stop()
     })
@@ -855,9 +856,10 @@ describe('createAnalyzerStore', () => {
       })
 
       const history = store.getState().getHistory()
-      const titleEntry = history.find(h => h.kind === 'title' && h.error)!
-      expect(titleEntry.error).toBe('Title API error')
-      expect(titleEntry.response).toBe('')
+      const titleEntry = history.find(h => h.kind === 'title' && h.error)
+      expect(titleEntry).toBeDefined()
+      expect(titleEntry?.error).toBe('Title API error')
+      expect(titleEntry?.response).toBe('')
 
       store.getState().stop()
     })

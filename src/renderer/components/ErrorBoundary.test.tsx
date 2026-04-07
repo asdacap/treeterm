@@ -95,8 +95,9 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>
     )
     expect(onError).toHaveBeenCalledTimes(1)
-    expect(onError.mock.calls[0][0]).toBeInstanceOf(Error)
-    expect(onError.mock.calls[0][0].message).toBe('boom')
+    const errorArg = onError.mock.calls[0][0] as Error
+    expect(errorArg).toBeInstanceOf(Error)
+    expect(errorArg.message).toBe('boom')
   })
 
   it('recovers to render children after reset is called', () => {

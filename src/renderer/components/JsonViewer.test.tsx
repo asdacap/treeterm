@@ -13,8 +13,9 @@ describe('JsonViewer', () => {
   it('renders string values with quotes', () => {
     render(<JsonViewer data="hello" />)
     // The component renders &quot; entities around strings
-    const el = document.querySelector('.json-viewer-string')!
-    expect(el.textContent).toBe('"hello"')
+    const el = document.querySelector('.json-viewer-string')
+    expect(el).toBeDefined()
+    expect(el?.textContent).toBe('"hello"')
   })
 
   it('renders number values', () => {
@@ -43,8 +44,9 @@ describe('JsonViewer', () => {
 
   it('renders top-level object keys expanded by default', () => {
     render(<JsonViewer data={{ name: 'test' }} />)
-    const key = document.querySelector('.json-viewer-key')!
-    expect(key.textContent).toBe('"name"')
+    const key = document.querySelector('.json-viewer-key')
+    expect(key).toBeDefined()
+    expect(key?.textContent).toBe('"name"')
   })
 
   it('collapses nested objects by default (depth >= 1)', () => {

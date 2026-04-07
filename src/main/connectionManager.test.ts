@@ -297,7 +297,7 @@ describe('ConnectionManager', () => {
 
   describe('disconnectRemote', () => {
     it('throws when trying to disconnect local', () => {
-      expect(() => manager.disconnectRemote('local')).toThrow('Cannot disconnect local connection')
+      expect(() => { manager.disconnectRemote('local'); }).toThrow('Cannot disconnect local connection')
     })
 
     it('no-ops for missing connection', () => {
@@ -393,7 +393,7 @@ describe('ConnectionManager', () => {
     })
 
     it('removePortForward no-ops for unknown id', () => {
-      expect(() => manager.removePortForward('unknown')).not.toThrow()
+      expect(() => { manager.removePortForward('unknown'); }).not.toThrow()
     })
 
     it('watchPortForwardOutput returns scrollback and subscribes', async () => {
