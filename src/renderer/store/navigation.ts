@@ -11,5 +11,5 @@ interface NavigationState {
 
 export const useNavigationStore = create<NavigationState>()((set) => ({
   activeView: null,
-  setActiveView: (view: ActiveView) => set({ activeView: view }),
+  setActiveView: (view: ActiveView) => { set({ activeView: view }); },
 }))

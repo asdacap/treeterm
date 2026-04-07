@@ -38,13 +38,13 @@ export function createRunActionsStore(
       }
     },
 
-    run: async (actionId: string) => {
+    run: (actionId: string) => {
       return deps.run(workspacePath, actionId)
     }
   }))
 
   // Auto-detect on creation
-  store.getState().detect()
+  void store.getState().detect()
 
   return store
 }

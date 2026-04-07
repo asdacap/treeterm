@@ -52,7 +52,7 @@ export default function TabContentPortals({ sessionStore, activeWorkspaceId }: T
     const observer = new MutationObserver(updateSlots)
     observer.observe(document.body, { childList: true, subtree: true })
 
-    return () => observer.disconnect()
+    return () => { observer.disconnect(); }
   }, [])
 
   // Collect tab IDs for the active workspace to detect unassigned portal slots
@@ -70,7 +70,6 @@ export default function TabContentPortals({ sessionStore, activeWorkspaceId }: T
 
         return wsTabs.map(tab => {
           const app = applications[tab.applicationId]
-          if (!app) return null
 
           // All tabs stay mounted (hidden when workspace is inactive)
 
@@ -81,7 +80,7 @@ export default function TabContentPortals({ sessionStore, activeWorkspaceId }: T
             <ErrorBoundary
               key={`error-${wsId}-${tab.id}`}
               FallbackComponent={TabErrorFallback}
-              fallbackProps={{ tabTitle: tab.title, onClose: () => entry.store.getState().removeTab(tab.id) }}
+              fallbackProps={{ tabTitle: tab.title, onClose: () => { void entry.store.getState().removeTab(tab.id) } }}
             >
               <div
                 className={`app-wrapper ${tab.applicationId}-wrapper`}

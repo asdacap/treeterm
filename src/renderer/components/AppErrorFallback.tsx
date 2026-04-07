@@ -27,7 +27,7 @@ export default function AppErrorFallback({ error }: AppErrorFallbackProps) {
               <div className="app-error-stack-container">
                 <button
                   className="app-error-stack-toggle"
-                  onClick={() => setShowStack(!showStack)}
+                  onClick={() => { setShowStack(!showStack); }}
                 >
                   {showStack ? 'Hide' : 'Show'} Stack Trace
                 </button>

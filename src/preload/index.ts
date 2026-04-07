@@ -17,7 +17,7 @@ const client = new IpcClient()
 client.onPtyEvent((handle, event) => {
   const listeners = ptyEventListeners.get(handle)
   if (listeners) {
-    listeners.forEach((cb) => cb(event))
+    listeners.forEach((cb) => { cb(event); })
   }
   if (event.type === 'end') {
     ptyEventListeners.delete(handle)
@@ -28,7 +28,7 @@ client.onPtyEvent((handle, event) => {
 client.onExecEvent((execId, event) => {
   const listeners = execEventListeners.get(execId)
   if (listeners) {
-    listeners.forEach((cb) => cb(event))
+    listeners.forEach((cb) => { cb(event); })
   }
   if (event.type === 'exit' || event.type === 'error') {
     execEventListeners.delete(execId)
@@ -39,21 +39,21 @@ type SettingsOpenCallback = () => void
 const settingsOpenListeners: SettingsOpenCallback[] = []
 
 client.onSettingsOpen(() => {
-  settingsOpenListeners.forEach((cb) => cb())
+  settingsOpenListeners.forEach((cb) => { cb(); })
 })
 
 type CloseConfirmCallback = () => void
 const closeConfirmListeners: CloseConfirmCallback[] = []
 
 client.onAppConfirmClose(() => {
-  closeConfirmListeners.forEach((cb) => cb())
+  closeConfirmListeners.forEach((cb) => { cb(); })
 })
 
 type CapsLockCallback = (event: { type: string; key: string; code: string }) => void
 const capsLockListeners: CapsLockCallback[] = []
 
 client.onCapsLockEvent((event) => {
-  capsLockListeners.forEach((cb) => cb(event))
+  capsLockListeners.forEach((cb) => { cb(event); })
 })
 
 type ReadyCallback = (session: Session | null) => void
@@ -64,14 +64,14 @@ let initialSession: Session | null = null
 client.onAppReady((session) => {
   isReady = true
   initialSession = session
-  readyListeners.forEach((cb) => cb(session))
+  readyListeners.forEach((cb) => { cb(session); })
 })
 
 type SessionsCallback = (sessions: TTYSessionInfo[]) => void
 const daemonSessionsListeners: SessionsCallback[] = []
 
 client.onDaemonSessions((sessions) => {
-  daemonSessionsListeners.forEach((cb) => cb(sessions))
+  daemonSessionsListeners.forEach((cb) => { cb(sessions); })
 })
 
 
@@ -79,70 +79,70 @@ type SessionSyncCallback = (connectionId: string, session: Session) => void
 const sessionSyncListeners: SessionSyncCallback[] = []
 
 client.onSessionSync((connectionId, session) => {
-  sessionSyncListeners.forEach((cb) => cb(connectionId, session))
+  sessionSyncListeners.forEach((cb) => { cb(connectionId, session); })
 })
 
 type SshAutoConnectedCallback = (session: Session, connection: ConnectionInfo) => void
 const sshAutoConnectedListeners: SshAutoConnectedCallback[] = []
 
 client.onSshAutoConnected((session, connection) => {
-  sshAutoConnectedListeners.forEach((cb) => cb(session, connection))
+  sshAutoConnectedListeners.forEach((cb) => { cb(session, connection); })
 })
 
 type DaemonDisconnectedCallback = () => void
 const daemonDisconnectedListeners: DaemonDisconnectedCallback[] = []
 
 client.onDaemonDisconnected(() => {
-  daemonDisconnectedListeners.forEach((cb) => cb())
+  daemonDisconnectedListeners.forEach((cb) => { cb(); })
 })
 
 type ActiveProcessesOpenCallback = () => void
 const activeProcessesOpenListeners: ActiveProcessesOpenCallback[] = []
 
 client.onActiveProcessesOpen(() => {
-  activeProcessesOpenListeners.forEach((cb) => cb())
+  activeProcessesOpenListeners.forEach((cb) => { cb(); })
 })
 
 type SshConnectionStatusCallback = (info: ConnectionInfo) => void
 const sshConnectionStatusListeners: SshConnectionStatusCallback[] = []
 
 client.onSshConnectionStatus((info) => {
-  sshConnectionStatusListeners.forEach((cb) => cb(info))
+  sshConnectionStatusListeners.forEach((cb) => { cb(info); })
 })
 
 type LlmDeltaCallback = (requestId: string, text: string) => void
 const llmDeltaListeners: LlmDeltaCallback[] = []
 
 client.onLlmChatDelta((requestId, text) => {
-  llmDeltaListeners.forEach((cb) => cb(requestId, text))
+  llmDeltaListeners.forEach((cb) => { cb(requestId, text); })
 })
 
 type LlmDoneCallback = (requestId: string) => void
 const llmDoneListeners: LlmDoneCallback[] = []
 
 client.onLlmChatDone((requestId) => {
-  llmDoneListeners.forEach((cb) => cb(requestId))
+  llmDoneListeners.forEach((cb) => { cb(requestId); })
 })
 
 type LlmErrorCallback = (requestId: string, error: string) => void
 const llmErrorListeners: LlmErrorCallback[] = []
 
 client.onLlmChatError((requestId, error) => {
-  llmErrorListeners.forEach((cb) => cb(requestId, error))
+  llmErrorListeners.forEach((cb) => { cb(requestId, error); })
 })
 
 type SshOutputCallback = (connectionId: string, line: string) => void
 const sshOutputListeners: SshOutputCallback[] = []
 
 client.onSshOutput((connectionId, line) => {
-  sshOutputListeners.forEach((cb) => cb(connectionId, line))
+  sshOutputListeners.forEach((cb) => { cb(connectionId, line); })
 })
 
 type GitOutputCallback = (operationId: string, data: string) => void
 const gitOutputListeners: GitOutputCallback[] = []
 
 client.onGitOutput((operationId, data) => {
-  gitOutputListeners.forEach((cb) => cb(operationId, data))
+  gitOutputListeners.forEach((cb) => { cb(operationId, data); })
 })
 
 type SshOutputWatchCallback = (line: string) => void
@@ -166,7 +166,7 @@ type PortForwardStatusCallback = (info: PortForwardInfo) => void
 const portForwardStatusListeners: PortForwardStatusCallback[] = []
 
 client.onSshPortForwardStatus((info) => {
-  portForwardStatusListeners.forEach((cb) => cb(info))
+  portForwardStatusListeners.forEach((cb) => { cb(info); })
 })
 
 type PortForwardOutputWatchCallback = (line: string) => void
@@ -202,7 +202,7 @@ const preloadApi: PreloadApi = {
       if (!ptyEventListeners.has(id)) {
         ptyEventListeners.set(id, [])
       }
-      ptyEventListeners.get(id)!.push(callback)
+      ptyEventListeners.get(id)?.push(callback)
 
       return () => {
         const listeners = ptyEventListeners.get(id)
@@ -384,7 +384,7 @@ const preloadApi: PreloadApi = {
       if (!execEventListeners.has(execId)) {
         execEventListeners.set(execId, [])
       }
-      execEventListeners.get(execId)!.push(callback)
+      execEventListeners.get(execId)?.push(callback)
 
       return () => {
         const listeners = execEventListeners.get(execId)
@@ -583,7 +583,7 @@ const preloadApi: PreloadApi = {
         scrollback: result.scrollback,
         unsubscribe: () => {
           sshOutputWatchCallbacks.delete(connectionId)
-          client.sshUnwatchOutput(connectionId).catch(() => {})
+          client.sshUnwatchOutput(connectionId).catch((_e: unknown) => {})
         }
       }
     },
@@ -594,7 +594,7 @@ const preloadApi: PreloadApi = {
         initial: result.initial,
         unsubscribe: () => {
           sshStatusWatchCallbacks.delete(connectionId)
-          client.sshUnwatchConnectionStatus(connectionId).catch(() => {})
+          client.sshUnwatchConnectionStatus(connectionId).catch((_e: unknown) => {})
         }
       }
     },
@@ -621,7 +621,7 @@ const preloadApi: PreloadApi = {
         scrollback: result.scrollback,
         unsubscribe: () => {
           portForwardOutputWatchCallbacks.delete(portForwardId)
-          client.sshUnwatchPortForwardOutput(portForwardId).catch(() => {})
+          client.sshUnwatchPortForwardOutput(portForwardId).catch((_e: unknown) => {})
         }
       }
     }

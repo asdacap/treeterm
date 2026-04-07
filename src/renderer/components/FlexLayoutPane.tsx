@@ -17,15 +17,14 @@ interface FlexLayoutPaneProps {
 
 function buildModel(ws: WorkspaceStore, getApplication: (id: string) => ReturnType<typeof useAppStore.getState>['applications'][string]): Model | null {
   const currentWorkspace = ws.getState().workspace
-  if (!currentWorkspace) return null
 
   const currentTabs = getTabs(currentWorkspace)
   const currentActiveTabId = currentWorkspace.activeTabId ?? null
   let json: IJsonModel
-  const saved = currentWorkspace.metadata?.layoutModel
+  const saved = currentWorkspace.metadata.layoutModel
   if (saved) {
     try {
-      json = JSON.parse(saved)
+      json = JSON.parse(saved) as IJsonModel
     } catch {
       json = createDefaultLayoutModel(currentTabs, currentActiveTabId, getApplication)
     }
@@ -42,13 +41,13 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
   const getApplication = useCallback((id: string) => applications[id], [applications])
   const menuApplications = Object.values(applications).filter((app) => app.showInNewTabMenu)
 
-  const activeTabId = workspace?.activeTabId ?? null
+  const activeTabId = workspace.activeTabId ?? null
 
   // Initialize model — recreate when workspace changes (setState-during-render pattern)
   const [model, setModel] = useState<Model | null>(() => buildModel(ws, getApplication))
-  const [modelWorkspaceId, setModelWorkspaceId] = useState(workspace?.id)
-  if (workspace?.id !== modelWorkspaceId) {
-    setModelWorkspaceId(workspace?.id)
+  const [modelWorkspaceId, setModelWorkspaceId] = useState(workspace.id)
+  if (workspace.id !== modelWorkspaceId) {
+    setModelWorkspaceId(workspace.id)
     setModel(buildModel(ws, getApplication))
   }
 
@@ -56,12 +55,11 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
   const suppressModelChangeRef = useRef(false)
 
   // Sync store tab changes → model (adds/removes)
-  const appStates = workspace?.appStates
+  const appStates = workspace.appStates
   useEffect(() => {
-    if (!model || !appStates) return
+    if (!model) return
 
     const currentWorkspace = ws.getState().workspace
-    if (!currentWorkspace) return
     const currentTabs = getTabs(currentWorkspace)
     const currentIds = new Set(currentTabs.map(t => t.id))
 
@@ -149,7 +147,7 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
   const handleAction = useCallback((action: Action): Action | undefined => {
     if (action.type === Actions.DELETE_TAB) {
       const tabId = action.data.node
-      if (!workspace?.appStates[tabId]) {
+      if (!workspace.appStates[tabId]) {
         return action // Orphan tab — let FlexLayout remove it directly
       }
       removeTab(tabId)
@@ -172,7 +170,7 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
   const handleRenderTab = useCallback((node: TabNode, renderValues: ITabRenderValues) => {
     const tabId = node.getId()
     const wsState = ws.getState().workspace
-    const tab = wsState ? getTabs(wsState).find(t => t.id === tabId) : undefined
+    const tab = getTabs(wsState).find(t => t.id === tabId)
     if (tab) {
       const app = getApplication(tab.applicationId)
       if (app) {
@@ -227,7 +225,7 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
           anchor={menuAnchor}
           applications={menuApplications}
           onNewTab={(appId) => { onNewTab(appId); setMenuAnchor(null) }}
-          onClose={() => setMenuAnchor(null)}
+          onClose={() => { setMenuAnchor(null); }}
         />
       )}
     </>
@@ -250,7 +248,7 @@ function NewTabDropdownMenu({ anchor, applications, onNewTab, onClose }: {
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    return () => { document.removeEventListener('mousedown', handleClickOutside); }
   }, [onClose])
 
   return createPortal(
@@ -270,7 +268,7 @@ function NewTabDropdownMenu({ anchor, applications, onNewTab, onClose }: {
         <div
           key={app.id}
           className="app-menu-item"
-          onClick={() => onNewTab(app.id)}
+          onClick={() => { onNewTab(app.id); }}
         >
           <span className="app-menu-icon">{app.icon}</span>
           <span className="app-menu-name">{app.name}</span>

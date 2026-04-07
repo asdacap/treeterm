@@ -10,7 +10,7 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
   const { settings } = useSettingsStore()
   const llm = useAppStore((s) => s.llm)
   const state = tab.state as ChatState
-  const [messages, setMessages] = useState<ChatMessage[]>(state.messages)
+  const [messages, setMessages] = useState(state.messages)
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -29,7 +29,7 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
       if (requestId !== activeRequestId.current) return
       setMessages((prev) => {
         const last = prev[prev.length - 1]
-        if (last && last.role === 'assistant') {
+        if (last.role === 'assistant') {
           return [...prev.slice(0, -1), { ...last, content: last.content + text }]
         }
         return prev
@@ -116,7 +116,7 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
-        handleSend()
+        void handleSend()
       }
     },
     [handleSend]
@@ -160,7 +160,7 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
             Reasoning
             <select
               value={reasoning}
-              onChange={(e) => setReasoning(e.target.value as ReasoningEffort)}
+              onChange={(e) => { setReasoning(e.target.value as ReasoningEffort); }}
               disabled={isStreaming}
             >
               <option value="off">Off</option>
@@ -173,7 +173,7 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
         <textarea
           className="chat-input"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => { setInput(e.target.value); }}
           onKeyDown={handleKeyDown}
           placeholder="Type a message... (Enter to send, Shift+Enter for newline)"
           disabled={isStreaming}
@@ -187,7 +187,7 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
           ) : (
             <button
               className="chat-btn chat-btn-send"
-              onClick={handleSend}
+              onClick={() => { void handleSend(); }}
               disabled={!input.trim()}
             >
               Send

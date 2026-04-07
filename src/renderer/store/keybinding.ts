@@ -86,7 +86,7 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
 
       // Check for prefix key activation
       const prefixKeybinding = convertDirectKeybinding(prefixMode.prefixKey)
-      const prefixParts = parseKeybinding(prefixKeybinding)
+      const prefixParts = parseKeybinding(prefixKeybinding) as [string[], string][]
 
       if (prefixParts.length > 0) {
         const [modifiers, key] = prefixParts[0]
@@ -198,7 +198,7 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
     }
 
     window.addEventListener('keydown', handleKeyDown, true)
-    cleanupListener = () => window.removeEventListener('keydown', handleKeyDown, true)
+    cleanupListener = () => { window.removeEventListener('keydown', handleKeyDown, true); }
   },
 
   dispose: () => {
@@ -208,7 +208,7 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
     timeoutId = null
   },
 
-  setHandlers: (handlers: KeybindingHandlers) => set({ handlers }),
+  setHandlers: (handlers: KeybindingHandlers) => { set({ handlers }); },
 
   activate: () => {
     if (timeoutId) clearTimeout(timeoutId)

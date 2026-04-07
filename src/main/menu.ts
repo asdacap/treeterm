@@ -1,4 +1,4 @@
-import { Menu, app, BrowserWindow } from 'electron'
+import { Menu, app, BrowserWindow, shell } from 'electron'
 import type { IpcServer } from './ipc/ipc-server'
 import { windowManager } from './windowManager'
 
@@ -34,7 +34,7 @@ export function createApplicationMenu(
                 label: 'Preferences...',
                 accelerator: 'Cmd+,',
                 click: () => {
-                  sendToFocusedWindow(server, s => s.settingsOpen())
+                  sendToFocusedWindow(server, s => { s.settingsOpen(); })
                 }
               },
               { type: 'separator' as const },
@@ -61,7 +61,7 @@ export function createApplicationMenu(
                 label: 'Settings',
                 accelerator: 'Ctrl+,',
                 click: () => {
-                  sendToFocusedWindow(server, s => s.settingsOpen())
+                  sendToFocusedWindow(server, s => { s.settingsOpen(); })
                 }
               },
               { type: 'separator' as const }
@@ -139,7 +139,7 @@ export function createApplicationMenu(
         {
           label: 'Active Processes',
           click: () => {
-            sendToFocusedWindow(server, s => s.activeProcessesOpen())
+            sendToFocusedWindow(server, s => { s.activeProcessesOpen(); })
           }
         },
         ...(isMac
@@ -154,9 +154,8 @@ export function createApplicationMenu(
       submenu: [
         {
           label: 'Learn More',
-          click: async () => {
-            const { shell } = await import('electron')
-            await shell.openExternal('https://github.com')
+          click: () => {
+            void shell.openExternal('https://github.com')
           }
         }
       ]

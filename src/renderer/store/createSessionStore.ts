@@ -165,7 +165,7 @@ export function createSessionStore(
 
       const daemonWorkspaces = Object.values(workspaces)
         .filter((e): e is Extract<WorkspaceEntry, { status: 'loaded' }> => e.status === 'loaded')
-        .map(e => { const { createdAt, lastActivity, ...ws } = e.data; return ws })
+        .map(e => { const { createdAt: _createdAt, lastActivity: _lastActivity, ...ws } = e.data; return ws })
 
       console.log('[session] syncing to daemon:', daemonWorkspaces.length, 'workspaces', JSON.stringify(daemonWorkspaces))
 
@@ -196,7 +196,7 @@ export function createSessionStore(
       clearTimeout(syncDebounceTimer)
     }
     syncDebounceTimer = setTimeout(() => {
-      syncSessionToDaemon(store.getState().isRestoring)
+      void syncSessionToDaemon(store.getState().isRestoring)
     }, 500)
   }
 
@@ -213,7 +213,7 @@ export function createSessionStore(
       getSettings: deps.getSettings,
       llm: deps.llm,
       setActivityTabState: deps.setActivityTabState,
-      syncToDaemon: () => debouncedSyncToDaemon(),
+      syncToDaemon: () => { debouncedSyncToDaemon(); },
       removeWorkspace: (id) => store.getState().removeWorkspace(id),
       removeWorkspaceKeepBranch: (id) => store.getState().removeWorkspaceKeepBranch(id),
       removeWorkspaceKeepBoth: (id) => store.getState().removeWorkspaceKeepBoth(id),
@@ -315,11 +315,11 @@ export function createSessionStore(
         const childWorkspace: Workspace = {
           id,
           name: worktreeName,
-          path: result.path!,
+          path: result.path ?? '',
           parentId,
           status: 'active',
           isGitRepo: true,
-          gitBranch: result.branch!,
+          gitBranch: result.branch ?? '',
           gitRootPath: parent?.gitRootPath ?? null,
           isWorktree: true,
           isDetached: options.isDetached ?? false,
@@ -555,7 +555,7 @@ export function createSessionStore(
 
       const mergeResult = await deps.git.merge(
         parent.path,
-        workspace.gitBranch!,
+        workspace.gitBranch ?? '',
         squash,
         operationId
       )
@@ -584,7 +584,7 @@ export function createSessionStore(
   const boundTerminal: TtyTerminalDeps = {
     write: deps.terminal.write,
     resize: deps.terminal.resize,
-    kill: (sessionId: string) => deps.terminal.kill(connectionId, sessionId),
+    kill: (sessionId: string) => { deps.terminal.kill(connectionId, sessionId); },
   }
 
   const store = createStore<SessionState>()((set, get) => ({
@@ -654,7 +654,7 @@ export function createSessionStore(
       }))
 
       // Fire-and-forget: resolve git info then create workspace+handle
-      deps.git.getInfo(path).then(gitInfo => {
+      void deps.git.getInfo(path).then(gitInfo => {
         const appStates: Record<string, AppState> = {}
         let activeTabId: string | null = null
 
@@ -698,8 +698,8 @@ export function createSessionStore(
         set(s => ({
           workspaces: { ...s.workspaces, [id]: { status: 'loaded', data: workspace, store: handle } }
         }))
-        syncSessionToDaemon(get().isRestoring)
-      }).catch(err => {
+        void syncSessionToDaemon(get().isRestoring)
+      }).catch((err: unknown) => {
         set(s => ({
           workspaces: { ...s.workspaces, [id]: { status: 'error', name, error: err instanceof Error ? err.message : String(err) } }
         }))
@@ -733,9 +733,9 @@ export function createSessionStore(
           const currentParentEntry = get().workspaces[parentId]
           const currentParent = currentParentEntry && (currentParentEntry.status === 'loaded' || currentParentEntry.status === 'operation-error') ? currentParentEntry.data : undefined
           return deps.git.createWorktree(
-            parent.gitRootPath!,
+            parent.gitRootPath ?? '',
             name,
-            currentParent?.gitBranch || undefined,
+            currentParent?.gitBranch ?? undefined,
             operationId
           )
         },
@@ -779,7 +779,7 @@ export function createSessionStore(
         initialBranch: branch,
         message: 'Creating worktree from branch...',
         gitOperation: (operationId) => deps.git.createWorktreeFromBranch(
-          parent.gitRootPath!,
+          parent.gitRootPath ?? '',
           branch,
           worktreeName,
           operationId
@@ -806,7 +806,7 @@ export function createSessionStore(
         initialBranch: remoteBranch,
         message: 'Creating worktree from remote...',
         gitOperation: (operationId) => deps.git.createWorktreeFromRemote(
-          parent.gitRootPath!,
+          parent.gitRootPath ?? '',
           remoteBranch,
           worktreeName,
           operationId
@@ -849,7 +849,7 @@ export function createSessionStore(
           gitRootPath: gitInfo.isRepo ? gitInfo.rootPath : null
         }
       }))
-      syncSessionToDaemon(get().isRestoring).catch(console.error)
+      void syncSessionToDaemon(get().isRestoring).catch((e: unknown) => { console.error(e) })
     },
 
     refreshGitInfo: async (id: string) => {
@@ -886,7 +886,7 @@ export function createSessionStore(
       if (wsData?.parentId) {
         const parentEntry = get().workspaces[wsData.parentId]
         if (parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error')) {
-          parentEntry.store.getState().gitController.getState().refreshRemoteStatus()
+          void parentEntry.store.getState().gitController.getState().refreshRemoteStatus()
         }
       }
 
@@ -908,15 +908,15 @@ export function createSessionStore(
       // Refresh workspace diff status and git info
       const currentEntry = get().workspaces[id]
       if (currentEntry && currentEntry.status === 'loaded') {
-        currentEntry.store.getState().gitController.getState().refreshDiffStatus()
+        void currentEntry.store.getState().gitController.getState().refreshDiffStatus()
       }
-      get().refreshGitInfo(id)
+      void get().refreshGitInfo(id)
 
       // Refresh parent's remote status after merge
       if (currentEntry && currentEntry.status === 'loaded' && currentEntry.data.parentId) {
         const parentEntry = get().workspaces[currentEntry.data.parentId]
         if (parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error')) {
-          parentEntry.store.getState().gitController.getState().refreshRemoteStatus()
+          void parentEntry.store.getState().gitController.getState().refreshRemoteStatus()
         }
       }
 
@@ -1002,8 +1002,8 @@ export function createSessionStore(
       const ordered = siblings.filter(s => s.id !== workspaceId)
       const targetIdx = ordered.findIndex(s => s.id === targetWorkspaceId)
       const insertIdx = position === 'before' ? targetIdx : targetIdx + 1
-      const dragSibling = siblings.find(s => s.id === workspaceId)!
-      ordered.splice(insertIdx, 0, dragSibling)
+      const dragSibling = siblings.find(s => s.id === workspaceId)
+      if (dragSibling) ordered.splice(insertIdx, 0, dragSibling)
 
       // Reassign sortOrder on all siblings
       for (let i = 0; i < ordered.length; i++) {
@@ -1038,6 +1038,7 @@ export function createSessionStore(
       console.log('[Session] Session restore complete, workspace count:', Object.keys(get().workspaces).length)
     },
 
+    // eslint-disable-next-line @typescript-eslint/require-await -- interface requires Promise<void> but implementation is synchronous
     handleExternalUpdate: async (daemonSession: Session) => {
       const currentVersion = get().sessionVersion
       if (daemonSession.version <= currentVersion) {

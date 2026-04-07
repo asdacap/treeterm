@@ -35,7 +35,7 @@ export default function ReviewBrowser({
   const git = useGitApi(workspace)
   const workspaceId = wsData.id
   const parentWorkspace = parentWorkspaceId ? lookupWorkspace(parentWorkspaceId) : undefined
-  const reviewState = wsData?.appStates[tabId]?.state as ReviewState | undefined
+  const reviewState = wsData.appStates[tabId].state as ReviewState | undefined
 
   // For top-level worktrees, we only show uncommitted changes (no parent to compare against)
   const hasParent = !!parentWorkspaceId
@@ -44,7 +44,7 @@ export default function ReviewBrowser({
   const [diff, setDiff] = useState<DiffResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedFile, setSelectedFile] = useState<string | null>(reviewState?.selectedFilePath ?? null)
+  const [selectedFile, setSelectedFile] = useState(reviewState?.selectedFilePath ?? null)
   const [fileDiffContents, setFileDiffContents] = useState<FileDiffContents | null>(null)
   const [loadingFileDiff, setLoadingFileDiff] = useState(false)
 
@@ -97,7 +97,7 @@ export default function ReviewBrowser({
   const [selectedCommitFile, setSelectedCommitFile] = useState<string | null>(null)
 
   // AI harness prompt support
-  const runningHarness = wsData ? findRunningHarness(getTabs(wsData)) : null
+  const runningHarness = findRunningHarness(getTabs(wsData))
 
   const [refreshing, setRefreshing] = useState(false)
 
@@ -119,7 +119,7 @@ export default function ReviewBrowser({
         h.loadReviews(),
         ...(hasParent ? [h.loadDiff(), h.checkConflicts()] : []),
       ])
-      refreshDiffStatus()
+      void refreshDiffStatus()
     } finally {
       setRefreshing(false)
     }
@@ -129,18 +129,18 @@ export default function ReviewBrowser({
   const wasVisibleRef = useRef<boolean | null>(null)
   useEffect(() => {
     if (wasVisibleRef.current === false && isVisible) {
-      handleRefresh()
+      void handleRefresh()
     }
     wasVisibleRef.current = isVisible
   }, [isVisible, handleRefresh])
 
   const handlePromptCommit = useCallback(() => {
-    promptHarness('commit')
+    void promptHarness('commit')
   }, [promptHarness])
 
   const handlePromptRebase = useCallback(() => {
     if (parentWorkspace?.gitBranch) {
-      promptHarness(`rebase local branch ${wsData.gitBranch} onto ${parentWorkspace.gitBranch}`)
+      void promptHarness(`rebase local branch ${wsData.gitBranch ?? ''} onto ${parentWorkspace.gitBranch}`)
     }
   }, [promptHarness, wsData.gitBranch, parentWorkspace?.gitBranch])
 
@@ -165,7 +165,7 @@ export default function ReviewBrowser({
   }, [])
 
   // Track whether we need to restore persisted file selection after initial data load
-  const pendingRestoreRef = useRef<boolean>(
+  const pendingRestoreRef = useRef(
     !!(reviewState?.selectedFilePath || reviewState?.selectedUncommittedFilePath)
   )
   // Capture initial viewMode for mount-only commits loading (tab click handler loads on interaction)
@@ -173,24 +173,24 @@ export default function ReviewBrowser({
 
   // Use stable primitives instead of object references to avoid re-running
   // on every workspace store update (tab switches, scroll persistence, etc.)
-  const currentGitBranch = wsData?.gitBranch
+  const currentGitBranch = wsData.gitBranch
   const parentGitBranch = parentWorkspace?.gitBranch
 
   useEffect(() => {
     const h = helpersRef.current
-    h.loadUncommittedChanges()
-    h.loadReviews()
+    void h.loadUncommittedChanges()
+    void h.loadReviews()
 
     if (parentWorkspaceId) {
-      h.loadDiff()
-      h.checkConflicts()
+      void h.loadDiff()
+      void h.checkConflicts()
     } else {
       setLoading(false)
     }
 
     // If commits tab was persisted, load commits on mount
     if (initialViewMode === 'commits') {
-      h.loadCommits()
+      void h.loadCommits()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- initialViewMode is intentionally excluded: it captures the mount-time value and should not re-trigger the effect
   }, [workspaceId, parentWorkspaceId, currentGitBranch, parentGitBranch])
@@ -203,7 +203,7 @@ export default function ReviewBrowser({
       const fileExists = diff.files.some(f => f.path === reviewState.selectedFilePath)
       if (fileExists) {
         pendingRestoreRef.current = false
-        helpersRef.current.loadFileDiff(reviewState.selectedFilePath)
+        void helpersRef.current.loadFileDiff(reviewState.selectedFilePath)
       }
     }
   }, [diff, viewMode, reviewState?.selectedFilePath])
@@ -215,7 +215,7 @@ export default function ReviewBrowser({
       const file = uncommitted.files.find(f => f.path === reviewState.selectedUncommittedFilePath)
       if (file) {
         pendingRestoreRef.current = false
-        helpersRef.current.loadUncommittedFileDiff(file)
+        void helpersRef.current.loadUncommittedFileDiff(file)
       }
     }
   }, [uncommitted, viewMode, reviewState?.selectedUncommittedFilePath])
@@ -234,8 +234,7 @@ export default function ReviewBrowser({
   }
 
   const loadDiff = async () => {
-    const ws = wsData
-    if (!ws?.gitBranch || !parentWorkspace?.gitBranch) return
+    if (!wsData.gitBranch || !parentWorkspace?.gitBranch) return
 
     if (!diff) {
       setLoading(true)
@@ -258,7 +257,7 @@ export default function ReviewBrowser({
   const loadUncommittedChanges = async () => {
     try {
       const result = await git.getUncommittedChanges()
-      if (result.success && result.changes) {
+      if (result.success) {
         setUncommitted(result.changes)
       }
     } catch (err) {
@@ -292,7 +291,7 @@ export default function ReviewBrowser({
     setCommitDiffLoading(true)
     try {
       const result = await git.getCommitDiff(commit.hash)
-      if (result.success && result.files) {
+      if (result.success) {
         setCommitDiffFiles(result.files)
       }
     } catch (err) {
@@ -320,17 +319,16 @@ export default function ReviewBrowser({
   }
 
   const checkConflicts = async () => {
-    const ws = wsData
-    if (!ws?.gitBranch || !parentWorkspace?.gitBranch || !parentWorkspace.gitRootPath) return
+    if (!wsData.gitBranch || !parentWorkspace?.gitBranch || !parentWorkspace.gitRootPath) return
 
     setIsCheckingConflicts(true)
     setConflictError(null)
     try {
       const result = await git.checkMergeConflicts(
-        ws.gitBranch,
+        wsData.gitBranch,
         parentWorkspace.gitBranch
       )
-      if (result.success && result.conflicts) {
+      if (result.success) {
         setConflictInfo(result.conflicts)
       } else if (!result.success) {
         setConflictError(result.error || 'Failed to check for conflicts')
@@ -402,7 +400,7 @@ export default function ReviewBrowser({
       const result = await git.stageFile(filePath)
       if (result.success) {
         await loadUncommittedChanges()
-        refreshDiffStatus()
+        void refreshDiffStatus()
       } else {
         setStageError(result.error || `Failed to stage ${filePath}`)
       }
@@ -419,7 +417,7 @@ export default function ReviewBrowser({
       const result = await git.unstageFile(filePath)
       if (result.success) {
         await loadUncommittedChanges()
-        refreshDiffStatus()
+        void refreshDiffStatus()
       } else {
         setStageError(result.error || `Failed to unstage ${filePath}`)
       }
@@ -436,7 +434,7 @@ export default function ReviewBrowser({
       const result = await git.stageAll()
       if (result.success) {
         await loadUncommittedChanges()
-        refreshDiffStatus()
+        void refreshDiffStatus()
       } else {
         setStageError(result.error || 'Failed to stage all files')
       }
@@ -453,7 +451,7 @@ export default function ReviewBrowser({
       const result = await git.unstageAll()
       if (result.success) {
         await loadUncommittedChanges()
-        refreshDiffStatus()
+        void refreshDiffStatus()
       } else {
         setStageError(result.error || 'Failed to unstage all files')
       }
@@ -478,7 +476,7 @@ export default function ReviewBrowser({
         setCommitMessage('')
         await loadUncommittedChanges()
         await loadDiff()
-        refreshDiffStatus()
+        void refreshDiffStatus()
       } else {
         setCommitError(result.error || 'Failed to commit')
       }
@@ -491,22 +489,22 @@ export default function ReviewBrowser({
 
   const handleMerge = async (squash: boolean) => {
     // Dry-run: re-check conflicts before merging to catch stale state
-    if (wsData?.gitBranch && parentWorkspace?.gitBranch) {
+    if (wsData.gitBranch && parentWorkspace?.gitBranch) {
       const freshCheck = await git.checkMergeConflicts(
         wsData.gitBranch,
         parentWorkspace.gitBranch
       )
-      if (freshCheck.success && freshCheck.conflicts?.hasConflicts) {
+      if (freshCheck.success && freshCheck.conflicts.hasConflicts) {
         setConflictInfo(freshCheck.conflicts)
-        alert(`Cannot merge: ${freshCheck.conflicts.conflictedFiles.length} conflict(s) detected. Resolve conflicts first.`)
+        alert(`Cannot merge: ${String(freshCheck.conflicts.conflictedFiles.length)} conflict(s) detected. Resolve conflicts first.`)
         return
       }
     }
 
     if (hasUncommitted) {
-      const fileCount = uncommitted!.files.length
+      const fileCount = uncommitted.files.length
       const confirmed = confirm(
-        `You have ${fileCount} uncommitted file${fileCount !== 1 ? 's' : ''}. ` +
+        `You have ${String(fileCount)} uncommitted file${fileCount !== 1 ? 's' : ''}. ` +
         `These changes will be auto-committed before merging. Continue?`
       )
       if (!confirmed) {
@@ -532,22 +530,22 @@ export default function ReviewBrowser({
   }
 
   const handleMergeAndKeep = async (squash: boolean) => {
-    if (wsData?.gitBranch && parentWorkspace?.gitBranch) {
+    if (wsData.gitBranch && parentWorkspace?.gitBranch) {
       const freshCheck = await git.checkMergeConflicts(
         wsData.gitBranch,
         parentWorkspace.gitBranch
       )
-      if (freshCheck.success && freshCheck.conflicts?.hasConflicts) {
+      if (freshCheck.success && freshCheck.conflicts.hasConflicts) {
         setConflictInfo(freshCheck.conflicts)
-        alert(`Cannot merge: ${freshCheck.conflicts.conflictedFiles.length} conflict(s) detected. Resolve conflicts first.`)
+        alert(`Cannot merge: ${String(freshCheck.conflicts.conflictedFiles.length)} conflict(s) detected. Resolve conflicts first.`)
         return
       }
     }
 
     if (hasUncommitted) {
-      const fileCount = uncommitted!.files.length
+      const fileCount = uncommitted.files.length
       const confirmed = confirm(
-        `You have ${fileCount} uncommitted file${fileCount !== 1 ? 's' : ''}. ` +
+        `You have ${String(fileCount)} uncommitted file${fileCount !== 1 ? 's' : ''}. ` +
         `These changes will be auto-committed before merging. Continue?`
       )
       if (!confirmed) {
@@ -568,7 +566,7 @@ export default function ReviewBrowser({
       }
       // Workspace still alive — refresh the review view
       await Promise.all([loadDiff(), loadUncommittedChanges()])
-      refreshDiffStatus()
+      void refreshDiffStatus()
     } catch (err) {
       alert(`Merge failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
@@ -597,7 +595,7 @@ export default function ReviewBrowser({
   }
 
   const handleCancel = () => {
-    removeTab(tabId)
+    void removeTab(tabId)
   }
 
   const getStatusIcon = (status: DiffFile['status'] | UncommittedFile['status']) => {
@@ -613,10 +611,6 @@ export default function ReviewBrowser({
       case 'untracked':
         return <span className="diff-status untracked">?</span>
     }
-  }
-
-  if (!wsData) {
-    return <div className="review-browser-error">Workspace not found</div>
   }
 
   const stagedFiles = uncommitted?.files.filter((f) => f.staged) || []
@@ -639,10 +633,10 @@ export default function ReviewBrowser({
     if (currentFileIndex > 0) {
       const prevFilePath = fileList[currentFileIndex - 1]
       if (viewMode === 'committed') {
-        loadFileDiff(prevFilePath)
+        void loadFileDiff(prevFilePath)
       } else {
         const prevFile = [...stagedFiles, ...unstagedFiles].find(f => f.path === prevFilePath)
-        if (prevFile) loadUncommittedFileDiff(prevFile)
+        if (prevFile) void loadUncommittedFileDiff(prevFile)
       }
     }
   }
@@ -651,10 +645,10 @@ export default function ReviewBrowser({
     if (currentFileIndex < fileList.length - 1) {
       const nextFilePath = fileList[currentFileIndex + 1]
       if (viewMode === 'committed') {
-        loadFileDiff(nextFilePath)
+        void loadFileDiff(nextFilePath)
       } else {
         const nextFile = [...stagedFiles, ...unstagedFiles].find(f => f.path === nextFilePath)
-        if (nextFile) loadUncommittedFileDiff(nextFile)
+        if (nextFile) void loadUncommittedFileDiff(nextFile)
       }
     }
   }
@@ -663,7 +657,7 @@ export default function ReviewBrowser({
     setCommentInput({ visible: true, lineNumber, side })
   }
 
-  const handleCommentSubmit = async (text: string) => {
+  const handleCommentSubmit = (text: string) => {
     const filePath = selectedFile || selectedUncommittedFile?.path
     if (!commentInput || !currentCommitHash || !filePath) return
 
@@ -715,7 +709,7 @@ export default function ReviewBrowser({
           )}
           <button
             className="review-refresh-btn"
-            onClick={handleRefresh}
+            onClick={() => { void handleRefresh(); }}
             disabled={refreshing}
             title="Refresh changes"
           >
@@ -741,7 +735,7 @@ export default function ReviewBrowser({
                 Close
               </button>
             </>
-          ) : wsData?.isDetached ? (
+          ) : wsData.isDetached ? (
             <>
               {hasUncommitted && runningHarness && (
                 <button
@@ -755,7 +749,7 @@ export default function ReviewBrowser({
               )}
               <button
                 className="review-action-btn review-close-and-clean-btn"
-                onClick={handleCloseAndClean}
+                onClick={() => { void handleCloseAndClean(); }}
                 disabled={isProcessing}
                 title="Remove worktree but keep the branch"
               >
@@ -794,7 +788,7 @@ export default function ReviewBrowser({
               <div className="merge-btn-group">
                 <button
                   className="review-action-btn review-merge-btn merge-btn-main"
-                  onClick={() => handleMerge(false)}
+                  onClick={() => { void handleMerge(false); }}
                   disabled={isProcessing || hasConflicts}
                   title={hasConflicts ? 'Cannot merge: resolve conflicts first' : 'Merge changes into parent branch'}
                 >
@@ -803,17 +797,17 @@ export default function ReviewBrowser({
                 </button>
                 <button
                   className="review-action-btn review-merge-btn merge-btn-dropdown-toggle"
-                  onClick={() => setMergeDropdownOpen(!mergeDropdownOpen)}
+                  onClick={() => { setMergeDropdownOpen(!mergeDropdownOpen); }}
                   disabled={isProcessing || hasConflicts}
                   title="More merge options"
                 >
                   <ChevronDown size={14} />
                 </button>
                 {mergeDropdownOpen && (
-                  <ClickOutsideDiv className="merge-dropdown-menu" onClickOutside={() => setMergeDropdownOpen(false)}>
+                  <ClickOutsideDiv className="merge-dropdown-menu" onClickOutside={() => { setMergeDropdownOpen(false); }}>
                     <button
                       className="merge-dropdown-item"
-                      onClick={() => { setMergeDropdownOpen(false); handleMerge(true) }}
+                      onClick={() => { setMergeDropdownOpen(false); void handleMerge(true); }}
                       disabled={isProcessing || hasConflicts}
                       title={hasConflicts ? 'Cannot merge: resolve conflicts first' : 'Squash all commits into one'}
                     >
@@ -822,7 +816,7 @@ export default function ReviewBrowser({
                     </button>
                     <button
                       className="merge-dropdown-item"
-                      onClick={() => { setMergeDropdownOpen(false); handleMergeAndKeep(false) }}
+                      onClick={() => { setMergeDropdownOpen(false); void handleMergeAndKeep(false); }}
                       disabled={isProcessing || hasConflicts}
                       title={hasConflicts ? 'Cannot merge: resolve conflicts first' : 'Merge into parent but keep this workspace'}
                     >
@@ -831,7 +825,7 @@ export default function ReviewBrowser({
                     </button>
                     <button
                       className="merge-dropdown-item"
-                      onClick={() => { setMergeDropdownOpen(false); handleMergeAndKeep(true) }}
+                      onClick={() => { setMergeDropdownOpen(false); void handleMergeAndKeep(true); }}
                       disabled={isProcessing || hasConflicts}
                       title={hasConflicts ? 'Cannot merge: resolve conflicts first' : 'Squash merge into parent but keep this workspace'}
                     >
@@ -868,7 +862,7 @@ export default function ReviewBrowser({
             <strong>{conflictInfo?.conflictedFiles.length} conflict(s) detected</strong>
             <div className="review-conflict-files">
               {conflictInfo?.conflictedFiles.slice(0, 3).join(', ')}
-              {conflictInfo && conflictInfo.conflictedFiles.length > 3 && ` and ${conflictInfo.conflictedFiles.length - 3} more`}
+              {conflictInfo && conflictInfo.conflictedFiles.length > 3 && ` and ${String(conflictInfo.conflictedFiles.length - 3)} more`}
             </div>
           </div>
         </div>
@@ -882,7 +876,7 @@ export default function ReviewBrowser({
           >
             Committed Changes
             {hasCommittedChanges && (
-              <span className="diff-tab-count">{diff.files.length}</span>
+              <span className="diff-tab-count">{String(diff.files.length)}</span>
             )}
           </button>
         )}
@@ -892,12 +886,12 @@ export default function ReviewBrowser({
         >
           Uncommitted
           {hasUncommitted && (
-            <span className="diff-tab-count">{uncommitted.files.length}</span>
+            <span className="diff-tab-count">{String(uncommitted.files.length)}</span>
           )}
         </button>
         <button
           className={`diff-tab ${viewMode === 'commits' ? 'active' : ''}`}
-          onClick={() => { setViewMode('commits'); persistViewState({ viewMode: 'commits' }); if (commits.length === 0) loadCommits() }}
+          onClick={() => { setViewMode('commits'); persistViewState({ viewMode: 'commits' }); if (commits.length === 0) void loadCommits(); }}
         >
           Commits
           {commits.length > 0 && (
@@ -927,7 +921,7 @@ export default function ReviewBrowser({
                       <div
                         key={commit.hash}
                         className={`commit-row ${selectedCommit?.hash === commit.hash ? 'selected' : ''}`}
-                        onClick={() => loadCommitDiff(commit)}
+                        onClick={() => { void loadCommitDiff(commit); }}
                       >
                         <span className="commit-hash">{commit.shortHash}</span>
                         <span className="commit-message">{commit.message}</span>
@@ -938,7 +932,7 @@ export default function ReviewBrowser({
                     {commitsHasMore && (
                       <button
                         className="commits-load-more"
-                        onClick={() => loadCommits(commits.length)}
+                        onClick={() => { void loadCommits(commits.length); }}
                         disabled={commitsLoading}
                       >
                         {commitsLoading ? 'Loading...' : 'Load more'}
@@ -961,7 +955,7 @@ export default function ReviewBrowser({
                       <CommittedDiffFileTree
                         files={commitDiffFiles}
                         selectedFile={selectedCommitFile}
-                        onSelectFile={(path) => loadCommitFileDiff(selectedCommit.hash, path)}
+                        onSelectFile={(path) => { void loadCommitFileDiff(selectedCommit.hash, path); }}
                         getStatusIcon={getStatusIcon}
                       />
                     )}
@@ -1017,7 +1011,7 @@ export default function ReviewBrowser({
                     <CommittedDiffFileTree
                       files={diff.files}
                       selectedFile={selectedFile}
-                      onSelectFile={loadFileDiff}
+                      onSelectFile={(path) => { void loadFileDiff(path); }}
                       getStatusIcon={getStatusIcon}
                     />
                   </div>
@@ -1036,8 +1030,8 @@ export default function ReviewBrowser({
                           originalContent={fileDiffContents.originalContent}
                           modifiedContent={fileDiffContents.modifiedContent}
                           language={fileDiffContents.language}
-                          originalLabel={diff?.baseBranch || 'Original'}
-                          modifiedLabel={diff?.headBranch || 'Modified'}
+                          originalLabel={diff.baseBranch || 'Original'}
+                          modifiedLabel={diff.headBranch || 'Modified'}
                           onPreviousFile={handlePreviousFile}
                           onNextFile={handleNextFile}
                           hasPreviousFile={currentFileIndex > 0}
@@ -1046,7 +1040,7 @@ export default function ReviewBrowser({
                           onLineClick={handleLineClick}
                           inlineCommentInput={commentInput}
                           onCommentSubmit={handleCommentSubmit}
-                          onCommentCancel={() => setCommentInput(null)}
+                          onCommentCancel={() => { setCommentInput(null); }}
                           onCommentDelete={handleCommentDelete}
                           initialScrollTop={reviewState?.scrollTop}
                           onScrollPositionChange={handleScrollPositionChange}
@@ -1074,10 +1068,10 @@ export default function ReviewBrowser({
                     <span className="deletions">-{uncommitted.totalDeletions}</span>
                   </span>
                   <div className="diff-actions">
-                    <button onClick={handleStageAll} className="diff-action-btn" disabled={stagingInProgress}>
+                    <button onClick={() => { void handleStageAll(); }} className="diff-action-btn" disabled={stagingInProgress}>
                       {stagingInProgress ? 'Processing...' : 'Stage All'}
                     </button>
-                    <button onClick={handleUnstageAll} className="diff-action-btn" disabled={stagingInProgress}>
+                    <button onClick={() => { void handleUnstageAll(); }} className="diff-action-btn" disabled={stagingInProgress}>
                       {stagingInProgress ? 'Processing...' : 'Unstage All'}
                     </button>
                   </div>
@@ -1097,9 +1091,9 @@ export default function ReviewBrowser({
                         <UncommittedDiffFileTree
                           files={stagedFiles}
                           selectedFile={selectedUncommittedFile}
-                          onSelectFile={loadUncommittedFileDiff}
+                          onSelectFile={(file) => { void loadUncommittedFileDiff(file); }}
                           getStatusIcon={getStatusIcon}
-                          onAction={handleUnstageFile}
+                          onAction={(path) => { void handleUnstageFile(path); }}
                           actionLabel="Unstage"
                           stagingInProgress={stagingInProgress}
                         />
@@ -1111,9 +1105,9 @@ export default function ReviewBrowser({
                         <UncommittedDiffFileTree
                           files={unstagedFiles}
                           selectedFile={selectedUncommittedFile}
-                          onSelectFile={loadUncommittedFileDiff}
+                          onSelectFile={(file) => { void loadUncommittedFileDiff(file); }}
                           getStatusIcon={getStatusIcon}
-                          onAction={handleStageFile}
+                          onAction={(path) => { void handleStageFile(path); }}
                           actionLabel="Stage"
                           stagingInProgress={stagingInProgress}
                         />
@@ -1145,7 +1139,7 @@ export default function ReviewBrowser({
                           onLineClick={handleLineClick}
                           inlineCommentInput={commentInput}
                           onCommentSubmit={handleCommentSubmit}
-                          onCommentCancel={() => setCommentInput(null)}
+                          onCommentCancel={() => { setCommentInput(null); }}
                           onCommentDelete={handleCommentDelete}
                           initialScrollTop={reviewState?.scrollTop}
                           onScrollPositionChange={handleScrollPositionChange}
@@ -1166,17 +1160,17 @@ export default function ReviewBrowser({
                       className="review-commit-input"
                       placeholder="Commit message..."
                       value={commitMessage}
-                      onChange={(e) => setCommitMessage(e.target.value)}
+                      onChange={(e) => { setCommitMessage(e.target.value); }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && !e.shiftKey) {
                           e.preventDefault()
-                          handleCommit()
+                          void handleCommit()
                         }
                       }}
                     />
                     <button
                       className="review-commit-btn"
-                      onClick={handleCommit}
+                      onClick={() => { void handleCommit(); }}
                       disabled={committing || !commitMessage.trim()}
                     >
                       {committing ? 'Committing...' : 'Commit'}
@@ -1211,7 +1205,7 @@ function ClickOutsideDiv({ className, onClickOutside, children }: {
       }
     }
     document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    return () => { document.removeEventListener('mousedown', handler); }
   }, [onClickOutside])
 
   return <div className={className} ref={ref}>{children}</div>

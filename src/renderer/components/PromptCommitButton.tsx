@@ -1,7 +1,8 @@
+import React from 'react'
 import { useStore } from 'zustand'
 import type { WorkspaceStore } from '../types'
 
-export function PromptCommitButton({ workspace }: { workspace: WorkspaceStore }): JSX.Element | null {
+export function PromptCommitButton({ workspace }: { workspace: WorkspaceStore }): React.JSX.Element | null {
   const { gitController, promptHarness } = useStore(workspace)
   const { hasUncommittedChanges, hasConflictsWithParent } = useStore(gitController)
 
@@ -10,7 +11,7 @@ export function PromptCommitButton({ workspace }: { workspace: WorkspaceStore })
   return (
     <button
       className="review-comments-button"
-      onClick={() => promptHarness('commit')}
+      onClick={() => { void promptHarness('commit') }}
       title="Prompt AI to commit changes"
     >
       Prompt Commit

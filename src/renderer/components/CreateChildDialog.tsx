@@ -33,7 +33,7 @@ export default function CreateChildDialog({
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [isProcessing, setIsProcessing] = useState(false)
-  const [processingMessage, setProcessingMessage] = useState<string>('')
+  const [processingMessage, setProcessingMessage] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isDetached, setIsDetached] = useState(false)
 
@@ -49,7 +49,7 @@ export default function CreateChildDialog({
   // Settings section state
   const [settingsExpanded, setSettingsExpanded] = useState(false)
   const [useCustomSettings, setUseCustomSettings] = useState(false)
-  const [selectedAppId, setSelectedAppId] = useState<string>('')
+  const [selectedAppId, setSelectedAppId] = useState('')
 
   const applications = useAppStore((s) => s.applications)
 
@@ -168,7 +168,7 @@ export default function CreateChildDialog({
       if (mode === 'create') {
         handleCreateSubmit()
       } else if (mode === 'existing' && selectedWorktree) {
-        handleAdoptSubmit()
+        void handleAdoptSubmit()
       } else if (mode === 'branch' && selectedBranch) {
         handleBranchSubmit()
       } else if (mode === 'remote' && selectedRemoteBranch) {
@@ -182,7 +182,7 @@ export default function CreateChildDialog({
 
   return (
     <div className="dialog-overlay" onClick={onCancel}>
-      <div className="create-child-dialog" onClick={(e) => e.stopPropagation()} onKeyDown={handleKeyDown}>
+      <div className="create-child-dialog" onClick={(e) => { e.stopPropagation(); }} onKeyDown={handleKeyDown}>
         <div className="create-child-dialog-header">
           <h2>Add Child Workspace</h2>
           <button className="dialog-close" onClick={onCancel}>
@@ -233,7 +233,7 @@ export default function CreateChildDialog({
                   id="workspace-name"
                   type="text"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => { setName(e.target.value); }}
                   placeholder="Workspace name..."
                   autoFocus
                   disabled={isProcessing}
@@ -280,7 +280,7 @@ export default function CreateChildDialog({
             <textarea
               id="workspace-description"
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              onChange={(e) => { setDescription(e.target.value); }}
               placeholder="Optional description..."
               disabled={isProcessing}
               rows={2}
@@ -295,7 +295,7 @@ export default function CreateChildDialog({
                 <input
                   type="checkbox"
                   checked={isDetached}
-                  onChange={(e) => setIsDetached(e.target.checked)}
+                  onChange={(e) => { setIsDetached(e.target.checked); }}
                   disabled={isProcessing}
                 />
                 <span>Detached worktree (no merge, only close and clean)</span>
@@ -307,7 +307,7 @@ export default function CreateChildDialog({
           <div className="create-child-settings-section">
             <button
               className="create-child-settings-toggle"
-              onClick={() => setSettingsExpanded(!settingsExpanded)}
+              onClick={() => { setSettingsExpanded(!settingsExpanded); }}
               type="button"
             >
               <span>{settingsExpanded ? '▼' : '▶'}</span>
@@ -345,7 +345,7 @@ export default function CreateChildDialog({
                     <label>Default Application</label>
                     <select
                       value={selectedAppId}
-                      onChange={(e) => setSelectedAppId(e.target.value)}
+                      onChange={(e) => { setSelectedAppId(e.target.value); }}
                       disabled={isProcessing}
                     >
                       <option value="">Select an application...</option>
@@ -382,7 +382,7 @@ export default function CreateChildDialog({
           ) : mode === 'existing' ? (
             <button
               className="dialog-btn create"
-              onClick={handleAdoptSubmit}
+              onClick={() => { void handleAdoptSubmit(); }}
               disabled={isProcessing || !selectedWorktree}
             >
               {isProcessing ? 'Opening... Please wait' : 'Open'}
@@ -421,7 +421,7 @@ function ExistingWorktreesLoader({ git, openWorktreePaths, selectedWorktree, onS
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    git.listWorktrees().then(result => {
+    void git.listWorktrees().then(result => {
       setWorktrees(result.filter(wt => !openWorktreePaths.includes(wt.path)))
       setLoading(false)
     }).catch(() => {
@@ -441,7 +441,7 @@ function ExistingWorktreesLoader({ git, openWorktreePaths, selectedWorktree, onS
           <div
             key={wt.path}
             className={`create-child-worktree-item ${selectedWorktree?.path === wt.path ? 'selected' : ''}`}
-            onClick={() => onSelect(wt)}
+            onClick={() => { onSelect(wt); }}
           >
             <span className="worktree-name">{wt.branch}</span>
             <span className="worktree-branch">{wt.branch}</span>
@@ -465,13 +465,13 @@ function LocalBranchesLoader({ git, isProcessing, selectedBranch, onSelect, onEr
   const [search, setSearch] = useState('')
 
   useEffect(() => {
-    Promise.all([
+    void Promise.all([
       git.listLocalBranches(),
       git.getBranchesInWorktrees()
     ]).then(([allBranches, branchesInWorktrees]) => {
       setBranches(allBranches.map(name => ({ name, isInWorktree: branchesInWorktrees.includes(name) })))
       setLoading(false)
-    }).catch((error) => {
+    }).catch((error: unknown) => {
       setBranches([])
       setLoading(false)
       onError(`Failed to load branches: ${error instanceof Error ? error.message : 'Unknown error'}`)
@@ -483,7 +483,7 @@ function LocalBranchesLoader({ git, isProcessing, selectedBranch, onSelect, onEr
   return (
     <>
       <div className="create-child-search-field">
-        <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search branches..." disabled={isProcessing} />
+        <input type="text" value={search} onChange={(e) => { setSearch(e.target.value); }} placeholder="Search branches..." disabled={isProcessing} />
       </div>
       <div className="create-child-existing-list">
         {loading ? (
@@ -521,7 +521,7 @@ function RemoteBranchesLoader({ git, isProcessing, selectedBranch, onSelect, onE
   const [search, setSearch] = useState('')
 
   useEffect(() => {
-    Promise.all([
+    void Promise.all([
       git.listRemoteBranches(),
       git.getBranchesInWorktrees(),
       git.listLocalBranches()
@@ -534,7 +534,7 @@ function RemoteBranchesLoader({ git, isProcessing, selectedBranch, onSelect, onE
         }
       }))
       setLoading(false)
-    }).catch((error) => {
+    }).catch((error: unknown) => {
       setBranches([])
       setLoading(false)
       onError(`Failed to load remote branches: ${error instanceof Error ? error.message : 'Unknown error'}`)
@@ -546,7 +546,7 @@ function RemoteBranchesLoader({ git, isProcessing, selectedBranch, onSelect, onE
   return (
     <>
       <div className="create-child-search-field">
-        <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search remote branches..." disabled={isProcessing} />
+        <input type="text" value={search} onChange={(e) => { setSearch(e.target.value); }} placeholder="Search remote branches..." disabled={isProcessing} />
       </div>
       <div className="create-child-existing-list">
         {loading ? (

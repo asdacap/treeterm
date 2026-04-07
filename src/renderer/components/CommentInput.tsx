@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import React, { useState } from 'react'
 
 interface CommentInputProps {
   lineNumber: number
@@ -12,7 +12,7 @@ export function CommentInput({
   side,
   onSubmit,
   onCancel
-}: CommentInputProps): JSX.Element {
+}: CommentInputProps): React.JSX.Element {
   const [text, setText] = useState('')
 
   const handleSubmit = () => {
@@ -40,7 +40,7 @@ export function CommentInput({
       <textarea
         className="comment-input-textarea"
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => { setText(e.target.value); }}
         onKeyDown={handleKeyDown}
         placeholder="Add your comment... (Cmd/Ctrl+Enter to submit, Esc to cancel)"
         autoFocus

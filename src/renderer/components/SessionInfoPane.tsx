@@ -61,7 +61,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
 
   const ssh = useAppStore(s => s.ssh)
   const disconnectSession = useAppStore(s => s.disconnectSession)
-  const displayName = useSessionNamesStore(s => s.names[sessionId]?.name)
+  const displayName = useSessionNamesStore(s => s.names[sessionId].name)
 
   const [activeTab, setActiveTab] = useState<TabId>(isRemote ? 'ssh' : 'info')
   const [sshSubTab, setSshSubTab] = useState<SshSubTab>('bootstrap')
@@ -80,15 +80,15 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
 
   // SSH output watching
   useEffect(() => {
-    if (!isRemote || !connection) return
+    if (!isRemote) return
     let unsubscribe: (() => void) | undefined
-    ssh.watchOutput(connection.id, (line) => {
+    void ssh.watchOutput(connection.id, (line) => {
       const id = nextLineId++
       setOutput(prev => [...prev, { id, line }])
     }).then(({ scrollback, unsubscribe: unsub }) => {
       setOutput(scrollback.map(line => ({ id: nextLineId++, line })))
       unsubscribe = unsub
-    }).catch(console.error)
+    }).catch((e: unknown) => { console.error(e) })
     return () => { unsubscribe?.() }
   }, [isRemote, connection, ssh])
 
@@ -103,14 +103,14 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
 
   // Port forwards (only when connected + remote)
   useEffect(() => {
-    if (!isRemote || !isConnected || !connection) return
-    ssh.listPortForwards(connection.id).then(setPortForwards).catch(console.error)
+    if (!isRemote || !isConnected) return
+    void ssh.listPortForwards(connection.id).then(setPortForwards).catch((e: unknown) => { console.error(e) })
   }, [isRemote, isConnected, connection, ssh])
 
   useEffect(() => {
     if (!isRemote || !isConnected) return
     const unsubscribe = ssh.onPortForwardStatus((info) => {
-      if (!connection || info.connectionId !== connection.id) return
+      if (info.connectionId !== connection.id) return
       setPortForwards(prev => {
         const idx = prev.findIndex(p => p.id === info.id)
         if (idx >= 0) {
@@ -127,36 +127,35 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
   const handleTogglePfOutput = (pfId: string, currentlyExpanded: boolean) => {
     if (currentlyExpanded) {
       setExpandedPfOutput(prev => {
-        const next = { ...prev }
-        delete next[pfId]
-        return next
+        const { [pfId]: _removed, ...rest } = prev
+        return rest
       })
     } else {
-      ssh.watchPortForwardOutput(pfId, (line) => {
+      void ssh.watchPortForwardOutput(pfId, (line) => {
         const id = nextLineId++
         setExpandedPfOutput(prev => ({
           ...prev,
           [pfId]: [...(prev[pfId] ?? []), { id, line }]
         }))
-      }).then(({ scrollback, unsubscribe: _ }) => {
+      }).then(({ scrollback }) => {
         setExpandedPfOutput(prev => ({ ...prev, [pfId]: scrollback.map(line => ({ id: nextLineId++, line })) }))
-      }).catch(console.error)
+      }).catch((e: unknown) => { console.error(e) })
       setExpandedPfOutput(prev => ({ ...prev, [pfId]: [] }))
     }
   }
 
   const handleRetry = () => {
-    if (!isRemote || connection?.target.type !== 'remote') return
+    if (!isRemote || connection.target.type !== 'remote') return
     const config = connection.target.config
     // Reset connection to connecting state
     sessionStore.setState({ connection: { ...connection, status: 'connecting' as const } })
-    ssh.connect(config).then(({ info, session }) => {
+    void ssh.connect(config).then(({ info, session }) => {
       if (info.status !== 'connected' || !session) {
         useAppStore.getState().setSessionError(config.id, info.status === 'error' ? info.error : 'Connection failed')
         return
       }
-      useAppStore.getState().addRemoteSession(session, info)
-    }).catch((err) => {
+      void useAppStore.getState().addRemoteSession(session, info)
+    }).catch((err: unknown) => {
       useAppStore.getState().setSessionError(config.id, err instanceof Error ? err.message : String(err))
     })
   }
@@ -201,14 +200,14 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
         {isRemote && (
           <span
             className="ssh-pane-status-dot"
-            style={{ backgroundColor: getStatusColor(connection?.status) }}
+            style={{ backgroundColor: getStatusColor(connection.status) }}
           />
         )}
         <span className="ssh-pane-label">{label}</span>
-        {isRemote && connection?.status === 'connecting' && (
+        {isRemote && connection.status === 'connecting' && (
           <Loader2 size={14} className="spinning" style={{ marginLeft: 8 }} />
         )}
-        {isRemote && connection?.status && (
+        {isRemote && connection.status && (
           <span className="ssh-pane-status-text">({connection.status})</span>
         )}
         {!isRemote && (
@@ -217,10 +216,10 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
         {connectionError && (
           <span className="ssh-pane-error">{connectionError}</span>
         )}
-        {(connection?.status === 'error' || connection?.status === 'disconnected') && (
+        {connection && (connection.status === 'error' || connection.status === 'disconnected') && (
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             <button className="ssh-pane-tab" onClick={handleRetry}>Retry</button>
-            <button className="ssh-pane-tab" style={{ color: '#f44336' }} onClick={() => disconnectSession(sessionId)}>Remove</button>
+            <button className="ssh-pane-tab" style={{ color: '#f44336' }} onClick={() => { disconnectSession(sessionId); }}>Remove</button>
           </div>
         )}
       </div>
@@ -229,16 +228,16 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
           <button
             key={tab.id}
             className={`ssh-pane-tab ${activeTab === tab.id ? 'active' : ''}`}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => { setActiveTab(tab.id); }}
           >
             {tab.label}
           </button>
         ))}
       </div>
-      {showPortForwardDialog && isRemote && connection && (
+      {showPortForwardDialog && isRemote && (
         <PortForwardDialog
           connectionId={connection.id}
-          onClose={() => setShowPortForwardDialog(false)}
+          onClose={() => { setShowPortForwardDialog(false); }}
           onCreated={(info) => {
             setPortForwards(prev => {
               const idx = prev.findIndex(p => p.id === info.id)
@@ -259,13 +258,13 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
             <button
               key={tab.id}
               className={`ssh-pane-tab ${sshSubTab === tab.id ? 'active' : ''}`}
-              onClick={() => setSshSubTab(tab.id)}
+              onClick={() => { setSshSubTab(tab.id); }}
             >
               {tab.label}
             </button>
           ))}
           {sshSubTab === 'portforwards' && isConnected && (
-            <button className="ssh-pane-tab active" style={{ marginLeft: 'auto' }} onClick={() => setShowPortForwardDialog(true)}>
+            <button className="ssh-pane-tab active" style={{ marginLeft: 'auto' }} onClick={() => { setShowPortForwardDialog(true); }}>
               + Add Port Forward
             </button>
           )}
@@ -279,7 +278,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
               <div className="ssh-pane-output-line">Connection: SSH</div>
               <div className="ssh-pane-output-line">Host: {connection.target.config.host}</div>
               <div className="ssh-pane-output-line">User: {connection.target.config.user}</div>
-              <div className="ssh-pane-output-line">Port: {connection.target.config.port}</div>
+              <div className="ssh-pane-output-line">Port: {String(connection.target.config.port)}</div>
               {connection.target.config.identityFile && (
                 <div className="ssh-pane-output-line">Identity File: {connection.target.config.identityFile}</div>
               )}
@@ -332,12 +331,12 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
                         style={{ backgroundColor: getPfStatusColor(pf.status) }}
                       />
                       <span className="port-forward-item-label">
-                        localhost:{pf.localPort} → {pf.remoteHost}:{pf.remotePort}
+                        localhost:{String(pf.localPort)} → {pf.remoteHost}:{String(pf.remotePort)}
                       </span>
                       <span className="ssh-pane-status-text">({pf.status})</span>
                       <button
                         className="ssh-pane-tab"
-                        onClick={() => handleTogglePfOutput(pf.id, isExpanded)}
+                        onClick={() => { handleTogglePfOutput(pf.id, isExpanded); }}
                         title={isExpanded ? 'Hide output' : 'Show output'}
                       >
                         {isExpanded ? 'Hide' : 'Log'}
@@ -346,21 +345,23 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
                         <button
                           className="ssh-pane-tab"
                           style={{ color: '#ff9800' }}
-                          onClick={async () => {
-                            await ssh.removePortForward(pf.id).catch(() => {})
-                            const config: PortForwardConfig = {
-                              id: crypto.randomUUID(),
-                              connectionId: pf.connectionId,
-                              localPort: pf.localPort,
-                              remoteHost: pf.remoteHost,
-                              remotePort: pf.remotePort,
-                            }
-                            try {
-                              const info = await ssh.addPortForward(config)
-                              setPortForwards(prev => prev.filter(p => p.id !== pf.id).concat(info))
-                            } catch (err) {
-                              console.error('Failed to restart port forward:', err)
-                            }
+                          onClick={() => {
+                            void (async () => {
+                              await ssh.removePortForward(pf.id).catch(() => {})
+                              const config: PortForwardConfig = {
+                                id: crypto.randomUUID(),
+                                connectionId: pf.connectionId,
+                                localPort: pf.localPort,
+                                remoteHost: pf.remoteHost,
+                                remotePort: pf.remotePort,
+                              }
+                              try {
+                                const info = await ssh.addPortForward(config)
+                                setPortForwards(prev => prev.filter(p => p.id !== pf.id).concat(info))
+                              } catch (err) {
+                                console.error('Failed to restart port forward:', err)
+                              }
+                            })()
                           }}
                         >
                           Restart
@@ -371,7 +372,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
                           className="ssh-pane-tab"
                           style={{ color: '#f44336' }}
                           onClick={() => {
-                            ssh.removePortForward(pf.id).catch(console.error)
+                            void ssh.removePortForward(pf.id).catch((e: unknown) => { console.error(e) })
                             setPortForwards(prev => prev.filter(p => p.id !== pf.id))
                           }}
                         >

@@ -19,7 +19,7 @@ export default function CloseConfirmDialog({
 
   return (
     <div className="dialog-overlay" onClick={onCancel} onKeyDown={handleKeyDown}>
-      <div className="close-confirm-dialog" onClick={(e) => e.stopPropagation()}>
+      <div className="close-confirm-dialog" onClick={(e) => { e.stopPropagation(); }}>
         <div className="close-confirm-dialog-header">
           <h2>Unmerged Workspaces</h2>
           <button className="dialog-close" onClick={onCancel}>

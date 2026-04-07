@@ -103,12 +103,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   init: (settingsApi: SettingsApi, terminalKill: (connectionId: string, id: string) => void) => {
     set({ settingsApi, terminalKill })
-    get().loadSettings()
+    void get().loadSettings()
   },
 
   loadSettings: async () => {
     try {
-      const settings = await get().settingsApi!.load()
+      const settingsApi = get().settingsApi
+      if (!settingsApi) return
+      const settings = await settingsApi.load()
       set({ settings, isLoaded: true })
       // Register dynamic terminal variants and update base terminal
       useAppStore.getState().registerTerminalVariants(settings.terminal.instances)
@@ -124,7 +126,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   saveSettings: async (settings: Settings) => {
     try {
-      await get().settingsApi!.save(settings)
+      const settingsApi = get().settingsApi
+      if (!settingsApi) throw new Error('Settings API not initialized')
+      await settingsApi.save(settings)
       set({ settings })
       // Re-register terminal variants and update base terminal when settings change
       useAppStore.getState().registerTerminalVariants(settings.terminal.instances)
@@ -151,14 +155,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           [key]: value
         }
       }
-      saveSettings(newSettings)
+      void saveSettings(newSettings)
     } else {
       // Handle top-level primitive values (for future use)
       const newSettings = {
         ...settings,
         [key]: value
       }
-      saveSettings(newSettings)
+      void saveSettings(newSettings)
     }
   }
 }))

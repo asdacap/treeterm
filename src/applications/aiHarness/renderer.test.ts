@@ -21,7 +21,7 @@ const mockTerminalKill = vi.fn()
 const mockDeps = { terminal: { kill: mockTerminalKill } }
 
 const mockWorkspaceStoreStateData = {
-  workspace: { id: 'ws-1', path: '/test' } as Workspace,
+  workspace: { id: 'ws-1', path: '/test', appStates: {} } as Workspace,
   addTab: vi.fn(),
   removeTab: vi.fn(),
   setActiveTab: vi.fn(),

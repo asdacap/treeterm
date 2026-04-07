@@ -9,7 +9,7 @@ import { createRunActionsClient, RunActionsClient } from './runActions'
 import { ConnectionManager } from './connectionManager'
 import { windowManager } from './windowManager'
 import type { ExecInput, ExecOutput } from '../generated/treeterm'
-import type { SandboxConfig, SSHConnectionConfig, PortForwardConfig } from '../shared/types'
+import type { SSHConnectionConfig, PortForwardConfig } from '../shared/types'
 
 // Parse initial workspace and SSH target from command line
 let initialWorkspacePath: string | null = null
@@ -68,7 +68,7 @@ function createLoadingWindow(): BrowserWindow {
     backgroundColor: '#00000000'
   })
 
-  loadingWindow.loadFile(join(__dirname, 'loading.html'))
+  void loadingWindow.loadFile(join(__dirname, 'loading.html'))
 
   loadingWindow.once('ready-to-show', () => {
     if (!isTest) {
@@ -139,12 +139,12 @@ function createWindow(): BrowserWindow {
       return
     }
     event.preventDefault()
-    shell.openExternal(url)
+    void shell.openExternal(url)
   })
 
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (url && url !== 'about:blank') {
-      shell.openExternal(url)
+      void shell.openExternal(url)
     }
     return { action: 'deny' }
   })
@@ -163,10 +163,10 @@ function createWindow(): BrowserWindow {
     : `file://${join(__dirname, '../renderer/index.html')}`
 
   // Load the renderer
-  window.loadURL(loadUrl)
+  void window.loadURL(loadUrl)
 
   // Signal renderer when ready to initialize with the session
-  window.webContents.on('did-finish-load', async () => {
+  window.webContents.on('did-finish-load', () => { void (async () => {
     if (!connectionManager) {
       windowServer.appReady(null)
       return
@@ -197,7 +197,7 @@ function createWindow(): BrowserWindow {
       console.error('[main] failed to get session:', error)
       windowServer.appReady(null)
     }
-  })
+  })() })
 
   window.on('closed', () => {
     // Stop watching session
@@ -220,7 +220,7 @@ server.onPtyCreate(async (event, connectionId, handle, cwd, sandbox, startupComm
   try {
     const client = getClientForConnection(connectionId)
     await client.ensureDaemonRunning()
-    const sessionId = await client.createPtySession({ cwd, sandbox: sandbox as SandboxConfig | undefined, startupCommand })
+    const sessionId = await client.createPtySession({ cwd, sandbox: sandbox, startupCommand })
     const ptyStream = client.openPtyStream(handle, sessionId, (evt) => {
       event.sender.send('pty:event', handle, evt)
       if (evt.type === 'end') ptyStreams.delete(handle)
@@ -260,7 +260,7 @@ server.onPtyAttach(async (event, connectionId, handle, sessionId) => {
 server.onPtyList(async (connectionId) => {
   const client = getClientForConnection(connectionId)
   await client.ensureDaemonRunning()
-  return await client.listPtySessions()
+  return client.listPtySessions()
 })
 
 server.onPtyWrite((handle, data) => {
@@ -281,7 +281,7 @@ server.onPtyKill((connectionId, sessionId) => {
   }
   try {
     const client = getClientForConnection(connectionId)
-    client.killPtySession(sessionId).catch(error => {
+    void client.killPtySession(sessionId).catch((error: unknown) => {
       console.error('[main] failed to kill PTY:', error)
     })
   } catch (error) {
@@ -431,14 +431,14 @@ function getRunActionsClientForConnection(connectionId: string): RunActionsClien
 }
 
 // Git IPC Handlers - Now handled in main process via ExecStream
-server.onGitGetInfo(async (connectionId, dirPath) => {
+server.onGitGetInfo((connectionId, dirPath) => {
   return getGitClientForConnection(connectionId).getGitInfo(dirPath)
 })
 
 server.onGitCreateWorktree(async (connectionId, repoPath, name, baseBranch, operationId) => {
   try {
     const onProgress = operationId
-      ? (data: string) => server.gitOutput(operationId, data)
+      ? (data: string) => { server.gitOutput(operationId, data); }
       : undefined
     const result = await getGitClientForConnection(connectionId).createWorktree(repoPath, name, baseBranch, onProgress)
     return { success: true, path: result.path, branch: result.branch }
@@ -451,32 +451,32 @@ server.onGitCreateWorktree(async (connectionId, repoPath, name, baseBranch, oper
 
 server.onGitRemoveWorktree(async (connectionId, repoPath, worktreePath, deleteBranch, operationId) => {
   const onProgress = operationId
-    ? (data: string) => server.gitOutput(operationId, data)
+    ? (data: string) => { server.gitOutput(operationId, data); }
     : undefined
   await getGitClientForConnection(connectionId).removeWorktree(repoPath, worktreePath, deleteBranch, onProgress)
   return { success: true }
 })
 
-server.onGitListWorktrees(async (connectionId, repoPath) => {
+server.onGitListWorktrees((connectionId, repoPath) => {
   return getGitClientForConnection(connectionId).listWorktrees(repoPath)
 })
 
-server.onGitListLocalBranches(async (connectionId, repoPath) => {
+server.onGitListLocalBranches((connectionId, repoPath) => {
   return getGitClientForConnection(connectionId).listLocalBranches(repoPath)
 })
 
-server.onGitListRemoteBranches(async (connectionId, repoPath) => {
+server.onGitListRemoteBranches((connectionId, repoPath) => {
   return getGitClientForConnection(connectionId).listRemoteBranches(repoPath)
 })
 
-server.onGitGetBranchesInWorktrees(async (connectionId, repoPath) => {
+server.onGitGetBranchesInWorktrees((connectionId, repoPath) => {
   return getGitClientForConnection(connectionId).getBranchesInWorktrees(repoPath)
 })
 
 server.onGitCreateWorktreeFromBranch(async (connectionId, repoPath, branch, worktreeName, operationId) => {
   try {
     const onProgress = operationId
-      ? (data: string) => server.gitOutput(operationId, data)
+      ? (data: string) => { server.gitOutput(operationId, data); }
       : undefined
     const result = await getGitClientForConnection(connectionId).createWorktreeFromBranch(repoPath, branch, worktreeName, onProgress)
     return { success: true, path: result.path, branch: result.branch }
@@ -490,7 +490,7 @@ server.onGitCreateWorktreeFromBranch(async (connectionId, repoPath, branch, work
 server.onGitCreateWorktreeFromRemote(async (connectionId, repoPath, remoteBranch, worktreeName, operationId) => {
   try {
     const onProgress = operationId
-      ? (data: string) => server.gitOutput(operationId, data)
+      ? (data: string) => { server.gitOutput(operationId, data); }
       : undefined
     const result = await getGitClientForConnection(connectionId).createWorktreeFromRemote(repoPath, remoteBranch, worktreeName, onProgress)
     return { success: true, path: result.path, branch: result.branch }
@@ -513,7 +513,7 @@ server.onGitGetFileDiff(async (connectionId, worktreePath, parentBranch, filePat
 
 server.onGitMerge(async (connectionId, targetWorktreePath, worktreeBranch, squash, operationId) => {
   const onProgress = operationId
-    ? (data: string) => server.gitOutput(operationId, data)
+    ? (data: string) => { server.gitOutput(operationId, data); }
     : undefined
   await getGitClientForConnection(connectionId).mergeWorktree(targetWorktreePath, worktreeBranch, squash, onProgress)
   return { success: true }
@@ -531,7 +531,7 @@ server.onGitCheckMergeConflicts(async (connectionId, repoPath, sourceBranch, tar
   }
 })
 
-server.onGitHasUncommittedChanges(async (connectionId, repoPath) => {
+server.onGitHasUncommittedChanges((connectionId, repoPath) => {
   return getGitClientForConnection(connectionId).hasUncommittedChanges(repoPath)
 })
 
@@ -542,7 +542,7 @@ server.onGitCommitAll(async (connectionId, repoPath, message) => {
 
 server.onGitDeleteBranch(async (connectionId, repoPath, branchName, operationId) => {
   const onProgress = operationId
-    ? (data: string) => server.gitOutput(operationId, data)
+    ? (data: string) => { server.gitOutput(operationId, data); }
     : undefined
   await getGitClientForConnection(connectionId).deleteBranch(repoPath, branchName, false, onProgress)
   return { success: true }
@@ -673,8 +673,8 @@ server.onGitPull(async (connectionId, repoPath) => {
   }
 })
 
-server.onGitGetBehindCount(async (connectionId, repoPath) => {
-  return await getGitClientForConnection(connectionId).getBehindCount(repoPath)
+server.onGitGetBehindCount((connectionId, repoPath) => {
+  return getGitClientForConnection(connectionId).getBehindCount(repoPath)
 })
 
 // GitHub IPC Handlers
@@ -716,7 +716,7 @@ function execCommand(
           })
         }
       })
-      stream.on('error', (error: Error) => reject(error))
+      stream.on('error', (error: Error) => { reject(error); })
       stream.on('end', () => {
         if (!resultReceived) resolve({ exitCode: -1, stdout: '', stderr: 'Stream ended unexpectedly' })
       })
@@ -741,14 +741,14 @@ server.onGithubGetPrInfo(async (connectionId, repoPath, head, base) => {
     // Get GitHub token
     const settings = loadSettings()
     let token: string
-    if (settings.github?.autodetectViaGh !== false) {
+    if (settings.github.autodetectViaGh) {
       const result = await execCommand(getClientForConnection(connectionId), repoPath, 'gh', ['auth', 'token'])
       if (result.exitCode !== 0) {
         return { error: 'Failed to get token from gh CLI. Is gh installed and authenticated?' }
       }
       token = result.stdout.trim()
     } else {
-      token = settings.github?.pat || ''
+      token = settings.github.pat || ''
       if (!token) return { error: 'No GitHub PAT configured. Set one in Settings > GitHub.' }
     }
 
@@ -765,7 +765,7 @@ server.onGithubGetPrInfo(async (connectionId, repoPath, head, base) => {
       { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } }
     )
     if (!prResponse.ok) {
-      return { error: `GitHub API error: ${prResponse.status} ${prResponse.statusText}` }
+      return { error: `GitHub API error: ${String(prResponse.status)} ${prResponse.statusText}` }
     }
     const prs = await prResponse.json() as Array<{ number: number; title: string }>
 
@@ -774,7 +774,7 @@ server.onGithubGetPrInfo(async (connectionId, repoPath, head, base) => {
     }
 
     const pr = prs[0]
-    const prUrl = `https://github.com/${owner}/${repo}/pull/${pr.number}`
+    const prUrl = `https://github.com/${owner}/${repo}/pull/${String(pr.number)}`
 
     // Fetch rich PR info via GraphQL
     const graphqlQuery = `query($owner: String!, $repo: String!, $prNumber: Int!) {
@@ -939,11 +939,11 @@ server.onGithubGetPrInfo(async (connectionId, repoPath, head, base) => {
 })
 
 // Run Actions IPC Handlers
-server.onRunActionsDetect(async (connectionId, workspacePath) => {
+server.onRunActionsDetect((connectionId, workspacePath) => {
   return getRunActionsClientForConnection(connectionId).detect(workspacePath)
 })
 
-server.onRunActionsRun(async (connectionId, workspacePath, actionId) => {
+server.onRunActionsRun((connectionId, workspacePath, actionId) => {
   return getRunActionsClientForConnection(connectionId).run(workspacePath, actionId)
 })
 
@@ -958,19 +958,19 @@ server.onSettingsSave((settings) => {
 })
 
 // Filesystem IPC Handlers - All proxied to daemon
-server.onFsReadDirectory(async (connectionId, workspacePath, dirPath) => {
+server.onFsReadDirectory((connectionId, workspacePath, dirPath) => {
   return getClientForConnection(connectionId).readDirectory(workspacePath, dirPath)
 })
 
-server.onFsReadFile(async (connectionId, workspacePath, filePath) => {
+server.onFsReadFile((connectionId, workspacePath, filePath) => {
   return getClientForConnection(connectionId).readFile(workspacePath, filePath)
 })
 
-server.onFsWriteFile(async (connectionId, workspacePath, filePath, content) => {
+server.onFsWriteFile((connectionId, workspacePath, filePath, content) => {
   return getClientForConnection(connectionId).writeFile(workspacePath, filePath, content)
 })
 
-server.onFsSearchFiles(async (connectionId, workspacePath, query) => {
+server.onFsSearchFiles((connectionId, workspacePath, query) => {
   return getClientForConnection(connectionId).searchFiles(workspacePath, query)
 })
 
@@ -1093,9 +1093,9 @@ function autoStartPortForwards(
       if (!pfStatusWatchUnsubscribers.has(winId)) {
         pfStatusWatchUnsubscribers.set(winId, new Map())
       }
-      pfStatusWatchUnsubscribers.get(winId)!.set(pfConfig.id, unsubscribe)
+      pfStatusWatchUnsubscribers.get(winId)?.set(pfConfig.id, unsubscribe)
     } catch (err) {
-      console.error(`[main:ssh] Failed to auto-start port forward ${spec.localPort}:${spec.remoteHost}:${spec.remotePort}:`, err)
+      console.error(`[main:ssh] Failed to auto-start port forward ${String(spec.localPort)}:${spec.remoteHost}:${String(spec.remotePort)}:`, err)
     }
   }
 }
@@ -1104,7 +1104,7 @@ function autoStartPortForwards(
 server.onSshConnect(async (event, config, options) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
 
-  console.log(`[main:ssh] onSshConnect called for host=${config.host}, id=${config.id}, refreshDaemon=${options?.refreshDaemon ?? false}`)
+  console.log(`[main:ssh] onSshConnect called for host=${config.host}, id=${config.id}, refreshDaemon=${String(options?.refreshDaemon ?? false)}`)
   const info = await connectionManager.connectRemote(config, { refreshDaemon: options?.refreshDaemon })
   console.log(`[main:ssh] connectRemote returned status=${info.status}${info.status === 'error' ? `, error=${info.error}` : ''}`)
 
@@ -1117,14 +1117,14 @@ server.onSshConnect(async (event, config, options) => {
       try {
         console.log(`[main:ssh] Starting session watch for remote daemon`)
         const remoteWatch = remoteClient.watchSession(randomUUID(), (updatedSession) => {
-          console.log(`[main:ssh] Session sync update received for session=${updatedSession.id}, workspaces=${updatedSession.workspaces?.length ?? 0}`)
+          console.log(`[main:ssh] Session sync update received for session=${updatedSession.id}, workspaces=${String(updatedSession.workspaces.length)}`)
           const windowInfo = windowManager.getWindow(senderWindow.id)
           if (windowInfo) {
             windowInfo.ipcServer.sessionSync(config.id, updatedSession)
           }
         })
         const session = await remoteWatch.initial
-        console.log(`[main:ssh] Initial session loaded: id=${session.id}, workspaces=${session.workspaces?.length ?? 0}`)
+        console.log(`[main:ssh] Initial session loaded: id=${session.id}, workspaces=${String(session.workspaces.length)}`)
         sessionConnectionMap.set(session.id, config.id)
 
         // Auto-start saved port forwards
@@ -1151,17 +1151,17 @@ server.onSshConnect(async (event, config, options) => {
   return { info, session: null }
 })
 
-server.onSshDisconnect(async (connectionId) => {
+server.onSshDisconnect((connectionId) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
   connectionManager.disconnectRemote(connectionId)
 })
 
-server.onSshListConnections(async () => {
+server.onSshListConnections(() => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
   return connectionManager.listConnections()
 })
 
-server.onSshSaveConnection(async (config) => {
+server.onSshSaveConnection((config) => {
   const settings = loadSettings()
   const existing = settings.ssh.savedConnections.findIndex(
     c => c.host === config.host && c.user === config.user && c.port === config.port
@@ -1174,18 +1174,18 @@ server.onSshSaveConnection(async (config) => {
   saveSettings(settings)
 })
 
-server.onSshGetSavedConnections(async () => {
+server.onSshGetSavedConnections(() => {
   const settings = loadSettings()
   return settings.ssh.savedConnections
 })
 
-server.onSshRemoveSavedConnection(async (id) => {
+server.onSshRemoveSavedConnection((id) => {
   const settings = loadSettings()
   settings.ssh.savedConnections = settings.ssh.savedConnections.filter(c => c.id !== id)
   saveSettings(settings)
 })
 
-server.onSshGetOutput(async (connectionId) => {
+server.onSshGetOutput((connectionId) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
   const tunnel = connectionManager.getSSHTunnel(connectionId)
   return tunnel?.getOutput() || []
@@ -1195,7 +1195,7 @@ server.onSshGetOutput(async (connectionId) => {
 const outputWatchUnsubscribers = new Map<number, Map<string, () => void>>()
 const statusWatchUnsubscribers = new Map<number, Map<string, () => void>>()
 
-server.onSshWatchOutput(async (event, connectionId) => {
+server.onSshWatchOutput((event, connectionId) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
 
   const senderWindow = BrowserWindow.fromWebContents(event.sender)
@@ -1215,12 +1215,12 @@ server.onSshWatchOutput(async (event, connectionId) => {
   if (!outputWatchUnsubscribers.has(winId)) {
     outputWatchUnsubscribers.set(winId, new Map())
   }
-  outputWatchUnsubscribers.get(winId)!.set(connectionId, unsubscribe)
+  outputWatchUnsubscribers.get(winId)?.set(connectionId, unsubscribe)
 
   return { scrollback }
 })
 
-server.onSshUnwatchOutput(async (event, connectionId) => {
+server.onSshUnwatchOutput((event, connectionId) => {
   const senderWindow = BrowserWindow.fromWebContents(event.sender)
   if (!senderWindow) return
 
@@ -1229,7 +1229,7 @@ server.onSshUnwatchOutput(async (event, connectionId) => {
   outputWatchUnsubscribers.get(winId)?.delete(connectionId)
 })
 
-server.onSshWatchConnectionStatus(async (event, connectionId) => {
+server.onSshWatchConnectionStatus((event, connectionId) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
 
   const senderWindow = BrowserWindow.fromWebContents(event.sender)
@@ -1251,12 +1251,12 @@ server.onSshWatchConnectionStatus(async (event, connectionId) => {
   if (!statusWatchUnsubscribers.has(winId)) {
     statusWatchUnsubscribers.set(winId, new Map())
   }
-  statusWatchUnsubscribers.get(winId)!.set(connectionId, unsubscribe)
+  statusWatchUnsubscribers.get(winId)?.set(connectionId, unsubscribe)
 
   return { initial }
 })
 
-server.onSshUnwatchConnectionStatus(async (event, connectionId) => {
+server.onSshUnwatchConnectionStatus((event, connectionId) => {
   const senderWindow = BrowserWindow.fromWebContents(event.sender)
   if (!senderWindow) return
 
@@ -1268,7 +1268,7 @@ server.onSshUnwatchConnectionStatus(async (event, connectionId) => {
 // Port forward IPC handlers
 const pfStatusWatchUnsubscribers = new Map<number, Map<string, () => void>>()
 
-server.onSshAddPortForward(async (event, config) => {
+server.onSshAddPortForward((event, config) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
   const info = connectionManager.addPortForward(config)
 
@@ -1285,7 +1285,7 @@ server.onSshAddPortForward(async (event, config) => {
     if (!pfStatusWatchUnsubscribers.has(winId)) {
       pfStatusWatchUnsubscribers.set(winId, new Map())
     }
-    pfStatusWatchUnsubscribers.get(winId)!.set(config.id, unsubscribe)
+    pfStatusWatchUnsubscribers.get(winId)?.set(config.id, unsubscribe)
   }
 
   // Sync saved connection with updated port forwards
@@ -1294,7 +1294,7 @@ server.onSshAddPortForward(async (event, config) => {
   return info
 })
 
-server.onSshRemovePortForward(async (portForwardId) => {
+server.onSshRemovePortForward((portForwardId) => {
   if (!connectionManager) return
   // Find the owning connection before removal so we can sync saved config
   let ownerConnectionId: string | undefined
@@ -1312,7 +1312,7 @@ server.onSshRemovePortForward(async (portForwardId) => {
   }
 })
 
-server.onSshListPortForwards(async (connectionId) => {
+server.onSshListPortForwards((connectionId) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
   return connectionManager.listPortForwards(connectionId)
 })
@@ -1320,7 +1320,7 @@ server.onSshListPortForwards(async (connectionId) => {
 // Per-window port forward watch subscriptions
 const pfOutputWatchUnsubscribers = new Map<number, Map<string, () => void>>()
 
-server.onSshWatchPortForwardOutput(async (event, portForwardId) => {
+server.onSshWatchPortForwardOutput((event, portForwardId) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
 
   const senderWindow = BrowserWindow.fromWebContents(event.sender)
@@ -1339,12 +1339,12 @@ server.onSshWatchPortForwardOutput(async (event, portForwardId) => {
   if (!pfOutputWatchUnsubscribers.has(winId)) {
     pfOutputWatchUnsubscribers.set(winId, new Map())
   }
-  pfOutputWatchUnsubscribers.get(winId)!.set(portForwardId, unsubscribe)
+  pfOutputWatchUnsubscribers.get(winId)?.set(portForwardId, unsubscribe)
 
   return { scrollback }
 })
 
-server.onSshUnwatchPortForwardOutput(async (event, portForwardId) => {
+server.onSshUnwatchPortForwardOutput((event, portForwardId) => {
   const senderWindow = BrowserWindow.fromWebContents(event.sender)
   if (!senderWindow) return
 
@@ -1367,7 +1367,7 @@ server.onAppCloseCancelled(() => {
 })
 
 // App lifecycle
-app.whenReady().then(async () => {
+void app.whenReady().then(async () => {
   // Always use daemon mode
   console.log('[main] daemon mode enabled')
 
@@ -1404,13 +1404,14 @@ app.whenReady().then(async () => {
     const parsed = parseSSHTarget(initialSSHTarget)
     if (parsed) {
       console.log('[main] Auto-connecting SSH:', initialSSHTarget)
-      connectionManager.connectRemote(parsed).then(async (info) => {
+      void connectionManager.connectRemote(parsed).then(async (info) => {
         if (info.status === 'connected') {
           console.log('[main] SSH connected:', info.id)
           if (mainWindow) {
             // Load session from remote daemon and re-initialize the renderer
             try {
-              const remoteClient = connectionManager!.getClient(parsed.id)
+              if (!connectionManager) throw new Error('ConnectionManager not initialized')
+              const remoteClient = connectionManager.getClient(parsed.id)
               const windowId = mainWindow.id
               const remoteWatch = remoteClient.watchSession(randomUUID(), (updatedSession) => {
                 const windowInfo = windowManager.getWindow(windowId)
@@ -1431,7 +1432,7 @@ app.whenReady().then(async () => {
         } else {
           console.error('[main] SSH connection failed:', info.status === 'error' ? info.error : `status=${info.status}`)
         }
-      }).catch((error) => {
+      }).catch((error: unknown) => {
         console.error('[main] SSH connection error:', error)
       })
     }
@@ -1445,7 +1446,7 @@ app.whenReady().then(async () => {
       createApplicationMenu(mainWindow, server, quitAndKillDaemon)
     }
   })
-}).catch((error) => {
+}).catch((error: unknown) => {
   console.error('[main] startup failed:', error)
   dialog.showErrorBox('Startup Error', `TreeTerm failed to start: ${error instanceof Error ? error.message : String(error)}`)
   app.quit()
@@ -1482,7 +1483,7 @@ async function quitAndKillDaemon(): Promise<void> {
   app.quit()
 }
 
-app.on('before-quit', async () => {
+app.on('before-quit', () => {
   if (connectionManager) {
     // Disconnect all remote SSH connections
     connectionManager.disconnectAll()

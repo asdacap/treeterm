@@ -36,7 +36,7 @@ export default function CommentsList({
   const clipboard = useAppStore((state) => state.clipboard)
   const filesystem = useFilesystemApi(workspace)
   const comments: ReviewComment[] = getReviewComments()
-  const [fileContents, setFileContents] = useState<Map<string, string>>(new Map())
+  const [fileContents, setFileContents] = useState(new Map<string, string>())
   const [promptExpanded, setPromptExpanded] = useState(false)
 
   // Batch-fetch file contents for code context
@@ -64,7 +64,7 @@ export default function CommentsList({
       setFileContents(newContents)
     }
 
-    fetchFiles()
+    void fetchFiles()
   }, [comments, wsData.path, fileContents, filesystem])
 
   const handleToggleAddressed = (commentId: string) => {
@@ -126,12 +126,12 @@ export default function CommentsList({
                   type="checkbox"
                   className="comments-addressed"
                   checked={comment.addressed}
-                  onChange={() => handleToggleAddressed(comment.id)}
+                  onChange={() => { handleToggleAddressed(comment.id); }}
                   title="Mark as addressed"
                 />
                 <button
                   className="comment-delete-btn"
-                  onClick={() => handleDelete(comment.id)}
+                  onClick={() => { handleDelete(comment.id); }}
                   title="Delete comment"
                 >
                   ×
@@ -160,7 +160,7 @@ export default function CommentsList({
                 </span>
                 <button
                   className="comments-goto-btn"
-                  onClick={() => handleGoToFile(comment)}
+                  onClick={() => { handleGoToFile(comment); }}
                   title="Open file at this line"
                 >
                   Go to file
@@ -175,7 +175,7 @@ export default function CommentsList({
         <div className="comments-prompt-preview">
           <div
             className="comments-prompt-header"
-            onClick={() => setPromptExpanded(!promptExpanded)}
+            onClick={() => { setPromptExpanded(!promptExpanded); }}
           >
             <span>{promptExpanded ? '▼' : '▶'} Generated Prompt</span>
             <button

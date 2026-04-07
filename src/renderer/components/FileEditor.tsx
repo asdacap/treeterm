@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from 'react'
+import React, { useEffect, useRef, useCallback, useState } from 'react'
 import Editor, { OnMount, OnChange } from '@monaco-editor/react'
 import { editor, KeyMod, KeyCode } from 'monaco-editor'
 import { useStore } from 'zustand'
@@ -24,15 +24,15 @@ function getFilename(filePath: string): string {
   return filePath.split('/').pop() || filePath
 }
 
-export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
+export function FileEditor({ workspace, tabId }: FileEditorProps): React.JSX.Element {
   const { workspace: wsData, updateTabState, updateTabTitle, addTab, connectionId } = useStore(workspace)
   const filesystem = useFilesystemApi(workspace)
   const execApi = useExecApi(workspace)
-  const appState = wsData?.appStates[tabId]
-  const state = appState?.state as EditorState | undefined
+  const appState = wsData.appStates[tabId]
+  const state = appState.state as EditorState | undefined
 
   const scrollTop = state?.status === 'ready' ? state.scrollTop ?? 0 : 0
-  const lastScrollTopRef = useRef<number>(scrollTop)
+  const lastScrollTopRef = useRef(scrollTop)
   const [saving, setSaving] = useState(false)
 
   const pendingScrollToLine = state && state.status !== 'error' ? state.scrollToLine : undefined
@@ -77,13 +77,13 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
         updateTabState<EditorState>(tabId, () => ({
           status: 'error',
           filePath: state.filePath,
-          error: `Error loading file: ${err}`
+          error: `Error loading file: ${err instanceof Error ? err.message : String(err)}`
         }))
       }
     }
 
     if (state.status !== 'ready') {
-      loadFile()
+      void loadFile()
     }
   }, [state?.filePath, wsData.path, tabId, filesystem, updateTabState, updateTabTitle, state?.status, pendingScrollToLine])
 
@@ -125,7 +125,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
         alert(`Failed to save: ${result.error}`)
       }
     } catch (err) {
-      alert(`Error saving file: ${err}`)
+      alert(`Error saving file: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setSaving(false)
     }
@@ -152,7 +152,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
       }
 
       // Add Cmd/Ctrl+S keybinding for save
-      editor.addCommand(KeyMod.CtrlCmd | KeyCode.KeyS, () => handleSave())
+      editor.addCommand(KeyMod.CtrlCmd | KeyCode.KeyS, () => { void handleSave(); })
 
       // Wire navigation bridge for go-to-definition
       monacoNavigationBridge.searchDefinition = (symbol, language) =>
@@ -228,7 +228,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): JSX.Element {
           )}
           <button
             className="file-editor-save-btn"
-            onClick={handleSave}
+            onClick={() => { void handleSave(); }}
             disabled={!state.isDirty || saving}
             title="Save (Cmd+S)"
           >

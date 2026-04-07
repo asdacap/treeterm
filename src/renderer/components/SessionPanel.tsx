@@ -166,7 +166,7 @@ export default function SessionPanel({
         setUpstreamWarning({
           workspaceId: parentId,
           behindCount,
-          workspaceName: entry.data.metadata?.displayName || entry.data.name,
+          workspaceName: entry.data.metadata.displayName || entry.data.name,
           action: 'createChild'
         })
         return
@@ -184,7 +184,7 @@ export default function SessionPanel({
         setUpstreamWarning({
           workspaceId: wsId,
           behindCount,
-          workspaceName: entry.data.metadata?.displayName || entry.data.name,
+          workspaceName: entry.data.metadata.displayName || entry.data.name,
           action: 'quickFork'
         })
         return
@@ -386,9 +386,9 @@ export default function SessionPanel({
         isExpanded={expanded.has(id)}
         onToggleExpand={toggleExpand}
         onClick={handleWorkspaceClick}
-        onQuickFork={handleQuickFork}
+        onQuickFork={(wsId) => { void handleQuickFork(wsId); }}
         onCreateChild={handleCreateChild}
-        onRemove={handleRemove}
+        onRemove={(wsId) => { void handleRemove(wsId); }}
         onOpenSettings={handleOpenSettings}
         children={children}
         renderChild={renderWorkspace}
@@ -418,7 +418,7 @@ export default function SessionPanel({
 
   return (
     <div className="session-panel">
-      <div className="session-panel-header" onClick={() => setActiveView({ type: 'session', sessionId })} onContextMenu={handleSessionContextMenu}>
+      <div className="session-panel-header" onClick={() => { setActiveView({ type: 'session', sessionId }); }} onContextMenu={handleSessionContextMenu}>
         <span
           className="session-panel-expand"
           onClick={(e) => { e.stopPropagation(); setIsSessionCollapsed(!isSessionCollapsed) }}
@@ -430,14 +430,14 @@ export default function SessionPanel({
             autoFocus
             className="tree-title-input"
             value={editName}
-            onChange={(e) => setEditName(e.target.value)}
-            onFocus={(e) => e.target.select()}
+            onChange={(e) => { setEditName(e.target.value); }}
+            onFocus={(e) => { e.target.select(); }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleSaveName()
               if (e.key === 'Escape') setIsEditingName(false)
             }}
             onBlur={handleSaveName}
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); }}
           />
         ) : (
           <span
@@ -484,8 +484,8 @@ export default function SessionPanel({
         <UpstreamWarningDialog
           behindCount={upstreamWarning.behindCount}
           workspaceName={upstreamWarning.workspaceName}
-          onConfirm={handleUpstreamWarningConfirm}
-          onCancel={() => setUpstreamWarning(null)}
+          onConfirm={() => { void handleUpstreamWarningConfirm(); }}
+          onCancel={() => { setUpstreamWarning(null); }}
         />
       )}
 
@@ -497,7 +497,7 @@ export default function SessionPanel({
           onAdopt={handleAdoptWorktreeSubmit}
           onCreateFromBranch={handleCreateFromBranchSubmit}
           onCreateFromRemote={handleCreateFromRemoteSubmit}
-          onCancel={() => setCreateChildDialogParentId(null)}
+          onCancel={() => { setCreateChildDialogParentId(null); }}
           openWorktreePaths={openWorktreePaths}
           initialMode="branch"
         />
@@ -507,10 +507,10 @@ export default function SessionPanel({
       {isOpenWorkspaceDialogOpen && (
         <OpenWorkspaceDialog
           onOpen={handleOpenWorkspaceSubmit}
-          onCancel={() => setIsOpenWorkspaceDialogOpen(false)}
+          onCancel={() => { setIsOpenWorkspaceDialogOpen(false); }}
           selectFolder={selectFolder}
           connectionKey={connection?.target.type === 'remote'
-            ? `${connection.target.config.user}@${connection.target.config.host}:${connection.target.config.port}`
+            ? `${connection.target.config.user}@${connection.target.config.host}:${String(connection.target.config.port)}`
             : 'local'}
           isRemote={connection?.target.type === 'remote'}
           readDirectory={connection?.target.type === 'remote'
@@ -557,7 +557,7 @@ function WorkspaceTreeItem({
   const menuId = `ws-context-${id}`
 
   const ws = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined
-  const displayName = ws ? (ws.metadata?.displayName || ws.name) : (entry as { name: string }).name
+  const displayName = ws ? (ws.metadata.displayName || ws.name) : (entry as { name: string }).name
   const hasChildren = children.length > 0
   const tabIds = ws ? Object.keys(ws.appStates) : []
 
@@ -578,7 +578,7 @@ function WorkspaceTreeItem({
       <div
         className={`tree-item ${depth === 0 ? 'tree-item-root' : ''} ${isActive ? 'active' : ''} ${isFocused ? 'focused' : ''} ${dragClasses}`}
         style={{ paddingLeft: 4 + depth * 4 }}
-        onClick={() => onClick(id)}
+        onClick={() => { onClick(id); }}
         onContextMenu={handleContextMenu}
         title={ws?.metadata?.description ? `${ws.path}\n\n${ws.metadata.description}` : ws?.path}
         draggable={ws !== undefined}
@@ -621,22 +621,22 @@ function WorkspaceTreeItem({
 
       <ContextMenu menuId={menuId} activeMenuId={activeMenuId} position={menuPosition}>
         {ws && (
-          <div className="context-menu-item" onClick={() => onOpenSettings(id)}>
+          <div className="context-menu-item" onClick={() => { onOpenSettings(id); }}>
             Settings
           </div>
         )}
         {ws?.isGitRepo && (
-          <div className="context-menu-item" onClick={() => onCreateChild(id)}>
+          <div className="context-menu-item" onClick={() => { onCreateChild(id); }}>
             Open Existing Branch
           </div>
         )}
         {ws?.isWorktree && ws?.parentId && (
-          <div className="context-menu-item" onClick={() => onRemove(id)}>
+          <div className="context-menu-item" onClick={() => { onRemove(id); }}>
             Review & Merge
           </div>
         )}
         {ws && !ws.isWorktree && (
-          <div className="context-menu-item danger" onClick={() => onRemove(id)}>
+          <div className="context-menu-item danger" onClick={() => { onRemove(id); }}>
             Remove
           </div>
         )}
@@ -686,7 +686,7 @@ export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSess
     if (!entry) return null
 
     const ws = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined
-    const displayName = ws ? (ws.metadata?.displayName || ws.name) : (entry as { name: string }).name
+    const displayName = ws ? (ws.metadata.displayName || ws.name) : (entry as { name: string }).name
     const tabIds = ws ? Object.keys(ws.appStates) : []
     const isActive = isActiveSession && activeWorkspaceId === id
     const children = getChildren(id)
@@ -696,7 +696,7 @@ export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSess
         <div
           className={`collapsed-workspace-icon ${isActive ? 'active' : ''}`}
           title={displayName}
-          onClick={() => handleClick(id)}
+          onClick={() => { handleClick(id); }}
         >
           <WorkspaceIcon
             tabIds={tabIds}

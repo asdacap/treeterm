@@ -170,19 +170,19 @@ export class IpcServer {
 
   onPtyWrite(handler: (...args: IpcSends['ptyWrite']['params']) => void): void {
     ipcMain.on(CHANNELS.ptyWrite, (_event: IpcMainEvent, ...args: unknown[]) =>
-      handler(...(args as IpcSends['ptyWrite']['params']))
+      { handler(...(args as IpcSends['ptyWrite']['params'])); }
     )
   }
 
   onPtyResize(handler: (...args: IpcSends['ptyResize']['params']) => void): void {
     ipcMain.on(CHANNELS.ptyResize, (_event: IpcMainEvent, ...args: unknown[]) =>
-      handler(...(args as IpcSends['ptyResize']['params']))
+      { handler(...(args as IpcSends['ptyResize']['params'])); }
     )
   }
 
   onPtyKill(handler: (...args: IpcSends['ptyKill']['params']) => void): void {
     ipcMain.on(CHANNELS.ptyKill, (_event: IpcMainEvent, ...args: unknown[]) =>
-      handler(...(args as IpcSends['ptyKill']['params']))
+      { handler(...(args as IpcSends['ptyKill']['params'])); }
     )
   }
 
@@ -905,22 +905,22 @@ export class IpcServer {
   // ==================== Fire-and-Forget Handlers (send/on pattern) ====================
 
   onAppCloseConfirmed(handler: (event: IpcMainEvent) => void): void {
-    ipcMain.on(CHANNELS.appCloseConfirmed, (event: IpcMainEvent) => handler(event))
+    ipcMain.on(CHANNELS.appCloseConfirmed, (event: IpcMainEvent) => { handler(event); })
   }
 
   onAppCloseCancelled(handler: (event: IpcMainEvent) => void): void {
-    ipcMain.on(CHANNELS.appCloseCancelled, (event: IpcMainEvent) => handler(event))
+    ipcMain.on(CHANNELS.appCloseCancelled, (event: IpcMainEvent) => { handler(event); })
   }
 
   onLlmChatCancel(handler: (...args: IpcSends['llmChatCancel']['params']) => void): void {
     ipcMain.on(CHANNELS.llmChatCancel, (_event: IpcMainEvent, ...args: unknown[]) =>
-      handler(...(args as IpcSends['llmChatCancel']['params']))
+      { handler(...(args as IpcSends['llmChatCancel']['params'])); }
     )
   }
 
   onClipboardWriteText(handler: (...args: IpcSends['clipboardWriteText']['params']) => void): void {
     ipcMain.on(CHANNELS.clipboardWriteText, (_event: IpcMainEvent, ...args: unknown[]) =>
-      handler(...(args as IpcSends['clipboardWriteText']['params']))
+      { handler(...(args as IpcSends['clipboardWriteText']['params'])); }
     )
   }
 
@@ -943,7 +943,7 @@ export class IpcServer {
 
   onExecKill(handler: (...args: IpcSends['execKill']['params']) => void): void {
     ipcMain.on(CHANNELS.execKill, (_event: IpcMainEvent, ...args: unknown[]) =>
-      handler(...(args as IpcSends['execKill']['params']))
+      { handler(...(args as IpcSends['execKill']['params'])); }
     )
   }
 

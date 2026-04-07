@@ -99,7 +99,7 @@ export default function App() {
             <TreePane
               selectFolder={selectFolder}
               isCollapsed={isTreeCollapsed}
-              onToggleCollapse={() => setIsTreeCollapsed(prev => !prev)}
+              onToggleCollapse={() => { setIsTreeCollapsed(prev => !prev); }}
             />
           </div>
           {!isTreeCollapsed && (
@@ -126,7 +126,7 @@ export default function App() {
           </div>
           <SettingsDialog
             isOpen={isSettingsOpen}
-            onClose={() => useAppStore.setState({ isSettingsOpen: false })}
+            onClose={() => { useAppStore.setState({ isSettingsOpen: false }); }}
             sandbox={sandbox}
             platform={platform}
           />
@@ -145,12 +145,12 @@ export default function App() {
                   .map(([id, e]) => [id, (e as Extract<typeof e, { status: 'loaded' | 'operation-error' }>).data])
               )}
               connectionId={activeSessionStore.getState().connection?.id ?? 'local'}
-              onClose={() => useAppStore.setState({ isActiveProcessesOpen: false })}
+              onClose={() => { useAppStore.setState({ isActiveProcessesOpen: false }); }}
             />
           )}
           <ConnectionPicker
             isOpen={showConnectionPicker}
-            onClose={() => useAppStore.setState({ showConnectionPicker: false })}
+            onClose={() => { useAppStore.setState({ showConnectionPicker: false }); }}
           />
         </div>
     </ErrorBoundary>

@@ -44,7 +44,7 @@ declare var SpeechRecognition: {
   new (): SpeechRecognition
 }
 
-declare var webkitSpeechRecognition: {
+declare let webkitSpeechRecognition: {
   new (): SpeechRecognition
 }
 

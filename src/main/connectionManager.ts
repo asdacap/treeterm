@@ -131,7 +131,10 @@ class Connection {
     if (!this.portForwardOutputWatchers.has(portForwardId)) {
       this.portForwardOutputWatchers.set(portForwardId, new Set())
     }
-    this.portForwardOutputWatchers.get(portForwardId)!.add(cb)
+    const outputWatchers = this.portForwardOutputWatchers.get(portForwardId)
+    if (outputWatchers) {
+      outputWatchers.add(cb)
+    }
 
     return {
       scrollback,
@@ -145,7 +148,10 @@ class Connection {
     if (!this.portForwardStatusWatchers.has(portForwardId)) {
       this.portForwardStatusWatchers.set(portForwardId, new Set())
     }
-    this.portForwardStatusWatchers.get(portForwardId)!.add(cb)
+    const statusWatchers = this.portForwardStatusWatchers.get(portForwardId)
+    if (statusWatchers) {
+      statusWatchers.add(cb)
+    }
 
     return {
       initial,
@@ -188,7 +194,7 @@ export class ConnectionManager {
       throw new Error(`Connection not found: ${connectionId}`)
     }
     if (!conn.client || conn.status !== 'connected') {
-      throw new Error(`Connection ${connectionId} is ${conn.status}${conn.error ? ': ' + conn.error : ''}`)
+      throw new Error(`Connection ${connectionId} is ${conn.status}${conn.error ? ': ' + String(conn.error) : ''}`)
     }
     return conn.client
   }
@@ -253,7 +259,7 @@ export class ConnectionManager {
 
     try {
       // Establish SSH tunnel
-      console.log(`[connectionManager] SSH tunnel connecting to ${config.host}:${config.port} (id=${config.id})`)
+      console.log(`[connectionManager] SSH tunnel connecting to ${config.host}:${String(config.port)} (id=${config.id})`)
       const localSocketPath = await tunnel.connect()
       console.log(`[connectionManager] SSH tunnel connected, local socket: ${localSocketPath}`)
 
@@ -289,7 +295,11 @@ export class ConnectionManager {
       })
 
       this.emitStatus(config.id)
-      return this.getConnection(config.id)!
+      const connInfo = this.getConnection(config.id)
+      if (!connInfo) {
+        throw new Error(`Connection not found after connect: ${config.id}`)
+      }
+      return connInfo
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error)
       console.error(`[connectionManager] SSH connection failed (id=${config.id}): ${errorMsg}`)

@@ -28,7 +28,7 @@ class WindowManager {
    */
   registerWindow(window: BrowserWindow, ipcServer: IpcServer, uuid?: string): void {
     const id = window.id
-    this.windows.set(id, { window, ipcServer, uuid: uuid || `win-${id}` })
+    this.windows.set(id, { window, ipcServer, uuid: uuid || `win-${String(id)}` })
 
     // Clean up when window closes
     window.on('closed', () => {

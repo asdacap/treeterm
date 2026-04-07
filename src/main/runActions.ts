@@ -25,14 +25,16 @@ function createNpmProvider(daemonClient: GrpcDaemonClient): RunActionProvider {
     detect: async (_workspacePath, readFile) => {
       const content = await readFile('package.json')
       if (!content) return []
-      const pkg = JSON.parse(content)
-      const scripts = pkg.scripts
+      const pkg: unknown = JSON.parse(content)
+      if (typeof pkg !== 'object' || pkg === null || !('scripts' in pkg)) return []
+      const scripts = (pkg as Record<string, unknown>).scripts
       if (!scripts || typeof scripts !== 'object') return []
-      return Object.keys(scripts).map((name): RunAction => ({
+      const scriptsRecord = scripts as Record<string, string>
+      return Object.keys(scriptsRecord).map((name): RunAction => ({
         id: `npm:${name}`,
         name,
         source: 'npm',
-        description: scripts[name]
+        description: scriptsRecord[name]
       }))
     },
     run: async (_actionId, workspacePath) => {
@@ -116,15 +118,16 @@ function createVscodeTaskProvider(daemonClient: GrpcDaemonClient): RunActionProv
       // Re-parse to get the command
       const readFileFn: ReadFile = async (p) => {
         const result = await daemonClient.readFile(workspacePath, path.join(workspacePath, p))
-        if (result.success && result.file) return result.file.content
+        if (result.success) return result.file.content
         return null
       }
       const content = await readFileFn('.vscode/tasks.json')
       if (!content) throw new Error('tasks.json not found')
-      const parsed = JSON.parse(stripJsoncComments(content))
-      const task = (parsed.tasks || []).find((t: { label?: string }) => t.label === name)
+      const parsed = JSON.parse(stripJsoncComments(content)) as Record<string, unknown>
+      const tasksArray = (parsed.tasks ?? []) as { label?: string; command?: string; args?: string[] }[]
+      const task = tasksArray.find((t) => t.label === name)
       if (!task?.command) throw new Error(`Task "${name}" has no command`)
-      const cmd = task.args ? `${task.command} ${(task.args as string[]).join(' ')}` : task.command
+      const cmd = task.args ? `${task.command} ${task.args.join(' ')}` : task.command
       return daemonClient.createPtySession({ cwd: workspacePath, startupCommand: cmd })
     }
   }
@@ -162,7 +165,7 @@ export function parseTaskfileNames(content: string): RunAction[] {
   // Tasks are top-level keys under tasks: with 2-space indent
   const tasksMatch = content.match(/^tasks:\s*$/m)
   if (!tasksMatch) return actions
-  const afterTasks = content.slice(tasksMatch.index! + tasksMatch[0].length)
+  const afterTasks = content.slice((tasksMatch.index ?? 0) + tasksMatch[0].length)
   const lines = afterTasks.split('\n')
   for (const line of lines) {
     // Stop at next top-level key
@@ -185,9 +188,9 @@ export function stripJsoncComments(content: string): string {
 }
 
 export function parseVscodeLaunch(content: string): RunAction[] {
-  const parsed = JSON.parse(stripJsoncComments(content))
-  const configs = parsed.configurations || []
-  return configs.map((config: { name: string; type?: string; program?: string }): RunAction => ({
+  const parsed = JSON.parse(stripJsoncComments(content)) as Record<string, unknown>
+  const configs = (parsed.configurations ?? []) as { name: string; type?: string; program?: string }[]
+  return configs.map((config): RunAction => ({
     id: `vscode-launch:${config.name}`,
     name: config.name,
     source: 'vscode-launch',
@@ -196,15 +199,15 @@ export function parseVscodeLaunch(content: string): RunAction[] {
 }
 
 export function parseVscodeTasks(content: string): RunAction[] {
-  const parsed = JSON.parse(stripJsoncComments(content))
-  const tasks = parsed.tasks || []
+  const parsed = JSON.parse(stripJsoncComments(content)) as Record<string, unknown>
+  const tasks = (parsed.tasks ?? []) as { label?: string; command?: string; type?: string }[]
   return tasks
-    .filter((t: { label?: string }) => t.label)
-    .map((t: { label: string; command?: string; type?: string }): RunAction => ({
+    .filter((t): t is { label: string; command?: string; type?: string } => Boolean(t.label))
+    .map((t): RunAction => ({
       id: `vscode-task:${t.label}`,
       name: t.label,
       source: 'vscode-task',
-      description: t.command || t.type || ''
+      description: t.command ?? t.type ?? ''
     }))
 }
 
@@ -222,7 +225,7 @@ export class RunActionsClient {
       try {
         const absolutePath = path.join(workspacePath, filePath)
         const result = await this.daemonClient.readFile(workspacePath, absolutePath)
-        if (result.success && result.file) return result.file.content
+        if (result.success) return result.file.content
         return null
       } catch {
         return null

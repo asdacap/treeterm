@@ -547,129 +547,129 @@ export class IpcClient {
 
   onPtyEvent(callback: (...args: IpcEvents['ptyEvent']['params']) => void): () => void {
     const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      callback(...(args as IpcEvents['ptyEvent']['params']))
+      { callback(...(args as IpcEvents['ptyEvent']['params'])); }
     ipcRenderer.on(CHANNELS.ptyEvent, handler)
     return () => ipcRenderer.removeListener(CHANNELS.ptyEvent, handler)
   }
 
   onSettingsOpen(callback: () => void): () => void {
-    const handler = () => callback()
+    const handler = () => { callback(); }
     ipcRenderer.on(CHANNELS.settingsOpen, handler)
     return () => ipcRenderer.removeListener(CHANNELS.settingsOpen, handler)
   }
 
   onAppConfirmClose(callback: () => void): () => void {
-    const handler = () => callback()
+    const handler = () => { callback(); }
     ipcRenderer.on(CHANNELS.appConfirmClose, handler)
     return () => ipcRenderer.removeListener(CHANNELS.appConfirmClose, handler)
   }
 
   onAppReady(callback: (...args: IpcEvents['appReady']['params']) => void): () => void {
     const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      callback(...(args as IpcEvents['appReady']['params']))
+      { callback(...(args as IpcEvents['appReady']['params'])); }
     ipcRenderer.on(CHANNELS.appReady, handler)
     return () => ipcRenderer.removeListener(CHANNELS.appReady, handler)
   }
 
   onCapsLockEvent(callback: (...args: IpcEvents['capsLockEvent']['params']) => void): () => void {
     const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      callback(...(args as IpcEvents['capsLockEvent']['params']))
+      { callback(...(args as IpcEvents['capsLockEvent']['params'])); }
     ipcRenderer.on(CHANNELS.capsLockEvent, handler)
     return () => ipcRenderer.removeListener(CHANNELS.capsLockEvent, handler)
   }
 
   onDaemonSessions(callback: (...args: IpcEvents['daemonSessions']['params']) => void): () => void {
     const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      callback(...(args as IpcEvents['daemonSessions']['params']))
+      { callback(...(args as IpcEvents['daemonSessions']['params'])); }
     ipcRenderer.on(CHANNELS.daemonSessions, handler)
     return () => ipcRenderer.removeListener(CHANNELS.daemonSessions, handler)
   }
 
   onSessionSync(callback: (...args: IpcEvents['sessionSync']['params']) => void): () => void {
     const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      callback(...(args as IpcEvents['sessionSync']['params']))
+      { callback(...(args as IpcEvents['sessionSync']['params'])); }
     ipcRenderer.on(CHANNELS.sessionSync, handler)
     return () => ipcRenderer.removeListener(CHANNELS.sessionSync, handler)
   }
 
   onSshAutoConnected(callback: (...args: IpcEvents['sshAutoConnected']['params']) => void): () => void {
     const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      callback(...(args as IpcEvents['sshAutoConnected']['params']))
+      { callback(...(args as IpcEvents['sshAutoConnected']['params'])); }
     ipcRenderer.on(CHANNELS.sshAutoConnected, handler)
     return () => ipcRenderer.removeListener(CHANNELS.sshAutoConnected, handler)
   }
 
   onDaemonDisconnected(callback: () => void): () => void {
-    const handler = () => callback()
+    const handler = () => { callback(); }
     ipcRenderer.on(CHANNELS.daemonDisconnected, handler)
     return () => ipcRenderer.removeListener(CHANNELS.daemonDisconnected, handler)
   }
 
   onActiveProcessesOpen(callback: () => void): () => void {
-    const handler = () => callback()
+    const handler = () => { callback(); }
     ipcRenderer.on(CHANNELS.activeProcessesOpen, handler)
     return () => ipcRenderer.removeListener(CHANNELS.activeProcessesOpen, handler)
   }
 
   onSshConnectionStatus(callback: (...args: IpcEvents['sshConnectionStatus']['params']) => void): () => void {
     const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      callback(...(args as IpcEvents['sshConnectionStatus']['params']))
+      { callback(...(args as IpcEvents['sshConnectionStatus']['params'])); }
     ipcRenderer.on(CHANNELS.sshConnectionStatus, handler)
     return () => ipcRenderer.removeListener(CHANNELS.sshConnectionStatus, handler)
   }
 
   onSshOutput(callback: (...args: IpcEvents['sshOutput']['params']) => void): () => void {
     const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      callback(...(args as IpcEvents['sshOutput']['params']))
+      { callback(...(args as IpcEvents['sshOutput']['params'])); }
     ipcRenderer.on(CHANNELS.sshOutput, handler)
     return () => ipcRenderer.removeListener(CHANNELS.sshOutput, handler)
   }
 
   onSshPortForwardStatus(callback: (...args: IpcEvents['sshPortForwardStatus']['params']) => void): () => void {
     const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      callback(...(args as IpcEvents['sshPortForwardStatus']['params']))
+      { callback(...(args as IpcEvents['sshPortForwardStatus']['params'])); }
     ipcRenderer.on(CHANNELS.sshPortForwardStatus, handler)
     return () => ipcRenderer.removeListener(CHANNELS.sshPortForwardStatus, handler)
   }
 
   onSshPortForwardOutput(callback: (...args: IpcEvents['sshPortForwardOutput']['params']) => void): () => void {
     const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      callback(...(args as IpcEvents['sshPortForwardOutput']['params']))
+      { callback(...(args as IpcEvents['sshPortForwardOutput']['params'])); }
     ipcRenderer.on(CHANNELS.sshPortForwardOutput, handler)
     return () => ipcRenderer.removeListener(CHANNELS.sshPortForwardOutput, handler)
   }
 
   onLlmChatDelta(callback: (...args: IpcEvents['llmChatDelta']['params']) => void): () => void {
     const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      callback(...(args as IpcEvents['llmChatDelta']['params']))
+      { callback(...(args as IpcEvents['llmChatDelta']['params'])); }
     ipcRenderer.on(CHANNELS.llmChatDelta, handler)
     return () => ipcRenderer.removeListener(CHANNELS.llmChatDelta, handler)
   }
 
   onLlmChatDone(callback: (...args: IpcEvents['llmChatDone']['params']) => void): () => void {
     const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      callback(...(args as IpcEvents['llmChatDone']['params']))
+      { callback(...(args as IpcEvents['llmChatDone']['params'])); }
     ipcRenderer.on(CHANNELS.llmChatDone, handler)
     return () => ipcRenderer.removeListener(CHANNELS.llmChatDone, handler)
   }
 
   onLlmChatError(callback: (...args: IpcEvents['llmChatError']['params']) => void): () => void {
     const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      callback(...(args as IpcEvents['llmChatError']['params']))
+      { callback(...(args as IpcEvents['llmChatError']['params'])); }
     ipcRenderer.on(CHANNELS.llmChatError, handler)
     return () => ipcRenderer.removeListener(CHANNELS.llmChatError, handler)
   }
 
   onGitOutput(callback: (...args: IpcEvents['gitOutput']['params']) => void): () => void {
     const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      callback(...(args as IpcEvents['gitOutput']['params']))
+      { callback(...(args as IpcEvents['gitOutput']['params'])); }
     ipcRenderer.on(CHANNELS.gitOutput, handler)
     return () => ipcRenderer.removeListener(CHANNELS.gitOutput, handler)
   }
 
   onExecEvent(callback: (...args: IpcEvents['execEvent']['params']) => void): () => void {
     const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      callback(...(args as IpcEvents['execEvent']['params']))
+      { callback(...(args as IpcEvents['execEvent']['params'])); }
     ipcRenderer.on(CHANNELS.execEvent, handler)
     return () => ipcRenderer.removeListener(CHANNELS.execEvent, handler)
   }

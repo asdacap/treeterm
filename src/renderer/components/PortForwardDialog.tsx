@@ -54,13 +54,13 @@ export default function PortForwardDialog({ connectionId, onClose, onCreated, ad
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') handleSubmit()
+    if (e.key === 'Enter') void handleSubmit()
     if (e.key === 'Escape') onClose()
   }
 
   return (
     <div className="dialog-overlay" onClick={onClose}>
-      <div className="port-forward-dialog" onClick={(e) => e.stopPropagation()} onKeyDown={handleKeyDown}>
+      <div className="port-forward-dialog" onClick={(e) => { e.stopPropagation(); }} onKeyDown={handleKeyDown}>
         <div className="port-forward-dialog-header">
           <h2>Add Port Forward</h2>
           <button className="dialog-close" onClick={onClose}>✕</button>
@@ -72,7 +72,7 @@ export default function PortForwardDialog({ connectionId, onClose, onCreated, ad
               type="number"
               placeholder="8080"
               value={localPort}
-              onChange={(e) => setLocalPort(e.target.value)}
+              onChange={(e) => { setLocalPort(e.target.value); }}
               autoFocus
               min={1}
               max={65535}
@@ -84,7 +84,7 @@ export default function PortForwardDialog({ connectionId, onClose, onCreated, ad
               type="text"
               placeholder="localhost"
               value={remoteHost}
-              onChange={(e) => setRemoteHost(e.target.value)}
+              onChange={(e) => { setRemoteHost(e.target.value); }}
             />
           </div>
           <div className="port-forward-dialog-row">
@@ -93,7 +93,7 @@ export default function PortForwardDialog({ connectionId, onClose, onCreated, ad
               type="number"
               placeholder="3000"
               value={remotePort}
-              onChange={(e) => setRemotePort(e.target.value)}
+              onChange={(e) => { setRemotePort(e.target.value); }}
               min={1}
               max={65535}
             />
@@ -110,7 +110,7 @@ export default function PortForwardDialog({ connectionId, onClose, onCreated, ad
           <button className="dialog-btn cancel" onClick={onClose} disabled={loading}>
             Cancel
           </button>
-          <button className="dialog-btn create" onClick={handleSubmit} disabled={loading}>
+          <button className="dialog-btn create" onClick={() => { void handleSubmit() }} disabled={loading}>
             {loading ? 'Starting...' : 'Start Forward'}
           </button>
         </div>

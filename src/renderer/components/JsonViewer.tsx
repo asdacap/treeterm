@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import React, { useState } from 'react'
 
-function JsonValue({ value, depth, defaultExpanded }: { value: unknown; depth: number; defaultExpanded: boolean }): JSX.Element {
+function JsonValue({ value, depth, defaultExpanded }: { value: unknown; depth: number; defaultExpanded: boolean }): React.JSX.Element {
   if (value === null) {
     return <span className="json-viewer-null">null</span>
   }
@@ -19,7 +19,7 @@ function JsonValue({ value, depth, defaultExpanded }: { value: unknown; depth: n
   if (typeof value === 'object') {
     return <JsonCollection entries={Object.entries(value as Record<string, unknown>)} kind="object" depth={depth} defaultExpanded={defaultExpanded} />
   }
-  return <span>{String(value)}</span>
+  return <span>{JSON.stringify(value)}</span>
 }
 
 function JsonCollection({
@@ -32,7 +32,7 @@ function JsonCollection({
   kind: 'object' | 'array'
   depth: number
   defaultExpanded: boolean
-}): JSX.Element {
+}): React.JSX.Element {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const open = kind === 'object' ? '{' : '['
   const close = kind === 'object' ? '}' : ']'
@@ -45,9 +45,9 @@ function JsonCollection({
   if (!expanded) {
     return (
       <span>
-        <button className="json-viewer-toggle" onClick={() => setExpanded(true)}>&#x25b8;</button>
+        <button className="json-viewer-toggle" onClick={() => { setExpanded(true); }}>&#x25b8;</button>
         <span className="json-viewer-bracket">{open}</span>
-        <span className="json-viewer-summary" onClick={() => setExpanded(true)}>
+        <span className="json-viewer-summary" onClick={() => { setExpanded(true); }}>
           {count} {count === 1 ? 'item' : 'items'}
         </span>
         <span className="json-viewer-bracket">{close}</span>
@@ -57,7 +57,7 @@ function JsonCollection({
 
   return (
     <span>
-      <button className="json-viewer-toggle" onClick={() => setExpanded(false)}>&#x25be;</button>
+      <button className="json-viewer-toggle" onClick={() => { setExpanded(false); }}>&#x25be;</button>
       <span className="json-viewer-bracket">{open}</span>
       <div className="json-viewer-children">
         {entries.map(([key, val], i) => (
@@ -78,7 +78,7 @@ function JsonCollection({
   )
 }
 
-export default function JsonViewer({ data }: { data: unknown }): JSX.Element {
+export default function JsonViewer({ data }: { data: unknown }): React.JSX.Element {
   return (
     <div className="json-viewer">
       <JsonValue value={data} depth={0} defaultExpanded={true} />

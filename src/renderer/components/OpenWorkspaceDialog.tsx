@@ -16,9 +16,9 @@ interface OpenWorkspaceDialogProps {
 }
 
 export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, connectionKey, isRemote, readDirectory }: OpenWorkspaceDialogProps) {
-  const [selectedPath, setSelectedPath] = useState<string>('')
+  const [selectedPath, setSelectedPath] = useState('')
   const [isSelecting, setIsSelecting] = useState(false)
-  const [selectedAppId, setSelectedAppId] = useState<string>('')
+  const [selectedAppId, setSelectedAppId] = useState('')
   const [showBrowser, setShowBrowser] = useState(false)
 
   const recentDirectories = useRecentDirectoriesStore(s => s.directories[connectionKey]) ?? EMPTY_RECENT
@@ -71,7 +71,7 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, co
 
   return (
     <div className="dialog-overlay" onClick={onCancel}>
-      <div className="open-workspace-dialog" onClick={(e) => e.stopPropagation()} onKeyDown={handleKeyDown}>
+      <div className="open-workspace-dialog" onClick={(e) => { e.stopPropagation(); }} onKeyDown={handleKeyDown}>
         <div className="open-workspace-dialog-header">
           <h2>Open Workspace</h2>
           <button className="dialog-close" onClick={onCancel}>
@@ -88,7 +88,7 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, co
                   <button
                     key={dir}
                     className="recent-directory-item"
-                    onClick={() => handleSelectRecent(dir)}
+                    onClick={() => { handleSelectRecent(dir); }}
                     title={dir}
                   >
                     <span className="recent-directory-name">{getFolderName(dir)}</span>
@@ -105,7 +105,7 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, co
               <input
                 type="text"
                 value={selectedPath}
-                onChange={(e) => setSelectedPath(e.target.value)}
+                onChange={(e) => { setSelectedPath(e.target.value); }}
                 placeholder={isRemote ? "Enter remote path (e.g. /home/user/project)" : "Enter or browse for a folder..."}
                 className="folder-path-input"
                 autoFocus
@@ -113,7 +113,7 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, co
               {!isRemote && (
                 <button
                   className="dialog-btn browse"
-                  onClick={handleSelectFolder}
+                  onClick={() => { void handleSelectFolder(); }}
                   disabled={isSelecting}
                 >
                   {isSelecting ? 'Opening...' : 'Browse...'}
@@ -122,7 +122,7 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, co
               {isRemote && readDirectory && (
                 <button
                   className="dialog-btn browse"
-                  onClick={() => setShowBrowser(!showBrowser)}
+                  onClick={() => { setShowBrowser(!showBrowser); }}
                 >
                   {showBrowser ? 'Hide' : 'Browse...'}
                 </button>
@@ -138,7 +138,7 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, co
                 setSelectedPath(path)
                 setShowBrowser(false)
               }}
-              onCancel={() => setShowBrowser(false)}
+              onCancel={() => { setShowBrowser(false); }}
             />
           )}
 
@@ -147,7 +147,7 @@ export default function OpenWorkspaceDialog({ onOpen, onCancel, selectFolder, co
             <select
               className="settings-select"
               value={selectedAppId}
-              onChange={(e) => setSelectedAppId(e.target.value)}
+              onChange={(e) => { setSelectedAppId(e.target.value); }}
             >
               <option value="">Use Global Default</option>
               <option disabled>──────────</option>

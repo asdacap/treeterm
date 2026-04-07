@@ -41,7 +41,7 @@ export default function RemoteDirectoryBrowser({
       } else {
         setDirState({ entries: [], loading: false, error: result.error })
       }
-    }).catch(err => {
+    }).catch((err: unknown) => {
       setDirState({ entries: [], loading: false, error: String(err) })
     })
   }, [currentPath, readDirectory])
@@ -85,7 +85,7 @@ export default function RemoteDirectoryBrowser({
         <input
           className="remote-dir-path-input"
           value={pathInput}
-          onChange={(e) => setPathInput(e.target.value)}
+          onChange={(e) => { setPathInput(e.target.value); }}
           onKeyDown={handlePathKeyDown}
           onBlur={handlePathSubmit}
           placeholder="/path/to/directory"
@@ -123,7 +123,7 @@ export default function RemoteDirectoryBrowser({
           <button
             key={entry.path}
             className="remote-dir-entry"
-            onClick={() => navigateTo(entry.path)}
+            onClick={() => { navigateTo(entry.path); }}
             title={entry.path}
           >
             <span className="remote-dir-entry-name">{entry.name}</span>
@@ -136,7 +136,7 @@ export default function RemoteDirectoryBrowser({
         <button className="dialog-btn cancel" onClick={onCancel}>
           Cancel
         </button>
-        <button className="dialog-btn create" onClick={() => onSelect(currentPath)}>
+        <button className="dialog-btn create" onClick={() => { onSelect(currentPath); }}>
           Select
         </button>
       </div>

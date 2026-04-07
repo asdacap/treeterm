@@ -48,7 +48,7 @@ export function FileTree({
     const timer = setTimeout(() => {
       setDebouncedQuery(search.query)
     }, 300)
-    return () => clearTimeout(timer)
+    return () => { clearTimeout(timer); }
   }, [search.query])
 
   // Perform search when debounced query changes
@@ -84,12 +84,12 @@ export function FileTree({
           ...prev,
           entries: [],
           loading: false,
-          error: `Search error: ${err}`
+          error: `Search error: ${String(err)}`
         }))
       }
     }
 
-    performSearch()
+    void performSearch()
   }, [debouncedQuery, workspacePath, filesystem])
 
   const loadDirectory = useCallback(
@@ -123,7 +123,7 @@ export function FileTree({
       } catch (err) {
         setDirContents((prev) => ({
           ...prev,
-          [dirPath]: { entries: [], loading: false, error: `Error: ${err}` }
+          [dirPath]: { entries: [], loading: false, error: `Error: ${String(err)}` }
         }))
       }
     },
@@ -132,13 +132,13 @@ export function FileTree({
 
   // Load root directory on mount
   useEffect(() => {
-    loadDirectory(workspacePath)
+    void loadDirectory(workspacePath)
   }, [workspacePath, loadDirectory])
 
   const handleToggleDir = (dirPath: string) => {
     onToggleDir(dirPath)
     if (!expandedDirs.includes(dirPath)) {
-      loadDirectory(dirPath)
+      void loadDirectory(dirPath)
     }
   }
 
@@ -188,7 +188,7 @@ export function FileTree({
       <div key={entry.path}>
         <div
           className={`file-tree-item ${isSelected ? 'selected' : ''}`}
-          style={{ paddingLeft: `${depth * 16 + 8}px` }}
+          style={{ paddingLeft: `${String(depth * 16 + 8)}px` }}
           onClick={() => {
             if (entry.isDirectory) {
               handleToggleDir(entry.path)
@@ -206,14 +206,14 @@ export function FileTree({
         {entry.isDirectory && isExpanded && (
           <div className="file-tree-children">
             {dirState?.loading && (
-              <div className="file-tree-item" style={{ paddingLeft: `${(depth + 1) * 16 + 8}px` }}>
+              <div className="file-tree-item" style={{ paddingLeft: `${String((depth + 1) * 16 + 8)}px` }}>
                 <span className="file-tree-loading">Loading...</span>
               </div>
             )}
             {dirState?.error && (
               <div
                 className="file-tree-item file-tree-error"
-                style={{ paddingLeft: `${(depth + 1) * 16 + 8}px` }}
+                style={{ paddingLeft: `${String((depth + 1) * 16 + 8)}px` }}
               >
                 <span>{dirState.error}</span>
               </div>

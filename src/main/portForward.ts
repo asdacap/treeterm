@@ -30,7 +30,7 @@ export class PortForwardProcess {
   start(): void {
     const args = this.buildSSHArgs()
 
-    this.appendOutput(`[portfwd] Starting port forward: localhost:${this.config.localPort} -> ${this.config.remoteHost}:${this.config.remotePort}`)
+    this.appendOutput(`[portfwd] Starting port forward: localhost:${String(this.config.localPort)} -> ${this.config.remoteHost}:${String(this.config.remotePort)}`)
     this.appendOutput(`[portfwd] $ ssh ${args.join(' ')}`)
 
     this.process = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] })
@@ -58,7 +58,7 @@ export class PortForwardProcess {
       this.clearStabilizationTimer()
       this.process = null
       if (this._status !== 'stopped') {
-        const msg = `Port forward process exited (code ${code})`
+        const msg = `Port forward process exited (code ${String(code)})`
         this.appendOutput(`[portfwd] ${msg}`)
         this.setStatus('error', msg)
       }
@@ -88,12 +88,12 @@ export class PortForwardProcess {
 
   onOutput(cb: OutputCallback): () => void {
     this.outputListeners.add(cb)
-    return () => this.outputListeners.delete(cb)
+    return () => { this.outputListeners.delete(cb) }
   }
 
   onStatusChange(cb: StatusCallback): () => void {
     this.statusListeners.add(cb)
-    return () => this.statusListeners.delete(cb)
+    return () => { this.statusListeners.delete(cb) }
   }
 
   toInfo(): PortForwardInfo {
@@ -142,7 +142,7 @@ export class PortForwardProcess {
     const { localPort, remoteHost, remotePort } = this.config
 
     const args = [
-      '-L', `${localPort}:${remoteHost}:${remotePort}`,
+      '-L', `${String(localPort)}:${remoteHost}:${String(remotePort)}`,
       '-o', 'StrictHostKeyChecking=accept-new',
       '-o', 'BatchMode=yes',
       '-o', 'ExitOnForwardFailure=yes',

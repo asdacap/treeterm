@@ -1,3 +1,4 @@
+import React from 'react'
 import { Monitor, Loader2, AlertCircle, GitBranch, Folder, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useActivityStateStore } from '../store/activityState'
 import { useAppStore } from '../store/app'
@@ -26,7 +27,7 @@ interface TreePaneProps {
   onToggleCollapse: () => void
 }
 
-export default function TreePane({ selectFolder, isCollapsed, onToggleCollapse }: TreePaneProps): JSX.Element {
+export default function TreePane({ selectFolder, isCollapsed, onToggleCollapse }: TreePaneProps): React.JSX.Element {
   const sessionStores = useAppStore(s => s.sessionStores)
   const sessionIds = Object.keys(sessionStores)
 
@@ -62,7 +63,7 @@ export default function TreePane({ selectFolder, isCollapsed, onToggleCollapse }
         <div className="tree-header-actions">
           <button
             className="add-button"
-            onClick={() => useAppStore.setState({ showConnectionPicker: true })}
+            onClick={() => { useAppStore.setState({ showConnectionPicker: true }); }}
             title="Connect to SSH"
           >
             <Monitor size={14} />

@@ -191,7 +191,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         store.setState({ analyzing: false })
         if (pendingAnalyze) {
           pendingAnalyze = false
-          analyze()
+          void analyze()
         }
         return
       }
@@ -224,7 +224,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
       if (pendingAnalyze) {
         pendingAnalyze = false
-        analyze()
+        void analyze()
       }
     } catch (err) {
       requestInFlight = false
@@ -236,7 +236,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       if (history.length > MAX_HISTORY) history.shift()
       if (pendingAnalyze) {
         pendingAnalyze = false
-        analyze()
+        void analyze()
       }
     }
   }
@@ -252,7 +252,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       updateAiState('working')
 
       if (debounceTimer) clearTimeout(debounceTimer)
-      debounceTimer = setTimeout(analyze, 500)
+      debounceTimer = setTimeout(() => { void analyze(); }, 500)
     }, 500)
   }
 
@@ -316,10 +316,13 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
           deps.updateMetadata('descriptionPrompted', 'true')
         }
         if (result.branchName && isValidBranchName(result.branchName) && deps.getGitBranch() && !deps.getBranchIsUserDefined() && deps.getParentId()) {
-          try {
-            await deps.renameBranch(deps.getGitBranch()!, result.branchName)
-          } catch (err) {
-            console.error('[analyzer] branch rename failed:', err)
+          const currentBranch = deps.getGitBranch()
+          if (currentBranch) {
+            try {
+              await deps.renameBranch(currentBranch, result.branchName)
+            } catch (err) {
+              console.error('[analyzer] branch rename failed:', err)
+            }
           }
         }
       }
@@ -352,7 +355,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       // Create headless xterm (no DOM attachment needed)
       terminal = new Terminal()
 
-      deps.openTtyStream(ptyId, (event) => {
+      void deps.openTtyStream(ptyId, (event) => {
         switch (event.type) {
           case 'data':
             terminal?.write(event.data)
@@ -373,14 +376,14 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         // Restore scrollback into headless terminal
         if (scrollback) {
           for (const chunk of scrollback) {
-            terminal!.write(chunk)
+            terminal?.write(chunk)
           }
           dataVersion++ // trigger initial analysis from scrollback
         }
 
         // If already exited, don't start polling
         if (exitCode !== undefined) return
-      }).catch((err) => {
+      }).catch((err: unknown) => {
         console.error('[analyzer] failed to open TTY stream:', err)
       })
 
@@ -396,7 +399,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       if (titleGenerated) return
       if (data.includes('\r')) {
         titleGenerated = true
-        generateTitle()
+        void generateTitle()
       }
     },
 
@@ -421,8 +424,8 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       prevAiState = state.aiState
       handleAutoApprove()
       if (wasWorking) {
-        deps.refreshGitInfo().catch(() => {})
-        deps.refreshDiffStatus().catch(() => {})
+        void deps.refreshGitInfo().catch(() => {})
+        void deps.refreshDiffStatus().catch(() => {})
       }
     }
   })

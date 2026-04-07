@@ -27,21 +27,21 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
 
   useEffect(() => {
     if (isOpen) {
-      ssh.getSavedConnections().then(setSavedConnections).catch(console.error)
+      void ssh.getSavedConnections().then(setSavedConnections).catch((e: unknown) => { console.error(e) })
     }
   }, [isOpen, ssh])
 
   if (!isOpen) return null
 
   const connectAndCreateSession = (config: SSHConnectionConfig) => {
-    console.log(`[renderer:ConnectionPicker] Initiating SSH connection to ${config.host}:${config.port} (id=${config.id})`)
+    console.log(`[renderer:ConnectionPicker] Initiating SSH connection to ${config.host}:${String(config.port)} (id=${config.id})`)
 
     // 1. Immediately navigate to connecting view and close modal
     startRemoteConnect(config)
     onClose()
 
     // 2. Fire SSH connection in the background
-    ssh.connect(config, { refreshDaemon }).then(({ info, session }) => {
+    void ssh.connect(config, { refreshDaemon }).then(({ info, session }) => {
       console.log(`[renderer:ConnectionPicker] ssh.connect returned: status=${info.status}, session=${session ? session.id : 'undefined'}`)
 
       if (info.status !== 'connected' || !session) {
@@ -54,7 +54,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
       // 3. Add real session (replaces connecting entry)
       console.log(`[renderer:ConnectionPicker] Adding remote session to store: session=${session.id}`)
       addRemoteSession(session, info)
-    }).catch((err) => {
+    }).catch((err: unknown) => {
       console.error(`[renderer:ConnectionPicker] SSH connection error:`, err)
       setSessionError(config.id, err instanceof Error ? err.message : String(err))
     })
@@ -79,7 +79,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
     setError(null)
     connectAndCreateSession(config)
     // Save connection for future use
-    ssh.saveConnection(config).catch(console.error)
+    void ssh.saveConnection(config).catch((e: unknown) => { console.error(e) })
     // Reset form
     setHost('')
     setUser('')
@@ -168,11 +168,11 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
                     style={smallButtonStyle}
                   >Fill</button>
                   <button
-                    onClick={() => handleConnectSaved(config)}
+                    onClick={() => { handleConnectSaved(config); }}
                     style={smallButtonStyle}
                   >Connect</button>
                   <button
-                    onClick={() => handleRemoveSaved(config.id)}
+                    onClick={() => { void handleRemoveSaved(config.id); }}
                     style={{ ...smallButtonStyle, color: '#f44336' }}
                   >Remove</button>
                 </div>
@@ -187,35 +187,35 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
           <div>
             <label style={labelStyle}>User</label>
             <input
-              value={user} onChange={e => setUser(e.target.value)}
+              value={user} onChange={e => { setUser(e.target.value); }}
               placeholder="username" style={inputStyle} autoFocus
             />
           </div>
           <div>
             <label style={labelStyle}>Host</label>
             <input
-              value={host} onChange={e => setHost(e.target.value)}
+              value={host} onChange={e => { setHost(e.target.value); }}
               placeholder="hostname or IP" style={inputStyle}
             />
           </div>
           <div>
             <label style={labelStyle}>Port</label>
             <input
-              value={port} onChange={e => setPort(e.target.value)}
+              value={port} onChange={e => { setPort(e.target.value); }}
               placeholder="22" style={inputStyle}
             />
           </div>
           <div>
             <label style={labelStyle}>Label (optional)</label>
             <input
-              value={label} onChange={e => setLabel(e.target.value)}
+              value={label} onChange={e => { setLabel(e.target.value); }}
               placeholder="display name" style={inputStyle}
             />
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
             <label style={labelStyle}>Identity File (optional)</label>
             <input
-              value={identityFile} onChange={e => setIdentityFile(e.target.value)}
+              value={identityFile} onChange={e => { setIdentityFile(e.target.value); }}
               placeholder="~/.ssh/id_rsa" style={inputStyle}
             />
           </div>
@@ -225,7 +225,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
         <div style={{ marginBottom: 12 }}>
           <label style={labelStyle}>Port Forwards</label>
           {portForwards.map((pf, i) => (
-            <div key={`${pf.localPort}-${pf.remoteHost}:${pf.remotePort}`} style={{
+            <div key={`${String(pf.localPort)}-${pf.remoteHost}:${String(pf.remotePort)}`} style={{
               display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4,
               fontSize: 12, color: '#cdd6f4'
             }}>
@@ -233,24 +233,24 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
                 localhost:{pf.localPort} → {pf.remoteHost}:{pf.remotePort}
               </span>
               <button
-                onClick={() => handleRemovePortForward(i)}
+                onClick={() => { handleRemovePortForward(i); }}
                 style={{ ...smallButtonStyle, color: '#f44336', padding: '0 6px' }}
               >x</button>
             </div>
           ))}
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
             <input
-              value={pfLocalPort} onChange={e => setPfLocalPort(e.target.value)}
+              value={pfLocalPort} onChange={e => { setPfLocalPort(e.target.value); }}
               placeholder="local port" style={{ ...inputStyle, width: 80 }}
             />
             <span style={{ fontSize: 12, color: '#a6adc8' }}>→</span>
             <input
-              value={pfRemoteHost} onChange={e => setPfRemoteHost(e.target.value)}
+              value={pfRemoteHost} onChange={e => { setPfRemoteHost(e.target.value); }}
               placeholder="remote host" style={{ ...inputStyle, width: 120 }}
             />
             <span style={{ fontSize: 12, color: '#a6adc8' }}>:</span>
             <input
-              value={pfRemotePort} onChange={e => setPfRemotePort(e.target.value)}
+              value={pfRemotePort} onChange={e => { setPfRemotePort(e.target.value); }}
               placeholder="remote port" style={{ ...inputStyle, width: 80 }}
             />
             <button onClick={handleAddPortForward} style={smallButtonStyle}>Add</button>
@@ -261,7 +261,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
           <input
             type="checkbox"
             checked={refreshDaemon}
-            onChange={e => setRefreshDaemon(e.target.checked)}
+            onChange={e => { setRefreshDaemon(e.target.checked); }}
           />
           Refresh remote daemon
         </label>

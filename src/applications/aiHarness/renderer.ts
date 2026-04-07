@@ -41,7 +41,7 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
         analyzer.getState().start(state.ptyId)
       } else {
         // New tab: create PTY then start analyzer
-        ws.createTty(ws.workspace.path, state.sandbox, instance.command).then((ptyId) => {
+        void ws.createTty(ws.workspace.path, state.sandbox, instance.command).then((ptyId) => {
           workspaceStore.getState().updateTabState<AiHarnessState>(tab.id, (s) => ({
             ...s,
             ptyId,
@@ -56,7 +56,7 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
         dispose: () => {
           analyzer.getState().stop()
           // Read current state for up-to-date ptyId (may have been set after onWorkspaceLoad)
-          const current = workspaceStore.getState().workspace?.appStates?.[tab.id]?.state as AiHarnessState | undefined
+          const current = workspaceStore.getState().workspace.appStates[tab.id]?.state as AiHarnessState | undefined
           const ptyId = current?.ptyId ?? state.ptyId
           if (ptyId) {
             deps.terminal.kill(current?.connectionId ?? ws.connectionId, ptyId)

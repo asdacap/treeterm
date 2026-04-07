@@ -157,8 +157,8 @@ export default function BaseTerminal({
   const clipboard = useAppStore((state) => state.clipboard)
 
   // Get existing ptyId from store for reconnection
-  const appState = wsData?.appStates[tabId]
-  const existingPtyId = (appState?.state as BaseTerminalState | undefined)?.ptyId
+  const appState = wsData.appStates[tabId]
+  const existingPtyId = (appState.state as BaseTerminalState | undefined)?.ptyId
   const existingPtyIdRef = useRef(existingPtyId)
   existingPtyIdRef.current = existingPtyId
 
@@ -186,7 +186,7 @@ export default function BaseTerminal({
       terminalRef.current = terminal
       ttyRef.current = tty
 
-      const rawResize = tty.getState().resize
+      const { resize: rawResize } = tty.getState()
       const resize = (cols: number, rows: number) => {
         requestedSize = { cols, rows }
         rawResize(cols, rows)
@@ -214,7 +214,7 @@ export default function BaseTerminal({
       detector = config.disableActivityDetector
         ? null
         : createActivityStateDetector(
-            (state) => setTabState(tabId, state),
+            (state) => { setTabState(tabId, state); },
             config.promptPatterns ? { promptPatterns: config.promptPatterns } : undefined
           )
 
@@ -272,15 +272,15 @@ export default function BaseTerminal({
           case 'exit': {
             console.log(`[${config.logPrefix} ${tabId}] PTY exited with code:`, event.exitCode)
             if (!cancelled) {
-              const currentTab = workspace.getState().workspace?.appStates[tabId]
-              const keepOnExit = (currentTab?.state as BaseTerminalState | undefined)?.keepOnExit
+              const currentTab = workspace.getState().workspace.appStates[tabId]
+              const keepOnExit = (currentTab.state as BaseTerminalState | undefined)?.keepOnExit
               const immediateFailure = event.exitCode !== 0 && (Date.now() - cache.connectedAt) < 1000
               if (immediateFailure) {
-                setOverlay({ message: `Process exited immediately with code ${event.exitCode}`, type: 'error' })
+                setOverlay({ message: `Process exited immediately with code ${String(event.exitCode)}`, type: 'error' })
               } else if (keepOnExit) {
-                terminal.write(`\r\n\x1b[2mProcess exited with exit code ${event.exitCode}\x1b[0m\r\n`)
+                terminal.write(`\r\n\x1b[2mProcess exited with exit code ${String(event.exitCode)}\x1b[0m\r\n`)
               } else {
-                removeTab(tabId)
+                void removeTab(tabId)
               }
             }
             break
@@ -324,13 +324,13 @@ export default function BaseTerminal({
       }
 
       // ResizeObserver — gated on initialResizeDone to prevent resize during mount
-      resizeObserver = new ResizeObserver((entries) => {
-        const entry = entries[0]
-        if (!entry) return
+      resizeObserver = new ResizeObserver(() => {
         if (!initialResizeDone) return
         fitTerminal(terminal, resize)
       })
-      resizeObserver.observe(containerRef.current!)
+      if (containerRef.current) {
+        resizeObserver.observe(containerRef.current)
+      }
 
       // Wait for layout to settle, then fit (only sends resize if size actually changed)
       if (resizeTimeout) clearTimeout(resizeTimeout)
@@ -343,7 +343,9 @@ export default function BaseTerminal({
 
       // Forward terminal input to PTY
       inputDisposable = terminal.onData((data) => {
-        writeChunked(ttyRef.current!.getState(), data)
+        if (ttyRef.current) {
+          writeChunked(ttyRef.current.getState(), data)
+        }
       })
     }
 
@@ -411,7 +413,7 @@ export default function BaseTerminal({
         // Create cache entry — event handler is registered before the stream starts
         const cache: CachedTerminal = {
           terminal,
-          tty: null!,  // set after openTtyStream resolves
+          tty: undefined as unknown as Tty,  // set after openTtyStream resolves
           unsubscribeEvents: () => {},
           mountedHandler: null,
           stripScrollbackClear: config.stripScrollbackClear ?? false,
@@ -419,12 +421,12 @@ export default function BaseTerminal({
           dataVersion: 0,
           onExitUnmounted: (exitCode: number) => {
             console.log(`[${config.logPrefix} ${tabId}] PTY exited while unmounted, code:`, exitCode)
-            const currentTab = workspace.getState().workspace?.appStates[tabId]
-            const keepOnExit = (currentTab?.state as BaseTerminalState | undefined)?.keepOnExit
+            const currentTab = workspace.getState().workspace.appStates[tabId]
+            const keepOnExit = (currentTab.state as BaseTerminalState | undefined)?.keepOnExit
             if (keepOnExit) {
-              terminal.write(`\r\n\x1b[2mProcess exited with exit code ${exitCode}\x1b[0m\r\n`)
+              terminal.write(`\r\n\x1b[2mProcess exited with exit code ${String(exitCode)}\x1b[0m\r\n`)
             } else {
-              workspace.getState().removeTab(tabId)
+              void workspace.getState().removeTab(tabId)
             }
           },
         }
@@ -455,7 +457,7 @@ export default function BaseTerminal({
         attachMountedState(terminal, tty, cache)
       }
 
-      init()
+      void init()
     }
 
     // Cleanup — detach mounted state but keep terminal + TTY subscription alive
@@ -526,7 +528,7 @@ export default function BaseTerminal({
 
   const handlePaste = async () => {
     const text = await clipboard.readText()
-    console.log(`[${config.logPrefix} ${tabId}] paste:`, { clipboardText: text ?? '(empty)', hasTty: !!ttyRef.current })
+    console.log(`[${config.logPrefix} ${tabId}] paste:`, { clipboardText: text || '(empty)', hasTty: !!ttyRef.current })
     if (text && ttyRef.current) {
       writeChunked(ttyRef.current.getState(), text)
     }
@@ -552,7 +554,7 @@ export default function BaseTerminal({
       {overlay && (
         <div
           className={`terminal-overlay terminal-overlay-${overlay.type}`}
-          onClick={() => setOverlay(null)}
+          onClick={() => { setOverlay(null); }}
         >
           {overlay.message}
         </div>
@@ -566,7 +568,7 @@ export default function BaseTerminal({
         <div className="context-menu-item" onClick={handleCopy}>
           Copy
         </div>
-        <div className="context-menu-item" onClick={handlePaste}>
+        <div className="context-menu-item" onClick={() => { void handlePaste(); }}>
           Paste
         </div>
       </ContextMenu>
@@ -586,7 +588,7 @@ export default function BaseTerminal({
       {sizeMismatch && (
         <span
           className="size-mismatch-badge"
-          title={`Requested: ${sizeMismatch.requested.cols}x${sizeMismatch.requested.rows}, Stream: ${sizeMismatch.actual.cols}x${sizeMismatch.actual.rows}`}
+          title={`Requested: ${String(sizeMismatch.requested.cols)}x${String(sizeMismatch.requested.rows)}, Stream: ${String(sizeMismatch.actual.cols)}x${String(sizeMismatch.actual.rows)}`}
         >
           {sizeMismatch.actual.cols}x{sizeMismatch.actual.rows}
         </span>

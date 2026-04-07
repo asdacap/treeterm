@@ -138,8 +138,8 @@ export function CommittedDiffFileTree({
         <div
           key={node.path}
           className={`diff-file-item ${selectedFile === file.path ? 'selected' : ''}`}
-          style={{ paddingLeft: `${depth * 16 + 12}px` }}
-          onClick={() => onSelectFile(file.path)}
+          style={{ paddingLeft: `${String(depth * 16 + 12)}px` }}
+          onClick={() => { onSelectFile(file.path); }}
           title={file.path}
         >
           {getStatusIcon(file.status)}
@@ -157,8 +157,8 @@ export function CommittedDiffFileTree({
       <div key={node.path}>
         <div
           className="diff-tree-dir"
-          style={{ paddingLeft: `${depth * 16 + 12}px` }}
-          onClick={() => toggleDir(node.path)}
+          style={{ paddingLeft: `${String(depth * 16 + 12)}px` }}
+          onClick={() => { toggleDir(node.path); }}
         >
           <span className="diff-tree-chevron">{isExpanded ? '\u25BC' : '\u25B6'}</span>
           <span className="diff-tree-dir-name">{node.name}</span>
@@ -213,8 +213,8 @@ export function UncommittedDiffFileTree({
         <div
           key={node.path}
           className={`diff-file-item ${selectedFile?.path === file.path ? 'selected' : ''}`}
-          style={{ paddingLeft: `${depth * 16 + 12}px` }}
-          onClick={() => onSelectFile(file)}
+          style={{ paddingLeft: `${String(depth * 16 + 12)}px` }}
+          onClick={() => { onSelectFile(file); }}
           title={file.path}
         >
           {getStatusIcon(file.status)}
@@ -242,8 +242,8 @@ export function UncommittedDiffFileTree({
       <div key={node.path}>
         <div
           className="diff-tree-dir"
-          style={{ paddingLeft: `${depth * 16 + 12}px` }}
-          onClick={() => toggleDir(node.path)}
+          style={{ paddingLeft: `${String(depth * 16 + 12)}px` }}
+          onClick={() => { toggleDir(node.path); }}
         >
           <span className="diff-tree-chevron">{isExpanded ? '\u25BC' : '\u25B6'}</span>
           <span className="diff-tree-dir-name">{node.name}</span>

@@ -121,6 +121,7 @@ export interface ReviewState {
   scrollTop?: number
 }
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- intentional marker interface for tab state
 export interface CommentsState {
   // empty - no persisted state needed
 }
@@ -415,6 +416,7 @@ export function createBoundRunActions(raw: RawRunActionsApi, connectionId: strin
   return bindConnectionId<RunActionsApi>(raw, connectionId)
 }
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- intentional marker interface for tab state
 export interface GitHubAppState {
   // empty — reads prInfo from workspace store
 }
@@ -573,7 +575,7 @@ export function isTerminalState(state: unknown): state is TerminalState {
 export function isAiHarnessState(state: unknown): state is AiHarnessState {
   return (
     isTerminalState(state) &&
-    'sandbox' in state &&
+    'sandbox' in (state as unknown as Record<string, unknown>) &&
     typeof (state as AiHarnessState).sandbox === 'object' &&
     (state as AiHarnessState).sandbox !== null
   )

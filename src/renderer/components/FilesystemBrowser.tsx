@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import { useStore } from 'zustand'
 import { FileTree } from './FileTree'
 import { FileViewer } from './FileViewer'
@@ -13,12 +13,12 @@ interface FilesystemBrowserProps {
 export function FilesystemBrowser({
   workspace,
   tabId,
-}: FilesystemBrowserProps): JSX.Element {
+}: FilesystemBrowserProps): React.JSX.Element {
   const { workspace: wsData } = useStore(workspace)
-  const appState = wsData?.appStates[tabId]
-  const state = appState?.state as FilesystemState | undefined
+  const appState = wsData.appStates[tabId]
+  const state = appState.state as FilesystemState | undefined
 
-  if (!appState || !state) {
+  if (!state) {
     return <div className="filesystem-browser-error">Invalid tab</div>
   }
 
@@ -33,7 +33,7 @@ function FilesystemBrowserContent({
   workspace: WorkspaceStore
   tabId: string
   state: FilesystemState
-}): JSX.Element {
+}): React.JSX.Element {
   const { workspace: wsData, updateTabState, reviewComments: reviewCommentStore } = useStore(workspace)
   const git = useGitApi(workspace)
   const { getReviewComments, addReviewComment, deleteReviewComment, updateOutdatedReviewComments } = useStore(reviewCommentStore)
@@ -85,7 +85,7 @@ function FilesystemBrowserContent({
         updateOutdatedReviewComments(hashResult.hash)
       }
     }
-    updateOutdated()
+    void updateOutdated()
   }, [workspacePath, git, updateOutdatedReviewComments, wsData.isGitRepo])
 
   // Clear comment input when selected file changes
@@ -162,7 +162,7 @@ function FilesystemBrowserContent({
           onLineClick={handleLineClick}
           inlineCommentInput={commentInput}
           onCommentSubmit={handleCommentSubmit}
-          onCommentCancel={() => setCommentInput(null)}
+          onCommentCancel={() => { setCommentInput(null); }}
           onCommentDelete={handleCommentDelete}
           scrollToLine={state.scrollToLine}
           onScrollToLineUsed={() => {

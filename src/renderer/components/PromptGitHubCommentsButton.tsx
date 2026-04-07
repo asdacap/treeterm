@@ -1,7 +1,8 @@
+import React from 'react'
 import { useStore } from 'zustand'
 import type { WorkspaceStore } from '../types'
 
-export function PromptGitHubCommentsButton({ workspace }: { workspace: WorkspaceStore }): JSX.Element | null {
+export function PromptGitHubCommentsButton({ workspace }: { workspace: WorkspaceStore }): React.JSX.Element | null {
   const { gitController, promptHarness } = useStore(workspace)
   const { prInfo } = useStore(gitController)
 
@@ -10,10 +11,10 @@ export function PromptGitHubCommentsButton({ workspace }: { workspace: Workspace
   return (
     <button
       className="review-comments-button"
-      onClick={() => promptHarness('Pull Github comment and address')}
+      onClick={() => { void promptHarness('Pull Github comment and address') }}
       title="Prompt AI to pull and address GitHub PR comments"
     >
-      Address PR Comments ({prInfo.unresolvedCount})
+      Address PR Comments ({String(prInfo.unresolvedCount)})
     </button>
   )
 }

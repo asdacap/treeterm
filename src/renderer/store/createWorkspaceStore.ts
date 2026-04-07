@@ -139,7 +139,7 @@ export interface WorkspaceStoreState {
 export type WorkspaceStore = StoreApi<WorkspaceStoreState>
 
 function generateTabId(): string {
-  return `tab-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+  return `tab-${String(Date.now())}-${Math.random().toString(36).slice(2, 9)}`
 }
 
 export function createWorkspaceStore(
@@ -156,14 +156,14 @@ export function createWorkspaceStore(
   }
 
   // Closure-level tab ref registry (non-serialized per-tab runtime state)
-  const tabRefs: Record<string, AppRef> = {}
+  const tabRefs = new Map<string, AppRef>()
 
   // Cached xterm.js Terminal instances for BaseTerminal-derived tabs only
   // (Terminal, AiHarness). Survives mount/unmount; disposed on removeTab.
-  const cachedTerminals: Record<string, CachedTerminal> = {}
+  const cachedTerminals = new Map<string, CachedTerminal>()
 
   // Write-only PTY handles, cached per workspace (separate stream from terminal events)
-  const ttyWriters: Record<string, TtyWriter> = {}
+  const ttyWriters = new Map<string, TtyWriter>()
 
   const gitController = createGitControllerStore({
     git: deps.git,
@@ -176,7 +176,7 @@ export function createWorkspaceStore(
 
   const reviewComments = createReviewCommentStore({
     getMetadata: () => store.getState().workspace.metadata,
-    updateMetadata: (key, value) => store.getState().updateMetadata(key, value),
+    updateMetadata: (key, value) => { store.getState().updateMetadata(key, value); },
   })
 
   store = createStore<WorkspaceStoreState>()((set, get) => ({
@@ -186,38 +186,38 @@ export function createWorkspaceStore(
     reviewComments,
 
     initTab: (tabId: string): void => {
-      if (tabRefs[tabId]) return
+      if (tabRefs.has(tabId)) return
       const appState = get().workspace.appStates[tabId]
       if (!appState) return
       const app = deps.appRegistry.get(appState.applicationId)
       if (!app) return
-      tabRefs[tabId] = app.onWorkspaceLoad({ ...appState, id: tabId }, store)
+      tabRefs.set(tabId, app.onWorkspaceLoad({ ...appState, id: tabId }, store))
     },
 
-    getTabRef: (tabId: string): AppRef | null => tabRefs[tabId] ?? null,
+    getTabRef: (tabId: string): AppRef | null => tabRefs.get(tabId) ?? null,
 
     disposeTabResources: (tabId: string): void => {
-      const ref = tabRefs[tabId]
+      const ref = tabRefs.get(tabId)
       if (ref) {
         ref.dispose()
-        delete tabRefs[tabId]
+        tabRefs.delete(tabId)
       }
       get().disposeCachedTerminal(tabId)
     },
 
-    getCachedTerminal: (tabId: string): CachedTerminal | null => cachedTerminals[tabId] ?? null,
-    setCachedTerminal: (tabId: string, entry: CachedTerminal): void => { cachedTerminals[tabId] = entry },
+    getCachedTerminal: (tabId: string): CachedTerminal | null => cachedTerminals.get(tabId) ?? null,
+    setCachedTerminal: (tabId: string, entry: CachedTerminal): void => { cachedTerminals.set(tabId, entry) },
     disposeCachedTerminal: (tabId: string): void => {
-      const cached = cachedTerminals[tabId]
+      const cached = cachedTerminals.get(tabId)
       if (cached) {
         cached.mountedHandler = null
         cached.unsubscribeEvents()
         cached.terminal.dispose()
-        delete cachedTerminals[tabId]
+        cachedTerminals.delete(tabId)
       }
     },
     disposeAllCachedTerminals: (): void => {
-      for (const tabId of Object.keys(cachedTerminals)) {
+      for (const tabId of Array.from(cachedTerminals.keys())) {
         get().disposeCachedTerminal(tabId)
       }
     },
@@ -225,18 +225,18 @@ export function createWorkspaceStore(
     initAnalyzer: (tabId: string): Analyzer => createAnalyzerStore(tabId, {
       getSettings: deps.getSettings,
       llm: deps.llm,
-      updateMetadata: (key, value) => get().updateMetadata(key, value),
-      getDisplayName: () => get().workspace.metadata?.displayName,
-      getDescription: () => get().workspace.metadata?.description,
+      updateMetadata: (key, value) => { get().updateMetadata(key, value); },
+      getDisplayName: () => get().workspace.metadata.displayName,
+      getDescription: () => get().workspace.metadata.description,
       setActivityTabState: deps.setActivityTabState,
       openTtyStream: deps.openTtyStream,
       cwd: get().workspace.path,
       renameBranch: async (oldName, newName) => {
-        await deps.git.renameBranch(get().workspace.gitRootPath!, oldName, newName)
+        await deps.git.renameBranch(get().workspace.gitRootPath ?? '', oldName, newName)
         await deps.refreshGitInfo(id)
       },
       getGitBranch: () => get().workspace.gitBranch,
-      getBranchIsUserDefined: () => get().workspace.metadata?.branchIsUserDefined === 'true',
+      getBranchIsUserDefined: () => get().workspace.metadata.branchIsUserDefined === 'true',
       getParentId: () => get().workspace.parentId,
       refreshGitInfo: () => deps.refreshGitInfo(id),
       refreshDiffStatus: () => gitController.getState().refreshDiffStatus(),
@@ -246,13 +246,13 @@ export function createWorkspaceStore(
       deps.createTty(cwd, sandbox, startupCommand),
 
     getTtyWriter: async (ptyId: string): Promise<TtyWriter> => {
-      const cached = ttyWriters[ptyId]
+      const cached = ttyWriters.get(ptyId)
       if (cached) return cached
       let disconnected = false
       const { tty } = await deps.openTtyStream(ptyId, (event) => {
         if (event.type === 'end' || event.type === 'error') {
           disconnected = true
-          delete ttyWriters[ptyId]
+          ttyWriters.delete(ptyId)
         }
       })
       const state = tty.getState()
@@ -266,7 +266,7 @@ export function createWorkspaceStore(
           state.kill()
         },
       }
-      ttyWriters[ptyId] = writer
+      ttyWriters.set(ptyId, writer)
       return writer
     },
 
@@ -288,7 +288,7 @@ export function createWorkspaceStore(
             ...ws.appStates,
             [tabId]: {
               applicationId,
-              title: `${app.name} ${existingCount + 1}`,
+              title: `${app.name} ${String(existingCount + 1)}`,
               state: initialState
                 ? { ...(app.createInitialState() || {}), ...initialState }
                 : app.createInitialState()
@@ -303,19 +303,19 @@ export function createWorkspaceStore(
       return tabId
     },
 
-    removeTab: async (tabId: string): Promise<void> => {
+    removeTab: (tabId: string): Promise<void> => {
       const ws = get().workspace
       const appState = ws.appStates[tabId]
-      if (!appState) return
+      if (!appState) return Promise.resolve()
 
       const app = deps.appRegistry.get(appState.applicationId)
-      if (!app) return
-      if (!app.canClose) return
+      if (!app) return Promise.resolve()
+      if (!app.canClose) return Promise.resolve()
 
       get().disposeTabResources(tabId)
 
       updateWorkspace((ws) => {
-        const { [tabId]: removed, ...remainingStates } = ws.appStates
+        const { [tabId]: _removed, ...remainingStates } = ws.appStates
         const remainingIds = Object.keys(remainingStates)
         let newActiveTabId = ws.activeTabId
 
@@ -334,6 +334,7 @@ export function createWorkspaceStore(
       })
 
       deps.syncToDaemon()
+      return Promise.resolve()
     },
 
     setActiveTab: (tabId: string): void => {
@@ -342,26 +343,22 @@ export function createWorkspaceStore(
     },
 
     focusTabId: null,
-    requestFocus: (): void => set({ focusTabId: get().workspace.activeTabId }),
-    clearFocusRequest: (): void => set({ focusTabId: null }),
+    requestFocus: (): void => { set({ focusTabId: get().workspace.activeTabId }); },
+    clearFocusRequest: (): void => { set({ focusTabId: null }); },
 
     updateTabTitle: (tabId: string, title: string): void => {
-      updateWorkspace((ws) => {
-        if (!ws.appStates[tabId]) return ws
-        return {
-          ...ws,
-          appStates: {
-            ...ws.appStates,
-            [tabId]: { ...ws.appStates[tabId], title }
-          }
+      updateWorkspace((ws) => ({
+        ...ws,
+        appStates: {
+          ...ws.appStates,
+          [tabId]: { ...ws.appStates[tabId], title }
         }
-      })
+      }))
       deps.syncToDaemon()
     },
 
     updateTabState: <T,>(tabId: string, updater: (state: T) => T): void => {
       updateWorkspace((ws) => {
-        if (!ws.appStates[tabId]) return ws
         const appState = ws.appStates[tabId]
         return {
           ...ws,
@@ -373,7 +370,7 @@ export function createWorkspaceStore(
       })
       // Only sync if the tab state contains a ptyId (persisted state)
       const appState = get().workspace.appStates[tabId]
-      if (appState?.state && (appState.state as { ptyId?: string }).ptyId) {
+      if (appState.state && (appState.state as { ptyId?: string }).ptyId) {
         deps.syncToDaemon()
       }
     },
@@ -389,7 +386,7 @@ export function createWorkspaceStore(
     updateSettings: (newSettings: Partial<WorktreeSettings>): void => {
       updateWorkspace((ws) => ({
         ...ws,
-        settings: { ...(ws.settings ?? {}), ...newSettings } as WorktreeSettings
+        settings: { ...ws.settings, ...newSettings } as WorktreeSettings
       }))
       deps.syncToDaemon()
     },

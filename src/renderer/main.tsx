@@ -11,7 +11,7 @@ import './styles/flexlayout-overrides.css'
 window.electron.app.onReady(() => {
   const e = window.electron
 
-  useAppStore.getState().initialize({
+  void useAppStore.getState().initialize({
     platform: e.platform,
     terminal: e.terminal,
     git: e.git,
@@ -32,7 +32,9 @@ window.electron.app.onReady(() => {
     getInitialWorkspace: e.getInitialWorkspace,
   })
 
-  ReactDOM.createRoot(document.getElementById('root')!).render(
+  const rootEl = document.getElementById('root')
+  if (!rootEl) throw new Error('Root element not found')
+  ReactDOM.createRoot(rootEl).render(
     <React.StrictMode>
       <App />
     </React.StrictMode>

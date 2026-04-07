@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import Editor, { OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
@@ -74,7 +74,7 @@ export function FileViewer({
   onScrollToLineUsed,
   initialScrollTop,
   onScrollPositionChange
-}: FileViewerProps): JSX.Element {
+}: FileViewerProps): React.JSX.Element {
   const { workspace: wsData, addTab, connectionId } = useStore(workspace)
   const filesystem = useFilesystemApi(workspace)
   const execApi = useExecApi(workspace)
@@ -85,14 +85,14 @@ export function FileViewer({
     error: null
   })
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
-  const lastScrollTopRef = useRef<number>(initialScrollTop ?? 0)
-  const decorationsRef = useRef<string[]>([])
+  const lastScrollTopRef = useRef(initialScrollTop ?? 0)
+  const decorationsRef = useRef<editor.IEditorDecorationsCollection | null>(null)
   const viewZoneIdRef = useRef<string | null>(null)
   const [commentContainer, setCommentContainer] = useState<HTMLDivElement | null>(null)
   const [viewMode, setViewMode] = useState<'source' | 'preview'>(onLineClick ? 'source' : 'preview')
   // Inline comment display zones
-  const commentDisplayZonesRef = useRef<Map<string, { zoneId: string; container: HTMLDivElement }>>(new Map())
-  const [commentDisplayContainers, setCommentDisplayContainers] = useState<Map<string, { container: HTMLDivElement; comments: ReviewComment[] }>>(new Map())
+  const commentDisplayZonesRef = useRef(new Map<string, { zoneId: string; container: HTMLDivElement }>())
+  const [commentDisplayContainers, setCommentDisplayContainers] = useState(new Map<string, { container: HTMLDivElement; comments: ReviewComment[] }>())
 
   // Reset file state and view mode when file path or onLineClick changes
   const [prevFilePath, setPrevFilePath] = useState(filePath)
@@ -135,12 +135,12 @@ export function FileViewer({
           content: '',
           language: 'plaintext',
           loading: false,
-          error: `Error loading file: ${err}`
+          error: `Error loading file: ${err instanceof Error ? err.message : String(err)}`
         })
       }
     }
 
-    loadFile()
+    void loadFile()
   }, [wsData.path, filePath, filesystem])
 
   const handleEditorMount: OnMount = useCallback((editor, monaco) => {
@@ -151,7 +151,7 @@ export function FileViewer({
     })
 
     if (onLineClick) {
-      editor.onMouseDown((e) => {
+      editor.onMouseDown((e: { target: { type: number; position?: { lineNumber: number } | null } }) => {
         if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
           const lineNumber = e.target.position?.lineNumber
           if (lineNumber) {
@@ -193,10 +193,9 @@ export function FileViewer({
     if (!editorRef.current) return
 
     // Clear old decorations
-    decorationsRef.current = editorRef.current.deltaDecorations(
-      decorationsRef.current,
-      []
-    )
+    if (decorationsRef.current) {
+      decorationsRef.current.clear()
+    }
 
     if (!comments.length) return
 
@@ -214,10 +213,7 @@ export function FileViewer({
       }
     }))
 
-    decorationsRef.current = editorRef.current.deltaDecorations(
-      [],
-      decorations
-    )
+    decorationsRef.current = editorRef.current.createDecorationsCollection(decorations)
   }, [comments])
 
   // Manage inline comment display view zones
@@ -255,7 +251,7 @@ export function FileViewer({
 
       const container = document.createElement('div')
       container.className = 'inline-comment-zone inline-comment-display-zone'
-      container.addEventListener('mousedown', (e) => e.stopPropagation())
+      container.addEventListener('mousedown', (e) => { e.stopPropagation(); })
 
       ed.changeViewZones((accessor: editor.IViewZoneChangeAccessor) => {
         const zoneId = accessor.addZone({
@@ -310,7 +306,7 @@ export function FileViewer({
 
     const container = document.createElement('div')
     container.className = 'inline-comment-zone'
-    container.addEventListener('mousedown', (e) => e.stopPropagation())
+    container.addEventListener('mousedown', (e) => { e.stopPropagation(); })
     setCommentContainer(container)
 
     editorRef.current.changeViewZones((accessor) => {
@@ -388,7 +384,7 @@ export function FileViewer({
           {isMarkdown && (
             <button
               className="file-viewer-toggle-btn"
-              onClick={() => setViewMode(v => v === 'preview' ? 'source' : 'preview')}
+              onClick={() => { setViewMode(v => v === 'preview' ? 'source' : 'preview'); }}
               title={viewMode === 'preview' ? 'View source' : 'View preview'}
             >
               {viewMode === 'preview' ? '</> Source' : 'Preview'}

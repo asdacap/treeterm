@@ -37,13 +37,13 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
   const { settings: savedSettings, saveSettings } = useSettingsStore()
   const applications = useAppStore((s) => s.applications)
   const allApplications = Object.values(applications)
-  const [localSettings, setLocalSettings] = useState<Settings>(savedSettings)
+  const [localSettings, setLocalSettings] = useState(savedSettings)
   const [activeTab, setActiveTab] = useState<TabId>('terminal')
   const [recording, setRecording] = useState<RecordingState>(null)
   const [sandboxAvailable, setSandboxAvailable] = useState<boolean | null>(null)
 
   useEffect(() => {
-    sandbox.isAvailable().then(setSandboxAvailable).catch((error) => {
+    void sandbox.isAvailable().then(setSandboxAvailable).catch((error: unknown) => {
       console.error('[SettingsDialog] sandbox availability check failed:', error)
       setSandboxAvailable(false)
     })
@@ -95,16 +95,14 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
       parts.push(key.length === 1 ? key.toUpperCase() : key)
       const keybinding = parts.join('+')
 
-      if (recording.type === 'prefixKey') {
-        setLocalSettings((prev) => ({
-          ...prev,
-          prefixMode: {
-            ...prev.prefixMode,
-            prefixKey: keybinding
-          }
-        }))
-        setRecording(null)
-      }
+      setLocalSettings((prev) => ({
+        ...prev,
+        prefixMode: {
+          ...prev.prefixMode,
+          prefixKey: keybinding
+        }
+      }))
+      setRecording(null)
 
     },
     [recording]
@@ -116,7 +114,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
     <div className="dialog-overlay" onClick={onClose}>
       <div
         className="settings-dialog"
-        onClick={(e) => e.stopPropagation()}
+        onClick={(e) => { e.stopPropagation(); }}
         onKeyDown={handleKeyDown}
       >
         <div className="settings-dialog-header">
@@ -132,7 +130,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
               <button
                 key={tab.id}
                 className={`settings-tab ${activeTab === tab.id ? 'active' : ''}`}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => { setActiveTab(tab.id); }}
               >
                 {tab.label}
               </button>
@@ -148,10 +146,10 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     className="settings-select"
                     value={localSettings.globalDefaultApplicationId}
                     onChange={(e) =>
-                      setLocalSettings((prev) => ({
+                      { setLocalSettings((prev) => ({
                         ...prev,
                         globalDefaultApplicationId: e.target.value
-                      }))
+                      })); }
                     }
                   >
                     {allApplications.map((app) => (
@@ -179,10 +177,10 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     min={8}
                     max={32}
                     onChange={(e) =>
-                      setLocalSettings((prev) => ({
+                      { setLocalSettings((prev) => ({
                         ...prev,
                         terminal: { ...prev.terminal, fontSize: parseInt(e.target.value) || 14 }
-                      }))
+                      })); }
                     }
                   />
                 </div>
@@ -194,10 +192,10 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     className="settings-input"
                     value={localSettings.terminal.fontFamily}
                     onChange={(e) =>
-                      setLocalSettings((prev) => ({
+                      { setLocalSettings((prev) => ({
                         ...prev,
                         terminal: { ...prev.terminal, fontFamily: e.target.value }
-                      }))
+                      })); }
                     }
                   />
                 </div>
@@ -208,13 +206,13 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     className="settings-select"
                     value={localSettings.terminal.cursorStyle}
                     onChange={(e) =>
-                      setLocalSettings((prev) => ({
+                      { setLocalSettings((prev) => ({
                         ...prev,
                         terminal: {
                           ...prev.terminal,
                           cursorStyle: e.target.value as 'block' | 'underline' | 'bar'
                         }
-                      }))
+                      })); }
                     }
                   >
                     <option value="block">Block</option>
@@ -229,10 +227,10 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                       type="checkbox"
                       checked={localSettings.terminal.cursorBlink}
                       onChange={(e) =>
-                        setLocalSettings((prev) => ({
+                        { setLocalSettings((prev) => ({
                           ...prev,
                           terminal: { ...prev.terminal, cursorBlink: e.target.checked }
-                        }))
+                        })); }
                       }
                     />
                     Cursor Blink
@@ -245,10 +243,10 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                       type="checkbox"
                       checked={localSettings.terminal.showRawChars}
                       onChange={(e) =>
-                        setLocalSettings((prev) => ({
+                        { setLocalSettings((prev) => ({
                           ...prev,
                           terminal: { ...prev.terminal, showRawChars: e.target.checked }
-                        }))
+                        })); }
                       }
                     />
                     Show Raw Characters (Debug)
@@ -277,10 +275,10 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                       disabled={!sandboxAvailable}
                       checked={localSettings.sandbox.enabledByDefault}
                       onChange={(e) =>
-                        setLocalSettings((prev) => ({
+                        { setLocalSettings((prev) => ({
                           ...prev,
                           sandbox: { ...prev.sandbox, enabledByDefault: e.target.checked }
-                        }))
+                        })); }
                       }
                     />
                     Enable Sandbox by Default
@@ -297,10 +295,10 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                       disabled={!sandboxAvailable}
                       checked={localSettings.sandbox.allowNetworkByDefault}
                       onChange={(e) =>
-                        setLocalSettings((prev) => ({
+                        { setLocalSettings((prev) => ({
                           ...prev,
                           sandbox: { ...prev.sandbox, allowNetworkByDefault: e.target.checked }
-                        }))
+                        })); }
                       }
                     />
                     Allow Network Access by Default
@@ -328,7 +326,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                           value={inst.icon}
                           maxLength={2}
                           onChange={(e) =>
-                            setLocalSettings((prev) => ({
+                            { setLocalSettings((prev) => ({
                               ...prev,
                               aiHarness: {
                                 ...prev.aiHarness,
@@ -336,7 +334,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                                   i === index ? { ...a, icon: e.target.value } : a
                                 )
                               }
-                            }))
+                            })); }
                           }
                         />
                       </div>
@@ -347,7 +345,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                           value={inst.name}
                           placeholder="Name (e.g., Claude)"
                           onChange={(e) =>
-                            setLocalSettings((prev) => ({
+                            { setLocalSettings((prev) => ({
                               ...prev,
                               aiHarness: {
                                 ...prev.aiHarness,
@@ -355,7 +353,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                                   i === index ? { ...a, name: e.target.value } : a
                                 )
                               }
-                            }))
+                            })); }
                           }
                         />
                         <input
@@ -364,7 +362,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                           value={inst.command}
                           placeholder="Command (e.g., claude, cline, opencode)"
                           onChange={(e) =>
-                            setLocalSettings((prev) => ({
+                            { setLocalSettings((prev) => ({
                               ...prev,
                               aiHarness: {
                                 ...prev.aiHarness,
@@ -372,7 +370,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                                   i === index ? { ...a, command: e.target.value } : a
                                 )
                               }
-                            }))
+                            })); }
                           }
                         />
                         <input
@@ -381,7 +379,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                           value={inst.backgroundColor}
                           placeholder="Background color (e.g., #1a1a24)"
                           onChange={(e) =>
-                            setLocalSettings((prev) => ({
+                            { setLocalSettings((prev) => ({
                               ...prev,
                               aiHarness: {
                                 ...prev.aiHarness,
@@ -389,7 +387,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                                   i === index ? { ...a, backgroundColor: e.target.value } : a
                                 )
                               }
-                            }))
+                            })); }
                           }
                         />
                         <div className="ai-harness-options">
@@ -398,7 +396,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                               type="checkbox"
                               checked={inst.isDefault}
                               onChange={(e) =>
-                                setLocalSettings((prev) => ({
+                                { setLocalSettings((prev) => ({
                                   ...prev,
                                   aiHarness: {
                                     ...prev.aiHarness,
@@ -406,7 +404,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                                       i === index ? { ...a, isDefault: e.target.checked } : a
                                     )
                                   }
-                                }))
+                                })); }
                               }
                             />
                             Start by Default
@@ -417,7 +415,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                               disabled={!sandboxAvailable}
                               checked={inst.enableSandbox}
                               onChange={(e) =>
-                                setLocalSettings((prev) => ({
+                                { setLocalSettings((prev) => ({
                                   ...prev,
                                   aiHarness: {
                                     ...prev.aiHarness,
@@ -425,7 +423,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                                       i === index ? { ...a, enableSandbox: e.target.checked } : a
                                     )
                                   }
-                                }))
+                                })); }
                               }
                             />
                             Enable Sandbox
@@ -436,7 +434,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                               disabled={!sandboxAvailable || !inst.enableSandbox}
                               checked={inst.allowNetwork}
                               onChange={(e) =>
-                                setLocalSettings((prev) => ({
+                                { setLocalSettings((prev) => ({
                                   ...prev,
                                   aiHarness: {
                                     ...prev.aiHarness,
@@ -444,7 +442,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                                       i === index ? { ...a, allowNetwork: e.target.checked } : a
                                     )
                                   }
-                                }))
+                                })); }
                               }
                             />
                             Allow Network
@@ -454,7 +452,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                               type="checkbox"
                               checked={inst.disableScrollbar}
                               onChange={(e) =>
-                                setLocalSettings((prev) => ({
+                                { setLocalSettings((prev) => ({
                                   ...prev,
                                   aiHarness: {
                                     ...prev.aiHarness,
@@ -462,7 +460,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                                       i === index ? { ...a, disableScrollbar: e.target.checked } : a
                                     )
                                   }
-                                }))
+                                })); }
                               }
                             />
                             Disable Scrollbar
@@ -472,7 +470,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                               type="checkbox"
                               checked={inst.stripScrollbackClear}
                               onChange={(e) =>
-                                setLocalSettings((prev) => ({
+                                { setLocalSettings((prev) => ({
                                   ...prev,
                                   aiHarness: {
                                     ...prev.aiHarness,
@@ -480,7 +478,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                                       i === index ? { ...a, stripScrollbackClear: e.target.checked } : a
                                     )
                                   }
-                                }))
+                                })); }
                               }
                             />
                             Strip Scrollback Clear
@@ -490,13 +488,13 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                       <button
                         className="application-delete"
                         onClick={() =>
-                          setLocalSettings((prev) => ({
+                          { setLocalSettings((prev) => ({
                             ...prev,
                             aiHarness: {
                               ...prev.aiHarness,
                               instances: prev.aiHarness.instances.filter((_, i) => i !== index)
                             }
-                          }))
+                          })); }
                         }
                       >
                         Delete
@@ -507,7 +505,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                 <button
                   className="settings-btn add-app"
                   onClick={() => {
-                    const newId = `ai-${Date.now()}`
+                    const newId = `ai-${String(Date.now())}`
                     setLocalSettings((prev) => ({
                       ...prev,
                       aiHarness: {
@@ -557,7 +555,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                           value={inst.icon}
                           maxLength={2}
                           onChange={(e) =>
-                            setLocalSettings((prev) => ({
+                            { setLocalSettings((prev) => ({
                               ...prev,
                               customRunner: {
                                 ...prev.customRunner,
@@ -565,7 +563,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                                   i === index ? { ...a, icon: e.target.value } : a
                                 )
                               }
-                            }))
+                            })); }
                           }
                         />
                       </div>
@@ -576,7 +574,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                           value={inst.name}
                           placeholder="Name (e.g., Rider)"
                           onChange={(e) =>
-                            setLocalSettings((prev) => ({
+                            { setLocalSettings((prev) => ({
                               ...prev,
                               customRunner: {
                                 ...prev.customRunner,
@@ -584,7 +582,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                                   i === index ? { ...a, name: e.target.value } : a
                                 )
                               }
-                            }))
+                            })); }
                           }
                         />
                         <input
@@ -593,7 +591,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                           value={inst.commandTemplate}
                           placeholder="Command template (e.g., rider {{workspace_path}})"
                           onChange={(e) =>
-                            setLocalSettings((prev) => ({
+                            { setLocalSettings((prev) => ({
                               ...prev,
                               customRunner: {
                                 ...prev.customRunner,
@@ -601,7 +599,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                                   i === index ? { ...a, commandTemplate: e.target.value } : a
                                 )
                               }
-                            }))
+                            })); }
                           }
                         />
                       </div>
@@ -610,7 +608,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                           type="checkbox"
                           checked={inst.isDefault}
                           onChange={(e) =>
-                            setLocalSettings((prev) => ({
+                            { setLocalSettings((prev) => ({
                               ...prev,
                               customRunner: {
                                 ...prev.customRunner,
@@ -618,7 +616,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                                   i === index ? { ...a, isDefault: e.target.checked } : a
                                 )
                               }
-                            }))
+                            })); }
                           }
                         />
                         Default
@@ -626,13 +624,13 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                       <button
                         className="application-delete"
                         onClick={() =>
-                          setLocalSettings((prev) => ({
+                          { setLocalSettings((prev) => ({
                             ...prev,
                             customRunner: {
                               ...prev.customRunner,
                               instances: prev.customRunner.instances.filter((_, i) => i !== index)
                             }
-                          }))
+                          })); }
                         }
                       >
                         Delete
@@ -643,7 +641,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                 <button
                   className="settings-btn add-app"
                   onClick={() => {
-                    const newId = `runner-${Date.now()}`
+                    const newId = `runner-${String(Date.now())}`
                     setLocalSettings((prev) => ({
                       ...prev,
                       customRunner: {
@@ -679,10 +677,10 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     className="settings-input"
                     value={localSettings.llm.baseUrl}
                     onChange={(e) =>
-                      setLocalSettings((prev) => ({
+                      { setLocalSettings((prev) => ({
                         ...prev,
                         llm: { ...prev.llm, baseUrl: e.target.value }
-                      }))
+                      })); }
                     }
                     placeholder="https://openrouter.ai/api/v1"
                   />
@@ -698,10 +696,10 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     className="settings-input"
                     value={localSettings.llm.apiKey}
                     onChange={(e) =>
-                      setLocalSettings((prev) => ({
+                      { setLocalSettings((prev) => ({
                         ...prev,
                         llm: { ...prev.llm, apiKey: e.target.value }
-                      }))
+                      })); }
                     }
                     placeholder="sk-..."
                   />
@@ -717,10 +715,10 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     className="settings-input"
                     value={localSettings.llm.model}
                     onChange={(e) =>
-                      setLocalSettings((prev) => ({
+                      { setLocalSettings((prev) => ({
                         ...prev,
                         llm: { ...prev.llm, model: e.target.value }
-                      }))
+                      })); }
                     }
                     placeholder="gpt-4o"
                   />
@@ -738,10 +736,10 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     className="settings-input"
                     value={localSettings.terminalAnalyzer.model}
                     onChange={(e) =>
-                      setLocalSettings((prev) => ({
+                      { setLocalSettings((prev) => ({
                         ...prev,
                         terminalAnalyzer: { ...prev.terminalAnalyzer, model: e.target.value }
-                      }))
+                      })); }
                     }
                     placeholder="openai/gpt-oss-safeguard-20b"
                   />
@@ -757,10 +755,10 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     rows={4}
                     value={localSettings.terminalAnalyzer.systemPrompt}
                     onChange={(e) =>
-                      setLocalSettings((prev) => ({
+                      { setLocalSettings((prev) => ({
                         ...prev,
                         terminalAnalyzer: { ...prev.terminalAnalyzer, systemPrompt: e.target.value }
-                      }))
+                      })); }
                     }
                     style={{ resize: 'vertical', fontFamily: 'inherit' }}
                   />
@@ -770,10 +768,10 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                   <button
                     className="settings-reset-btn"
                     onClick={() =>
-                      setLocalSettings((prev) => ({
+                      { setLocalSettings((prev) => ({
                         ...prev,
                         terminalAnalyzer: { ...prev.terminalAnalyzer, systemPrompt: defaultSettings.terminalAnalyzer.systemPrompt }
-                      }))
+                      })); }
                     }
                   >
                     Reset to default
@@ -787,10 +785,10 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     rows={3}
                     value={localSettings.terminalAnalyzer.titleSystemPrompt}
                     onChange={(e) =>
-                      setLocalSettings((prev) => ({
+                      { setLocalSettings((prev) => ({
                         ...prev,
                         terminalAnalyzer: { ...prev.terminalAnalyzer, titleSystemPrompt: e.target.value }
-                      }))
+                      })); }
                     }
                     style={{ resize: 'vertical', fontFamily: 'inherit' }}
                   />
@@ -800,10 +798,10 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                   <button
                     className="settings-reset-btn"
                     onClick={() =>
-                      setLocalSettings((prev) => ({
+                      { setLocalSettings((prev) => ({
                         ...prev,
                         terminalAnalyzer: { ...prev.terminalAnalyzer, titleSystemPrompt: defaultSettings.terminalAnalyzer.titleSystemPrompt }
-                      }))
+                      })); }
                     }
                   >
                     Reset to default
@@ -817,13 +815,13 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     className="settings-input"
                     value={localSettings.terminalAnalyzer.safePaths.join(', ')}
                     onChange={(e) =>
-                      setLocalSettings((prev) => ({
+                      { setLocalSettings((prev) => ({
                         ...prev,
                         terminalAnalyzer: {
                           ...prev.terminalAnalyzer,
                           safePaths: e.target.value.split(',').map((s) => s.trim()).filter(Boolean)
                         }
-                      }))
+                      })); }
                     }
                     placeholder="/tmp"
                   />
@@ -841,10 +839,10 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     max={100}
                     value={localSettings.terminalAnalyzer.bufferLines}
                     onChange={(e) =>
-                      setLocalSettings((prev) => ({
+                      { setLocalSettings((prev) => ({
                         ...prev,
                         terminalAnalyzer: { ...prev.terminalAnalyzer, bufferLines: parseInt(e.target.value) || 10 }
-                      }))
+                      })); }
                     }
                   />
                   <p className="settings-hint">
@@ -858,10 +856,10 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     <select
                       value={localSettings.terminalAnalyzer.reasoningEffort}
                       onChange={(e) =>
-                        setLocalSettings((prev) => ({
+                        { setLocalSettings((prev) => ({
                           ...prev,
                           terminalAnalyzer: { ...prev.terminalAnalyzer, reasoningEffort: e.target.value as ReasoningEffort }
-                        }))
+                        })); }
                       }
                     >
                       <option value="off">Off</option>
@@ -885,13 +883,13 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     className="settings-select"
                     value={localSettings.appearance.theme}
                     onChange={(e) =>
-                      setLocalSettings((prev) => ({
+                      { setLocalSettings((prev) => ({
                         ...prev,
                         appearance: {
                           ...prev.appearance,
                           theme: e.target.value as 'dark' | 'light' | 'system'
                         }
-                      }))
+                      })); }
                     }
                   >
                     <option value="dark">Dark</option>
@@ -910,9 +908,9 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                   <button
                     className={`settings-keybinding ${recording?.type === 'prefixKey' ? 'recording' : ''}`}
                     onClick={() =>
-                      setRecording(
+                      { setRecording(
                         recording?.type === 'prefixKey' ? null : { type: 'prefixKey' }
-                      )
+                      ); }
                     }
                   >
                     {recording?.type === 'prefixKey'
@@ -934,13 +932,13 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     max={5000}
                     step={100}
                     onChange={(e) =>
-                      setLocalSettings((prev) => ({
+                      { setLocalSettings((prev) => ({
                         ...prev,
                         prefixMode: {
                           ...prev.prefixMode,
                           timeout: parseInt(e.target.value) || 1500
                         }
-                      }))
+                      })); }
                     }
                   />
                   <p className="settings-hint">
@@ -962,11 +960,11 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     <button
                       className={`settings-keybinding prefix-key-btn ${recording?.type === 'keybinding' && recording.action === key ? 'recording' : ''}`}
                       onClick={() =>
-                        setRecording(
+                        { setRecording(
                           recording?.type === 'keybinding' && recording.action === key
                             ? null
                             : { type: 'keybinding', action: key }
-                        )
+                        ); }
                       }
                     >
                       {recording?.type === 'keybinding' && recording.action === key
@@ -997,7 +995,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                           value={inst.icon}
                           maxLength={2}
                           onChange={(e) =>
-                            setLocalSettings((prev) => ({
+                            { setLocalSettings((prev) => ({
                               ...prev,
                               terminal: {
                                 ...prev.terminal,
@@ -1005,7 +1003,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                                   i === index ? { ...a, icon: e.target.value } : a
                                 )
                               }
-                            }))
+                            })); }
                           }
                         />
                       </div>
@@ -1016,7 +1014,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                           value={inst.name}
                           placeholder="Name"
                           onChange={(e) =>
-                            setLocalSettings((prev) => ({
+                            { setLocalSettings((prev) => ({
                               ...prev,
                               terminal: {
                                 ...prev.terminal,
@@ -1024,7 +1022,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                                   i === index ? { ...a, name: e.target.value } : a
                                 )
                               }
-                            }))
+                            })); }
                           }
                         />
                         <input
@@ -1033,7 +1031,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                           value={inst.startupCommand}
                           placeholder="Startup command"
                           onChange={(e) =>
-                            setLocalSettings((prev) => ({
+                            { setLocalSettings((prev) => ({
                               ...prev,
                               terminal: {
                                 ...prev.terminal,
@@ -1041,7 +1039,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                                   i === index ? { ...a, startupCommand: e.target.value } : a
                                 )
                               }
-                            }))
+                            })); }
                           }
                         />
                       </div>
@@ -1050,7 +1048,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                           type="checkbox"
                           checked={inst.isDefault}
                           onChange={(e) =>
-                            setLocalSettings((prev) => ({
+                            { setLocalSettings((prev) => ({
                               ...prev,
                               terminal: {
                                 ...prev.terminal,
@@ -1058,7 +1056,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                                   i === index ? { ...a, isDefault: e.target.checked } : a
                                 )
                               }
-                            }))
+                            })); }
                           }
                         />
                         Default
@@ -1066,13 +1064,13 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                       <button
                         className="application-delete"
                         onClick={() =>
-                          setLocalSettings((prev) => ({
+                          { setLocalSettings((prev) => ({
                             ...prev,
                             terminal: {
                               ...prev.terminal,
                               instances: prev.terminal.instances.filter((_, i) => i !== index)
                             }
-                          }))
+                          })); }
                         }
                       >
                         Delete
@@ -1083,7 +1081,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                 <button
                   className="settings-btn add-app"
                   onClick={() => {
-                    const newId = `term-${Date.now()}`
+                    const newId = `term-${String(Date.now())}`
                     setLocalSettings((prev) => ({
                       ...prev,
                       terminal: {
@@ -1116,12 +1114,12 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                   <label className="settings-checkbox-label">
                     <input
                       type="checkbox"
-                      checked={localSettings.github?.autodetectViaGh !== false}
+                      checked={localSettings.github.autodetectViaGh}
                       onChange={(e) =>
-                        setLocalSettings((prev) => ({
+                        { setLocalSettings((prev) => ({
                           ...prev,
-                          github: { ...prev.github, pat: prev.github?.pat || '', autodetectViaGh: e.target.checked }
-                        }))
+                          github: { ...prev.github, pat: prev.github.pat || '', autodetectViaGh: e.target.checked }
+                        })); }
                       }
                     />
                     Autodetect via gh CLI
@@ -1136,15 +1134,15 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                   <input
                     type="password"
                     className="settings-input"
-                    value={localSettings.github?.pat || ''}
+                    value={localSettings.github.pat || ''}
                     onChange={(e) =>
-                      setLocalSettings((prev) => ({
+                      { setLocalSettings((prev) => ({
                         ...prev,
-                        github: { ...prev.github, autodetectViaGh: prev.github?.autodetectViaGh ?? true, pat: e.target.value }
-                      }))
+                        github: { ...prev.github, autodetectViaGh: prev.github.autodetectViaGh, pat: e.target.value }
+                      })); }
                     }
                     placeholder="ghp_..."
-                    disabled={localSettings.github?.autodetectViaGh !== false}
+                    disabled={localSettings.github.autodetectViaGh}
                   />
                   <p className="settings-hint">
                     Used when &quot;Autodetect via gh CLI&quot; is off. Generate a token at GitHub → Settings → Developer Settings → Personal Access Tokens.
@@ -1161,10 +1159,10 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                       type="checkbox"
                       checked={localSettings.debug.showBadge}
                       onChange={(e) =>
-                        setLocalSettings((prev) => ({
+                        { setLocalSettings((prev) => ({
                           ...prev,
                           debug: { ...prev.debug, showBadge: e.target.checked }
-                        }))
+                        })); }
                       }
                     />
                     Show Debug Badge
@@ -1182,7 +1180,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
           <button className="settings-btn cancel" onClick={onClose}>
             Cancel
           </button>
-          <button className="settings-btn save" onClick={handleSave}>
+          <button className="settings-btn save" onClick={() => { void handleSave(); }}>
             Save
           </button>
         </div>

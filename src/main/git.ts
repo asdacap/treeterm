@@ -758,7 +758,7 @@ export class GitClient {
     return {
       hasConflicts: conflictedFiles.length > 0,
       conflictedFiles,
-      messages: conflictedFiles.length > 0 ? [`${conflictedFiles.length} conflicting files`] : []
+      messages: conflictedFiles.length > 0 ? [`${String(conflictedFiles.length)} conflicting files`] : []
     }
   }
 
@@ -907,7 +907,7 @@ export class GitClient {
       let modifiedContent = ''
       try {
         const result = await this.daemonClient.readFile(repoPath, filePath)
-        if (result.success && result.file) {
+        if (result.success) {
           modifiedContent = result.file.content
         }
       } catch {
@@ -929,7 +929,7 @@ export class GitClient {
     limit: number
   ): Promise<GitLogResult> {
     const format = '%H%x1e%h%x1e%an%x1e%aI%x1e%s%x1e%P'
-    const args = ['log', `--format=${format}`, `--skip=${skip}`, `--max-count=${limit + 1}`]
+    const args = ['log', `--format=${format}`, `--skip=${String(skip)}`, `--max-count=${String(limit + 1)}`]
 
     if (parentBranch) {
       args.push(`${parentBranch}..HEAD`)
@@ -1151,6 +1151,6 @@ export class GitClient {
       return new Error(`Git error [${cmd}]: ${result.stderr}`)
     }
 
-    return new Error(`Git command failed [${cmd}] with exit code ${result.exitCode}`)
+    return new Error(`Git command failed [${cmd}] with exit code ${String(result.exitCode)}`)
   }
 }

@@ -122,7 +122,7 @@ export class GrpcDaemonClient {
   private client: TreeTermDaemonClient | null = null
   private connected: boolean = false
   private disconnectListeners: Set<DisconnectListener> = new Set()
-  private clientId: string = `client-${Date.now()}`
+  private clientId: string = `client-${String(Date.now())}`
 
   constructor(private socketPath: string = getDefaultSocketPath()) {}
 
@@ -187,9 +187,9 @@ export class GrpcDaemonClient {
   async ensureDaemonRunning(): Promise<void> {
     try {
       await this.connect()
-    } catch (error) {
+    } catch {
       console.log('[grpcDaemonClient] daemon not running, starting it...')
-      await this.spawnDaemon()
+      this.spawnDaemon()
 
       // Wait for socket file to appear, then give gRPC server a moment to fully bind
       await this.waitForSocket()
@@ -202,6 +202,7 @@ export class GrpcDaemonClient {
     if (!this.client) {
       throw new Error('Not connected to daemon')
     }
+    const client = this.client
 
     return new Promise((resolve, reject) => {
       const request: CreatePtyRequest = {
@@ -213,13 +214,11 @@ export class GrpcDaemonClient {
         startupCommand: config.startupCommand
       }
 
-      this.client!.createPty(request, (error, response) => {
+      client.createPty(request, (error, response) => {
         if (error) {
           reject(new Error(error.message))
-        } else if (response) {
-          resolve(response.sessionId)
         } else {
-          reject(new Error('No response from server'))
+          resolve(response.sessionId)
         }
       })
     })
@@ -229,11 +228,12 @@ export class GrpcDaemonClient {
     if (!this.client) {
       throw new Error('Not connected to daemon')
     }
+    const client = this.client
 
     return new Promise((resolve, reject) => {
       const request: KillPtyRequest = { sessionId }
 
-      this.client!.killPty(request, (error) => {
+      client.killPty(request, (error) => {
         if (error) {
           reject(new Error(error.message))
         } else {
@@ -247,15 +247,14 @@ export class GrpcDaemonClient {
     if (!this.client) {
       throw new Error('Not connected to daemon')
     }
+    const client = this.client
 
     return new Promise((resolve, reject) => {
-      this.client!.listPtySessions({}, (error, response) => {
+      client.listPtySessions({}, (error, response) => {
         if (error) {
           reject(new Error(error.message))
-        } else if (response) {
-          resolve(response.sessions as TTYSessionInfo[])
         } else {
-          resolve([])
+          resolve(response?.sessions as TTYSessionInfo[] ?? [])
         }
       })
     })
@@ -265,9 +264,10 @@ export class GrpcDaemonClient {
     if (!this.client) {
       throw new Error('Not connected to daemon')
     }
+    const client = this.client
 
     return new Promise((resolve, reject) => {
-      this.client!.shutdown({}, (error) => {
+      client.shutdown({}, (error) => {
         if (error) {
           reject(new Error(error.message))
         } else {
@@ -286,6 +286,7 @@ export class GrpcDaemonClient {
     if (!this.client) {
       throw new Error('Not connected to daemon')
     }
+    const client = this.client
 
     return new Promise((resolve, reject) => {
       const request: UpdateSessionRequest = {
@@ -294,13 +295,11 @@ export class GrpcDaemonClient {
         expectedVersion
       }
 
-      this.client!.updateSession(request, (error, response) => {
+      client.updateSession(request, (error, response) => {
         if (error) {
           reject(new Error(error.message))
-        } else if (response) {
-          resolve(this.convertFromProtoSession(response))
         } else {
-          reject(new Error('No response from server'))
+          resolve(this.convertFromProtoSession(response))
         }
       })
     })
@@ -332,21 +331,21 @@ export class GrpcDaemonClient {
 
     console.log(`[grpcClient] watchSession started for listener=${listenerId}`)
 
-    stream.on('data', (event) => {
+    stream.on('data', (event: { session?: ProtoSession }) => {
       if (event.session) {
         const session = this.convertFromProtoSession(event.session)
         if (isFirst) {
           isFirst = false
-          console.log(`[grpcClient] watchSession initial data received: session=${session.id}, workspaces=${session.workspaces?.length ?? 0}`)
+          console.log(`[grpcClient] watchSession initial data received: session=${session.id}, workspaces=${String(session.workspaces.length)}`)
           resolveInitial(session)
         } else {
-          console.log(`[grpcClient] watchSession update received: session=${session.id}, workspaces=${session.workspaces?.length ?? 0}`)
+          console.log(`[grpcClient] watchSession update received: session=${session.id}, workspaces=${String(session.workspaces.length)}`)
           onUpdate(session)
         }
       }
     })
 
-    stream.on('error', (error) => {
+    stream.on('error', (error: Error) => {
       console.error(`[grpcClient] watchSession stream error:`, error)
       if (isFirst) {
         isFirst = false
@@ -381,20 +380,21 @@ export class GrpcDaemonClient {
 
   async readDirectory(workspacePath: string, dirPath: string): Promise<IpcResult<{ contents: DirectoryContents }>> {
     if (!this.client) throw new Error('Not connected to daemon')
+    const client = this.client
     return new Promise((resolve, reject) => {
-      this.client!.readDirectory({ workspacePath, dirPath }, (error, response) => {
+      client.readDirectory({ workspacePath, dirPath }, (error, response) => {
         if (error) reject(new Error(error.message))
-        else if (response) resolve(response as IpcResult<{ contents: DirectoryContents }>)
-        else reject(new Error('No response from server'))
+        else resolve(response as IpcResult<{ contents: DirectoryContents }>)
       })
     })
   }
 
   async readFile(workspacePath: string, filePath: string): Promise<IpcResult<{ file: FileContents }>> {
     if (!this.client) throw new Error('Not connected to daemon')
+    const client = this.client
 
     return new Promise((resolve, reject) => {
-      const stream = this.client!.readFile({ workspacePath, filePath })
+      const stream = client.readFile({ workspacePath, filePath })
       const chunks: Buffer[] = []
       let fileMetadata: { path: string; size: number; language: string } | null = null
 
@@ -421,18 +421,18 @@ export class GrpcDaemonClient {
         }
       })
 
-      stream.on('error', (err) => reject(err))
+      stream.on('error', (err) => { reject(err); })
     })
   }
 
   async writeFile(workspacePath: string, filePath: string, content: string): Promise<IpcResult> {
     if (!this.client) throw new Error('Not connected to daemon')
+    const client = this.client
 
     return new Promise((resolve, reject) => {
-      const stream = this.client!.writeFile((error, response) => {
+      const stream = client.writeFile((error, response) => {
         if (error) reject(new Error(error.message))
-        else if (response) resolve(response as IpcResult)
-        else reject(new Error('No response from server'))
+        else resolve(response as IpcResult)
       })
 
       // Send header first
@@ -453,11 +453,11 @@ export class GrpcDaemonClient {
 
   async searchFiles(workspacePath: string, query: string): Promise<IpcResult<{ entries: FileEntry[] }>> {
     if (!this.client) throw new Error('Not connected to daemon')
+    const client = this.client
     return new Promise((resolve, reject) => {
-      this.client!.searchFiles({ workspacePath, query }, (error, response) => {
+      client.searchFiles({ workspacePath, query }, (error, response) => {
         if (error) reject(new Error(error.message))
-        else if (response) resolve(response as IpcResult<{ entries: FileEntry[] }>)
-        else reject(new Error('No response from server'))
+        else resolve(response as IpcResult<{ entries: FileEntry[] }>)
       })
     })
   }
@@ -499,7 +499,7 @@ export class GrpcDaemonClient {
         activeTabId: w.activeTabId || undefined,
         createdAt: 0,
         lastActivity: 0,
-        metadata: Buffer.from(JSON.stringify(w.metadata ?? {}), 'utf-8')
+        metadata: Buffer.from(JSON.stringify(w.metadata), 'utf-8')
       }
     })
   }
@@ -516,11 +516,11 @@ export class GrpcDaemonClient {
 
   private convertFromProtoWorkspace(protoWorkspace: ProtoWorkspace): Workspace {
     const appStates: Record<string, AppState> = {}
-    for (const [key, value] of Object.entries(protoWorkspace.appStates || {})) {
+    for (const [key, value] of Object.entries(protoWorkspace.appStates)) {
       appStates[key] = {
         applicationId: value.applicationId,
         title: value.title,
-        state: JSON.parse(value.state.toString('utf-8'))
+        state: JSON.parse(value.state.toString('utf-8')) as unknown
       }
     }
     return {
@@ -537,13 +537,13 @@ export class GrpcDaemonClient {
       appStates,
       activeTabId: protoWorkspace.activeTabId || null,
       settings: { defaultApplicationId: '' },
-      metadata: protoWorkspace.metadata?.length ? JSON.parse(protoWorkspace.metadata.toString('utf-8')) : {},
+      metadata: protoWorkspace.metadata?.length ? JSON.parse(protoWorkspace.metadata.toString('utf-8')) as Record<string, string> : {},
       createdAt: protoWorkspace.createdAt,
       lastActivity: protoWorkspace.lastActivity
     }
   }
 
-  private async spawnDaemon(): Promise<void> {
+  private spawnDaemon(): void {
     const daemonPath = app.isPackaged
       ? path.join(process.resourcesPath, 'daemon-rs', 'treeterm-daemon')
       : path.join(__dirname, '../daemon-rs/treeterm-daemon')
@@ -566,7 +566,7 @@ export class GrpcDaemonClient {
     })
 
     child.unref()
-    console.log('[grpcDaemonClient] daemon spawned with PID', child.pid)
+    console.log('[grpcDaemonClient] daemon spawned with PID', String(child.pid))
   }
 
   private async waitForSocket(): Promise<void> {

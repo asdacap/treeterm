@@ -30,7 +30,7 @@ export const useSessionNamesStore = create<SessionNamesState>()(
       },
       removeName: (sessionId: string) => {
         set((state) => {
-          const { [sessionId]: _, ...rest } = state.names
+          const { [sessionId]: _removed, ...rest } = state.names
           return { names: rest }
         })
       },

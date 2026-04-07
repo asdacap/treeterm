@@ -1,4 +1,5 @@
 import React, { useEffect, useCallback, useState } from 'react'
+// eslint-disable-next-line @typescript-eslint/no-deprecated -- Github icon has no non-deprecated replacement in lucide-react
 import { ChevronDown, Github, Loader2, ArrowDownToLine, RefreshCw, AlertTriangle, CircleDot, Check } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
@@ -62,7 +63,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
 
   const handleStartEditName = useCallback(() => {
     if (!activeWorkspace) return
-    setEditName(activeWorkspace.metadata?.displayName || activeWorkspace.name)
+    setEditName(activeWorkspace.metadata.displayName || activeWorkspace.name)
     setIsEditingName(true)
   }, [activeWorkspace])
 
@@ -77,7 +78,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
 
   const handleStartEditDescription = useCallback(() => {
     if (!activeWorkspace) return
-    setEditDescription(activeWorkspace.metadata?.description || '')
+    setEditDescription(activeWorkspace.metadata.description || '')
     setIsEditingDescription(true)
   }, [activeWorkspace])
 
@@ -104,7 +105,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   // Create new tab using the first available application
   const handleNewDefaultTab = useCallback(() => {
     const defaultApp = menuApplications[0]
-    if (activeHandle && defaultApp) {
+    if (activeHandle) {
       activeHandle.getState().addTab(defaultApp.id)
     }
   }, [activeHandle, menuApplications])
@@ -112,7 +113,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const handleCloseTab = useCallback(
     (tabId: string) => {
       if (activeHandle) {
-        activeHandle.getState().removeTab(tabId)
+        void activeHandle.getState().removeTab(tabId)
       }
     },
     [activeHandle]
@@ -253,8 +254,8 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   // Prompt description: show button next to description for AI harness tabs that haven't been prompted yet
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const showPromptDescriptionButton = activeTab?.applicationId.startsWith('aiharness-')
-    && activeWorkspace?.metadata?.description
-    && !activeWorkspace?.metadata?.descriptionPrompted
+    && activeWorkspace?.metadata.description
+    && !activeWorkspace.metadata.descriptionPrompted
 
   const handlePromptDescriptionDismiss = useCallback(() => {
     if (activeHandle) {
@@ -294,8 +295,8 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                     autoFocus
                     className="workspace-edit-input"
                     value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => { setEditName(e.target.value); }}
+                    onFocus={(e) => { e.target.select(); }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') handleSaveName()
                       else if (e.key === 'Escape') setIsEditingName(false)
@@ -304,7 +305,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                   />
                 ) : (
                   <>
-                    <span className="workspace-title">{activeWorkspace.metadata?.displayName || activeWorkspace.name}</span>
+                    <span className="workspace-title">{activeWorkspace.metadata.displayName || activeWorkspace.name}</span>
                     <button
                       className="workspace-edit-btn"
                       onClick={handleStartEditName}
@@ -320,9 +321,9 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                       <span
                         className={`workspace-branch${branchCopied ? ' copied' : ''}`}
                         onClick={() => {
-                          clipboard.writeText(activeWorkspace.gitBranch!)
+                          clipboard.writeText(activeWorkspace.gitBranch ?? '')
                           setBranchCopied(true)
-                          setTimeout(() => setBranchCopied(false), 1500)
+                          setTimeout(() => { setBranchCopied(false); }, 1500)
                         }}
                         onContextMenu={(e) => {
                           e.preventDefault()
@@ -351,7 +352,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                     <RunActionDropdown
                       workspacePath={activeWorkspace.path}
                       runActions={activeHandle.getState().runActionsApi}
-                      onRun={async (ptyId, actionId) => {
+                      onRun={(ptyId, actionId) => {
                         const tabId = activeHandle.getState().addTab('terminal', { ptyId, ptyHandle: null, keepOnExit: true })
                         activeHandle.getState().updateTabTitle(tabId, actionId)
                       }}
@@ -379,12 +380,12 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                     value={editDescription}
                     onFocus={(e) => {
                       e.target.style.height = 'auto'
-                      e.target.style.height = e.target.scrollHeight + 'px'
+                      e.target.style.height = String(e.target.scrollHeight) + 'px'
                     }}
                     onChange={(e) => {
                       setEditDescription(e.target.value)
                       e.target.style.height = 'auto'
-                      e.target.style.height = e.target.scrollHeight + 'px'
+                      e.target.style.height = String(e.target.scrollHeight) + 'px'
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
@@ -398,13 +399,13 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                     placeholder="Add a description..."
                     rows={1}
                   />
-                ) : activeWorkspace.metadata?.description ? (
+                ) : activeWorkspace.metadata.description ? (
                   <span className="workspace-description">
                     {activeWorkspace.metadata.description}
-                    {showPromptDescriptionButton && (
+                    {showPromptDescriptionButton && activeHandle && (
                       <PromptDescriptionButton
                         description={activeWorkspace.metadata.description}
-                        workspace={activeHandle!}
+                        workspace={activeHandle}
                         onDismiss={handlePromptDescriptionDismiss}
                       />
                     )}
@@ -437,11 +438,11 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                   <p className="workspace-load-error-message">{activeEntry.error}</p>
                   <div className="workspace-load-error-actions">
                     {activeEntry.status === 'operation-error' && (
-                      <button className="workspace-action-btn" onClick={() => clearWorkspaceError(activeWorkspaceId!)}>
+                      <button className="workspace-action-btn" onClick={() => { if (activeWorkspaceId) clearWorkspaceError(activeWorkspaceId); }}>
                         Dismiss
                       </button>
                     )}
-                    <button className="workspace-action-btn workspace-action-btn-danger" onClick={() => closeWorkspace(activeWorkspaceId!)}>
+                    <button className="workspace-action-btn workspace-action-btn-danger" onClick={() => { if (activeWorkspaceId) closeWorkspace(activeWorkspaceId); }}>
                       Close
                     </button>
                   </div>
@@ -485,7 +486,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
             onAdopt={handleAdoptWorktreeSubmit}
             onCreateFromBranch={handleCreateFromBranchSubmit}
             onCreateFromRemote={handleCreateFromRemoteSubmit}
-            onCancel={() => setShowCreateChildDialog(false)}
+            onCancel={() => { setShowCreateChildDialog(false); }}
             openWorktreePaths={openWorktreePaths}
           />
         )}
@@ -521,7 +522,7 @@ function MergeAbandonButton({ workspace, onOpenReview }: MergeAbandonButtonProps
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    return () => { document.removeEventListener('mousedown', handleClickOutside); }
   }, [menuOpen])
 
   const handleAbandon = async () => {
@@ -543,7 +544,7 @@ function MergeAbandonButton({ workspace, onOpenReview }: MergeAbandonButtonProps
   }
 
   const mainLabel = isDiffCleanFromParent ? 'Abandon' : 'Review & Merge'
-  const mainAction = isDiffCleanFromParent ? handleAbandon : onOpenReview
+  const mainAction = isDiffCleanFromParent ? () => { void handleAbandon() } : onOpenReview
   const mainTitle = isDiffCleanFromParent
     ? 'Abandon: No changes to merge — delete worktree and branch'
     : 'Review & Merge: Review changes and merge this workspace'
@@ -560,7 +561,7 @@ function MergeAbandonButton({ workspace, onOpenReview }: MergeAbandonButtonProps
       <button
         ref={buttonRef}
         className="workspace-action-btn workspace-action-btn-merge abandon-dropdown-btn"
-        onClick={() => setMenuOpen(!menuOpen)}
+        onClick={() => { setMenuOpen(!menuOpen); }}
         title="More options"
       >
         <ChevronDown size={14} />
@@ -574,16 +575,16 @@ function MergeAbandonButton({ workspace, onOpenReview }: MergeAbandonButtonProps
             </div>
           )}
           {!isDiffCleanFromParent && (
-            <div className="abandon-menu-item" onClick={handleAbandon}>
+            <div className="abandon-menu-item" onClick={() => { void handleAbandon() }}>
               Abandon
               <span className="abandon-menu-hint">Delete worktree and branch</span>
             </div>
           )}
-          <div className="abandon-menu-item" onClick={handleAbandonKeepBranch}>
+          <div className="abandon-menu-item" onClick={() => { void handleAbandonKeepBranch() }}>
             Abandon (Keep Branch)
             <span className="abandon-menu-hint">Delete worktree, keep branch</span>
           </div>
-          <div className="abandon-menu-item" onClick={handleAbandonKeepBoth}>
+          <div className="abandon-menu-item" onClick={() => { void handleAbandonKeepBoth() }}>
             Abandon (Keep Both)
             <span className="abandon-menu-hint">Keep worktree and branch</span>
           </div>
@@ -612,8 +613,8 @@ function GitStatusButton({ workspace }: GitStatusButtonProps) {
   const { gitController } = useStore(workspace)
   const { gitRefreshing, hasUncommittedChanges, hasConflictsWithParent, refreshDiffStatus } = useStore(gitController)
 
-  const handleRefresh = async () => {
-    await refreshDiffStatus()
+  const handleRefresh = () => {
+    void refreshDiffStatus()
   }
 
   let icon: React.ReactNode
@@ -693,7 +694,7 @@ function GitHubButton({ workspace }: GitHubButtonProps) {
 
   let title = 'Create GitHub PR'
   if (hasUnresolved) {
-    title = `Address ${unresolvedCount} comment${unresolvedCount === 1 ? '' : 's'}`
+    title = `Address ${String(unresolvedCount)} comment${unresolvedCount === 1 ? '' : 's'}`
   } else if (hasPr) {
     title = 'Open GitHub PR'
   }
@@ -701,12 +702,12 @@ function GitHubButton({ workspace }: GitHubButtonProps) {
   return (
     <button
       className={className}
-      onClick={handleClick}
+      onClick={() => { void handleClick() }}
       disabled={loading}
       title={title}
     >
       <Github size={14} />
-      {hasUnresolved && <span className="github-comment-count">Address {unresolvedCount} comment{unresolvedCount === 1 ? '' : 's'}</span>}
+      {hasUnresolved && <span className="github-comment-count">Address {String(unresolvedCount)} comment{unresolvedCount === 1 ? '' : 's'}</span>}
     </button>
   )
 }
@@ -719,8 +720,8 @@ function GitPullButton({ workspace }: GitPullButtonProps) {
   const { gitController } = useStore(workspace)
   const { behindCount, pullLoading, refreshRemoteStatus, pullFromRemote } = useStore(gitController)
 
-  const handleRefresh = async () => {
-    await refreshRemoteStatus()
+  const handleRefresh = () => {
+    void refreshRemoteStatus()
   }
 
   const handlePull = async () => {
@@ -734,12 +735,12 @@ function GitPullButton({ workspace }: GitPullButtonProps) {
     return (
       <button
         className="workspace-action-btn workspace-action-btn-pull"
-        onClick={handlePull}
+        onClick={() => { void handlePull() }}
         disabled={pullLoading}
-        title={`Pull ${behindCount} commit${behindCount > 1 ? 's' : ''} from remote`}
+        title={`Pull ${String(behindCount)} commit${behindCount > 1 ? 's' : ''} from remote`}
       >
         {pullLoading ? <Loader2 size={14} className="spinning" /> : <ArrowDownToLine size={14} />}
-        <span className="pull-count">{behindCount}</span>
+        <span className="pull-count">{String(behindCount)}</span>
       </button>
     )
   }

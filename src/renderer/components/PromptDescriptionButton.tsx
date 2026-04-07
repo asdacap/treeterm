@@ -11,7 +11,7 @@ export function PromptDescriptionButton({ description, workspace, onDismiss }: P
   const { promptHarness } = useStore(workspace)
 
   const handlePrompt = () => {
-    promptHarness(description)
+    void promptHarness(description)
     onDismiss()
   }
 

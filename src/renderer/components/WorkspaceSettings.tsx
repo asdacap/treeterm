@@ -11,8 +11,8 @@ export default function WorkspaceSettings({ workspace, applications }: Workspace
   const { workspace: ws, updateMetadata, updateSettings } = useStore(workspace)
   const appList = Object.values(applications).filter((app) => app.showInNewTabMenu)
 
-  const [name, setName] = useState(ws.metadata?.displayName ?? ws.name)
-  const [description, setDescription] = useState(ws.metadata?.description ?? '')
+  const [name, setName] = useState(ws.metadata.displayName || ws.name)
+  const [description, setDescription] = useState(ws.metadata.description || '')
   const [jsonExpanded, setJsonExpanded] = useState(false)
 
   const handleNameBlur = () => {
@@ -40,7 +40,7 @@ export default function WorkspaceSettings({ workspace, applications }: Workspace
           className="settings-input"
           type="text"
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => { setName(e.target.value); }}
           onBlur={handleNameBlur}
           onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
         />
@@ -51,7 +51,7 @@ export default function WorkspaceSettings({ workspace, applications }: Workspace
         <textarea
           className="settings-input"
           value={description}
-          onChange={(e) => setDescription(e.target.value)}
+          onChange={(e) => { setDescription(e.target.value); }}
           onBlur={handleDescriptionBlur}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -68,7 +68,7 @@ export default function WorkspaceSettings({ workspace, applications }: Workspace
         <label className="settings-label">Default Application for Children</label>
         <select
           className="settings-select"
-          value={ws.settings?.defaultApplicationId ?? ''}
+          value={ws.settings.defaultApplicationId}
           onChange={handleDefaultAppChange}
         >
           <option value="">Use Global Default</option>
@@ -85,7 +85,7 @@ export default function WorkspaceSettings({ workspace, applications }: Workspace
       <div className="settings-group">
         <div
           className="workspace-settings-json-toggle"
-          onClick={() => setJsonExpanded(!jsonExpanded)}
+          onClick={() => { setJsonExpanded(!jsonExpanded); }}
         >
           <span>{jsonExpanded ? '▾' : '▸'}</span>
           Raw Workspace JSON

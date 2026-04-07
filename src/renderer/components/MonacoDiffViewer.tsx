@@ -53,19 +53,19 @@ export function MonacoDiffViewer({
   onScrollPositionChange
 }: MonacoDiffViewerProps): JSX.Element {
   const diffEditorRef = useRef<editor.IStandaloneDiffEditor | null>(null)
-  const lastScrollTopRef = useRef<number>(initialScrollTop ?? 0)
+  const lastScrollTopRef = useRef(initialScrollTop ?? 0)
   let shouldRestoreScroll = !!initialScrollTop && initialScrollTop > 0
   const [lineChanges, setLineChanges] = useState<editor.ILineChange[] | null>(null)
-  const [currentChangeIndex, setCurrentChangeIndex] = useState<number>(-1)
-  const [isSplitView, setIsSplitView] = useState<boolean>(false)
-  const [isWordWrap, setIsWordWrap] = useState<boolean>(true)
-  const decorationsRef = useRef<{ original: string[]; modified: string[] }>({ original: [], modified: [] })
-  const changeHighlightRef = useRef<{ original: string[]; modified: string[] }>({ original: [], modified: [] })
+  const [currentChangeIndex, setCurrentChangeIndex] = useState(-1)
+  const [isSplitView, setIsSplitView] = useState(false)
+  const [isWordWrap, setIsWordWrap] = useState(true)
+  const decorationsRef = useRef<{ original: editor.IEditorDecorationsCollection | null; modified: editor.IEditorDecorationsCollection | null }>({ original: null, modified: null })
+  const changeHighlightRef = useRef<{ original: editor.IEditorDecorationsCollection | null; modified: editor.IEditorDecorationsCollection | null }>({ original: null, modified: null })
   const viewZoneIdRef = useRef<string | null>(null)
   const [commentContainer, setCommentContainer] = useState<HTMLDivElement | null>(null)
   // Inline comment display zones
-  const commentDisplayZonesRef = useRef<Map<string, { zoneId: string; container: HTMLDivElement; editor: editor.IStandaloneCodeEditor }>>(new Map())
-  const [commentDisplayContainers, setCommentDisplayContainers] = useState<Map<string, { container: HTMLDivElement; comments: ReviewComment[] }>>(new Map())
+  const commentDisplayZonesRef = useRef(new Map<string, { zoneId: string; container: HTMLDivElement; editor: editor.IStandaloneCodeEditor }>())
+  const [commentDisplayContainers, setCommentDisplayContainers] = useState(new Map<string, { container: HTMLDivElement; comments: ReviewComment[] }>())
 
   // Reset when content changes
   const [prevOriginalContent, setPrevOriginalContent] = useState(originalContent)
@@ -201,7 +201,7 @@ export function MonacoDiffViewer({
     if (!lineChanges || lineChanges.length === 0) {
       return 'No changes'
     }
-    return `${currentChangeIndex + 1}/${lineChanges.length}`
+    return `${String(currentChangeIndex + 1)}/${String(lineChanges.length)}`
   }
 
   const isPrevDisabled = () => {
@@ -226,14 +226,8 @@ export function MonacoDiffViewer({
     const originalEditor = diffEditorRef.current.getOriginalEditor()
 
     // Clear old decorations
-    decorationsRef.current.modified = modifiedEditor.deltaDecorations(
-      decorationsRef.current.modified,
-      []
-    )
-    decorationsRef.current.original = originalEditor.deltaDecorations(
-      decorationsRef.current.original,
-      []
-    )
+    decorationsRef.current.modified?.clear()
+    decorationsRef.current.original?.clear()
 
     // Add decorations for comments on modified side
     const modifiedDecorations = comments
@@ -269,14 +263,8 @@ export function MonacoDiffViewer({
         }
       }))
 
-    decorationsRef.current.modified = modifiedEditor.deltaDecorations(
-      [],
-      modifiedDecorations
-    )
-    decorationsRef.current.original = originalEditor.deltaDecorations(
-      [],
-      originalDecorations
-    )
+    decorationsRef.current.modified = modifiedEditor.createDecorationsCollection(modifiedDecorations)
+    decorationsRef.current.original = originalEditor.createDecorationsCollection(originalDecorations)
   }, [comments])
 
   // Manage inline comment display view zones
@@ -289,7 +277,7 @@ export function MonacoDiffViewer({
     // Group comments by side:lineNumber
     const groups = new Map<string, ReviewComment[]>()
     for (const comment of comments) {
-      const key = `${comment.side}:${comment.lineNumber}`
+      const key = `${comment.side}:${String(comment.lineNumber)}`
       const group = groups.get(key)
       if (group) {
         group.push(comment)
@@ -317,7 +305,7 @@ export function MonacoDiffViewer({
 
       const container = document.createElement('div')
       container.className = 'inline-comment-zone inline-comment-display-zone'
-      container.addEventListener('mousedown', (e) => e.stopPropagation())
+      container.addEventListener('mousedown', (e) => { e.stopPropagation(); })
 
       targetEditor.changeViewZones((accessor: editor.IViewZoneChangeAccessor) => {
         const zoneId = accessor.addZone({
@@ -385,7 +373,7 @@ export function MonacoDiffViewer({
     const container = document.createElement('div')
     container.className = 'inline-comment-zone'
     // Prevent Monaco from stealing focus when clicking inside the comment zone
-    container.addEventListener('mousedown', (e) => e.stopPropagation())
+    container.addEventListener('mousedown', (e) => { e.stopPropagation(); })
     setCommentContainer(container)
 
     editor.changeViewZones((accessor) => {
@@ -424,8 +412,8 @@ export function MonacoDiffViewer({
     const originalEditor = diffEditorRef.current.getOriginalEditor()
 
     if (!lineChanges || lineChanges.length === 0 || currentChangeIndex < 0) {
-      changeHighlightRef.current.modified = modifiedEditor.deltaDecorations(changeHighlightRef.current.modified, [])
-      changeHighlightRef.current.original = originalEditor.deltaDecorations(changeHighlightRef.current.original, [])
+      changeHighlightRef.current.modified?.clear()
+      changeHighlightRef.current.original?.clear()
       return
     }
 
@@ -442,8 +430,10 @@ export function MonacoDiffViewer({
       options: highlightOpts
     }] : []
 
-    changeHighlightRef.current.modified = modifiedEditor.deltaDecorations(changeHighlightRef.current.modified, modifiedDecs)
-    changeHighlightRef.current.original = originalEditor.deltaDecorations(changeHighlightRef.current.original, originalDecs)
+    changeHighlightRef.current.modified?.clear()
+    changeHighlightRef.current.modified = modifiedEditor.createDecorationsCollection(modifiedDecs)
+    changeHighlightRef.current.original?.clear()
+    changeHighlightRef.current.original = originalEditor.createDecorationsCollection(originalDecs)
   }, [currentChangeIndex, lineChanges])
 
   // Update editor options when split view changes
@@ -495,14 +485,14 @@ export function MonacoDiffViewer({
         </button>
         <button
           className={`monaco-diff-nav-btn monaco-diff-view-toggle${isSplitView ? ' active' : ''}`}
-          onClick={() => setIsSplitView(prev => !prev)}
+          onClick={() => { setIsSplitView(prev => !prev); }}
           title={isSplitView ? 'Switch to unified view' : 'Switch to split view'}
         >
           {isSplitView ? '⇔' : '⇕'}
         </button>
         <button
           className={`monaco-diff-nav-btn monaco-diff-view-toggle${isWordWrap ? ' active' : ''}`}
-          onClick={() => setIsWordWrap(prev => !prev)}
+          onClick={() => { setIsWordWrap(prev => !prev); }}
           title={isWordWrap ? 'Disable word wrap' : 'Enable word wrap'}
         >
           ↩

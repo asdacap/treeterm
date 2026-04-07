@@ -18,7 +18,7 @@ export function generateReviewPrompt(comments: ReviewComment[]): string {
     lines.push(`## ${filePath}`)
     for (const c of fileComments) {
       const outdated = c.isOutdated ? ' [OUTDATED]' : ''
-      lines.push(`- Line ${c.lineNumber} (${c.side}): "${c.text}"${outdated}`)
+      lines.push(`- Line ${String(c.lineNumber)} (${c.side}): "${c.text}"${outdated}`)
     }
     lines.push('')
   }

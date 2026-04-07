@@ -109,7 +109,7 @@ export function loadSettings(): Settings {
   try {
     if (existsSync(settingsPath)) {
       const data = readFileSync(settingsPath, 'utf-8')
-      const loaded = JSON.parse(data)
+      const loaded = JSON.parse(data) as Partial<Settings>
       // Deep merge with defaults to handle missing fields
       return mergeSettings(defaultSettings, loaded)
     }
@@ -219,8 +219,8 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
   // Backfill required boolean fields on AI Harness instances from old settings
   aiHarnessInstances = aiHarnessInstances.map(inst => ({
     ...inst,
-    disableScrollbar: inst.disableScrollbar ?? false,
-    stripScrollbackClear: inst.stripScrollbackClear ?? false,
+    disableScrollbar: inst.disableScrollbar,
+    stripScrollbackClear: inst.stripScrollbackClear,
   }))
 
   return {
@@ -260,7 +260,7 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
       ...loaded.ssh,
       savedConnections: (loaded.ssh?.savedConnections || []).map(c => ({
         ...c,
-        portForwards: c.portForwards || []
+        portForwards: c.portForwards
       }))
     },
     llm: {

@@ -30,7 +30,7 @@ export default function GitHubBrowser({ workspace, isVisible }: GitHubBrowserPro
       <div className="github-browser">
         <div className="github-browser-empty">
           <p>No open pull request found for this branch.</p>
-          <button className="workspace-action-btn" onClick={handleRefresh} disabled={refreshing}>
+          <button className="workspace-action-btn" onClick={() => { void handleRefresh(); }} disabled={refreshing}>
             {refreshing ? <Loader2 size={14} className="spinning" /> : <RefreshCw size={14} />}
             <span style={{ marginLeft: 4 }}>Refresh</span>
           </button>
@@ -44,10 +44,10 @@ export default function GitHubBrowser({ workspace, isVisible }: GitHubBrowserPro
       <div className="github-browser-header">
         <div className="github-browser-title-row">
           <h2 className="github-browser-title">
-            #{prInfo.number} {prInfo.title}
+            #{String(prInfo.number)} {prInfo.title}
           </h2>
           <div className="github-browser-actions">
-            <button className="workspace-action-btn" onClick={handleRefresh} disabled={refreshing} title="Refresh">
+            <button className="workspace-action-btn" onClick={() => { void handleRefresh(); }} disabled={refreshing} title="Refresh">
               {refreshing ? <Loader2 size={14} className="spinning" /> : <RefreshCw size={14} />}
             </button>
             <button
@@ -166,9 +166,9 @@ function UnresolvedThreadsSection({ threads, prUrl }: { threads: GitHubReviewThr
       <h3 className="github-section-title">Unresolved Comments ({threads.length})</h3>
       <div className="github-section-list">
         {threads.map((thread) => (
-          <div key={`${thread.path}:${thread.line ?? 'general'}-${thread.author}`} className="github-thread-item" onClick={() => window.open(prUrl, '_blank')}>
+          <div key={`${thread.path}:${String(thread.line ?? 'general')}-${thread.author}`} className="github-thread-item" onClick={() => window.open(prUrl, '_blank')}>
             <div className="github-thread-header">
-              <span className="github-thread-path">{thread.path}{thread.line ? `:${thread.line}` : ''}</span>
+              <span className="github-thread-path">{thread.path}{thread.line ? `:${String(thread.line)}` : ''}</span>
               <span className="github-thread-author">{thread.author}</span>
             </div>
             <div className="github-thread-body">{thread.body}</div>

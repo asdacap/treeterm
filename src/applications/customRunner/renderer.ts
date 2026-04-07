@@ -26,7 +26,7 @@ export function createCustomRunnerVariant(instance: CustomRunnerInstance, deps: 
       const state = tab.state as TerminalState
       if (!state.ptyId) {
         const resolvedCommand = resolveTemplate(instance.commandTemplate, ws.workspace.path)
-        ws.createTty(ws.workspace.path, undefined, resolvedCommand).then((ptyId) => {
+        void ws.createTty(ws.workspace.path, undefined, resolvedCommand).then((ptyId) => {
           workspaceStore.getState().updateTabState<TerminalState>(tab.id, (s) => ({
             ...s,
             ptyId,
@@ -36,7 +36,7 @@ export function createCustomRunnerVariant(instance: CustomRunnerInstance, deps: 
       }
       return {
         dispose: () => {
-          const current = workspaceStore.getState().workspace?.appStates?.[tab.id]?.state as TerminalState | undefined
+          const current = workspaceStore.getState().workspace.appStates[tab.id]?.state as TerminalState | undefined
           const ptyId = current?.ptyId ?? state.ptyId
           if (ptyId) {
             deps.terminal.kill(current?.connectionId ?? ws.connectionId, ptyId)

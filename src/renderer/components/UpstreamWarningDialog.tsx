@@ -19,7 +19,7 @@ export default function UpstreamWarningDialog({
 
   return (
     <div className="dialog-overlay" onClick={onCancel} onKeyDown={handleKeyDown}>
-      <div className="upstream-warning-dialog" onClick={(e) => e.stopPropagation()}>
+      <div className="upstream-warning-dialog" onClick={(e) => { e.stopPropagation(); }}>
         <div className="upstream-warning-dialog-header">
           <h2>Upstream Updates Available</h2>
           <button className="dialog-close" onClick={onCancel}>

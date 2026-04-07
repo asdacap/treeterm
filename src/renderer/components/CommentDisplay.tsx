@@ -14,7 +14,7 @@ export function CommentDisplay({ comment, onDelete, hideLineRef }: CommentDispla
         <div className="comment-display-header">
           {!hideLineRef && (
             <span className="comment-line-ref">
-              Line {comment.lineNumber} ({comment.side})
+              Line {String(comment.lineNumber)} ({comment.side})
             </span>
           )}
           {comment.isOutdated && (
@@ -24,7 +24,7 @@ export function CommentDisplay({ comment, onDelete, hideLineRef }: CommentDispla
           )}
           <button
             className="comment-delete-btn"
-            onClick={() => onDelete(comment.id)}
+            onClick={() => { onDelete(comment.id); }}
             title="Delete comment"
           >
             ×
@@ -36,7 +36,7 @@ export function CommentDisplay({ comment, onDelete, hideLineRef }: CommentDispla
         {!showHeader && (
           <button
             className="comment-delete-btn inline"
-            onClick={() => onDelete(comment.id)}
+            onClick={() => { onDelete(comment.id); }}
             title="Delete comment"
           >
             ×

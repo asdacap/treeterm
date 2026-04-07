@@ -20,9 +20,9 @@ export type Tty = StoreApi<TtyState>
 export function createTtyStore(ptyId: string, handle: string, terminal: TtyTerminalDeps): Tty {
   return createStore<TtyState>()(() => ({
     ptyId,
-    write: (data: string) => terminal.write(handle, data),
-    resize: (cols: number, rows: number) => terminal.resize(handle, cols, rows),
-    kill: () => terminal.kill(ptyId),
+    write: (data: string) => { terminal.write(handle, data); },
+    resize: (cols: number, rows: number) => { terminal.resize(handle, cols, rows); },
+    kill: () => { terminal.kill(ptyId); },
   }))
 }
 
@@ -34,7 +34,7 @@ export interface TtyWriter {
 
 export function createTtyWriter(ptyId: string, handle: string, terminal: TtyTerminalDeps): TtyWriter {
   return {
-    write: (data: string) => terminal.write(handle, data),
-    kill: () => terminal.kill(ptyId),
+    write: (data: string) => { terminal.write(handle, data); },
+    kill: () => { terminal.kill(ptyId); },
   }
 }

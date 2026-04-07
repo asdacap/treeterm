@@ -58,7 +58,7 @@ export default function AiHarness({
   stripScrollbackClear,
 }: AiHarnessProps) {
   const { workspace: wsData } = useStore(workspace)
-  const appState = wsData?.appStates[tabId]
+  const appState = wsData.appStates[tabId]
 
   if (!appState) {
     return <div style={{ padding: 16, color: '#888' }}>Loading AI harness...</div>
@@ -173,12 +173,12 @@ function AiHarnessStatusBar({ analyzer, workspace, tabId }: AiHarnessStatusBarPr
     closeContextMenu()
     const bufferText = analyzer.getState().getBufferText()
     if (!bufferText) return
-    workspace.getState().addTab<{ bufferText: string }>('system-prompt-debugger', { bufferText })
+    workspace.getState().addTab('system-prompt-debugger', { bufferText })
   }
 
   const handleViewHistory = () => {
     closeContextMenu()
-    workspace.getState().addTab<{ sourceTabId: string }>('analyzer-history', { sourceTabId: tabId })
+    workspace.getState().addTab('analyzer-history', { sourceTabId: tabId })
   }
 
   return (
@@ -197,7 +197,7 @@ function AiHarnessStatusBar({ analyzer, workspace, tabId }: AiHarnessStatusBarPr
           <input
             type="checkbox"
             checked={autoApprove}
-            onChange={(e) => analyzer.getState().setAutoApprove(e.target.checked)}
+            onChange={(e) => { analyzer.getState().setAutoApprove(e.target.checked); }}
           />
           <span className="ai-harness-toggle-slider" />
           <span className="ai-harness-toggle-label">Auto-approve safe</span>

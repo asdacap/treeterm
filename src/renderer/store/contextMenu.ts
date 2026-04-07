@@ -25,8 +25,8 @@ export const useContextMenuStore = create<ContextMenuState>()((set) => ({
   activeMenuId: null,
   position: { x: 0, y: 0 },
   open: (menuId, x, y, menuWidth, menuHeight) =>
-    set({ activeMenuId: menuId, position: clampContextMenuPosition(x, y, menuWidth, menuHeight) }),
-  close: () => set({ activeMenuId: null }),
+    { set({ activeMenuId: menuId, position: clampContextMenuPosition(x, y, menuWidth, menuHeight) }); },
+  close: () => { set({ activeMenuId: null }); },
 }))
 
 export function handleClickOutside(e: { target: EventTarget | null }): void {

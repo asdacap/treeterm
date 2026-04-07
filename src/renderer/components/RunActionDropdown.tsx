@@ -50,7 +50,7 @@ export default function RunActionDropdown({ workspacePath, runActions: runAction
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    return () => { document.removeEventListener('mousedown', handleClickOutside); }
   }, [menuOpen])
 
   const handleRun = useCallback(async (actionId: string) => {
@@ -66,7 +66,7 @@ export default function RunActionDropdown({ workspacePath, runActions: runAction
       <button
         ref={buttonRef}
         className="workspace-action-btn run-action-trigger-btn"
-        onClick={() => setMenuOpen(!menuOpen)}
+        onClick={() => { setMenuOpen(!menuOpen); }}
         title="Run action"
       >
         ▶ Run <ChevronDown size={12} />
@@ -86,7 +86,7 @@ export default function RunActionDropdown({ workspacePath, runActions: runAction
                 <div
                   key={action.id}
                   className="run-action-menu-item"
-                  onClick={() => handleRun(action.id)}
+                  onClick={() => { void handleRun(action.id) }}
                   title={action.description}
                 >
                   {action.name}

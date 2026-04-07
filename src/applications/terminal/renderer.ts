@@ -22,7 +22,7 @@ function makeTerminalOnWorkspaceLoad(
     if (state.ptyId) {
       analyzer.getState().start(state.ptyId)
     } else {
-      ws.createTty(ws.workspace.path, undefined, startupCommand).then((ptyId) => {
+      void ws.createTty(ws.workspace.path, undefined, startupCommand).then((ptyId) => {
         workspaceStore.getState().updateTabState<TerminalState>(tab.id, (s) => ({
           ...s,
           ptyId,
@@ -35,7 +35,7 @@ function makeTerminalOnWorkspaceLoad(
       analyzer,
       dispose: () => {
         analyzer.getState().stop()
-        const current = workspaceStore.getState().workspace?.appStates?.[tab.id]?.state as TerminalState | undefined
+        const current = workspaceStore.getState().workspace.appStates[tab.id]?.state as TerminalState | undefined
         const ptyId = current?.ptyId ?? state.ptyId
         if (ptyId) {
           deps.terminal.kill(current?.connectionId ?? ws.connectionId, ptyId)

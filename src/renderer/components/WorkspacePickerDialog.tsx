@@ -54,9 +54,9 @@ export default function WorkspacePickerDialog({
     const days = Math.floor(diff / 86400000)
 
     if (minutes < 1) return 'just now'
-    if (minutes < 60) return `${minutes}m ago`
-    if (hours < 24) return `${hours}h ago`
-    return `${days}d ago`
+    if (minutes < 60) return `${String(minutes)}m ago`
+    if (hours < 24) return `${String(hours)}h ago`
+    return `${String(days)}d ago`
   }
 
   const getStatusIcon = (status: string) => {
@@ -109,8 +109,8 @@ export default function WorkspacePickerDialog({
       <div
         key={session.id}
         className={`session-picker-item ${selectedSession?.id === session.id ? 'selected' : ''}`}
-        onClick={() => setSelectedSession(session)}
-        onDoubleClick={() => onSelect(session)}
+        onClick={() => { setSelectedSession(session); }}
+        onDoubleClick={() => { onSelect(session); }}
       >
         <div className="session-header">
           <div className="session-info">
@@ -134,7 +134,7 @@ export default function WorkspacePickerDialog({
     <div className="dialog-overlay" onClick={onCancel}>
       <div
         className="workspace-picker-dialog"
-        onClick={(e) => e.stopPropagation()}
+        onClick={(e) => { e.stopPropagation(); }}
         onKeyDown={handleKeyDown}
       >
         <div className="workspace-picker-header">
@@ -151,7 +151,7 @@ export default function WorkspacePickerDialog({
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => { setSearchQuery(e.target.value); }}
               placeholder="Search by workspace name or path..."
               autoFocus
             />

@@ -36,7 +36,7 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
 
   // Clean up activity state on unmount
   useEffect(() => {
-    return () => removeTabState(tab.id)
+    return () => { removeTabState(tab.id); }
   }, [tab.id, removeTabState])
 
   const systemPrompt = mode === 'analyzer' ? analyzerPrompt : titlePrompt
@@ -118,7 +118,7 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
           <input
             type="text"
             value={model}
-            onChange={(e) => setModel(e.target.value)}
+            onChange={(e) => { setModel(e.target.value); }}
             style={{
               width: '100%',
               background: '#1e1e1e',
@@ -154,7 +154,7 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
           Reasoning
           <select
             value={reasoningEffort}
-            onChange={(e) => setReasoningEffort(e.target.value as ReasoningEffort)}
+            onChange={(e) => { setReasoningEffort(e.target.value as ReasoningEffort); }}
             style={{
               background: '#1e1e1e',
               color: '#d4d4d4',
@@ -193,7 +193,7 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
       </div>
       <textarea
         value={systemPrompt}
-        onChange={(e) => setSystemPrompt(e.target.value)}
+        onChange={(e) => { setSystemPrompt(e.target.value); }}
         style={{
           minHeight: 120,
           background: '#1e1e1e',
@@ -210,7 +210,7 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
       <label style={{ color: '#aaa', fontSize: 12 }}>Buffer (paste from debug console)</label>
       <textarea
         value={bufferText}
-        onChange={(e) => setBufferText(e.target.value)}
+        onChange={(e) => { setBufferText(e.target.value); }}
         placeholder="Paste terminal buffer lines here..."
         style={{
           minHeight: 120,
@@ -227,7 +227,7 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <button
-          onClick={handleTest}
+          onClick={() => { void handleTest(); }}
           disabled={loading}
           style={{
             padding: '6px 16px',

@@ -48,7 +48,7 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
           const parent = deps.lookupWorkspace(ws.parentId)
           if (parent?.gitBranch) {
             const result = await deps.git.getDiff(ws.path, parent.gitBranch)
-            const clean = result.success && result.diff ? result.diff.files.length === 0 : false
+            const clean = result.success ? result.diff.files.length === 0 : false
             const uncommitted = store.getState().hasUncommittedChanges
             store.setState({ isDiffCleanFromParent: clean && !uncommitted })
           }
@@ -88,8 +88,8 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
   function startGitController(): void {
     if (!deps.initialWorkspace.isGitRepo) return
 
-    refreshDiffStatus()
-    gitControllerInterval = setInterval(refreshDiffStatus, 10_000)
+    void refreshDiffStatus()
+    gitControllerInterval = setInterval(() => { void refreshDiffStatus(); }, 10_000)
   }
 
   function stopGitController(): void {
@@ -159,14 +159,14 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
     startPolling: (): void => {
       startGitController()
       if (deps.initialWorkspace.isGitRepo) {
-        store.getState().refreshRemoteStatus()
+        void store.getState().refreshRemoteStatus()
       }
       if (deps.initialWorkspace.isWorktree && deps.initialWorkspace.parentId) {
-        refreshPrStatus()
+        void refreshPrStatus()
       }
     },
 
-    dispose: () => stopGitController(),
+    dispose: () => { stopGitController(); },
   }))
 
   return store

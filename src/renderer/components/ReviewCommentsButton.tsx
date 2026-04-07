@@ -1,3 +1,4 @@
+import React from 'react'
 import { useStore } from 'zustand'
 import type { WorkspaceStore } from '../types'
 import { generateReviewPrompt } from '../utils/reviewPrompt'
@@ -6,7 +7,7 @@ interface ReviewCommentsButtonProps {
   workspace: WorkspaceStore
 }
 
-export function ReviewCommentsButton({ workspace }: ReviewCommentsButtonProps): JSX.Element | null {
+export function ReviewCommentsButton({ workspace }: ReviewCommentsButtonProps): React.JSX.Element | null {
   const { reviewComments: reviewCommentStore, promptHarness } = useStore(workspace)
   const { getReviewComments, markAllReviewCommentsAddressed } = useStore(reviewCommentStore)
   const comments = getReviewComments()
@@ -24,7 +25,7 @@ export function ReviewCommentsButton({ workspace }: ReviewCommentsButtonProps): 
   return (
     <button
       className="review-comments-button"
-      onClick={handleClick}
+      onClick={() => { void handleClick(); }}
       title="Address review comments"
     >
       Address Comments

@@ -12,7 +12,7 @@ export function PromptRebaseButton({ workspace }: { workspace: WorkspaceStore })
   return (
     <button
       className="review-comments-button"
-      onClick={() => promptHarness(`rebase local branch ${wsData.gitBranch} onto ${parentBranch}`)}
+      onClick={() => { void promptHarness(`rebase local branch ${wsData.gitBranch} onto ${parentBranch}`); }}
       title="Prompt AI to rebase onto parent branch"
     >
       Prompt Rebase

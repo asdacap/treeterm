@@ -12,13 +12,13 @@ interface ActiveProcessesDialogProps {
 
 function formatRelativeTime(timestamp: number): string {
   const seconds = Math.floor((Date.now() - timestamp) / 1000)
-  if (seconds < 60) return `${seconds}s ago`
+  if (seconds < 60) return `${String(seconds)}s ago`
   const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
+  if (minutes < 60) return `${String(minutes)}m ago`
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
+  if (hours < 24) return `${String(hours)}h ago`
   const days = Math.floor(hours / 24)
-  return `${days}d ago`
+  return `${String(days)}d ago`
 }
 
 function lastSegment(cwd: string): string {
@@ -67,7 +67,7 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
       fitTerminal(term, resizePty)
     })
     resizeObserver.observe(container)
-    cleanups.push(() => resizeObserver.disconnect())
+    cleanups.push(() => { resizeObserver.disconnect(); })
 
     // Attach to PTY — register listener before starting stream
     const handle = crypto.randomUUID()
@@ -84,12 +84,12 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
     })
     cleanups.push(unsubEvent)
 
-    terminalApi.attach(connectionId, handle, ptyId).then((result) => {
+    void terminalApi.attach(connectionId, handle, ptyId).then((result) => {
       if (cancelled) return
 
       if (!result.success) {
         setStatus('error')
-        setErrorMessage(result.error ?? `Failed to attach to PTY session ${ptyId}`)
+        setErrorMessage(result.error)
         return
       }
 
@@ -97,7 +97,7 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
       const onDataDisposable = term.onData((data) => {
         terminalApi.write(handle, data)
       })
-      cleanups.push(() => onDataDisposable.dispose())
+      cleanups.push(() => { onDataDisposable.dispose(); })
 
       setStatus('ready')
     }).catch((err: unknown) => {
@@ -160,7 +160,7 @@ export default function ActiveProcessesDialog({ workspaces, connectionId, onClos
 
   const handleStop = useCallback(async () => {
     if (!selectedId) return
-    await terminalApi.kill(connectionId, selectedId)
+    terminalApi.kill(connectionId, selectedId)
     setSelectedId(null)
     const list = await terminalApi.list(connectionId)
     setSessions(list)
@@ -191,7 +191,7 @@ export default function ActiveProcessesDialog({ workspaces, connectionId, onClos
               <div
                 key={session.id}
                 className={`active-processes-item ${selectedId === session.id ? 'selected' : ''}`}
-                onClick={() => setSelectedId(session.id)}
+                onClick={() => { setSelectedId(session.id); }}
               >
                 <div className="active-processes-item-name">{getDisplayName(session.cwd, workspaces)}</div>
                 <div className="active-processes-item-meta">
@@ -207,7 +207,7 @@ export default function ActiveProcessesDialog({ workspaces, connectionId, onClos
             {selectedId ? (
               <>
                 <div className="active-processes-toolbar">
-                  <button className="active-processes-stop-btn" onClick={handleStop}>
+                  <button className="active-processes-stop-btn" onClick={() => { void handleStop(); }}>
                     Stop Process
                   </button>
                 </div>

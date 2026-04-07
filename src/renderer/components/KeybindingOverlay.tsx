@@ -58,14 +58,14 @@ function TimeoutProgress({ timeout, activatedAt }: { timeout: number; activatedA
       }
     }, 16) // ~60fps
 
-    return () => clearInterval(interval)
+    return () => { clearInterval(interval); }
   }, [activatedAt, timeout])
 
   return (
     <div className="keybinding-overlay-progress">
       <div
         className="keybinding-overlay-progress-bar"
-        style={{ width: `${remaining}%` }}
+        style={{ width: `${String(remaining)}%` }}
       />
     </div>
   )

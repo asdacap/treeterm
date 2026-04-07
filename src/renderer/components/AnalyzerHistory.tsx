@@ -43,16 +43,16 @@ export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderPro
 
 function AnalyzerHistoryContent({ analyzer, workspace }: { analyzer: AiHarnessRef['analyzer']; workspace: ApplicationRenderProps['workspace'] }) {
   const [entries, setEntries] = useState<AnalyzerHistoryEntry[]>(() => analyzer.getState().getHistory())
-  const [expandedEntries, setExpandedEntries] = useState<Set<number>>(new Set())
-  const [expandedResponses, setExpandedResponses] = useState<Set<number>>(new Set())
-  const [expandedPrompts, setExpandedPrompts] = useState<Set<number>>(new Set())
+  const [expandedEntries, setExpandedEntries] = useState(new Set())
+  const [expandedResponses, setExpandedResponses] = useState(new Set())
+  const [expandedPrompts, setExpandedPrompts] = useState(new Set())
 
   const handleRefresh = () => {
     setEntries(analyzer.getState().getHistory())
   }
 
   const handleDebug = (entry: AnalyzerHistoryEntry) => {
-    workspace.getState().addTab<{ bufferText: string }>('system-prompt-debugger', { bufferText: entry.bufferText })
+    workspace.getState().addTab('system-prompt-debugger', { bufferText: entry.bufferText })
   }
 
   const toggleExpand = (index: number) => {
@@ -112,7 +112,7 @@ function AnalyzerHistoryContent({ analyzer, workspace }: { analyzer: AiHarnessRe
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {reversed.map((entry, i) => (
               <div
-                key={`${entry.timestamp}-${entry.kind}`}
+                key={`${String(entry.timestamp)}-${entry.kind}`}
                 style={{
                   background: '#1e1e1e',
                   border: '1px solid #333',
@@ -169,7 +169,7 @@ function AnalyzerHistoryContent({ analyzer, workspace }: { analyzer: AiHarnessRe
                           fontFamily: 'monospace'
                         }}
                       >
-                        {entry.durationMs}ms
+                        {String(entry.durationMs)}ms
                       </span>
                     )}
                     {entry.error && (
@@ -191,7 +191,7 @@ function AnalyzerHistoryContent({ analyzer, workspace }: { analyzer: AiHarnessRe
                     <div style={{ color: '#f44747', fontSize: 12 }}>{entry.error}</div>
                   )}
                   <pre
-                    onClick={() => toggleExpand(entries.length - 1 - i)}
+                    onClick={() => { toggleExpand(entries.length - 1 - i); }}
                     style={{
                       margin: 0,
                       color: '#666',
@@ -207,7 +207,7 @@ function AnalyzerHistoryContent({ analyzer, workspace }: { analyzer: AiHarnessRe
                   </pre>
                   {entry.response && (
                     <pre
-                      onClick={() => toggleResponse(entries.length - 1 - i)}
+                      onClick={() => { toggleResponse(entries.length - 1 - i); }}
                       style={{
                         margin: 0,
                         color: '#23d18b',
@@ -227,7 +227,7 @@ function AnalyzerHistoryContent({ analyzer, workspace }: { analyzer: AiHarnessRe
                   )}
                   {entry.systemPrompt && (
                     <pre
-                      onClick={() => togglePrompt(entries.length - 1 - i)}
+                      onClick={() => { togglePrompt(entries.length - 1 - i); }}
                       style={{
                         margin: 0,
                         color: '#b5cea8',
@@ -247,7 +247,7 @@ function AnalyzerHistoryContent({ analyzer, workspace }: { analyzer: AiHarnessRe
                   )}
                 </div>
                 <button
-                  onClick={() => handleDebug(entry)}
+                  onClick={() => { handleDebug(entry); }}
                   style={{
                     padding: '4px 8px',
                     background: '#333',

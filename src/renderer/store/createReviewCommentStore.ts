@@ -22,7 +22,7 @@ export type ReviewCommentStore = StoreApi<ReviewCommentState>
 export function parseReviewComments(metadata: Record<string, string>): ReviewComment[] {
   if (!metadata.reviewComments) return []
   try {
-    return JSON.parse(metadata.reviewComments)
+    return JSON.parse(metadata.reviewComments) as ReviewComment[]
   } catch {
     return []
   }
