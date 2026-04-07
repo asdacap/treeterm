@@ -2,7 +2,11 @@
 
 # TreeTerm
 
-A hierarchical terminal manager and IDE built for AI agent workflows. TreeTerm is an Electron-based desktop application that manages multiple workspaces using Git worktrees, enabling branching development with AI agents.
+A personal terminal multiplexer built for my own use. It makes it easy to run multiple CLI agents at the same time across different machines via SSH, which is nice. It also has an auto-approve toggle that uses a separate model to evaluate whether a pending approval is safe before accepting it, which is also nice.
+
+Session state is stored in a daemon process per host, so I can update the client UI without losing anything, or disconnect my laptop and reconnect later without losing any agent sessions.
+
+Under the hood, it's an Electron app that manages multiple workspaces using Git worktrees, enabling branching development with AI agents.
 
 ## Architecture
 
