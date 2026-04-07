@@ -96,6 +96,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     }
     const idx = cache.findIndex((entry) => entry.buffer === buffer)
     if (idx !== -1) {
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- idx from findIndex, guaranteed valid
       const hit = cache[idx]!
       cache.splice(idx, 1)
       cache.push(hit)

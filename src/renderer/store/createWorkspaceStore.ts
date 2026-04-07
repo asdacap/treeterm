@@ -357,6 +357,7 @@ export function createWorkspaceStore(
         ...ws,
         appStates: {
           ...ws.appStates,
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist
           [tabId]: { ...ws.appStates[tabId]!, title }
         }
       }))
@@ -365,6 +366,7 @@ export function createWorkspaceStore(
 
     updateTabState: <T,>(tabId: string, updater: (state: T) => T): void => {
       updateWorkspace((ws) => {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist
         const appState = ws.appStates[tabId]!
         return {
           ...ws,

@@ -71,9 +71,12 @@ function parseGrepOutput(stdout: string): DefinitionLocation[] {
     // grep -rn output: file:lineNumber:content
     const match = line.match(/^(.+?):(\d+):/)
     if (match) {
-      const filePath = match[1]!.startsWith('./') ? match[1]!.slice(2) : match[1]!
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- regex capture groups guaranteed by match
+      const rawPath = match[1]!
+      const filePath = rawPath.startsWith('./') ? rawPath.slice(2) : rawPath
       results.push({
         filePath,
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- regex capture group 2 guaranteed by match
         lineNumber: parseInt(match[2]!, 10),
       })
     }

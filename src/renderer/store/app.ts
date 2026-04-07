@@ -277,6 +277,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         }
         if (session.workspaces.length > 0) {
           void sessionStore.getState().handleRestore(session)
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length > 0 checked above
           const firstWs = session.workspaces[0]!
           useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: session.id })
         }
@@ -366,6 +367,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const remainingIds = Array.from(get().sessionStores.keys())
       const nextSessionId = remainingIds[0]
       if (nextSessionId) {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- nextSessionId from sessionStores.keys()
         const nextEntry = get().sessionStores.get(nextSessionId)!
         const workspaces = nextEntry.store.getState().workspaces
         const firstWsId = Array.from(workspaces.keys())[0]
@@ -410,6 +412,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     if (session.workspaces.length > 0) {
       console.log(`[renderer:app] Restoring ${String(session.workspaces.length)} workspaces for session=${session.id}`)
       await store.getState().handleRestore(session)
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length > 0 checked above
       const firstWs = session.workspaces[0]!
       useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: session.id })
     } else if (connection.target.type === 'remote') {
@@ -432,6 +435,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   setSessionError: (connectionId: string, error: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- connectionId guaranteed to exist in sessionStores
     const entry = get().sessionStores.get(connectionId)!
     const conn = entry.store.getState().connection
     if (conn) {

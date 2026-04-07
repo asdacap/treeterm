@@ -90,6 +90,7 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
       const prefixParts = parseKeybinding(prefixKeybinding) as [string[], string][]
 
       if (prefixParts.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length > 0 checked above
         const [modifiers, key] = prefixParts[0]!
         if (matchesKeybinding(e, modifiers, key)) {
           e.preventDefault()

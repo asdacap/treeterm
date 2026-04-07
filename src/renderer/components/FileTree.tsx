@@ -34,7 +34,7 @@ export function FileTree({
   const { workspace: wsData } = useStore(workspace)
   const workspacePath = wsData.path
   const filesystem = useFilesystemApi(workspace)
-  const [dirContents, setDirContents] = useState<Map<string, DirectoryState>>(new Map())
+  const [dirContents, setDirContents] = useState(new Map<string, DirectoryState>())
   const [search, setSearch] = useState<SearchState>({
     query: '',
     entries: [],

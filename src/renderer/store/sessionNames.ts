@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware'
 
 interface SessionNameEntry {
   name: string
@@ -50,33 +50,36 @@ export const useSessionNamesStore = create<SessionNamesState>()(
     }),
     {
       name: 'treeterm-session-names',
-      storage: {
-        getItem: (name) => {
-          const raw = globalThis.localStorage?.getItem(name)
-          if (!raw) return null
-          const parsed = JSON.parse(raw) as { state: { names: Record<string, SessionNameEntry> }; version: number }
-          return {
-            ...parsed,
-            state: {
-              ...parsed.state,
-              names: new Map(Object.entries(parsed.state.names)),
-            },
-          }
-        },
-        setItem: (name, value) => {
-          const serializable = {
-            ...value,
-            state: {
-              ...value.state,
-              names: Object.fromEntries(value.state.names),
-            },
-          }
-          globalThis.localStorage?.setItem(name, JSON.stringify(serializable))
-        },
-        removeItem: (name) => {
-          globalThis.localStorage?.removeItem(name)
-        },
-      },
+      storage: ((): PersistStorage<SessionNamesState> => {
+        const storage = typeof localStorage !== 'undefined' ? localStorage : undefined
+        return {
+          getItem: (name: string): StorageValue<SessionNamesState> | null => {
+            const raw = storage?.getItem(name)
+            if (!raw) return null
+            const parsed = JSON.parse(raw) as { state: { names: Record<string, SessionNameEntry> }; version?: number }
+            return {
+              ...parsed,
+              state: {
+                ...parsed.state,
+                names: new Map(Object.entries(parsed.state.names)),
+              } as SessionNamesState,
+            }
+          },
+          setItem: (name: string, value: StorageValue<SessionNamesState>) => {
+            const serializable = {
+              ...value,
+              state: {
+                ...value.state,
+                names: Object.fromEntries(value.state.names),
+              },
+            }
+            storage?.setItem(name, JSON.stringify(serializable))
+          },
+          removeItem: (name: string) => {
+            storage?.removeItem(name)
+          },
+        }
+      })(),
     }
   )
 )

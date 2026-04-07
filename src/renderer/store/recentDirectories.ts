@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware'
 
 interface RecentDirectoriesState {
   directories: Map<string, string[]>
@@ -28,33 +28,36 @@ export const useRecentDirectoriesStore = create<RecentDirectoriesState>()(
     }),
     {
       name: 'treeterm-recent-directories',
-      storage: {
-        getItem: (name) => {
-          const raw = globalThis.localStorage?.getItem(name)
-          if (!raw) return null
-          const parsed = JSON.parse(raw) as { state: { directories: Record<string, string[]> }; version: number }
-          return {
-            ...parsed,
-            state: {
-              ...parsed.state,
-              directories: new Map(Object.entries(parsed.state.directories)),
-            },
-          }
-        },
-        setItem: (name, value) => {
-          const serializable = {
-            ...value,
-            state: {
-              ...value.state,
-              directories: Object.fromEntries(value.state.directories),
-            },
-          }
-          globalThis.localStorage?.setItem(name, JSON.stringify(serializable))
-        },
-        removeItem: (name) => {
-          globalThis.localStorage?.removeItem(name)
-        },
-      },
+      storage: ((): PersistStorage<RecentDirectoriesState> => {
+        const storage = typeof localStorage !== 'undefined' ? localStorage : undefined
+        return {
+          getItem: (name: string): StorageValue<RecentDirectoriesState> | null => {
+            const raw = storage?.getItem(name)
+            if (!raw) return null
+            const parsed = JSON.parse(raw) as { state: { directories: Record<string, string[]> }; version?: number }
+            return {
+              ...parsed,
+              state: {
+                ...parsed.state,
+                directories: new Map(Object.entries(parsed.state.directories)),
+              } as RecentDirectoriesState,
+            }
+          },
+          setItem: (name: string, value: StorageValue<RecentDirectoriesState>) => {
+            const serializable = {
+              ...value,
+              state: {
+                ...value.state,
+                directories: Object.fromEntries(value.state.directories),
+              },
+            }
+            storage?.setItem(name, JSON.stringify(serializable))
+          },
+          removeItem: (name: string) => {
+            storage?.removeItem(name)
+          },
+        }
+      })(),
     }
   )
 )
