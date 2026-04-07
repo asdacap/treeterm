@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Loader2, RefreshCw } from 'lucide-react'
+import { Loader2, RefreshCw, Square, X } from 'lucide-react'
 import type { ExecApi } from '../types'
 import type { ExecEvent } from '../../shared/ipc-types'
 
@@ -254,9 +254,17 @@ interface SystemMonitorProps {
 interface SystemMetricsProps {
   metrics: SystemMetrics
   onRefresh: () => void
+  exec: ExecApi
+  connectionId: string
 }
 
-function MonitorDashboard({ metrics, onRefresh }: SystemMetricsProps) {
+function sendSignal(exec: ExecApi, connectionId: string, pid: number, signal: string, onRefresh: () => void): void {
+  void exec.start(connectionId, '/', 'kill', [signal, String(pid)]).then(() => {
+    onRefresh()
+  })
+}
+
+function MonitorDashboard({ metrics, onRefresh, exec, connectionId }: SystemMetricsProps) {
   return (
     <>
       <div className="system-monitor-section">
@@ -311,6 +319,7 @@ function MonitorDashboard({ metrics, onRefresh }: SystemMetricsProps) {
               <span>%CPU</span>
               <span>%MEM</span>
               <span>COMMAND</span>
+              <span></span>
             </div>
             {metrics.processes.map(proc => (
               <div key={proc.pid} className="system-monitor-process-row">
@@ -319,6 +328,22 @@ function MonitorDashboard({ metrics, onRefresh }: SystemMetricsProps) {
                 <span>{proc.cpuPercent.toFixed(1)}</span>
                 <span>{proc.memPercent.toFixed(1)}</span>
                 <span className="system-monitor-process-cmd">{proc.command}</span>
+                <span className="system-monitor-process-actions">
+                  <button
+                    className="system-monitor-action-btn system-monitor-stop-btn"
+                    title="Stop (SIGTERM)"
+                    onClick={() => { sendSignal(exec, connectionId, proc.pid, '-TERM', onRefresh) }}
+                  >
+                    <Square size={10} />
+                  </button>
+                  <button
+                    className="system-monitor-action-btn system-monitor-kill-btn"
+                    title="Kill (SIGKILL)"
+                    onClick={() => { sendSignal(exec, connectionId, proc.pid, '-9', onRefresh) }}
+                  >
+                    <X size={10} />
+                  </button>
+                </span>
               </div>
             ))}
           </div>
@@ -443,7 +468,7 @@ export default function SystemMonitor({ connectionId, exec }: SystemMonitorProps
         </div>
       )}
       {state.status === MonitorStatus.Active && (
-        <MonitorDashboard metrics={state.metrics} onRefresh={handleRetry} />
+        <MonitorDashboard metrics={state.metrics} onRefresh={handleRetry} exec={exec} connectionId={connectionId} />
       )}
     </div>
   )

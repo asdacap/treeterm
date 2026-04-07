@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, act } from '@testing-library/react'
 
 import SystemMonitor, { formatBytes, getUtilizationColor, parseMetrics } from './SystemMonitor'
+import type { ExecEvent } from '../../shared/ipc-types'
 
 // --- formatBytes ---
 
@@ -178,5 +179,63 @@ describe('SystemMonitor component', () => {
     }
     render(<SystemMonitor connectionId="test-conn" exec={mockExec} />)
     expect(screen.getByText('Collecting system metrics...')).toBeDefined()
+  })
+
+  it('renders stop and kill buttons for each process after metrics load', async () => {
+    let capturedCallback: ((event: ExecEvent) => void) | null = null
+    const mockExec = {
+      start: () => Promise.resolve({ success: true as const, execId: 'exec-1' }),
+      kill: () => {},
+      onEvent: (_id: string, cb: (event: ExecEvent) => void) => {
+        capturedCallback = cb
+        return () => {}
+      },
+    }
+    render(<SystemMonitor connectionId="test-conn" exec={mockExec} />)
+
+    // Wait for exec.start promise to resolve and trigger onEvent registration
+    await act(async () => { await new Promise(r => { setTimeout(r, 0) }) })
+
+    // Simulate stdout + exit within act so state updates are flushed
+    act(() => {
+      capturedCallback!({ type: 'stdout', data: LINUX_OUTPUT })
+      capturedCallback!({ type: 'exit', exitCode: 0 })
+    })
+
+    const stopButtons = screen.getAllByTitle('Stop (SIGTERM)')
+    const killButtons = screen.getAllByTitle('Kill (SIGKILL)')
+    expect(stopButtons).toHaveLength(2)
+    expect(killButtons).toHaveLength(2)
+  })
+
+  it('sends SIGTERM when stop button is clicked', async () => {
+    let capturedCallback: ((event: ExecEvent) => void) | null = null
+    const startCalls: string[][] = []
+    const mockExec = {
+      start: (_connId: string, _cwd: string, cmd: string, args: string[]) => {
+        startCalls.push([cmd, ...args])
+        return Promise.resolve({ success: true as const, execId: `exec-${String(startCalls.length)}` })
+      },
+      kill: () => {},
+      onEvent: (_id: string, cb: (event: ExecEvent) => void) => {
+        capturedCallback = cb
+        return () => {}
+      },
+    }
+    render(<SystemMonitor connectionId="test-conn" exec={mockExec} />)
+
+    await act(async () => { await new Promise(r => { setTimeout(r, 0) }) })
+
+    act(() => {
+      capturedCallback!({ type: 'stdout', data: LINUX_OUTPUT })
+      capturedCallback!({ type: 'exit', exitCode: 0 })
+    })
+
+    const stopButtons = screen.getAllByTitle('Stop (SIGTERM)')
+    stopButtons[0]!.click()
+
+    // First call is the monitor script, second is the kill
+    expect(startCalls.length).toBeGreaterThanOrEqual(2)
+    expect(startCalls[1]).toEqual(['kill', '-TERM', '1234'])
   })
 })

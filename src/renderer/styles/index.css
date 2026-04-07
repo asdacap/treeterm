@@ -6004,7 +6004,7 @@ body,
 
 .system-monitor-processes-header {
   display: grid;
-  grid-template-columns: 56px 72px 52px 52px 1fr;
+  grid-template-columns: 56px 72px 52px 52px 1fr auto;
   gap: 4px;
   padding: 4px 0;
   color: var(--text-secondary);
@@ -6015,10 +6015,11 @@ body,
 
 .system-monitor-process-row {
   display: grid;
-  grid-template-columns: 56px 72px 52px 52px 1fr;
+  grid-template-columns: 56px 72px 52px 52px 1fr auto;
   gap: 4px;
   padding: 3px 0;
   color: var(--text-primary);
+  align-items: center;
 }
 
 .system-monitor-process-row:nth-child(even) {
@@ -6029,6 +6030,39 @@ body,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.system-monitor-process-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.system-monitor-action-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.system-monitor-process-row:hover .system-monitor-action-btn {
+  opacity: 1;
+}
+
+.system-monitor-stop-btn:hover {
+  color: #ff9800;
+  border-color: #ff9800;
+}
+
+.system-monitor-kill-btn:hover {
+  color: #f44336;
+  border-color: #f44336;
 }
 
 .system-monitor-footer {
