@@ -277,7 +277,7 @@ export class ConnectionManager {
     return conn.watchStatus(cb)
   }
 
-  async connectRemote(config: SSHConnectionConfig, options?: { refreshDaemon?: boolean }): Promise<ConnectionInfo> {
+  async connectRemote(config: SSHConnectionConfig, options?: { refreshDaemon?: boolean; allowOutdatedDaemon?: boolean }): Promise<ConnectionInfo> {
     // Check if already connected
     const existing = this.connections.get(config.id)
     if (existing && existing.status === 'connected') {
@@ -297,8 +297,8 @@ export class ConnectionManager {
     return promise
   }
 
-  private async doConnectRemote(config: SSHConnectionConfig, options?: { refreshDaemon?: boolean }): Promise<ConnectionInfo> {
-    const tunnel = new SSHTunnel(config, { refreshDaemon: options?.refreshDaemon })
+  private async doConnectRemote(config: SSHConnectionConfig, options?: { refreshDaemon?: boolean; allowOutdatedDaemon?: boolean }): Promise<ConnectionInfo> {
+    const tunnel = new SSHTunnel(config, { refreshDaemon: options?.refreshDaemon, allowOutdatedDaemon: options?.allowOutdatedDaemon })
     const target: ConnectionTarget = { type: 'remote', config }
 
     const conn = new Connection(config.id, target, null, 'connecting', tunnel)

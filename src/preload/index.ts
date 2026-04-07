@@ -555,7 +555,7 @@ const preloadApi: PreloadApi = {
     }
   },
   ssh: {
-    connect: (config: SSHConnectionConfig, options?: { refreshDaemon?: boolean }) => {
+    connect: (config: SSHConnectionConfig, options?: { refreshDaemon?: boolean; allowOutdatedDaemon?: boolean }) => {
       return client.sshConnect(config, options)
     },
     disconnect: (connectionId: string): Promise<void> => {

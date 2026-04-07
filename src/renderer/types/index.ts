@@ -510,7 +510,7 @@ export interface LlmApi {
 }
 
 export interface SSHApi {
-  connect: (config: SSHConnectionConfig, options?: { refreshDaemon?: boolean }) => Promise<{ info: ConnectionInfo; session: Session | null }>
+  connect: (config: SSHConnectionConfig, options?: { refreshDaemon?: boolean; allowOutdatedDaemon?: boolean }) => Promise<{ info: ConnectionInfo; session: Session | null }>
   disconnect: (connectionId: string) => Promise<void>
   listConnections: () => Promise<ConnectionInfo[]>
   saveConnection: (config: SSHConnectionConfig) => Promise<void>

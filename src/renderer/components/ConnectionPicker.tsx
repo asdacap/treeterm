@@ -24,6 +24,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
   const [pfRemotePort, setPfRemotePort] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [refreshDaemon, setRefreshDaemon] = useState(false)
+  const [allowOutdatedDaemon, setAllowOutdatedDaemon] = useState(false)
 
   useEffect(() => {
     if (isOpen) {
@@ -41,7 +42,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
     onClose()
 
     // 2. Fire SSH connection in the background
-    void ssh.connect(config, { refreshDaemon }).then(({ info, session }) => {
+    void ssh.connect(config, { refreshDaemon, allowOutdatedDaemon }).then(({ info, session }) => {
       console.log(`[renderer:ConnectionPicker] ssh.connect returned: status=${info.status}, session=${session ? session.id : 'undefined'}`)
 
       if (info.status !== 'connected' || !session) {
@@ -264,6 +265,16 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
             onChange={e => { setRefreshDaemon(e.target.checked); }}
           />
           Refresh remote daemon
+        </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#a6adc8', marginBottom: 8, opacity: refreshDaemon ? 0.5 : 1 }}>
+          <input
+            type="checkbox"
+            checked={allowOutdatedDaemon}
+            onChange={e => { setAllowOutdatedDaemon(e.target.checked); }}
+            disabled={refreshDaemon}
+          />
+          Allow outdated daemon
         </label>
 
         {error && (

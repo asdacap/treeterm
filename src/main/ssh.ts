@@ -17,6 +17,7 @@ type DisconnectCallback = (error?: string) => void
 
 export interface SSHTunnelOptions {
   refreshDaemon?: boolean
+  allowOutdatedDaemon?: boolean
 }
 
 export class SSHTunnel {
@@ -365,15 +366,33 @@ export class SSHTunnel {
                   resolve(socketPath)
                   return
                 }
-                // Hash mismatch — kill outdated daemon before re-uploading
-                this.appendBootstrapOutput(
-                  `Daemon binary mismatch (local=${localHash.substring(0, 12)}... remote=${remoteHash.substring(0, 12)}...), re-uploading...`,
-                )
-                const killArgs = this.buildBaseSSHArgs()
-                killArgs.push(
-                  'pkill -x "treeterm-daemon" 2>/dev/null || true; rm -f /tmp/treeterm-$(id -u)/daemon.sock; sleep 0.5',
-                )
-                await this.runSSHCommand(killArgs)
+                if (this.options.refreshDaemon) {
+                  // Refresh requested — kill outdated daemon before re-uploading
+                  this.appendBootstrapOutput(
+                    `Daemon binary mismatch (local=${localHash.substring(0, 12)}... remote=${remoteHash.substring(0, 12)}...), re-uploading...`,
+                  )
+                  const killArgs = this.buildBaseSSHArgs()
+                  killArgs.push(
+                    'pkill -x "treeterm-daemon" 2>/dev/null || true; rm -f /tmp/treeterm-$(id -u)/daemon.sock; sleep 0.5',
+                  )
+                  await this.runSSHCommand(killArgs)
+                } else if (this.options.allowOutdatedDaemon) {
+                  // User explicitly opted to use the outdated daemon
+                  this.appendBootstrapOutput(
+                    `Daemon binary mismatch (local=${localHash.substring(0, 12)}... remote=${remoteHash.substring(0, 12)}...), proceeding with outdated daemon as requested.`,
+                  )
+                  resolve(socketPath)
+                  return
+                } else {
+                  // Default: reject with clear error — do not auto-kill
+                  reject(
+                    new Error(
+                      `Daemon binary hash mismatch (local=${localHash.substring(0, 12)}... remote=${remoteHash.substring(0, 12)}...). ` +
+                      `The remote daemon is outdated. Check "Refresh remote daemon" to update it, or "Allow outdated daemon" to connect anyway.`,
+                    ),
+                  )
+                  return
+                }
               } else {
                 // No hash available (sha256sum missing) — trust the running daemon
                 resolve(socketPath)

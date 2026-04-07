@@ -1107,8 +1107,8 @@ function autoStartPortForwards(
 server.onSshConnect(async (event, config, options) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
 
-  console.log(`[main:ssh] onSshConnect called for host=${config.host}, id=${config.id}, refreshDaemon=${String(options?.refreshDaemon ?? false)}`)
-  const info = await connectionManager.connectRemote(config, { refreshDaemon: options?.refreshDaemon })
+  console.log(`[main:ssh] onSshConnect called for host=${config.host}, id=${config.id}, refreshDaemon=${String(options?.refreshDaemon ?? false)}, allowOutdatedDaemon=${String(options?.allowOutdatedDaemon ?? false)}`)
+  const info = await connectionManager.connectRemote(config, { refreshDaemon: options?.refreshDaemon, allowOutdatedDaemon: options?.allowOutdatedDaemon })
   console.log(`[main:ssh] connectRemote returned status=${info.status}${info.status === 'error' ? `, error=${info.error}` : ''}`)
 
   // Switch the calling window to use the remote daemon

@@ -332,7 +332,7 @@ describe('SSHTunnel', () => {
       expect(spawn).toHaveBeenCalledTimes(1)
     })
 
-    it('kills and re-uploads when hash mismatches', async () => {
+    it('kills and re-uploads when hash mismatches with refreshDaemon', async () => {
       const bootstrapProc = makeMockProcess()
       const killProc = makeMockProcess()
       const scpProc = makeMockProcess()
@@ -345,7 +345,7 @@ describe('SSHTunnel', () => {
 
       vi.mocked(fs.existsSync).mockReturnValue(false)
 
-      const tunnel = new SSHTunnel(makeConfig())
+      const tunnel = new SSHTunnel(makeConfig(), { refreshDaemon: true })
       vi.spyOn(priv(tunnel), 'getLocalDaemonChecksum').mockReturnValue('localhash000')
       vi.spyOn(priv(tunnel), 'getDaemonBinaryPath').mockReturnValue('/mock/path/treeterm-daemon-x86_64-linux')
 
@@ -378,6 +378,51 @@ describe('SSHTunnel', () => {
       const result = await promise
       expect(result).toBe('/tmp/treeterm-1000/daemon.sock')
       expect(spawn).toHaveBeenCalledTimes(4)
+    })
+
+    it('rejects with error on hash mismatch without refreshDaemon', async () => {
+      const proc = makeMockProcess()
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
+
+      const tunnel = new SSHTunnel(makeConfig())
+      vi.spyOn(priv(tunnel), 'getLocalDaemonChecksum').mockReturnValue('localhash000')
+
+      const promise = priv(tunnel).bootstrapRemoteDaemon()
+
+      proc.stdout.emit(
+        'data',
+        Buffer.from(
+          'TREETERM_ARCH:x86_64\nTREETERM_REMOTE_HASH:remotehash999\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n',
+        ),
+      )
+      proc.emit('close', 0)
+
+      await expect(promise).rejects.toThrow('Daemon binary hash mismatch')
+      // Only bootstrap spawn — no kill or upload
+      expect(spawn).toHaveBeenCalledTimes(1)
+    })
+
+    it('resolves with existing socket when allowOutdatedDaemon and hash mismatches', async () => {
+      const proc = makeMockProcess()
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
+
+      const tunnel = new SSHTunnel(makeConfig(), { allowOutdatedDaemon: true })
+      vi.spyOn(priv(tunnel), 'getLocalDaemonChecksum').mockReturnValue('localhash000')
+
+      const promise = priv(tunnel).bootstrapRemoteDaemon()
+
+      proc.stdout.emit(
+        'data',
+        Buffer.from(
+          'TREETERM_ARCH:x86_64\nTREETERM_REMOTE_HASH:remotehash999\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n',
+        ),
+      )
+      proc.emit('close', 0)
+
+      const result = await promise
+      expect(result).toBe('/tmp/treeterm-1000/daemon.sock')
+      // Only bootstrap spawn — no kill or upload
+      expect(spawn).toHaveBeenCalledTimes(1)
     })
 
     it('trusts running daemon when sha256sum is unavailable (NONE hash)', async () => {

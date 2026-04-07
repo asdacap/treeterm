@@ -296,7 +296,7 @@ export interface IpcRequests {
 
   // SSH operations
   sshConnect: {
-    params: [config: SSHConnectionConfig, options?: { refreshDaemon?: boolean }]
+    params: [config: SSHConnectionConfig, options?: { refreshDaemon?: boolean; allowOutdatedDaemon?: boolean }]
     result: { info: ConnectionInfo; session: Session | null }
   }
   sshDisconnect: {
