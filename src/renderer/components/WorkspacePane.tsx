@@ -443,11 +443,11 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                   <div className="workspace-load-error-actions">
                     {activeEntry.status === 'operation-error' && (
                       <button className="workspace-action-btn" onClick={() => { if (activeWorkspaceId) clearWorkspaceError(activeWorkspaceId); }}>
-                        Dismiss
+                        Cancel
                       </button>
                     )}
                     <button className="workspace-action-btn workspace-action-btn-danger" onClick={() => { if (activeWorkspaceId) closeWorkspace(activeWorkspaceId); }}>
-                      Close
+                      Close Workspace
                     </button>
                   </div>
                 </div>
