@@ -52,6 +52,12 @@ export type {
 /** Convenience type: AppState with its id (the map key) */
 export type Tab = AppState & { id: string }
 
+export enum ScrollPosition {
+  Top = 'top',
+  Bottom = 'bottom',
+  Middle = 'middle',
+}
+
 // Activity state for applications that can report their state
 export type ActivityState =
   | 'idle'

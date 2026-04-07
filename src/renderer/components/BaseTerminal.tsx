@@ -9,6 +9,7 @@ import { useSessionApi } from '../contexts/SessionStoreContext'
 import { createActivityStateDetector } from '../utils/activityStateDetector'
 import type { Tty } from '../store/createTtyStore'
 import type { CachedTerminal } from '../store/createWorkspaceStore'
+import { ScrollPosition } from '../types'
 import type { PtyEvent, SandboxConfig, TerminalState, WorkspaceStore } from '../types'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
@@ -146,7 +147,9 @@ export default function BaseTerminal({
   const ttyRef = useRef<Tty | null>(null)
   const [overlay, setOverlay] = useState<{ message: string; type: 'info' | 'error' } | null>(null)
   const [loading, setLoading] = useState(true)
-  const [scrollPosition, setScrollPosition] = useState<'top' | 'bottom' | 'middle'>('bottom')
+  const [scrollPosition, setScrollPosition] = useState<ScrollPosition>(ScrollPosition.Bottom)
+  const scrollPositionRef = useRef<ScrollPosition>(ScrollPosition.Bottom)
+  scrollPositionRef.current = scrollPosition
   const [isAlternateScreen, setIsAlternateScreen] = useState(false)
   const [sizeMismatch, setSizeMismatch] = useState<{ requested: { cols: number; rows: number }; actual: { cols: number; rows: number } } | null>(null)
   const [refreshCounter, setRefreshCounter] = useState(0)
@@ -196,13 +199,13 @@ export default function BaseTerminal({
       scrollDisposable = terminal.onScroll(() => {
         const buf = terminal.buffer.active
         if (buf.baseY === 0) {
-          setScrollPosition('bottom')
+          setScrollPosition(ScrollPosition.Bottom)
         } else if (buf.viewportY === 0) {
-          setScrollPosition('top')
+          setScrollPosition(ScrollPosition.Top)
         } else if (buf.baseY - buf.viewportY <= 1) {
-          setScrollPosition('bottom')
+          setScrollPosition(ScrollPosition.Bottom)
         } else {
-          setScrollPosition('middle')
+          setScrollPosition(ScrollPosition.Middle)
         }
       })
 
@@ -238,12 +241,12 @@ export default function BaseTerminal({
             cache.dataVersion++
             setOverlay(null)
 
-            const buf = terminal.buffer.active
-            const wasAtBottom = buf.baseY - buf.viewportY <= 1
+            const wasAtBottom = scrollPositionRef.current === ScrollPosition.Bottom
 
             const afterWrite = () => {
-              if (wasAtBottom && terminal.buffer.active.baseY - terminal.buffer.active.viewportY > 1) {
+              if (wasAtBottom) {
                 terminal.scrollToBottom()
+                setScrollPosition(ScrollPosition.Bottom)
               }
             }
 
@@ -286,11 +289,9 @@ export default function BaseTerminal({
             break
           }
           case 'resize': {
+            const wasAtBottom = scrollPositionRef.current === ScrollPosition.Bottom
             const buf = terminal.buffer.active
-            const prevViewportY = buf.viewportY
-            const prevBaseY = buf.baseY
-            const wasAtBottom = prevBaseY - prevViewportY <= 3
-            const scrollRatio = prevBaseY > 0 ? prevViewportY / prevBaseY : 0
+            const scrollRatio = buf.baseY > 0 ? buf.viewportY / buf.baseY : 0
 
             terminal.resize(event.cols, event.rows)
 
@@ -304,6 +305,7 @@ export default function BaseTerminal({
 
             if (wasAtBottom) {
               terminal.scrollToBottom()
+              setScrollPosition(ScrollPosition.Bottom)
             } else {
               const newScrollLine = Math.round(terminal.buffer.active.baseY * scrollRatio)
               terminal.scrollToLine(newScrollLine)
@@ -504,7 +506,7 @@ export default function BaseTerminal({
     setRefreshCounter((c) => c + 1)
   }, [tabId, disposeCachedTerminal])
 
-  const handleBadgeClick = scrollPosition === 'bottom' ? handleScrollToTop : handleScrollDown
+  const handleBadgeClick = scrollPosition === ScrollPosition.Bottom ? handleScrollToTop : handleScrollDown
 
   const openContextMenu = useContextMenuStore((s) => s.open)
   const closeContextMenu = useContextMenuStore((s) => s.close)
@@ -576,7 +578,7 @@ export default function BaseTerminal({
       <button
         className={`scroll-position-badge scroll-position-${scrollPosition}`}
         onClick={handleBadgeClick}
-        title={scrollPosition === 'bottom' ? 'Scroll to top' : 'Scroll to bottom'}
+        title={scrollPosition === ScrollPosition.Bottom ? 'Scroll to top' : 'Scroll to bottom'}
       >
         {scrollPosition.toUpperCase()}
       </button>
