@@ -147,10 +147,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const categoryValue = settings[category]
     
     // Handle nested object categories (terminal, sandbox, etc.)
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- guard against future changes
     if (typeof categoryValue === 'object' && categoryValue !== null && !Array.isArray(categoryValue)) {
       const newSettings = {
         ...settings,
         [category]: {
+          // eslint-disable-next-line @typescript-eslint/no-misused-spread -- categoryValue is always an object here
           ...categoryValue,
           [key]: value
         }

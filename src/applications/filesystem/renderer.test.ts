@@ -8,7 +8,7 @@ import type { ReviewCommentState } from '../../renderer/store/createReviewCommen
 
 // Mock React
 vi.mock('react', () => ({
-  createElement: vi.fn((component: any, props: any) => ({ component, props }))
+  createElement: vi.fn((component: unknown, props: unknown) => ({ component, props }))
 }))
 
 // Mock FilesystemBrowser component
@@ -70,7 +70,7 @@ function createMockWorkspaceStoreStateData(overrides?: Partial<WorkspaceStoreSta
     setCachedTerminal: vi.fn(),
     disposeCachedTerminal: vi.fn(), disposeAllCachedTerminals: vi.fn(), disposeTabResources: vi.fn(),
     initAnalyzer: vi.fn(),
-    createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn(), kill: vi.fn() }),
+    createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
     connectionId: 'local',
     focusTabId: null,
     requestFocus: vi.fn(),
@@ -145,7 +145,9 @@ describe('Filesystem Renderer', () => {
         })
 
         expect(result).toEqual({
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           component: expect.any(Function),
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           props: expect.objectContaining({
             key: 'tab-1',
             workspace: mockWorkspaceStore,

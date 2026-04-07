@@ -61,7 +61,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
 
   const ssh = useAppStore(s => s.ssh)
   const disconnectSession = useAppStore(s => s.disconnectSession)
-  const displayName = useSessionNamesStore(s => s.names[sessionId].name)
+  const displayName = useSessionNamesStore(s => s.names.get(sessionId)?.name ?? sessionId)
 
   const [activeTab, setActiveTab] = useState<TabId>(isRemote ? 'ssh' : 'info')
   const [sshSubTab, setSshSubTab] = useState<SshSubTab>('bootstrap')
@@ -127,7 +127,8 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
   const handleTogglePfOutput = (pfId: string, currentlyExpanded: boolean) => {
     if (currentlyExpanded) {
       setExpandedPfOutput(prev => {
-        const { [pfId]: _removed, ...rest } = prev
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { [pfId]: _, ...rest } = prev
         return rest
       })
     } else {
@@ -183,7 +184,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
     activeWorkspaceId: rawActiveWorkspaceId,
     sessionVersion: rawSessionVersion,
     workspaces: Object.fromEntries(
-      Object.entries(rawWorkspaces).map(([id, entry]) => [
+      Array.from(rawWorkspaces.entries()).map(([id, entry]) => [
         id,
         entry.status === 'loaded' || entry.status === 'operation-error'
           ? { status: entry.status, data: entry.data }
@@ -207,7 +208,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
         {isRemote && connection.status === 'connecting' && (
           <Loader2 size={14} className="spinning" style={{ marginLeft: 8 }} />
         )}
-        {isRemote && connection.status && (
+        {isRemote && (
           <span className="ssh-pane-status-text">({connection.status})</span>
         )}
         {!isRemote && (

@@ -104,9 +104,9 @@ describe('ConnectionManager', () => {
     it('registers local connection as connected', () => {
       const connections = manager.listConnections()
       expect(connections).toHaveLength(1)
-      expect(connections[0].id).toBe('local')
-      expect(connections[0].status).toBe('connected')
-      expect(connections[0].target).toEqual({ type: 'local' })
+      expect(connections[0]!.id).toBe('local')
+      expect(connections[0]!.status).toBe('connected')
+      expect(connections[0]!.target).toEqual({ type: 'local' })
     })
   })
 
@@ -142,8 +142,8 @@ describe('ConnectionManager', () => {
     it('returns connection info for existing connection', () => {
       const info = manager.getConnection('local')
       expect(info).toBeDefined()
-      expect(info!.id).toBe('local')
-      expect(info!.status).toBe('connected')
+      expect(info?.id).toBe('local')
+      expect(info?.status).toBe('connected')
     })
 
     it('returns undefined for missing connection', () => {
@@ -180,7 +180,7 @@ describe('ConnectionManager', () => {
       const cb = vi.fn()
       const result = manager.watchConnectionStatus('local', cb)
       expect(result.initial).toBeDefined()
-      expect(result.initial!.id).toBe('local')
+      expect(result.initial?.id).toBe('local')
       expect(typeof result.unsubscribe).toBe('function')
     })
 
@@ -297,7 +297,7 @@ describe('ConnectionManager', () => {
 
   describe('disconnectRemote', () => {
     it('throws when trying to disconnect local', () => {
-      expect(() => manager.disconnectRemote('local')).toThrow('Cannot disconnect local connection')
+      expect(() => { manager.disconnectRemote('local'); }).toThrow('Cannot disconnect local connection')
     })
 
     it('no-ops for missing connection', () => {
@@ -376,7 +376,7 @@ describe('ConnectionManager', () => {
       manager.addPortForward(pfConfig)
       const list = manager.listPortForwards('remote-1')
       expect(list).toHaveLength(1)
-      expect(list[0].id).toBe('pf-1')
+      expect(list[0]!.id).toBe('pf-1')
     })
 
     it('listPortForwards returns empty for connection with no forwards', async () => {
@@ -393,7 +393,7 @@ describe('ConnectionManager', () => {
     })
 
     it('removePortForward no-ops for unknown id', () => {
-      expect(() => manager.removePortForward('unknown')).not.toThrow()
+      expect(() => { manager.removePortForward('unknown'); }).not.toThrow()
     })
 
     it('watchPortForwardOutput returns scrollback and subscribes', async () => {

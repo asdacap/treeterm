@@ -86,10 +86,12 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
 
       // Check for prefix key activation
       const prefixKeybinding = convertDirectKeybinding(prefixMode.prefixKey)
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
       const prefixParts = parseKeybinding(prefixKeybinding) as [string[], string][]
 
       if (prefixParts.length > 0) {
-        const [modifiers, key] = prefixParts[0]
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length > 0 checked above
+        const [modifiers, key] = prefixParts[0]!
         if (matchesKeybinding(e, modifiers, key)) {
           e.preventDefault()
           e.stopPropagation()
@@ -189,7 +191,7 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
       }
 
       // Diagnostic: detect if Shift/Enter are being unexpectedly blocked in idle mode
-      if (prefixState === 'idle' && (e.key === 'Shift' || e.key === 'Enter') && e.defaultPrevented) {
+      if ((e.key === 'Shift' || e.key === 'Enter') && e.defaultPrevented) {
         console.error('[KeyDiag] Shift/Enter was preventDefault in idle mode!', {
           key: e.key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey,
           activeElement: document.activeElement?.tagName,

@@ -149,6 +149,7 @@ export function createWorkspaceStore(
   const id = workspace.id
 
   // Declare store early so sub-stores can reference it lazily via callbacks
+  // eslint-disable-next-line prefer-const
   let store!: WorkspaceStore
 
   function updateWorkspace(updater: (ws: Workspace) => Workspace): void {
@@ -187,7 +188,9 @@ export function createWorkspaceStore(
 
     initTab: (tabId: string): void => {
       if (tabRefs.has(tabId)) return
+       
       const appState = get().workspace.appStates[tabId]
+       
       if (!appState) return
       const app = deps.appRegistry.get(appState.applicationId)
       if (!app) return
@@ -305,7 +308,9 @@ export function createWorkspaceStore(
 
     removeTab: (tabId: string): Promise<void> => {
       const ws = get().workspace
+       
       const appState = ws.appStates[tabId]
+       
       if (!appState) return Promise.resolve()
 
       const app = deps.appRegistry.get(appState.applicationId)
@@ -315,6 +320,7 @@ export function createWorkspaceStore(
       get().disposeTabResources(tabId)
 
       updateWorkspace((ws) => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { [tabId]: _removed, ...remainingStates } = ws.appStates
         const remainingIds = Object.keys(remainingStates)
         let newActiveTabId = ws.activeTabId
@@ -351,7 +357,8 @@ export function createWorkspaceStore(
         ...ws,
         appStates: {
           ...ws.appStates,
-          [tabId]: { ...ws.appStates[tabId], title }
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist
+          [tabId]: { ...ws.appStates[tabId]!, title }
         }
       }))
       deps.syncToDaemon()
@@ -359,7 +366,8 @@ export function createWorkspaceStore(
 
     updateTabState: <T,>(tabId: string, updater: (state: T) => T): void => {
       updateWorkspace((ws) => {
-        const appState = ws.appStates[tabId]
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist
+        const appState = ws.appStates[tabId]!
         return {
           ...ws,
           appStates: {
@@ -370,7 +378,7 @@ export function createWorkspaceStore(
       })
       // Only sync if the tab state contains a ptyId (persisted state)
       const appState = get().workspace.appStates[tabId]
-      if (appState.state && (appState.state as { ptyId?: string }).ptyId) {
+      if (appState?.state && (appState.state as { ptyId?: string }).ptyId) {
         deps.syncToDaemon()
       }
     },

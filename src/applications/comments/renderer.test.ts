@@ -55,7 +55,7 @@ const mockWorkspaceStoreStateData = {
   setCachedTerminal: vi.fn(),
   disposeCachedTerminal: vi.fn(), disposeAllCachedTerminals: vi.fn(), disposeTabResources: vi.fn(),
   initAnalyzer: vi.fn(),
-  createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn(), kill: vi.fn() }),
+  createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
   connectionId: 'local',
   updateSettings: vi.fn(),
   focusTabId: null,
@@ -141,7 +141,9 @@ describe('Comments Renderer', () => {
         })
 
         expect(result).toEqual({
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           component: expect.any(Function),
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           props: expect.objectContaining({
             key: 'tab-1',
             workspace: mockWorkspaceStore,

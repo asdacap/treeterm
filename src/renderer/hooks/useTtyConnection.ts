@@ -60,7 +60,7 @@ export function useTtyCreation(
       }
     }
 
-    create()
+    void create()
 
     return () => {
       cancelled = true

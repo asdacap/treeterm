@@ -5,8 +5,9 @@ import { createStore } from 'zustand/vanilla'
 import { PromptGitHubCommentsButton } from './PromptGitHubCommentsButton'
 
 function makeStores(prInfo: any) {
-  const promptHarness = vi.fn()
+  const promptHarness = vi.fn<(prompt: string) => void>()
   const gitControllerStore = createStore<any>()(() => ({
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     prInfo,
   }))
   const workspaceStore = createStore<any>()(() => ({

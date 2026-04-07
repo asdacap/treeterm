@@ -7,10 +7,13 @@ import type { WorkspaceStoreState } from '../../renderer/store/createWorkspaceSt
 import type { GitControllerState } from '../../renderer/store/createGitControllerStore'
 import type { ReviewCommentState } from '../../renderer/store/createReviewCommentStore'
 
-vi.mock('react', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('react')>()),
-  createElement: vi.fn((component: unknown, props: unknown) => ({ component, props }))
-}))
+vi.mock('react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react')>()
+  return {
+    ...actual,
+    createElement: vi.fn((component: unknown, props: unknown) => ({ component, props }))
+  }
+})
 
 vi.mock('../../renderer/components/WorkspaceSettings', () => ({
   default: vi.fn(() => null)
@@ -37,7 +40,7 @@ const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => ({
   closeAndClean: vi.fn(), lookupWorkspace: vi.fn(),
   remove: vi.fn(), removeKeepBranch: vi.fn(), removeKeepBoth: vi.fn(),
   initTab: vi.fn(), getTabRef: vi.fn().mockReturnValue(null), getCachedTerminal: vi.fn().mockReturnValue(null), setCachedTerminal: vi.fn(), disposeCachedTerminal: vi.fn(), disposeAllCachedTerminals: vi.fn(), disposeTabResources: vi.fn(),
-  initAnalyzer: vi.fn(), createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn(), kill: vi.fn() }),
+  initAnalyzer: vi.fn(), createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
   connectionId: 'local', updateSettings: vi.fn(),
   gitApi: createMockGitApi(), filesystemApi: createMockFilesystemApi(), runActionsApi: createMockRunActionsApi(), execApi: createMockExecApi(),
   focusTabId: null, requestFocus: vi.fn(), clearFocusRequest: vi.fn(),
@@ -78,6 +81,7 @@ describe('WorkspaceSettings Renderer', () => {
     const tab = { id: 'tab-1', state: {} } as unknown as Tab
     const result = workspaceSettingsApplication.render({ tab, workspace: mockWorkspaceStore, isVisible: true })
     expect(result).toEqual({
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       component: expect.any(Function),
       props: {
         key: 'tab-1',

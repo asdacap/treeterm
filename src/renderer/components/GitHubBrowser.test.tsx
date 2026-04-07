@@ -124,8 +124,9 @@ describe('GitHubBrowser', () => {
     const { workspaceStore, refreshPrStatus } = makeStores(null)
     render(<GitHubBrowser workspace={workspaceStore} isVisible={true} />)
 
-    const refreshBtn = screen.getByText('Refresh').closest('button')!
-    fireEvent.click(refreshBtn)
+    const refreshBtn = screen.getByText('Refresh').closest('button')
+    expect(refreshBtn).toBeDefined()
+    if (refreshBtn) fireEvent.click(refreshBtn)
 
     await waitFor(() => {
       expect(refreshPrStatus).toHaveBeenCalledTimes(1)

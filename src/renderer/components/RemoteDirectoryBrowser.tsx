@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import type { IpcResult, DirectoryContents } from '../types'
 
 interface RemoteDirectoryBrowserProps {
@@ -19,7 +19,7 @@ export default function RemoteDirectoryBrowser({
   initialPath,
   onSelect,
   onCancel,
-}: RemoteDirectoryBrowserProps): JSX.Element {
+}: RemoteDirectoryBrowserProps): React.JSX.Element {
   const [currentPath, setCurrentPath] = useState(initialPath)
   const [pathInput, setPathInput] = useState(initialPath)
   const [dirState, setDirState] = useState<DirState>({ entries: [], loading: true, error: null })
@@ -101,7 +101,7 @@ export default function RemoteDirectoryBrowser({
             <span key={path}>
               <button
                 className={`remote-dir-breadcrumb-seg ${isLast ? 'active' : ''}`}
-                onClick={() => !isLast && navigateTo(path)}
+                onClick={() => { if (!isLast) navigateTo(path) }}
                 disabled={isLast}
               >
                 {seg === '/' ? '/' : seg}

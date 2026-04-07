@@ -152,6 +152,7 @@ export function FileViewer({
 
     if (onLineClick) {
       editor.onMouseDown((e: { target: { type: number; position?: { lineNumber: number } | null } }) => {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
         if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
           const lineNumber = e.target.position?.lineNumber
           if (lineNumber) {

@@ -1,5 +1,5 @@
 import { DiffEditor, DiffOnMount } from '@monaco-editor/react'
-import { useRef, useState, useEffect } from 'react'
+import React, { useRef, useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import type { editor } from 'monaco-editor'
 import type { ReviewComment } from '../types'
@@ -51,7 +51,7 @@ export function MonacoDiffViewer({
   onCommentDelete,
   initialScrollTop,
   onScrollPositionChange
-}: MonacoDiffViewerProps): JSX.Element {
+}: MonacoDiffViewerProps): React.JSX.Element {
   const diffEditorRef = useRef<editor.IStandaloneDiffEditor | null>(null)
   const lastScrollTopRef = useRef(initialScrollTop ?? 0)
   let shouldRestoreScroll = !!initialScrollTop && initialScrollTop > 0
@@ -113,7 +113,8 @@ export function MonacoDiffViewer({
     const changesToUse = changes || lineChanges
     if (!changesToUse || changesToUse.length === 0) return
 
-    const change = changesToUse[index]
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- index is bounds-checked by caller
+    const change = changesToUse[index]!
     const lineNumber = change.modifiedStartLineNumber || change.originalStartLineNumber
     const modifiedEditor = diffEditorRef.current.getModifiedEditor()
     modifiedEditor.revealLineInCenter(lineNumber)
@@ -178,6 +179,7 @@ export function MonacoDiffViewer({
       const originalEditor = editor.getOriginalEditor()
 
       modifiedEditor.onMouseDown((e) => {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
         if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
           const lineNumber = e.target.position?.lineNumber
           if (lineNumber) {
@@ -187,6 +189,7 @@ export function MonacoDiffViewer({
       })
 
       originalEditor.onMouseDown((e) => {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
         if (e.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
           const lineNumber = e.target.position?.lineNumber
           if (lineNumber) {
@@ -299,7 +302,7 @@ export function MonacoDiffViewer({
     const newContainers = new Map<string, { container: HTMLDivElement; comments: ReviewComment[] }>()
 
     Array.from(groups.entries()).forEach(([key, groupComments]) => {
-      const [side, lineStr] = key.split(':')
+      const [side, lineStr] = key.split(':') as [string, string]
       const lineNumber = parseInt(lineStr, 10)
       const targetEditor = side === 'modified' ? modifiedEditor : originalEditor
 
@@ -417,7 +420,8 @@ export function MonacoDiffViewer({
       return
     }
 
-    const change = lineChanges[currentChangeIndex]
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- currentChangeIndex is bounds-checked above
+    const change = lineChanges[currentChangeIndex]!
     const highlightOpts = { isWholeLine: true, className: 'current-change-highlight' }
 
     const modifiedDecs = change.modifiedStartLineNumber > 0 ? [{

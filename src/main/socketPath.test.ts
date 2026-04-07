@@ -13,7 +13,7 @@ describe('socketPath', () => {
     it('returns path under tmpdir with treeterm prefix', () => {
       const result = getDefaultSocketPath()
       const uid = process.getuid ? process.getuid() : os.userInfo().uid
-      expect(result).toBe(path.join(os.tmpdir(), `treeterm-${uid}`, 'daemon.sock'))
+      expect(result).toBe(path.join(os.tmpdir(), `treeterm-${String(uid)}`, 'daemon.sock'))
     })
   })
 
@@ -26,7 +26,7 @@ describe('socketPath', () => {
     it('returns path under /tmp with treeterm prefix', () => {
       const uid = process.getuid ? process.getuid() : os.userInfo().uid
       const result = getRemoteForwardSocketPath('test-connection')
-      expect(result).toContain(`/tmp/treeterm-${uid}/`)
+      expect(result).toContain(`/tmp/treeterm-${String(uid)}/`)
     })
 
     it('produces different paths for different connection IDs', () => {

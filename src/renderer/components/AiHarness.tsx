@@ -47,12 +47,8 @@ interface AiHarnessProps {
 }
 
 export default function AiHarness({
-  cwd: _cwd,
   workspace,
   tabId,
-  sandbox: _sandbox,
-  isVisible: _isVisible,
-  command: _command,
   backgroundColor,
   disableScrollbar,
   stripScrollbackClear,

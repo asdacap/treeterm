@@ -10,6 +10,7 @@ import {
   createRunActionsClient,
 } from './runActions'
 import type { RunActionProvider } from './runActions'
+import type { GrpcDaemonClient } from './grpcClient'
 
 describe('parseMakeTargets', () => {
   it('parses simple targets', () => {
@@ -38,14 +39,14 @@ build:
 `
     const actions = parseMakeTargets(content)
     expect(actions).toHaveLength(1)
-    expect(actions[0].name).toBe('build')
+    expect(actions[0]!.name).toBe('build')
   })
 
   it('handles targets with dots and dashes', () => {
     const content = `my-target.all:\n\techo hi\n`
     const actions = parseMakeTargets(content)
     expect(actions).toHaveLength(1)
-    expect(actions[0].name).toBe('my-target.all')
+    expect(actions[0]!.name).toBe('my-target.all')
   })
 
   it('returns empty for empty content', () => {
@@ -154,7 +155,7 @@ describe('parseVscodeLaunch', () => {
 
   it('returns empty description when config has no type', () => {
     const actions = parseVscodeLaunch('{"configurations": [{"name": "Run"}]}')
-    expect(actions[0].description).toBe('')
+    expect(actions[0]!.description).toBe('')
   })
 
   it('returns empty for no configurations', () => {
@@ -196,7 +197,7 @@ describe('parseVscodeTasks', () => {
   it('uses type as description when no command', () => {
     const content = '{"tasks": [{"label": "Watch", "type": "typescript"}]}'
     const actions = parseVscodeTasks(content)
-    expect(actions[0].description).toBe('typescript')
+    expect(actions[0]!.description).toBe('typescript')
   })
 
   it('filters tasks without labels', () => {
@@ -208,7 +209,7 @@ describe('parseVscodeTasks', () => {
     }`
     const actions = parseVscodeTasks(content)
     expect(actions).toHaveLength(1)
-    expect(actions[0].name).toBe('Build')
+    expect(actions[0]!.name).toBe('Build')
   })
 })
 
@@ -216,8 +217,8 @@ describe('RunActionsClient', () => {
   function makeProvider(overrides?: Partial<RunActionProvider>): RunActionProvider {
     return {
       source: 'test',
-      detect: vi.fn().mockResolvedValue([]),
-      run: vi.fn().mockResolvedValue('pty-1'),
+      detect: vi.fn<(workspace: string) => Promise<any[]>>().mockResolvedValue([]),
+      run: vi.fn<(actionId: string, workspace: string) => Promise<string>>().mockResolvedValue('pty-1'),
       ...overrides,
     }
   }
@@ -225,45 +226,45 @@ describe('RunActionsClient', () => {
   it('detect aggregates actions from all providers', async () => {
     const p1 = makeProvider({
       source: 'npm',
-      detect: vi.fn().mockResolvedValue([{ id: 'npm:build', name: 'build', source: 'npm', description: '' }]),
+      detect: vi.fn<(workspace: string) => Promise<any[]>>().mockResolvedValue([{ id: 'npm:build', name: 'build', source: 'npm', description: '' }]),
     })
     const p2 = makeProvider({
       source: 'make',
-      detect: vi.fn().mockResolvedValue([{ id: 'make:test', name: 'test', source: 'make', description: '' }]),
+      detect: vi.fn<(workspace: string) => Promise<any[]>>().mockResolvedValue([{ id: 'make:test', name: 'test', source: 'make', description: '' }]),
     })
-    const client = new RunActionsClient({} as any, [p1, p2])
+    const client = new RunActionsClient({} as unknown as GrpcDaemonClient, [p1, p2])
     const actions = await client.detect('/workspace')
     expect(actions).toHaveLength(2)
-    expect(actions[0].id).toBe('npm:build')
-    expect(actions[1].id).toBe('make:test')
+    expect(actions[0]!.id).toBe('npm:build')
+    expect(actions[1]!.id).toBe('make:test')
   })
 
   it('detect handles provider failures gracefully', async () => {
     const p1 = makeProvider({
       source: 'npm',
-      detect: vi.fn().mockRejectedValue(new Error('parse error')),
+      detect: vi.fn<(workspace: string) => Promise<any[]>>().mockRejectedValue(new Error('parse error')),
     })
     const p2 = makeProvider({
       source: 'make',
-      detect: vi.fn().mockResolvedValue([{ id: 'make:all', name: 'all', source: 'make', description: '' }]),
+      detect: vi.fn<(workspace: string) => Promise<any[]>>().mockResolvedValue([{ id: 'make:all', name: 'all', source: 'make', description: '' }]),
     })
-    const client = new RunActionsClient({} as any, [p1, p2])
+    const client = new RunActionsClient({} as unknown as GrpcDaemonClient, [p1, p2])
     const actions = await client.detect('/workspace')
     expect(actions).toHaveLength(1)
-    expect(actions[0].id).toBe('make:all')
+    expect(actions[0]!.id).toBe('make:all')
   })
 
   it('detect returns empty when all providers fail', async () => {
-    const p1 = makeProvider({ detect: vi.fn().mockRejectedValue(new Error('fail')) })
-    const client = new RunActionsClient({} as any, [p1])
+    const p1 = makeProvider({ detect: vi.fn<(workspace: string) => Promise<any[]>>().mockRejectedValue(new Error('fail')) })
+    const client = new RunActionsClient({} as unknown as GrpcDaemonClient, [p1])
     const actions = await client.detect('/workspace')
     expect(actions).toEqual([])
   })
 
   it('run dispatches to correct provider', async () => {
-    const p1 = makeProvider({ source: 'npm', run: vi.fn().mockResolvedValue('pty-npm') })
-    const p2 = makeProvider({ source: 'make', run: vi.fn().mockResolvedValue('pty-make') })
-    const client = new RunActionsClient({} as any, [p1, p2])
+    const p1 = makeProvider({ source: 'npm', run: vi.fn<(actionId: string, workspace: string) => Promise<string>>().mockResolvedValue('pty-npm') })
+    const p2 = makeProvider({ source: 'make', run: vi.fn<(actionId: string, workspace: string) => Promise<string>>().mockResolvedValue('pty-make') })
+    const client = new RunActionsClient({} as unknown as GrpcDaemonClient, [p1, p2])
 
     const result = await client.run('/workspace', 'make:build')
     expect(result).toMatchObject({ success: true, ptyId: 'pty-make' })
@@ -272,21 +273,22 @@ describe('RunActionsClient', () => {
   })
 
   it('run throws for unknown provider', async () => {
-    const client = new RunActionsClient({} as any, [])
+    const client = new RunActionsClient({} as unknown as GrpcDaemonClient, [])
     const result = await client.run('/workspace', 'unknown:action')
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     expect(result).toMatchObject({ success: false, error: expect.stringContaining('No provider found') })
   })
 
   it('detect returns empty when package.json has no scripts', async () => {
     const mockDaemonClient = {
-      readFile: vi.fn().mockResolvedValue({
+      readFile: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({
         success: true,
         file: { content: '{"name": "test"}' },
       }),
-      createPtySession: vi.fn(),
+      createPtySession: vi.fn<(...args: any[]) => Promise<string>>(),
     }
 
-    const client = createRunActionsClient(mockDaemonClient as any)
+    const client = createRunActionsClient(mockDaemonClient as unknown as GrpcDaemonClient)
     const actions = await client.detect('/workspace')
     const npmActions = actions.filter(a => a.source === 'npm')
     expect(npmActions).toHaveLength(0)
@@ -294,14 +296,14 @@ describe('RunActionsClient', () => {
 
   it('detect returns empty when package.json scripts is not an object', async () => {
     const mockDaemonClient = {
-      readFile: vi.fn().mockResolvedValue({
+      readFile: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({
         success: true,
         file: { content: '{"scripts": "invalid"}' },
       }),
-      createPtySession: vi.fn(),
+      createPtySession: vi.fn<(...args: any[]) => Promise<string>>(),
     }
 
-    const client = createRunActionsClient(mockDaemonClient as any)
+    const client = createRunActionsClient(mockDaemonClient as unknown as GrpcDaemonClient)
     const actions = await client.detect('/workspace')
     const npmActions = actions.filter(a => a.source === 'npm')
     expect(npmActions).toHaveLength(0)
@@ -310,15 +312,15 @@ describe('RunActionsClient', () => {
   it('detect finds Taskfile.yaml when Taskfile.yml missing', async () => {
     const taskfileContent = 'version: \'3\'\n\ntasks:\n  build:\n    cmds:\n      - echo build\n'
     const mockDaemonClient = {
-      readFile: vi.fn().mockImplementation((_ws: string, absPath: string) => {
+      readFile: vi.fn<(ws: string, absPath: string) => Promise<any>>().mockImplementation((_ws: string, absPath: string) => {
         if (absPath.endsWith('Taskfile.yml')) return Promise.resolve({ success: false })
         if (absPath.endsWith('Taskfile.yaml')) return Promise.resolve({ success: true, file: { content: taskfileContent } })
         return Promise.resolve({ success: false })
       }),
-      createPtySession: vi.fn(),
+      createPtySession: vi.fn<(...args: any[]) => Promise<string>>(),
     }
 
-    const client = createRunActionsClient(mockDaemonClient as any)
+    const client = createRunActionsClient(mockDaemonClient as unknown as GrpcDaemonClient)
     const actions = await client.detect('/workspace')
     const taskActions = actions.filter(a => a.source === 'task')
     expect(taskActions.length).toBeGreaterThanOrEqual(1)
@@ -326,16 +328,16 @@ describe('RunActionsClient', () => {
 
   it('detect finds Justfile with lowercase fallback', async () => {
     const mockDaemonClient = {
-      readFile: vi.fn().mockImplementation((_ws: string, absPath: string) => {
+      readFile: vi.fn<(ws: string, absPath: string) => Promise<any>>().mockImplementation((_ws: string, absPath: string) => {
         // Return null for Justfile (uppercase), content for justfile (lowercase)
         if (absPath.endsWith('Justfile')) return Promise.resolve({ success: false })
         if (absPath.endsWith('justfile')) return Promise.resolve({ success: true, file: { content: 'build:\n  echo build\n' } })
         return Promise.resolve({ success: false })
       }),
-      createPtySession: vi.fn(),
+      createPtySession: vi.fn<(...args: any[]) => Promise<string>>(),
     }
 
-    const client = createRunActionsClient(mockDaemonClient as any)
+    const client = createRunActionsClient(mockDaemonClient as unknown as GrpcDaemonClient)
     const actions = await client.detect('/workspace')
     const justActions = actions.filter(a => a.source === 'just')
     expect(justActions.length).toBeGreaterThanOrEqual(1)
@@ -343,51 +345,51 @@ describe('RunActionsClient', () => {
 
   it('detect reads files via daemonClient', async () => {
     const mockDaemonClient = {
-      readFile: vi.fn().mockResolvedValue({
+      readFile: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({
         success: true,
         file: { content: '{"scripts":{"build":"echo build"}}' },
       }),
-      createPtySession: vi.fn().mockResolvedValue('pty-1'),
+      createPtySession: vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('pty-1'),
     }
 
-    const client = createRunActionsClient(mockDaemonClient as any)
+    const client = createRunActionsClient(mockDaemonClient as unknown as GrpcDaemonClient)
     const actions = await client.detect('/workspace')
 
     // Should have found at least the npm build script
     const npmActions = actions.filter(a => a.source === 'npm')
     expect(npmActions.length).toBeGreaterThanOrEqual(1)
-    expect(npmActions[0].name).toBe('build')
+    expect(npmActions[0]!.name).toBe('build')
   })
 
   it('detect handles readFile returning null content', async () => {
     const mockDaemonClient = {
-      readFile: vi.fn().mockResolvedValue({ success: false }),
-      createPtySession: vi.fn(),
+      readFile: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: false }),
+      createPtySession: vi.fn<(...args: any[]) => Promise<string>>(),
     }
 
-    const client = createRunActionsClient(mockDaemonClient as any)
+    const client = createRunActionsClient(mockDaemonClient as unknown as GrpcDaemonClient)
     const actions = await client.detect('/workspace')
     expect(actions).toEqual([])
   })
 
   it('detect handles readFile throwing', async () => {
     const mockDaemonClient = {
-      readFile: vi.fn().mockRejectedValue(new Error('read error')),
-      createPtySession: vi.fn(),
+      readFile: vi.fn<(...args: any[]) => Promise<any>>().mockRejectedValue(new Error('read error')),
+      createPtySession: vi.fn<(...args: any[]) => Promise<string>>(),
     }
 
-    const client = createRunActionsClient(mockDaemonClient as any)
+    const client = createRunActionsClient(mockDaemonClient as unknown as GrpcDaemonClient)
     const actions = await client.detect('/workspace')
     expect(actions).toEqual([])
   })
 
   it('run npm action creates pty with correct command', async () => {
     const mockDaemonClient = {
-      readFile: vi.fn(),
-      createPtySession: vi.fn().mockResolvedValue('pty-npm'),
+      readFile: vi.fn<(...args: any[]) => any>(),
+      createPtySession: vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('pty-npm'),
     }
 
-    const client = createRunActionsClient(mockDaemonClient as any)
+    const client = createRunActionsClient(mockDaemonClient as unknown as GrpcDaemonClient)
     const result = await client.run('/workspace', 'npm:build')
     expect(result).toMatchObject({ success: true, ptyId: 'pty-npm' })
     expect(mockDaemonClient.createPtySession).toHaveBeenCalledWith({
@@ -398,11 +400,11 @@ describe('RunActionsClient', () => {
 
   it('run make action creates pty with correct command', async () => {
     const mockDaemonClient = {
-      readFile: vi.fn(),
-      createPtySession: vi.fn().mockResolvedValue('pty-make'),
+      readFile: vi.fn<(...args: any[]) => any>(),
+      createPtySession: vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('pty-make'),
     }
 
-    const client = createRunActionsClient(mockDaemonClient as any)
+    const client = createRunActionsClient(mockDaemonClient as unknown as GrpcDaemonClient)
     await client.run('/workspace', 'make:test')
     expect(mockDaemonClient.createPtySession).toHaveBeenCalledWith({
       cwd: '/workspace',
@@ -412,11 +414,11 @@ describe('RunActionsClient', () => {
 
   it('run just action creates pty with correct command', async () => {
     const mockDaemonClient = {
-      readFile: vi.fn(),
-      createPtySession: vi.fn().mockResolvedValue('pty-just'),
+      readFile: vi.fn<(...args: any[]) => any>(),
+      createPtySession: vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('pty-just'),
     }
 
-    const client = createRunActionsClient(mockDaemonClient as any)
+    const client = createRunActionsClient(mockDaemonClient as unknown as GrpcDaemonClient)
     await client.run('/workspace', 'just:deploy')
     expect(mockDaemonClient.createPtySession).toHaveBeenCalledWith({
       cwd: '/workspace',
@@ -426,11 +428,11 @@ describe('RunActionsClient', () => {
 
   it('run task action creates pty with correct command', async () => {
     const mockDaemonClient = {
-      readFile: vi.fn(),
-      createPtySession: vi.fn().mockResolvedValue('pty-task'),
+      readFile: vi.fn<(...args: any[]) => any>(),
+      createPtySession: vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('pty-task'),
     }
 
-    const client = createRunActionsClient(mockDaemonClient as any)
+    const client = createRunActionsClient(mockDaemonClient as unknown as GrpcDaemonClient)
     await client.run('/workspace', 'task:lint')
     expect(mockDaemonClient.createPtySession).toHaveBeenCalledWith({
       cwd: '/workspace',
@@ -440,11 +442,11 @@ describe('RunActionsClient', () => {
 
   it('run vscode-launch action creates pty with echo message', async () => {
     const mockDaemonClient = {
-      readFile: vi.fn(),
-      createPtySession: vi.fn().mockResolvedValue('pty-launch'),
+      readFile: vi.fn<(...args: any[]) => any>(),
+      createPtySession: vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('pty-launch'),
     }
 
-    const client = createRunActionsClient(mockDaemonClient as any)
+    const client = createRunActionsClient(mockDaemonClient as unknown as GrpcDaemonClient)
     await client.run('/workspace', 'vscode-launch:Debug App')
     expect(mockDaemonClient.createPtySession).toHaveBeenCalledWith({
       cwd: '/workspace',
@@ -458,11 +460,11 @@ describe('RunActionsClient', () => {
       tasks: [{ label: 'Build', command: 'npm', args: ['run', 'build'] }]
     })
     const mockDaemonClient = {
-      readFile: vi.fn().mockResolvedValue({ success: true, file: { content: tasksJson } }),
-      createPtySession: vi.fn().mockResolvedValue('pty-vscode'),
+      readFile: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true, file: { content: tasksJson } }),
+      createPtySession: vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('pty-vscode'),
     }
 
-    const client = createRunActionsClient(mockDaemonClient as any)
+    const client = createRunActionsClient(mockDaemonClient as unknown as GrpcDaemonClient)
     await client.run('/workspace', 'vscode-task:Build')
     expect(mockDaemonClient.createPtySession).toHaveBeenCalledWith({
       cwd: '/workspace',
@@ -472,11 +474,11 @@ describe('RunActionsClient', () => {
 
   it('run vscode-task throws when tasks.json not found', async () => {
     const mockDaemonClient = {
-      readFile: vi.fn().mockResolvedValue({ success: false }),
-      createPtySession: vi.fn(),
+      readFile: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: false }),
+      createPtySession: vi.fn<(...args: any[]) => Promise<string>>(),
     }
 
-    const client = createRunActionsClient(mockDaemonClient as any)
+    const client = createRunActionsClient(mockDaemonClient as unknown as GrpcDaemonClient)
     await expect(client.run('/workspace', 'vscode-task:Build')).rejects.toThrow('tasks.json not found')
   })
 
@@ -485,11 +487,11 @@ describe('RunActionsClient', () => {
       tasks: [{ label: 'NoCmd' }]
     })
     const mockDaemonClient = {
-      readFile: vi.fn().mockResolvedValue({ success: true, file: { content: tasksJson } }),
-      createPtySession: vi.fn(),
+      readFile: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true, file: { content: tasksJson } }),
+      createPtySession: vi.fn<(...args: any[]) => Promise<string>>(),
     }
 
-    const client = createRunActionsClient(mockDaemonClient as any)
+    const client = createRunActionsClient(mockDaemonClient as unknown as GrpcDaemonClient)
     await expect(client.run('/workspace', 'vscode-task:NoCmd')).rejects.toThrow('Task "NoCmd" has no command')
   })
 
@@ -498,11 +500,11 @@ describe('RunActionsClient', () => {
       tasks: [{ label: 'Lint', command: 'eslint .' }]
     })
     const mockDaemonClient = {
-      readFile: vi.fn().mockResolvedValue({ success: true, file: { content: tasksJson } }),
-      createPtySession: vi.fn().mockResolvedValue('pty-lint'),
+      readFile: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true, file: { content: tasksJson } }),
+      createPtySession: vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('pty-lint'),
     }
 
-    const client = createRunActionsClient(mockDaemonClient as any)
+    const client = createRunActionsClient(mockDaemonClient as unknown as GrpcDaemonClient)
     await client.run('/workspace', 'vscode-task:Lint')
     expect(mockDaemonClient.createPtySession).toHaveBeenCalledWith({
       cwd: '/workspace',

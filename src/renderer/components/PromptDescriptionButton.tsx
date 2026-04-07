@@ -1,3 +1,4 @@
+import React from 'react'
 import { useStore } from 'zustand'
 import type { WorkspaceStore } from '../types'
 
@@ -7,7 +8,7 @@ interface PromptDescriptionButtonProps {
   onDismiss: () => void
 }
 
-export function PromptDescriptionButton({ description, workspace, onDismiss }: PromptDescriptionButtonProps): JSX.Element | null {
+export function PromptDescriptionButton({ description, workspace, onDismiss }: PromptDescriptionButtonProps): React.JSX.Element | null {
   const { promptHarness } = useStore(workspace)
 
   const handlePrompt = () => {

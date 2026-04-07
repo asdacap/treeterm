@@ -4,15 +4,15 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { createStore } from 'zustand/vanilla'
 import WorkspaceSettings from './WorkspaceSettings'
 
-const applications = {
-  terminal: { id: 'terminal', name: 'Terminal', showInNewTabMenu: true },
-  editor: { id: 'editor', name: 'Editor', showInNewTabMenu: true },
-  hidden: { id: 'hidden', name: 'Hidden', showInNewTabMenu: false },
-} as any
+const applications = new Map([
+  ['terminal', { id: 'terminal', name: 'Terminal', showInNewTabMenu: true }],
+  ['editor', { id: 'editor', name: 'Editor', showInNewTabMenu: true }],
+  ['hidden', { id: 'hidden', name: 'Hidden', showInNewTabMenu: false }],
+]) as unknown as Map<string, import('../types').Application>
 
 function makeWorkspaceStore(overrides: Record<string, any> = {}) {
-  const updateMetadata = vi.fn()
-  const updateSettings = vi.fn()
+  const updateMetadata = vi.fn<(...args: any[]) => void>()
+  const updateSettings = vi.fn<(...args: any[]) => void>()
   const ws = {
     id: 'ws-1',
     name: 'test-workspace',

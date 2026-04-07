@@ -54,12 +54,13 @@ export default function CreateChildDialog({
   const applications = useAppStore((s) => s.applications)
 
   // Get inherited app name
-  const inheritedApp = parentWsData.settings?.defaultApplicationId
-    ? applications[parentWsData.settings.defaultApplicationId] ?? null
+  const inheritedApp = parentWsData.settings.defaultApplicationId
+     
+    ? applications.get(parentWsData.settings.defaultApplicationId) ?? null
     : null
 
   // Get available apps
-  const availableApps = Object.values(applications).filter(app => app.showInNewTabMenu)
+  const availableApps = Array.from(applications.values()).filter(app => app.showInNewTabMenu)
 
   // Validate name for '/' character
   const nameValidationError = !name.trim() ? null
@@ -495,7 +496,7 @@ function LocalBranchesLoader({ git, isProcessing, selectedBranch, onSelect, onEr
             <div
               key={branch.name}
               className={`create-child-worktree-item ${selectedBranch?.name === branch.name ? 'selected' : ''} ${branch.isInWorktree ? 'disabled' : ''}`}
-              onClick={() => !branch.isInWorktree && onSelect(branch)}
+              onClick={() => { if (!branch.isInWorktree) onSelect(branch) }}
               title={branch.isInWorktree ? 'Branch is already in a worktree' : undefined}
             >
               <span className="worktree-name">{branch.name}</span>
@@ -558,7 +559,7 @@ function RemoteBranchesLoader({ git, isProcessing, selectedBranch, onSelect, onE
             <div
               key={branch.name}
               className={`create-child-worktree-item ${selectedBranch?.name === branch.name ? 'selected' : ''} ${branch.isInWorktree ? 'disabled' : ''}`}
-              onClick={() => !branch.isInWorktree && onSelect(branch)}
+              onClick={() => { if (!branch.isInWorktree) onSelect(branch) }}
               title={branch.isInWorktree ? 'Branch is already in a worktree' : undefined}
             >
               <span className="worktree-name">{branch.name}</span>

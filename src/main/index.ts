@@ -320,7 +320,7 @@ server.onLlmAnalyzeTerminal(async (buffer, cwd, settings) => {
       reasoning: settings.reasoningEffort
     })
     const parsed = parseLlmJson(response)
-    const result = { state: parsed.state as string, reason: (parsed.reason as string) ?? '' }
+    const result = { state: parsed.state as string, reason: parsed.reason as string }
     analyzerCache.push({ buffer, result })
     if (analyzerCache.length > ANALYZER_CACHE_SIZE) {
       analyzerCache.shift()
@@ -331,7 +331,8 @@ server.onLlmAnalyzeTerminal(async (buffer, cwd, settings) => {
   }
 })
 
-server.onLlmClearAnalyzerCache(() => {
+// eslint-disable-next-line @typescript-eslint/require-await
+server.onLlmClearAnalyzerCache(async () => {
   analyzerCache.length = 0
 })
 
@@ -406,6 +407,7 @@ server.onDialogSelectFolder(async () => {
     return null
   }
   const selectedPath = result.filePaths[0]
+  if (!selectedPath) return null
   // Add to recent directories
   try {
     const settings = loadSettings()
@@ -419,7 +421,7 @@ server.onDialogSelectFolder(async () => {
 
 server.onDialogGetRecentDirectories(() => {
   const settings = loadSettings()
-  return settings.recentDirectories || []
+  return settings.recentDirectories
 })
 
 function getGitClientForConnection(connectionId: string): GitClient {
@@ -721,7 +723,7 @@ function execCommand(
         if (!resultReceived) resolve({ exitCode: -1, stdout: '', stderr: 'Stream ended unexpectedly' })
       })
     } catch (error) {
-      reject(error)
+      reject(error instanceof Error ? error : new Error(String(error)))
     }
   })
 }
@@ -729,10 +731,10 @@ function execCommand(
 function parseGitHubOwnerRepo(remoteUrl: string): { owner: string; repo: string } | null {
   // Handle SSH: git@github.com:owner/repo.git
   const sshMatch = remoteUrl.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/)
-  if (sshMatch) return { owner: sshMatch[1], repo: sshMatch[2] }
+  if (sshMatch?.[1] && sshMatch[2]) return { owner: sshMatch[1], repo: sshMatch[2] }
   // Handle HTTPS: https://github.com/owner/repo.git
   const httpsMatch = remoteUrl.match(/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?$/)
-  if (httpsMatch) return { owner: httpsMatch[1], repo: httpsMatch[2] }
+  if (httpsMatch?.[1] && httpsMatch[2]) return { owner: httpsMatch[1], repo: httpsMatch[2] }
   return null
 }
 
@@ -773,7 +775,8 @@ server.onGithubGetPrInfo(async (connectionId, repoPath, head, base) => {
       return { noPr: true as const, createUrl: `https://github.com/${owner}/${repo}/compare/${base}...${head}?expand=1` }
     }
 
-    const pr = prs[0]
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length checked above
+    const pr = prs[0]!
     const prUrl = `https://github.com/${owner}/${repo}/pull/${String(pr.number)}`
 
     // Fetch rich PR info via GraphQL
@@ -975,7 +978,7 @@ server.onFsSearchFiles((connectionId, workspacePath, query) => {
 })
 
 // Exec IPC Handlers
-server.onExecStart(async (connectionId, cwd, command, args) => {
+server.onExecStart((connectionId, cwd, command, args) => {
   try {
     const client = getClientForConnection(connectionId)
     const execId = randomUUID()
@@ -1151,7 +1154,8 @@ server.onSshConnect(async (event, config, options) => {
   return { info, session: null }
 })
 
-server.onSshDisconnect((connectionId) => {
+// eslint-disable-next-line @typescript-eslint/require-await
+server.onSshDisconnect(async (connectionId) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
   connectionManager.disconnectRemote(connectionId)
 })
@@ -1161,7 +1165,8 @@ server.onSshListConnections(() => {
   return connectionManager.listConnections()
 })
 
-server.onSshSaveConnection((config) => {
+// eslint-disable-next-line @typescript-eslint/require-await
+server.onSshSaveConnection(async (config) => {
   const settings = loadSettings()
   const existing = settings.ssh.savedConnections.findIndex(
     c => c.host === config.host && c.user === config.user && c.port === config.port
@@ -1179,7 +1184,8 @@ server.onSshGetSavedConnections(() => {
   return settings.ssh.savedConnections
 })
 
-server.onSshRemoveSavedConnection((id) => {
+// eslint-disable-next-line @typescript-eslint/require-await
+server.onSshRemoveSavedConnection(async (id) => {
   const settings = loadSettings()
   settings.ssh.savedConnections = settings.ssh.savedConnections.filter(c => c.id !== id)
   saveSettings(settings)
@@ -1220,7 +1226,8 @@ server.onSshWatchOutput((event, connectionId) => {
   return { scrollback }
 })
 
-server.onSshUnwatchOutput((event, connectionId) => {
+// eslint-disable-next-line @typescript-eslint/require-await
+server.onSshUnwatchOutput(async (event, connectionId) => {
   const senderWindow = BrowserWindow.fromWebContents(event.sender)
   if (!senderWindow) return
 
@@ -1256,7 +1263,8 @@ server.onSshWatchConnectionStatus((event, connectionId) => {
   return { initial }
 })
 
-server.onSshUnwatchConnectionStatus((event, connectionId) => {
+// eslint-disable-next-line @typescript-eslint/require-await
+server.onSshUnwatchConnectionStatus(async (event, connectionId) => {
   const senderWindow = BrowserWindow.fromWebContents(event.sender)
   if (!senderWindow) return
 
@@ -1294,7 +1302,8 @@ server.onSshAddPortForward((event, config) => {
   return info
 })
 
-server.onSshRemovePortForward((portForwardId) => {
+// eslint-disable-next-line @typescript-eslint/require-await
+server.onSshRemovePortForward(async (portForwardId) => {
   if (!connectionManager) return
   // Find the owning connection before removal so we can sync saved config
   let ownerConnectionId: string | undefined
@@ -1344,7 +1353,8 @@ server.onSshWatchPortForwardOutput((event, portForwardId) => {
   return { scrollback }
 })
 
-server.onSshUnwatchPortForwardOutput((event, portForwardId) => {
+// eslint-disable-next-line @typescript-eslint/require-await
+server.onSshUnwatchPortForwardOutput(async (event, portForwardId) => {
   const senderWindow = BrowserWindow.fromWebContents(event.sender)
   if (!senderWindow) return
 
@@ -1397,10 +1407,10 @@ void app.whenReady().then(async () => {
 
   mainWindow = createWindow()
   server.setWindow(mainWindow)
-  createApplicationMenu(mainWindow, server, quitAndKillDaemon)
+  createApplicationMenu(mainWindow, server, () => { void quitAndKillDaemon() })
 
   // Handle --ssh startup argument
-  if (initialSSHTarget && connectionManager) {
+  if (initialSSHTarget) {
     const parsed = parseSSHTarget(initialSSHTarget)
     if (parsed) {
       console.log('[main] Auto-connecting SSH:', initialSSHTarget)
@@ -1443,7 +1453,7 @@ void app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       mainWindow = createWindow()
       server.setWindow(mainWindow)
-      createApplicationMenu(mainWindow, server, quitAndKillDaemon)
+      createApplicationMenu(mainWindow, server, () => { void quitAndKillDaemon() })
     }
   })
 }).catch((error: unknown) => {
@@ -1460,10 +1470,14 @@ void app.whenReady().then(async () => {
 function parseSSHTarget(target: string): SSHConnectionConfig | null {
   const match = target.match(/^([^@]+)@([^:]+)(?::(\d+))?$/)
   if (!match) return null
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- regex groups guaranteed by match
+  const user = match[1]!
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- regex groups guaranteed by match
+  const host = match[2]!
   return {
-    id: `ssh-${match[2]}-${Date.now()}`,
-    user: match[1],
-    host: match[2],
+    id: `ssh-${host}-${String(Date.now())}`,
+    user,
+    host,
     port: match[3] ? parseInt(match[3], 10) : 22,
     label: target,
     portForwards: [],

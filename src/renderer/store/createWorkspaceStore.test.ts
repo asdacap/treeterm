@@ -1,45 +1,47 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createWorkspaceStore } from './createWorkspaceStore'
-import type { WorkspaceStoreDeps } from './createWorkspaceStore'
+import type { WorkspaceStoreDeps, CachedTerminal } from './createWorkspaceStore'
 import { getUnmergedSubWorkspaces } from './createSessionStore'
 import type { WorkspaceEntry } from './createSessionStore'
 import type { Workspace, Application } from '../types'
 import { createMockExecApi } from '../../shared/mockApis'
 
+interface TestComment { id: string; filePath: string; lineNumber: number; text: string; commitHash: string | null; createdAt: number; isOutdated: boolean; addressed: boolean; side: string }
+
 function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStoreDeps {
   return {
     appRegistry: {
-      get: vi.fn().mockReturnValue(null),
-      getDefaultApp: vi.fn().mockReturnValue(null),
+      get: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
+      getDefaultApp: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
     },
-    openTtyStream: vi.fn().mockImplementation(() => Promise.resolve({ tty: null })),
-    createTty: vi.fn().mockResolvedValue('pty-1'),
+    openTtyStream: vi.fn<(...args: any[]) => any>().mockImplementation(() => Promise.resolve({ tty: null })),
+    createTty: vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('pty-1'),
     connectionId: 'local',
-    git: {} as any,
-    filesystem: {} as any,
-    runActions: { detect: vi.fn().mockResolvedValue([]), run: vi.fn().mockResolvedValue(null) },
+    git: {} as unknown as WorkspaceStoreDeps['git'],
+    filesystem: {} as unknown as WorkspaceStoreDeps['filesystem'],
+    runActions: { detect: vi.fn<(...args: any[]) => Promise<any[]>>().mockResolvedValue([]), run: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue(null) },
     exec: createMockExecApi(),
-    syncToDaemon: vi.fn(),
-    removeWorkspace: vi.fn().mockResolvedValue(undefined),
-    removeWorkspaceKeepBranch: vi.fn().mockResolvedValue(undefined),
-    removeWorkspaceKeepBoth: vi.fn().mockResolvedValue(undefined),
-    mergeAndRemoveWorkspace: vi.fn().mockResolvedValue({ success: true }),
-    mergeAndKeepWorkspace: vi.fn().mockResolvedValue({ success: true }),
-    closeAndCleanWorkspace: vi.fn().mockResolvedValue({ success: true }),
-    quickForkWorkspace: vi.fn().mockResolvedValue({ success: true }),
-    refreshGitInfo: vi.fn().mockResolvedValue(undefined),
-    lookupWorkspace: vi.fn().mockReturnValue(undefined),
-    getSettings: vi.fn().mockReturnValue({
+    syncToDaemon: vi.fn<() => void>(),
+    removeWorkspace: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
+    removeWorkspaceKeepBranch: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
+    removeWorkspaceKeepBoth: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
+    mergeAndRemoveWorkspace: vi.fn<(...args: any[]) => Promise<{ success: boolean }>>().mockResolvedValue({ success: true }),
+    mergeAndKeepWorkspace: vi.fn<(...args: any[]) => Promise<{ success: boolean }>>().mockResolvedValue({ success: true }),
+    closeAndCleanWorkspace: vi.fn<(...args: any[]) => Promise<{ success: boolean }>>().mockResolvedValue({ success: true }),
+    quickForkWorkspace: vi.fn<(...args: any[]) => Promise<{ success: boolean }>>().mockResolvedValue({ success: true }),
+    refreshGitInfo: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
+    lookupWorkspace: vi.fn<(...args: any[]) => any>().mockReturnValue(undefined),
+    getSettings: vi.fn<() => any>().mockReturnValue({
       llm: { apiKey: '', baseUrl: '' },
       terminalAnalyzer: { model: '', systemPrompt: '', titleSystemPrompt: '', reasoningEffort: 'off', safePaths: [], bufferLines: 10 },
     }),
     llm: {
-      analyzeTerminal: vi.fn().mockResolvedValue({ state: 'idle', reason: '' }),
-      generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
+      analyzeTerminal: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ state: 'idle', reason: '' }),
+      generateTitle: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ title: '', description: '', branchName: '' }),
     },
-    setActivityTabState: vi.fn(),
+    setActivityTabState: vi.fn<(...args: any[]) => void>(),
     github: {
-      getPrInfo: vi.fn().mockResolvedValue({ noPr: true, createUrl: 'https://github.com/test/repo/compare/main...feat?expand=1' }),
+      getPrInfo: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ noPr: true, createUrl: 'https://github.com/test/repo/compare/main...feat?expand=1' }),
     },
     ...overrides,
   }
@@ -89,16 +91,16 @@ function toLoaded(ws: Workspace): WorkspaceEntry {
 
 describe('getUnmergedSubWorkspaces', () => {
   it('returns empty array when no workspaces', () => {
-    expect(getUnmergedSubWorkspaces({})).toEqual([])
+    expect(getUnmergedSubWorkspaces(new Map())).toEqual([])
   })
 
   it('returns only active worktree workspaces', () => {
-    const workspaces: Record<string, WorkspaceEntry> = {
-      root: toLoaded(makeWorkspace({ id: 'root', isWorktree: false, status: 'active' })),
-      child1: toLoaded(makeWorkspace({ id: 'child1', isWorktree: true, status: 'active' })),
-      child2: toLoaded(makeWorkspace({ id: 'child2', isWorktree: true, status: 'merged' })),
-      child3: toLoaded(makeWorkspace({ id: 'child3', isWorktree: true, status: 'active' }))
-    }
+    const workspaces = new Map<string, WorkspaceEntry>([
+      ['root', toLoaded(makeWorkspace({ id: 'root', isWorktree: false, status: 'active' }))],
+      ['child1', toLoaded(makeWorkspace({ id: 'child1', isWorktree: true, status: 'active' }))],
+      ['child2', toLoaded(makeWorkspace({ id: 'child2', isWorktree: true, status: 'merged' }))],
+      ['child3', toLoaded(makeWorkspace({ id: 'child3', isWorktree: true, status: 'active' }))],
+    ])
     const result = getUnmergedSubWorkspaces(workspaces)
     expect(result).toHaveLength(2)
     expect(result.map(w => w.id)).toContain('child1')
@@ -106,9 +108,9 @@ describe('getUnmergedSubWorkspaces', () => {
   })
 
   it('excludes non-worktree workspaces even if active', () => {
-    const workspaces: Record<string, WorkspaceEntry> = {
-      root: toLoaded(makeWorkspace({ id: 'root', isWorktree: false, status: 'active' }))
-    }
+    const workspaces = new Map<string, WorkspaceEntry>([
+      ['root', toLoaded(makeWorkspace({ id: 'root', isWorktree: false, status: 'active' }))],
+    ])
     expect(getUnmergedSubWorkspaces(workspaces)).toEqual([])
   })
 })
@@ -162,7 +164,7 @@ describe('createWorkspaceStore', () => {
 
     store.getState().updateTabTitle('tab-1', 'my shell')
 
-    expect(store.getState().workspace.appStates['tab-1'].title).toBe('my shell')
+    expect(store.getState().workspace.appStates['tab-1']!.title).toBe('my shell')
   })
 
   it('setActiveTab updates the workspace activeTabId', () => {
@@ -186,8 +188,8 @@ describe('createWorkspaceStore', () => {
       const app = makeFakeApp()
       const deps = makeHandleDeps({
         appRegistry: {
-          get: vi.fn().mockReturnValue(app),
-          getDefaultApp: vi.fn().mockReturnValue(null),
+          get: vi.fn<(...args: any[]) => any>().mockReturnValue(app),
+          getDefaultApp: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
         },
       })
       const ws = makeWorkspace({
@@ -199,9 +201,9 @@ describe('createWorkspaceStore', () => {
       const tabId = store.getState().addTab('terminal')
 
       const wsState = store.getState().workspace
-      const newTab = wsState.appStates[tabId]
+      const newTab = wsState.appStates[tabId]!
       expect(newTab).toBeDefined()
-      expect(newTab!.title).toBe('Terminal 2')
+      expect(newTab.title).toBe('Terminal 2')
       expect(wsState.activeTabId).toBe(tabId)
     })
 
@@ -220,8 +222,8 @@ describe('createWorkspaceStore', () => {
       const app = makeFakeApp({ createInitialState: () => ({ ptyId: null, cwd: '/default' }) })
       const deps = makeHandleDeps({
         appRegistry: {
-          get: vi.fn().mockReturnValue(app),
-          getDefaultApp: vi.fn().mockReturnValue(null),
+          get: vi.fn<(...args: any[]) => any>().mockReturnValue(app),
+          getDefaultApp: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
         },
       })
       const ws = makeWorkspace({ id: 'ws-1' })
@@ -229,9 +231,9 @@ describe('createWorkspaceStore', () => {
 
       const tabId = store.getState().addTab('terminal', { cwd: '/custom' })
 
-      const tab = store.getState().workspace.appStates[tabId]
+      const tab = store.getState().workspace.appStates[tabId]!
       expect(tab).toBeDefined()
-      expect(tab!.state).toEqual({ ptyId: null, cwd: '/custom' })
+      expect(tab.state).toEqual({ ptyId: null, cwd: '/custom' })
     })
 
   })
@@ -241,8 +243,8 @@ describe('createWorkspaceStore', () => {
       const app = makeFakeApp({ canClose: true })
       const deps = makeHandleDeps({
         appRegistry: {
-          get: vi.fn().mockReturnValue(app),
-          getDefaultApp: vi.fn().mockReturnValue(null),
+          get: vi.fn<(...args: any[]) => any>().mockReturnValue(app),
+          getDefaultApp: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
         },
       })
       const ws = makeWorkspace({
@@ -264,12 +266,12 @@ describe('createWorkspaceStore', () => {
     })
 
     it('calls dispose on tab ref when removing', async () => {
-      const dispose = vi.fn()
+      const dispose = vi.fn<() => void>()
       const app = makeFakeApp({ canClose: true, onWorkspaceLoad: () => ({ dispose }) })
       const deps = makeHandleDeps({
         appRegistry: {
-          get: vi.fn().mockReturnValue(app),
-          getDefaultApp: vi.fn().mockReturnValue(null),
+          get: vi.fn<(...args: any[]) => any>().mockReturnValue(app),
+          getDefaultApp: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
         },
       })
       const ws = makeWorkspace({
@@ -290,8 +292,8 @@ describe('createWorkspaceStore', () => {
       const app = makeFakeApp({ canClose: false })
       const deps = makeHandleDeps({
         appRegistry: {
-          get: vi.fn().mockReturnValue(app),
-          getDefaultApp: vi.fn().mockReturnValue(null),
+          get: vi.fn<(...args: any[]) => any>().mockReturnValue(app),
+          getDefaultApp: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
         },
       })
       const ws = makeWorkspace({
@@ -325,7 +327,7 @@ describe('createWorkspaceStore', () => {
 
       store.getState().updateTabState<{ count: number }>('tab-1', (s) => ({ ...s, count: s.count + 1 }))
 
-      const tab = store.getState().workspace.appStates['tab-1']
+      const tab = store.getState().workspace.appStates['tab-1']!
       expect(tab.state).toEqual({ count: 1 })
     })
 
@@ -365,12 +367,12 @@ describe('createWorkspaceStore', () => {
       })
 
       const wsState = store.getState().workspace
-      const comments = JSON.parse(wsState.metadata.reviewComments)
+      const comments = JSON.parse(wsState.metadata.reviewComments!) as TestComment[]
       expect(comments).toHaveLength(1)
-      expect(comments[0].text).toBe('Fix this')
-      expect(comments[0].filePath).toBe('test.ts')
-      expect(comments[0].id).toBeDefined()
-      expect(comments[0].createdAt).toBeDefined()
+      expect(comments[0]!.text).toBe('Fix this')
+      expect(comments[0]!.filePath).toBe('test.ts')
+      expect(comments[0]!.id).toBeDefined()
+      expect(comments[0]!.createdAt).toBeDefined()
     })
 
     it('deleteReviewComment removes a comment', () => {
@@ -385,9 +387,9 @@ describe('createWorkspaceStore', () => {
       store.getState().reviewComments.getState().deleteReviewComment('c1')
 
       const wsState = store.getState().workspace
-      const comments = JSON.parse(wsState.metadata.reviewComments)
+      const comments = JSON.parse(wsState.metadata.reviewComments!) as TestComment[]
       expect(comments).toHaveLength(1)
-      expect(comments[0].id).toBe('c2')
+      expect(comments[0]!.id).toBe('c2')
     })
 
     it('toggleReviewCommentAddressed toggles addressed flag', () => {
@@ -401,8 +403,8 @@ describe('createWorkspaceStore', () => {
       store.getState().reviewComments.getState().toggleReviewCommentAddressed('c1')
 
       const wsState = store.getState().workspace
-      const comments = JSON.parse(wsState.metadata.reviewComments)
-      expect(comments[0].addressed).toBe(true)
+      const comments = JSON.parse(wsState.metadata.reviewComments!) as TestComment[]
+      expect(comments[0]!.addressed).toBe(true)
     })
 
     it('updateOutdatedReviewComments marks comments with different hash as outdated', () => {
@@ -417,9 +419,9 @@ describe('createWorkspaceStore', () => {
       store.getState().reviewComments.getState().updateOutdatedReviewComments('new')
 
       const wsState = store.getState().workspace
-      const comments = JSON.parse(wsState.metadata.reviewComments)
-      expect(comments[0].isOutdated).toBe(true)
-      expect(comments[1].isOutdated).toBe(false)
+      const comments = JSON.parse(wsState.metadata.reviewComments!) as TestComment[]
+      expect(comments[0]!.isOutdated).toBe(true)
+      expect(comments[1]!.isOutdated).toBe(false)
     })
 
     it('updateOutdatedReviewComments never marks null-commitHash comments as outdated', () => {
@@ -433,8 +435,8 @@ describe('createWorkspaceStore', () => {
       store.getState().reviewComments.getState().updateOutdatedReviewComments('any-hash')
 
       const wsState = store.getState().workspace
-      const comments = JSON.parse(wsState.metadata.reviewComments)
-      expect(comments[0].isOutdated).toBe(false)
+      const comments = JSON.parse(wsState.metadata.reviewComments!) as TestComment[]
+      expect(comments[0]!.isOutdated).toBe(false)
     })
 
     it('clearReviewComments empties the comments', () => {
@@ -448,7 +450,7 @@ describe('createWorkspaceStore', () => {
       store.getState().reviewComments.getState().clearReviewComments()
 
       const wsState = store.getState().workspace
-      const comments = JSON.parse(wsState.metadata.reviewComments)
+      const comments = JSON.parse(wsState.metadata.reviewComments!) as TestComment[]
       expect(comments).toHaveLength(0)
     })
   })
@@ -546,17 +548,17 @@ describe('createWorkspaceStore', () => {
     })
 
     it('writes text and sets active tab when ai harness tab has ptyId', async () => {
-      const writeFn = vi.fn()
-      const killFn = vi.fn()
+      const writeFn = vi.fn<(...args: any[]) => void>()
+      const killFn = vi.fn<() => void>()
       const ttyStore = {
-        getState: () => ({ ptyId: 'pty-h', write: writeFn, resize: vi.fn(), kill: killFn }),
-        setState: vi.fn(),
-        subscribe: vi.fn(),
-        destroy: vi.fn(),
-        getInitialState: vi.fn(),
+        getState: () => ({ ptyId: 'pty-h', write: writeFn, resize: vi.fn<(...args: any[]) => void>(), kill: killFn }),
+        setState: vi.fn<(...args: any[]) => void>(),
+        subscribe: vi.fn<(...args: any[]) => any>(),
+        destroy: vi.fn<() => void>(),
+        getInitialState: vi.fn<() => any>(),
       }
       const deps = makeHandleDeps({
-        openTtyStream: vi.fn().mockResolvedValue({ tty: ttyStore }),
+        openTtyStream: vi.fn<(...args: any[]) => any>().mockResolvedValue({ tty: ttyStore }),
       })
       const ws = makeWorkspace({
         id: 'ws-1',
@@ -585,16 +587,16 @@ describe('createWorkspaceStore', () => {
 
     it('retries on first getTtyWriter failure', async () => {
       let callCount = 0
-      const writeFn = vi.fn()
+      const writeFn = vi.fn<(...args: any[]) => void>()
       const ttyStore = {
-        getState: () => ({ ptyId: 'pty-h', write: writeFn, resize: vi.fn(), kill: vi.fn() }),
-        setState: vi.fn(),
-        subscribe: vi.fn(),
-        destroy: vi.fn(),
-        getInitialState: vi.fn(),
+        getState: () => ({ ptyId: 'pty-h', write: writeFn, resize: vi.fn<(...args: any[]) => void>(), kill: vi.fn<() => void>() }),
+        setState: vi.fn<(...args: any[]) => void>(),
+        subscribe: vi.fn<(...args: any[]) => any>(),
+        destroy: vi.fn<() => void>(),
+        getInitialState: vi.fn<() => any>(),
       }
       const deps = makeHandleDeps({
-        openTtyStream: vi.fn().mockImplementation(() => {
+        openTtyStream: vi.fn<(...args: any[]) => any>().mockImplementation(() => {
           callCount++
           if (callCount === 1) return Promise.reject(new Error('fail'))
           return Promise.resolve({ tty: ttyStore })
@@ -628,19 +630,19 @@ describe('createWorkspaceStore', () => {
     function makeGitDeps(): WorkspaceStoreDeps {
       return makeHandleDeps({
         git: {
-          getInfo: vi.fn().mockResolvedValue({}),
-          getDiff: vi.fn().mockResolvedValue({ success: true }),
-          commitAll: vi.fn().mockResolvedValue({ success: true }),
-          stageFile: vi.fn().mockResolvedValue({ success: true }),
-          fetch: vi.fn().mockResolvedValue({ success: true }),
-          createWorktree: vi.fn().mockResolvedValue({ success: true }),
-          listWorktrees: vi.fn().mockResolvedValue([]),
-          getFileDiff: vi.fn().mockResolvedValue({ success: true }),
-          getBehindCount: vi.fn().mockResolvedValue(0),
-          hasUncommittedChanges: vi.fn().mockResolvedValue(false),
-          checkMergeConflicts: vi.fn().mockResolvedValue({ success: true }),
-          pull: vi.fn().mockResolvedValue({ success: true }),
-        } as any,
+          getInfo: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({}),
+          getDiff: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true }),
+          commitAll: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true }),
+          stageFile: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true }),
+          fetch: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true }),
+          createWorktree: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true }),
+          listWorktrees: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue([]),
+          getFileDiff: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true }),
+          getBehindCount: vi.fn<(...args: any[]) => Promise<number>>().mockResolvedValue(0),
+          hasUncommittedChanges: vi.fn<(...args: any[]) => Promise<boolean>>().mockResolvedValue(false),
+          checkMergeConflicts: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true }),
+          pull: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true }),
+        } as unknown as WorkspaceStoreDeps['git'],
       })
     }
 
@@ -684,11 +686,11 @@ describe('createWorkspaceStore', () => {
     function makeFsDeps(): WorkspaceStoreDeps {
       return makeHandleDeps({
         filesystem: {
-          readDirectory: vi.fn().mockResolvedValue([]),
-          readFile: vi.fn().mockResolvedValue('content'),
-          writeFile: vi.fn().mockResolvedValue(undefined),
-          searchFiles: vi.fn().mockResolvedValue([]),
-        } as any,
+          readDirectory: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue([]),
+          readFile: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue('content'),
+          writeFile: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue(undefined),
+          searchFiles: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue([]),
+        } as unknown as WorkspaceStoreDeps['filesystem'],
       })
     }
 
@@ -710,22 +712,25 @@ describe('createWorkspaceStore', () => {
   describe('getTtyWriter', () => {
     function makeTtyDeps() {
       let onEventCb: ((event: { type: string }) => void) | null = null
-      const writeFn = vi.fn()
-      const killFn = vi.fn()
+      const writeFn = vi.fn<(...args: any[]) => void>()
+      const killFn = vi.fn<() => void>()
       const ttyStore = {
-        getState: () => ({ ptyId: 'pty-1', write: writeFn, resize: vi.fn(), kill: killFn }),
-        setState: vi.fn(),
-        subscribe: vi.fn(),
-        destroy: vi.fn(),
-        getInitialState: vi.fn(),
+        getState: () => ({ ptyId: 'pty-1', write: writeFn, resize: vi.fn<(...args: any[]) => void>(), kill: killFn }),
+        setState: vi.fn<(...args: any[]) => void>(),
+        subscribe: vi.fn<(...args: any[]) => any>(),
+        destroy: vi.fn<() => void>(),
+        getInitialState: vi.fn<() => any>(),
       }
       const deps = makeHandleDeps({
-        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: { type: string }) => void) => {
+        openTtyStream: vi.fn<(...args: any[]) => any>().mockImplementation((_ptyId: string, onEvent: (event: { type: string }) => void) => {
           onEventCb = onEvent
           return Promise.resolve({ tty: ttyStore })
         }),
       })
-      return { deps, writeFn, killFn, getOnEvent: () => onEventCb! }
+      return { deps, writeFn, killFn, getOnEvent: () => {
+        if (!onEventCb) throw new Error('onEventCb not set')
+        return onEventCb
+      } }
     }
 
     it('opens stream and returns writer with write/kill', async () => {
@@ -765,7 +770,7 @@ describe('createWorkspaceStore', () => {
 
       const writer = await store.getState().getTtyWriter('pty-1')
       getOnEvent()({ type: 'end' })
-      expect(() => writer.write('x')).toThrow('disconnected')
+      expect(() => { writer.write('x'); }).toThrow('disconnected')
     })
 
     it('throws on kill after disconnect', async () => {
@@ -774,27 +779,27 @@ describe('createWorkspaceStore', () => {
 
       const writer = await store.getState().getTtyWriter('pty-1')
       getOnEvent()({ type: 'error' })
-      expect(() => writer.kill()).toThrow('disconnected')
+      expect(() => { writer.kill(); }).toThrow('disconnected')
     })
   })
 
   describe('disposeAllCachedTerminals', () => {
     it('disposes all cached terminals', () => {
       const store = createWorkspaceStore(makeWorkspace(), makeHandleDeps())
-      const disposeFns = [vi.fn(), vi.fn()]
+      const disposeFns = [vi.fn<() => void>(), vi.fn<() => void>()]
       const terminalMocks = disposeFns.map((unsub) => ({
-        terminal: { dispose: vi.fn() },
-        tty: {} as any,
+        terminal: { dispose: vi.fn<() => void>() },
+        tty: {} as unknown as CachedTerminal['tty'],
         unsubscribeEvents: unsub,
         mountedHandler: null,
         stripScrollbackClear: false,
         connectedAt: Date.now(),
         dataVersion: 0,
-        onExitUnmounted: vi.fn(),
+        onExitUnmounted: vi.fn<(...args: any[]) => void>(),
       }))
 
-      store.getState().setCachedTerminal('tab-a', terminalMocks[0] as any)
-      store.getState().setCachedTerminal('tab-b', terminalMocks[1] as any)
+      store.getState().setCachedTerminal('tab-a', terminalMocks[0] as unknown as CachedTerminal)
+      store.getState().setCachedTerminal('tab-b', terminalMocks[1] as unknown as CachedTerminal)
       expect(store.getState().getCachedTerminal('tab-a')).not.toBeNull()
       expect(store.getState().getCachedTerminal('tab-b')).not.toBeNull()
 
@@ -804,17 +809,17 @@ describe('createWorkspaceStore', () => {
       expect(store.getState().getCachedTerminal('tab-b')).toBeNull()
       expect(disposeFns[0]).toHaveBeenCalled()
       expect(disposeFns[1]).toHaveBeenCalled()
-      expect(terminalMocks[0].terminal.dispose).toHaveBeenCalled()
-      expect(terminalMocks[1].terminal.dispose).toHaveBeenCalled()
+      expect(terminalMocks[0]!.terminal.dispose).toHaveBeenCalled()
+      expect(terminalMocks[1]!.terminal.dispose).toHaveBeenCalled()
     })
   })
 
   describe('initTab', () => {
     it('no-ops when already initialized', () => {
-      const onWorkspaceLoad = vi.fn().mockReturnValue({ dispose: vi.fn() })
+      const onWorkspaceLoad = vi.fn<(...args: any[]) => any>().mockReturnValue({ dispose: vi.fn<() => void>() })
       const app = makeFakeApp({ onWorkspaceLoad })
       const deps = makeHandleDeps({
-        appRegistry: { get: vi.fn().mockReturnValue(app), getDefaultApp: vi.fn().mockReturnValue(null) },
+        appRegistry: { get: vi.fn<(...args: any[]) => any>().mockReturnValue(app), getDefaultApp: vi.fn<(...args: any[]) => any>().mockReturnValue(null) },
       })
       const ws = makeWorkspace({
         appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: {} } },
@@ -845,10 +850,10 @@ describe('createWorkspaceStore', () => {
     })
 
     it('stores ref accessible via getTabRef', () => {
-      const ref = { dispose: vi.fn() }
-      const app = makeFakeApp({ onWorkspaceLoad: vi.fn().mockReturnValue(ref) })
+      const ref = { dispose: vi.fn<() => void>() }
+      const app = makeFakeApp({ onWorkspaceLoad: vi.fn<(...args: any[]) => any>().mockReturnValue(ref) })
       const deps = makeHandleDeps({
-        appRegistry: { get: vi.fn().mockReturnValue(app), getDefaultApp: vi.fn().mockReturnValue(null) },
+        appRegistry: { get: vi.fn<(...args: any[]) => any>().mockReturnValue(app), getDefaultApp: vi.fn<(...args: any[]) => any>().mockReturnValue(null) },
       })
       const ws = makeWorkspace({
         appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: {} } },
@@ -863,7 +868,7 @@ describe('createWorkspaceStore', () => {
   describe('lookupWorkspace', () => {
     it('delegates to deps.lookupWorkspace', () => {
       const mockWs = makeWorkspace({ id: 'other' })
-      const deps = makeHandleDeps({ lookupWorkspace: vi.fn().mockReturnValue(mockWs) })
+      const deps = makeHandleDeps({ lookupWorkspace: vi.fn<(...args: any[]) => any>().mockReturnValue(mockWs) })
       const store = createWorkspaceStore(makeWorkspace(), deps)
 
       expect(store.getState().lookupWorkspace('other')).toBe(mockWs)

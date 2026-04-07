@@ -55,7 +55,7 @@ describe('createActivityStateDetector', () => {
     processData('user@host:~$ ')
     vi.advanceTimersByTime(200)
 
-    const calls = onStateChange.mock.calls.map(c => c[0])
+    const calls = onStateChange.mock.calls.map((c: unknown[]) => c[0] as string)
     expect(calls).toContain('user_input_required')
   })
 
@@ -66,7 +66,7 @@ describe('createActivityStateDetector', () => {
     processData('myhost% ')
     vi.advanceTimersByTime(200)
 
-    const calls = onStateChange.mock.calls.map(c => c[0])
+    const calls = onStateChange.mock.calls.map((c: unknown[]) => c[0] as string)
     expect(calls).toContain('user_input_required')
   })
 
@@ -77,7 +77,7 @@ describe('createActivityStateDetector', () => {
     processData('> ')
     vi.advanceTimersByTime(200)
 
-    const calls = onStateChange.mock.calls.map(c => c[0])
+    const calls = onStateChange.mock.calls.map((c: unknown[]) => c[0] as string)
     expect(calls).toContain('user_input_required')
   })
 
@@ -104,7 +104,7 @@ describe('createActivityStateDetector', () => {
 
     vi.advanceTimersByTime(200)
 
-    const calls = onStateChange.mock.calls.map(c => c[0])
+    const calls = onStateChange.mock.calls.map((c: unknown[]) => c[0] as string)
     expect(calls).toContain('user_input_required')
   })
 
@@ -116,7 +116,7 @@ describe('createActivityStateDetector', () => {
     processData('\x1b[32muser@host\x1b[0m:~$ ')
     vi.advanceTimersByTime(200)
 
-    const calls = onStateChange.mock.calls.map(c => c[0])
+    const calls = onStateChange.mock.calls.map((c: unknown[]) => c[0] as string)
     expect(calls).toContain('user_input_required')
   })
 
@@ -128,7 +128,7 @@ describe('createActivityStateDetector', () => {
     processData('output2')
 
     // Should only be called once with 'working' since state doesn't change
-    const workingCalls = onStateChange.mock.calls.filter(c => c[0] === 'working')
+    const workingCalls = onStateChange.mock.calls.filter((c: unknown[]) => c[0] === 'working')
     expect(workingCalls).toHaveLength(1)
   })
 
@@ -142,12 +142,12 @@ describe('createActivityStateDetector', () => {
     processData('output2') // Reset timer
     vi.advanceTimersByTime(300) // Still not idle (300 < 500)
 
-    const idleCalls = onStateChange.mock.calls.filter(c => c[0] === 'idle' || c[0] === 'user_input_required')
+    const idleCalls = onStateChange.mock.calls.filter((c: unknown[]) => c[0] === 'idle' || c[0] === 'user_input_required')
     expect(idleCalls).toHaveLength(0)
 
     vi.advanceTimersByTime(300) // Now past idle timeout
     // Should have transitioned to idle or user_input_required
-    const finalCalls = onStateChange.mock.calls.filter(c => c[0] === 'idle' || c[0] === 'user_input_required')
+    const finalCalls = onStateChange.mock.calls.filter((c: unknown[]) => c[0] === 'idle' || c[0] === 'user_input_required')
     expect(finalCalls.length).toBeGreaterThan(0)
   })
 
@@ -157,7 +157,7 @@ describe('createActivityStateDetector', () => {
       const { processData, destroy } = createActivityStateDetector(onStateChange, { idleTimeout: 1000 })
 
       processData('some data')
-      expect(() => destroy()).not.toThrow()
+      expect(() => { destroy(); }).not.toThrow()
     })
 
     it('stops idle transitions after destroy', () => {
@@ -170,7 +170,7 @@ describe('createActivityStateDetector', () => {
       vi.advanceTimersByTime(500)
 
       // Should not have emitted user_input_required after destroy
-      const stateCalls = onStateChange.mock.calls.filter(c => c[0] === 'user_input_required')
+      const stateCalls = onStateChange.mock.calls.filter((c: unknown[]) => c[0] === 'user_input_required')
       expect(stateCalls).toHaveLength(0)
     })
 
@@ -183,7 +183,7 @@ describe('createActivityStateDetector', () => {
       destroy() // should clear debounce timer
 
       vi.advanceTimersByTime(600) // past debounce period
-      const waitingCalls = onStateChange.mock.calls.filter(c => c[0] === 'user_input_required')
+      const waitingCalls = onStateChange.mock.calls.filter((c: unknown[]) => c[0] === 'user_input_required')
       expect(waitingCalls).toHaveLength(0)
     })
 
@@ -203,7 +203,7 @@ describe('createActivityStateDetector', () => {
     processData('root@host:~# ')
     vi.advanceTimersByTime(200)
 
-    const calls = onStateChange.mock.calls.map(c => c[0])
+    const calls = onStateChange.mock.calls.map((c: unknown[]) => c[0] as string)
     expect(calls).toContain('user_input_required')
   })
 
@@ -214,7 +214,7 @@ describe('createActivityStateDetector', () => {
     processData('~/project \u276f ')
     vi.advanceTimersByTime(200)
 
-    const calls = onStateChange.mock.calls.map(c => c[0])
+    const calls = onStateChange.mock.calls.map((c: unknown[]) => c[0] as string)
     expect(calls).toContain('user_input_required')
   })
 
@@ -230,7 +230,7 @@ describe('createActivityStateDetector', () => {
     vi.advanceTimersByTime(10)
 
     // Should have gone back to 'working', not 'user_input_required'
-    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1][0]
+    const lastCall = onStateChange.mock.calls[onStateChange.mock.calls.length - 1]![0] as string
     expect(lastCall).toBe('working')
   })
 
@@ -247,7 +247,7 @@ describe('createActivityStateDetector', () => {
     vi.advanceTimersByTime(250)
 
     // The last state should not be user_input_required since working cleared it
-    const waitingCalls = onStateChange.mock.calls.filter(c => c[0] === 'user_input_required')
+    const waitingCalls = onStateChange.mock.calls.filter((c: unknown[]) => c[0] === 'user_input_required')
     expect(waitingCalls).toHaveLength(0)
   })
 
@@ -276,7 +276,7 @@ describe('createActivityStateDetector', () => {
     processData('READY>')
     vi.advanceTimersByTime(200)
 
-    const calls = onStateChange.mock.calls.map(c => c[0])
+    const calls = onStateChange.mock.calls.map((c: unknown[]) => c[0] as string)
     expect(calls).toContain('user_input_required')
   })
 })

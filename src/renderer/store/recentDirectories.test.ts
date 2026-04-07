@@ -3,7 +3,7 @@ import { useRecentDirectoriesStore } from './recentDirectories'
 
 describe('RecentDirectoriesStore', () => {
   beforeEach(() => {
-    useRecentDirectoriesStore.setState({ directories: {} })
+    useRecentDirectoriesStore.setState({ directories: new Map() })
   })
 
   describe('getRecent', () => {
@@ -42,7 +42,7 @@ describe('RecentDirectoriesStore', () => {
     it('limits to 10 entries', () => {
       const store = useRecentDirectoriesStore.getState()
       for (let i = 0; i < 15; i++) {
-        store.addRecent('conn1', `/dir${i}`)
+        store.addRecent('conn1', `/dir${String(i)}`)
       }
       const result = useRecentDirectoriesStore.getState().getRecent('conn1')
       expect(result).toHaveLength(10)

@@ -4,12 +4,12 @@ import type { Application, WorkspaceStore } from '../types'
 
 interface WorkspaceSettingsProps {
   workspace: WorkspaceStore
-  applications: Record<string, Application>
+  applications: Map<string, Application>
 }
 
 export default function WorkspaceSettings({ workspace, applications }: WorkspaceSettingsProps) {
   const { workspace: ws, updateMetadata, updateSettings } = useStore(workspace)
-  const appList = Object.values(applications).filter((app) => app.showInNewTabMenu)
+  const appList = Array.from(applications.values()).filter((app) => app.showInNewTabMenu)
 
   const [name, setName] = useState(ws.metadata.displayName || ws.name)
   const [description, setDescription] = useState(ws.metadata.description || '')

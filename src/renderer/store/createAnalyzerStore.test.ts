@@ -272,14 +272,14 @@ describe('createAnalyzerStore', () => {
     expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
 
     // Resolve the first request — should drain pending
-    calls[0]({ state: 'idle', reason: 'prompt visible' })
+    calls[0]!({ state: 'idle', reason: 'prompt visible' })
     await vi.advanceTimersByTimeAsync(0)
 
     // Now the pending analyze should have fired
     expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(2)
 
     // Resolve second
-    calls[1]({ state: 'idle', reason: 'tests passed' })
+    calls[1]!({ state: 'idle', reason: 'tests passed' })
     await vi.advanceTimersByTimeAsync(0)
 
     store.getState().stop()
@@ -362,7 +362,7 @@ describe('createAnalyzerStore', () => {
       llm: {
         analyzeTerminal: vi.fn().mockImplementation(() => {
           callCount++
-          return Promise.resolve({ state: 'idle', reason: `call-${callCount}` })
+          return Promise.resolve({ state: 'idle', reason: `call-${String(callCount)}` })
         }),
         generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
       },
@@ -554,7 +554,7 @@ describe('createAnalyzerStore', () => {
         expect(deps.openTtyStream).toHaveBeenCalled()
       })
       // Wait for stream to be connected
-      await vi.advanceTimersByTimeAsync?.(0).catch(() => {})
+      await vi.advanceTimersByTimeAsync(0).catch(() => {})
       await new Promise(r => setTimeout(r, 0))
 
       store.getState().setAutoApprove(true)
@@ -562,6 +562,7 @@ describe('createAnalyzerStore', () => {
       // Simulate state change to safe_permission_requested
       store.setState({ aiState: 'safe_permission_requested' })
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(mock.ttyState.write).toHaveBeenCalledWith('\r')
 
       store.getState().stop()
@@ -579,6 +580,7 @@ describe('createAnalyzerStore', () => {
 
       store.setState({ aiState: 'safe_permission_requested' })
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(mock.ttyState.write).not.toHaveBeenCalled()
       store.getState().stop()
     })
@@ -596,6 +598,7 @@ describe('createAnalyzerStore', () => {
       store.getState().setAutoApprove(true)
       store.setState({ aiState: 'permission_request' })
 
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(mock.ttyState.write).not.toHaveBeenCalled()
       store.getState().stop()
     })
@@ -644,10 +647,10 @@ describe('createAnalyzerStore', () => {
 
       const history = store.getState().getHistory()
       expect(history).toHaveLength(1)
-      expect(history[0].kind).toBe('analyzer')
-      expect(history[0].error).toBeUndefined()
-      expect(history[0].model).toBe('test-model')
-      expect(history[0].response).toBe(JSON.stringify({ state: 'idle', reason: 'prompt visible' }))
+      expect(history[0]!.kind).toBe('analyzer')
+      expect(history[0]!.error).toBeUndefined()
+      expect(history[0]!.model).toBe('test-model')
+      expect(history[0]!.response).toBe(JSON.stringify({ state: 'idle', reason: 'prompt visible' }))
 
       store.getState().stop()
       vi.useRealTimers()
@@ -674,9 +677,9 @@ describe('createAnalyzerStore', () => {
 
       const history = store.getState().getHistory()
       expect(history).toHaveLength(1)
-      expect(history[0].kind).toBe('analyzer')
-      expect(history[0].error).toBe('API error')
-      expect(history[0].response).toBe(JSON.stringify({ error: 'API error' }))
+      expect(history[0]!.kind).toBe('analyzer')
+      expect(history[0]!.error).toBe('API error')
+      expect(history[0]!.response).toBe(JSON.stringify({ error: 'API error' }))
 
       store.getState().stop()
       vi.useRealTimers()
@@ -703,9 +706,9 @@ describe('createAnalyzerStore', () => {
 
       const history = store.getState().getHistory()
       expect(history).toHaveLength(1)
-      expect(history[0].kind).toBe('analyzer')
-      expect(history[0].error).toBe('Network error')
-      expect(history[0].response).toBe('')
+      expect(history[0]!.kind).toBe('analyzer')
+      expect(history[0]!.error).toBe('Network error')
+      expect(history[0]!.response).toBe('')
 
       store.getState().stop()
       vi.useRealTimers()
@@ -732,9 +735,9 @@ describe('createAnalyzerStore', () => {
 
       const history = store.getState().getHistory()
       expect(history).toHaveLength(1)
-      expect(history[0].kind).toBe('analyzer')
-      expect(history[0].error).toBe('[unexpected] no state in result')
-      expect(history[0].response).toBe(JSON.stringify({ something: 'unexpected' }))
+      expect(history[0]!.kind).toBe('analyzer')
+      expect(history[0]!.error).toBe('[unexpected] no state in result')
+      expect(history[0]!.response).toBe(JSON.stringify({ something: 'unexpected' }))
 
       store.getState().stop()
       vi.useRealTimers()
@@ -764,9 +767,10 @@ describe('createAnalyzerStore', () => {
       })
 
       const history = store.getState().getHistory()
-      const titleEntry = history.find(h => h.kind === 'title')!
-      expect(titleEntry.error).toBeUndefined()
-      expect(titleEntry.response).toBe(JSON.stringify({ title: 'Test Title', description: 'Test Description', branchName: 'test-title' }))
+      const titleEntry = history.find(h => h.kind === 'title')
+      expect(titleEntry).toBeDefined()
+      expect(titleEntry?.error).toBeUndefined()
+      expect(titleEntry?.response).toBe(JSON.stringify({ title: 'Test Title', description: 'Test Description', branchName: 'test-title' }))
 
       store.getState().stop()
     })
@@ -855,9 +859,10 @@ describe('createAnalyzerStore', () => {
       })
 
       const history = store.getState().getHistory()
-      const titleEntry = history.find(h => h.kind === 'title' && h.error)!
-      expect(titleEntry.error).toBe('Title API error')
-      expect(titleEntry.response).toBe('')
+      const titleEntry = history.find(h => h.kind === 'title' && h.error)
+      expect(titleEntry).toBeDefined()
+      expect(titleEntry?.error).toBe('Title API error')
+      expect(titleEntry?.response).toBe('')
 
       store.getState().stop()
     })

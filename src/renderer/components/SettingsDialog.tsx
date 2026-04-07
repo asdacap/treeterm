@@ -36,7 +36,7 @@ type RecordingState =
 export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: SettingsDialogProps) {
   const { settings: savedSettings, saveSettings } = useSettingsStore()
   const applications = useAppStore((s) => s.applications)
-  const allApplications = Object.values(applications)
+  const allApplications = Array.from(applications.values())
   const [localSettings, setLocalSettings] = useState(savedSettings)
   const [activeTab, setActiveTab] = useState<TabId>('terminal')
   const [recording, setRecording] = useState<RecordingState>(null)

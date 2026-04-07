@@ -26,11 +26,12 @@ describe('ActivityIndicator', () => {
       const { container } = render(
         <ActivityIndicator activityState={state} className="test-class" />
       )
-      const span = container.querySelector('span')!
-      expect(span.getAttribute('title')).toBe(title)
-      expect(span.className).toBe(`test-class activity-${state}`)
+      const span = container.querySelector('span')
+      expect(span).toBeDefined()
+      expect(span?.getAttribute('title')).toBe(title)
+      expect(span?.className).toBe(`test-class activity-${state}`)
       if (icon) {
-        expect(span.textContent).toContain(icon)
+        expect(span?.textContent).toContain(icon)
       }
     })
   }

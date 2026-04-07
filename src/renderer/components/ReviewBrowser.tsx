@@ -35,7 +35,8 @@ export default function ReviewBrowser({
   const git = useGitApi(workspace)
   const workspaceId = wsData.id
   const parentWorkspace = parentWorkspaceId ? lookupWorkspace(parentWorkspaceId) : undefined
-  const reviewState = wsData.appStates[tabId].state as ReviewState | undefined
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist in appStates
+  const reviewState = wsData.appStates[tabId]!.state as ReviewState | undefined
 
   // For top-level worktrees, we only show uncommitted changes (no parent to compare against)
   const hasParent = !!parentWorkspaceId
@@ -330,7 +331,7 @@ export default function ReviewBrowser({
       )
       if (result.success) {
         setConflictInfo(result.conflicts)
-      } else if (!result.success) {
+      } else {
         setConflictError(result.error || 'Failed to check for conflicts')
       }
     } catch (err) {
@@ -518,7 +519,7 @@ export default function ReviewBrowser({
     try {
       const result = await mergeAndRemove(squash)
       if (!result.success) {
-        alert(`Merge failed: ${result.error}`)
+        alert(`Merge failed: ${String(result.error)}`)
         return
       }
     } catch (err) {
@@ -559,7 +560,7 @@ export default function ReviewBrowser({
     try {
       const result = await mergeAndKeep(squash)
       if (!result.success) {
-        alert(`Merge failed: ${result.error}`)
+        alert(`Merge failed: ${String(result.error)}`)
         setIsProcessing(false)
         setProcessingAction(null)
         return
@@ -585,7 +586,7 @@ export default function ReviewBrowser({
     try {
       const result = await closeAndClean()
       if (!result.success) {
-        alert(`Close failed: ${result.error}`)
+        alert(`Close failed: ${String(result.error)}`)
       }
     } catch (err) {
       alert(`Close failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
@@ -631,7 +632,8 @@ export default function ReviewBrowser({
 
   const handlePreviousFile = () => {
     if (currentFileIndex > 0) {
-      const prevFilePath = fileList[currentFileIndex - 1]
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- currentFileIndex > 0 guarantees valid index
+      const prevFilePath = fileList[currentFileIndex - 1]!
       if (viewMode === 'committed') {
         void loadFileDiff(prevFilePath)
       } else {
@@ -643,7 +645,8 @@ export default function ReviewBrowser({
 
   const handleNextFile = () => {
     if (currentFileIndex < fileList.length - 1) {
-      const nextFilePath = fileList[currentFileIndex + 1]
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- currentFileIndex < length - 1 guarantees valid index
+      const nextFilePath = fileList[currentFileIndex + 1]!
       if (viewMode === 'committed') {
         void loadFileDiff(nextFilePath)
       } else {

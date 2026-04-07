@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import React, { useState, useCallback } from 'react'
 import type { ReactNode } from 'react'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
@@ -29,7 +29,7 @@ export default function SessionPanel({
   sessionId,
   sessionStore,
   selectFolder,
-}: SessionPanelProps): JSX.Element {
+}: SessionPanelProps): React.JSX.Element {
   const connection = useStore(sessionStore, s => s.connection)
   const {
     workspaces,
@@ -58,14 +58,14 @@ export default function SessionPanel({
   const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
   const menuPosition = useContextMenuStore((s) => s.position)
   const getChildren = (parentId: string) =>
-    Object.entries(workspaces)
-      .filter(([, e]) => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === parentId)
-      .map(([, e]) => (e as Extract<typeof e, { status: 'loaded' | 'operation-error' }>).data)
+    Array.from(workspaces.values())
+      .filter((e): e is Extract<typeof e, { status: 'loaded' | 'operation-error' }> => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === parentId)
+      .map(e => e.data)
       .sort((a, b) => parseInt(a.metadata.sortOrder || '0') - parseInt(b.metadata.sortOrder || '0'))
 
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     return new Set(
-      Object.keys(workspaces)
+      Array.from(workspaces.keys())
         .filter((id) => getChildren(id).length > 0)
     )
   })
@@ -86,7 +86,7 @@ export default function SessionPanel({
   } | null>(null)
 
   // Session name editing
-  const displayName = useSessionNamesStore(s => s.names[sessionId]?.name)
+  const displayName = useSessionNamesStore(s => s.names.get(sessionId)?.name)
   const setSessionName = useSessionNamesStore(s => s.setName)
   const removeSessionName = useSessionNamesStore(s => s.removeName)
   const [isEditingName, setIsEditingName] = useState(false)
@@ -115,10 +115,10 @@ export default function SessionPanel({
   const [prevWorkspaces, setPrevWorkspaces] = useState(workspaces)
   if (workspaces !== prevWorkspaces) {
     setPrevWorkspaces(workspaces)
-    const parentIds = Object.keys(workspaces)
+    const parentIds = Array.from(workspaces.keys())
       .filter((id) =>
-        Object.entries(workspaces)
-          .filter(([, e]) => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === id)
+        Array.from(workspaces.values())
+          .filter(e => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === id)
           .length > 0
       )
     if (parentIds.length > 0) {
@@ -131,7 +131,7 @@ export default function SessionPanel({
   }
 
   // Compute paths of already-open worktrees
-  const openWorktreePaths = Object.values(workspaces)
+  const openWorktreePaths = Array.from(workspaces.values())
     .filter((e): e is Extract<typeof e, { status: 'loaded' | 'operation-error' }> =>
       e.status === 'loaded' || e.status === 'operation-error')
     .filter(e => e.data.isWorktree)
@@ -159,7 +159,7 @@ export default function SessionPanel({
 
   const handleCreateChild = (parentId: string) => {
     closeContextMenu()
-    const entry = workspaces[parentId]
+    const entry = workspaces.get(parentId)
     if (entry && (entry.status === 'loaded' || entry.status === 'operation-error')) {
       const behindCount = entry.store.getState().gitController.getState().behindCount
       if (behindCount > 0) {
@@ -177,7 +177,7 @@ export default function SessionPanel({
 
 
   const handleQuickFork = async (wsId: string) => {
-    const entry = workspaces[wsId]
+    const entry = workspaces.get(wsId)
     if (entry && (entry.status === 'loaded' || entry.status === 'operation-error')) {
       const behindCount = entry.store.getState().gitController.getState().behindCount
       if (behindCount > 0) {
@@ -268,7 +268,7 @@ export default function SessionPanel({
 
   const handleRemove = async (id: string) => {
     closeContextMenu()
-    const entry = workspaces[id]
+    const entry = workspaces.get(id)
     if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
     const ws = entry.data
 
@@ -290,7 +290,7 @@ export default function SessionPanel({
 
   const handleOpenSettings = (workspaceId: string) => {
     closeContextMenu()
-    const entry = workspaces[workspaceId]
+    const entry = workspaces.get(workspaceId)
     if (entry && (entry.status === 'loaded' || entry.status === 'operation-error')) {
       entry.store.getState().addTab('workspace-settings')
     }
@@ -309,7 +309,7 @@ export default function SessionPanel({
   }
 
   // Get root workspaces (those without parents) — includes loading/error entries (no parentId)
-  const rootWorkspaceIds = Object.entries(workspaces)
+  const rootWorkspaceIds = Array.from(workspaces.entries())
     .filter(([, e]) => {
       if (e.status === 'loaded' || e.status === 'operation-error') return !e.data.parentId
       return true // loading/error entries are always top-level
@@ -322,7 +322,7 @@ export default function SessionPanel({
     .map(([id]) => id)
 
   // Get create child dialog parent handle
-  const createChildDialogParentEntry = createChildDialogParentId ? workspaces[createChildDialogParentId] : undefined
+  const createChildDialogParentEntry = createChildDialogParentId ? workspaces.get(createChildDialogParentId) : undefined
   const createChildDialogParentHandle = createChildDialogParentEntry &&
     (createChildDialogParentEntry.status === 'loaded' || createChildDialogParentEntry.status === 'operation-error')
     ? createChildDialogParentEntry.store
@@ -341,8 +341,8 @@ export default function SessionPanel({
     e.preventDefault()
     if (!dragState) return
     // Only allow drop on same-parent siblings
-    const dragEntry = workspaces[dragState.dragId]
-    const overEntry = workspaces[id]
+    const dragEntry = workspaces.get(dragState.dragId)
+    const overEntry = workspaces.get(id)
     if (!dragEntry || !overEntry) return
     if (dragEntry.status !== 'loaded' && dragEntry.status !== 'operation-error') return
     if (overEntry.status !== 'loaded' && overEntry.status !== 'operation-error') return
@@ -369,7 +369,7 @@ export default function SessionPanel({
   }
 
   const renderWorkspace = (id: string, depth: number = 0): ReactNode => {
-    const entry = workspaces[id]
+    const entry = workspaces.get(id)
     if (!entry) return null
 
     const children = getChildren(id)
@@ -402,18 +402,22 @@ export default function SessionPanel({
     )
   }
 
-  const statusIcon: Record<ConnectionStatus, () => ReactNode> = {
-    connecting: () => <Loader2 size={14} className="spinning" />,
-    connected: () => null,
-    disconnected: () => <AlertCircle size={14} style={{ color: '#f44336' }} />,
-    error: () => <AlertCircle size={14} style={{ color: '#f44336' }} />,
+  const renderStatusIcon = (status: ConnectionStatus): ReactNode => {
+    switch (status) {
+      case 'connecting': return <Loader2 size={14} className="spinning" />
+      case 'connected': return null
+      case 'disconnected': return <AlertCircle size={14} style={{ color: '#f44336' }} />
+      case 'error': return <AlertCircle size={14} style={{ color: '#f44336' }} />
+    }
   }
 
-  const statusContent: Record<ConnectionStatus, () => ReactNode> = {
-    connecting: () => <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>Connecting...</div>,
-    connected: () => null,
-    disconnected: () => <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{(connection && 'error' in connection && connection.error) || 'Disconnected'}</div>,
-    error: () => <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{connection && 'error' in connection && connection.error}</div>,
+  const renderStatusContent = (status: ConnectionStatus): ReactNode => {
+    switch (status) {
+      case 'connecting': return <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>Connecting...</div>
+      case 'connected': return null
+      case 'disconnected': return <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{(connection && 'error' in connection && connection.error) || 'Disconnected'}</div>
+      case 'error': return <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{connection && 'error' in connection && connection.error}</div>
+    }
   }
 
   return (
@@ -445,7 +449,7 @@ export default function SessionPanel({
             onDoubleClick={(e) => { e.stopPropagation(); handleStartEditName() }}
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            {connection && statusIcon[connection.status]()}
+            {connection && renderStatusIcon(connection.status)}
             {displayName || sessionId}
           </span>
         )}
@@ -462,8 +466,8 @@ export default function SessionPanel({
 
       {!isSessionCollapsed && (
         <div className="tree-list">
-          {connection && statusContent[connection.status]() ? (
-            statusContent[connection.status]()
+          {connection && renderStatusContent(connection.status) ? (
+            renderStatusContent(connection.status)
           ) : rootWorkspaceIds.length === 0 ? (
             <div className="tree-empty">No workspaces. Click + to add one.</div>
           ) : (
@@ -550,7 +554,7 @@ function WorkspaceTreeItem({
   onToggleExpand, onClick, onQuickFork, onCreateChild, onRemove, onOpenSettings,
   children, renderChild,
   isDragging, dragOverPosition, onDragStart, onDragOver, onDrop, onDragEnd,
-}: WorkspaceTreeItemProps): JSX.Element {
+}: WorkspaceTreeItemProps): React.JSX.Element {
   const openContextMenu = useContextMenuStore((s) => s.open)
   const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
   const menuPosition = useContextMenuStore((s) => s.position)
@@ -580,7 +584,7 @@ function WorkspaceTreeItem({
         style={{ paddingLeft: 4 + depth * 4 }}
         onClick={() => { onClick(id); }}
         onContextMenu={handleContextMenu}
-        title={ws?.metadata?.description ? `${ws.path}\n\n${ws.metadata.description}` : ws?.path}
+        title={ws?.metadata.description ? `${ws.path}\n\n${ws.metadata.description}` : ws?.path}
         draggable={ws !== undefined}
         onDragStart={(e) => { e.stopPropagation(); onDragStart(id) }}
         onDragOver={(e) => { e.stopPropagation(); onDragOver(e, id) }}
@@ -630,7 +634,7 @@ function WorkspaceTreeItem({
             Open Existing Branch
           </div>
         )}
-        {ws?.isWorktree && ws?.parentId && (
+        {ws?.isWorktree && ws.parentId && (
           <div className="context-menu-item" onClick={() => { onRemove(id); }}>
             Review & Merge
           </div>
@@ -653,18 +657,18 @@ interface CollapsedSessionPanelProps {
   sessionStore: StoreApi<SessionState>
 }
 
-export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSessionPanelProps): JSX.Element {
+export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSessionPanelProps): React.JSX.Element {
   const { workspaces, activeWorkspaceId, setActiveWorkspace } = useStore(sessionStore)
   const { activeView, setActiveView } = useNavigationStore()
   const isActiveSession = activeView?.type === 'workspace' && activeView.sessionId === sessionId
 
   const getChildren = (parentId: string): Workspace[] =>
-    Object.entries(workspaces)
-      .filter(([, e]) => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === parentId)
-      .map(([, e]) => (e as Extract<typeof e, { status: 'loaded' | 'operation-error' }>).data)
+    Array.from(workspaces.values())
+      .filter((e): e is Extract<typeof e, { status: 'loaded' | 'operation-error' }> => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === parentId)
+      .map(e => e.data)
       .sort((a, b) => parseInt(a.metadata.sortOrder || '0') - parseInt(b.metadata.sortOrder || '0'))
 
-  const rootWorkspaceIds = Object.entries(workspaces)
+  const rootWorkspaceIds = Array.from(workspaces.entries())
     .filter(([, e]) => {
       if (e.status === 'loaded' || e.status === 'operation-error') return !e.data.parentId
       return true
@@ -682,7 +686,7 @@ export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSess
   }
 
   const renderIcon = (id: string): ReactNode => {
-    const entry = workspaces[id]
+    const entry = workspaces.get(id)
     if (!entry) return null
 
     const ws = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined

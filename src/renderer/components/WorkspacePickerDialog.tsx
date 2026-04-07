@@ -175,14 +175,14 @@ export default function WorkspacePickerDialog({
           </button>
           <button
             className="dialog-btn secondary"
-            onClick={() => selectedSession && onOpenInNewWindow(selectedSession)}
+            onClick={() => { if (selectedSession) onOpenInNewWindow(selectedSession); }}
             disabled={!selectedSession}
           >
             Open in New Window
           </button>
           <button
             className="dialog-btn primary"
-            onClick={() => selectedSession && onSelect(selectedSession)}
+            onClick={() => { if (selectedSession) onSelect(selectedSession); }}
             disabled={!selectedSession}
           >
             Restore

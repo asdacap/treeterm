@@ -5,7 +5,7 @@ const addEventListenerMock = vi.fn()
 const removeEventListenerMock = vi.fn()
 vi.stubGlobal('window', {
   setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
-  clearTimeout: (id: number) => clearTimeout(id),
+  clearTimeout: (id: ReturnType<typeof setTimeout>) => { clearTimeout(id); },
   addEventListener: addEventListenerMock,
   removeEventListener: removeEventListenerMock,
 })
@@ -51,7 +51,7 @@ function createKeyEvent(overrides: Partial<KeyboardEvent> = {}): KeyboardEvent {
 function initAndGetHandler(): (e: KeyboardEvent) => void {
   addEventListenerMock.mockClear()
   useKeybindingStore.getState().init()
-  return addEventListenerMock.mock.calls[0][1]
+  return addEventListenerMock.mock.calls[0]![1] as (e: KeyboardEvent) => void
 }
 
 describe('useKeybindingStore', () => {
@@ -182,7 +182,9 @@ describe('useKeybindingStore', () => {
       const event = createKeyEvent({ key: 'b', ctrlKey: true })
 
       handleKeyDown(event)
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(event.preventDefault).toHaveBeenCalled()
+      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(event.stopPropagation).toHaveBeenCalled()
     })
 

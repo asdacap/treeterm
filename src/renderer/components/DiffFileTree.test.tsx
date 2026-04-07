@@ -175,8 +175,9 @@ describe('CommittedDiffFileTree', () => {
       />
     )
     // Click the directory header
-    const dirHeader = container.querySelector('.diff-tree-dir')!
-    fireEvent.click(dirHeader)
+    const dirHeader = container.querySelector('.diff-tree-dir')
+    expect(dirHeader).toBeDefined()
+    if (dirHeader) fireEvent.click(dirHeader)
 
     // Files should be hidden
     expect(screen.queryByText('a.ts')).toBeNull()
@@ -255,7 +256,7 @@ describe('UncommittedDiffFileTree', () => {
         stagingInProgress={true}
       />
     )
-    expect((screen.getByText('Stage') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText<HTMLButtonElement>('Stage').disabled).toBe(true)
   })
 
   it('action button click does not trigger onSelectFile', () => {

@@ -32,7 +32,7 @@ const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => ({
   closeAndClean: vi.fn(), lookupWorkspace: vi.fn(),
   remove: vi.fn(), removeKeepBranch: vi.fn(), removeKeepBoth: vi.fn(),
   initTab: vi.fn(), getTabRef: vi.fn().mockReturnValue(null), getCachedTerminal: vi.fn().mockReturnValue(null), setCachedTerminal: vi.fn(), disposeCachedTerminal: vi.fn(), disposeAllCachedTerminals: vi.fn(), disposeTabResources: vi.fn(),
-  initAnalyzer: vi.fn(), createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn(), kill: vi.fn() }),
+  initAnalyzer: vi.fn(), createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
   connectionId: 'local', updateSettings: vi.fn(),
   gitApi: createMockGitApi(), filesystemApi: createMockFilesystemApi(), runActionsApi: createMockRunActionsApi(), execApi: createMockExecApi(),
   focusTabId: null, requestFocus: vi.fn(), clearFocusRequest: vi.fn(),
@@ -75,8 +75,8 @@ describe('Chat Renderer', () => {
     const tab = { id: 'tab-1', state: { messages: [] } } as unknown as Tab
     const result = chatApplication.render({ tab, workspace: mockWorkspaceStore, isVisible: true })
     expect(result).toEqual({
-      component: expect.any(Function),
-      props: expect.objectContaining({ tab }),
+      component: expect.any(Function) as unknown,
+      props: expect.objectContaining({ tab }) as unknown,
     })
   })
 })

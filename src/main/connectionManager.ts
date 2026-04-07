@@ -194,7 +194,7 @@ export class ConnectionManager {
       throw new Error(`Connection not found: ${connectionId}`)
     }
     if (!conn.client || conn.status !== 'connected') {
-      throw new Error(`Connection ${connectionId} is ${conn.status}${conn.error ? ': ' + String(conn.error) : ''}`)
+      throw new Error(`Connection ${connectionId} is ${conn.status}${conn.error ? ': ' + conn.error : ''}`)
     }
     return conn.client
   }

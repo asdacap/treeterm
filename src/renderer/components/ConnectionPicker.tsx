@@ -53,7 +53,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
 
       // 3. Add real session (replaces connecting entry)
       console.log(`[renderer:ConnectionPicker] Adding remote session to store: session=${session.id}`)
-      addRemoteSession(session, info)
+      void addRemoteSession(session, info)
     }).catch((err: unknown) => {
       console.error(`[renderer:ConnectionPicker] SSH connection error:`, err)
       setSessionError(config.id, err instanceof Error ? err.message : String(err))
@@ -67,7 +67,7 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
     }
 
     const config: SSHConnectionConfig = {
-      id: `ssh-${host}-${Date.now()}`,
+      id: `ssh-${host}-${String(Date.now())}`,
       host,
       user,
       port: parseInt(port, 10) || 22,

@@ -28,7 +28,8 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): React.JSX.Ele
   const { workspace: wsData, updateTabState, updateTabTitle, addTab, connectionId } = useStore(workspace)
   const filesystem = useFilesystemApi(workspace)
   const execApi = useExecApi(workspace)
-  const appState = wsData.appStates[tabId]
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist in appStates
+  const appState = wsData.appStates[tabId]!
   const state = appState.state as EditorState | undefined
 
   const scrollTop = state?.status === 'ready' ? state.scrollTop ?? 0 : 0

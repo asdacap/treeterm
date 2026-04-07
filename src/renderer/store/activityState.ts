@@ -24,6 +24,7 @@ export const useActivityStateStore = create<ActivityStateStore>((set, get) => ({
 
   removeTabState: (tabId) => {
     set((s) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { [tabId]: _, ...rest } = s.states
       return { states: rest }
     })

@@ -146,7 +146,7 @@ describe('createSessionStore', () => {
     })
 
     it('has empty workspace collection', () => {
-      expect(store.getState().workspaces).toEqual({})
+      expect(store.getState().workspaces).toEqual(new Map())
     })
 
     it('has null active workspace', () => {
@@ -172,15 +172,15 @@ describe('createSessionStore', () => {
     it('addWorkspace creates workspace and sets active', async () => {
       const id = store.getState().addWorkspace('/my/project')
       expect(id).toBeDefined()
-      expect(store.getState().workspaces[id]).toBeDefined()
+      expect(store.getState().workspaces.get(id)).toBeDefined()
       // Immediately after addWorkspace, status is 'loading' with name available
-      const loadingEntry = store.getState().workspaces[id]
+      const loadingEntry = store.getState().workspaces.get(id)!
       expect(loadingEntry.status).toBe('loading')
       expect((loadingEntry as { name: string }).name).toBe('project')
       expect(store.getState().activeWorkspaceId).toBe(id)
       // After flush, workspace transitions to 'loaded' with full data
       await flushPromises()
-      const entry = store.getState().workspaces[id]
+      const entry = store.getState().workspaces.get(id)!
       expect(entry.status).toBe('loaded')
       expect((entry as Extract<typeof entry, { status: 'loaded' }>).data.name).toBe('project')
       expect((entry as Extract<typeof entry, { status: 'loaded' }>).data.path).toBe('/my/project')
@@ -190,7 +190,7 @@ describe('createSessionStore', () => {
       store.getState().addWorkspace('/my/repo')
       await flushPromises()
       expect(deps.git.getInfo).toHaveBeenCalledWith('/my/repo')
-      const entry = Object.values(store.getState().workspaces)[0]
+      const entry = Array.from(store.getState().workspaces.values())[0]!
       expect(entry.status).toBe('loaded')
       const ws = (entry as Extract<typeof entry, { status: 'loaded' }>).data
       expect(ws.isGitRepo).toBe(true)
@@ -202,7 +202,7 @@ describe('createSessionStore', () => {
       vi.mocked(deps.appRegistry.getDefaultApp).mockReturnValue(app)
       const id = store.getState().addWorkspace('/test')
       await flushPromises()
-      const entry = store.getState().workspaces[id]
+      const entry = store.getState().workspaces.get(id)!
       expect(entry.status).toBe('loaded')
       const ws = (entry as Extract<typeof entry, { status: 'loaded' }>).data
       expect(Object.keys(ws.appStates)).toHaveLength(1)
@@ -214,13 +214,13 @@ describe('createSessionStore', () => {
       vi.mocked(deps.appRegistry.getDefaultApp).mockReturnValue(app)
       const id = store.getState().addWorkspace('/test', { skipDefaultTabs: true })
       await flushPromises()
-      const entry = store.getState().workspaces[id]
+      const entry = store.getState().workspaces.get(id)!
       expect(entry.status).toBe('loaded')
       const ws = (entry as Extract<typeof entry, { status: 'loaded' }>).data
       expect(Object.keys(ws.appStates)).toHaveLength(0)
     })
 
-    it('setActiveWorkspace updates active workspace id', async () => {
+    it('setActiveWorkspace updates active workspace id', () => {
       const id = store.getState().addWorkspace('/test')
       store.getState().setActiveWorkspace(null)
       expect(store.getState().activeWorkspaceId).toBeNull()
@@ -244,16 +244,16 @@ describe('createSessionStore', () => {
       expect(deps.git.createWorktree).toHaveBeenCalled()
 
       const workspaces = store.getState().workspaces
-      const children = Object.values(workspaces)
+      const children = Array.from(workspaces.values())
         .filter((e): e is Extract<typeof e, { status: 'loaded' }> => e.status === 'loaded' && e.data.parentId === parentId)
         .map(e => e.data)
       expect(children).toHaveLength(1)
-      expect(children[0].name).toBe('feature')
-      expect(children[0].isWorktree).toBe(true)
+      expect(children[0]!.name).toBe('feature')
+      expect(children[0]!.isWorktree).toBe(true)
     })
 
-    it('addChildWorkspace fails when parent not found', async () => {
-      const result = await store.getState().addChildWorkspace('nonexistent', 'feat')
+    it('addChildWorkspace fails when parent not found', () => {
+      const result = store.getState().addChildWorkspace('nonexistent', 'feat')
       expect(result).toEqual({ success: false, error: 'Parent workspace not found' })
     })
 
@@ -271,10 +271,12 @@ describe('createSessionStore', () => {
       expect(result).toEqual({ success: true })
       await flushPromises()
       const workspaces = store.getState().workspaces
-      const errorEntry = Object.values(workspaces).find(e => e.status === 'error')
+      const errorEntry = Array.from(workspaces.values()).find(e => e.status === 'error')
       expect(errorEntry).toBeDefined()
-      expect(errorEntry!.status).toBe('error')
-      expect((errorEntry as Extract<typeof errorEntry, { status: 'error' }>).error).toBe('git error')
+      if (errorEntry) {
+        expect(errorEntry.status).toBe('error')
+        expect(errorEntry.error).toBe('git error')
+      }
     })
 
     it('adoptExistingWorktree adds existing worktree', async () => {
@@ -317,8 +319,8 @@ describe('createSessionStore', () => {
       expect(deps.git.createWorktreeFromRemote).toHaveBeenCalledWith('/repo', 'origin/feature', 'feature', expect.any(String))
     })
 
-    it('createWorktreeFromRemote fails for non-existent parent', async () => {
-      const result = await store.getState().createWorktreeFromRemote('bad', 'origin/feat', false)
+    it('createWorktreeFromRemote fails for non-existent parent', () => {
+      const result = store.getState().createWorktreeFromRemote('bad', 'origin/feat', false)
       expect(result).toEqual({ success: false, error: 'Parent workspace not found' })
     })
   })
@@ -332,27 +334,28 @@ describe('createSessionStore', () => {
       await flushPromises()
       store.getState().addChildWorkspace(parentId, 'child')
       await flushPromises()
-      const childEntry = Object.values(store.getState().workspaces)
-        .find((e): e is Extract<typeof e, { status: 'loaded' }> => e.status === 'loaded' && e.data.name === 'child')!
-      childId = childEntry.data.id
+      const childEntry = Array.from(store.getState().workspaces.values())
+        .find((e): e is Extract<typeof e, { status: 'loaded' }> => e.status === 'loaded' && e.data.name === 'child')
+      expect(childEntry).toBeDefined()
+      childId = childEntry?.data.id ?? ''
     })
 
     it('removeWorkspace removes child and cleans up git', async () => {
       await store.getState().removeWorkspace(childId)
-      expect(store.getState().workspaces[childId]).toBeUndefined()
+      expect(store.getState().workspaces.get(childId)).toBeUndefined()
       expect(deps.git.removeWorktree).toHaveBeenCalled()
     })
 
     it('removeWorkspaceKeepBranch keeps branch', async () => {
       await store.getState().removeWorkspaceKeepBranch(childId)
-      expect(store.getState().workspaces[childId]).toBeUndefined()
+      expect(store.getState().workspaces.get(childId)).toBeUndefined()
       // removeWorktree called with deleteBranch=false
       expect(deps.git.removeWorktree).toHaveBeenCalledWith('/repo', expect.any(String), false, expect.any(String))
     })
 
     it('removeWorkspaceKeepBoth skips both worktree and branch removal', async () => {
       await store.getState().removeWorkspaceKeepBoth(childId)
-      expect(store.getState().workspaces[childId]).toBeUndefined()
+      expect(store.getState().workspaces.get(childId)).toBeUndefined()
       expect(deps.git.removeWorktree).not.toHaveBeenCalled()
       expect(deps.git.deleteBranch).not.toHaveBeenCalled()
     })
@@ -365,7 +368,7 @@ describe('createSessionStore', () => {
 
     it('removeOrphanWorkspace removes without git cleanup', () => {
       store.getState().removeOrphanWorkspace(childId)
-      expect(store.getState().workspaces[childId]).toBeUndefined()
+      expect(store.getState().workspaces.get(childId)).toBeUndefined()
       expect(deps.git.removeWorktree).not.toHaveBeenCalled()
     })
 
@@ -376,7 +379,7 @@ describe('createSessionStore', () => {
 
     it('removeOrphanWorkspace removes workspace from state', () => {
       store.getState().removeOrphanWorkspace(childId)
-      expect(store.getState().workspaces[childId]).toBeUndefined()
+      expect(store.getState().workspaces.get(childId)).toBeUndefined()
     })
   })
 
@@ -385,7 +388,7 @@ describe('createSessionStore', () => {
       const id = store.getState().addWorkspace('/test')
       await flushPromises()
       store.getState().updateGitInfo(id, { isRepo: true, branch: 'develop', rootPath: '/test' })
-      const entry = store.getState().workspaces[id]
+      const entry = store.getState().workspaces.get(id)!
       expect(entry.status).toBe('loaded')
       expect((entry as Extract<typeof entry, { status: 'loaded' }>).data.gitBranch).toBe('develop')
     })
@@ -400,7 +403,7 @@ describe('createSessionStore', () => {
       await flushPromises()
       vi.mocked(deps.git.getInfo).mockResolvedValue({ isRepo: true, branch: 'feature', rootPath: '/test' })
       await store.getState().refreshGitInfo(id)
-      const entry = store.getState().workspaces[id]
+      const entry = store.getState().workspaces.get(id)!
       expect(entry.status).toBe('loaded')
       expect((entry as Extract<typeof entry, { status: 'loaded' }>).data.gitBranch).toBe('feature')
     })
@@ -420,16 +423,17 @@ describe('createSessionStore', () => {
       await flushPromises()
       store.getState().addChildWorkspace(parentId, 'child')
       await flushPromises()
-      const childEntry = Object.values(store.getState().workspaces)
-        .find((e): e is Extract<typeof e, { status: 'loaded' }> => e.status === 'loaded' && e.data.name === 'child')!
-      childId = childEntry.data.id
+      const childEntry = Array.from(store.getState().workspaces.values())
+        .find((e): e is Extract<typeof e, { status: 'loaded' }> => e.status === 'loaded' && e.data.name === 'child')
+      expect(childEntry).toBeDefined()
+      childId = childEntry?.data.id ?? ''
     })
 
     it('mergeAndRemoveWorkspace merges, removes, and cleans up', async () => {
       const result = await store.getState().mergeAndRemoveWorkspace(childId, false)
       expect(result).toEqual({ success: true })
       expect(deps.git.merge).toHaveBeenCalled()
-      expect(store.getState().workspaces[childId]).toBeUndefined()
+      expect(store.getState().workspaces.get(childId)).toBeUndefined()
     })
 
     it('mergeAndRemoveWorkspace auto-commits uncommitted changes', async () => {
@@ -470,7 +474,7 @@ describe('createSessionStore', () => {
       const result = await store.getState().mergeAndKeepWorkspace(childId, false)
       expect(result).toEqual({ success: true })
       expect(deps.git.merge).toHaveBeenCalled()
-      expect(store.getState().workspaces[childId]).toBeDefined()
+      expect(store.getState().workspaces.get(childId)).toBeDefined()
     })
 
     it('mergeAndKeepWorkspace auto-commits uncommitted changes', async () => {
@@ -510,7 +514,7 @@ describe('createSessionStore', () => {
     it('closeAndCleanWorkspace removes worktree', async () => {
       const result = await store.getState().closeAndCleanWorkspace(childId)
       expect(result).toEqual({ success: true })
-      expect(store.getState().workspaces[childId]).toBeUndefined()
+      expect(store.getState().workspaces.get(childId)).toBeUndefined()
     })
 
     it('closeAndCleanWorkspace fails for non-existent workspace', async () => {
@@ -567,10 +571,10 @@ describe('createSessionStore', () => {
         settings: { defaultApplicationId: 'custom-app' },
       })
       await flushPromises()
-      const entry = store.getState().workspaces[id]
+      const entry = store.getState().workspaces.get(id)!
       expect(entry.status).toBe('loaded')
       const ws = (entry as Extract<typeof entry, { status: 'loaded' }>).data
-      const tab = Object.values(ws.appStates)[0]
+      const tab = Object.values(ws.appStates)[0]!
       expect(tab.applicationId).toBe('custom-app')
     })
 
@@ -581,10 +585,10 @@ describe('createSessionStore', () => {
 
       const id = store.getState().addWorkspace('/test')
       await flushPromises()
-      const entry = store.getState().workspaces[id]
+      const entry = store.getState().workspaces.get(id)!
       expect(entry.status).toBe('loaded')
       const ws = (entry as Extract<typeof entry, { status: 'loaded' }>).data
-      const tab = Object.values(ws.appStates)[0]
+      const tab = Object.values(ws.appStates)[0]!
       expect(tab.applicationId).toBe('global-default')
     })
   })
@@ -621,7 +625,7 @@ describe('createSessionStore', () => {
 
       await store.getState().handleRestore(daemonSession)
 
-      const entry = store.getState().workspaces['ws-restored']
+      const entry = store.getState().workspaces.get('ws-restored')!
       expect(entry).toBeDefined()
       expect(entry.status).toBe('loaded')
       expect((entry as Extract<typeof entry, { status: 'loaded' }>).data.name).toBe('restored')
@@ -632,7 +636,7 @@ describe('createSessionStore', () => {
       // First add a workspace
       store.getState().addWorkspace('/existing')
       await flushPromises()
-      const existingId = Object.keys(store.getState().workspaces)[0]
+      const existingId = Array.from(store.getState().workspaces.keys())[0]
 
       const daemonSession = {
         id: 'session-1',
@@ -647,9 +651,9 @@ describe('createSessionStore', () => {
       await store.getState().handleExternalUpdate(daemonSession)
 
       // Old workspace should be removed (not in daemon session)
-      expect(store.getState().workspaces[existingId]).toBeUndefined()
+      expect(store.getState().workspaces.get(existingId!)).toBeUndefined()
       // New workspace should be added
-      expect(store.getState().workspaces['ws-new']).toBeDefined()
+      expect(store.getState().workspaces.get('ws-new')).toBeDefined()
       expect(store.getState().isRestoring).toBe(false)
     })
 
@@ -667,9 +671,9 @@ describe('createSessionStore', () => {
 
       await store.getState().handleRestore(daemonSession)
 
-      expect(store.getState().workspaces['ws-parent']).toBeDefined()
-      expect(store.getState().workspaces['ws-child']).toBeDefined()
-      const childEntry = store.getState().workspaces['ws-child']
+      expect(store.getState().workspaces.get('ws-parent')).toBeDefined()
+      expect(store.getState().workspaces.get('ws-child')).toBeDefined()
+      const childEntry = store.getState().workspaces.get('ws-child')!
       expect(childEntry.status).toBe('loaded')
       expect((childEntry as Extract<typeof childEntry, { status: 'loaded' }>).data.parentId).toBe('ws-parent')
     })

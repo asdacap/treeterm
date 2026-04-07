@@ -15,7 +15,7 @@ interface FlexLayoutPaneProps {
   onNewTab: (applicationId: string) => void
 }
 
-function buildModel(ws: WorkspaceStore, getApplication: (id: string) => ReturnType<typeof useAppStore.getState>['applications'][string]): Model | null {
+function buildModel(ws: WorkspaceStore, getApplication: (id: string) => ReturnType<ReturnType<typeof useAppStore.getState>['applications']['get']>): Model | null {
   const currentWorkspace = ws.getState().workspace
 
   const currentTabs = getTabs(currentWorkspace)
@@ -38,8 +38,8 @@ function buildModel(ws: WorkspaceStore, getApplication: (id: string) => ReturnTy
 export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPaneProps) {
   const { workspace, removeTab, setActiveTab, updateMetadata } = useStore(ws)
   const applications = useAppStore((s) => s.applications)
-  const getApplication = useCallback((id: string) => applications[id], [applications])
-  const menuApplications = Object.values(applications).filter((app) => app.showInNewTabMenu)
+  const getApplication = useCallback((id: string) => applications.get(id), [applications])
+  const menuApplications = Array.from(applications.values()).filter((app) => app.showInNewTabMenu)
 
   const activeTabId = workspace.activeTabId ?? null
 
@@ -150,7 +150,7 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
       if (!workspace.appStates[tabId]) {
         return action // Orphan tab — let FlexLayout remove it directly
       }
-      removeTab(tabId)
+      void removeTab(tabId)
       return undefined // Prevent FlexLayout from handling it — store will sync
     }
     if (action.type === Actions.SELECT_TAB) {
@@ -160,7 +160,7 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
   }, [workspace, removeTab, setActiveTab])
 
   // Serialize model changes to metadata
-  const handleModelChange = useCallback((m: Model, _action: Action) => {
+  const handleModelChange = useCallback((m: Model) => {
     if (suppressModelChangeRef.current) return
     const json = JSON.stringify(m.toJson())
     updateMetadata('layoutModel', json)

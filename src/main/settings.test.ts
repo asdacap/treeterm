@@ -68,8 +68,8 @@ describe('settings', () => {
       const settings = loadSettings()
 
       expect(settings.terminal.instances).toHaveLength(1)
-      expect(settings.terminal.instances[0].id).toBe('app-1')
-      expect(settings.terminal.instances[0].startupCommand).toBe('/usr/bin/zsh')
+      expect(settings.terminal.instances[0]!.id).toBe('app-1')
+      expect(settings.terminal.instances[0]!.startupCommand).toBe('/usr/bin/zsh')
     })
 
     it('skips built-in apps during applications migration', () => {
@@ -86,7 +86,7 @@ describe('settings', () => {
       const settings = loadSettings()
 
       expect(settings.terminal.instances).toHaveLength(1)
-      expect(settings.terminal.instances[0].id).toBe('custom-1')
+      expect(settings.terminal.instances[0]!.id).toBe('custom-1')
     })
 
     it('does not migrate applications when terminal.instances already exist', () => {
@@ -103,7 +103,7 @@ describe('settings', () => {
       const settings = loadSettings()
 
       expect(settings.terminal.instances).toHaveLength(1)
-      expect(settings.terminal.instances[0].id).toBe('existing')
+      expect(settings.terminal.instances[0]!.id).toBe('existing')
     })
 
     it('migrates old claude config to aiHarness.instances', () => {
@@ -117,8 +117,8 @@ describe('settings', () => {
       const settings = loadSettings()
 
       expect(settings.aiHarness.instances).toHaveLength(1)
-      expect(settings.aiHarness.instances[0].command).toBe('my-claude')
-      expect(settings.aiHarness.instances[0].isDefault).toBe(true)
+      expect(settings.aiHarness.instances[0]!.command).toBe('my-claude')
+      expect(settings.aiHarness.instances[0]!.isDefault).toBe(true)
     })
 
     it('does not migrate claude config when aiHarness.instances already exist', () => {
@@ -133,7 +133,7 @@ describe('settings', () => {
       const settings = loadSettings()
 
       expect(settings.aiHarness.instances).toHaveLength(1)
-      expect(settings.aiHarness.instances[0].id).toBe('existing-ai')
+      expect(settings.aiHarness.instances[0]!.id).toBe('existing-ai')
     })
 
     it('preserves customRunner.instances from loaded settings', () => {
@@ -149,8 +149,8 @@ describe('settings', () => {
       const settings = loadSettings()
 
       expect(settings.customRunner.instances).toHaveLength(1)
-      expect(settings.customRunner.instances[0].id).toBe('rider')
-      expect(settings.customRunner.instances[0].commandTemplate).toBe('rider {{workspace_path}}')
+      expect(settings.customRunner.instances[0]!.id).toBe('rider')
+      expect(settings.customRunner.instances[0]!.commandTemplate).toBe('rider {{workspace_path}}')
     })
 
     it('defaults customRunner.instances to empty array when not in stored settings', () => {

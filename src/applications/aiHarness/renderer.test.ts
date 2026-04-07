@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createAiHarnessVariant, type AiHarnessRef } from './renderer'
+import { createAiHarnessVariant } from './renderer'
 import type { Tab, Workspace, AiHarnessInstance } from '../../renderer/types'
 import { createMockGitApi, createMockFilesystemApi, createMockRunActionsApi, createMockExecApi } from '../../shared/mockApis'
 import { createStore } from 'zustand/vanilla'
@@ -9,7 +9,7 @@ import type { ReviewCommentState } from '../../renderer/store/createReviewCommen
 
 // Mock React
 vi.mock('react', () => ({
-  createElement: vi.fn((component: any, props: any) => ({ component, props }))
+  createElement: vi.fn((component: unknown, props: unknown) => ({ component, props }))
 }))
 
 // Mock AiHarness component
@@ -17,7 +17,7 @@ vi.mock('../../renderer/components/AiHarness', () => ({
   default: vi.fn(() => null)
 }))
 
-const mockTerminalKill = vi.fn()
+const mockTerminalKill = vi.fn<(connectionId: string, ptyId: string) => void>()
 const mockDeps = { terminal: { kill: mockTerminalKill } }
 
 const mockWorkspaceStoreStateData = {
@@ -58,7 +58,7 @@ const mockWorkspaceStoreStateData = {
   setCachedTerminal: vi.fn(),
   disposeCachedTerminal: vi.fn(), disposeAllCachedTerminals: vi.fn(), disposeTabResources: vi.fn(),
   initAnalyzer: vi.fn(),
-  createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn(), kill: vi.fn() }),
+  createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
   connectionId: 'local',
   updateSettings: vi.fn(),
   focusTabId: null,
@@ -164,8 +164,8 @@ describe('AI Harness Renderer', () => {
     })
 
     describe('onWorkspaceLoad and dispose', () => {
-      const mockAnalyzerState = { start: vi.fn(), stop: vi.fn(), getHistory: vi.fn().mockReturnValue([]) }
-      const mockAnalyzer = { getState: vi.fn().mockReturnValue(mockAnalyzerState), setState: vi.fn(), subscribe: vi.fn() }
+      const mockAnalyzerState = { start: vi.fn(), stop: vi.fn(), getHistory: vi.fn<() => unknown[]>().mockReturnValue([]) }
+      const mockAnalyzer: Record<string, unknown> = { getState: vi.fn().mockReturnValue(mockAnalyzerState), setState: vi.fn(), subscribe: vi.fn() }
 
       it('starts analyzer directly when tab has existing ptyId (restore path)', () => {
         const mockAnalyzerState = { start: vi.fn(), stop: vi.fn(), getHistory: vi.fn().mockReturnValue([]) }
@@ -233,7 +233,7 @@ describe('AI Harness Renderer', () => {
         expect(mockUpdateTabState).toHaveBeenCalledWith('tab-1', expect.any(Function))
         expect(mockAnalyzerState.start).toHaveBeenCalledWith('pty-new')
 
-        const updater = mockUpdateTabState.mock.calls[0][1]
+        const updater = mockUpdateTabState.mock.calls[0]![1] as (prev: Record<string, unknown>) => Record<string, unknown>
         const updated = updater({ ptyId: null, sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] } })
         expect(updated).toEqual({
           ptyId: 'pty-new',
@@ -305,7 +305,7 @@ describe('AI Harness Renderer', () => {
           initAnalyzer: vi.fn().mockReturnValue(mockAnalyzer),
         }))
 
-        const ref = app.onWorkspaceLoad(tab, store) as AiHarnessRef
+        const ref = app.onWorkspaceLoad(tab, store)
 
         expect(typeof ref.dispose).toBe('function')
         expect(ref.analyzer).toBe(mockAnalyzer)
@@ -332,7 +332,9 @@ describe('AI Harness Renderer', () => {
         })
 
         expect(result).toEqual({
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           component: expect.any(Function),
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           props: expect.objectContaining({
             key: 'tab-1',
             cwd: '/test',

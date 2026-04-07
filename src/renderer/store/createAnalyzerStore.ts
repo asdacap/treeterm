@@ -96,7 +96,8 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     }
     const idx = cache.findIndex((entry) => entry.buffer === buffer)
     if (idx !== -1) {
-      const hit = cache[idx]
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- idx from findIndex, guaranteed valid
+      const hit = cache[idx]!
       cache.splice(idx, 1)
       cache.push(hit)
       return { action: 'reuse', result: hit.result }
@@ -181,6 +182,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
       requestInFlight = false
 
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (!running) return
 
       if (dataVersion !== requestVersion) {
@@ -342,7 +344,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     ownTty.getState().write('\r')
   }
 
-  const store = createStore<AnalyzerState>()((set, _get) => ({
+  const store = createStore<AnalyzerState>()((set) => ({
     tabId,
     aiState: 'idle',
     analyzing: false,

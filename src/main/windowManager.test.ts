@@ -1,18 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { BrowserWindow } from 'electron'
+import type { IpcServer } from './ipc/ipc-server'
 
 const mockBrowserWindow = {
   id: 1,
   webContents: { id: 101 },
-  on: vi.fn(),
-  isMinimized: vi.fn().mockReturnValue(false),
-  restore: vi.fn(),
-  focus: vi.fn()
+  on: vi.fn<(...args: any[]) => any>(),
+  isMinimized: vi.fn<() => boolean>().mockReturnValue(false),
+  restore: vi.fn<() => void>(),
+  focus: vi.fn<() => void>()
 }
 
 const mockIpcServer = {}
 
 vi.mock('electron', () => ({
-  BrowserWindow: vi.fn(() => mockBrowserWindow)
+  BrowserWindow: vi.fn<(...args: any[]) => any>(() => mockBrowserWindow)
 }))
 
 // Import after mocking
@@ -33,7 +35,7 @@ describe('WindowManager', () => {
     it('registers a window with info', () => {
       const win = { ...mockBrowserWindow, id: 2, webContents: { id: 102 } }
 
-      windowManager.registerWindow(win as any, mockIpcServer as any, 'uuid-1')
+      windowManager.registerWindow(win as unknown as BrowserWindow, mockIpcServer as unknown as IpcServer, 'uuid-1')
 
       const info = windowManager.getWindow(2)
       expect(info).toBeDefined()
@@ -43,21 +45,22 @@ describe('WindowManager', () => {
     it('auto-generates uuid if not provided', () => {
       const win = { ...mockBrowserWindow, id: 3, webContents: { id: 103 } }
 
-      windowManager.registerWindow(win as any, mockIpcServer as any)
+      windowManager.registerWindow(win as unknown as BrowserWindow, mockIpcServer as unknown as IpcServer)
 
       const info = windowManager.getWindow(3)
       expect(info?.uuid).toMatch(/^win-/)
     })
 
     it('sets up closed event handler that removes window', () => {
-      const win = { ...mockBrowserWindow, id: 4, webContents: { id: 104 }, on: vi.fn() }
+      const win = { ...mockBrowserWindow, id: 4, webContents: { id: 104 }, on: vi.fn<(...args: any[]) => any>() }
 
-      windowManager.registerWindow(win as any, mockIpcServer as any)
+      windowManager.registerWindow(win as unknown as BrowserWindow, mockIpcServer as unknown as IpcServer)
       expect(windowManager.getWindow(4)).toBeDefined()
 
       // Simulate the closed event
-      const closedHandler = win.on.mock.calls.find((c: any[]) => c[0] === 'closed')?.[1]
-      closedHandler()
+      const closedCall = win.on.mock.calls.find((c: any[]) => c[0] === 'closed')
+      const closedHandler = closedCall?.[1] as (() => void) | undefined
+      closedHandler?.()
 
       expect(windowManager.getWindow(4)).toBeUndefined()
     })
@@ -70,9 +73,9 @@ describe('WindowManager', () => {
     })
 
     it('returns window info for registered window', () => {
-      const win = { ...mockBrowserWindow, id: 5, webContents: { id: 105 }, on: vi.fn() }
+      const win = { ...mockBrowserWindow, id: 5, webContents: { id: 105 }, on: vi.fn<(...args: any[]) => any>() }
 
-      windowManager.registerWindow(win as any, mockIpcServer as any)
+      windowManager.registerWindow(win as unknown as BrowserWindow, mockIpcServer as unknown as IpcServer)
 
       const info = windowManager.getWindow(5)
       expect(info?.window).toBe(win)
@@ -96,9 +99,9 @@ describe('WindowManager', () => {
 
   describe('findWindowByWebContentsId', () => {
     it('finds window by webContents ID', () => {
-      const win = { ...mockBrowserWindow, id: 9, webContents: { id: 109 }, on: vi.fn() }
+      const win = { ...mockBrowserWindow, id: 9, webContents: { id: 109 }, on: vi.fn<(...args: any[]) => any>() }
 
-      windowManager.registerWindow(win as any, mockIpcServer as any)
+      windowManager.registerWindow(win as unknown as BrowserWindow, mockIpcServer as unknown as IpcServer)
 
       const found = windowManager.findWindowByWebContentsId(109)
       expect(found?.window.id).toBe(9)

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useStore } from 'zustand'
 import type { FileEntry, WorkspaceStore } from '../types'
 import { useFilesystemApi } from '../hooks/useWorkspaceApis'
@@ -30,11 +30,11 @@ export function FileTree({
   expandedDirs,
   onSelectFile,
   onToggleDir
-}: FileTreeProps): JSX.Element {
+}: FileTreeProps): React.JSX.Element {
   const { workspace: wsData } = useStore(workspace)
   const workspacePath = wsData.path
   const filesystem = useFilesystemApi(workspace)
-  const [dirContents, setDirContents] = useState<Record<string, DirectoryState>>({})
+  const [dirContents, setDirContents] = useState(new Map<string, DirectoryState>())
   const [search, setSearch] = useState<SearchState>({
     query: '',
     entries: [],
@@ -97,34 +97,32 @@ export function FileTree({
       // Atomically check-and-set loading state to prevent duplicate requests
       let alreadyRequested = false
       setDirContents((prev) => {
-        const existing = prev[dirPath]
+        const existing = prev.get(dirPath)
         if (existing && !existing.error) {
           alreadyRequested = true
           return prev
         }
-        return { ...prev, [dirPath]: { entries: [], loading: true, error: null } }
+        return new Map(prev).set(dirPath, { entries: [], loading: true, error: null })
       })
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated synchronously in setState callback above
       if (alreadyRequested) return
 
       try {
         const result = await filesystem.readDirectory(dirPath)
 
         if (result.success) {
-          setDirContents((prev) => ({
-            ...prev,
-            [dirPath]: { entries: result.contents.entries, loading: false, error: null }
-          }))
+          setDirContents((prev) =>
+            new Map(prev).set(dirPath, { entries: result.contents.entries, loading: false, error: null })
+          )
         } else {
-          setDirContents((prev) => ({
-            ...prev,
-            [dirPath]: { entries: [], loading: false, error: result.error || 'Failed to load' }
-          }))
+          setDirContents((prev) =>
+            new Map(prev).set(dirPath, { entries: [], loading: false, error: result.error || 'Failed to load' })
+          )
         }
       } catch (err) {
-        setDirContents((prev) => ({
-          ...prev,
-          [dirPath]: { entries: [], loading: false, error: `Error: ${String(err)}` }
-        }))
+        setDirContents((prev) =>
+          new Map(prev).set(dirPath, { entries: [], loading: false, error: `Error: ${String(err)}` })
+        )
       }
     },
     [filesystem]
@@ -156,7 +154,7 @@ export function FileTree({
   }
 
   // Highlight matching text in filename
-  const highlightMatch = (name: string, query: string): JSX.Element => {
+  const highlightMatch = (name: string, query: string): React.JSX.Element => {
     if (!query.trim()) return <>{name}</>
 
     const lowerName = name.toLowerCase()
@@ -179,10 +177,10 @@ export function FileTree({
   }
 
   // Render a tree entry (file or directory)
-  const renderEntry = (entry: FileEntry, depth: number): JSX.Element => {
+  const renderEntry = (entry: FileEntry, depth: number): React.JSX.Element => {
     const isExpanded = expandedDirs.includes(entry.path)
     const isSelected = selectedPath === entry.path
-    const dirState = dirContents[entry.path]
+    const dirState = dirContents.get(entry.path)
 
     return (
       <div key={entry.path}>
@@ -226,7 +224,7 @@ export function FileTree({
   }
 
   // Render a search result entry
-  const renderSearchResult = (entry: FileEntry): JSX.Element => {
+  const renderSearchResult = (entry: FileEntry): React.JSX.Element => {
     const isSelected = selectedPath === entry.path
 
     return (
@@ -254,7 +252,7 @@ export function FileTree({
     )
   }
 
-  const rootState = dirContents[workspacePath]
+  const rootState = dirContents.get(workspacePath)
   const isSearching = search.query.trim().length > 0
 
   return (
@@ -328,9 +326,9 @@ export function FileTree({
 }
 
 /** Triggers directory load on mount — renders nothing */
-function DirectoryLoader({ dirPath, loadDirectory }: { dirPath: string; loadDirectory: (path: string) => void }) {
+function DirectoryLoader({ dirPath, loadDirectory }: { dirPath: string; loadDirectory: (path: string) => Promise<void> }) {
   useEffect(() => {
-    loadDirectory(dirPath)
+    void loadDirectory(dirPath)
   }, [dirPath, loadDirectory])
 
   return null
