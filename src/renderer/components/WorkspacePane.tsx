@@ -197,7 +197,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const flattenedWorkspaceIds = (() => {
     const result: string[] = []
     const parentMap = new Map<string | null, string[]>()
-    for (const [id, entry] of workspaces.entries()) {
+    for (const [id, entry] of Array.from(workspaces.entries())) {
       const parentId = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data.parentId : null
       const children = parentMap.get(parentId) ?? []
       children.push(id)
