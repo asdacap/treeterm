@@ -412,8 +412,11 @@ export default function SessionPanel({
   }
 
   const renderStatusContent = (status: ConnectionStatus): ReactNode => {
+    const phaseLabel = connection?.status === 'connecting' && 'connectPhase' in connection
+      ? { bootstrap: 'Bootstrapping...', tunnel: 'Establishing tunnel...', daemon: 'Connecting to daemon...' }[connection.connectPhase ?? 'bootstrap']
+      : 'Connecting...'
     switch (status) {
-      case 'connecting': return <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>Connecting...</div>
+      case 'connecting': return <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{phaseLabel}</div>
       case 'connected': return null
       case 'disconnected': return <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{(connection && 'error' in connection && connection.error) || 'Disconnected'}</div>
       case 'error': return <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{connection && 'error' in connection && connection.error}</div>

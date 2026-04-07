@@ -21,8 +21,10 @@ export interface SSHTunnelOptions {
 
 export class SSHTunnel {
   private sshProcess: ChildProcess | null = null
-  private outputBuffer: string[] = []
-  private outputListeners: Set<OutputCallback> = new Set()
+  private bootstrapBuffer: string[] = []
+  private bootstrapListeners: Set<OutputCallback> = new Set()
+  private tunnelBuffer: string[] = []
+  private tunnelListeners: Set<OutputCallback> = new Set()
   private disconnectListeners: Set<DisconnectCallback> = new Set()
   private localSocketPath: string
   private _connected: boolean = false
@@ -79,13 +81,22 @@ export class SSHTunnel {
     }
   }
 
-  getOutput(): string[] {
-    return [...this.outputBuffer]
+  getBootstrapOutput(): string[] {
+    return [...this.bootstrapBuffer]
   }
 
-  onOutput(cb: OutputCallback): () => void {
-    this.outputListeners.add(cb)
-    return () => { this.outputListeners.delete(cb) }
+  getTunnelOutput(): string[] {
+    return [...this.tunnelBuffer]
+  }
+
+  onBootstrapOutput(cb: OutputCallback): () => void {
+    this.bootstrapListeners.add(cb)
+    return () => { this.bootstrapListeners.delete(cb) }
+  }
+
+  onTunnelOutput(cb: OutputCallback): () => void {
+    this.tunnelListeners.add(cb)
+    return () => { this.tunnelListeners.delete(cb) }
   }
 
   onDisconnect(cb: DisconnectCallback): () => void {
@@ -93,14 +104,24 @@ export class SSHTunnel {
     return () => { this.disconnectListeners.delete(cb) }
   }
 
-  private appendOutput(line: string): void {
+  private appendBootstrapOutput(line: string): void {
     console.log(line)
-    this.outputBuffer.push(line)
-    // Keep buffer bounded
-    if (this.outputBuffer.length > 1000) {
-      this.outputBuffer = this.outputBuffer.slice(-500)
+    this.bootstrapBuffer.push(line)
+    if (this.bootstrapBuffer.length > 1000) {
+      this.bootstrapBuffer = this.bootstrapBuffer.slice(-500)
     }
-    for (const cb of this.outputListeners) {
+    for (const cb of this.bootstrapListeners) {
+      cb(line)
+    }
+  }
+
+  private appendTunnelOutput(line: string): void {
+    console.log(line)
+    this.tunnelBuffer.push(line)
+    if (this.tunnelBuffer.length > 1000) {
+      this.tunnelBuffer = this.tunnelBuffer.slice(-500)
+    }
+    for (const cb of this.tunnelListeners) {
       cb(line)
     }
   }
@@ -151,7 +172,7 @@ export class SSHTunnel {
     }
     scpArgs.push(localPath, `${this.config.user}@${this.config.host}:${remotePath}`)
 
-    this.appendOutput(`[ssh] Uploading daemon binary to ${remotePath}...`)
+    this.appendBootstrapOutput(`Uploading daemon binary to ${remotePath}...`)
 
     return new Promise<void>((resolve, reject) => {
       const proc = spawn('scp', scpArgs, { stdio: ['pipe', 'pipe', 'pipe'] })
@@ -161,7 +182,7 @@ export class SSHTunnel {
         if (code !== 0) {
           reject(new Error(`scp failed (exit ${String(code)}): ${stderr}`))
         } else {
-          this.appendOutput(`[ssh] Upload complete`)
+          this.appendBootstrapOutput(`Upload complete`)
           resolve()
         }
       })
@@ -174,7 +195,7 @@ export class SSHTunnel {
    * Returns the remote socket path.
    */
   private async uploadAndStartDaemon(remoteArch: string): Promise<string> {
-    this.appendOutput(`[ssh] Uploading daemon binary (remote arch: ${remoteArch})...`)
+    this.appendBootstrapOutput(`Uploading daemon binary (remote arch: ${remoteArch})...`)
     await this.uploadDaemon('~/.treeterm/treeterm-daemon', remoteArch)
 
     const startArgs = this.buildBaseSSHArgs()
@@ -205,7 +226,7 @@ export class SSHTunnel {
       'fi',
     ].join('\n')
     startArgs.push(startScript)
-    const startResult = await this.runSSHCommand(startArgs, 'start')
+    const startResult = await this.runSSHCommand(startArgs)
     const startMatch = startResult.match(/TREETERM_SOCKET:(.+)/)
     if (!startMatch) {
       throw new Error('Daemon failed to start after upload — check daemon log on remote')
@@ -295,8 +316,8 @@ export class SSHTunnel {
 
       sshArgs.push(bootstrapScript)
 
-      this.appendOutput(`[ssh] Bootstrapping remote daemon on ${this.config.user}@${this.config.host}...`)
-      this.appendOutput(`[ssh] $ ssh ${sshArgs.join(' ')}`)
+      this.appendBootstrapOutput(`Bootstrapping remote daemon on ${this.config.user}@${this.config.host}...`)
+      this.appendBootstrapOutput(`$ ssh ${sshArgs.join(' ')}`)
 
       const proc = spawn('ssh', sshArgs, { stdio: ['pipe', 'pipe', 'pipe'] })
       let stdout = ''
@@ -305,14 +326,14 @@ export class SSHTunnel {
         const text = data.toString()
         stdout += text
         for (const line of text.split('\n').filter(Boolean)) {
-          this.appendOutput(`[bootstrap] ${line}`)
+          this.appendBootstrapOutput(line)
         }
       })
 
       proc.stderr.on('data', (data: Buffer) => {
         const text = data.toString()
         for (const line of text.split('\n').filter(Boolean)) {
-          this.appendOutput(`[bootstrap:err] ${line}`)
+          this.appendBootstrapOutput(`[stderr] ${line}`)
         }
       })
 
@@ -345,14 +366,14 @@ export class SSHTunnel {
                   return
                 }
                 // Hash mismatch — kill outdated daemon before re-uploading
-                this.appendOutput(
-                  `[ssh] Daemon binary mismatch (local=${localHash.substring(0, 12)}... remote=${remoteHash.substring(0, 12)}...), re-uploading...`,
+                this.appendBootstrapOutput(
+                  `Daemon binary mismatch (local=${localHash.substring(0, 12)}... remote=${remoteHash.substring(0, 12)}...), re-uploading...`,
                 )
                 const killArgs = this.buildBaseSSHArgs()
                 killArgs.push(
                   'pkill -x "treeterm-daemon" 2>/dev/null || true; rm -f /tmp/treeterm-$(id -u)/daemon.sock; sleep 0.5',
                 )
-                await this.runSSHCommand(killArgs, 'kill-old-daemon')
+                await this.runSSHCommand(killArgs)
               } else {
                 // No hash available (sha256sum missing) — trust the running daemon
                 resolve(socketPath)
@@ -378,7 +399,7 @@ export class SSHTunnel {
     })
   }
 
-  private runSSHCommand(sshArgs: string[], prefix = 'ssh'): Promise<string> {
+  private runSSHCommand(sshArgs: string[]): Promise<string> {
     return new Promise((resolve, reject) => {
       const proc = spawn('ssh', sshArgs, { stdio: ['pipe', 'pipe', 'pipe'] })
       let stdout = ''
@@ -387,14 +408,14 @@ export class SSHTunnel {
         const text = d.toString()
         stdout += text
         for (const line of text.split('\n').filter(Boolean)) {
-          this.appendOutput(`[${prefix}] ${line}`)
+          this.appendBootstrapOutput(line)
         }
       })
       proc.stderr.on('data', (d: Buffer) => {
         const text = d.toString()
         stderr += text
         for (const line of text.split('\n').filter(Boolean)) {
-          this.appendOutput(`[${prefix}:err] ${line}`)
+          this.appendBootstrapOutput(`[stderr] ${line}`)
         }
       })
       proc.on('close', (code) => {
@@ -422,14 +443,14 @@ export class SSHTunnel {
       'cat' // Simple command that keeps the connection open
     )
 
-    this.appendOutput(`[ssh] Starting tunnel: ${this.localSocketPath} -> ${remoteSocketPath}`)
-    this.appendOutput(`[ssh] $ ssh ${sshArgs.join(' ')}`)
+    this.appendTunnelOutput(`Starting tunnel: ${this.localSocketPath} -> ${remoteSocketPath}`)
+    this.appendTunnelOutput(`$ ssh ${sshArgs.join(' ')}`)
 
     this.sshProcess = spawn('ssh', sshArgs, { stdio: ['pipe', 'pipe', 'pipe'] })
 
     this.sshProcess.stdout?.on('data', (data: Buffer) => {
       for (const line of data.toString().split('\n').filter(Boolean)) {
-        this.appendOutput(`[tunnel] ${line}`)
+        this.appendTunnelOutput(line)
       }
     })
 
@@ -437,7 +458,7 @@ export class SSHTunnel {
     this.sshProcess.stderr?.on('data', (data: Buffer) => {
       for (const line of data.toString().split('\n').filter(Boolean)) {
         this.tunnelStderr.push(line)
-        this.appendOutput(`[tunnel:err] ${line}`)
+        this.appendTunnelOutput(`[stderr] ${line}`)
       }
     })
 
@@ -450,7 +471,7 @@ export class SSHTunnel {
         ? `: ${this.tunnelStderr.join('; ')}`
         : ''
       const msg = `SSH tunnel closed (exit ${String(code)})${stderrDetail}`
-      this.appendOutput(`[ssh] ${msg}`)
+      this.appendTunnelOutput(msg)
 
       if (wasConnected) {
         for (const cb of this.disconnectListeners) {
@@ -463,7 +484,7 @@ export class SSHTunnel {
       this._connected = false
       this.sshProcess = null
       const msg = `SSH tunnel error: ${err.message}`
-      this.appendOutput(`[ssh] ${msg}`)
+      this.appendTunnelOutput(msg)
 
       for (const cb of this.disconnectListeners) {
         cb(msg)
@@ -478,7 +499,7 @@ export class SSHTunnel {
 
     while (Date.now() - start < maxWait) {
       if (fs.existsSync(this.localSocketPath)) {
-        this.appendOutput(`[ssh] Local socket ready: ${this.localSocketPath}`)
+        this.appendTunnelOutput(`Local socket ready: ${this.localSocketPath}`)
         return
       }
 

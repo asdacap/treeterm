@@ -36,7 +36,8 @@ type MockProcess = EventEmitter & {
 type SSHTunnelPrivate = {
   sshProcess: ChildProcess | null
   _connected: boolean
-  appendOutput: (line: string) => void
+  appendBootstrapOutput: (line: string) => void
+  appendTunnelOutput: (line: string) => void
   disconnectListeners: Set<(error?: string) => void>
   buildBaseSSHArgs: () => string[]
   bootstrapRemoteDaemon: () => Promise<string>
@@ -116,44 +117,66 @@ describe('SSHTunnel', () => {
     })
   })
 
-  describe('output management', () => {
-    it('getOutput returns copy of buffer', () => {
+  describe('bootstrap output management', () => {
+    it('getBootstrapOutput returns copy of buffer', () => {
       const tunnel = new SSHTunnel(makeConfig())
-      priv(tunnel).appendOutput('line 1')
-      priv(tunnel).appendOutput('line 2')
+      priv(tunnel).appendBootstrapOutput('line 1')
+      priv(tunnel).appendBootstrapOutput('line 2')
 
-      const output = tunnel.getOutput()
+      const output = tunnel.getBootstrapOutput()
       expect(output).toEqual(['line 1', 'line 2'])
       output.push('line 3')
-      expect(tunnel.getOutput()).toHaveLength(2)
+      expect(tunnel.getBootstrapOutput()).toHaveLength(2)
     })
 
-    it('onOutput notifies listeners', () => {
+    it('onBootstrapOutput notifies listeners', () => {
       const tunnel = new SSHTunnel(makeConfig())
       const cb = vi.fn()
-      tunnel.onOutput(cb)
+      tunnel.onBootstrapOutput(cb)
 
-      priv(tunnel).appendOutput('test line')
+      priv(tunnel).appendBootstrapOutput('test line')
       expect(cb).toHaveBeenCalledWith('test line')
     })
 
-    it('onOutput unsubscribe works', () => {
+    it('onBootstrapOutput unsubscribe works', () => {
       const tunnel = new SSHTunnel(makeConfig())
       const cb = vi.fn()
-      const unsub = tunnel.onOutput(cb)
+      const unsub = tunnel.onBootstrapOutput(cb)
 
       unsub()
-      priv(tunnel).appendOutput('test')
+      priv(tunnel).appendBootstrapOutput('test')
       expect(cb).not.toHaveBeenCalled()
     })
 
-    it('output buffer is bounded', () => {
+    it('bootstrap output buffer is bounded', () => {
       const tunnel = new SSHTunnel(makeConfig())
       for (let i = 0; i < 1100; i++) {
-        priv(tunnel).appendOutput(`line ${String(i)}`)
+        priv(tunnel).appendBootstrapOutput(`line ${String(i)}`)
       }
-      const output = tunnel.getOutput()
+      const output = tunnel.getBootstrapOutput()
       expect(output.length).toBeLessThanOrEqual(1000)
+    })
+  })
+
+  describe('tunnel output management', () => {
+    it('getTunnelOutput returns copy of buffer', () => {
+      const tunnel = new SSHTunnel(makeConfig())
+      priv(tunnel).appendTunnelOutput('line 1')
+      priv(tunnel).appendTunnelOutput('line 2')
+
+      const output = tunnel.getTunnelOutput()
+      expect(output).toEqual(['line 1', 'line 2'])
+      output.push('line 3')
+      expect(tunnel.getTunnelOutput()).toHaveLength(2)
+    })
+
+    it('onTunnelOutput notifies listeners', () => {
+      const tunnel = new SSHTunnel(makeConfig())
+      const cb = vi.fn()
+      tunnel.onTunnelOutput(cb)
+
+      priv(tunnel).appendTunnelOutput('test line')
+      expect(cb).toHaveBeenCalledWith('test line')
     })
   })
 
