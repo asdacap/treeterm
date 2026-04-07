@@ -238,6 +238,58 @@ describe('createWorkspaceStore', () => {
 
   })
 
+  describe('openOrFocusTab', () => {
+    it('focuses existing tab when applicationId matches', () => {
+      const app = makeFakeApp()
+      const deps = makeHandleDeps({
+        appRegistry: {
+          get: vi.fn<(...args: any[]) => any>().mockReturnValue(app),
+          getDefaultApp: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
+        },
+      })
+      const ws = makeWorkspace({
+        id: 'ws-1',
+        appStates: {
+          'tab-existing': { applicationId: 'review', title: 'Review 1', state: { parentWorkspaceId: 'ws-parent' } },
+          'tab-other': { applicationId: 'terminal', title: 'Terminal 1', state: {} },
+        },
+        activeTabId: 'tab-other',
+      })
+      const store = createWorkspaceStore(ws, deps)
+
+      const tabId = store.getState().openOrFocusTab('review', { parentWorkspaceId: 'ws-parent' })
+
+      expect(tabId).toBe('tab-existing')
+      expect(store.getState().workspace.activeTabId).toBe('tab-existing')
+      expect(Object.keys(store.getState().workspace.appStates)).toHaveLength(2)
+    })
+
+    it('creates new tab when no matching applicationId exists', () => {
+      const app = makeFakeApp()
+      const deps = makeHandleDeps({
+        appRegistry: {
+          get: vi.fn<(...args: any[]) => any>().mockReturnValue(app),
+          getDefaultApp: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
+        },
+      })
+      const ws = makeWorkspace({
+        id: 'ws-1',
+        appStates: {
+          'tab-terminal': { applicationId: 'terminal', title: 'Terminal 1', state: {} },
+        },
+        activeTabId: 'tab-terminal',
+      })
+      const store = createWorkspaceStore(ws, deps)
+
+      const tabId = store.getState().openOrFocusTab('review', { parentWorkspaceId: 'ws-parent' })
+
+      expect(tabId).not.toBe('tab-terminal')
+      expect(store.getState().workspace.activeTabId).toBe(tabId)
+      expect(Object.keys(store.getState().workspace.appStates)).toHaveLength(2)
+      expect(store.getState().workspace.appStates[tabId]!.applicationId).toBe('review')
+    })
+  })
+
   describe('removeTab', () => {
     it('removes tab and adjusts activeTabId', async () => {
       const app = makeFakeApp({ canClose: true })

@@ -25,7 +25,7 @@ vi.mock('../../renderer/store/app', () => ({
 
 const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => ({
   workspace: { id: 'ws-1', path: '/test' } as Workspace,
-  addTab: vi.fn(), removeTab: vi.fn(), setActiveTab: vi.fn(),
+  addTab: vi.fn(), openOrFocusTab: vi.fn(), removeTab: vi.fn(), setActiveTab: vi.fn(),
   updateTabTitle: vi.fn(), updateTabState: vi.fn(),
   reviewComments: createStore<ReviewCommentState>()(() => ({
     getReviewComments: vi.fn().mockReturnValue([]),

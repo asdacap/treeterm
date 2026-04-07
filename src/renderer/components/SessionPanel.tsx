@@ -275,7 +275,7 @@ export default function SessionPanel({
     // For worktree workspaces with a parent, open the Review tab
     if (ws.isWorktree && ws.parentId) {
       setActiveWorkspace(id)
-      entry.store.getState().addTab<ReviewState>('review', {
+      entry.store.getState().openOrFocusTab<ReviewState>('review', {
         parentWorkspaceId: ws.parentId
       })
       return

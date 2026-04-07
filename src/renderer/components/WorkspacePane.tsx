@@ -187,7 +187,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   // Review handler
   const handleOpenReview = () => {
     if (!activeHandle || !activeWorkspace?.parentId) return
-    activeHandle.getState().addTab<ReviewState>('review', {
+    activeHandle.getState().openOrFocusTab<ReviewState>('review', {
       parentWorkspaceId: activeWorkspace.parentId
     })
   }
@@ -660,7 +660,7 @@ interface GitHubButtonProps {
 }
 
 function GitHubButton({ workspace }: GitHubButtonProps) {
-  const { gitController, addTab } = useStore(workspace)
+  const { gitController, openOrFocusTab } = useStore(workspace)
   const { prInfo, openGitHub } = useStore(gitController)
   const [loading, setLoading] = useState(false)
 
@@ -670,7 +670,7 @@ function GitHubButton({ workspace }: GitHubButtonProps) {
 
   const handleClick = async () => {
     if (hasUnresolved) {
-      addTab('github')
+      openOrFocusTab('github')
       return
     }
     setLoading(true)

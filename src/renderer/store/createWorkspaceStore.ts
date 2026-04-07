@@ -66,6 +66,7 @@ export interface WorkspaceStoreState {
 
   // Tab methods
   addTab: <T>(applicationId: string, initialState?: Partial<T>) => string
+  openOrFocusTab: <T>(applicationId: string, initialState?: Partial<T>) => string
   removeTab: (tabId: string) => Promise<void>
   setActiveTab: (tabId: string) => void
   updateTabTitle: (tabId: string, title: string) => void
@@ -304,6 +305,18 @@ export function createWorkspaceStore(
       deps.syncToDaemon()
       get().initTab(tabId)
       return tabId
+    },
+
+    openOrFocusTab: <T,>(applicationId: string, initialState?: Partial<T>): string => {
+      const ws = get().workspace
+      const existing = Object.entries(ws.appStates).find(
+        ([, s]) => s.applicationId === applicationId
+      )
+      if (existing) {
+        get().setActiveTab(existing[0])
+        return existing[0]
+      }
+      return get().addTab<T>(applicationId, initialState)
     },
 
     removeTab: (tabId: string): Promise<void> => {
