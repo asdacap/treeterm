@@ -68,9 +68,12 @@ const CHANNELS = {
   sshSaveConnection: 'ssh:saveConnection',
   sshGetSavedConnections: 'ssh:getSavedConnections',
   sshRemoveSavedConnection: 'ssh:removeSavedConnection',
-  sshGetOutput: 'ssh:getOutput',
-  sshWatchOutput: 'ssh:watchOutput',
-  sshUnwatchOutput: 'ssh:unwatchOutput',
+  sshWatchBootstrapOutput: 'ssh:watchBootstrapOutput',
+  sshUnwatchBootstrapOutput: 'ssh:unwatchBootstrapOutput',
+  sshWatchTunnelOutput: 'ssh:watchTunnelOutput',
+  sshUnwatchTunnelOutput: 'ssh:unwatchTunnelOutput',
+  sshWatchDaemonOutput: 'ssh:watchDaemonOutput',
+  sshUnwatchDaemonOutput: 'ssh:unwatchDaemonOutput',
   sshWatchConnectionStatus: 'ssh:watchConnectionStatus',
   sshUnwatchConnectionStatus: 'ssh:unwatchConnectionStatus',
   sshAddPortForward: 'ssh:addPortForward',
@@ -112,7 +115,9 @@ const CHANNELS = {
   daemonDisconnected: 'daemon:disconnected',
   activeProcessesOpen: 'active-processes:open',
   sshConnectionStatus: 'ssh:connectionStatus',
-  sshOutput: 'ssh:output',
+  sshBootstrapOutput: 'ssh:bootstrapOutput',
+  sshTunnelOutput: 'ssh:tunnelOutput',
+  sshDaemonOutput: 'ssh:daemonOutput',
   sshPortForwardStatus: 'ssh:portForwardStatus',
   sshPortForwardOutput: 'ssh:portForwardOutput',
   llmChatDelta: 'llm:chat:delta',
@@ -437,16 +442,28 @@ export class IpcClient {
     return ipcRenderer.invoke(CHANNELS.sshRemoveSavedConnection, ...args)
   }
 
-  sshGetOutput(...args: IpcRequests['sshGetOutput']['params']): Promise<IpcRequests['sshGetOutput']['result']> {
-    return ipcRenderer.invoke(CHANNELS.sshGetOutput, ...args)
+  sshWatchBootstrapOutput(...args: IpcRequests['sshWatchBootstrapOutput']['params']): Promise<IpcRequests['sshWatchBootstrapOutput']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshWatchBootstrapOutput, ...args)
   }
 
-  sshWatchOutput(...args: IpcRequests['sshWatchOutput']['params']): Promise<IpcRequests['sshWatchOutput']['result']> {
-    return ipcRenderer.invoke(CHANNELS.sshWatchOutput, ...args)
+  sshUnwatchBootstrapOutput(...args: IpcRequests['sshUnwatchBootstrapOutput']['params']): Promise<IpcRequests['sshUnwatchBootstrapOutput']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshUnwatchBootstrapOutput, ...args)
   }
 
-  sshUnwatchOutput(...args: IpcRequests['sshUnwatchOutput']['params']): Promise<IpcRequests['sshUnwatchOutput']['result']> {
-    return ipcRenderer.invoke(CHANNELS.sshUnwatchOutput, ...args)
+  sshWatchTunnelOutput(...args: IpcRequests['sshWatchTunnelOutput']['params']): Promise<IpcRequests['sshWatchTunnelOutput']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshWatchTunnelOutput, ...args)
+  }
+
+  sshUnwatchTunnelOutput(...args: IpcRequests['sshUnwatchTunnelOutput']['params']): Promise<IpcRequests['sshUnwatchTunnelOutput']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshUnwatchTunnelOutput, ...args)
+  }
+
+  sshWatchDaemonOutput(...args: IpcRequests['sshWatchDaemonOutput']['params']): Promise<IpcRequests['sshWatchDaemonOutput']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshWatchDaemonOutput, ...args)
+  }
+
+  sshUnwatchDaemonOutput(...args: IpcRequests['sshUnwatchDaemonOutput']['params']): Promise<IpcRequests['sshUnwatchDaemonOutput']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshUnwatchDaemonOutput, ...args)
   }
 
   sshWatchConnectionStatus(...args: IpcRequests['sshWatchConnectionStatus']['params']): Promise<IpcRequests['sshWatchConnectionStatus']['result']> {
@@ -618,11 +635,25 @@ export class IpcClient {
     return () => ipcRenderer.removeListener(CHANNELS.sshConnectionStatus, handler)
   }
 
-  onSshOutput(callback: (...args: IpcEvents['sshOutput']['params']) => void): () => void {
+  onSshBootstrapOutput(callback: (...args: IpcEvents['sshBootstrapOutput']['params']) => void): () => void {
     const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      { callback(...(args as IpcEvents['sshOutput']['params'])); }
-    ipcRenderer.on(CHANNELS.sshOutput, handler)
-    return () => ipcRenderer.removeListener(CHANNELS.sshOutput, handler)
+      { callback(...(args as IpcEvents['sshBootstrapOutput']['params'])); }
+    ipcRenderer.on(CHANNELS.sshBootstrapOutput, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.sshBootstrapOutput, handler)
+  }
+
+  onSshTunnelOutput(callback: (...args: IpcEvents['sshTunnelOutput']['params']) => void): () => void {
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
+      { callback(...(args as IpcEvents['sshTunnelOutput']['params'])); }
+    ipcRenderer.on(CHANNELS.sshTunnelOutput, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.sshTunnelOutput, handler)
+  }
+
+  onSshDaemonOutput(callback: (...args: IpcEvents['sshDaemonOutput']['params']) => void): () => void {
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
+      { callback(...(args as IpcEvents['sshDaemonOutput']['params'])); }
+    ipcRenderer.on(CHANNELS.sshDaemonOutput, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.sshDaemonOutput, handler)
   }
 
   onSshPortForwardStatus(callback: (...args: IpcEvents['sshPortForwardStatus']['params']) => void): () => void {

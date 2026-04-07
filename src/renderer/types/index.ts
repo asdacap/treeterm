@@ -516,10 +516,13 @@ export interface SSHApi {
   saveConnection: (config: SSHConnectionConfig) => Promise<void>
   getSavedConnections: () => Promise<SSHConnectionConfig[]>
   removeSavedConnection: (id: string) => Promise<void>
-  getOutput: (connectionId: string) => Promise<string[]>
   onConnectionStatus: (callback: (info: ConnectionInfo) => void) => () => void
-  onOutput: (callback: (connectionId: string, line: string) => void) => () => void
-  watchOutput: (connectionId: string, cb: (line: string) => void) => Promise<{ scrollback: string[]; unsubscribe: () => void }>
+  onBootstrapOutput: (callback: (connectionId: string, line: string) => void) => () => void
+  onTunnelOutput: (callback: (connectionId: string, line: string) => void) => () => void
+  onDaemonOutput: (callback: (connectionId: string, line: string) => void) => () => void
+  watchBootstrapOutput: (connectionId: string, cb: (line: string) => void) => Promise<{ scrollback: string[]; unsubscribe: () => void }>
+  watchTunnelOutput: (connectionId: string, cb: (line: string) => void) => Promise<{ scrollback: string[]; unsubscribe: () => void }>
+  watchDaemonOutput: (connectionId: string, cb: (line: string) => void) => Promise<{ scrollback: string[]; unsubscribe: () => void }>
   watchConnectionStatus: (connectionId: string, cb: (info: ConnectionInfo) => void) => Promise<{ initial: ConnectionInfo; unsubscribe: () => void }>
   addPortForward: (config: PortForwardConfig) => Promise<PortForwardInfo>
   removePortForward: (portForwardId: string) => Promise<void>

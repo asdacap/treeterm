@@ -11,6 +11,7 @@ import type {
   ConnectionTarget,
   ConnectionStatus,
   ConnectionInfo,
+  ConnectPhase,
   PortForwardConfig,
   PortForwardInfo
 } from '../shared/types'
@@ -22,9 +23,13 @@ type PortForwardStatusCallback = (info: PortForwardInfo) => void
 class Connection {
   client: GrpcDaemonClient | null
   status: ConnectionStatus
+  connectPhase?: ConnectPhase
   error?: string
 
-  private outputWatchers: Set<OutputCallback> = new Set()
+  private bootstrapWatchers: Set<OutputCallback> = new Set()
+  private tunnelWatchers: Set<OutputCallback> = new Set()
+  private daemonWatchers: Set<OutputCallback> = new Set()
+  private daemonBuffer: string[] = []
   private statusWatchers: Set<StatusChangeCallback> = new Set()
   private portForwards: Map<string, PortForwardProcess> = new Map()
   private portForwardOutputWatchers: Map<string, Set<OutputCallback>> = new Map()
@@ -48,11 +53,30 @@ class Connection {
     if (this.status === 'disconnected') {
       return { id: this.id, target: this.target, status: 'disconnected', error: this.error }
     }
+    if (this.status === 'connecting') {
+      return { id: this.id, target: this.target, status: 'connecting', connectPhase: this.connectPhase }
+    }
     return { id: this.id, target: this.target, status: this.status }
   }
 
-  emitOutput(line: string): void {
-    for (const cb of this.outputWatchers) {
+  emitBootstrapOutput(line: string): void {
+    for (const cb of this.bootstrapWatchers) {
+      cb(line)
+    }
+  }
+
+  emitTunnelOutput(line: string): void {
+    for (const cb of this.tunnelWatchers) {
+      cb(line)
+    }
+  }
+
+  emitDaemonOutput(line: string): void {
+    this.daemonBuffer.push(line)
+    if (this.daemonBuffer.length > 500) {
+      this.daemonBuffer = this.daemonBuffer.slice(-250)
+    }
+    for (const cb of this.daemonWatchers) {
       cb(line)
     }
   }
@@ -63,12 +87,30 @@ class Connection {
     }
   }
 
-  watchOutput(cb: OutputCallback): { scrollback: string[], unsubscribe: () => void } {
-    const scrollback = this.tunnel?.getOutput() || []
-    this.outputWatchers.add(cb)
+  watchBootstrapOutput(cb: OutputCallback): { scrollback: string[], unsubscribe: () => void } {
+    const scrollback = this.tunnel?.getBootstrapOutput() || []
+    this.bootstrapWatchers.add(cb)
     return {
       scrollback,
-      unsubscribe: () => { this.outputWatchers.delete(cb) }
+      unsubscribe: () => { this.bootstrapWatchers.delete(cb) }
+    }
+  }
+
+  watchTunnelOutput(cb: OutputCallback): { scrollback: string[], unsubscribe: () => void } {
+    const scrollback = this.tunnel?.getTunnelOutput() || []
+    this.tunnelWatchers.add(cb)
+    return {
+      scrollback,
+      unsubscribe: () => { this.tunnelWatchers.delete(cb) }
+    }
+  }
+
+  watchDaemonOutput(cb: OutputCallback): { scrollback: string[], unsubscribe: () => void } {
+    const scrollback = [...this.daemonBuffer]
+    this.daemonWatchers.add(cb)
+    return {
+      scrollback,
+      unsubscribe: () => { this.daemonWatchers.delete(cb) }
     }
   }
 
@@ -211,10 +253,22 @@ export class ConnectionManager {
     return this.connections.get(connectionId)?.toInfo()
   }
 
-  watchOutput(connectionId: string, cb: OutputCallback): { scrollback: string[], unsubscribe: () => void } {
+  watchBootstrapOutput(connectionId: string, cb: OutputCallback): { scrollback: string[], unsubscribe: () => void } {
     const conn = this.connections.get(connectionId)
     if (!conn) return { scrollback: [], unsubscribe: () => {} }
-    return conn.watchOutput(cb)
+    return conn.watchBootstrapOutput(cb)
+  }
+
+  watchTunnelOutput(connectionId: string, cb: OutputCallback): { scrollback: string[], unsubscribe: () => void } {
+    const conn = this.connections.get(connectionId)
+    if (!conn) return { scrollback: [], unsubscribe: () => {} }
+    return conn.watchTunnelOutput(cb)
+  }
+
+  watchDaemonOutput(connectionId: string, cb: OutputCallback): { scrollback: string[], unsubscribe: () => void } {
+    const conn = this.connections.get(connectionId)
+    if (!conn) return { scrollback: [], unsubscribe: () => {} }
+    return conn.watchDaemonOutput(cb)
   }
 
   watchConnectionStatus(connectionId: string, cb: StatusChangeCallback): { initial: ConnectionInfo | undefined, unsubscribe: () => void } {
@@ -248,26 +302,36 @@ export class ConnectionManager {
     const target: ConnectionTarget = { type: 'remote', config }
 
     const conn = new Connection(config.id, target, null, 'connecting', tunnel)
+    conn.connectPhase = 'bootstrap'
     this.connections.set(config.id, conn)
 
     // Forward tunnel output to connection's watchers
-    tunnel.onOutput((line: string) => {
-      conn.emitOutput(line)
+    tunnel.onBootstrapOutput((line: string) => {
+      conn.emitBootstrapOutput(line)
+    })
+    tunnel.onTunnelOutput((line: string) => {
+      conn.emitTunnelOutput(line)
     })
 
     this.emitStatus(config.id)
 
     try {
-      // Establish SSH tunnel
+      // Establish SSH tunnel (bootstrap + tunnel phases happen inside)
       console.log(`[connectionManager] SSH tunnel connecting to ${config.host}:${String(config.port)} (id=${config.id})`)
+      conn.connectPhase = 'tunnel'
+      this.emitStatus(config.id)
       const localSocketPath = await tunnel.connect()
       console.log(`[connectionManager] SSH tunnel connected, local socket: ${localSocketPath}`)
 
-      // Create gRPC client pointing at the forwarded socket
+      // Connect gRPC client through the forwarded socket
+      conn.connectPhase = 'daemon'
+      this.emitStatus(config.id)
+      conn.emitDaemonOutput('Connecting to daemon via gRPC...')
       const client = new GrpcDaemonClient(localSocketPath)
       console.log(`[connectionManager] Connecting gRPC daemon client via forwarded socket...`)
       await client.connect()
       console.log(`[connectionManager] gRPC daemon client connected successfully`)
+      conn.emitDaemonOutput('Connected to daemon')
 
       // Update connection with real client
       conn.client = client
@@ -301,8 +365,15 @@ export class ConnectionManager {
       }
       return connInfo
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error)
-      console.error(`[connectionManager] SSH connection failed (id=${config.id}): ${errorMsg}`)
+      const rawMsg = error instanceof Error ? error.message : String(error)
+      const phase = conn.connectPhase ?? 'bootstrap'
+      const errorMsg = phase === 'daemon'
+        ? `SSH tunnel OK, but daemon not responding: ${rawMsg}`
+        : rawMsg
+      console.error(`[connectionManager] Connection failed at ${phase} phase (id=${config.id}): ${errorMsg}`)
+      if (phase === 'daemon') {
+        conn.emitDaemonOutput(`Failed: ${rawMsg}`)
+      }
       conn.status = 'error'
       conn.error = errorMsg
       this.emitStatus(config.id)

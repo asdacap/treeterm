@@ -2,13 +2,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { PortForwardConfig } from '../shared/types'
 
 // Mock ssh module before importing connectionManager
+let tunnelBootstrapOutputCallback: ((line: string) => void) | null = null
 let tunnelOutputCallback: ((line: string) => void) | null = null
 let tunnelDisconnectCallback: ((error?: string) => void) | null = null
 
 const mockTunnelInstance = {
   connect: vi.fn().mockResolvedValue('/tmp/test.sock'),
   disconnect: vi.fn(),
-  onOutput: vi.fn().mockImplementation((cb: (line: string) => void) => {
+  onBootstrapOutput: vi.fn().mockImplementation((cb: (line: string) => void) => {
+    tunnelBootstrapOutputCallback = cb
+    return () => { tunnelBootstrapOutputCallback = null }
+  }),
+  onTunnelOutput: vi.fn().mockImplementation((cb: (line: string) => void) => {
     tunnelOutputCallback = cb
     return () => { tunnelOutputCallback = null }
   }),
@@ -16,7 +21,8 @@ const mockTunnelInstance = {
     tunnelDisconnectCallback = cb
     return () => { tunnelDisconnectCallback = null }
   }),
-  getOutput: vi.fn().mockReturnValue(['scrollback-line']),
+  getBootstrapOutput: vi.fn().mockReturnValue(['scrollback-line']),
+  getTunnelOutput: vi.fn().mockReturnValue([]),
 }
 
 vi.mock('./ssh', () => {
@@ -93,6 +99,7 @@ describe('ConnectionManager', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    tunnelBootstrapOutputCallback = null
     tunnelOutputCallback = null
     tunnelDisconnectCallback = null
     grpcDisconnectCallback = null
@@ -151,17 +158,17 @@ describe('ConnectionManager', () => {
     })
   })
 
-  describe('watchOutput', () => {
+  describe('watchBootstrapOutput', () => {
     it('sets up watcher and returns scrollback', () => {
       const cb = vi.fn()
-      const result = manager.watchOutput('local', cb)
+      const result = manager.watchBootstrapOutput('local', cb)
       expect(result.scrollback).toEqual([])
       expect(typeof result.unsubscribe).toBe('function')
     })
 
     it('unsubscribe removes the watcher', () => {
       const cb = vi.fn()
-      const { unsubscribe } = manager.watchOutput('local', cb)
+      const { unsubscribe } = manager.watchBootstrapOutput('local', cb)
       unsubscribe()
       // Should not throw
     })
@@ -169,8 +176,8 @@ describe('ConnectionManager', () => {
     it('creates new watcher set for connection without existing watchers', () => {
       const cb1 = vi.fn()
       const cb2 = vi.fn()
-      manager.watchOutput('local', cb1)
-      manager.watchOutput('local', cb2)
+      manager.watchBootstrapOutput('local', cb1)
+      manager.watchBootstrapOutput('local', cb2)
       // Both should be registered without error
     })
   })
@@ -265,10 +272,20 @@ describe('ConnectionManager', () => {
       expect(statuses).toContain('disconnected')
     })
 
+    it('forwards bootstrap output to watchers', async () => {
+      await manager.connectRemote(remoteConfig)
+      const outputCb = vi.fn()
+      manager.watchBootstrapOutput('remote-1', outputCb)
+
+      // Simulate bootstrap output via the captured callback
+      tunnelBootstrapOutputCallback?.('hello from bootstrap')
+      expect(outputCb).toHaveBeenCalledWith('hello from bootstrap')
+    })
+
     it('forwards tunnel output to watchers', async () => {
       await manager.connectRemote(remoteConfig)
       const outputCb = vi.fn()
-      manager.watchOutput('remote-1', outputCb)
+      manager.watchTunnelOutput('remote-1', outputCb)
 
       // Simulate tunnel output via the captured callback
       tunnelOutputCallback?.('hello from tunnel')

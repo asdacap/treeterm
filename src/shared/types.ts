@@ -27,8 +27,11 @@ export type ConnectionTarget =
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
 
+export type ConnectPhase = 'bootstrap' | 'tunnel' | 'daemon'
+
 export type ConnectionInfo =
-  | { id: string; target: ConnectionTarget; status: 'connecting' | 'connected' }
+  | { id: string; target: ConnectionTarget; status: 'connecting'; connectPhase?: ConnectPhase }
+  | { id: string; target: ConnectionTarget; status: 'connected' }
   | { id: string; target: ConnectionTarget; status: 'disconnected'; error?: string }
   | { id: string; target: ConnectionTarget; status: 'error'; error: string }
 

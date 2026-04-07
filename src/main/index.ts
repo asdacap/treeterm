@@ -1191,49 +1191,86 @@ server.onSshRemoveSavedConnection(async (id) => {
   saveSettings(settings)
 })
 
-server.onSshGetOutput((connectionId) => {
-  if (!connectionManager) throw new Error('ConnectionManager not initialized')
-  const tunnel = connectionManager.getSSHTunnel(connectionId)
-  return tunnel?.getOutput() || []
-})
-
 // Per-window watch subscriptions
-const outputWatchUnsubscribers = new Map<number, Map<string, () => void>>()
+const bootstrapOutputUnsubscribers = new Map<number, Map<string, () => void>>()
+const tunnelOutputUnsubscribers = new Map<number, Map<string, () => void>>()
+const daemonOutputUnsubscribers = new Map<number, Map<string, () => void>>()
 const statusWatchUnsubscribers = new Map<number, Map<string, () => void>>()
 
-server.onSshWatchOutput((event, connectionId) => {
-  if (!connectionManager) throw new Error('ConnectionManager not initialized')
-
+function registerOutputWatch(
+  unsubs: Map<number, Map<string, () => void>>,
+  event: Electron.IpcMainInvokeEvent,
+  connectionId: string,
+  watchFn: (id: string, cb: (line: string) => void) => { scrollback: string[], unsubscribe: () => void },
+  emitFn: (ipcServer: IpcServer, connectionId: string, line: string) => void,
+): { scrollback: string[] } {
   const senderWindow = BrowserWindow.fromWebContents(event.sender)
   if (!senderWindow) throw new Error('No window found for event sender')
   const winId = senderWindow.id
 
-  // Clean up any existing watch for this window+connection
-  outputWatchUnsubscribers.get(winId)?.get(connectionId)?.()
+  unsubs.get(winId)?.get(connectionId)?.()
 
   const windowInfo = windowManager.getWindow(winId)
-  const { scrollback, unsubscribe } = connectionManager.watchOutput(connectionId, (line) => {
+  const { scrollback, unsubscribe } = watchFn.call(connectionManager, connectionId, (line: string) => {
     if (windowInfo) {
-      windowInfo.ipcServer.sshOutput(connectionId, line)
+      emitFn(windowInfo.ipcServer, connectionId, line)
     }
   })
 
-  if (!outputWatchUnsubscribers.has(winId)) {
-    outputWatchUnsubscribers.set(winId, new Map())
+  if (!unsubs.has(winId)) {
+    unsubs.set(winId, new Map())
   }
-  outputWatchUnsubscribers.get(winId)?.set(connectionId, unsubscribe)
+  unsubs.get(winId)?.set(connectionId, unsubscribe)
 
   return { scrollback }
+}
+
+function unregisterOutputWatch(
+  unsubs: Map<number, Map<string, () => void>>,
+  event: Electron.IpcMainInvokeEvent,
+  connectionId: string,
+): void {
+  const senderWindow = BrowserWindow.fromWebContents(event.sender)
+  if (!senderWindow) return
+  const winId = senderWindow.id
+  unsubs.get(winId)?.get(connectionId)?.()
+  unsubs.get(winId)?.delete(connectionId)
+}
+
+server.onSshWatchBootstrapOutput((event, connectionId) => {
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
+  return registerOutputWatch(bootstrapOutputUnsubscribers, event, connectionId,
+    connectionManager.watchBootstrapOutput.bind(connectionManager),
+    (ipc, cid, line) => { ipc.sshBootstrapOutput(cid, line) })
 })
 
 // eslint-disable-next-line @typescript-eslint/require-await
-server.onSshUnwatchOutput(async (event, connectionId) => {
-  const senderWindow = BrowserWindow.fromWebContents(event.sender)
-  if (!senderWindow) return
+server.onSshUnwatchBootstrapOutput(async (event, connectionId) => {
+  unregisterOutputWatch(bootstrapOutputUnsubscribers, event, connectionId)
+})
 
-  const winId = senderWindow.id
-  outputWatchUnsubscribers.get(winId)?.get(connectionId)?.()
-  outputWatchUnsubscribers.get(winId)?.delete(connectionId)
+server.onSshWatchTunnelOutput((event, connectionId) => {
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
+  return registerOutputWatch(tunnelOutputUnsubscribers, event, connectionId,
+    connectionManager.watchTunnelOutput.bind(connectionManager),
+    (ipc, cid, line) => { ipc.sshTunnelOutput(cid, line) })
+})
+
+// eslint-disable-next-line @typescript-eslint/require-await
+server.onSshUnwatchTunnelOutput(async (event, connectionId) => {
+  unregisterOutputWatch(tunnelOutputUnsubscribers, event, connectionId)
+})
+
+server.onSshWatchDaemonOutput((event, connectionId) => {
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
+  return registerOutputWatch(daemonOutputUnsubscribers, event, connectionId,
+    connectionManager.watchDaemonOutput.bind(connectionManager),
+    (ipc, cid, line) => { ipc.sshDaemonOutput(cid, line) })
+})
+
+// eslint-disable-next-line @typescript-eslint/require-await
+server.onSshUnwatchDaemonOutput(async (event, connectionId) => {
+  unregisterOutputWatch(daemonOutputUnsubscribers, event, connectionId)
 })
 
 server.onSshWatchConnectionStatus((event, connectionId) => {

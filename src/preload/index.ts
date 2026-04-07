@@ -132,10 +132,18 @@ client.onLlmChatError((requestId, error) => {
 })
 
 type SshOutputCallback = (connectionId: string, line: string) => void
-const sshOutputListeners: SshOutputCallback[] = []
+const sshBootstrapOutputListeners: SshOutputCallback[] = []
+const sshTunnelOutputListeners: SshOutputCallback[] = []
+const sshDaemonOutputListeners: SshOutputCallback[] = []
 
-client.onSshOutput((connectionId, line) => {
-  sshOutputListeners.forEach((cb) => { cb(connectionId, line); })
+client.onSshBootstrapOutput((connectionId, line) => {
+  sshBootstrapOutputListeners.forEach((cb) => { cb(connectionId, line); })
+})
+client.onSshTunnelOutput((connectionId, line) => {
+  sshTunnelOutputListeners.forEach((cb) => { cb(connectionId, line); })
+})
+client.onSshDaemonOutput((connectionId, line) => {
+  sshDaemonOutputListeners.forEach((cb) => { cb(connectionId, line); })
 })
 
 type GitOutputCallback = (operationId: string, data: string) => void
@@ -146,12 +154,18 @@ client.onGitOutput((operationId, data) => {
 })
 
 type SshOutputWatchCallback = (line: string) => void
-const sshOutputWatchCallbacks = new Map<string, SshOutputWatchCallback>()
+const sshBootstrapWatchCallbacks = new Map<string, SshOutputWatchCallback>()
+const sshTunnelWatchCallbacks = new Map<string, SshOutputWatchCallback>()
+const sshDaemonWatchCallbacks = new Map<string, SshOutputWatchCallback>()
 
-// Route pushed ssh:output events to per-connection watch callbacks
-client.onSshOutput((connectionId, line) => {
-  const cb = sshOutputWatchCallbacks.get(connectionId)
-  if (cb) cb(line)
+client.onSshBootstrapOutput((connectionId, line) => {
+  sshBootstrapWatchCallbacks.get(connectionId)?.(line)
+})
+client.onSshTunnelOutput((connectionId, line) => {
+  sshTunnelWatchCallbacks.get(connectionId)?.(line)
+})
+client.onSshDaemonOutput((connectionId, line) => {
+  sshDaemonWatchCallbacks.get(connectionId)?.(line)
 })
 
 type SshStatusWatchCallback = (info: ConnectionInfo) => void
@@ -559,9 +573,6 @@ const preloadApi: PreloadApi = {
     removeSavedConnection: (id: string): Promise<void> => {
       return client.sshRemoveSavedConnection(id)
     },
-    getOutput: (connectionId: string): Promise<string[]> => {
-      return client.sshGetOutput(connectionId)
-    },
     onConnectionStatus: (callback: SshConnectionStatusCallback): (() => void) => {
       sshConnectionStatusListeners.push(callback)
       return () => {
@@ -569,21 +580,57 @@ const preloadApi: PreloadApi = {
         if (index > -1) sshConnectionStatusListeners.splice(index, 1)
       }
     },
-    onOutput: (callback: SshOutputCallback): (() => void) => {
-      sshOutputListeners.push(callback)
+    onBootstrapOutput: (callback: SshOutputCallback): (() => void) => {
+      sshBootstrapOutputListeners.push(callback)
       return () => {
-        const index = sshOutputListeners.indexOf(callback)
-        if (index > -1) sshOutputListeners.splice(index, 1)
+        const index = sshBootstrapOutputListeners.indexOf(callback)
+        if (index > -1) sshBootstrapOutputListeners.splice(index, 1)
       }
     },
-    watchOutput: async (connectionId: string, cb: (line: string) => void): Promise<{ scrollback: string[], unsubscribe: () => void }> => {
-      sshOutputWatchCallbacks.set(connectionId, cb)
-      const result = await client.sshWatchOutput(connectionId)
+    onTunnelOutput: (callback: SshOutputCallback): (() => void) => {
+      sshTunnelOutputListeners.push(callback)
+      return () => {
+        const index = sshTunnelOutputListeners.indexOf(callback)
+        if (index > -1) sshTunnelOutputListeners.splice(index, 1)
+      }
+    },
+    onDaemonOutput: (callback: SshOutputCallback): (() => void) => {
+      sshDaemonOutputListeners.push(callback)
+      return () => {
+        const index = sshDaemonOutputListeners.indexOf(callback)
+        if (index > -1) sshDaemonOutputListeners.splice(index, 1)
+      }
+    },
+    watchBootstrapOutput: async (connectionId: string, cb: (line: string) => void): Promise<{ scrollback: string[], unsubscribe: () => void }> => {
+      sshBootstrapWatchCallbacks.set(connectionId, cb)
+      const result = await client.sshWatchBootstrapOutput(connectionId)
       return {
         scrollback: result.scrollback,
         unsubscribe: () => {
-          sshOutputWatchCallbacks.delete(connectionId)
-          client.sshUnwatchOutput(connectionId).catch(() => {})
+          sshBootstrapWatchCallbacks.delete(connectionId)
+          client.sshUnwatchBootstrapOutput(connectionId).catch(() => {})
+        }
+      }
+    },
+    watchTunnelOutput: async (connectionId: string, cb: (line: string) => void): Promise<{ scrollback: string[], unsubscribe: () => void }> => {
+      sshTunnelWatchCallbacks.set(connectionId, cb)
+      const result = await client.sshWatchTunnelOutput(connectionId)
+      return {
+        scrollback: result.scrollback,
+        unsubscribe: () => {
+          sshTunnelWatchCallbacks.delete(connectionId)
+          client.sshUnwatchTunnelOutput(connectionId).catch(() => {})
+        }
+      }
+    },
+    watchDaemonOutput: async (connectionId: string, cb: (line: string) => void): Promise<{ scrollback: string[], unsubscribe: () => void }> => {
+      sshDaemonWatchCallbacks.set(connectionId, cb)
+      const result = await client.sshWatchDaemonOutput(connectionId)
+      return {
+        scrollback: result.scrollback,
+        unsubscribe: () => {
+          sshDaemonWatchCallbacks.delete(connectionId)
+          client.sshUnwatchDaemonOutput(connectionId).catch(() => {})
         }
       }
     },

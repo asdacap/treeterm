@@ -129,9 +129,12 @@ describe('IpcServer', () => {
       ['onSshSaveConnection', 'ssh:saveConnection'],
       ['onSshGetSavedConnections', 'ssh:getSavedConnections'],
       ['onSshRemoveSavedConnection', 'ssh:removeSavedConnection'],
-      ['onSshGetOutput', 'ssh:getOutput'],
-      ['onSshWatchOutput', 'ssh:watchOutput'],
-      ['onSshUnwatchOutput', 'ssh:unwatchOutput'],
+      ['onSshWatchBootstrapOutput', 'ssh:watchBootstrapOutput'],
+      ['onSshUnwatchBootstrapOutput', 'ssh:unwatchBootstrapOutput'],
+      ['onSshWatchTunnelOutput', 'ssh:watchTunnelOutput'],
+      ['onSshUnwatchTunnelOutput', 'ssh:unwatchTunnelOutput'],
+      ['onSshWatchDaemonOutput', 'ssh:watchDaemonOutput'],
+      ['onSshUnwatchDaemonOutput', 'ssh:unwatchDaemonOutput'],
       ['onSshWatchConnectionStatus', 'ssh:watchConnectionStatus'],
       ['onSshUnwatchConnectionStatus', 'ssh:unwatchConnectionStatus'],
     ] as const)('%s registers handler on %s channel', (method, channel) => {
@@ -310,13 +313,31 @@ describe('IpcServer', () => {
       expect(mockSend).toHaveBeenCalledWith('ssh:connectionStatus', info)
     })
 
-    it('sshOutput sends to window webContents', () => {
+    it('sshBootstrapOutput sends to window webContents', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
       server.setWindow(mockWindow)
 
-      server.sshOutput('conn-1', 'log line')
-      expect(mockSend).toHaveBeenCalledWith('ssh:output', 'conn-1', 'log line')
+      server.sshBootstrapOutput('conn-1', 'log line')
+      expect(mockSend).toHaveBeenCalledWith('ssh:bootstrapOutput', 'conn-1', 'log line')
+    })
+
+    it('sshTunnelOutput sends to window webContents', () => {
+      const mockSend = vi.fn<(...args: any[]) => void>()
+      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
+      server.setWindow(mockWindow)
+
+      server.sshTunnelOutput('conn-1', 'log line')
+      expect(mockSend).toHaveBeenCalledWith('ssh:tunnelOutput', 'conn-1', 'log line')
+    })
+
+    it('sshDaemonOutput sends to window webContents', () => {
+      const mockSend = vi.fn<(...args: any[]) => void>()
+      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
+      server.setWindow(mockWindow)
+
+      server.sshDaemonOutput('conn-1', 'log line')
+      expect(mockSend).toHaveBeenCalledWith('ssh:daemonOutput', 'conn-1', 'log line')
     })
 
     it('gitOutput sends to window webContents', () => {

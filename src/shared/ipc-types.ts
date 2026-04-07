@@ -319,15 +319,27 @@ export interface IpcRequests {
     params: [id: string]
     result: undefined
   }
-  sshGetOutput: {
-    params: [connectionId: string]
-    result: string[]
-  }
-  sshWatchOutput: {
+  sshWatchBootstrapOutput: {
     params: [connectionId: string]
     result: { scrollback: string[] }
   }
-  sshUnwatchOutput: {
+  sshUnwatchBootstrapOutput: {
+    params: [connectionId: string]
+    result: undefined
+  }
+  sshWatchTunnelOutput: {
+    params: [connectionId: string]
+    result: { scrollback: string[] }
+  }
+  sshUnwatchTunnelOutput: {
+    params: [connectionId: string]
+    result: undefined
+  }
+  sshWatchDaemonOutput: {
+    params: [connectionId: string]
+    result: { scrollback: string[] }
+  }
+  sshUnwatchDaemonOutput: {
     params: [connectionId: string]
     result: undefined
   }
@@ -456,7 +468,13 @@ export interface IpcEvents {
   sshConnectionStatus: {
     params: [info: ConnectionInfo]
   }
-  sshOutput: {
+  sshBootstrapOutput: {
+    params: [connectionId: string, line: string]
+  }
+  sshTunnelOutput: {
+    params: [connectionId: string, line: string]
+  }
+  sshDaemonOutput: {
     params: [connectionId: string, line: string]
   }
   sshPortForwardStatus: {
