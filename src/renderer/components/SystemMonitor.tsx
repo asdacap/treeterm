@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, RefreshCw } from 'lucide-react'
 import type { ExecApi } from '../types'
 import type { ExecEvent } from '../../shared/ipc-types'
 
@@ -253,9 +253,10 @@ interface SystemMonitorProps {
 
 interface SystemMetricsProps {
   metrics: SystemMetrics
+  onRefresh: () => void
 }
 
-function MonitorDashboard({ metrics }: SystemMetricsProps) {
+function MonitorDashboard({ metrics, onRefresh }: SystemMetricsProps) {
   return (
     <>
       <div className="system-monitor-section">
@@ -324,8 +325,13 @@ function MonitorDashboard({ metrics }: SystemMetricsProps) {
         </div>
       )}
 
-      <div className="system-monitor-timestamp">
-        Updated {new Date(metrics.collectedAt).toLocaleTimeString()}
+      <div className="system-monitor-footer">
+        <span className="system-monitor-timestamp">
+          Updated {new Date(metrics.collectedAt).toLocaleTimeString()}
+        </span>
+        <button className="system-monitor-refresh" onClick={onRefresh} title="Refresh now">
+          <RefreshCw size={12} />
+        </button>
       </div>
     </>
   )
@@ -437,7 +443,7 @@ export default function SystemMonitor({ connectionId, exec }: SystemMonitorProps
         </div>
       )}
       {state.status === MonitorStatus.Active && (
-        <MonitorDashboard metrics={state.metrics} />
+        <MonitorDashboard metrics={state.metrics} onRefresh={handleRetry} />
       )}
     </div>
   )

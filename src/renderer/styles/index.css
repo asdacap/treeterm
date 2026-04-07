@@ -5967,7 +5967,8 @@ body,
   color: var(--text-secondary);
   font-size: 10px;
   flex-shrink: 0;
-  min-width: 100px;
+  width: 150px;
+  text-align: right;
 }
 
 .system-monitor-stats {
@@ -6028,6 +6029,28 @@ body,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.system-monitor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.system-monitor-refresh {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.system-monitor-refresh:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
 }
 
 .system-monitor-timestamp {
