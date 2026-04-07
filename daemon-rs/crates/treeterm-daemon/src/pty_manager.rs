@@ -35,6 +35,10 @@ pub struct PtySession {
     pub data_subscribers: Vec<mpsc::Sender<Vec<u8>>>,
     pub exit_tx: broadcast::Sender<(i32, Option<i32>)>,
     pub resize_tx: broadcast::Sender<(i32, i32)>,
+    /// Handle to the background read_pty_loop task. Must be aborted before
+    /// closing master_fd to prevent stale AsyncFd from corrupting tokio's I/O driver
+    /// when the fd number is reused by a new PTY session.
+    pub reader_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 #[derive(Clone)]
@@ -138,6 +142,7 @@ impl PtyManager {
             data_subscribers: vec![],
             exit_tx: exit_tx.clone(),
             resize_tx: resize_tx.clone(),
+            reader_handle: None,
         };
 
         let session = Arc::new(Mutex::new(session));
@@ -155,11 +160,12 @@ impl PtyManager {
         // Spawn background reader task
         let reader_session = Arc::clone(&session);
         let reader_id = id.clone();
-        tokio::spawn(async move {
+        let reader_handle = tokio::spawn(async move {
             if let Err(e) = read_pty_loop(master_fd, reader_session).await {
                 tracing::debug!(session_id = %reader_id, error = %e, "pty reader ended");
             }
         });
+        session.lock().await.reader_handle = Some(reader_handle);
 
         // Spawn waitpid task
         let wait_session = Arc::clone(&session);
@@ -295,7 +301,13 @@ impl PtyManager {
     pub async fn kill(&self, session_id: &str) {
         let removed = self.sessions.write().await.remove(session_id);
         if let Some(session) = removed {
-            let session = session.lock().await;
+            let mut session = session.lock().await;
+            // Abort reader task FIRST — drops AsyncFd, deregisters fd from epoll.
+            // This prevents stale AsyncFd from corrupting tokio's I/O driver
+            // when the fd number is reused by a subsequent forkpty() call.
+            if let Some(handle) = session.reader_handle.take() {
+                handle.abort();
+            }
             unsafe {
                 libc::kill(session.child_pid, libc::SIGTERM);
                 libc::close(session.master_fd);
@@ -406,7 +418,10 @@ impl PtyManager {
     pub async fn shutdown(&self) {
         let mut sessions = self.sessions.write().await;
         for (id, session) in sessions.drain() {
-            let session = session.lock().await;
+            let mut session = session.lock().await;
+            if let Some(handle) = session.reader_handle.take() {
+                handle.abort();
+            }
             unsafe {
                 libc::kill(session.child_pid, libc::SIGTERM);
                 libc::close(session.master_fd);
