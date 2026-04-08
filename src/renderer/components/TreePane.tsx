@@ -1,7 +1,8 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Monitor, Loader2, AlertCircle, GitBranch, Folder, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useActivityStateStore } from '../store/activityState'
 import { useAppStore } from '../store/app'
+import { useSessionNamesStore } from '../store/sessionNames'
 import SessionPanel, { CollapsedSessionPanel } from './SessionPanel'
 import { ActivityIndicator } from './ActivityIndicator'
 
@@ -29,7 +30,44 @@ interface TreePaneProps {
 
 export default function TreePane({ selectFolder, isCollapsed, onToggleCollapse }: TreePaneProps): React.JSX.Element {
   const sessionStores = useAppStore(s => s.sessionStores)
-  const sessionIds = Array.from(sessionStores.keys())
+  const rawSessionIds = Array.from(sessionStores.keys())
+  const getSortedIds = useSessionNamesStore(s => s.getSortedIds)
+  const reorderSession = useSessionNamesStore(s => s.reorderSession)
+  const sessionIds = getSortedIds(rawSessionIds)
+
+  // Session drag-and-drop state
+  const [dragState, setDragState] = useState<{
+    dragId: string
+    overId: string
+    position: 'before' | 'after'
+  } | null>(null)
+
+  const handleSessionDragStart = (id: string) => {
+    setDragState({ dragId: id, overId: '', position: 'before' })
+  }
+
+  const handleSessionDragOver = (e: React.DragEvent, id: string) => {
+    e.preventDefault()
+    if (!dragState) return
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const position: 'before' | 'after' = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+    if (dragState.overId !== id || dragState.position !== position) {
+      setDragState({ ...dragState, overId: id, position })
+    }
+  }
+
+  const handleSessionDrop = () => {
+    if (!dragState || !dragState.overId || dragState.dragId === dragState.overId) {
+      setDragState(null)
+      return
+    }
+    reorderSession(dragState.dragId, dragState.overId, dragState.position)
+    setDragState(null)
+  }
+
+  const handleSessionDragEnd = () => {
+    setDragState(null)
+  }
 
   if (isCollapsed) {
     return (
@@ -44,14 +82,33 @@ export default function TreePane({ selectFolder, isCollapsed, onToggleCollapse }
           </button>
         </div>
         <div className="tree-pane-collapsed-rail">
-          {sessionIds.map((sessionId) => (
-            <CollapsedSessionPanel
-              key={sessionId}
-              sessionId={sessionId}
-              // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- sessionId from sessionStores.keys()
-              sessionStore={sessionStores.get(sessionId)!.store}
-            />
-          ))}
+          {sessionIds.map((sessionId) => {
+            const isDragging = dragState?.dragId === sessionId
+            const dragOverPosition = dragState?.overId === sessionId ? dragState.position : null
+            const dragClasses = [
+              isDragging ? 'dragging' : '',
+              dragOverPosition === 'before' ? 'drag-before' : '',
+              dragOverPosition === 'after' ? 'drag-after' : '',
+            ].filter(Boolean).join(' ')
+
+            return (
+              <div
+                key={sessionId}
+                className={`session-drag-handle ${dragClasses}`}
+                draggable
+                onDragStart={() => { handleSessionDragStart(sessionId) }}
+                onDragOver={(e) => { handleSessionDragOver(e, sessionId) }}
+                onDrop={(e) => { e.preventDefault(); handleSessionDrop() }}
+                onDragEnd={handleSessionDragEnd}
+              >
+                <CollapsedSessionPanel
+                  sessionId={sessionId}
+                  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- sessionId from sessionStores.keys()
+                  sessionStore={sessionStores.get(sessionId)!.store}
+                />
+              </div>
+            )
+          })}
         </div>
       </div>
     )
@@ -79,15 +136,34 @@ export default function TreePane({ selectFolder, isCollapsed, onToggleCollapse }
         </div>
       </div>
       <div className="tree-sessions-scroll">
-        {sessionIds.map((sessionId) => (
-          <SessionPanel
-            key={sessionId}
-            sessionId={sessionId}
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- sessionId from sessionStores.keys()
-            sessionStore={sessionStores.get(sessionId)!.store}
-            selectFolder={selectFolder}
-          />
-        ))}
+        {sessionIds.map((sessionId) => {
+          const isDragging = dragState?.dragId === sessionId
+          const dragOverPosition = dragState?.overId === sessionId ? dragState.position : null
+          const dragClasses = [
+            isDragging ? 'dragging' : '',
+            dragOverPosition === 'before' ? 'drag-before' : '',
+            dragOverPosition === 'after' ? 'drag-after' : '',
+          ].filter(Boolean).join(' ')
+
+          return (
+            <div
+              key={sessionId}
+              className={`session-drag-handle ${dragClasses}`}
+              draggable
+              onDragStart={() => { handleSessionDragStart(sessionId) }}
+              onDragOver={(e) => { handleSessionDragOver(e, sessionId) }}
+              onDrop={(e) => { e.preventDefault(); handleSessionDrop() }}
+              onDragEnd={handleSessionDragEnd}
+            >
+              <SessionPanel
+                sessionId={sessionId}
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- sessionId from sessionStores.keys()
+                sessionStore={sessionStores.get(sessionId)!.store}
+                selectFolder={selectFolder}
+              />
+            </div>
+          )
+        })}
         {sessionIds.length === 0 && (
           <div className="tree-empty" style={{ padding: '16px' }}>No sessions. Click + to browse.</div>
         )}

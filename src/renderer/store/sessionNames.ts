@@ -4,6 +4,7 @@ import { persist, type PersistStorage, type StorageValue } from 'zustand/middlew
 interface SessionNameEntry {
   name: string
   lastUsed: number
+  sortOrder: number
 }
 
 interface SessionNamesState {
@@ -11,19 +12,33 @@ interface SessionNamesState {
   setName: (sessionId: string, name: string) => void
   removeName: (sessionId: string) => void
   getName: (sessionId: string) => string | undefined
+  reorderSession: (dragId: string, targetId: string, position: 'before' | 'after') => void
+  getSortedIds: (ids: string[]) => string[]
   cleanupStale: () => void
 }
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
+
+function nextSortOrder(names: Map<string, SessionNameEntry>): number {
+  let max = -1
+  for (const [, entry] of Array.from(names.entries())) {
+    if (entry.sortOrder > max) max = entry.sortOrder
+  }
+  return max + 1
+}
 
 export const useSessionNamesStore = create<SessionNamesState>()(
   persist(
     (set, get) => ({
       names: new Map<string, SessionNameEntry>(),
       setName: (sessionId: string, name: string) => {
-        set((state) => ({
-          names: new Map(state.names).set(sessionId, { name, lastUsed: Date.now() }),
-        }))
+        set((state) => {
+          const existing = state.names.get(sessionId)
+          const sortOrder = existing?.sortOrder ?? nextSortOrder(state.names)
+          return {
+            names: new Map(state.names).set(sessionId, { name, lastUsed: Date.now(), sortOrder }),
+          }
+        })
       },
       removeName: (sessionId: string) => {
         set((state) => {
@@ -34,6 +49,39 @@ export const useSessionNamesStore = create<SessionNamesState>()(
       },
       getName: (sessionId: string) => {
         return get().names.get(sessionId)?.name
+      },
+      reorderSession: (dragId: string, targetId: string, position: 'before' | 'after') => {
+        if (dragId === targetId) return
+        set((state) => {
+          const { names } = state
+          if (!names.has(dragId) || !names.has(targetId)) return state
+
+          const sorted = Array.from(names.entries())
+            .sort(([, a], [, b]) => a.sortOrder - b.sortOrder)
+
+          const ordered = sorted.filter(([id]) => id !== dragId)
+          const targetIdx = ordered.findIndex(([id]) => id === targetId)
+          const insertIdx = position === 'before' ? targetIdx : targetIdx + 1
+          const dragEntry = sorted.find(([id]) => id === dragId)
+          if (dragEntry) ordered.splice(insertIdx, 0, dragEntry)
+
+          const updated = new Map<string, SessionNameEntry>()
+          for (let i = 0; i < ordered.length; i++) {
+            const item = ordered[i]
+            if (!item) continue
+            const [id, entry] = item
+            updated.set(id, { ...entry, sortOrder: i })
+          }
+          return { names: updated }
+        })
+      },
+      getSortedIds: (ids: string[]) => {
+        const { names } = get()
+        return [...ids].sort((a, b) => {
+          const aOrder = names.get(a)?.sortOrder ?? Infinity
+          const bOrder = names.get(b)?.sortOrder ?? Infinity
+          return aOrder - bOrder
+        })
       },
       cleanupStale: () => {
         const now = Date.now()
