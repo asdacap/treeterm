@@ -515,6 +515,7 @@ export interface SSHApi {
   disconnect: (connectionId: string) => Promise<void>
   reconnect: (connectionId: string) => Promise<void>
   reconnectNow: (connectionId: string) => Promise<void>
+  forceReconnect: (connectionId: string) => Promise<void>
   cancelReconnect: (connectionId: string) => Promise<void>
   listConnections: () => Promise<ConnectionInfo[]>
   saveConnection: (config: SSHConnectionConfig) => Promise<void>

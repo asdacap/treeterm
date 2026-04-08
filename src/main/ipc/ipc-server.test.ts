@@ -127,6 +127,7 @@ describe('IpcServer', () => {
       ['onSshDisconnect', 'ssh:disconnect'],
       ['onSshReconnect', 'ssh:reconnect'],
       ['onSshReconnectNow', 'ssh:reconnectNow'],
+      ['onSshForceReconnect', 'ssh:forceReconnect'],
       ['onSshCancelReconnect', 'ssh:cancelReconnect'],
       ['onSshListConnections', 'ssh:listConnections'],
       ['onSshSaveConnection', 'ssh:saveConnection'],

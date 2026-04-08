@@ -583,6 +583,9 @@ const preloadApi: PreloadApi = {
     reconnectNow: (connectionId: string): Promise<void> => {
       return client.sshReconnectNow(connectionId)
     },
+    forceReconnect: (connectionId: string): Promise<void> => {
+      return client.sshForceReconnect(connectionId)
+    },
     cancelReconnect: (connectionId: string): Promise<void> => {
       return client.sshCancelReconnect(connectionId)
     },

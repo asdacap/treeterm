@@ -1234,6 +1234,12 @@ server.onSshReconnectNow(async (connectionId) => {
 })
 
 // eslint-disable-next-line @typescript-eslint/require-await
+server.onSshForceReconnect(async (connectionId) => {
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
+  connectionManager.forceReconnect(connectionId)
+})
+
+// eslint-disable-next-line @typescript-eslint/require-await
 server.onSshCancelReconnect(async (connectionId) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
   connectionManager.cancelReconnect(connectionId)

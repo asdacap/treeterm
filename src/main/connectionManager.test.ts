@@ -659,4 +659,23 @@ describe('ConnectionManager', () => {
       })
     })
   })
+
+  describe('forceReconnect', () => {
+    it('from connected state enters reconnecting', () => {
+      expect(manager.getConnection('local')?.status).toBe('connected')
+      manager.forceReconnect('local')
+      expect(manager.getConnection('local')?.status).toBe('reconnecting')
+    })
+
+    it('throws for unknown connection', () => {
+      expect(() => { manager.forceReconnect('nonexistent') }).toThrow('Connection not found')
+    })
+
+    it('is no-op when already reconnecting', () => {
+      vi.advanceTimersByTime(50_000)
+      expect(manager.getConnection('local')?.status).toBe('reconnecting')
+      manager.forceReconnect('local')
+      expect(manager.getConnection('local')?.status).toBe('reconnecting')
+    })
+  })
 })

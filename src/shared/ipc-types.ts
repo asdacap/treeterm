@@ -311,6 +311,10 @@ export interface IpcRequests {
     params: [connectionId: string]
     result: undefined
   }
+  sshForceReconnect: {
+    params: [connectionId: string]
+    result: undefined
+  }
   sshCancelReconnect: {
     params: [connectionId: string]
     result: undefined

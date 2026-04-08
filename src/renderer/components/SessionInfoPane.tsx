@@ -226,7 +226,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
           />
         )}
         <span className="ssh-pane-label">{label}</span>
-        {isRemote && connection.status === 'connecting' && (
+        {isRemote && (connection.status === 'connecting' || connection.status === 'reconnecting') && (
           <Loader2 size={14} className="spinning" style={{ marginLeft: 8 }} />
         )}
         {isRemote && (
@@ -237,6 +237,11 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
         )}
         {connectionError && (
           <span className="ssh-pane-error">{connectionError}</span>
+        )}
+        {connection && connection.status === 'connected' && (
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <button className="ssh-pane-tab" onClick={() => { void ssh.forceReconnect(connection.id) }}>Reconnect</button>
+          </div>
         )}
         {connection && (connection.status === 'error' || connection.status === 'disconnected') && (
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>

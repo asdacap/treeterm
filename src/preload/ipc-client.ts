@@ -66,6 +66,7 @@ const CHANNELS = {
   sshDisconnect: 'ssh:disconnect',
   sshReconnect: 'ssh:reconnect',
   sshReconnectNow: 'ssh:reconnectNow',
+  sshForceReconnect: 'ssh:forceReconnect',
   sshCancelReconnect: 'ssh:cancelReconnect',
   sshListConnections: 'ssh:listConnections',
   sshSaveConnection: 'ssh:saveConnection',
@@ -436,6 +437,10 @@ export class IpcClient {
 
   sshReconnectNow(...args: IpcRequests['sshReconnectNow']['params']): Promise<IpcRequests['sshReconnectNow']['result']> {
     return ipcRenderer.invoke(CHANNELS.sshReconnectNow, ...args)
+  }
+
+  sshForceReconnect(...args: IpcRequests['sshForceReconnect']['params']): Promise<IpcRequests['sshForceReconnect']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshForceReconnect, ...args)
   }
 
   sshCancelReconnect(...args: IpcRequests['sshCancelReconnect']['params']): Promise<IpcRequests['sshCancelReconnect']['result']> {

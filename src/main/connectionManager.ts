@@ -613,6 +613,13 @@ export class ConnectionManager {
     }
   }
 
+  forceReconnect(connectionId: string): void {
+    const conn = this.connections.get(connectionId)
+    if (!conn) throw new Error(`Connection not found: ${connectionId}`)
+    if (conn.status === 'reconnecting') return
+    conn.startReconnect(() => { this.emitStatus(connectionId) })
+  }
+
   cancelReconnect(connectionId: string): void {
     const conn = this.connections.get(connectionId)
     if (conn?.status === 'reconnecting') {
