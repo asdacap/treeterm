@@ -471,6 +471,9 @@ export interface IpcEvents {
   sshAutoConnected: {
     params: [session: Session, connection: ConnectionInfo]
   }
+  connectionReconnected: {
+    params: [session: Session, connection: ConnectionInfo]
+  }
   daemonDisconnected: {
     params: []
   }

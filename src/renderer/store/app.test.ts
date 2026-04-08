@@ -110,6 +110,7 @@ const mockDeps = {
     onCloseConfirm: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
     onReady: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
     onSshAutoConnected: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
+    onConnectionReconnected: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
     confirmClose: vi.fn<() => void>(),
     cancelClose: vi.fn<() => void>()
   },
