@@ -1436,6 +1436,13 @@ void app.whenReady().then(async () => {
   // Create ConnectionManager wrapping local daemon client
   connectionManager = new ConnectionManager(localClient)
 
+  // Push connection status changes to all renderer windows
+  connectionManager.onStatusChange((info) => {
+    for (const winInfo of windowManager.getAllWindows()) {
+      winInfo.ipcServer.sshConnectionStatus(info)
+    }
+  })
+
   // Close loading window and show main window
   if (loadingWindow) {
     loadingWindow.close()

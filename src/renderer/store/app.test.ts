@@ -619,8 +619,9 @@ describe('useAppStore', () => {
       }
 
       // Pre-populate session store so onSync finds it (local connection)
+      const localConn = { id: 'local', target: { type: 'local' }, status: 'connected' }
       const mockStore = {
-        getState: vi.fn<() => any>().mockReturnValue({ connection: null, handleExternalUpdate: mockHandleExternalUpdate }),
+        getState: vi.fn<() => any>().mockReturnValue({ connection: localConn, handleExternalUpdate: mockHandleExternalUpdate }),
         setState: vi.fn<(...args: any[]) => void>(),
         subscribe: vi.fn<(...args: any[]) => any>()
       }
@@ -644,8 +645,9 @@ describe('useAppStore', () => {
       }
 
       // Pre-populate session store so onSync finds it (local connection)
+      const localConn = { id: 'local', target: { type: 'local' }, status: 'connected' }
       const mockStore = {
-        getState: vi.fn<() => any>().mockReturnValue({ connection: null, handleExternalUpdate: mockHandleExternalUpdate }),
+        getState: vi.fn<() => any>().mockReturnValue({ connection: localConn, handleExternalUpdate: mockHandleExternalUpdate }),
         setState: vi.fn<(...args: any[]) => void>(),
         subscribe: vi.fn<(...args: any[]) => any>()
       }

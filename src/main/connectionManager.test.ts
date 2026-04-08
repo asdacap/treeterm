@@ -35,12 +35,18 @@ vi.mock('./ssh', () => {
 
 let grpcDisconnectCallback: (() => void) | null = null
 
+const mockWatchSessionUnsubscribe = vi.fn()
+
 const mockRemoteClient = {
   connect: vi.fn().mockResolvedValue(undefined),
   disconnect: vi.fn(),
   onDisconnect: vi.fn().mockImplementation((cb: () => void) => {
     grpcDisconnectCallback = cb
     return () => { grpcDisconnectCallback = null }
+  }),
+  watchSession: vi.fn().mockReturnValue({
+    initial: Promise.resolve({ id: 'test', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }),
+    unsubscribe: mockWatchSessionUnsubscribe,
   }),
 }
 
@@ -81,6 +87,10 @@ function mockClient(overrides: Partial<GrpcDaemonClient> = {}): GrpcDaemonClient
     connect: vi.fn().mockResolvedValue(undefined),
     disconnect: vi.fn(),
     onDisconnect: vi.fn(),
+    watchSession: vi.fn().mockReturnValue({
+      initial: Promise.resolve({ id: 'test', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }),
+      unsubscribe: vi.fn(),
+    }),
     ...overrides,
   } as unknown as GrpcDaemonClient
 }
@@ -98,6 +108,7 @@ describe('ConnectionManager', () => {
   }
 
   beforeEach(() => {
+    vi.useFakeTimers()
     vi.clearAllMocks()
     tunnelBootstrapOutputCallback = null
     tunnelOutputCallback = null
@@ -105,6 +116,10 @@ describe('ConnectionManager', () => {
     grpcDisconnectCallback = null
     localClient = mockClient()
     manager = new ConnectionManager(localClient)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   describe('constructor', () => {
@@ -467,6 +482,96 @@ describe('ConnectionManager', () => {
 
     it('returns undefined for missing connection', () => {
       expect(manager.getSSHTunnel('nonexistent')).toBeUndefined()
+    })
+  })
+
+  describe('heartbeat monitoring', () => {
+    it('starts heartbeat for local connection on construction', () => {
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(localClient.watchSession).toHaveBeenCalledWith(
+        expect.stringContaining('heartbeat-local-'),
+        expect.any(Function),
+        expect.any(Function)
+      )
+    })
+
+    it('starts heartbeat for remote connection after connect', async () => {
+      mockRemoteClient.watchSession.mockClear()
+      await manager.connectRemote(remoteConfig)
+      expect(mockRemoteClient.watchSession).toHaveBeenCalledWith(
+        expect.stringContaining('heartbeat-remote-1-'),
+        expect.any(Function),
+        expect.any(Function)
+      )
+    })
+
+    it('heartbeat timeout sets local connection to error', async () => {
+      const cb = vi.fn()
+      manager.onStatusChange(cb)
+
+      // Advance past heartbeat timeout (50s)
+      vi.advanceTimersByTime(50_000)
+      await vi.runAllTimersAsync()
+
+      const info = manager.getConnection('local')
+      expect(info?.status).toBe('error')
+      expect(info).toHaveProperty('error', 'Connection lost (no heartbeat from daemon)')
+    })
+
+    it('heartbeat timeout sets remote connection to error', async () => {
+      await manager.connectRemote(remoteConfig)
+      const cb = vi.fn()
+      manager.onStatusChange(cb)
+
+      vi.advanceTimersByTime(50_000)
+      await vi.runAllTimersAsync()
+
+      const info = manager.getConnection('remote-1')
+      expect(info?.status).toBe('error')
+      expect(info).toHaveProperty('error', 'Connection lost (no heartbeat from daemon)')
+    })
+
+    it('heartbeat stream error sets connection to error', async () => {
+      await manager.connectRemote(remoteConfig)
+
+      // Get the onError callback passed to watchSession
+      const watchCall = mockRemoteClient.watchSession.mock.calls.find(
+        (c: unknown[]) => (c[0] as string).startsWith('heartbeat-remote-1-')
+      ) as [string, (session: unknown) => void, (error: Error) => void] | undefined
+      expect(watchCall).toBeDefined()
+      const onError = watchCall![2]
+
+      onError(new Error('stream broken'))
+
+      const info = manager.getConnection('remote-1')
+      expect(info?.status).toBe('error')
+    })
+
+    it('tunnel disconnect stops heartbeat and unsubscribes stream', async () => {
+      mockWatchSessionUnsubscribe.mockClear()
+      await manager.connectRemote(remoteConfig)
+
+      tunnelDisconnectCallback?.('lost connection')
+
+      expect(mockWatchSessionUnsubscribe).toHaveBeenCalled()
+    })
+
+    it('grpc disconnect stops heartbeat', async () => {
+      mockWatchSessionUnsubscribe.mockClear()
+      await manager.connectRemote(remoteConfig)
+
+      grpcDisconnectCallback?.()
+
+      expect(mockWatchSessionUnsubscribe).toHaveBeenCalled()
+    })
+
+    it('manual disconnect stops heartbeat', async () => {
+      mockWatchSessionUnsubscribe.mockClear()
+      await manager.connectRemote(remoteConfig)
+
+      manager.disconnectRemote('remote-1')
+
+      expect(mockWatchSessionUnsubscribe).toHaveBeenCalled()
     })
   })
 })

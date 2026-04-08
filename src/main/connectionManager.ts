@@ -26,6 +26,10 @@ class Connection {
   connectPhase?: ConnectPhase
   error?: string
 
+  private static HEARTBEAT_TIMEOUT_MS = 50_000
+  private heartbeatTimer: ReturnType<typeof setTimeout> | null = null
+  private heartbeatUnsub: (() => void) | null = null
+
   private bootstrapWatchers: Set<OutputCallback> = new Set()
   private tunnelWatchers: Set<OutputCallback> = new Set()
   private daemonWatchers: Set<OutputCallback> = new Set()
@@ -201,7 +205,55 @@ class Connection {
     }
   }
 
+  startHeartbeatMonitor(onTimeout: () => void): void {
+    if (!this.client) return
+
+    const resetTimer = (): void => {
+      if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer)
+      this.heartbeatTimer = setTimeout(() => {
+        if (this.status === 'connected') {
+          onTimeout()
+        }
+      }, Connection.HEARTBEAT_TIMEOUT_MS)
+    }
+
+    const listenerId = `heartbeat-${this.id}-${String(Date.now())}`
+    const { initial, unsubscribe } = this.client.watchSession(
+      listenerId,
+      () => { resetTimer() },
+      (error) => {
+        console.error(`[connection] heartbeat stream error for ${this.id}:`, error)
+        if (this.status === 'connected') {
+          onTimeout()
+        }
+      }
+    )
+    this.heartbeatUnsub = unsubscribe
+
+    // Initial data also counts as a heartbeat
+    initial.then(() => { resetTimer() }).catch(() => {
+      // Error handled by onError callback
+    })
+
+    // Start the first timer
+    resetTimer()
+  }
+
+  stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearTimeout(this.heartbeatTimer)
+      this.heartbeatTimer = null
+    }
+    if (this.heartbeatUnsub) {
+      this.heartbeatUnsub()
+      this.heartbeatUnsub = null
+    }
+  }
+
   disconnect(): void {
+    // Stop heartbeat monitor
+    this.stopHeartbeat()
+
     // Stop all port forwards
     for (const pf of this.portForwards.values()) {
       pf.stop()
@@ -227,7 +279,17 @@ export class ConnectionManager {
   private statusListeners: Set<StatusChangeCallback> = new Set()
 
   constructor(localClient: GrpcDaemonClient) {
-    this.connections.set('local', new Connection('local', { type: 'local' }, localClient, 'connected'))
+    const localConn = new Connection('local', { type: 'local' }, localClient, 'connected')
+    this.connections.set('local', localConn)
+    localConn.startHeartbeatMonitor(() => {
+      const c = this.connections.get('local')
+      if (c && c.status === 'connected') {
+        c.stopHeartbeat()
+        c.status = 'error'
+        c.error = 'Connection lost (no heartbeat from daemon)'
+        this.emitStatus('local')
+      }
+    })
   }
 
   getClient(connectionId: string): GrpcDaemonClient {
@@ -337,10 +399,22 @@ export class ConnectionManager {
       conn.client = client
       conn.status = 'connected'
 
+      // Start heartbeat monitor for end-to-end health checking
+      conn.startHeartbeatMonitor(() => {
+        const c = this.connections.get(config.id)
+        if (c && c.status === 'connected') {
+          c.stopHeartbeat()
+          c.status = 'error'
+          c.error = 'Connection lost (no heartbeat from daemon)'
+          this.emitStatus(config.id)
+        }
+      })
+
       // Monitor for disconnection
       tunnel.onDisconnect((error) => {
         const c = this.connections.get(config.id)
         if (c) {
+          c.stopHeartbeat()
           c.client?.disconnect()
           c.client = null
           c.status = 'disconnected'
@@ -352,6 +426,7 @@ export class ConnectionManager {
       client.onDisconnect(() => {
         const c = this.connections.get(config.id)
         if (c && c.status === 'connected') {
+          c.stopHeartbeat()
           c.status = 'error'
           c.error = 'gRPC connection lost'
           this.emitStatus(config.id)

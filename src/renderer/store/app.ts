@@ -271,7 +271,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const unsubReady = appApi.onReady((session) => {
       console.log('[App] Received app:ready with session:', session?.id)
       if (session) {
-        const sessionStore = getOrCreateSession(session.id, get, set)
+        const localConnection: ConnectionInfo = { id: 'local', target: { type: 'local' }, status: 'connected' }
+        const sessionStore = getOrCreateSession(session.id, get, set, localConnection)
         if (!useSessionNamesStore.getState().getName(session.id)) {
           useSessionNamesStore.getState().setName(session.id, 'LOCAL')
         }
