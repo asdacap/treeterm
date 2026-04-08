@@ -178,18 +178,19 @@ impl PtyManager {
             let _ = session.exit_tx.send((exit_code, signal));
         });
 
-        // Execute startup command once the shell is ready to accept input
+        // Execute startup command once the shell is ready to accept input.
+        // Uses PtyManager::write() instead of raw libc::write() to avoid writing
+        // to a closed/reused fd if the PTY was killed during the wait.
         if let Some((cmd, mut rx)) = startup_command
             .filter(|s| !s.trim().is_empty())
             .zip(startup_rx)
         {
-            let fd = master_fd;
+            let startup_mgr = self.clone();
+            let startup_id = id.clone();
             tokio::spawn(async move {
                 wait_for_shell_ready(&mut rx).await;
                 let data = format!("exec {}\n", cmd.trim());
-                unsafe {
-                    libc::write(fd, data.as_ptr() as *const libc::c_void, data.len());
-                }
+                let _ = startup_mgr.write(&startup_id, data.as_bytes()).await;
             });
         }
 
@@ -244,7 +245,7 @@ impl PtyManager {
         };
 
         let data = data.to_vec();
-        tokio::task::spawn_blocking(move || {
+        let write_future = tokio::task::spawn_blocking(move || {
             let mut offset = 0;
             while offset < data.len() {
                 let end = (offset + Self::WRITE_CHUNK_SIZE).min(data.len());
@@ -261,9 +262,15 @@ impl PtyManager {
                 offset += n as usize;
             }
             Ok(())
-        })
-        .await
-        .map_err(|e| format!("spawn_blocking failed: {}", e))?
+        });
+
+        // Timeout prevents indefinite blocking pool thread consumption when
+        // the child process doesn't consume stdin (PTY slave buffer full).
+        match tokio::time::timeout(std::time::Duration::from_secs(30), write_future).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(e)) => Err(format!("spawn_blocking failed: {}", e)),
+            Err(_) => Err("write timed out: process may not be consuming input".to_string()),
+        }
     }
 
     pub async fn resize(&self, session_id: &str, cols: u16, rows: u16) -> Result<(), String> {
@@ -310,10 +317,29 @@ impl PtyManager {
                 handle.abort();
                 let _ = handle.await;
             }
+            let pid = session.child_pid;
+            let mut exit_rx = session.exit_tx.subscribe();
             unsafe {
-                libc::kill(session.child_pid, libc::SIGTERM);
+                libc::kill(pid, libc::SIGTERM);
                 libc::close(session.master_fd);
             }
+            // Release lock so the waitpid task can access the session to broadcast exit
+            drop(session);
+            // SIGKILL fallback: if process doesn't exit within 5s after SIGTERM,
+            // send SIGKILL to prevent zombie processes from SIGTERM-immune processes.
+            // Safe because waitpid hasn't reaped the child yet, so PID is still ours.
+            tokio::spawn(async move {
+                if tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    exit_rx.recv(),
+                )
+                .await
+                .is_err()
+                {
+                    tracing::warn!(pid, "process did not exit after SIGTERM, sending SIGKILL");
+                    unsafe { libc::kill(pid, libc::SIGKILL); }
+                }
+            });
             tracing::info!(session_id, "pty session killed");
         } else {
             tracing::warn!(session_id, "kill: session not found");
@@ -418,18 +444,42 @@ impl PtyManager {
     }
 
     pub async fn shutdown(&self) {
-        let mut sessions = self.sessions.write().await;
-        for (id, session) in sessions.drain() {
+        // Drain sessions from map first, releasing the write lock to avoid
+        // blocking all other operations during per-session cleanup.
+        let drained: Vec<_> = self.sessions.write().await.drain().collect();
+
+        let mut sigkill_tasks = Vec::new();
+        for (id, session) in drained {
             let mut session = session.lock().await;
             if let Some(handle) = session.reader_handle.take() {
                 handle.abort();
                 let _ = handle.await;
             }
+            let pid = session.child_pid;
+            let mut exit_rx = session.exit_tx.subscribe();
             unsafe {
-                libc::kill(session.child_pid, libc::SIGTERM);
+                libc::kill(pid, libc::SIGTERM);
                 libc::close(session.master_fd);
             }
+            drop(session);
+            sigkill_tasks.push(tokio::spawn(async move {
+                if tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    exit_rx.recv(),
+                )
+                .await
+                .is_err()
+                {
+                    tracing::warn!(pid, "process did not exit after SIGTERM during shutdown, sending SIGKILL");
+                    unsafe { libc::kill(pid, libc::SIGKILL); }
+                }
+            }));
             tracing::info!(session_id = %id, "pty session killed during shutdown");
+        }
+
+        // Wait for all SIGKILL fallback tasks (max 5s total since they run concurrently)
+        for task in sigkill_tasks {
+            let _ = task.await;
         }
     }
 }

@@ -5,6 +5,10 @@ use tonic::Streaming;
 use treeterm_proto::treeterm::*;
 
 const READ_BUF_SIZE: usize = 4096;
+/// Timeout for sending output to the gRPC channel. If the client can't keep up
+/// for this long, we stop reading from the child's pipe — the child will get
+/// SIGPIPE or block on its next write, which is better than freezing indefinitely.
+const SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 pub async fn handle_exec_stream(
     mut in_stream: Streaming<ExecInput>,
@@ -63,8 +67,9 @@ pub async fn handle_exec_stream(
                                 data: buf[..n].to_vec(),
                             })),
                         };
-                        if tx_out.send(Ok(msg)).await.is_err() {
-                            break;
+                        match tokio::time::timeout(SEND_TIMEOUT, tx_out.send(Ok(msg))).await {
+                            Ok(Ok(())) => {}
+                            _ => break, // timeout elapsed or channel closed
                         }
                     }
                     Err(_) => break,
@@ -87,8 +92,9 @@ pub async fn handle_exec_stream(
                                 data: buf[..n].to_vec(),
                             })),
                         };
-                        if tx_err.send(Ok(msg)).await.is_err() {
-                            break;
+                        match tokio::time::timeout(SEND_TIMEOUT, tx_err.send(Ok(msg))).await {
+                            Ok(Ok(())) => {}
+                            _ => break, // timeout elapsed or channel closed
                         }
                     }
                     Err(_) => break,
