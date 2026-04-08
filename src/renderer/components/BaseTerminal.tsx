@@ -149,7 +149,6 @@ export default function BaseTerminal({
   const [loading, setLoading] = useState(true)
   const [scrollPosition, setScrollPosition] = useState(ScrollPosition.Bottom)
   const scrollPositionRef = useRef(ScrollPosition.Bottom)
-  scrollPositionRef.current = scrollPosition
   const [isAlternateScreen, setIsAlternateScreen] = useState(false)
   const [sizeMismatch, setSizeMismatch] = useState<{ requested: { cols: number; rows: number }; actual: { cols: number; rows: number } } | null>(null)
   const [refreshCounter, setRefreshCounter] = useState(0)
@@ -197,19 +196,28 @@ export default function BaseTerminal({
         rawResize(cols, rows)
       }
 
-      // Scroll tracking
-      scrollDisposable = terminal.onScroll(() => {
-        const buf = terminal.buffer.active
-        if (buf.baseY === 0) {
-          setScrollPosition(ScrollPosition.Bottom)
-        } else if (buf.viewportY === 0) {
-          setScrollPosition(ScrollPosition.Top)
-        } else if (buf.baseY - buf.viewportY <= 1) {
-          setScrollPosition(ScrollPosition.Bottom)
-        } else {
-          setScrollPosition(ScrollPosition.Middle)
+      // Scroll tracking — listen on the DOM viewport element instead of terminal.onScroll,
+      // because xterm.js suppresses onScroll for user-initiated scrolling (mouse wheel, touch).
+      const viewportEl = terminal.element?.querySelector('.xterm-viewport')
+      if (viewportEl) {
+        const onViewportScroll = (): void => {
+          const buf = terminal.buffer.active
+          let pos: ScrollPosition
+          if (buf.baseY === 0) {
+            pos = ScrollPosition.Bottom
+          } else if (buf.viewportY === 0) {
+            pos = ScrollPosition.Top
+          } else if (buf.baseY - buf.viewportY <= 1) {
+            pos = ScrollPosition.Bottom
+          } else {
+            pos = ScrollPosition.Middle
+          }
+          scrollPositionRef.current = pos
+          setScrollPosition(pos)
         }
-      })
+        viewportEl.addEventListener('scroll', onViewportScroll)
+        scrollDisposable = { dispose: () => { viewportEl.removeEventListener('scroll', onViewportScroll) } }
+      }
 
       bufferChangeDisposable = terminal.buffer.onBufferChange((buf) => {
         setIsAlternateScreen(buf.type === 'alternate')
@@ -248,6 +256,7 @@ export default function BaseTerminal({
             const afterWrite = () => {
               if (wasAtBottom) {
                 terminal.scrollToBottom()
+                scrollPositionRef.current = ScrollPosition.Bottom
                 setScrollPosition(ScrollPosition.Bottom)
               }
             }
@@ -308,6 +317,7 @@ export default function BaseTerminal({
 
             if (wasAtBottom) {
               terminal.scrollToBottom()
+              scrollPositionRef.current = ScrollPosition.Bottom
               setScrollPosition(ScrollPosition.Bottom)
             } else {
               const newScrollLine = Math.round(terminal.buffer.active.baseY * scrollRatio)
