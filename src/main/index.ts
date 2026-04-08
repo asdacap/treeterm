@@ -1160,6 +1160,24 @@ server.onSshDisconnect(async (connectionId) => {
   connectionManager.disconnectRemote(connectionId)
 })
 
+// eslint-disable-next-line @typescript-eslint/require-await
+server.onSshReconnect(async (connectionId) => {
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
+  connectionManager.reconnect(connectionId)
+})
+
+// eslint-disable-next-line @typescript-eslint/require-await
+server.onSshReconnectNow(async (connectionId) => {
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
+  connectionManager.reconnectNow(connectionId)
+})
+
+// eslint-disable-next-line @typescript-eslint/require-await
+server.onSshCancelReconnect(async (connectionId) => {
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
+  connectionManager.cancelReconnect(connectionId)
+})
+
 server.onSshListConnections(() => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
   return connectionManager.listConnections()

@@ -87,6 +87,7 @@ function mockClient(overrides: Partial<GrpcDaemonClient> = {}): GrpcDaemonClient
     connect: vi.fn().mockResolvedValue(undefined),
     disconnect: vi.fn(),
     onDisconnect: vi.fn(),
+    socketPath: '/tmp/test.sock',
     watchSession: vi.fn().mockReturnValue({
       initial: Promise.resolve({ id: 'test', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }),
       unsubscribe: vi.fn(),
@@ -280,11 +281,11 @@ describe('ConnectionManager', () => {
       const cb = vi.fn()
       manager.watchConnectionStatus('remote-1', cb)
 
-      // Trigger a status change via tunnel disconnect
+      // Trigger a status change via tunnel disconnect — now triggers reconnecting
       tunnelDisconnectCallback?.('lost connection')
       expect(cb).toHaveBeenCalled()
       const statuses = cb.mock.calls.map((c: unknown[]) => (c[0] as { status: string }).status)
-      expect(statuses).toContain('disconnected')
+      expect(statuses).toContain('reconnecting')
     })
 
     it('forwards bootstrap output to watchers', async () => {
@@ -307,7 +308,7 @@ describe('ConnectionManager', () => {
       expect(outputCb).toHaveBeenCalledWith('hello from tunnel')
     })
 
-    it('monitors tunnel disconnection', async () => {
+    it('monitors tunnel disconnection and triggers reconnect', async () => {
       const statusCb = vi.fn()
       manager.onStatusChange(statusCb)
       await manager.connectRemote(remoteConfig)
@@ -315,15 +316,15 @@ describe('ConnectionManager', () => {
       // Simulate tunnel disconnect
       tunnelDisconnectCallback?.('lost connection')
       const info = manager.getConnection('remote-1')
-      expect(info?.status).toBe('disconnected')
+      expect(info?.status).toBe('reconnecting')
     })
 
-    it('monitors gRPC client disconnection', async () => {
+    it('monitors gRPC client disconnection and triggers reconnect', async () => {
       await manager.connectRemote(remoteConfig)
 
       grpcDisconnectCallback?.()
       const info = manager.getConnection('remote-1')
-      expect(info?.status).toBe('error')
+      expect(info?.status).toBe('reconnecting')
     })
   })
 
@@ -505,33 +506,31 @@ describe('ConnectionManager', () => {
       )
     })
 
-    it('heartbeat timeout sets local connection to error', async () => {
+    it('heartbeat timeout triggers reconnecting for local connection', () => {
       const cb = vi.fn()
       manager.onStatusChange(cb)
 
       // Advance past heartbeat timeout (50s)
       vi.advanceTimersByTime(50_000)
-      await vi.runAllTimersAsync()
 
       const info = manager.getConnection('local')
-      expect(info?.status).toBe('error')
+      expect(info?.status).toBe('reconnecting')
       expect(info).toHaveProperty('error', 'Connection lost (no heartbeat from daemon)')
     })
 
-    it('heartbeat timeout sets remote connection to error', async () => {
+    it('heartbeat timeout triggers reconnecting for remote connection', async () => {
       await manager.connectRemote(remoteConfig)
       const cb = vi.fn()
       manager.onStatusChange(cb)
 
       vi.advanceTimersByTime(50_000)
-      await vi.runAllTimersAsync()
 
       const info = manager.getConnection('remote-1')
-      expect(info?.status).toBe('error')
+      expect(info?.status).toBe('reconnecting')
       expect(info).toHaveProperty('error', 'Connection lost (no heartbeat from daemon)')
     })
 
-    it('heartbeat stream error sets connection to error', async () => {
+    it('heartbeat stream error triggers reconnecting', async () => {
       await manager.connectRemote(remoteConfig)
 
       // Get the onError callback passed to watchSession
@@ -544,25 +543,29 @@ describe('ConnectionManager', () => {
       onError(new Error('stream broken'))
 
       const info = manager.getConnection('remote-1')
-      expect(info?.status).toBe('error')
+      expect(info?.status).toBe('reconnecting')
     })
 
-    it('tunnel disconnect stops heartbeat and unsubscribes stream', async () => {
+    it('tunnel disconnect triggers reconnecting', async () => {
       mockWatchSessionUnsubscribe.mockClear()
       await manager.connectRemote(remoteConfig)
 
       tunnelDisconnectCallback?.('lost connection')
 
       expect(mockWatchSessionUnsubscribe).toHaveBeenCalled()
+      const info = manager.getConnection('remote-1')
+      expect(info?.status).toBe('reconnecting')
     })
 
-    it('grpc disconnect stops heartbeat', async () => {
+    it('grpc disconnect triggers reconnecting', async () => {
       mockWatchSessionUnsubscribe.mockClear()
       await manager.connectRemote(remoteConfig)
 
       grpcDisconnectCallback?.()
 
       expect(mockWatchSessionUnsubscribe).toHaveBeenCalled()
+      const info = manager.getConnection('remote-1')
+      expect(info?.status).toBe('reconnecting')
     })
 
     it('manual disconnect stops heartbeat', async () => {
@@ -572,6 +575,88 @@ describe('ConnectionManager', () => {
       manager.disconnectRemote('remote-1')
 
       expect(mockWatchSessionUnsubscribe).toHaveBeenCalled()
+    })
+  })
+
+  describe('reconnect', () => {
+    it('successful reconnect restores connected status', async () => {
+      // Trigger heartbeat timeout to enter reconnecting state
+      vi.advanceTimersByTime(50_000)
+
+      const info = manager.getConnection('local')
+      expect(info?.status).toBe('reconnecting')
+      expect(info).toHaveProperty('attempt', 0)
+
+      // Advance past first backoff delay (1s) and flush microtasks
+      await vi.advanceTimersByTimeAsync(1_000)
+
+      const info2 = manager.getConnection('local')
+      expect(info2?.status).toBe('connected')
+    })
+
+    it('cancelReconnect stops retries and sets error', () => {
+      vi.advanceTimersByTime(50_000)
+
+      expect(manager.getConnection('local')?.status).toBe('reconnecting')
+
+      manager.cancelReconnect('local')
+
+      const info = manager.getConnection('local')
+      expect(info?.status).toBe('error')
+    })
+
+    it('reconnectNow skips backoff delay', async () => {
+      vi.advanceTimersByTime(50_000)
+
+      expect(manager.getConnection('local')?.status).toBe('reconnecting')
+
+      // reconnectNow should immediately attempt — need to flush the async connect promise
+      manager.reconnectNow('local')
+      // Flush microtasks for the async reconnect
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      await new Promise(process.nextTick)
+
+      expect(manager.getConnection('local')?.status).toBe('connected')
+    })
+
+    it('reconnect from error state starts reconnecting', () => {
+      vi.advanceTimersByTime(50_000)
+
+      manager.cancelReconnect('local')
+      expect(manager.getConnection('local')?.status).toBe('error')
+
+      manager.reconnect('local')
+      expect(manager.getConnection('local')?.status).toBe('reconnecting')
+    })
+
+    it('failed reconnect attempt schedules retry with backoff', async () => {
+      // Make the gRPC client connect fail
+      const { GrpcDaemonClient } = await import('./grpcClient')
+      const MockGrpc = vi.mocked(GrpcDaemonClient)
+      MockGrpc.mockImplementation(function() {
+        return {
+          ...mockRemoteClient,
+          socketPath: '/tmp/test.sock',
+          connect: vi.fn().mockRejectedValue(new Error('connection refused')),
+        } as unknown as GrpcDaemonClient
+      })
+
+      // Trigger heartbeat timeout
+      vi.advanceTimersByTime(50_000)
+
+      expect(manager.getConnection('local')?.status).toBe('reconnecting')
+
+      // First attempt after 1s delay — should fail
+      await vi.advanceTimersByTimeAsync(1_000)
+
+      const info = manager.getConnection('local')
+      expect(info?.status).toBe('reconnecting')
+      expect(info).toHaveProperty('attempt', 1)
+
+      // Restore mock for cleanup
+      MockGrpc.mockImplementation(function() {
+        return { ...mockRemoteClient, socketPath: '/tmp/test.sock' } as unknown as GrpcDaemonClient
+      })
     })
   })
 })

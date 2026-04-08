@@ -303,6 +303,18 @@ export interface IpcRequests {
     params: [connectionId: string]
     result: undefined
   }
+  sshReconnect: {
+    params: [connectionId: string]
+    result: undefined
+  }
+  sshReconnectNow: {
+    params: [connectionId: string]
+    result: undefined
+  }
+  sshCancelReconnect: {
+    params: [connectionId: string]
+    result: undefined
+  }
   sshListConnections: {
     params: []
     result: ConnectionInfo[]

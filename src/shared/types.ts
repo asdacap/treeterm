@@ -25,13 +25,14 @@ export type ConnectionTarget =
   | { type: 'local' }
   | { type: 'remote'; config: SSHConnectionConfig }
 
-export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
+export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error'
 
 export type ConnectPhase = 'bootstrap' | 'tunnel' | 'daemon'
 
 export type ConnectionInfo =
   | { id: string; target: ConnectionTarget; status: 'connecting'; connectPhase?: ConnectPhase }
   | { id: string; target: ConnectionTarget; status: 'connected' }
+  | { id: string; target: ConnectionTarget; status: 'reconnecting'; error: string; attempt: number }
   | { id: string; target: ConnectionTarget; status: 'disconnected'; error?: string }
   | { id: string; target: ConnectionTarget; status: 'error'; error: string }
 

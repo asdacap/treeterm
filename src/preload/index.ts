@@ -561,6 +561,15 @@ const preloadApi: PreloadApi = {
     disconnect: (connectionId: string): Promise<void> => {
       return client.sshDisconnect(connectionId)
     },
+    reconnect: (connectionId: string): Promise<void> => {
+      return client.sshReconnect(connectionId)
+    },
+    reconnectNow: (connectionId: string): Promise<void> => {
+      return client.sshReconnectNow(connectionId)
+    },
+    cancelReconnect: (connectionId: string): Promise<void> => {
+      return client.sshCancelReconnect(connectionId)
+    },
     listConnections: (): Promise<ConnectionInfo[]> => {
       return client.sshListConnections()
     },

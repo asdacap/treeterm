@@ -24,6 +24,7 @@ function getStatusColor(status: string | undefined): string {
   switch (status) {
     case 'connected': return '#4caf50'
     case 'connecting': return '#ff9800'
+    case 'reconnecting': return '#ff9800'
     case 'error': return '#f44336'
     case 'disconnected': return '#f44336'
     default: return '#666'

@@ -124,7 +124,11 @@ export class GrpcDaemonClient {
   private disconnectListeners: Set<DisconnectListener> = new Set()
   private clientId: string = `client-${String(Date.now())}`
 
-  constructor(private socketPath: string = getDefaultSocketPath()) {}
+  constructor(private _socketPath: string = getDefaultSocketPath()) {}
+
+  get socketPath(): string {
+    return this._socketPath
+  }
 
   async connect(): Promise<void> {
     if (this.connected) {

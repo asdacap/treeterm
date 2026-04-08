@@ -25,10 +25,14 @@ class Connection {
   status: ConnectionStatus
   connectPhase?: ConnectPhase
   error?: string
+  tunnel?: SSHTunnel
 
   private static HEARTBEAT_TIMEOUT_MS = 50_000
+  private static RECONNECT_MAX_DELAY_MS = 30_000
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null
   private heartbeatUnsub: (() => void) | null = null
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private reconnectAttempt: number = 0
 
   private bootstrapWatchers: Set<OutputCallback> = new Set()
   private tunnelWatchers: Set<OutputCallback> = new Set()
@@ -44,15 +48,19 @@ class Connection {
     readonly target: ConnectionTarget,
     client: GrpcDaemonClient | null,
     status: ConnectionStatus,
-    readonly tunnel?: SSHTunnel
+    tunnel?: SSHTunnel
   ) {
     this.client = client
     this.status = status
+    this.tunnel = tunnel
   }
 
   toInfo(): ConnectionInfo {
     if (this.status === 'error') {
       return { id: this.id, target: this.target, status: 'error', error: this.error ?? 'Unknown error' }
+    }
+    if (this.status === 'reconnecting') {
+      return { id: this.id, target: this.target, status: 'reconnecting', error: this.error ?? 'Reconnecting...', attempt: this.reconnectAttempt }
     }
     if (this.status === 'disconnected') {
       return { id: this.id, target: this.target, status: 'disconnected', error: this.error }
@@ -250,9 +258,128 @@ class Connection {
     }
   }
 
-  disconnect(): void {
-    // Stop heartbeat monitor
+  startReconnect(onStatusChanged: () => void): void {
     this.stopHeartbeat()
+    this.reconnectAttempt = 0
+    this.status = 'reconnecting'
+    onStatusChanged()
+    this.scheduleReconnectAttempt(onStatusChanged)
+  }
+
+  reconnectNow(onStatusChanged: () => void): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    void this.doReconnectAttempt(onStatusChanged)
+  }
+
+  cancelReconnect(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    this.status = 'error'
+    this.error = this.error ?? 'Reconnection cancelled'
+  }
+
+  private scheduleReconnectAttempt(onStatusChanged: () => void): void {
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempt), Connection.RECONNECT_MAX_DELAY_MS)
+    console.log(`[connection] scheduling reconnect attempt ${String(this.reconnectAttempt + 1)} in ${String(delay)}ms for ${this.id}`)
+    this.reconnectTimer = setTimeout(() => {
+      void this.doReconnectAttempt(onStatusChanged)
+    }, delay)
+  }
+
+  private async doReconnectAttempt(onStatusChanged: () => void): Promise<void> {
+    if (this.status !== 'reconnecting') return
+
+    this.reconnectAttempt++
+    onStatusChanged()
+
+    try {
+      if (this.target.type === 'local') {
+        await this.reconnectLocal()
+      } else {
+        await this.reconnectRemote()
+      }
+
+      // Success
+      this.status = 'connected'
+      this.error = undefined
+      this.reconnectAttempt = 0
+      onStatusChanged()
+
+      // Restart heartbeat — on next failure, reconnect again
+      this.startHeartbeatMonitor(() => {
+        if (this.status === 'connected') {
+          this.startReconnect(onStatusChanged)
+        }
+      })
+    } catch (err) {
+      if (this.status !== 'reconnecting') return // cancelled during attempt
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`[connection] reconnect attempt ${String(this.reconnectAttempt)} failed for ${this.id}: ${msg}`)
+      this.error = msg
+      onStatusChanged()
+      this.scheduleReconnectAttempt(onStatusChanged)
+    }
+  }
+
+  private async reconnectLocal(): Promise<void> {
+    const socketPath = this.client?.socketPath
+    this.client?.disconnect()
+    this.client = null
+
+    if (!socketPath) {
+      throw new Error('No socket path available for local reconnect')
+    }
+
+    const newClient = new GrpcDaemonClient(socketPath)
+    await newClient.connect()
+    this.client = newClient
+  }
+
+  private async reconnectRemote(): Promise<void> {
+    if (this.target.type !== 'remote') {
+      throw new Error('reconnectRemote called on non-remote connection')
+    }
+
+    // Tear down old client and tunnel
+    this.client?.disconnect()
+    this.client = null
+    if (this.tunnel) {
+      this.tunnel.disconnect()
+      this.tunnel = undefined
+    }
+
+    // Create new tunnel with original config
+    const tunnel = new SSHTunnel(this.target.config)
+    this.tunnel = tunnel
+
+    // Forward tunnel output to connection's watchers
+    tunnel.onBootstrapOutput((line: string) => {
+      this.emitBootstrapOutput(line)
+    })
+    tunnel.onTunnelOutput((line: string) => {
+      this.emitTunnelOutput(line)
+    })
+
+    const localSocketPath = await tunnel.connect()
+
+    // Connect gRPC client through the new forwarded socket
+    const client = new GrpcDaemonClient(localSocketPath)
+    await client.connect()
+    this.client = client
+  }
+
+  disconnect(): void {
+    // Stop heartbeat monitor and any reconnect attempts
+    this.stopHeartbeat()
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
 
     // Stop all port forwards
     for (const pf of this.portForwards.values()) {
@@ -284,10 +411,8 @@ export class ConnectionManager {
     localConn.startHeartbeatMonitor(() => {
       const c = this.connections.get('local')
       if (c && c.status === 'connected') {
-        c.stopHeartbeat()
-        c.status = 'error'
         c.error = 'Connection lost (no heartbeat from daemon)'
-        this.emitStatus('local')
+        c.startReconnect(() => { this.emitStatus('local') })
       }
     })
   }
@@ -403,33 +528,27 @@ export class ConnectionManager {
       conn.startHeartbeatMonitor(() => {
         const c = this.connections.get(config.id)
         if (c && c.status === 'connected') {
-          c.stopHeartbeat()
-          c.status = 'error'
           c.error = 'Connection lost (no heartbeat from daemon)'
-          this.emitStatus(config.id)
+          c.startReconnect(() => { this.emitStatus(config.id) })
         }
       })
 
-      // Monitor for disconnection
+      // Monitor for disconnection — trigger reconnect for auto-recovery
       tunnel.onDisconnect((error) => {
         const c = this.connections.get(config.id)
-        if (c) {
-          c.stopHeartbeat()
+        if (c && (c.status === 'connected' || c.status === 'reconnecting')) {
           c.client?.disconnect()
           c.client = null
-          c.status = 'disconnected'
-          c.error = error
-          this.emitStatus(config.id)
+          c.error = error ?? 'SSH tunnel disconnected'
+          c.startReconnect(() => { this.emitStatus(config.id) })
         }
       })
 
       client.onDisconnect(() => {
         const c = this.connections.get(config.id)
         if (c && c.status === 'connected') {
-          c.stopHeartbeat()
-          c.status = 'error'
           c.error = 'gRPC connection lost'
-          this.emitStatus(config.id)
+          c.startReconnect(() => { this.emitStatus(config.id) })
         }
       })
 
@@ -476,6 +595,30 @@ export class ConnectionManager {
     conn.disconnect()
     this.emitStatus(connectionId)
     this.connections.delete(connectionId)
+  }
+
+  reconnect(connectionId: string): void {
+    const conn = this.connections.get(connectionId)
+    if (!conn) return
+    if (conn.status === 'error' || conn.status === 'disconnected') {
+      conn.error = conn.error ?? 'Manual reconnect'
+      conn.startReconnect(() => { this.emitStatus(connectionId) })
+    }
+  }
+
+  reconnectNow(connectionId: string): void {
+    const conn = this.connections.get(connectionId)
+    if (conn?.status === 'reconnecting') {
+      conn.reconnectNow(() => { this.emitStatus(connectionId) })
+    }
+  }
+
+  cancelReconnect(connectionId: string): void {
+    const conn = this.connections.get(connectionId)
+    if (conn?.status === 'reconnecting') {
+      conn.cancelReconnect()
+      this.emitStatus(connectionId)
+    }
   }
 
   addPortForward(config: PortForwardConfig): PortForwardInfo {

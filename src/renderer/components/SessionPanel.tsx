@@ -51,6 +51,7 @@ export default function SessionPanel({
   } = useKeybindingStore()
 
   const disconnectSession = useAppStore(s => s.disconnectSession)
+  const ssh = useAppStore(s => s.ssh)
   const filesystem = useAppStore(s => s.filesystem)
 
   const openContextMenu = useContextMenuStore((s) => s.open)
@@ -406,6 +407,7 @@ export default function SessionPanel({
     switch (status) {
       case 'connecting': return <Loader2 size={14} className="spinning" />
       case 'connected': return <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: '#4caf50' }} />
+      case 'reconnecting': return <Loader2 size={14} className="spinning" style={{ color: '#ff9800' }} />
       case 'disconnected': return <AlertCircle size={14} style={{ color: '#f44336' }} />
       case 'error': return <AlertCircle size={14} style={{ color: '#f44336' }} />
     }
@@ -418,8 +420,47 @@ export default function SessionPanel({
     switch (status) {
       case 'connecting': return <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{phaseLabel}</div>
       case 'connected': return null
-      case 'disconnected': return <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{(connection && 'error' in connection && connection.error) || 'Disconnected'}</div>
-      case 'error': return <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{connection && 'error' in connection && connection.error}</div>
+      case 'reconnecting': return null
+      case 'disconnected': return null
+      case 'error': return null
+    }
+  }
+
+  const isDegraded = connection != null && connection.status !== 'connected' && connection.status !== 'connecting'
+
+  const renderConnectionBanner = (): ReactNode => {
+    if (!connection) return null
+    const errorMsg = 'error' in connection ? connection.error : undefined
+    switch (connection.status) {
+      case 'reconnecting':
+        return (
+          <div className="connection-banner reconnecting">
+            <Loader2 size={12} className="spinning" />
+            <span>Reconnecting (attempt {String(connection.attempt)})...{errorMsg ? ` ${errorMsg}` : ''}</span>
+            <button onClick={() => { void ssh.reconnectNow(connection.id) }}>Retry now</button>
+            <button onClick={() => { void ssh.cancelReconnect(connection.id) }}>Stop</button>
+          </div>
+        )
+      case 'error':
+        return (
+          <div className="connection-banner error">
+            <AlertCircle size={12} />
+            <span>{errorMsg}</span>
+            <button onClick={() => { void ssh.reconnect(connection.id) }}>Reconnect</button>
+            <button onClick={() => { disconnectSession(sessionId) }}>Disconnect</button>
+          </div>
+        )
+      case 'disconnected':
+        return (
+          <div className="connection-banner disconnected">
+            <AlertCircle size={12} />
+            <span>{errorMsg ?? 'Disconnected'}</span>
+            <button onClick={() => { void ssh.reconnect(connection.id) }}>Reconnect</button>
+            <button onClick={() => { disconnectSession(sessionId) }}>Disconnect</button>
+          </div>
+        )
+      default:
+        return null
     }
   }
 
@@ -469,12 +510,15 @@ export default function SessionPanel({
 
       {!isSessionCollapsed && (
         <div className="tree-list">
+          {renderConnectionBanner()}
           {connection && renderStatusContent(connection.status) ? (
             renderStatusContent(connection.status)
           ) : rootWorkspaceIds.length === 0 ? (
             <div className="tree-empty">No workspaces. Click + to add one.</div>
           ) : (
-            rootWorkspaceIds.map((id) => renderWorkspace(id))
+            <div style={isDegraded ? { opacity: 0.6, pointerEvents: 'none' } : undefined}>
+              {rootWorkspaceIds.map((id) => renderWorkspace(id))}
+            </div>
           )}
         </div>
       )}

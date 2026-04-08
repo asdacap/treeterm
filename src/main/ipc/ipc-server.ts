@@ -64,6 +64,9 @@ const CHANNELS = {
   appGetWindowUuid: 'app:getWindowUuid',
   sshConnect: 'ssh:connect',
   sshDisconnect: 'ssh:disconnect',
+  sshReconnect: 'ssh:reconnect',
+  sshReconnectNow: 'ssh:reconnectNow',
+  sshCancelReconnect: 'ssh:cancelReconnect',
   sshListConnections: 'ssh:listConnections',
   sshSaveConnection: 'ssh:saveConnection',
   sshGetSavedConnections: 'ssh:getSavedConnections',
@@ -757,6 +760,36 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.sshDisconnect, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['sshDisconnect']['params']))
+    )
+  }
+
+  onSshReconnect(
+    handler: (
+      ...args: IpcRequests['sshReconnect']['params']
+    ) => IpcRequests['sshReconnect']['result'] | Promise<IpcRequests['sshReconnect']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshReconnect, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshReconnect']['params']))
+    )
+  }
+
+  onSshReconnectNow(
+    handler: (
+      ...args: IpcRequests['sshReconnectNow']['params']
+    ) => IpcRequests['sshReconnectNow']['result'] | Promise<IpcRequests['sshReconnectNow']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshReconnectNow, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshReconnectNow']['params']))
+    )
+  }
+
+  onSshCancelReconnect(
+    handler: (
+      ...args: IpcRequests['sshCancelReconnect']['params']
+    ) => IpcRequests['sshCancelReconnect']['result'] | Promise<IpcRequests['sshCancelReconnect']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshCancelReconnect, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshCancelReconnect']['params']))
     )
   }
 

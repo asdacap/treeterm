@@ -64,6 +64,9 @@ const CHANNELS = {
   appGetWindowUuid: 'app:getWindowUuid',
   sshConnect: 'ssh:connect',
   sshDisconnect: 'ssh:disconnect',
+  sshReconnect: 'ssh:reconnect',
+  sshReconnectNow: 'ssh:reconnectNow',
+  sshCancelReconnect: 'ssh:cancelReconnect',
   sshListConnections: 'ssh:listConnections',
   sshSaveConnection: 'ssh:saveConnection',
   sshGetSavedConnections: 'ssh:getSavedConnections',
@@ -424,6 +427,18 @@ export class IpcClient {
 
   sshDisconnect(...args: IpcRequests['sshDisconnect']['params']): Promise<IpcRequests['sshDisconnect']['result']> {
     return ipcRenderer.invoke(CHANNELS.sshDisconnect, ...args)
+  }
+
+  sshReconnect(...args: IpcRequests['sshReconnect']['params']): Promise<IpcRequests['sshReconnect']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshReconnect, ...args)
+  }
+
+  sshReconnectNow(...args: IpcRequests['sshReconnectNow']['params']): Promise<IpcRequests['sshReconnectNow']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshReconnectNow, ...args)
+  }
+
+  sshCancelReconnect(...args: IpcRequests['sshCancelReconnect']['params']): Promise<IpcRequests['sshCancelReconnect']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshCancelReconnect, ...args)
   }
 
   sshListConnections(...args: IpcRequests['sshListConnections']['params']): Promise<IpcRequests['sshListConnections']['result']> {
