@@ -243,10 +243,11 @@ describe('createCustomRunnerVariant', () => {
       const ref = variant.onWorkspaceLoad(tab, mockWorkspaceStore)
 
       expect(typeof ref.dispose).toBe('function')
+      expect(typeof ref.close).toBe('function')
     })
 
-    describe('dispose', () => {
-      it('kills PTY when tab has ptyId and removes activity state', () => {
+    describe('close', () => {
+      it('kills PTY when tab has ptyId', () => {
         const variant = createCustomRunnerVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
@@ -256,19 +257,35 @@ describe('createCustomRunnerVariant', () => {
         }
 
         const ref = variant.onWorkspaceLoad(tab, mockWorkspaceStore)
-        ref.dispose()
+        ref.close()
 
         expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-123')
-        expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
       })
 
-      it('does not kill PTY when ptyId is null but removes activity state', () => {
+      it('does not kill PTY when ptyId is null', () => {
         const variant = createCustomRunnerVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'customrunner-rider',
           title: 'Rider',
           state: { ptyId: null }
+        }
+
+        const ref = variant.onWorkspaceLoad(tab, mockWorkspaceStore)
+        ref.close()
+
+        expect(mockTerminalKill).not.toHaveBeenCalled()
+      })
+    })
+
+    describe('dispose', () => {
+      it('does not kill PTY but removes activity state', () => {
+        const variant = createCustomRunnerVariant(mockInstance, mockDeps)
+        const tab: Tab = {
+          id: 'tab-1',
+          applicationId: 'customrunner-rider',
+          title: 'Rider',
+          state: { ptyId: 'pty-123' }
         }
 
         const ref = variant.onWorkspaceLoad(tab, mockWorkspaceStore)

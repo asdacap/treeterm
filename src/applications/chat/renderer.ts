@@ -9,7 +9,7 @@ export const chatApplication: Application<ChatState> = {
   createInitialState: (): ChatState => ({
     messages: []
   }),
-  onWorkspaceLoad: () => ({ dispose: () => {} }),
+  onWorkspaceLoad: () => ({ close: () => {}, dispose: () => {} }),
   render: (props: ApplicationRenderProps) => createElement(Chat, props),
   canClose: true,
   showInNewTabMenu: true,

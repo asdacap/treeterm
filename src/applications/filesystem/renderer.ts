@@ -12,7 +12,7 @@ export const filesystemApplication: Application<FilesystemState> = {
     expandedDirs: []
   }),
 
-  onWorkspaceLoad: () => ({ dispose: () => {} }),
+  onWorkspaceLoad: () => ({ close: () => {}, dispose: () => {} }),
 
   render: ({ tab, workspace }) => {
     return createElement(FilesystemBrowser, {

@@ -75,7 +75,7 @@ function makeFakeApp(overrides: Partial<Application> = {}): Application {
     name: 'Terminal',
     icon: 'terminal',
     createInitialState: () => ({ ptyId: null }),
-    onWorkspaceLoad: () => ({ dispose: () => {} }),
+    onWorkspaceLoad: () => ({ close: () => {}, dispose: () => {} }),
     canClose: true,
     showInNewTabMenu: true,
     displayStyle: 'block',
@@ -318,8 +318,9 @@ describe('createWorkspaceStore', () => {
     })
 
     it('calls dispose on tab ref when removing', async () => {
+      const close = vi.fn<() => void>()
       const dispose = vi.fn<() => void>()
-      const app = makeFakeApp({ canClose: true, onWorkspaceLoad: () => ({ dispose }) })
+      const app = makeFakeApp({ canClose: true, onWorkspaceLoad: () => ({ close, dispose }) })
       const deps = makeHandleDeps({
         appRegistry: {
           get: vi.fn<(...args: any[]) => any>().mockReturnValue(app),

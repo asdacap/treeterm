@@ -121,7 +121,7 @@ function makeFakeApp(overrides: Partial<Application> = {}): Application {
     name: 'Terminal',
     icon: 'terminal',
     createInitialState: () => ({ ptyId: null }),
-    onWorkspaceLoad: () => ({ dispose: () => {} }),
+    onWorkspaceLoad: () => ({ close: () => {}, dispose: () => {} }),
     canClose: true,
     showInNewTabMenu: true,
     displayStyle: 'block',

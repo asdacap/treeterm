@@ -35,12 +35,14 @@ export function createCustomRunnerVariant(instance: CustomRunnerInstance, deps: 
         })
       }
       return {
-        dispose: () => {
+        close: () => {
           const current = workspaceStore.getState().workspace.appStates[tab.id]?.state as TerminalState | undefined
           const ptyId = current?.ptyId ?? state.ptyId
           if (ptyId) {
             deps.terminal.kill(current?.connectionId ?? ws.connectionId, ptyId)
           }
+        },
+        dispose: () => {
           useActivityStateStore.getState().removeTabState(tab.id)
         },
       }

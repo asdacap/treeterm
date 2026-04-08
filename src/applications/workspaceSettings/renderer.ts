@@ -15,7 +15,7 @@ export const workspaceSettingsApplication: Application = {
 
   createInitialState: () => ({}),
 
-  onWorkspaceLoad: () => ({ dispose: () => {} }),
+  onWorkspaceLoad: () => ({ close: () => {}, dispose: () => {} }),
 
   render: ({ tab, workspace }) =>
     createElement(WorkspaceSettingsConnected, { key: tab.id, tab, workspace }),

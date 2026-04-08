@@ -203,6 +203,7 @@ export function createWorkspaceStore(
     disposeTabResources: (tabId: string): void => {
       const ref = tabRefs.get(tabId)
       if (ref) {
+        ref.close()
         ref.dispose()
         tabRefs.delete(tabId)
       }

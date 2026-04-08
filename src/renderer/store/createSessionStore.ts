@@ -442,7 +442,10 @@ export function createSessionStore(
       handle.getState().disposeAllCachedTerminals()
       for (const tabId of Object.keys(workspace.appStates)) {
         const ref = handle.getState().getTabRef(tabId)
-        if (ref) ref.dispose()
+        if (ref) {
+          ref.close()
+          ref.dispose()
+        }
       }
     }
 

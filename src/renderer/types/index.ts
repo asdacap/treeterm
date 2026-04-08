@@ -71,6 +71,7 @@ export enum ActivityState {
 
 // Base interface for application runtime refs (non-serialized per-tab state)
 export interface AppRef {
+  close: () => void
   dispose: () => void
 }
 

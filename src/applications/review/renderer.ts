@@ -13,7 +13,7 @@ export const reviewApplication: Application<ReviewState> = {
     viewMode: 'committed' as const
   }),
 
-  onWorkspaceLoad: () => ({ dispose: () => {} }),
+  onWorkspaceLoad: () => ({ close: () => {}, dispose: () => {} }),
 
   render: ({ tab, workspace, isVisible }) => {
     if (!isReviewState(tab.state)) {

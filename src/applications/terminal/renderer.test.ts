@@ -135,7 +135,7 @@ describe('Terminal Renderer', () => {
     })
 
     describe('onWorkspaceLoad and dispose', () => {
-      it('dispose kills PTY when tab has ptyId and removes activity state', () => {
+      it('close kills PTY when tab has ptyId', () => {
         const app = createTerminalApplication(mockDeps)
         const tab: Tab = {
           id: 'tab-1',
@@ -145,19 +145,33 @@ describe('Terminal Renderer', () => {
         }
 
         const ref = app.onWorkspaceLoad(tab, mockWorkspaceStore)
-        ref.dispose()
+        ref.close()
 
         expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-123')
-        expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
       })
 
-      it('dispose does not kill PTY when tab has no ptyId but removes activity state', () => {
+      it('close does not kill PTY when tab has no ptyId', () => {
         const app = createTerminalApplication(mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal',
           title: 'Terminal',
           state: { ptyId: null }
+        }
+
+        const ref = app.onWorkspaceLoad(tab, mockWorkspaceStore)
+        ref.close()
+
+        expect(mockTerminalKill).not.toHaveBeenCalled()
+      })
+
+      it('dispose does not kill PTY but removes activity state', () => {
+        const app = createTerminalApplication(mockDeps)
+        const tab: Tab = {
+          id: 'tab-1',
+          applicationId: 'terminal',
+          title: 'Terminal',
+          state: { ptyId: 'pty-123' }
         }
 
         const ref = app.onWorkspaceLoad(tab, mockWorkspaceStore)
@@ -375,7 +389,7 @@ describe('Terminal Renderer', () => {
       expect(result).toHaveProperty('props')
     })
 
-    it('onWorkspaceLoad returns ref that disposes correctly', () => {
+    it('onWorkspaceLoad returns ref that closes and disposes correctly', () => {
       const app = createTerminalApplication(mockDeps)
       const tab: Tab = {
         id: 'tab-1',
@@ -385,6 +399,7 @@ describe('Terminal Renderer', () => {
       }
 
       const ref = app.onWorkspaceLoad(tab, mockWorkspaceStore)
+      ref.close()
       ref.dispose()
 
       expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-123')
@@ -437,8 +452,8 @@ describe('Terminal Renderer', () => {
       })
     })
 
-    describe('onWorkspaceLoad and dispose', () => {
-      it('dispose kills PTY when tab has ptyId', () => {
+    describe('onWorkspaceLoad and close/dispose', () => {
+      it('close kills PTY when tab has ptyId', () => {
         const variant = createTerminalVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
@@ -448,19 +463,33 @@ describe('Terminal Renderer', () => {
         }
 
         const ref = variant.onWorkspaceLoad(tab, mockWorkspaceStore)
-        ref.dispose()
+        ref.close()
 
         expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-456')
-        expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
       })
 
-      it('dispose does not kill PTY when state has no ptyId', () => {
+      it('close does not kill PTY when state has no ptyId', () => {
         const variant = createTerminalVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal-custom-term',
           title: 'Custom Terminal',
           state: { ptyId: null }
+        }
+
+        const ref = variant.onWorkspaceLoad(tab, mockWorkspaceStore)
+        ref.close()
+
+        expect(mockTerminalKill).not.toHaveBeenCalled()
+      })
+
+      it('dispose does not kill PTY but removes activity state', () => {
+        const variant = createTerminalVariant(mockInstance, mockDeps)
+        const tab: Tab = {
+          id: 'tab-1',
+          applicationId: 'terminal-custom-term',
+          title: 'Custom Terminal',
+          state: { ptyId: 'pty-456' }
         }
 
         const ref = variant.onWorkspaceLoad(tab, mockWorkspaceStore)

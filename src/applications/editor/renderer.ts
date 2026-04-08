@@ -17,7 +17,7 @@ export const editorApplication: Application<EditorState> = {
     viewMode: 'editor'
   }),
 
-  onWorkspaceLoad: () => ({ dispose: () => {} }),
+  onWorkspaceLoad: () => ({ close: () => {}, dispose: () => {} }),
 
   render: ({ tab, workspace }) => createElement(FileEditor, {
     key: tab.id,

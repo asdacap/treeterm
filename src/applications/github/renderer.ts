@@ -9,7 +9,7 @@ export const githubApplication: Application<GitHubAppState> = {
 
   createInitialState: () => ({}),
 
-  onWorkspaceLoad: () => ({ dispose: () => {} }),
+  onWorkspaceLoad: () => ({ close: () => {}, dispose: () => {} }),
 
   render: ({ tab, workspace, isVisible }) => {
     return createElement(GitHubBrowser, {

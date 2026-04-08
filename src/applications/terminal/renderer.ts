@@ -33,13 +33,15 @@ function makeTerminalOnWorkspaceLoad(
     }
     return {
       analyzer,
-      dispose: () => {
-        analyzer.getState().stop()
+      close: () => {
         const current = workspaceStore.getState().workspace.appStates[tab.id]?.state as TerminalState | undefined
         const ptyId = current?.ptyId ?? state.ptyId
         if (ptyId) {
           deps.terminal.kill(current?.connectionId ?? ws.connectionId, ptyId)
         }
+      },
+      dispose: () => {
+        analyzer.getState().stop()
         useActivityStateStore.getState().removeTabState(tab.id)
       },
     }

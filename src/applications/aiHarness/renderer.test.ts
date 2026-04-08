@@ -242,7 +242,7 @@ describe('AI Harness Renderer', () => {
         })
       })
 
-      it('dispose kills PTY when tab has ptyId', () => {
+      it('close kills PTY when tab has ptyId', () => {
         const app = createAiHarnessVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
@@ -260,12 +260,12 @@ describe('AI Harness Renderer', () => {
         }))
 
         const ref = app.onWorkspaceLoad(tab, store)
-        ref.dispose()
+        ref.close()
 
         expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-789')
       })
 
-      it('dispose does not kill PTY when tab has no ptyId', () => {
+      it('close does not kill PTY when tab has no ptyId', () => {
         const app = createAiHarnessVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
@@ -273,6 +273,29 @@ describe('AI Harness Renderer', () => {
           title: 'Claude',
           state: {
             ptyId: null,
+            sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] }
+          }
+        }
+
+        const store = createStore<WorkspaceStoreState>()(() => ({
+          ...mockWorkspaceStoreStateData,
+          initAnalyzer: vi.fn().mockReturnValue(mockAnalyzer),
+        }))
+
+        const ref = app.onWorkspaceLoad(tab, store)
+        ref.close()
+
+        expect(mockTerminalKill).not.toHaveBeenCalled()
+      })
+
+      it('dispose does not kill PTY', () => {
+        const app = createAiHarnessVariant(mockInstance, mockDeps)
+        const tab: Tab = {
+          id: 'tab-1',
+          applicationId: 'aiharness-claude',
+          title: 'Claude',
+          state: {
+            ptyId: 'pty-789',
             sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] }
           }
         }
