@@ -9,6 +9,7 @@ import { createRunActionsClient, RunActionsClient } from './runActions'
 import { ConnectionManager } from './connectionManager'
 import { windowManager } from './windowManager'
 import type { ExecInput, ExecOutput } from '../generated/treeterm'
+import { ConnectionStatus } from '../shared/types'
 import type { SSHConnectionConfig, PortForwardConfig } from '../shared/types'
 
 // Parse initial workspace and SSH target from command line
@@ -39,7 +40,7 @@ const execStreams = new Map<string, ReturnType<GrpcDaemonClient['execStream']>>(
 // Session watch unsubscribers per connectionId, so reconnect can re-establish watches
 const sessionWatchUnsubs = new Map<string, { windowId: number; uuid: string; unsubscribe: () => void }[]>()
 // Track previous connection status per connectionId for detecting reconnect transitions
-const previousConnectionStatuses = new Map<string, string>()
+const previousConnectionStatuses = new Map<string, ConnectionStatus>()
 
 // Helper: get the daemon client for a given connectionId
 function getClientForConnection(connId: string): GrpcDaemonClient {
@@ -1166,10 +1167,10 @@ server.onSshConnect(async (event, config, options) => {
 
   console.log(`[main:ssh] onSshConnect called for host=${config.host}, id=${config.id}, refreshDaemon=${String(options?.refreshDaemon ?? false)}, allowOutdatedDaemon=${String(options?.allowOutdatedDaemon ?? false)}`)
   const info = await connectionManager.connectRemote(config, { refreshDaemon: options?.refreshDaemon, allowOutdatedDaemon: options?.allowOutdatedDaemon })
-  console.log(`[main:ssh] connectRemote returned status=${info.status}${info.status === 'error' ? `, error=${info.error}` : ''}`)
+  console.log(`[main:ssh] connectRemote returned status=${info.status}${info.status === ConnectionStatus.Error ? `, error=${info.error}` : ''}`)
 
   // Switch the calling window to use the remote daemon
-  if (info.status === 'connected') {
+  if (info.status === ConnectionStatus.Connected) {
     const senderWindow = BrowserWindow.fromWebContents(event.sender)
     if (senderWindow) {
       // Load session from remote daemon and return it alongside connection info
@@ -1203,7 +1204,7 @@ server.onSshConnect(async (event, config, options) => {
           ? `Remote daemon is outdated. Retry with 'Refresh remote daemon' checked. (${errorMsg})`
           : `Connected but failed to load session: ${errorMsg}`
         return {
-          info: { ...info, status: 'error' as const, error: userError },
+          info: { ...info, status: ConnectionStatus.Error, error: userError },
           session: null
         }
       }
@@ -1531,7 +1532,7 @@ void app.whenReady().then(async () => {
     }
 
     // On reconnect success: re-establish session watch and notify renderer
-    if (info.status === 'connected' && prevStatus === 'reconnecting') {
+    if (info.status === ConnectionStatus.Connected && prevStatus === ConnectionStatus.Reconnecting) {
       console.log(`[main] connection ${info.id} reconnected, re-establishing session watches`)
       try {
         if (!connectionManager) throw new Error('ConnectionManager not initialized')
@@ -1559,7 +1560,7 @@ void app.whenReady().then(async () => {
     if (parsed) {
       console.log('[main] Auto-connecting SSH:', initialSSHTarget)
       void connectionManager.connectRemote(parsed).then(async (info) => {
-        if (info.status === 'connected') {
+        if (info.status === ConnectionStatus.Connected) {
           console.log('[main] SSH connected:', info.id)
           if (mainWindow) {
             // Load session from remote daemon and re-initialize the renderer
@@ -1588,7 +1589,7 @@ void app.whenReady().then(async () => {
             }
           }
         } else {
-          console.error('[main] SSH connection failed:', info.status === 'error' ? info.error : `status=${info.status}`)
+          console.error('[main] SSH connection failed:', info.status === ConnectionStatus.Error ? info.error : `status=${info.status}`)
         }
       }).catch((error: unknown) => {
         console.error('[main] SSH connection error:', error)

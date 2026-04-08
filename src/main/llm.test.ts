@@ -34,12 +34,13 @@ vi.mock('openai', () => {
 
 import { APIError } from 'openai'
 import { formatLlmError, startChatStream, completeChatCall, cancelChatStream, parseLlmJson } from './llm'
+import { ReasoningEffort } from '../shared/types'
 
 const mockSettings = {
   baseUrl: 'https://api.openai.com/v1',
   apiKey: 'test-key',
   model: 'gpt-4',
-  reasoning: 'off' as const,
+  reasoning: ReasoningEffort.Off,
 }
 
 function makeMockSender() {
@@ -135,7 +136,7 @@ describe('startChatStream', () => {
     })
 
     const sender = makeMockSender()
-    await startChatStream('req-5', [], { ...mockSettings, reasoning: 'medium' }, sender)
+    await startChatStream('req-5', [], { ...mockSettings, reasoning: ReasoningEffort.Medium }, sender)
 
     expect(mockCreate).toHaveBeenCalledWith(
       expect.objectContaining({ reasoning_effort: 'medium' }),
@@ -180,7 +181,7 @@ describe('completeChatCall', () => {
   it('passes reasoning_effort when reasoning enabled', async () => {
     mockCreate.mockResolvedValue({ choices: [] })
 
-    await completeChatCall([], { ...mockSettings, reasoning: 'high' })
+    await completeChatCall([], { ...mockSettings, reasoning: ReasoningEffort.High })
     expect(mockCreate).toHaveBeenCalledWith(
       expect.objectContaining({ reasoning_effort: 'high', stream: false })
     )

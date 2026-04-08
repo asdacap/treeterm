@@ -15,7 +15,12 @@ interface CreateChildDialogProps {
   initialMode?: TabMode
 }
 
-type TabMode = 'create' | 'existing' | 'branch' | 'remote'
+export enum TabMode {
+  Create = 'create',
+  Existing = 'existing',
+  Branch = 'branch',
+  Remote = 'remote',
+}
 
 export default function CreateChildDialog({
   parentWorkspace,
@@ -29,7 +34,7 @@ export default function CreateChildDialog({
 }: CreateChildDialogProps) {
   const { workspace: parentWsData } = useStore(parentWorkspace)
   const git = useGitApi(parentWorkspace)
-  const [mode, setMode] = useState<TabMode>(initialMode ?? 'create')
+  const [mode, setMode] = useState(initialMode ?? TabMode.Create)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [isProcessing, setIsProcessing] = useState(false)
@@ -166,13 +171,13 @@ export default function CreateChildDialog({
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !isProcessing) {
-      if (mode === 'create') {
+      if (mode === TabMode.Create) {
         handleCreateSubmit()
-      } else if (mode === 'existing' && selectedWorktree) {
+      } else if (mode === TabMode.Existing && selectedWorktree) {
         void handleAdoptSubmit()
-      } else if (mode === 'branch' && selectedBranch) {
+      } else if (mode === TabMode.Branch && selectedBranch) {
         handleBranchSubmit()
-      } else if (mode === 'remote' && selectedRemoteBranch) {
+      } else if (mode === TabMode.Remote && selectedRemoteBranch) {
         handleRemoteSubmit()
       }
     }
@@ -194,26 +199,26 @@ export default function CreateChildDialog({
         {/* Tab Switcher */}
         <div className="create-child-tabs">
           <button
-            className={`create-child-tab ${mode === 'create' ? 'active' : ''}`}
-            onClick={() => { setMode('create'); setError(null) }}
+            className={`create-child-tab ${mode === TabMode.Create ? 'active' : ''}`}
+            onClick={() => { setMode(TabMode.Create); setError(null) }}
           >
             Create New
           </button>
           <button
-            className={`create-child-tab ${mode === 'existing' ? 'active' : ''}`}
-            onClick={() => { setMode('existing'); setError(null) }}
+            className={`create-child-tab ${mode === TabMode.Existing ? 'active' : ''}`}
+            onClick={() => { setMode(TabMode.Existing); setError(null) }}
           >
             Open Existing
           </button>
           <button
-            className={`create-child-tab ${mode === 'branch' ? 'active' : ''}`}
-            onClick={() => { setMode('branch'); setError(null); setSelectedBranch(null) }}
+            className={`create-child-tab ${mode === TabMode.Branch ? 'active' : ''}`}
+            onClick={() => { setMode(TabMode.Branch); setError(null); setSelectedBranch(null) }}
           >
             Open Branch
           </button>
           <button
-            className={`create-child-tab ${mode === 'remote' ? 'active' : ''}`}
-            onClick={() => { setMode('remote'); setError(null); setSelectedRemoteBranch(null) }}
+            className={`create-child-tab ${mode === TabMode.Remote ? 'active' : ''}`}
+            onClick={() => { setMode(TabMode.Remote); setError(null); setSelectedRemoteBranch(null) }}
           >
             Open Remote
           </button>
@@ -225,7 +230,7 @@ export default function CreateChildDialog({
             <span className="create-child-value">{parentWsData.name}</span>
           </div>
 
-          {mode === 'create' ? (
+          {mode === TabMode.Create ? (
             /* Create New Tab */
             <>
               <div className="create-child-dialog-field">
@@ -244,7 +249,7 @@ export default function CreateChildDialog({
                 )}
               </div>
             </>
-          ) : mode === 'existing' ? (
+          ) : mode === TabMode.Existing ? (
             /* Open Existing Tab */
             <ExistingWorktreesLoader
               key={parentWsData.gitRootPath}
@@ -253,7 +258,7 @@ export default function CreateChildDialog({
               selectedWorktree={selectedWorktree}
               onSelect={setSelectedWorktree}
             />
-          ) : mode === 'branch' ? (
+          ) : mode === TabMode.Branch ? (
             /* Open Branch Tab */
             <LocalBranchesLoader
               key={parentWsData.gitRootPath}
@@ -290,7 +295,7 @@ export default function CreateChildDialog({
           </div>
 
           {/* Detached checkbox - shown for create, branch, and remote tabs */}
-          {mode !== 'existing' && (
+          {mode !== TabMode.Existing && (
             <div className="create-child-detached-checkbox">
               <label>
                 <input
@@ -372,7 +377,7 @@ export default function CreateChildDialog({
           <button className="dialog-btn cancel" onClick={onCancel} disabled={isProcessing}>
             Cancel
           </button>
-          {mode === 'create' ? (
+          {mode === TabMode.Create ? (
             <button
               className="dialog-btn create"
               onClick={handleCreateSubmit}
@@ -380,7 +385,7 @@ export default function CreateChildDialog({
             >
               {isProcessing ? 'Creating... Please wait' : 'Create'}
             </button>
-          ) : mode === 'existing' ? (
+          ) : mode === TabMode.Existing ? (
             <button
               className="dialog-btn create"
               onClick={() => { void handleAdoptSubmit(); }}
@@ -388,7 +393,7 @@ export default function CreateChildDialog({
             >
               {isProcessing ? 'Opening... Please wait' : 'Open'}
             </button>
-          ) : mode === 'branch' ? (
+          ) : mode === TabMode.Branch ? (
             <button
               className="dialog-btn create"
               onClick={handleBranchSubmit}

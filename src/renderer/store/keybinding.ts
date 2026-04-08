@@ -5,7 +5,11 @@ import { useSettingsStore } from './settings'
 import { convertDirectKeybinding } from '../utils/keybindingConverter'
 import type { Settings } from '../types'
 
-export type PrefixModeState = 'idle' | 'active' | 'workspace_focus'
+export enum PrefixModeState {
+  Idle = 'idle',
+  Active = 'active',
+  WorkspaceFocus = 'workspace_focus',
+}
 
 export interface KeybindingHandlers {
   newTab?: () => void
@@ -66,7 +70,7 @@ let timeoutId: number | null = null
 let cleanupListener: (() => void) | null = null
 
 export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
-  prefixState: 'idle',
+  prefixState: PrefixModeState.Idle,
   activatedAt: null,
   focusedWorkspaceIndex: 0,
   workspaceIds: [],
@@ -95,7 +99,7 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
         if (matchesKeybinding(e, modifiers, key)) {
           e.preventDefault()
           e.stopPropagation()
-          if (prefixState === 'idle') {
+          if (prefixState === PrefixModeState.Idle) {
             get().activate()
           } else {
             get().deactivate()
@@ -105,7 +109,7 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
       }
 
       // If in prefix mode, check for action keys
-      if (prefixState === 'active') {
+      if (prefixState === PrefixModeState.Active) {
         const actionKey = e.key.toLowerCase()
 
         if (actionKey === 'escape') {
@@ -146,7 +150,7 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
       }
 
       // If in workspace focus mode, handle navigation
-      if (prefixState === 'workspace_focus') {
+      if (prefixState === PrefixModeState.WorkspaceFocus) {
         const actionKey = e.key.toLowerCase()
 
         if (actionKey === 'escape') {
@@ -221,7 +225,7 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
     }, timeout)
 
     set({
-      prefixState: 'active',
+      prefixState: PrefixModeState.Active,
       activatedAt: Date.now()
     })
   },
@@ -231,7 +235,7 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
     timeoutId = null
 
     set({
-      prefixState: 'idle',
+      prefixState: PrefixModeState.Idle,
       activatedAt: null,
       focusedWorkspaceIndex: 0,
       workspaceIds: []
@@ -247,7 +251,7 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
     }, timeout)
 
     set({
-      prefixState: 'workspace_focus',
+      prefixState: PrefixModeState.WorkspaceFocus,
       activatedAt: Date.now(),
       workspaceIds,
       focusedWorkspaceIndex: currentIndex

@@ -17,7 +17,11 @@ interface ReviewBrowserProps {
   isVisible: boolean
 }
 
-type ViewMode = 'committed' | 'uncommitted' | 'commits'
+enum ViewMode {
+  Committed = 'committed',
+  Uncommitted = 'uncommitted',
+  Commits = 'commits',
+}
 
 export default function ReviewBrowser({
   workspace,
@@ -51,7 +55,7 @@ export default function ReviewBrowser({
 
   // Uncommitted changes state
   const [uncommitted, setUncommitted] = useState<UncommittedChanges | null>(null)
-  const [viewMode, setViewMode] = useState<ViewMode>(reviewState?.viewMode ?? (hasParent ? 'committed' : 'uncommitted'))
+  const [viewMode, setViewMode] = useState((reviewState?.viewMode as ViewMode | undefined) ?? (hasParent ? ViewMode.Committed : ViewMode.Uncommitted))
   const [selectedUncommittedFile, setSelectedUncommittedFile] = useState<UncommittedFile | null>(null)
 
   // Staging state
@@ -190,7 +194,7 @@ export default function ReviewBrowser({
     }
 
     // If commits tab was persisted, load commits on mount
-    if (initialViewMode === 'commits') {
+    if (initialViewMode === ViewMode.Commits) {
       void h.loadCommits()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- initialViewMode is intentionally excluded: it captures the mount-time value and should not re-trigger the effect
@@ -200,7 +204,7 @@ export default function ReviewBrowser({
   useEffect(() => {
     if (!pendingRestoreRef.current) return
 
-    if (viewMode === 'committed' && diff && reviewState?.selectedFilePath) {
+    if (viewMode === ViewMode.Committed && diff && reviewState?.selectedFilePath) {
       const fileExists = diff.files.some(f => f.path === reviewState.selectedFilePath)
       if (fileExists) {
         pendingRestoreRef.current = false
@@ -212,7 +216,7 @@ export default function ReviewBrowser({
   useEffect(() => {
     if (!pendingRestoreRef.current) return
 
-    if (viewMode === 'uncommitted' && uncommitted && reviewState?.selectedUncommittedFilePath) {
+    if (viewMode === ViewMode.Uncommitted && uncommitted && reviewState?.selectedUncommittedFilePath) {
       const file = uncommitted.files.find(f => f.path === reviewState.selectedUncommittedFilePath)
       if (file) {
         pendingRestoreRef.current = false
@@ -620,7 +624,7 @@ export default function ReviewBrowser({
   const hasCommittedChanges = diff && diff.files.length > 0
   const hasConflicts = conflictInfo?.hasConflicts || false
 
-  const fileList = viewMode === 'committed'
+  const fileList = viewMode === ViewMode.Committed
     ? getSortedFilePaths(diff?.files || [])
     : getSortedFilePaths([...stagedFiles, ...unstagedFiles])
 
@@ -634,7 +638,7 @@ export default function ReviewBrowser({
     if (currentFileIndex > 0) {
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- currentFileIndex > 0 guarantees valid index
       const prevFilePath = fileList[currentFileIndex - 1]!
-      if (viewMode === 'committed') {
+      if (viewMode === ViewMode.Committed) {
         void loadFileDiff(prevFilePath)
       } else {
         const prevFile = [...stagedFiles, ...unstagedFiles].find(f => f.path === prevFilePath)
@@ -647,7 +651,7 @@ export default function ReviewBrowser({
     if (currentFileIndex < fileList.length - 1) {
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- currentFileIndex < length - 1 guarantees valid index
       const nextFilePath = fileList[currentFileIndex + 1]!
-      if (viewMode === 'committed') {
+      if (viewMode === ViewMode.Committed) {
         void loadFileDiff(nextFilePath)
       } else {
         const nextFile = [...stagedFiles, ...unstagedFiles].find(f => f.path === nextFilePath)
@@ -874,8 +878,8 @@ export default function ReviewBrowser({
       <div className="diff-tabs">
         {hasParent && (
           <button
-            className={`diff-tab ${viewMode === 'committed' ? 'active' : ''}`}
-            onClick={() => { setViewMode('committed'); persistViewState({ viewMode: 'committed' }) }}
+            className={`diff-tab ${viewMode === ViewMode.Committed ? 'active' : ''}`}
+            onClick={() => { setViewMode(ViewMode.Committed); persistViewState({ viewMode: ViewMode.Committed }) }}
           >
             Committed Changes
             {hasCommittedChanges && (
@@ -884,8 +888,8 @@ export default function ReviewBrowser({
           </button>
         )}
         <button
-          className={`diff-tab ${viewMode === 'uncommitted' ? 'active' : ''}`}
-          onClick={() => { setViewMode('uncommitted'); persistViewState({ viewMode: 'uncommitted' }) }}
+          className={`diff-tab ${viewMode === ViewMode.Uncommitted ? 'active' : ''}`}
+          onClick={() => { setViewMode(ViewMode.Uncommitted); persistViewState({ viewMode: ViewMode.Uncommitted }) }}
         >
           Uncommitted
           {hasUncommitted && (
@@ -893,8 +897,8 @@ export default function ReviewBrowser({
           )}
         </button>
         <button
-          className={`diff-tab ${viewMode === 'commits' ? 'active' : ''}`}
-          onClick={() => { setViewMode('commits'); persistViewState({ viewMode: 'commits' }); if (commits.length === 0) void loadCommits(); }}
+          className={`diff-tab ${viewMode === ViewMode.Commits ? 'active' : ''}`}
+          onClick={() => { setViewMode(ViewMode.Commits); persistViewState({ viewMode: ViewMode.Commits }); if (commits.length === 0) void loadCommits(); }}
         >
           Commits
           {commits.length > 0 && (
@@ -909,7 +913,7 @@ export default function ReviewBrowser({
         <div className="review-error">{error}</div>
       ) : (
         <>
-          {viewMode === 'commits' ? (
+          {viewMode === ViewMode.Commits ? (
             <div className="commits-view">
               <div className="commits-pane">
                 {commitsLoading && commits.length === 0 ? (
@@ -989,7 +993,7 @@ export default function ReviewBrowser({
                 </div>
               )}
             </div>
-          ) : viewMode === 'committed' ? (
+          ) : viewMode === ViewMode.Committed ? (
             !hasCommittedChanges ? (
               <div className="diff-empty">No committed changes to show</div>
             ) : (

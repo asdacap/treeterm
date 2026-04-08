@@ -14,7 +14,7 @@ export default function TerminalAnalyzerDebugger({ tab }: ApplicationRenderProps
   const [systemPrompt, setSystemPrompt] = useState(settings.terminalAnalyzer.systemPrompt)
   const [bufferText, setBufferText] = useState(debuggerState?.bufferText ?? '')
   const [model, setModel] = useState(settings.terminalAnalyzer.model)
-  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(settings.terminalAnalyzer.reasoningEffort)
+  const [reasoningEffort, setReasoningEffort] = useState(settings.terminalAnalyzer.reasoningEffort)
   const [result, setResult] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)

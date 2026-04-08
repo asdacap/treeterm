@@ -6,6 +6,7 @@ import type { WorkspaceStore, WorkspaceStoreDeps } from './createWorkspaceStore'
 import { createTtyStore } from './createTtyStore'
 import type { Tty, TtyTerminalDeps } from './createTtyStore'
 import type { PtyEvent } from '../../shared/ipc-types'
+import { ConnectionStatus } from '../../shared/types'
 import type {
   Workspace, Session, AppState, GitInfo,
   ConnectionInfo, ActivityState,
@@ -153,7 +154,7 @@ export function createSessionStore(
       const { workspaces, connection } = store.getState()
       console.log('[session] syncSessionToDaemon called - workspaces:', workspaces.size, 'isRestoring:', isRestoring)
 
-      if (connection && connection.status !== 'connected') {
+      if (connection && connection.status !== ConnectionStatus.Connected) {
         console.log('[session] connection not yet established, skipping sync')
         return
       }

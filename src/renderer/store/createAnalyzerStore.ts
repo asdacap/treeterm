@@ -1,7 +1,8 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
 import { Terminal } from '@xterm/xterm'
-import type { ActivityState, LlmApi, Settings, PtyEvent } from '../types'
+import { ActivityState } from '../types'
+import type { LlmApi, Settings, PtyEvent } from '../types'
 import type { Tty } from './createTtyStore'
 
 export interface AnalyzerDeps {
@@ -142,7 +143,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
     if (!settings.llm.apiKey || !settings.terminalAnalyzer.model) {
       store.setState({ analyzing: false })
-      updateAiState('idle')
+      updateAiState(ActivityState.Idle)
       return
     }
 
@@ -213,7 +214,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         console.error('[terminal-analyzer] error:', result.error)
         inFlightBuffer = null
         store.setState({ analyzing: false })
-        updateAiState('error')
+        updateAiState(ActivityState.Error)
         history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), error: result.error, systemPrompt, durationMs })
         if (history.length > MAX_HISTORY) history.shift()
       } else {
@@ -233,7 +234,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       inFlightBuffer = null
       console.error('[terminal-analyzer] LLM call failed:', err)
       store.setState({ analyzing: false })
-      updateAiState('error')
+      updateAiState(ActivityState.Error)
       history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: '', error: err instanceof Error ? err.message : String(err) })
       if (history.length > MAX_HISTORY) history.shift()
       if (pendingAnalyze) {
@@ -251,7 +252,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       if (dataVersion === lastVersion) return
 
       lastVersion = dataVersion
-      updateAiState('working')
+      updateAiState(ActivityState.Working)
 
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(() => { void analyze(); }, 500)
@@ -339,14 +340,14 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
   function handleAutoApprove(): void {
     const state = store.getState()
-    if (state.aiState !== 'safe_permission_requested' || !state.autoApprove) return
+    if (state.aiState !== ActivityState.SafePermissionRequested || !state.autoApprove) return
     if (!ownTty) return
     ownTty.getState().write('\r')
   }
 
   const store = createStore<AnalyzerState>()((set) => ({
     tabId,
-    aiState: 'idle',
+    aiState: ActivityState.Idle,
     analyzing: false,
     reason: '',
     autoApprove: false,
@@ -419,10 +420,10 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   }))
 
   // Subscribe to own state changes for auto-approve and git refresh
-  let prevAiState: ActivityState = 'idle'
+  let prevAiState: ActivityState = ActivityState.Idle
   store.subscribe((state) => {
     if (state.aiState !== prevAiState) {
-      const wasWorking = prevAiState === 'working'
+      const wasWorking = prevAiState === ActivityState.Working
       prevAiState = state.aiState
       handleAutoApprove()
       if (wasWorking) {

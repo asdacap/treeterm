@@ -8,13 +8,13 @@ import type { StoreApi } from 'zustand'
 import type { SessionState, WorkspaceEntry } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import { useNavigationStore } from '../store/navigation'
-import { useKeybindingStore } from '../store/keybinding'
+import { useKeybindingStore, PrefixModeState } from '../store/keybinding'
 import { useSessionNamesStore } from '../store/sessionNames'
-import CreateChildDialog from './CreateChildDialog'
+import CreateChildDialog, { TabMode } from './CreateChildDialog'
 import OpenWorkspaceDialog from './OpenWorkspaceDialog'
 import UpstreamWarningDialog from './UpstreamWarningDialog'
 import type { ReviewState, WorktreeSettings, Workspace } from '../types'
-import type { ConnectionStatus } from '../../shared/types'
+import { ConnectionStatus } from '../../shared/types'
 
 // Import WorkspaceIcon from TreePane
 import { WorkspaceIcon } from './TreePane'
@@ -374,7 +374,7 @@ export default function SessionPanel({
     if (!entry) return null
 
     const children = getChildren(id)
-    const isFocused = prefixState === 'workspace_focus' && focusedWorkspaceIds[focusedWorkspaceIndex] === id
+    const isFocused = prefixState === PrefixModeState.WorkspaceFocus && focusedWorkspaceIds[focusedWorkspaceIndex] === id
 
     return (
       <WorkspaceTreeItem
@@ -405,34 +405,34 @@ export default function SessionPanel({
 
   const renderStatusIcon = (status: ConnectionStatus): ReactNode => {
     switch (status) {
-      case 'connecting': return <Loader2 size={14} className="spinning" />
-      case 'connected': return <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: '#4caf50' }} />
-      case 'reconnecting': return <Loader2 size={14} className="spinning" style={{ color: '#ff9800' }} />
-      case 'disconnected': return <AlertCircle size={14} style={{ color: '#f44336' }} />
-      case 'error': return <AlertCircle size={14} style={{ color: '#f44336' }} />
+      case ConnectionStatus.Connecting: return <Loader2 size={14} className="spinning" />
+      case ConnectionStatus.Connected: return <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: '#4caf50' }} />
+      case ConnectionStatus.Reconnecting: return <Loader2 size={14} className="spinning" style={{ color: '#ff9800' }} />
+      case ConnectionStatus.Disconnected: return <AlertCircle size={14} style={{ color: '#f44336' }} />
+      case ConnectionStatus.Error: return <AlertCircle size={14} style={{ color: '#f44336' }} />
     }
   }
 
   const renderStatusContent = (status: ConnectionStatus): ReactNode => {
-    const phaseLabel = connection?.status === 'connecting' && 'connectPhase' in connection
+    const phaseLabel = connection?.status === ConnectionStatus.Connecting && 'connectPhase' in connection
       ? { bootstrap: 'Bootstrapping...', tunnel: 'Establishing tunnel...', daemon: 'Connecting to daemon...' }[connection.connectPhase ?? 'bootstrap']
       : 'Connecting...'
     switch (status) {
-      case 'connecting': return <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{phaseLabel}</div>
-      case 'connected': return null
-      case 'reconnecting': return null
-      case 'disconnected': return null
-      case 'error': return null
+      case ConnectionStatus.Connecting: return <div className="tree-empty" style={{ fontSize: 12, padding: '4px 8px' }}>{phaseLabel}</div>
+      case ConnectionStatus.Connected: return null
+      case ConnectionStatus.Reconnecting: return null
+      case ConnectionStatus.Disconnected: return null
+      case ConnectionStatus.Error: return null
     }
   }
 
-  const isDegraded = connection != null && connection.status !== 'connected' && connection.status !== 'connecting'
+  const isDegraded = connection != null && connection.status !== ConnectionStatus.Connected && connection.status !== ConnectionStatus.Connecting
 
   const renderConnectionBanner = (): ReactNode => {
     if (!connection) return null
     const errorMsg = 'error' in connection ? connection.error : undefined
     switch (connection.status) {
-      case 'reconnecting':
+      case ConnectionStatus.Reconnecting:
         return (
           <div className="connection-banner reconnecting">
             <Loader2 size={12} className="spinning" />
@@ -441,7 +441,7 @@ export default function SessionPanel({
             <button onClick={() => { void ssh.cancelReconnect(connection.id) }}>Stop</button>
           </div>
         )
-      case 'error':
+      case ConnectionStatus.Error:
         return (
           <div className="connection-banner error">
             <AlertCircle size={12} />
@@ -450,7 +450,7 @@ export default function SessionPanel({
             <button onClick={() => { disconnectSession(sessionId) }}>Disconnect</button>
           </div>
         )
-      case 'disconnected':
+      case ConnectionStatus.Disconnected:
         return (
           <div className="connection-banner disconnected">
             <AlertCircle size={12} />
@@ -497,7 +497,7 @@ export default function SessionPanel({
             {displayName || sessionId}
           </span>
         )}
-        {(!connection || connection.status === 'connected') && (
+        {(!connection || connection.status === ConnectionStatus.Connected) && (
           <button
             className="add-button"
             onClick={(e) => { e.stopPropagation(); handleAddWorkspace() }}
@@ -550,7 +550,7 @@ export default function SessionPanel({
           onCreateFromRemote={handleCreateFromRemoteSubmit}
           onCancel={() => { setCreateChildDialogParentId(null); }}
           openWorktreePaths={openWorktreePaths}
-          initialMode="branch"
+          initialMode={TabMode.Branch}
         />
       )}
 

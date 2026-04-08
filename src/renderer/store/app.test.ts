@@ -69,6 +69,7 @@ import { useNavigationStore } from './navigation'
 import { useSessionNamesStore } from './sessionNames'
 import type { SessionState, SessionDeps } from './createSessionStore'
 import type { Workspace } from '../types'
+import { ConnectionStatus } from '../../shared/types'
 
 // Mock createSessionStore and its utilities
 vi.mock('./createSessionStore', () => ({
@@ -133,7 +134,7 @@ const mockDeps = {
   runActions: { detect: vi.fn<(...args: any[]) => Promise<any[]>>().mockResolvedValue([]), run: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue(null) },
   sandbox: {},
   ssh: {
-    connect: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ id: 'test', target: { type: 'remote' }, status: 'connected' }),
+    connect: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ id: 'test', target: { type: 'remote' }, status: ConnectionStatus.Connected }),
     disconnect: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
     listConnections: vi.fn<(...args: any[]) => Promise<any[]>>().mockResolvedValue([]),
     saveConnection: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
@@ -620,7 +621,7 @@ describe('useAppStore', () => {
       }
 
       // Pre-populate session store so onSync finds it (local connection)
-      const localConn = { id: 'local', target: { type: 'local' }, status: 'connected' }
+      const localConn = { id: 'local', target: { type: 'local' }, status: ConnectionStatus.Connected }
       const mockStore = {
         getState: vi.fn<() => any>().mockReturnValue({ connection: localConn, handleExternalUpdate: mockHandleExternalUpdate }),
         setState: vi.fn<(...args: any[]) => void>(),
@@ -646,7 +647,7 @@ describe('useAppStore', () => {
       }
 
       // Pre-populate session store so onSync finds it (local connection)
-      const localConn = { id: 'local', target: { type: 'local' }, status: 'connected' }
+      const localConn = { id: 'local', target: { type: 'local' }, status: ConnectionStatus.Connected }
       const mockStore = {
         getState: vi.fn<() => any>().mockReturnValue({ connection: localConn, handleExternalUpdate: mockHandleExternalUpdate }),
         setState: vi.fn<(...args: any[]) => void>(),
@@ -879,7 +880,7 @@ describe('useAppStore', () => {
         const connection = {
           id: 'conn-1',
           target: { type: 'remote' as const, config: { id: 'conn-1', host: 'myserver.com', user: 'alice', port: 22, portForwards: [] } },
-          status: 'connected' as const
+          status: ConnectionStatus.Connected as const
         }
         const session = { id: 'ssh-session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }
         await useAppStore.getState().addRemoteSession(session, connection)
@@ -890,7 +891,7 @@ describe('useAppStore', () => {
         const connection = {
           id: 'conn-2',
           target: { type: 'remote' as const, config: { id: 'conn-2', host: 'myserver.com', user: 'alice', port: 22, label: 'Production', portForwards: [] } },
-          status: 'connected' as const
+          status: ConnectionStatus.Connected as const
         }
         const session = { id: 'ssh-session-2', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }
         await useAppStore.getState().addRemoteSession(session, connection)
@@ -902,7 +903,7 @@ describe('useAppStore', () => {
         const connection = {
           id: 'conn-3',
           target: { type: 'remote' as const, config: { id: 'conn-3', host: 'myserver.com', user: 'alice', port: 22, portForwards: [] } },
-          status: 'connected' as const
+          status: ConnectionStatus.Connected as const
         }
         const session = { id: 'ssh-session-3', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }
         await useAppStore.getState().addRemoteSession(session, connection)

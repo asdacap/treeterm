@@ -59,14 +59,15 @@ export enum ScrollPosition {
 }
 
 // Activity state for applications that can report their state
-export type ActivityState =
-  | 'idle'
-  | 'working'
-  | 'user_input_required'
-  | 'permission_request'
-  | 'safe_permission_requested'
-  | 'completed'
-  | 'error'
+export enum ActivityState {
+  Idle = 'idle',
+  Working = 'working',
+  UserInputRequired = 'user_input_required',
+  PermissionRequest = 'permission_request',
+  SafePermissionRequested = 'safe_permission_requested',
+  Completed = 'completed',
+  Error = 'error',
+}
 
 // Base interface for application runtime refs (non-serialized per-tab state)
 export interface AppRef {
@@ -541,7 +542,19 @@ export interface SessionApi {
   onSync: (callback: (connectionId: string, session: Session) => void) => () => void
 }
 
-export type Platform = 'darwin' | 'linux' | 'win32' | 'aix' | 'android' | 'freebsd' | 'haiku' | 'openbsd' | 'sunos' | 'cygwin' | 'netbsd'
+export enum Platform {
+  Darwin = 'darwin',
+  Linux = 'linux',
+  Win32 = 'win32',
+  Aix = 'aix',
+  Android = 'android',
+  Freebsd = 'freebsd',
+  Haiku = 'haiku',
+  Openbsd = 'openbsd',
+  Sunos = 'sunos',
+  Cygwin = 'cygwin',
+  Netbsd = 'netbsd',
+}
 
 export type PreloadApi = {
   platform: Platform

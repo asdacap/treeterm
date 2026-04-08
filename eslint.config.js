@@ -1,6 +1,7 @@
 import tseslint from 'typescript-eslint'
 import reactPlugin from 'eslint-plugin-react'
 import reactHooks from 'eslint-plugin-react-hooks'
+import noStringLiteralUnion from './eslint-rules/no-string-literal-union.js'
 
 export default tseslint.config(
   {
@@ -17,8 +18,12 @@ export default tseslint.config(
         project: ['./tsconfig.node.json', './tsconfig.web.json']
       }
     },
+    plugins: {
+      custom: { rules: { 'no-string-literal-union': noStringLiteralUnion } }
+    },
     rules: {
-      '@typescript-eslint/no-explicit-any': 'error'
+      '@typescript-eslint/no-explicit-any': 'error',
+      'custom/no-string-literal-union': 'error'
     }
   },
   {

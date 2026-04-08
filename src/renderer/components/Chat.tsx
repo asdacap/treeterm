@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useStore } from 'zustand'
-import type { ApplicationRenderProps, ChatState, ChatMessage, ReasoningEffort } from '../types'
+import type { ApplicationRenderProps, ChatState, ChatMessage } from '../types'
+import { ReasoningEffort } from '../../shared/types'
 import { useSettingsStore } from '../store/settings'
 import { useAppStore } from '../store/app'
 
@@ -14,7 +15,7 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [reasoning, setReasoning] = useState<ReasoningEffort>('off')
+  const [reasoning, setReasoning] = useState(ReasoningEffort.Off)
   const activeRequestId = React.useRef<string | null>(null)
   const workspaceStore = useStore(workspace)
 

@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import type { Settings, ReasoningEffort } from '../types'
 import { useSettingsStore, defaultSettings } from '../store/settings'
 import { useAppStore } from '../store/app'
-import type { SandboxApi, Platform } from '../types'
+import { Platform } from '../types'
+import type { SandboxApi } from '../types'
 
 interface SettingsDialogProps {
   isOpen: boolean
@@ -11,20 +12,32 @@ interface SettingsDialogProps {
   platform: Platform
 }
 
-type TabId = 'general' | 'terminal' | 'sandbox' | 'ai-harness' | 'llm' | 'appearance' | 'keybindings' | 'terminal-profiles' | 'github' | 'debug' | 'custom-runners'
+enum TabId {
+  General = 'general',
+  Terminal = 'terminal',
+  Sandbox = 'sandbox',
+  AiHarness = 'ai-harness',
+  Llm = 'llm',
+  Appearance = 'appearance',
+  Keybindings = 'keybindings',
+  TerminalProfiles = 'terminal-profiles',
+  Github = 'github',
+  Debug = 'debug',
+  CustomRunners = 'custom-runners',
+}
 
 const tabs: { id: TabId; label: string }[] = [
-  { id: 'general', label: 'General' },
-  { id: 'terminal', label: 'Terminal' },
-  { id: 'terminal-profiles', label: 'Terminal Profiles' },
-  { id: 'ai-harness', label: 'AI Harness' },
-  { id: 'custom-runners', label: 'Custom Runners' },
-  { id: 'llm', label: 'LLM' },
-  { id: 'sandbox', label: 'Sandbox' },
-  { id: 'appearance', label: 'Appearance' },
-  { id: 'keybindings', label: 'Keybindings' },
-  { id: 'github', label: 'GitHub' },
-  { id: 'debug', label: 'Debug' }
+  { id: TabId.General, label: 'General' },
+  { id: TabId.Terminal, label: 'Terminal' },
+  { id: TabId.TerminalProfiles, label: 'Terminal Profiles' },
+  { id: TabId.AiHarness, label: 'AI Harness' },
+  { id: TabId.CustomRunners, label: 'Custom Runners' },
+  { id: TabId.Llm, label: 'LLM' },
+  { id: TabId.Sandbox, label: 'Sandbox' },
+  { id: TabId.Appearance, label: 'Appearance' },
+  { id: TabId.Keybindings, label: 'Keybindings' },
+  { id: TabId.Github, label: 'GitHub' },
+  { id: TabId.Debug, label: 'Debug' }
 ]
 
 // Recording state type - can be for keybinding or prefix key
@@ -38,7 +51,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
   const applications = useAppStore((s) => s.applications)
   const allApplications = Array.from(applications.values())
   const [localSettings, setLocalSettings] = useState(savedSettings)
-  const [activeTab, setActiveTab] = useState<TabId>('terminal')
+  const [activeTab, setActiveTab] = useState(TabId.Terminal)
   const [recording, setRecording] = useState<RecordingState>(null)
   const [sandboxAvailable, setSandboxAvailable] = useState<boolean | null>(null)
 
@@ -138,7 +151,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
           </div>
 
           <div className="settings-panel">
-            {activeTab === 'general' && (
+            {activeTab === TabId.General && (
               <div className="settings-section">
                 <div className="settings-group">
                   <label className="settings-label">Default Application for New Worktrees</label>
@@ -166,7 +179,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
               </div>
             )}
 
-            {activeTab === 'terminal' && (
+            {activeTab === TabId.Terminal && (
               <div className="settings-section">
                 <div className="settings-group">
                   <label className="settings-label">Font Size</label>
@@ -259,13 +272,13 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
               </div>
             )}
 
-            {activeTab === 'sandbox' && (
+            {activeTab === TabId.Sandbox && (
               <div className="settings-section">
                 {sandboxAvailable === false && (
                   <div className="settings-warning">
                     Sandbox not available on this system.
-                    {platform === 'linux' && ' Install bubblewrap (bwrap) to enable.'}
-                    {platform === 'win32' && ' Sandbox is not supported on Windows.'}
+                    {platform === Platform.Linux && ' Install bubblewrap (bwrap) to enable.'}
+                    {platform === Platform.Win32 && ' Sandbox is not supported on Windows.'}
                   </div>
                 )}
                 <div className="settings-group">
@@ -310,7 +323,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
               </div>
             )}
 
-            {activeTab === 'ai-harness' && (
+            {activeTab === TabId.AiHarness && (
               <div className="settings-section">
                 <p className="settings-hint">
                   Configure AI tools like Claude, Cline, OpenCode, etc.
@@ -538,7 +551,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
               </div>
             )}
 
-            {activeTab === 'custom-runners' && (
+            {activeTab === TabId.CustomRunners && (
               <div className="settings-section">
                 <p className="settings-hint">
                   Configure custom runners with template commands.
@@ -668,7 +681,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
               </div>
             )}
 
-            {activeTab === 'llm' && (
+            {activeTab === TabId.Llm && (
               <div className="settings-section">
                 <div className="settings-group">
                   <label className="settings-label">Base URL</label>
@@ -875,7 +888,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
               </div>
             )}
 
-            {activeTab === 'appearance' && (
+            {activeTab === TabId.Appearance && (
               <div className="settings-section">
                 <div className="settings-group">
                   <label className="settings-label">Theme</label>
@@ -900,7 +913,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
               </div>
             )}
 
-            {activeTab === 'keybindings' && (
+            {activeTab === TabId.Keybindings && (
               <div className="settings-section">
                 {/* Prefix Key Configuration */}
                 <div className="settings-group">
@@ -979,7 +992,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
               </div>
             )}
 
-            {activeTab === 'terminal-profiles' && (
+            {activeTab === TabId.TerminalProfiles && (
               <div className="settings-section">
                 <p className="settings-hint">
                   Create custom terminal profiles with startup commands.
@@ -1108,7 +1121,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
               </div>
             )}
 
-            {activeTab === 'github' && (
+            {activeTab === TabId.Github && (
               <div className="settings-section">
                 <div className="settings-group">
                   <label className="settings-checkbox-label">
@@ -1151,7 +1164,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
               </div>
             )}
 
-            {activeTab === 'debug' && (
+            {activeTab === TabId.Debug && (
               <div className="settings-section">
                 <div className="settings-group">
                   <label className="settings-checkbox-label">

@@ -1,6 +1,6 @@
 import OpenAI, { APIError } from 'openai'
 
-import type { ReasoningEffort } from '../shared/types'
+import { ReasoningEffort } from '../shared/types'
 
 interface LlmSettings {
   baseUrl: string
@@ -44,7 +44,7 @@ export async function startChatStream(
         model: settings.model,
         messages,
         stream: true,
-        ...(settings.reasoning !== 'off' && { reasoning_effort: settings.reasoning })
+        ...(settings.reasoning !== ReasoningEffort.Off && { reasoning_effort: settings.reasoning })
       },
       { signal: controller.signal }
     )
@@ -81,7 +81,7 @@ export async function completeChatCall(
     model: settings.model,
     messages,
     stream: false,
-    ...(settings.reasoning !== 'off' ? { reasoning_effort: settings.reasoning } : {})
+    ...(settings.reasoning !== ReasoningEffort.Off ? { reasoning_effort: settings.reasoning } : {})
   })
 
   return response.choices[0]?.message.content ?? ''

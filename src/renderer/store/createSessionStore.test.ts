@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createSessionStore } from './createSessionStore'
 import type { SessionDeps, SessionState } from './createSessionStore'
 import type { Workspace, Application, GitInfo } from '../types'
+import { ConnectionStatus } from '../../shared/types'
 import type { StoreApi } from 'zustand'
 import { createMockExecApi } from '../../shared/mockApis'
 
@@ -162,7 +163,7 @@ describe('createSessionStore', () => {
     })
 
     it('preserves connection when provided', () => {
-      const conn = { id: 'conn-1', target: { type: 'local' as const }, host: 'example.com', status: 'connected' as const }
+      const conn = { id: 'conn-1', target: { type: 'local' as const }, host: 'example.com', status: ConnectionStatus.Connected as const }
       const s = createSessionStore({ sessionId: 's', windowUuid: null, connection: conn }, deps)
       expect(s.getState().connection).toEqual(conn)
     })

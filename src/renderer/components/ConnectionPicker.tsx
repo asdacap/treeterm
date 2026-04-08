@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAppStore } from '../store/app'
+import { ConnectionStatus } from '../../shared/types'
 import type { SSHConnectionConfig, PortForwardSpec } from '../types'
 
 interface ConnectionPickerProps {
@@ -45,8 +46,8 @@ export default function ConnectionPicker({ isOpen, onClose }: ConnectionPickerPr
     void ssh.connect(config, { refreshDaemon, allowOutdatedDaemon }).then(({ info, session }) => {
       console.log(`[renderer:ConnectionPicker] ssh.connect returned: status=${info.status}, session=${session ? session.id : 'undefined'}`)
 
-      if (info.status !== 'connected' || !session) {
-        const errorMsg = info.status === 'error' ? info.error : 'No session returned'
+      if (info.status !== ConnectionStatus.Connected || !session) {
+        const errorMsg = info.status === ConnectionStatus.Error ? info.error : 'No session returned'
         console.error(`[renderer:ConnectionPicker] SSH connection failed: ${errorMsg}`)
         setSessionError(config.id, errorMsg)
         return

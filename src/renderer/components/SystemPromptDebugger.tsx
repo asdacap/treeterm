@@ -2,9 +2,14 @@ import { useEffect, useState } from 'react'
 import { useSettingsStore } from '../store/settings'
 import { useActivityStateStore } from '../store/activityState'
 import { useAppStore } from '../store/app'
-import type { ActivityState, ApplicationRenderProps, ReasoningEffort } from '../types'
+import { ActivityState } from '../types'
+import type { ApplicationRenderProps } from '../types'
+import { ReasoningEffort } from '../../shared/types'
 
-type DebugMode = 'analyzer' | 'title'
+enum DebugMode {
+  Analyzer = 'analyzer',
+  Title = 'title',
+}
 
 interface DebuggerState {
   bufferText?: string
@@ -16,12 +21,12 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
   const setTabState = useActivityStateStore((s) => s.setTabState)
   const removeTabState = useActivityStateStore((s) => s.removeTabState)
   const debuggerState = tab.state as DebuggerState | undefined
-  const [mode, setMode] = useState<DebugMode>('analyzer')
+  const [mode, setMode] = useState(DebugMode.Analyzer)
   const [analyzerPrompt, setAnalyzerPrompt] = useState(settings.terminalAnalyzer.systemPrompt)
   const [titlePrompt, setTitlePrompt] = useState(settings.terminalAnalyzer.titleSystemPrompt)
   const [bufferText, setBufferText] = useState(debuggerState?.bufferText ?? '')
   const [model, setModel] = useState(settings.terminalAnalyzer.model)
-  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(settings.terminalAnalyzer.reasoningEffort)
+  const [reasoningEffort, setReasoningEffort] = useState(settings.terminalAnalyzer.reasoningEffort)
   const [result, setResult] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -39,8 +44,8 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
     return () => { removeTabState(tab.id); }
   }, [tab.id, removeTabState])
 
-  const systemPrompt = mode === 'analyzer' ? analyzerPrompt : titlePrompt
-  const setSystemPrompt = mode === 'analyzer' ? setAnalyzerPrompt : setTitlePrompt
+  const systemPrompt = mode === DebugMode.Analyzer ? analyzerPrompt : titlePrompt
+  const setSystemPrompt = mode === DebugMode.Analyzer ? setAnalyzerPrompt : setTitlePrompt
 
   const handleTest = async () => {
     if (!model) {
@@ -52,11 +57,11 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
     setError(null)
     setResult(null)
     setDuration(null)
-    setTabState(tab.id, 'working')
+    setTabState(tab.id, ActivityState.Working)
 
     const start = Date.now()
     try {
-      if (mode === 'analyzer') {
+      if (mode === DebugMode.Analyzer) {
         await llm.clearAnalyzerCache()
         const response = await llm.analyzeTerminal(bufferText, '', {
           baseUrl: settings.llm.baseUrl,
@@ -69,7 +74,7 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
         setDuration(Date.now() - start)
         if ('error' in response) {
           setError(response.error)
-          setTabState(tab.id, 'error')
+          setTabState(tab.id, ActivityState.Error)
         } else {
           setResult(JSON.stringify(response))
           setTabState(tab.id, response.state as ActivityState)
@@ -85,23 +90,23 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
         setDuration(Date.now() - start)
         if ('error' in response) {
           setError(response.error)
-          setTabState(tab.id, 'error')
+          setTabState(tab.id, ActivityState.Error)
         } else {
           setResult(JSON.stringify(response))
-          setTabState(tab.id, 'completed')
+          setTabState(tab.id, ActivityState.Completed)
         }
       }
     } catch (err) {
       setDuration(Date.now() - start)
       setError(err instanceof Error ? err.message : String(err))
-      setTabState(tab.id, 'error')
+      setTabState(tab.id, ActivityState.Error)
     } finally {
       setLoading(false)
     }
   }
 
   const handleUpdatePrompt = () => {
-    if (mode === 'analyzer') {
+    if (mode === DebugMode.Analyzer) {
       useSettingsStore.getState().updateSetting('terminalAnalyzer', 'systemPrompt', analyzerPrompt)
     } else {
       useSettingsStore.getState().updateSetting('terminalAnalyzer', 'titleSystemPrompt', titlePrompt)
@@ -174,7 +179,7 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <label style={{ color: '#aaa', fontSize: 12 }}>
-          System Prompt ({mode === 'analyzer' ? 'Terminal Analyzer' : 'Title Generator'})
+          System Prompt ({mode === DebugMode.Analyzer ? 'Terminal Analyzer' : 'Title Generator'})
         </label>
         <button
           onClick={handleUpdatePrompt}

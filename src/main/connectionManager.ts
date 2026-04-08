@@ -6,12 +6,14 @@
 import { GrpcDaemonClient } from './grpcClient'
 import { SSHTunnel } from './ssh'
 import { PortForwardProcess } from './portForward'
+import {
+  ConnectionStatus,
+  ConnectPhase,
+} from '../shared/types'
 import type {
   SSHConnectionConfig,
   ConnectionTarget,
-  ConnectionStatus,
   ConnectionInfo,
-  ConnectPhase,
   PortForwardConfig,
   PortForwardInfo
 } from '../shared/types'
@@ -56,17 +58,17 @@ class Connection {
   }
 
   toInfo(): ConnectionInfo {
-    if (this.status === 'error') {
-      return { id: this.id, target: this.target, status: 'error', error: this.error ?? 'Unknown error' }
+    if (this.status === ConnectionStatus.Error) {
+      return { id: this.id, target: this.target, status: ConnectionStatus.Error, error: this.error ?? 'Unknown error' }
     }
-    if (this.status === 'reconnecting') {
-      return { id: this.id, target: this.target, status: 'reconnecting', error: this.error ?? 'Reconnecting...', attempt: this.reconnectAttempt }
+    if (this.status === ConnectionStatus.Reconnecting) {
+      return { id: this.id, target: this.target, status: ConnectionStatus.Reconnecting, error: this.error ?? 'Reconnecting...', attempt: this.reconnectAttempt }
     }
-    if (this.status === 'disconnected') {
-      return { id: this.id, target: this.target, status: 'disconnected', error: this.error }
+    if (this.status === ConnectionStatus.Disconnected) {
+      return { id: this.id, target: this.target, status: ConnectionStatus.Disconnected, error: this.error }
     }
-    if (this.status === 'connecting') {
-      return { id: this.id, target: this.target, status: 'connecting', connectPhase: this.connectPhase }
+    if (this.status === ConnectionStatus.Connecting) {
+      return { id: this.id, target: this.target, status: ConnectionStatus.Connecting, connectPhase: this.connectPhase }
     }
     return { id: this.id, target: this.target, status: this.status }
   }
@@ -219,7 +221,7 @@ class Connection {
     const resetTimer = (): void => {
       if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer)
       this.heartbeatTimer = setTimeout(() => {
-        if (this.status === 'connected') {
+        if (this.status === ConnectionStatus.Connected) {
           onTimeout()
         }
       }, Connection.HEARTBEAT_TIMEOUT_MS)
@@ -231,7 +233,7 @@ class Connection {
       () => { resetTimer() },
       (error) => {
         console.error(`[connection] heartbeat stream error for ${this.id}:`, error)
-        if (this.status === 'connected') {
+        if (this.status === ConnectionStatus.Connected) {
           onTimeout()
         }
       }
@@ -261,7 +263,7 @@ class Connection {
   startReconnect(onStatusChanged: () => void): void {
     this.stopHeartbeat()
     this.reconnectAttempt = 0
-    this.status = 'reconnecting'
+    this.status = ConnectionStatus.Reconnecting
     onStatusChanged()
     this.scheduleReconnectAttempt(onStatusChanged)
   }
@@ -279,7 +281,7 @@ class Connection {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
-    this.status = 'error'
+    this.status = ConnectionStatus.Error
     this.error = this.error ?? 'Reconnection cancelled'
   }
 
@@ -292,7 +294,7 @@ class Connection {
   }
 
   private async doReconnectAttempt(onStatusChanged: () => void): Promise<void> {
-    if (this.status !== 'reconnecting') return
+    if (this.status !== ConnectionStatus.Reconnecting) return
 
     this.reconnectAttempt++
     onStatusChanged()
@@ -305,19 +307,19 @@ class Connection {
       }
 
       // Success
-      this.status = 'connected'
+      this.status = ConnectionStatus.Connected
       this.error = undefined
       this.reconnectAttempt = 0
       onStatusChanged()
 
       // Restart heartbeat — on next failure, reconnect again
       this.startHeartbeatMonitor(() => {
-        if (this.status === 'connected') {
+        if (this.status === ConnectionStatus.Connected) {
           this.startReconnect(onStatusChanged)
         }
       })
     } catch (err) {
-      if (this.status !== 'reconnecting') return // cancelled during attempt
+      if (this.status !== ConnectionStatus.Reconnecting) return // cancelled during attempt
       const msg = err instanceof Error ? err.message : String(err)
       console.error(`[connection] reconnect attempt ${String(this.reconnectAttempt)} failed for ${this.id}: ${msg}`)
       this.error = msg
@@ -396,7 +398,7 @@ class Connection {
       this.tunnel.disconnect()
     }
 
-    this.status = 'disconnected'
+    this.status = ConnectionStatus.Disconnected
   }
 }
 
@@ -406,11 +408,11 @@ export class ConnectionManager {
   private statusListeners: Set<StatusChangeCallback> = new Set()
 
   constructor(localClient: GrpcDaemonClient) {
-    const localConn = new Connection('local', { type: 'local' }, localClient, 'connected')
+    const localConn = new Connection('local', { type: 'local' }, localClient, ConnectionStatus.Connected)
     this.connections.set('local', localConn)
     localConn.startHeartbeatMonitor(() => {
       const c = this.connections.get('local')
-      if (c && c.status === 'connected') {
+      if (c && c.status === ConnectionStatus.Connected) {
         c.error = 'Connection lost (no heartbeat from daemon)'
         c.startReconnect(() => { this.emitStatus('local') })
       }
@@ -422,7 +424,7 @@ export class ConnectionManager {
     if (!conn) {
       throw new Error(`Connection not found: ${connectionId}`)
     }
-    if (!conn.client || conn.status !== 'connected') {
+    if (!conn.client || conn.status !== ConnectionStatus.Connected) {
       throw new Error(`Connection ${connectionId} is ${conn.status}${conn.error ? ': ' + conn.error : ''}`)
     }
     return conn.client
@@ -467,7 +469,7 @@ export class ConnectionManager {
   async connectRemote(config: SSHConnectionConfig, options?: { refreshDaemon?: boolean; allowOutdatedDaemon?: boolean }): Promise<ConnectionInfo> {
     // Check if already connected
     const existing = this.connections.get(config.id)
-    if (existing && existing.status === 'connected') {
+    if (existing && existing.status === ConnectionStatus.Connected) {
       return existing.toInfo()
     }
 
@@ -488,8 +490,8 @@ export class ConnectionManager {
     const tunnel = new SSHTunnel(config, { refreshDaemon: options?.refreshDaemon, allowOutdatedDaemon: options?.allowOutdatedDaemon })
     const target: ConnectionTarget = { type: 'remote', config }
 
-    const conn = new Connection(config.id, target, null, 'connecting', tunnel)
-    conn.connectPhase = 'bootstrap'
+    const conn = new Connection(config.id, target, null, ConnectionStatus.Connecting, tunnel)
+    conn.connectPhase = ConnectPhase.Bootstrap
     this.connections.set(config.id, conn)
 
     // Forward tunnel output to connection's watchers
@@ -505,13 +507,13 @@ export class ConnectionManager {
     try {
       // Establish SSH tunnel (bootstrap + tunnel phases happen inside)
       console.log(`[connectionManager] SSH tunnel connecting to ${config.host}:${String(config.port)} (id=${config.id})`)
-      conn.connectPhase = 'tunnel'
+      conn.connectPhase = ConnectPhase.Tunnel
       this.emitStatus(config.id)
       const localSocketPath = await tunnel.connect()
       console.log(`[connectionManager] SSH tunnel connected, local socket: ${localSocketPath}`)
 
       // Connect gRPC client through the forwarded socket
-      conn.connectPhase = 'daemon'
+      conn.connectPhase = ConnectPhase.Daemon
       this.emitStatus(config.id)
       conn.emitDaemonOutput('Connecting to daemon via gRPC...')
       const client = new GrpcDaemonClient(localSocketPath)
@@ -522,12 +524,12 @@ export class ConnectionManager {
 
       // Update connection with real client
       conn.client = client
-      conn.status = 'connected'
+      conn.status = ConnectionStatus.Connected
 
       // Start heartbeat monitor for end-to-end health checking
       conn.startHeartbeatMonitor(() => {
         const c = this.connections.get(config.id)
-        if (c && c.status === 'connected') {
+        if (c && c.status === ConnectionStatus.Connected) {
           c.error = 'Connection lost (no heartbeat from daemon)'
           c.startReconnect(() => { this.emitStatus(config.id) })
         }
@@ -536,7 +538,7 @@ export class ConnectionManager {
       // Monitor for disconnection — trigger reconnect for auto-recovery
       tunnel.onDisconnect((error) => {
         const c = this.connections.get(config.id)
-        if (c && (c.status === 'connected' || c.status === 'reconnecting')) {
+        if (c && (c.status === ConnectionStatus.Connected || c.status === ConnectionStatus.Reconnecting)) {
           c.client?.disconnect()
           c.client = null
           c.error = error ?? 'SSH tunnel disconnected'
@@ -546,7 +548,7 @@ export class ConnectionManager {
 
       client.onDisconnect(() => {
         const c = this.connections.get(config.id)
-        if (c && c.status === 'connected') {
+        if (c && c.status === ConnectionStatus.Connected) {
           c.error = 'gRPC connection lost'
           c.startReconnect(() => { this.emitStatus(config.id) })
         }
@@ -560,15 +562,15 @@ export class ConnectionManager {
       return connInfo
     } catch (error) {
       const rawMsg = error instanceof Error ? error.message : String(error)
-      const phase = conn.connectPhase ?? 'bootstrap'
-      const errorMsg = phase === 'daemon'
+      const phase = conn.connectPhase ?? ConnectPhase.Bootstrap
+      const errorMsg = phase === ConnectPhase.Daemon
         ? `SSH tunnel OK, but daemon not responding: ${rawMsg}`
         : rawMsg
       console.error(`[connectionManager] Connection failed at ${phase} phase (id=${config.id}): ${errorMsg}`)
-      if (phase === 'daemon') {
+      if (phase === ConnectPhase.Daemon) {
         conn.emitDaemonOutput(`Failed: ${rawMsg}`)
       }
-      conn.status = 'error'
+      conn.status = ConnectionStatus.Error
       conn.error = errorMsg
       this.emitStatus(config.id)
 
@@ -578,7 +580,7 @@ export class ConnectionManager {
       return {
         id: config.id,
         target,
-        status: 'error',
+        status: ConnectionStatus.Error,
         error: errorMsg
       }
     }
@@ -600,7 +602,7 @@ export class ConnectionManager {
   reconnect(connectionId: string): void {
     const conn = this.connections.get(connectionId)
     if (!conn) return
-    if (conn.status === 'error' || conn.status === 'disconnected') {
+    if (conn.status === ConnectionStatus.Error || conn.status === ConnectionStatus.Disconnected) {
       conn.error = conn.error ?? 'Manual reconnect'
       conn.startReconnect(() => { this.emitStatus(connectionId) })
     }
@@ -608,7 +610,7 @@ export class ConnectionManager {
 
   reconnectNow(connectionId: string): void {
     const conn = this.connections.get(connectionId)
-    if (conn?.status === 'reconnecting') {
+    if (conn?.status === ConnectionStatus.Reconnecting) {
       conn.reconnectNow(() => { this.emitStatus(connectionId) })
     }
   }
@@ -616,13 +618,13 @@ export class ConnectionManager {
   forceReconnect(connectionId: string): void {
     const conn = this.connections.get(connectionId)
     if (!conn) throw new Error(`Connection not found: ${connectionId}`)
-    if (conn.status === 'reconnecting') return
+    if (conn.status === ConnectionStatus.Reconnecting) return
     conn.startReconnect(() => { this.emitStatus(connectionId) })
   }
 
   cancelReconnect(connectionId: string): void {
     const conn = this.connections.get(connectionId)
-    if (conn?.status === 'reconnecting') {
+    if (conn?.status === ConnectionStatus.Reconnecting) {
       conn.cancelReconnect()
       this.emitStatus(connectionId)
     }

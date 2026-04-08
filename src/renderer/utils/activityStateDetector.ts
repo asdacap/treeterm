@@ -1,4 +1,4 @@
-import type { ActivityState } from '../types'
+import { ActivityState } from '../types'
 
 interface DetectorConfig {
   promptPatterns?: RegExp[] // Patterns indicating "waiting for input"
@@ -29,7 +29,7 @@ export function createActivityStateDetector(
   let buffer = ''
   const MAX_BUFFER_SIZE = 500
 
-  let currentState: ActivityState = 'idle'
+  let currentState: ActivityState = ActivityState.Idle
   let idleTimerId: ReturnType<typeof setTimeout> | null = null
   let debounceTimerId: ReturnType<typeof setTimeout> | null = null
 
@@ -37,7 +37,7 @@ export function createActivityStateDetector(
     // Always clear pending debounce when trying to emit 'working'
     // This prevents a race where data arrives during a debounced transition
     // to 'user_input_required' or 'idle', which would incorrectly fire after the early return
-    if (state === 'working' && debounceTimerId) {
+    if (state === ActivityState.Working && debounceTimerId) {
       clearTimeout(debounceTimerId)
       debounceTimerId = null
     }
@@ -54,7 +54,7 @@ export function createActivityStateDetector(
 
     // Emit 'working' immediately - we want instant feedback when output starts
     // Debounce other state changes to prevent flickering
-    if (state === 'working') {
+    if (state === ActivityState.Working) {
       currentState = state
       onStateChange(state)
     } else {
@@ -89,9 +89,9 @@ export function createActivityStateDetector(
       // After 1 second of no activity, determine final state
       const hasPrompt = checkForPrompt()
       if (hasPrompt) {
-        emitState('user_input_required')
+        emitState(ActivityState.UserInputRequired)
       } else {
-        emitState('idle')
+        emitState(ActivityState.Idle)
       }
       idleTimerId = null
     }, idleTimeout)
@@ -105,7 +105,7 @@ export function createActivityStateDetector(
     }
 
     // Any stream activity = working
-    emitState('working')
+    emitState(ActivityState.Working)
     scheduleIdleCheck()
   }
 

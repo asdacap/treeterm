@@ -4,7 +4,8 @@
  */
 
 import { spawn, ChildProcess } from 'child_process'
-import type { SSHConnectionConfig, PortForwardConfig, PortForwardInfo, PortForwardStatus } from '../shared/types'
+import { PortForwardStatus } from '../shared/types'
+import type { SSHConnectionConfig, PortForwardConfig, PortForwardInfo } from '../shared/types'
 
 type OutputCallback = (line: string) => void
 type StatusCallback = (info: PortForwardInfo) => void
@@ -14,7 +15,7 @@ export class PortForwardProcess {
   private outputBuffer: string[] = []
   private outputListeners: Set<OutputCallback> = new Set()
   private statusListeners: Set<StatusCallback> = new Set()
-  private _status: PortForwardStatus = 'connecting'
+  private _status: PortForwardStatus = PortForwardStatus.Connecting
   private _error?: string
   private stabilizationTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -37,8 +38,8 @@ export class PortForwardProcess {
 
     // After 2 seconds without exit, consider the forward active
     this.stabilizationTimer = setTimeout(() => {
-      if (this._status === 'connecting' && this.process !== null) {
-        this.setStatus('active')
+      if (this._status === PortForwardStatus.Connecting && this.process !== null) {
+        this.setStatus(PortForwardStatus.Active)
       }
     }, 2000)
 
@@ -57,10 +58,10 @@ export class PortForwardProcess {
     this.process.on('close', (code) => {
       this.clearStabilizationTimer()
       this.process = null
-      if (this._status !== 'stopped') {
+      if (this._status !== PortForwardStatus.Stopped) {
         const msg = `Port forward process exited (code ${String(code)})`
         this.appendOutput(`[portfwd] ${msg}`)
-        this.setStatus('error', msg)
+        this.setStatus(PortForwardStatus.Error, msg)
       }
     })
 
@@ -69,13 +70,13 @@ export class PortForwardProcess {
       this.process = null
       const msg = `Port forward error: ${err.message}`
       this.appendOutput(`[portfwd] ${msg}`)
-      this.setStatus('error', msg)
+      this.setStatus(PortForwardStatus.Error, msg)
     })
   }
 
   stop(): void {
     this.clearStabilizationTimer()
-    this.setStatus('stopped')
+    this.setStatus(PortForwardStatus.Stopped)
     if (this.process) {
       this.process.kill()
       this.process = null
@@ -104,8 +105,8 @@ export class PortForwardProcess {
       remoteHost: this.config.remoteHost,
       remotePort: this.config.remotePort,
     }
-    if (this._status === 'error') {
-      return { ...base, status: 'error', error: this._error ?? 'Unknown error' }
+    if (this._status === PortForwardStatus.Error) {
+      return { ...base, status: PortForwardStatus.Error, error: this._error ?? 'Unknown error' }
     }
     return { ...base, status: this._status }
   }

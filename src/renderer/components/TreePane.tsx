@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { Monitor, Loader2, AlertCircle, GitBranch, Folder, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useActivityStateStore } from '../store/activityState'
 import { useAppStore } from '../store/app'
+import { ActivityState } from '../types'
 import { useSessionNamesStore } from '../store/sessionNames'
 import SessionPanel, { CollapsedSessionPanel } from './SessionPanel'
 import { ActivityIndicator } from './ActivityIndicator'
@@ -18,7 +19,7 @@ export function WorkspaceIcon({ tabIds, loadStatus, isWorktree }: {
 
   if (loadStatus === 'loading') return <Loader2 size={16} className="spinning" />
   if (loadStatus === 'error') return <AlertCircle size={16} className="tree-item-error-icon" />
-  if (activityState !== 'idle') return <ActivityIndicator activityState={activityState} className="tree-item-icon-activity" />
+  if (activityState !== ActivityState.Idle) return <ActivityIndicator activityState={activityState} className="tree-item-icon-activity" />
   return isWorktree ? <GitBranch size={16} /> : <Folder size={16} />
 }
 

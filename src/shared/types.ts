@@ -25,16 +25,26 @@ export type ConnectionTarget =
   | { type: 'local' }
   | { type: 'remote'; config: SSHConnectionConfig }
 
-export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error'
+export enum ConnectionStatus {
+  Disconnected = 'disconnected',
+  Connecting = 'connecting',
+  Connected = 'connected',
+  Reconnecting = 'reconnecting',
+  Error = 'error',
+}
 
-export type ConnectPhase = 'bootstrap' | 'tunnel' | 'daemon'
+export enum ConnectPhase {
+  Bootstrap = 'bootstrap',
+  Tunnel = 'tunnel',
+  Daemon = 'daemon',
+}
 
 export type ConnectionInfo =
-  | { id: string; target: ConnectionTarget; status: 'connecting'; connectPhase?: ConnectPhase }
-  | { id: string; target: ConnectionTarget; status: 'connected' }
-  | { id: string; target: ConnectionTarget; status: 'reconnecting'; error: string; attempt: number }
-  | { id: string; target: ConnectionTarget; status: 'disconnected'; error?: string }
-  | { id: string; target: ConnectionTarget; status: 'error'; error: string }
+  | { id: string; target: ConnectionTarget; status: ConnectionStatus.Connecting; connectPhase?: ConnectPhase }
+  | { id: string; target: ConnectionTarget; status: ConnectionStatus.Connected }
+  | { id: string; target: ConnectionTarget; status: ConnectionStatus.Reconnecting; error: string; attempt: number }
+  | { id: string; target: ConnectionTarget; status: ConnectionStatus.Disconnected; error?: string }
+  | { id: string; target: ConnectionTarget; status: ConnectionStatus.Error; error: string }
 
 // === Port Forward Types ===
 
@@ -46,11 +56,16 @@ export interface PortForwardConfig {
   remotePort: number
 }
 
-export type PortForwardStatus = 'connecting' | 'active' | 'error' | 'stopped'
+export enum PortForwardStatus {
+  Connecting = 'connecting',
+  Active = 'active',
+  Error = 'error',
+  Stopped = 'stopped',
+}
 
 export type PortForwardInfo =
-  | { id: string; connectionId: string; localPort: number; remoteHost: string; remotePort: number; status: 'connecting' | 'active' | 'stopped' }
-  | { id: string; connectionId: string; localPort: number; remoteHost: string; remotePort: number; status: 'error'; error: string }
+  | { id: string; connectionId: string; localPort: number; remoteHost: string; remotePort: number; status: PortForwardStatus.Connecting | PortForwardStatus.Active | PortForwardStatus.Stopped }
+  | { id: string; connectionId: string; localPort: number; remoteHost: string; remotePort: number; status: PortForwardStatus.Error; error: string }
 
 // === Sandbox Types ===
 
@@ -162,7 +177,12 @@ export interface RunAction {
   description: string
 }
 
-export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high'
+export enum ReasoningEffort {
+  Off = 'off',
+  Low = 'low',
+  Medium = 'medium',
+  High = 'high',
+}
 
 export interface Settings {
   terminal: {

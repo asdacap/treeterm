@@ -31,7 +31,7 @@ vi.mock('../utils/keybindingConverter', () => ({
   convertDirectKeybinding: vi.fn(() => '$mod+b')
 }))
 
-import { useKeybindingStore, matchesKeybinding } from './keybinding'
+import { useKeybindingStore, matchesKeybinding, PrefixModeState } from './keybinding'
 
 function createKeyEvent(overrides: Partial<KeyboardEvent> = {}): KeyboardEvent {
   return {
@@ -58,7 +58,7 @@ describe('useKeybindingStore', () => {
   beforeEach(() => {
     useKeybindingStore.getState().dispose()
     useKeybindingStore.setState({
-      prefixState: 'idle',
+      prefixState: PrefixModeState.Idle,
       activatedAt: null,
       focusedWorkspaceIndex: 0,
       workspaceIds: [],
@@ -71,7 +71,7 @@ describe('useKeybindingStore', () => {
   describe('initial state', () => {
     it('starts in idle state with no handlers', () => {
       const state = useKeybindingStore.getState()
-      expect(state.prefixState).toBe('idle')
+      expect(state.prefixState).toBe(PrefixModeState.Idle)
       expect(state.activatedAt).toBeNull()
       expect(state.focusedWorkspaceIndex).toBe(0)
       expect(state.workspaceIds).toEqual([])
@@ -82,11 +82,11 @@ describe('useKeybindingStore', () => {
   describe('activate/deactivate', () => {
     it('activates and deactivates prefix mode', () => {
       useKeybindingStore.getState().activate()
-      expect(useKeybindingStore.getState().prefixState).toBe('active')
+      expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Active)
       expect(useKeybindingStore.getState().activatedAt).not.toBeNull()
 
       useKeybindingStore.getState().deactivate()
-      expect(useKeybindingStore.getState().prefixState).toBe('idle')
+      expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Idle)
       expect(useKeybindingStore.getState().activatedAt).toBeNull()
       expect(useKeybindingStore.getState().focusedWorkspaceIndex).toBe(0)
       expect(useKeybindingStore.getState().workspaceIds).toEqual([])
@@ -100,7 +100,7 @@ describe('useKeybindingStore', () => {
       const after = Date.now()
 
       const state = useKeybindingStore.getState()
-      expect(state.prefixState).toBe('workspace_focus')
+      expect(state.prefixState).toBe(PrefixModeState.WorkspaceFocus)
       expect(state.workspaceIds).toEqual(['ws1', 'ws2', 'ws3'])
       expect(state.focusedWorkspaceIndex).toBe(1)
       expect(state.activatedAt).toBeGreaterThanOrEqual(before)
@@ -164,17 +164,17 @@ describe('useKeybindingStore', () => {
       const handleKeyDown = initAndGetHandler()
 
       handleKeyDown(createKeyEvent({ key: 'b', ctrlKey: true }))
-      expect(useKeybindingStore.getState().prefixState).toBe('active')
+      expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Active)
     })
 
     it('pressing prefix key in active mode deactivates (toggle)', () => {
       const handleKeyDown = initAndGetHandler()
 
       handleKeyDown(createKeyEvent({ key: 'b', ctrlKey: true }))
-      expect(useKeybindingStore.getState().prefixState).toBe('active')
+      expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Active)
 
       handleKeyDown(createKeyEvent({ key: 'b', ctrlKey: true }))
-      expect(useKeybindingStore.getState().prefixState).toBe('idle')
+      expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Idle)
     })
 
     it('prefix key preventDefault and stopPropagation', () => {
@@ -210,7 +210,7 @@ describe('useKeybindingStore', () => {
 
         handleKeyDown(createKeyEvent({ key }))
         expect(handlerFn).toHaveBeenCalledTimes(1)
-        expect(useKeybindingStore.getState().prefixState).toBe('idle')
+        expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Idle)
       })
 
       it('Escape deactivates without calling handlers', () => {
@@ -218,23 +218,23 @@ describe('useKeybindingStore', () => {
         useKeybindingStore.getState().setHandlers({ newTab })
 
         handleKeyDown(createKeyEvent({ key: 'Escape' }))
-        expect(useKeybindingStore.getState().prefixState).toBe('idle')
+        expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Idle)
         expect(newTab).not.toHaveBeenCalled()
       })
 
       it('unknown non-modifier key deactivates', () => {
         handleKeyDown(createKeyEvent({ key: 'z' }))
-        expect(useKeybindingStore.getState().prefixState).toBe('idle')
+        expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Idle)
       })
 
       it('modifier-only key (Shift) does NOT deactivate', () => {
         handleKeyDown(createKeyEvent({ key: 'Shift', shiftKey: true }))
-        expect(useKeybindingStore.getState().prefixState).toBe('active')
+        expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Active)
       })
 
       it('modifier-only key (Meta) does NOT deactivate', () => {
         handleKeyDown(createKeyEvent({ key: 'Meta', metaKey: true }))
-        expect(useKeybindingStore.getState().prefixState).toBe('active')
+        expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Active)
       })
     })
 
@@ -248,7 +248,7 @@ describe('useKeybindingStore', () => {
 
       it('Escape deactivates', () => {
         handleKeyDown(createKeyEvent({ key: 'Escape' }))
-        expect(useKeybindingStore.getState().prefixState).toBe('idle')
+        expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Idle)
       })
 
       it('Enter selects workspace and calls setActiveWorkspace', () => {
@@ -257,7 +257,7 @@ describe('useKeybindingStore', () => {
 
         handleKeyDown(createKeyEvent({ key: 'Enter' }))
         expect(setActiveWorkspace).toHaveBeenCalledWith('ws2')
-        expect(useKeybindingStore.getState().prefixState).toBe('idle')
+        expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Idle)
       })
 
       it('ArrowUp navigates up', () => {
@@ -298,30 +298,30 @@ describe('useKeybindingStore', () => {
 
     it('activate auto-deactivates after timeout', () => {
       useKeybindingStore.getState().activate()
-      expect(useKeybindingStore.getState().prefixState).toBe('active')
+      expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Active)
 
       vi.advanceTimersByTime(1500)
-      expect(useKeybindingStore.getState().prefixState).toBe('idle')
+      expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Idle)
     })
 
     it('enterWorkspaceFocus auto-deactivates after timeout', () => {
       useKeybindingStore.getState().enterWorkspaceFocus(['ws1'], 0)
-      expect(useKeybindingStore.getState().prefixState).toBe('workspace_focus')
+      expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.WorkspaceFocus)
 
       vi.advanceTimersByTime(1500)
-      expect(useKeybindingStore.getState().prefixState).toBe('idle')
+      expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Idle)
     })
 
     it('dispose clears timeout so it does not fire', () => {
       useKeybindingStore.getState().activate()
-      expect(useKeybindingStore.getState().prefixState).toBe('active')
+      expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Active)
 
       useKeybindingStore.getState().dispose()
 
       // Re-activate — if timeout wasn't cleared, it would fire and deactivate
       useKeybindingStore.getState().activate()
       vi.advanceTimersByTime(1400) // less than timeout
-      expect(useKeybindingStore.getState().prefixState).toBe('active')
+      expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Active)
     })
   })
 

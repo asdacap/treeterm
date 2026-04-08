@@ -2,7 +2,7 @@ import { contextBridge } from 'electron'
 import type { SandboxConfig, Session, TTYSessionInfo, WorkspaceInput, Settings, SSHConnectionConfig, ConnectionInfo, PortForwardConfig, PortForwardInfo, ReasoningEffort } from '../shared/types'
 import type { PtyEvent, ExecEvent } from '../shared/ipc-types'
 import { IpcClient } from './ipc-client'
-import type { PreloadApi } from '../renderer/types'
+import type { PreloadApi, Platform } from '../renderer/types'
 
 type PtyEventCallback = (event: PtyEvent) => void
 const ptyEventListeners = new Map<string, PtyEventCallback[]>()
@@ -199,7 +199,7 @@ client.onSshPortForwardOutput((portForwardId, line) => {
 })
 
 const preloadApi: PreloadApi = {
-  platform: process.platform,
+  platform: process.platform as Platform,
   terminal: {
     create: (connectionId: string, handle: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => {
       return client.ptyCreate(connectionId, handle, cwd, sandbox, startupCommand)

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { useKeybindingStore } from '../store/keybinding'
+import { useKeybindingStore, PrefixModeState } from '../store/keybinding'
 import { useSettingsStore } from '../store/settings'
 import type { Settings, Platform } from '../types'
 
@@ -75,12 +75,12 @@ export default function KeybindingOverlay({ platform }: { platform: Platform }):
   const { prefixState, activatedAt } = useKeybindingStore()
   const { settings } = useSettingsStore()
 
-  if (prefixState === 'idle') {
+  if (prefixState === PrefixModeState.Idle) {
     return null
   }
 
   // Workspace focus mode
-  if (prefixState === 'workspace_focus') {
+  if (prefixState === PrefixModeState.WorkspaceFocus) {
     return (
       <div className="keybinding-overlay">
         <div className="keybinding-overlay-header">

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createAnalyzerStore } from './createAnalyzerStore'
 import type { AnalyzerDeps } from './createAnalyzerStore'
+import { ActivityState } from '../types'
 import type { Settings } from '../types'
 import type { TtyState } from './createTtyStore'
 import { createStore } from 'zustand/vanilla'
@@ -78,7 +79,7 @@ describe('createAnalyzerStore', () => {
     const state = store.getState()
 
     expect(state.tabId).toBe('tab-1')
-    expect(state.aiState).toBe('idle')
+    expect(state.aiState).toBe(ActivityState.Idle)
     expect(state.analyzing).toBe(false)
     expect(state.reason).toBe('')
     expect(state.autoApprove).toBe(false)
@@ -130,7 +131,7 @@ describe('createAnalyzerStore', () => {
     mock.emitData('$ echo hello\r\nhello\r\n$ ')
     vi.advanceTimersByTime(500) // poll interval
 
-    expect(store.getState().aiState).toBe('working')
+    expect(store.getState().aiState).toBe(ActivityState.Working)
 
     store.getState().stop()
     vi.useRealTimers()
@@ -154,10 +155,10 @@ describe('createAnalyzerStore', () => {
     mock.emitData('$ hello')
     await vi.advanceTimersByTimeAsync(500)
     // Poll fires and sets 'working', then schedules analyze
-    expect(store.getState().aiState).toBe('working')
+    expect(store.getState().aiState).toBe(ActivityState.Working)
     await vi.advanceTimersByTimeAsync(500)
     // analyze() sees missing settings and resets to idle
-    expect(store.getState().aiState).toBe('idle')
+    expect(store.getState().aiState).toBe(ActivityState.Idle)
 
     store.getState().stop()
     vi.useRealTimers()
@@ -182,10 +183,10 @@ describe('createAnalyzerStore', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     expect(deps.llm.analyzeTerminal).toHaveBeenCalled()
-    expect(store.getState().aiState).toBe('idle')
+    expect(store.getState().aiState).toBe(ActivityState.Idle)
     expect(store.getState().reason).toBe('prompt visible')
     expect(store.getState().analyzing).toBe(false)
-    expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', 'idle')
+    expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', ActivityState.Idle)
 
     store.getState().stop()
     vi.useRealTimers()
@@ -210,7 +211,7 @@ describe('createAnalyzerStore', () => {
     vi.advanceTimersByTime(1000)
     await vi.advanceTimersByTimeAsync(0)
 
-    expect(store.getState().aiState).toBe('error')
+    expect(store.getState().aiState).toBe(ActivityState.Error)
     expect(store.getState().analyzing).toBe(false)
 
     store.getState().stop()
@@ -236,7 +237,7 @@ describe('createAnalyzerStore', () => {
     vi.advanceTimersByTime(1000)
     await vi.advanceTimersByTimeAsync(0)
 
-    expect(store.getState().aiState).toBe('error')
+    expect(store.getState().aiState).toBe(ActivityState.Error)
 
     store.getState().stop()
     vi.useRealTimers()
@@ -560,7 +561,7 @@ describe('createAnalyzerStore', () => {
       store.getState().setAutoApprove(true)
 
       // Simulate state change to safe_permission_requested
-      store.setState({ aiState: 'safe_permission_requested' })
+      store.setState({ aiState: ActivityState.SafePermissionRequested })
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(mock.ttyState.write).toHaveBeenCalledWith('\r')
@@ -578,7 +579,7 @@ describe('createAnalyzerStore', () => {
       store.getState().start('pty-1')
       await new Promise(r => setTimeout(r, 0))
 
-      store.setState({ aiState: 'safe_permission_requested' })
+      store.setState({ aiState: ActivityState.SafePermissionRequested })
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(mock.ttyState.write).not.toHaveBeenCalled()
@@ -596,7 +597,7 @@ describe('createAnalyzerStore', () => {
       await new Promise(r => setTimeout(r, 0))
 
       store.getState().setAutoApprove(true)
-      store.setState({ aiState: 'permission_request' })
+      store.setState({ aiState: ActivityState.PermissionRequest })
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(mock.ttyState.write).not.toHaveBeenCalled()
@@ -618,12 +619,12 @@ describe('createAnalyzerStore', () => {
     mock.emitData('$ echo hello\r\nhello\r\n$ ')
     vi.advanceTimersByTime(500) // poll detects change
     // 'working' state set via updateAiState
-    expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', 'working')
+    expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', ActivityState.Working)
 
     vi.advanceTimersByTime(500) // debounce fires analyze
     await vi.advanceTimersByTimeAsync(0) // resolve async
     // 'idle' state set after analysis completes
-    expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', 'idle')
+    expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', ActivityState.Idle)
 
     store.getState().stop()
     vi.useRealTimers()

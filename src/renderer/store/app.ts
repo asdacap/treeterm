@@ -29,6 +29,7 @@ import type {
   ConnectionInfo, SSHConnectionConfig, SSHApi, LlmApi, ClipboardApi, RawGitHubApi
 } from '../types'
 import { createBoundGit, createBoundGitHub, createBoundFilesystem, createBoundRunActions } from '../types'
+import { ConnectionStatus } from '../../shared/types'
 
 export interface AppDeps {
   platform: Platform
@@ -271,7 +272,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const unsubReady = appApi.onReady((session) => {
       console.log('[App] Received app:ready with session:', session?.id)
       if (session) {
-        const localConnection: ConnectionInfo = { id: 'local', target: { type: 'local' }, status: 'connected' }
+        const localConnection: ConnectionInfo = { id: 'local', target: { type: 'local' }, status: ConnectionStatus.Connected }
         const sessionStore = getOrCreateSession(session.id, get, set, localConnection)
         if (!useSessionNamesStore.getState().getName(session.id)) {
           useSessionNamesStore.getState().setName(session.id, 'LOCAL')
@@ -340,7 +341,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const sessionId = activeView?.type === 'workspace' ? activeView.sessionId : null
       const sessionEntry = sessionId ? get().sessionStores.get(sessionId) : Array.from(get().sessionStores.values())[0]
       const connStatus = sessionEntry?.store.getState().connection?.status
-      if (sessionEntry && connStatus !== 'connecting') {
+      if (sessionEntry && connStatus !== ConnectionStatus.Connecting) {
         const { workspaces, addWorkspace, setActiveWorkspace } = sessionEntry.store.getState()
         let existingId: string | undefined
         for (const [wsId, e] of Array.from(workspaces.entries())) {
@@ -441,7 +442,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   startRemoteConnect: (config: SSHConnectionConfig) => {
-    const connection: ConnectionInfo = { id: config.id, target: { type: 'remote', config }, status: 'connecting' }
+    const connection: ConnectionInfo = { id: config.id, target: { type: 'remote', config }, status: ConnectionStatus.Connecting }
     getOrCreateSession(config.id, get, set, connection)
     if (!useSessionNamesStore.getState().getName(config.id)) {
       useSessionNamesStore.getState().setName(config.id, config.label || `${config.user}@${config.host}`)
@@ -454,7 +455,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const entry = get().sessionStores.get(connectionId)!
     const conn = entry.store.getState().connection
     if (conn) {
-      entry.store.setState({ connection: { ...conn, status: 'error' as const, error } })
+      entry.store.setState({ connection: { ...conn, status: ConnectionStatus.Error, error } })
     }
   },
 

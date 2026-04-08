@@ -8,35 +8,47 @@ import type { SessionState } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import { useSessionNamesStore } from '../store/sessionNames'
 import type { PortForwardConfig, PortForwardInfo } from '../types'
+import { ConnectionStatus, PortForwardStatus } from '../../shared/types'
 import PortForwardDialog from './PortForwardDialog'
 import JsonViewer from './JsonViewer'
 import SystemMonitor from './SystemMonitor'
 
-type TabId = 'info' | 'ssh' | 'json'
-type SshSubTab = 'bootstrap' | 'tunnel' | 'daemon' | 'portforwards' | 'monitor'
+enum TabId {
+  Info = 'info',
+  Ssh = 'ssh',
+  Json = 'json',
+}
+
+enum SshSubTab {
+  Bootstrap = 'bootstrap',
+  Tunnel = 'tunnel',
+  Daemon = 'daemon',
+  Portforwards = 'portforwards',
+  Monitor = 'monitor',
+}
 
 interface OutputLine {
   id: number
   line: string
 }
 
-function getStatusColor(status: string | undefined): string {
+function getStatusColor(status: ConnectionStatus | undefined): string {
   switch (status) {
-    case 'connected': return '#4caf50'
-    case 'connecting': return '#ff9800'
-    case 'reconnecting': return '#ff9800'
-    case 'error': return '#f44336'
-    case 'disconnected': return '#f44336'
+    case ConnectionStatus.Connected: return '#4caf50'
+    case ConnectionStatus.Connecting: return '#ff9800'
+    case ConnectionStatus.Reconnecting: return '#ff9800'
+    case ConnectionStatus.Error: return '#f44336'
+    case ConnectionStatus.Disconnected: return '#f44336'
     default: return '#666'
   }
 }
 
-function getPfStatusColor(status: string | undefined): string {
+function getPfStatusColor(status: PortForwardStatus | undefined): string {
   switch (status) {
-    case 'active': return '#4caf50'
-    case 'connecting': return '#ff9800'
-    case 'error': return '#f44336'
-    case 'stopped': return '#666'
+    case PortForwardStatus.Active: return '#4caf50'
+    case PortForwardStatus.Connecting: return '#ff9800'
+    case PortForwardStatus.Error: return '#f44336'
+    case PortForwardStatus.Stopped: return '#666'
     default: return '#666'
   }
 }
@@ -49,16 +61,16 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
   const sessionId = useStore(sessionStore, s => s.sessionId)
   const connection = useStore(sessionStore, s => s.connection)
   const isRemote = connection?.target.type === 'remote'
-  const isConnected = connection?.status === 'connected'
-  const connectionError = (connection?.status === 'error' || connection?.status === 'disconnected') ? connection.error : undefined
+  const isConnected = connection?.status === ConnectionStatus.Connected
+  const connectionError = (connection?.status === ConnectionStatus.Error || connection?.status === ConnectionStatus.Disconnected) ? connection.error : undefined
 
   const ssh = useAppStore(s => s.ssh)
   const exec = useAppStore(s => s.exec)
   const disconnectSession = useAppStore(s => s.disconnectSession)
   const displayName = useSessionNamesStore(s => s.names.get(sessionId)?.name ?? sessionId)
 
-  const [activeTab, setActiveTab] = useState<TabId>(isRemote ? 'ssh' : 'info')
-  const [sshSubTab, setSshSubTab] = useState<SshSubTab>('bootstrap')
+  const [activeTab, setActiveTab] = useState(isRemote ? TabId.Ssh : TabId.Info)
+  const [sshSubTab, setSshSubTab] = useState(SshSubTab.Bootstrap)
   const [bootstrapOutput, setBootstrapOutput] = useState<OutputLine[]>([])
   const [tunnelOutput, setTunnelOutput] = useState<OutputLine[]>([])
   const [daemonOutput, setDaemonOutput] = useState<OutputLine[]>([])
@@ -170,10 +182,10 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
     if (!isRemote || connection.target.type !== 'remote') return
     const config = connection.target.config
     // Reset connection to connecting state
-    sessionStore.setState({ connection: { ...connection, status: 'connecting' as const } })
+    sessionStore.setState({ connection: { ...connection, status: ConnectionStatus.Connecting } })
     void ssh.connect(config).then(({ info, session }) => {
-      if (info.status !== 'connected' || !session) {
-        useAppStore.getState().setSessionError(config.id, info.status === 'error' ? info.error : 'Connection failed')
+      if (info.status !== ConnectionStatus.Connected || !session) {
+        useAppStore.getState().setSessionError(config.id, info.status === ConnectionStatus.Error ? info.error : 'Connection failed')
         return
       }
       void useAppStore.getState().addRemoteSession(session, info)
@@ -190,14 +202,14 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
   // Tabs: Info + SSH (if remote) + JSON (if connected)
   const tabs: { id: TabId; label: string }[] = isRemote
     ? isConnected
-      ? [{ id: 'info', label: 'Info' }, { id: 'ssh', label: 'SSH' }, { id: 'json', label: 'JSON' }]
-      : [{ id: 'info', label: 'Info' }, { id: 'ssh', label: 'SSH' }]
-    : [{ id: 'info', label: 'Info' }, { id: 'json', label: 'JSON' }]
+      ? [{ id: TabId.Info, label: 'Info' }, { id: TabId.Ssh, label: 'SSH' }, { id: TabId.Json, label: 'JSON' }]
+      : [{ id: TabId.Info, label: 'Info' }, { id: TabId.Ssh, label: 'SSH' }]
+    : [{ id: TabId.Info, label: 'Info' }, { id: TabId.Json, label: 'JSON' }]
 
   // SSH sub-tabs: Bootstrap + Tunnel + Daemon always, Port Forwards when connected
   const sshSubTabs: { id: SshSubTab; label: string }[] = isConnected
-    ? [{ id: 'bootstrap', label: 'Bootstrap' }, { id: 'tunnel', label: 'Tunnel' }, { id: 'daemon', label: 'Daemon' }, { id: 'portforwards', label: 'Port Forwards' }, { id: 'monitor', label: 'Monitor' }]
-    : [{ id: 'bootstrap', label: 'Bootstrap' }, { id: 'tunnel', label: 'Tunnel' }, { id: 'daemon', label: 'Daemon' }]
+    ? [{ id: SshSubTab.Bootstrap, label: 'Bootstrap' }, { id: SshSubTab.Tunnel, label: 'Tunnel' }, { id: SshSubTab.Daemon, label: 'Daemon' }, { id: SshSubTab.Portforwards, label: 'Port Forwards' }, { id: SshSubTab.Monitor, label: 'Monitor' }]
+    : [{ id: SshSubTab.Bootstrap, label: 'Bootstrap' }, { id: SshSubTab.Tunnel, label: 'Tunnel' }, { id: SshSubTab.Daemon, label: 'Daemon' }]
 
   const sessionData = {
     sessionId: rawSessionId,
@@ -226,7 +238,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
           />
         )}
         <span className="ssh-pane-label">{label}</span>
-        {isRemote && (connection.status === 'connecting' || connection.status === 'reconnecting') && (
+        {isRemote && (connection.status === ConnectionStatus.Connecting || connection.status === ConnectionStatus.Reconnecting) && (
           <Loader2 size={14} className="spinning" style={{ marginLeft: 8 }} />
         )}
         {isRemote && (
@@ -238,12 +250,12 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
         {connectionError && (
           <span className="ssh-pane-error">{connectionError}</span>
         )}
-        {connection && connection.status === 'connected' && (
+        {connection && connection.status === ConnectionStatus.Connected && (
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             <button className="ssh-pane-tab" onClick={() => { void ssh.forceReconnect(connection.id) }}>Reconnect</button>
           </div>
         )}
-        {connection && (connection.status === 'error' || connection.status === 'disconnected') && (
+        {connection && (connection.status === ConnectionStatus.Error || connection.status === ConnectionStatus.Disconnected) && (
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             <button className="ssh-pane-tab" onClick={handleRetry}>Retry</button>
             <button className="ssh-pane-tab" style={{ color: '#f44336' }} onClick={() => { disconnectSession(sessionId); }}>Remove</button>
@@ -279,7 +291,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
           addPortForward={ssh.addPortForward}
         />
       )}
-      {activeTab === 'ssh' && isRemote && (
+      {activeTab === TabId.Ssh && isRemote && (
         <div className="ssh-pane-subtabs">
           {sshSubTabs.map(tab => (
             <button
@@ -290,14 +302,14 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
               {tab.label}
             </button>
           ))}
-          {sshSubTab === 'portforwards' && isConnected && (
+          {sshSubTab === SshSubTab.Portforwards && isConnected && (
             <button className="ssh-pane-tab active" style={{ marginLeft: 'auto' }} onClick={() => { setShowPortForwardDialog(true); }}>
               + Add Port Forward
             </button>
           )}
         </div>
       )}
-      {activeTab === 'info' ? (
+      {activeTab === TabId.Info ? (
         <div className="ssh-pane-output">
           <div className="ssh-pane-output-line">Session ID: {sessionId}</div>
           {isRemote && connection.target.type === 'remote' ? (
@@ -310,7 +322,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
                 <div className="ssh-pane-output-line">Identity File: {connection.target.config.identityFile}</div>
               )}
               <div className="ssh-pane-output-line">Status: {connection.status}</div>
-              {(connection.status === 'error' || connection.status === 'disconnected') && connection.error && (
+              {(connection.status === ConnectionStatus.Error || connection.status === ConnectionStatus.Disconnected) && connection.error && (
                 <div className="ssh-pane-output-line">Error: {connection.error}</div>
               )}
             </>
@@ -318,11 +330,11 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
             <div className="ssh-pane-output-line">Connection: Local</div>
           )}
         </div>
-      ) : activeTab === 'json' ? (
+      ) : activeTab === TabId.Json ? (
         <div className="ssh-pane-output">
           <JsonViewer data={sessionData} />
         </div>
-      ) : sshSubTab === 'bootstrap' ? (
+      ) : sshSubTab === SshSubTab.Bootstrap ? (
         <div className="ssh-pane-output" ref={scrollRef}>
           {bootstrapOutput.length === 0 ? (
             <div className="ssh-pane-output-empty">No bootstrap output yet...</div>
@@ -332,7 +344,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
             ))
           )}
         </div>
-      ) : sshSubTab === 'tunnel' ? (
+      ) : sshSubTab === SshSubTab.Tunnel ? (
         <div className="ssh-pane-output" ref={scrollRef}>
           {tunnelOutput.length === 0 ? (
             <div className="ssh-pane-output-empty">No tunnel output yet...</div>
@@ -342,7 +354,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
             ))
           )}
         </div>
-      ) : sshSubTab === 'daemon' ? (
+      ) : sshSubTab === SshSubTab.Daemon ? (
         <div className="ssh-pane-output" ref={scrollRef}>
           {daemonOutput.length === 0 ? (
             <div className="ssh-pane-output-empty">No daemon output yet...</div>
@@ -352,7 +364,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
             ))
           )}
         </div>
-      ) : sshSubTab === 'monitor' && connection ? (
+      ) : sshSubTab === SshSubTab.Monitor && connection ? (
         <SystemMonitor connectionId={connection.id} exec={exec} />
       ) : (
         <div className="ssh-pane-output">
@@ -380,7 +392,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
                       >
                         {isExpanded ? 'Hide' : 'Log'}
                       </button>
-                      {(pf.status === 'error' || pf.status === 'stopped') && (
+                      {(pf.status === PortForwardStatus.Error || pf.status === PortForwardStatus.Stopped) && (
                         <button
                           className="ssh-pane-tab"
                           style={{ color: '#ff9800' }}
@@ -406,7 +418,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
                           Restart
                         </button>
                       )}
-                      {pf.status !== 'stopped' && pf.status !== 'error' && (
+                      {pf.status !== PortForwardStatus.Stopped && pf.status !== PortForwardStatus.Error && (
                         <button
                           className="ssh-pane-tab"
                           style={{ color: '#f44336' }}
@@ -419,7 +431,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
                         </button>
                       )}
                     </div>
-                    {pf.status === 'error' && (
+                    {pf.status === PortForwardStatus.Error && (
                       <div className="port-forward-item-error">{pf.error}</div>
                     )}
                     {isExpanded && (
