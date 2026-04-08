@@ -490,6 +490,7 @@ export interface AppApi {
   cancelClose: () => void
   onCapsLockEvent: (callback: (event: { type: string; key: string; code: string }) => void) => () => void
   onSshAutoConnected: (callback: (session: Session, connection: ConnectionInfo) => void) => () => void
+  onConnectionReconnected: (callback: (session: Session, connection: ConnectionInfo) => void) => () => void
 }
 
 export interface DaemonApi {

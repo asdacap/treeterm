@@ -89,6 +89,13 @@ client.onSshAutoConnected((session, connection) => {
   sshAutoConnectedListeners.forEach((cb) => { cb(session, connection); })
 })
 
+type ConnectionReconnectedCallback = (session: Session, connection: ConnectionInfo) => void
+const connectionReconnectedListeners: ConnectionReconnectedCallback[] = []
+
+client.onConnectionReconnected((session, connection) => {
+  connectionReconnectedListeners.forEach((cb) => { cb(session, connection); })
+})
+
 type DaemonDisconnectedCallback = () => void
 const daemonDisconnectedListeners: DaemonDisconnectedCallback[] = []
 
@@ -470,6 +477,15 @@ const preloadApi: PreloadApi = {
         const index = sshAutoConnectedListeners.indexOf(callback)
         if (index > -1) {
           sshAutoConnectedListeners.splice(index, 1)
+        }
+      }
+    },
+    onConnectionReconnected: (callback: ConnectionReconnectedCallback): (() => void) => {
+      connectionReconnectedListeners.push(callback)
+      return () => {
+        const index = connectionReconnectedListeners.indexOf(callback)
+        if (index > -1) {
+          connectionReconnectedListeners.splice(index, 1)
         }
       }
     }

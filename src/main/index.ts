@@ -36,6 +36,10 @@ const sessionConnectionMap = new Map<string, string>()
 const ptyStreams = new Map<string, PtyStream>()
 // Active exec streams keyed by execId for streaming output and kill support.
 const execStreams = new Map<string, ReturnType<GrpcDaemonClient['execStream']>>()
+// Session watch unsubscribers per connectionId, so reconnect can re-establish watches
+const sessionWatchUnsubs = new Map<string, { windowId: number; uuid: string; unsubscribe: () => void }[]>()
+// Track previous connection status per connectionId for detecting reconnect transitions
+const previousConnectionStatuses = new Map<string, string>()
 
 // Helper: get the daemon client for a given connectionId
 function getClientForConnection(connId: string): GrpcDaemonClient {
@@ -106,7 +110,7 @@ function createWindow(): BrowserWindow {
   // Assign a unique UUID to this window for session sync deduplication
   const windowUuid = randomUUID()
 
-  // Cleanup for session watch stream
+  // Cleanup for session watch stream (kept for window close cleanup)
   let unwatchSession: (() => void) | null = null
 
   // Forward all keyboard events including Caps Lock to renderer
@@ -189,6 +193,9 @@ function createWindow(): BrowserWindow {
       })
       unwatchSession = watch.unsubscribe
 
+      // Register in shared map so reconnect can re-establish this watch
+      registerSessionWatch('local', window.id, windowUuid, watch.unsubscribe)
+
       const session = await watch.initial
       console.log('[main] loaded session:', session.id)
       sessionConnectionMap.set(session.id, 'local')
@@ -211,6 +218,56 @@ function createWindow(): BrowserWindow {
   windowManager.registerWindow(window, windowServer, windowUuid)
 
   return window
+}
+
+// Helper: register a session watch unsubscriber for reconnect tracking
+function registerSessionWatch(connectionId: string, windowId: number, uuid: string, unsubscribe: () => void): void {
+  const existing = sessionWatchUnsubs.get(connectionId) ?? []
+  // Replace any existing entry for this window
+  const filtered = existing.filter(e => e.windowId !== windowId)
+  filtered.push({ windowId, uuid, unsubscribe })
+  sessionWatchUnsubs.set(connectionId, filtered)
+}
+
+// Helper: re-establish session watches for a connection after reconnect
+function reestablishSessionWatches(connectionId: string, client: GrpcDaemonClient): void {
+  const entries = sessionWatchUnsubs.get(connectionId) ?? []
+
+  // Unsubscribe old watches (they're dead but clean up references)
+  for (const entry of entries) {
+    entry.unsubscribe()
+  }
+
+  // Create new watches for each window
+  const newEntries: { windowId: number; uuid: string; unsubscribe: () => void }[] = []
+  for (const entry of entries) {
+    const winInfo = windowManager.getWindow(entry.windowId)
+    if (!winInfo) continue
+
+    const watch = client.watchSession(entry.uuid, (updatedSession) => {
+      console.log(`[main] session sync received after reconnect for window ${String(entry.windowId)}`, {
+        sessionId: updatedSession.id,
+        workspaces: updatedSession.workspaces.map(ws => ({ path: ws.path, metadata: ws.metadata })),
+      })
+      winInfo.ipcServer.sessionSync(connectionId, updatedSession)
+    })
+
+    newEntries.push({ windowId: entry.windowId, uuid: entry.uuid, unsubscribe: watch.unsubscribe })
+
+    // Send the initial session data to renderer as a reconnect event
+    void watch.initial.then((session) => {
+      console.log(`[main] reconnect: session loaded for connection ${connectionId}, session ${session.id}`)
+      sessionConnectionMap.set(session.id, connectionId)
+      const connectionInfo = connectionManager?.getConnection(connectionId)
+      if (connectionInfo) {
+        winInfo.ipcServer.connectionReconnected(session, connectionInfo)
+      }
+    }).catch((error: unknown) => {
+      console.error(`[main] reconnect: failed to load session for connection ${connectionId}:`, error)
+    })
+  }
+
+  sessionWatchUnsubs.set(connectionId, newEntries)
 }
 
 // IPC Handlers
@@ -1119,13 +1176,17 @@ server.onSshConnect(async (event, config, options) => {
       const remoteClient = connectionManager.getClient(config.id)
       try {
         console.log(`[main:ssh] Starting session watch for remote daemon`)
-        const remoteWatch = remoteClient.watchSession(randomUUID(), (updatedSession) => {
+        const watchUuid = randomUUID()
+        const remoteWatch = remoteClient.watchSession(watchUuid, (updatedSession) => {
           console.log(`[main:ssh] Session sync update received for session=${updatedSession.id}, workspaces=${String(updatedSession.workspaces.length)}`)
           const windowInfo = windowManager.getWindow(senderWindow.id)
           if (windowInfo) {
             windowInfo.ipcServer.sessionSync(config.id, updatedSession)
           }
         })
+        // Register for reconnect re-establishment
+        registerSessionWatch(config.id, senderWindow.id, watchUuid, remoteWatch.unsubscribe)
+
         const session = await remoteWatch.initial
         console.log(`[main:ssh] Initial session loaded: id=${session.id}, workspaces=${String(session.workspaces.length)}`)
         sessionConnectionMap.set(session.id, config.id)
@@ -1456,8 +1517,23 @@ void app.whenReady().then(async () => {
 
   // Push connection status changes to all renderer windows
   connectionManager.onStatusChange((info) => {
+    const prevStatus = previousConnectionStatuses.get(info.id)
+    previousConnectionStatuses.set(info.id, info.status)
+
     for (const winInfo of windowManager.getAllWindows()) {
       winInfo.ipcServer.sshConnectionStatus(info)
+    }
+
+    // On reconnect success: re-establish session watch and notify renderer
+    if (info.status === 'connected' && prevStatus === 'reconnecting') {
+      console.log(`[main] connection ${info.id} reconnected, re-establishing session watches`)
+      try {
+        if (!connectionManager) throw new Error('ConnectionManager not initialized')
+        const client = connectionManager.getClient(info.id)
+        reestablishSessionWatches(info.id, client)
+      } catch (error) {
+        console.error(`[main] failed to re-establish session watches after reconnect:`, error)
+      }
     }
   })
 
@@ -1485,12 +1561,16 @@ void app.whenReady().then(async () => {
               if (!connectionManager) throw new Error('ConnectionManager not initialized')
               const remoteClient = connectionManager.getClient(parsed.id)
               const windowId = mainWindow.id
-              const remoteWatch = remoteClient.watchSession(randomUUID(), (updatedSession) => {
+              const autoWatchUuid = randomUUID()
+              const remoteWatch = remoteClient.watchSession(autoWatchUuid, (updatedSession) => {
                 const windowInfo = windowManager.getWindow(windowId)
                 if (windowInfo) {
                   windowInfo.ipcServer.sessionSync(parsed.id, updatedSession)
                 }
               })
+              // Register for reconnect re-establishment
+              registerSessionWatch(parsed.id, windowId, autoWatchUuid, remoteWatch.unsubscribe)
+
               const session = await remoteWatch.initial
               sessionConnectionMap.set(session.id, parsed.id)
               const windowInfo = windowManager.getWindow(windowId)

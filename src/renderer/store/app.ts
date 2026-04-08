@@ -302,6 +302,19 @@ export const useAppStore = create<AppState>()((set, get) => ({
       void get().addRemoteSession(session, connection)
     })
 
+    const unsubReconnected = appApi.onConnectionReconnected((session, connection) => {
+      console.log('[App] Connection reconnected:', connection.id, 'session:', session.id)
+      // Dispose old session and recreate fresh
+      disposeSessionForConnection(connection.id, get)
+      const newStore = getOrCreateSession(session.id, get, set, connection)
+      if (session.workspaces.length > 0) {
+        void newStore.getState().handleRestore(session)
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length > 0 checked above
+        const firstWs = session.workspaces[0]!
+        useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: session.id })
+      }
+    })
+
     const unsubDisconnect = daemon.onDisconnected(() => {
       console.error('[App] Daemon disconnected')
       set({ daemonDisconnected: true })
@@ -350,6 +363,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       unsubReady()
       unsubSync()
       unsubSshAutoConnected()
+      unsubReconnected()
       unsubDisconnect()
       unsubActiveProcesses()
       unsubSshStatus()
@@ -497,4 +511,42 @@ function getOrCreateSession(
   }))
   console.log(`[renderer:app] getOrCreateSession: session store added to sessionStores, total sessions=${String(get().sessionStores.size)}`)
   return store
+}
+
+// Helper: dispose all workspaces in session stores matching a connectionId, then remove them
+function disposeSessionForConnection(connectionId: string, get: () => AppState): void {
+  const { sessionStores } = get()
+  const toRemove: string[] = []
+
+  for (const [sessionId, entry] of Array.from(sessionStores.entries())) {
+    const conn = entry.store.getState().connection
+    const connId = conn?.id ?? 'local'
+    if (connId !== connectionId) continue
+
+    console.log(`[renderer:app] Disposing session ${sessionId} for reconnecting connection ${connectionId}`)
+
+    // Dispose all workspaces: cached terminals, tab refs, git controllers
+    const workspaces = entry.store.getState().workspaces
+    for (const [, wsEntry] of Array.from(workspaces.entries())) {
+      if (wsEntry.status === 'loaded' || wsEntry.status === 'operation-error') {
+        wsEntry.store.getState().gitController.getState().dispose()
+        wsEntry.store.getState().disposeAllCachedTerminals()
+        for (const tabId of Object.keys(wsEntry.data.appStates)) {
+          const ref = wsEntry.store.getState().getTabRef(tabId)
+          if (ref) ref.dispose()
+        }
+      }
+    }
+
+    toRemove.push(sessionId)
+  }
+
+  // Remove disposed session stores
+  for (const sessionId of toRemove) {
+    useAppStore.setState((state) => {
+      const remaining = new Map(state.sessionStores)
+      remaining.delete(sessionId)
+      return { sessionStores: remaining }
+    })
+  }
 }
