@@ -4,14 +4,17 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    rust-overlay.url = "github:oxalica/rust-overlay";
+    rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, rust-overlay }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
           inherit system;
           config.allowUnfree = true; # Electron is unfree
+          overlays = [ rust-overlay.overlays.default ];
         };
 
         # Node.js LTS (22.x) - must use pkgs.nodejs, not nodejs_20,
@@ -19,24 +22,33 @@
         # fails when loaded via direnv.
         nodejs = pkgs.nodejs;
 
-        # Build inputs needed for native dependencies and Rust daemon
-        nativeBuildInputs = with pkgs; [
+        # Rust toolchain with musl cross-compilation targets
+        rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+          targets = [
+            "x86_64-unknown-linux-musl"
+            "aarch64-unknown-linux-musl"
+          ];
+        };
+
+        # Cross-compilation linkers for musl targets
+        muslCrossX86 = pkgs.pkgsCross.musl64.stdenv.cc;
+        muslCrossAarch64 = pkgs.pkgsCross.aarch64-multiplatform-musl.stdenv.cc;
+
+        # Dev shell build inputs
+        devNativeBuildInputs = with pkgs; [
           nodejs
-          (python3.withPackages (ps: [ ps.setuptools ])) # Required by node-gyp for native modules
+          (python3.withPackages (ps: [ ps.setuptools ]))
           pkg-config
           makeWrapper
-
-          # Rust toolchain for daemon-rs
-          rustc
-          cargo
-          protobuf # protoc for tonic-build
+          rustToolchain
+          protobuf
+          muslCrossX86
+          muslCrossAarch64
         ];
 
-        buildInputs = with pkgs; [
-          # Libraries needed for Electron and native modules
+        electronLibs = with pkgs; [
           stdenv.cc.cc.lib
         ] ++ lib.optionals stdenv.isLinux [
-          # Linux-specific dependencies for Electron
           alsa-lib
           at-spi2-atk
           at-spi2-core
@@ -71,17 +83,51 @@
           libxcb
           libxshmfence
         ] ++ lib.optionals stdenv.isDarwin [
-          # macOS-specific dependencies
           darwin.apple_sdk.frameworks.CoreServices
           darwin.apple_sdk.frameworks.AppKit
           darwin.apple_sdk.frameworks.Security
         ];
 
+        # Build the Rust daemon separately
+        treeterm-daemon = pkgs.rustPlatform.buildRustPackage {
+          pname = "treeterm-daemon";
+          version = "0.1.0";
+
+          src = pkgs.lib.cleanSourceWith {
+            src = ./.;
+            filter = path: type:
+              let
+                relPath = pkgs.lib.removePrefix (toString ./.) (toString path);
+              in
+              # Include daemon-rs/ and src/proto/ (needed by build.rs)
+              pkgs.lib.hasPrefix "/daemon-rs" relPath
+              || pkgs.lib.hasPrefix "/src/proto" relPath
+              || relPath == "/daemon-rs"
+              || relPath == "/src"
+              || relPath == "/src/proto"
+              || relPath == "";
+          };
+
+          sourceRoot = "source/daemon-rs";
+
+          cargoLock.lockFile = ./daemon-rs/Cargo.lock;
+
+          nativeBuildInputs = [ pkgs.protobuf ];
+
+          doCheck = false;
+
+          # Disable the musl cross-compilation config for nix build
+          preBuild = ''
+            rm -f .cargo/config.toml
+          '';
+        };
+
       in
       {
         # Development shell
         devShells.default = pkgs.mkShell {
-          inherit buildInputs nativeBuildInputs;
+          buildInputs = electronLibs;
+          nativeBuildInputs = devNativeBuildInputs;
 
           shellHook = ''
             echo "TreeTerm development environment"
@@ -96,7 +142,7 @@
             echo ""
           '' + pkgs.lib.optionalString pkgs.stdenv.isLinux ''
             # Set up library path for Electron on Linux
-            export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath buildInputs}:$LD_LIBRARY_PATH
+            export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath electronLibs}:$LD_LIBRARY_PATH
           '';
 
           # Environment variables
@@ -113,17 +159,38 @@
 
           src = ./.;
 
-          npmDepsHash = "sha256-/6esp6OPZkomSm1eltNKtk23PYYJehOdHUll3XRUfhE=";
-          npmFlags = [ "--legacy-peer-deps" ];
+          npmDepsHash = "sha256-u3yIfD37HB//ael83BJ8/lilJ/IFTYfJqhPhsQ15CIc=";
+          npmFlags = [ "--legacy-peer-deps" "--ignore-scripts" ];
 
-          inherit nativeBuildInputs buildInputs;
+          nativeBuildInputs = with pkgs; [
+            nodejs
+            (python3.withPackages (ps: [ ps.setuptools ]))
+            pkg-config
+            makeWrapper
+          ];
 
-          # node-pty needs to compile native code
+          buildInputs = electronLibs;
+
           makeCacheWritable = true;
 
+          # Proto files are pre-generated in src/generated/
+          # Daemon is built separately as treeterm-daemon
+          # Only run electron-vite build here
           buildPhase = ''
             runHook preBuild
-            npm run build
+
+            # Compile proto client for CLI usage (bin/treeterm.js needs it)
+            mkdir -p out/daemon/generated
+            npx tsc src/generated/treeterm.ts \
+              --outDir out/daemon/generated \
+              --module commonjs \
+              --target es2020 \
+              --esModuleInterop \
+              --declaration \
+              --skipLibCheck \
+              --moduleResolution node
+
+            npx electron-vite build
             runHook postBuild
           '';
 
@@ -131,30 +198,37 @@
             runHook preInstall
 
             mkdir -p $out/lib/treeterm
-            cp -r out/* $out/lib/treeterm/
+            cp -r out $out/lib/treeterm/out
             cp -r node_modules $out/lib/treeterm/
             cp package.json $out/lib/treeterm/
 
+            # Install daemon binary
+            mkdir -p $out/lib/treeterm/out/daemon-rs
+            cp ${treeterm-daemon}/bin/treeterm-daemon $out/lib/treeterm/out/daemon-rs/
+
             # Install the CLI wrapper
-            mkdir -p $out/bin
+            mkdir -p $out/bin $out/lib/treeterm/bin
             cp bin/treeterm.js $out/lib/treeterm/bin/
 
             makeWrapper ${nodejs}/bin/node $out/bin/treeterm \
               --add-flags "$out/lib/treeterm/bin/treeterm.js" \
+              --set ELECTRON_OVERRIDE_DIST_PATH "${pkgs.electron}/bin/" \
               ${pkgs.lib.optionalString pkgs.stdenv.isLinux
-                "--prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath buildInputs}"}
+                "--prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath electronLibs}"}
 
             runHook postInstall
           '';
 
           meta = with pkgs.lib; {
             description = "Hierarchical terminal manager and IDE for AI agent workflows";
-            homepage = "https://github.com/anthropics/treeterm";
             license = licenses.mit;
             platforms = platforms.unix;
             mainProgram = "treeterm";
           };
         };
+
+        # Expose daemon as a separate package
+        packages.daemon = treeterm-daemon;
 
         # Alias for the package
         packages.treeterm = self.packages.${system}.default;
