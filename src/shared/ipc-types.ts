@@ -249,6 +249,14 @@ export interface IpcRequests {
     params: [sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number]
     result: IpcResult<{ session: Session }>
   }
+  sessionLock: {
+    params: [sessionId: string, holderId: string, ttlMs?: number]
+    result: IpcResult<{ acquired: boolean; session: Session }>
+  }
+  sessionUnlock: {
+    params: [sessionId: string, holderId: string]
+    result: IpcResult<{ session: Session }>
+  }
 
   // Daemon operations
   daemonShutdown: {

@@ -45,7 +45,7 @@ const mockRemoteClient = {
     return () => { grpcDisconnectCallback = null }
   }),
   watchSession: vi.fn().mockReturnValue({
-    initial: Promise.resolve({ id: 'test', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }),
+    initial: Promise.resolve({ id: 'test', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }),
     unsubscribe: mockWatchSessionUnsubscribe,
   }),
 }
@@ -89,7 +89,7 @@ function mockClient(overrides: Partial<GrpcDaemonClient> = {}): GrpcDaemonClient
     onDisconnect: vi.fn(),
     socketPath: '/tmp/test.sock',
     watchSession: vi.fn().mockReturnValue({
-      initial: Promise.resolve({ id: 'test', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }),
+      initial: Promise.resolve({ id: 'test', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }),
       unsubscribe: vi.fn(),
     }),
     ...overrides,

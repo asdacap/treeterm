@@ -109,12 +109,19 @@ export interface Workspace {
   lastActivity: number
 }
 
+export interface SessionLock {
+  holderId: string
+  acquiredAt: number
+  expiresAt: number
+}
+
 export interface Session {
   id: string
   workspaces: Workspace[]
   createdAt: number
   lastActivity: number
   version: number
+  lock: SessionLock | null
 }
 
 // Helper type for workspace input (without daemon-managed fields)

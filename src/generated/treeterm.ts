@@ -70,6 +70,12 @@ export interface Workspace_AppStatesEntry {
   value?: AppState | undefined;
 }
 
+export interface SessionLock {
+  holderId: string;
+  acquiredAt: number;
+  expiresAt: number;
+}
+
 export interface Session {
   id: string;
   workspaces: Workspace[];
@@ -77,6 +83,7 @@ export interface Session {
   lastActivity: number;
   /** Monotonically increasing version, incremented on every update */
   version: number;
+  lock?: SessionLock | undefined;
 }
 
 export interface PtySessionInfo {
@@ -219,6 +226,21 @@ export interface SessionWatchEvent {
     | undefined;
   /** Who triggered the update */
   senderId: string;
+}
+
+export interface LockSessionRequest {
+  holderId: string;
+  /** Lock TTL in milliseconds (default 60000) */
+  ttlMs?: number | undefined;
+}
+
+export interface LockSessionResponse {
+  acquired: boolean;
+  session?: Session | undefined;
+}
+
+export interface UnlockSessionRequest {
+  holderId: string;
 }
 
 /** File read streaming messages */
@@ -1017,8 +1039,112 @@ export const Workspace_AppStatesEntry: MessageFns<Workspace_AppStatesEntry> = {
   },
 };
 
+function createBaseSessionLock(): SessionLock {
+  return { holderId: "", acquiredAt: 0, expiresAt: 0 };
+}
+
+export const SessionLock: MessageFns<SessionLock> = {
+  encode(message: SessionLock, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.holderId !== "") {
+      writer.uint32(10).string(message.holderId);
+    }
+    if (message.acquiredAt !== 0) {
+      writer.uint32(16).int64(message.acquiredAt);
+    }
+    if (message.expiresAt !== 0) {
+      writer.uint32(24).int64(message.expiresAt);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SessionLock {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSessionLock();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.holderId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.acquiredAt = longToNumber(reader.int64());
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.expiresAt = longToNumber(reader.int64());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SessionLock {
+    return {
+      holderId: isSet(object.holderId)
+        ? globalThis.String(object.holderId)
+        : isSet(object.holder_id)
+        ? globalThis.String(object.holder_id)
+        : "",
+      acquiredAt: isSet(object.acquiredAt)
+        ? globalThis.Number(object.acquiredAt)
+        : isSet(object.acquired_at)
+        ? globalThis.Number(object.acquired_at)
+        : 0,
+      expiresAt: isSet(object.expiresAt)
+        ? globalThis.Number(object.expiresAt)
+        : isSet(object.expires_at)
+        ? globalThis.Number(object.expires_at)
+        : 0,
+    };
+  },
+
+  toJSON(message: SessionLock): unknown {
+    const obj: any = {};
+    if (message.holderId !== "") {
+      obj.holderId = message.holderId;
+    }
+    if (message.acquiredAt !== 0) {
+      obj.acquiredAt = Math.round(message.acquiredAt);
+    }
+    if (message.expiresAt !== 0) {
+      obj.expiresAt = Math.round(message.expiresAt);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SessionLock>, I>>(base?: I): SessionLock {
+    return SessionLock.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<SessionLock>, I>>(object: I): SessionLock {
+    const message = createBaseSessionLock();
+    message.holderId = object.holderId ?? "";
+    message.acquiredAt = object.acquiredAt ?? 0;
+    message.expiresAt = object.expiresAt ?? 0;
+    return message;
+  },
+};
+
 function createBaseSession(): Session {
-  return { id: "", workspaces: [], createdAt: 0, lastActivity: 0, version: 0 };
+  return { id: "", workspaces: [], createdAt: 0, lastActivity: 0, version: 0, lock: undefined };
 }
 
 export const Session: MessageFns<Session> = {
@@ -1037,6 +1163,9 @@ export const Session: MessageFns<Session> = {
     }
     if (message.version !== 0) {
       writer.uint32(40).uint64(message.version);
+    }
+    if (message.lock !== undefined) {
+      SessionLock.encode(message.lock, writer.uint32(50).fork()).join();
     }
     return writer;
   },
@@ -1088,6 +1217,14 @@ export const Session: MessageFns<Session> = {
           message.version = longToNumber(reader.uint64());
           continue;
         }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.lock = SessionLock.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1114,6 +1251,7 @@ export const Session: MessageFns<Session> = {
         ? globalThis.Number(object.last_activity)
         : 0,
       version: isSet(object.version) ? globalThis.Number(object.version) : 0,
+      lock: isSet(object.lock) ? SessionLock.fromJSON(object.lock) : undefined,
     };
   },
 
@@ -1134,6 +1272,9 @@ export const Session: MessageFns<Session> = {
     if (message.version !== 0) {
       obj.version = Math.round(message.version);
     }
+    if (message.lock !== undefined) {
+      obj.lock = SessionLock.toJSON(message.lock);
+    }
     return obj;
   },
 
@@ -1147,6 +1288,9 @@ export const Session: MessageFns<Session> = {
     message.createdAt = object.createdAt ?? 0;
     message.lastActivity = object.lastActivity ?? 0;
     message.version = object.version ?? 0;
+    message.lock = (object.lock !== undefined && object.lock !== null)
+      ? SessionLock.fromPartial(object.lock)
+      : undefined;
     return message;
   },
 };
@@ -3189,6 +3333,232 @@ export const SessionWatchEvent: MessageFns<SessionWatchEvent> = {
   },
 };
 
+function createBaseLockSessionRequest(): LockSessionRequest {
+  return { holderId: "", ttlMs: undefined };
+}
+
+export const LockSessionRequest: MessageFns<LockSessionRequest> = {
+  encode(message: LockSessionRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.holderId !== "") {
+      writer.uint32(10).string(message.holderId);
+    }
+    if (message.ttlMs !== undefined) {
+      writer.uint32(16).int64(message.ttlMs);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): LockSessionRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseLockSessionRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.holderId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.ttlMs = longToNumber(reader.int64());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): LockSessionRequest {
+    return {
+      holderId: isSet(object.holderId)
+        ? globalThis.String(object.holderId)
+        : isSet(object.holder_id)
+        ? globalThis.String(object.holder_id)
+        : "",
+      ttlMs: isSet(object.ttlMs)
+        ? globalThis.Number(object.ttlMs)
+        : isSet(object.ttl_ms)
+        ? globalThis.Number(object.ttl_ms)
+        : undefined,
+    };
+  },
+
+  toJSON(message: LockSessionRequest): unknown {
+    const obj: any = {};
+    if (message.holderId !== "") {
+      obj.holderId = message.holderId;
+    }
+    if (message.ttlMs !== undefined) {
+      obj.ttlMs = Math.round(message.ttlMs);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<LockSessionRequest>, I>>(base?: I): LockSessionRequest {
+    return LockSessionRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<LockSessionRequest>, I>>(object: I): LockSessionRequest {
+    const message = createBaseLockSessionRequest();
+    message.holderId = object.holderId ?? "";
+    message.ttlMs = object.ttlMs ?? undefined;
+    return message;
+  },
+};
+
+function createBaseLockSessionResponse(): LockSessionResponse {
+  return { acquired: false, session: undefined };
+}
+
+export const LockSessionResponse: MessageFns<LockSessionResponse> = {
+  encode(message: LockSessionResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.acquired !== false) {
+      writer.uint32(8).bool(message.acquired);
+    }
+    if (message.session !== undefined) {
+      Session.encode(message.session, writer.uint32(18).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): LockSessionResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseLockSessionResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.acquired = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.session = Session.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): LockSessionResponse {
+    return {
+      acquired: isSet(object.acquired) ? globalThis.Boolean(object.acquired) : false,
+      session: isSet(object.session) ? Session.fromJSON(object.session) : undefined,
+    };
+  },
+
+  toJSON(message: LockSessionResponse): unknown {
+    const obj: any = {};
+    if (message.acquired !== false) {
+      obj.acquired = message.acquired;
+    }
+    if (message.session !== undefined) {
+      obj.session = Session.toJSON(message.session);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<LockSessionResponse>, I>>(base?: I): LockSessionResponse {
+    return LockSessionResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<LockSessionResponse>, I>>(object: I): LockSessionResponse {
+    const message = createBaseLockSessionResponse();
+    message.acquired = object.acquired ?? false;
+    message.session = (object.session !== undefined && object.session !== null)
+      ? Session.fromPartial(object.session)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseUnlockSessionRequest(): UnlockSessionRequest {
+  return { holderId: "" };
+}
+
+export const UnlockSessionRequest: MessageFns<UnlockSessionRequest> = {
+  encode(message: UnlockSessionRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.holderId !== "") {
+      writer.uint32(10).string(message.holderId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): UnlockSessionRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseUnlockSessionRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.holderId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): UnlockSessionRequest {
+    return {
+      holderId: isSet(object.holderId)
+        ? globalThis.String(object.holderId)
+        : isSet(object.holder_id)
+        ? globalThis.String(object.holder_id)
+        : "",
+    };
+  },
+
+  toJSON(message: UnlockSessionRequest): unknown {
+    const obj: any = {};
+    if (message.holderId !== "") {
+      obj.holderId = message.holderId;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<UnlockSessionRequest>, I>>(base?: I): UnlockSessionRequest {
+    return UnlockSessionRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<UnlockSessionRequest>, I>>(object: I): UnlockSessionRequest {
+    const message = createBaseUnlockSessionRequest();
+    message.holderId = object.holderId ?? "";
+    return message;
+  },
+};
+
 function createBaseFileReadChunk(): FileReadChunk {
   return { header: undefined, data: undefined, end: undefined };
 }
@@ -4908,6 +5278,24 @@ export const TreeTermDaemonService = {
     responseSerialize: (value: SessionWatchEvent): Buffer => Buffer.from(SessionWatchEvent.encode(value).finish()),
     responseDeserialize: (value: Buffer): SessionWatchEvent => SessionWatchEvent.decode(value),
   },
+  lockSession: {
+    path: "/treeterm.TreeTermDaemon/LockSession" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: LockSessionRequest): Buffer => Buffer.from(LockSessionRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): LockSessionRequest => LockSessionRequest.decode(value),
+    responseSerialize: (value: LockSessionResponse): Buffer => Buffer.from(LockSessionResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): LockSessionResponse => LockSessionResponse.decode(value),
+  },
+  unlockSession: {
+    path: "/treeterm.TreeTermDaemon/UnlockSession" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: UnlockSessionRequest): Buffer => Buffer.from(UnlockSessionRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): UnlockSessionRequest => UnlockSessionRequest.decode(value),
+    responseSerialize: (value: Session): Buffer => Buffer.from(Session.encode(value).finish()),
+    responseDeserialize: (value: Buffer): Session => Session.decode(value),
+  },
   /** Daemon Control */
   shutdown: {
     path: "/treeterm.TreeTermDaemon/Shutdown" as const,
@@ -4976,6 +5364,8 @@ export interface TreeTermDaemonServer extends UntypedServiceImplementation {
   /** Workspace Session Management (one session per daemon) */
   updateSession: handleUnaryCall<UpdateSessionRequest, Session>;
   sessionWatch: handleServerStreamingCall<SessionWatchRequest, SessionWatchEvent>;
+  lockSession: handleUnaryCall<LockSessionRequest, LockSessionResponse>;
+  unlockSession: handleUnaryCall<UnlockSessionRequest, Session>;
   /** Daemon Control */
   shutdown: handleUnaryCall<Empty, Empty>;
   /** Filesystem Operations */
@@ -5065,6 +5455,36 @@ export interface TreeTermDaemonClient extends Client {
     metadata?: Metadata,
     options?: Partial<CallOptions>,
   ): ClientReadableStream<SessionWatchEvent>;
+  lockSession(
+    request: LockSessionRequest,
+    callback: (error: ServiceError | null, response: LockSessionResponse) => void,
+  ): ClientUnaryCall;
+  lockSession(
+    request: LockSessionRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: LockSessionResponse) => void,
+  ): ClientUnaryCall;
+  lockSession(
+    request: LockSessionRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: LockSessionResponse) => void,
+  ): ClientUnaryCall;
+  unlockSession(
+    request: UnlockSessionRequest,
+    callback: (error: ServiceError | null, response: Session) => void,
+  ): ClientUnaryCall;
+  unlockSession(
+    request: UnlockSessionRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: Session) => void,
+  ): ClientUnaryCall;
+  unlockSession(
+    request: UnlockSessionRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: Session) => void,
+  ): ClientUnaryCall;
   /** Daemon Control */
   shutdown(request: Empty, callback: (error: ServiceError | null, response: Empty) => void): ClientUnaryCall;
   shutdown(

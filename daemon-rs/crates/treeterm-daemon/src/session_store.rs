@@ -34,6 +34,7 @@ struct SessionWatcher {
 struct Inner {
     session: Session,
     watchers: Vec<SessionWatcher>,
+    lock: Option<SessionLock>,
 }
 
 /// One session per daemon. Multiple sessions = multiple daemon instances.
@@ -52,12 +53,14 @@ impl SessionStore {
             created_at: now,
             last_activity: now,
             version: 1,
+            lock: None,
         };
         tracing::info!(session_id = %session.id, "session created");
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 session,
                 watchers: Vec::new(),
+                lock: None,
             })),
             pty_manager: PtyManager::new(),
         }
@@ -67,36 +70,70 @@ impl SessionStore {
         &self.pty_manager
     }
 
-    /// Return a snapshot of the current session.
+    /// Return a snapshot of the current session (with current lock state).
     pub async fn session(&self) -> Session {
-        self.inner.lock().await.session.clone()
+        let inner = self.inner.lock().await;
+        let mut session = inner.session.clone();
+        session.lock = inner.lock.clone();
+        session
     }
 
     /// Update the session's workspaces. Returns `(session, accepted)`.
+    ///
+    /// Lock enforcement: if session is locked by another sender, the update is rejected.
+    /// If the sender holds the lock, the `expected_version` check is skipped (holder always wins).
     /// If `expected_version` is provided and doesn't match the current version,
     /// the update is rejected and the current session is returned unchanged.
     pub async fn update_session(
         &self,
         workspaces: Vec<Workspace>,
         expected_version: Option<u64>,
+        sender_id: &str,
     ) -> (Session, bool) {
         let mut inner = self.inner.lock().await;
-        let existing = &inner.session;
+        let now = now_millis();
 
-        // Version mismatch → reject, return current state
-        if let Some(ev) = expected_version {
-            if ev != existing.version {
-                tracing::info!(
-                    expected_version = ev,
-                    actual_version = existing.version,
-                    "session update rejected: version mismatch"
-                );
-                return (existing.clone(), false);
+        // Clear expired lock
+        if inner.lock.as_ref().is_some_and(|l| l.expires_at <= now) {
+            tracing::info!("session lock expired, clearing");
+            inner.lock = None;
+            inner.session.lock = None;
+        }
+
+        let sender_holds_lock = inner
+            .lock
+            .as_ref()
+            .is_some_and(|l| l.holder_id == sender_id);
+
+        // Lock check: if locked by another sender, reject
+        if inner.lock.is_some() && !sender_holds_lock {
+            tracing::info!(
+                sender_id,
+                holder_id = %inner.lock.as_ref().unwrap().holder_id,
+                "session update rejected: locked by another client"
+            );
+            let mut session = inner.session.clone();
+            session.lock = inner.lock.clone();
+            return (session, false);
+        }
+
+        // Version check (skipped if sender holds the lock)
+        if !sender_holds_lock {
+            if let Some(ev) = expected_version {
+                if ev != inner.session.version {
+                    tracing::info!(
+                        expected_version = ev,
+                        actual_version = inner.session.version,
+                        "session update rejected: version mismatch"
+                    );
+                    let mut session = inner.session.clone();
+                    session.lock = inner.lock.clone();
+                    return (session, false);
+                }
             }
         }
 
-        let now = now_millis();
-        let old_workspaces = &existing.workspaces;
+        let old_workspaces = &inner.session.workspaces;
         let full_workspaces = workspaces
             .into_iter()
             .map(|mut ws| {
@@ -113,16 +150,104 @@ impl SessionStore {
             .collect();
 
         let updated = Session {
-            id: existing.id.clone(),
+            id: inner.session.id.clone(),
             workspaces: full_workspaces,
-            created_at: existing.created_at,
+            created_at: inner.session.created_at,
             last_activity: now,
-            version: existing.version + 1,
+            version: inner.session.version + 1,
+            lock: inner.lock.clone(),
         };
 
         tracing::info!(version = updated.version, "session updated");
         inner.session = updated.clone();
         (updated, true)
+    }
+
+    /// Acquire a session lock. Returns `(acquired, session)`.
+    ///
+    /// If the session is unlocked or the lock has expired, the lock is granted.
+    /// If the same holder re-acquires, the TTL is refreshed (idempotent).
+    /// If locked by another holder, returns `(false, current_session)`.
+    pub async fn lock_session(
+        &self,
+        holder_id: String,
+        ttl_ms: i64,
+    ) -> (bool, Session) {
+        let mut inner = self.inner.lock().await;
+        let now = now_millis();
+
+        // Clear expired lock
+        if inner.lock.as_ref().is_some_and(|l| l.expires_at <= now) {
+            tracing::info!("session lock expired, clearing");
+            inner.lock = None;
+            inner.session.lock = None;
+        }
+
+        // If locked by another holder, reject
+        if let Some(ref lock) = inner.lock {
+            if lock.holder_id != holder_id {
+                tracing::info!(
+                    holder_id,
+                    current_holder = %lock.holder_id,
+                    "session lock rejected: held by another client"
+                );
+                let mut session = inner.session.clone();
+                session.lock = inner.lock.clone();
+                return (false, session);
+            }
+        }
+
+        // Grant or refresh lock
+        let lock = SessionLock {
+            holder_id: holder_id.clone(),
+            acquired_at: now,
+            expires_at: now + ttl_ms,
+        };
+        inner.lock = Some(lock.clone());
+
+        // Increment version so watchers see the lock change
+        inner.session.version += 1;
+        inner.session.last_activity = now;
+        inner.session.lock = Some(lock);
+
+        tracing::info!(
+            holder_id,
+            version = inner.session.version,
+            ttl_ms,
+            "session locked"
+        );
+        (true, inner.session.clone())
+    }
+
+    /// Release a session lock. Only the holder can unlock.
+    /// Returns the current session (with lock cleared if released).
+    pub async fn unlock_session(
+        &self,
+        holder_id: &str,
+    ) -> Session {
+        let mut inner = self.inner.lock().await;
+        let now = now_millis();
+
+        if let Some(ref lock) = inner.lock {
+            if lock.holder_id == holder_id {
+                tracing::info!(holder_id, "session unlocked");
+                inner.lock = None;
+
+                inner.session.version += 1;
+                inner.session.last_activity = now;
+                inner.session.lock = None;
+            } else {
+                tracing::info!(
+                    holder_id,
+                    current_holder = %lock.holder_id,
+                    "session unlock ignored: not the holder"
+                );
+            }
+        }
+
+        let mut session = inner.session.clone();
+        session.lock = inner.lock.clone();
+        session
     }
 
     pub async fn add_watcher(
@@ -197,13 +322,14 @@ mod tests {
         assert_eq!(session.version, 1);
         assert!(session.created_at > 0);
         assert_eq!(session.workspaces.len(), 0);
+        assert!(session.lock.is_none());
     }
 
     #[tokio::test]
     async fn update_session_increments_version() {
         let store = SessionStore::new();
 
-        let (updated, accepted) = store.update_session(vec![], None).await;
+        let (updated, accepted) = store.update_session(vec![], None, "window-a").await;
         assert!(accepted);
         assert_eq!(updated.version, 2);
     }
@@ -212,7 +338,7 @@ mod tests {
     async fn update_session_version_match_accepted() {
         let store = SessionStore::new();
 
-        let (updated, accepted) = store.update_session(vec![], Some(1)).await;
+        let (updated, accepted) = store.update_session(vec![], Some(1), "window-a").await;
         assert!(accepted);
         assert_eq!(updated.version, 2);
     }
@@ -221,7 +347,7 @@ mod tests {
     async fn update_session_version_mismatch_rejected() {
         let store = SessionStore::new();
 
-        let (returned, accepted) = store.update_session(vec![], Some(999)).await;
+        let (returned, accepted) = store.update_session(vec![], Some(999), "window-a").await;
         assert!(!accepted);
         assert_eq!(returned.version, 1); // unchanged
     }
@@ -234,7 +360,7 @@ mod tests {
             path: "/a".into(),
             ..Default::default()
         };
-        store.update_session(vec![ws], None).await;
+        store.update_session(vec![ws], None, "window-a").await;
         let session = store.session().await;
         let original_created_at = session.workspaces[0].created_at;
 
@@ -243,7 +369,9 @@ mod tests {
             path: "/a-updated".into(),
             ..Default::default()
         };
-        let (updated, _) = store.update_session(vec![updated_ws], None).await;
+        let (updated, _) = store
+            .update_session(vec![updated_ws], None, "window-a")
+            .await;
 
         assert_eq!(updated.workspaces[0].id, "ws-1");
         assert_eq!(updated.workspaces[0].created_at, original_created_at);
@@ -257,7 +385,7 @@ mod tests {
             path: "/same-path".into(),
             ..Default::default()
         };
-        store.update_session(vec![ws], None).await;
+        store.update_session(vec![ws], None, "window-a").await;
 
         // Update with empty id but same path
         let updated_ws = Workspace {
@@ -265,7 +393,9 @@ mod tests {
             path: "/same-path".into(),
             ..Default::default()
         };
-        let (updated, _) = store.update_session(vec![updated_ws], None).await;
+        let (updated, _) = store
+            .update_session(vec![updated_ws], None, "window-a")
+            .await;
 
         // Should reuse the original workspace id
         assert_eq!(updated.workspaces[0].id, "ws-original");
@@ -310,5 +440,163 @@ mod tests {
         // PtyManager should be functional
         let sessions = store.pty_manager().list_sessions().await;
         assert!(sessions.is_empty());
+    }
+
+    // ---- Lock tests ----
+
+    #[tokio::test]
+    async fn lock_acquires_when_unlocked() {
+        let store = SessionStore::new();
+
+        let (acquired, session) = store.lock_session("holder-a".into(), 60000).await;
+        assert!(acquired);
+        assert!(session.lock.is_some());
+        let lock = session.lock.unwrap();
+        assert_eq!(lock.holder_id, "holder-a");
+        assert!(lock.expires_at > lock.acquired_at);
+    }
+
+    #[tokio::test]
+    async fn lock_rejects_when_held_by_other() {
+        let store = SessionStore::new();
+
+        let (acquired, _) = store.lock_session("holder-a".into(), 60000).await;
+        assert!(acquired);
+
+        let (acquired, session) = store.lock_session("holder-b".into(), 60000).await;
+        assert!(!acquired);
+        // Session should show current holder
+        assert_eq!(session.lock.unwrap().holder_id, "holder-a");
+    }
+
+    #[tokio::test]
+    async fn lock_reacquire_by_same_holder() {
+        let store = SessionStore::new();
+
+        let (acquired, session1) = store.lock_session("holder-a".into(), 10000).await;
+        assert!(acquired);
+        let first_expires = session1.lock.unwrap().expires_at;
+
+        // Re-acquire with longer TTL refreshes the lock
+        let (acquired, session2) = store.lock_session("holder-a".into(), 60000).await;
+        assert!(acquired);
+        let second_expires = session2.lock.unwrap().expires_at;
+        assert!(second_expires > first_expires);
+    }
+
+    #[tokio::test]
+    async fn lock_succeeds_when_expired() {
+        let store = SessionStore::new();
+
+        // Lock with 0ms TTL (immediately expired)
+        let (acquired, _) = store.lock_session("holder-a".into(), 0).await;
+        assert!(acquired);
+
+        // Another holder can now acquire
+        let (acquired, session) = store.lock_session("holder-b".into(), 60000).await;
+        assert!(acquired);
+        assert_eq!(session.lock.unwrap().holder_id, "holder-b");
+    }
+
+    #[tokio::test]
+    async fn lock_increments_version() {
+        let store = SessionStore::new();
+        let session_before = store.session().await;
+
+        let (acquired, session_after) = store.lock_session("holder-a".into(), 60000).await;
+        assert!(acquired);
+        assert_eq!(session_after.version, session_before.version + 1);
+    }
+
+    #[tokio::test]
+    async fn update_rejects_when_locked_by_other() {
+        let store = SessionStore::new();
+
+        let (acquired, _) = store.lock_session("holder-a".into(), 60000).await;
+        assert!(acquired);
+
+        // Window B tries to update — rejected
+        let (_, accepted) = store
+            .update_session(vec![], None, "window-b")
+            .await;
+        assert!(!accepted);
+    }
+
+    #[tokio::test]
+    async fn update_accepts_for_lock_holder() {
+        let store = SessionStore::new();
+
+        let (acquired, session) = store.lock_session("holder-a".into(), 60000).await;
+        assert!(acquired);
+
+        // Holder can update
+        let (updated, accepted) = store
+            .update_session(vec![], Some(session.version), "holder-a")
+            .await;
+        assert!(accepted);
+        assert_eq!(updated.version, session.version + 1);
+    }
+
+    #[tokio::test]
+    async fn update_skips_version_check_for_holder() {
+        let store = SessionStore::new();
+
+        let (acquired, _) = store.lock_session("holder-a".into(), 60000).await;
+        assert!(acquired);
+
+        // Holder sends wrong expected_version — still accepted because version check is skipped
+        let (_, accepted) = store
+            .update_session(vec![], Some(999), "holder-a")
+            .await;
+        assert!(accepted);
+    }
+
+    #[tokio::test]
+    async fn unlock_releases_lock() {
+        let store = SessionStore::new();
+
+        store.lock_session("holder-a".into(), 60000).await;
+        let session = store.unlock_session("holder-a").await;
+        assert!(session.lock.is_none());
+
+        // Other window can now update
+        let (_, accepted) = store
+            .update_session(vec![], Some(session.version), "window-b")
+            .await;
+        assert!(accepted);
+    }
+
+    #[tokio::test]
+    async fn unlock_noop_for_non_holder() {
+        let store = SessionStore::new();
+
+        store.lock_session("holder-a".into(), 60000).await;
+        let session = store.unlock_session("holder-b").await;
+        // Lock still held by holder-a
+        assert!(session.lock.is_some());
+        assert_eq!(session.lock.unwrap().holder_id, "holder-a");
+    }
+
+    #[tokio::test]
+    async fn unlock_increments_version() {
+        let store = SessionStore::new();
+
+        let (_, lock_session) = store.lock_session("holder-a".into(), 60000).await;
+        let session = store.unlock_session("holder-a").await;
+        assert_eq!(session.version, lock_session.version + 1);
+    }
+
+    #[tokio::test]
+    async fn session_snapshot_includes_lock_state() {
+        let store = SessionStore::new();
+
+        store.lock_session("holder-a".into(), 60000).await;
+        let session = store.session().await;
+        assert!(session.lock.is_some());
+        assert_eq!(session.lock.unwrap().holder_id, "holder-a");
+
+        store.unlock_session("holder-a").await;
+        let session = store.session().await;
+        assert!(session.lock.is_none());
     }
 }

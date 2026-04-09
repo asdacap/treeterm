@@ -60,6 +60,8 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
     exec: createMockExecApi(),
     sessionApi: {
       update: vi.fn().mockResolvedValue({ success: true }),
+      lock: vi.fn().mockResolvedValue({ success: true, acquired: true, session: { id: 'session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null } }),
+      unlock: vi.fn().mockResolvedValue({ success: true, session: { id: 'session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null } }),
       onSync: vi.fn().mockReturnValue(() => {}),
     },
     terminal: {
@@ -622,6 +624,7 @@ describe('createSessionStore', () => {
         createdAt: Date.now(),
         lastActivity: Date.now(),
         version: 1,
+        lock: null,
       }
 
       await store.getState().handleRestore(daemonSession)
@@ -647,6 +650,7 @@ describe('createSessionStore', () => {
         createdAt: Date.now(),
         lastActivity: Date.now(),
         version: 1,
+        lock: null,
       }
 
       await store.getState().handleExternalUpdate(daemonSession)
@@ -668,6 +672,7 @@ describe('createSessionStore', () => {
         createdAt: Date.now(),
         lastActivity: Date.now(),
         version: 1,
+        lock: null,
       }
 
       await store.getState().handleRestore(daemonSession)

@@ -13,6 +13,7 @@ import type {
   TerminalApi, GitApi, FilesystemApi, ExecApi, SessionApi, Settings, WorktreeSettings,
   Application, SandboxConfig, TTYSessionInfo, LlmApi, GitHubApi, RunActionsApi
 } from '../types'
+import type { SessionLock } from '../../shared/types'
 
 export enum WorkspaceEntryStatus {
   Loading = 'loading',
@@ -64,6 +65,7 @@ export interface SessionState {
   activeWorkspaceId: string | null
   isRestoring: boolean
   sessionVersion: number
+  sessionLock: SessionLock | null
 
   clearWorkspaceError: (id: string) => void
   /** Reactive cleanup when a workspace is no longer in the daemon session.
@@ -188,7 +190,7 @@ export function createSessionStore(
       } else {
         if (result.session.version === currentVersion + 1) {
           // Update accepted
-          store.setState({ sessionVersion: result.session.version })
+          store.setState({ sessionVersion: result.session.version, sessionLock: result.session.lock })
           console.log('[session] session updated successfully, version:', result.session.version)
         } else {
           // Update rejected (version mismatch) — reconcile from daemon's current state
@@ -599,6 +601,7 @@ export function createSessionStore(
     activeWorkspaceId: null,
     isRestoring: false,
     sessionVersion: 0,
+    sessionLock: null,
 
     connection: config.connection ?? null,
 
@@ -865,67 +868,97 @@ export function createSessionStore(
     },
 
     mergeAndRemoveWorkspace: async (id: string, squash: boolean) => {
-      const result = await mergeWorkspaceCore(id, squash)
-      if (!result.success) return result
-
-      const entry = get().workspaces.get(id)
-      if (entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError)) {
-        entry.store.getState().updateStatus('merged')
+      // Acquire session lock before merge (slow IO operation)
+      const holderId = config.windowUuid || ''
+      if (holderId) {
+        const lockResult = await deps.sessionApi.lock(config.sessionId, holderId, 60_000)
+        if (!lockResult.success || !lockResult.acquired) {
+          return { success: false, error: 'Session is locked by another window' }
+        }
       }
 
       try {
-        await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: false, operationId: result.operationId })
-      } catch (err) {
-        // Merge succeeded but removal failed — show operation error
-        const currentEntry = get().workspaces.get(id)
-        if (currentEntry && (currentEntry.status === WorkspaceEntryStatus.Loaded || currentEntry.status === WorkspaceEntryStatus.OperationError)) {
-          store.setState(s => ({
-            workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: currentEntry.data, store: currentEntry.store, error: `Merge succeeded but cleanup failed: ${err instanceof Error ? err.message : String(err)}` })
-          }))
-        }
-        return { success: false, error: err instanceof Error ? err.message : String(err) }
-      }
+        const result = await mergeWorkspaceCore(id, squash)
+        if (!result.success) return result
 
-      // Refresh parent's remote status after merge
-      const wsData = entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data : undefined
-      if (wsData?.parentId) {
-        const parentEntry = get().workspaces.get(wsData.parentId)
-        if (parentEntry && (parentEntry.status === WorkspaceEntryStatus.Loaded || parentEntry.status === WorkspaceEntryStatus.OperationError)) {
-          void parentEntry.store.getState().gitController.getState().refreshRemoteStatus()
+        const entry = get().workspaces.get(id)
+        if (entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError)) {
+          entry.store.getState().updateStatus('merged')
+        }
+
+        try {
+          await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: false, operationId: result.operationId })
+        } catch (err) {
+          // Merge succeeded but removal failed — show operation error
+          const currentEntry = get().workspaces.get(id)
+          if (currentEntry && (currentEntry.status === WorkspaceEntryStatus.Loaded || currentEntry.status === WorkspaceEntryStatus.OperationError)) {
+            store.setState(s => ({
+              workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: currentEntry.data, store: currentEntry.store, error: `Merge succeeded but cleanup failed: ${err instanceof Error ? err.message : String(err)}` })
+            }))
+          }
+          return { success: false, error: err instanceof Error ? err.message : String(err) }
+        }
+
+        // Refresh parent's remote status after merge
+        const wsData = entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data : undefined
+        if (wsData?.parentId) {
+          const parentEntry = get().workspaces.get(wsData.parentId)
+          if (parentEntry && (parentEntry.status === WorkspaceEntryStatus.Loaded || parentEntry.status === WorkspaceEntryStatus.OperationError)) {
+            void parentEntry.store.getState().gitController.getState().refreshRemoteStatus()
+          }
+        }
+
+        return { success: true }
+      } finally {
+        if (holderId) {
+          await deps.sessionApi.unlock(config.sessionId, holderId).catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
         }
       }
-
-      return { success: true }
     },
 
     mergeAndKeepWorkspace: async (id: string, squash: boolean) => {
-      const result = await mergeWorkspaceCore(id, squash)
-      if (!result.success) return result
-
-      // On success, ensure workspace is back to loaded status
-      const entry = get().workspaces.get(id)
-      if (entry && entry.status === WorkspaceEntryStatus.OperationError) {
-        store.setState(s => ({
-          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: entry.data, store: entry.store })
-        }))
-      }
-
-      // Refresh workspace diff status and git info
-      const currentEntry = get().workspaces.get(id)
-      if (currentEntry && currentEntry.status === WorkspaceEntryStatus.Loaded) {
-        void currentEntry.store.getState().gitController.getState().refreshDiffStatus()
-      }
-      void get().refreshGitInfo(id)
-
-      // Refresh parent's remote status after merge
-      if (currentEntry && currentEntry.status === WorkspaceEntryStatus.Loaded && currentEntry.data.parentId) {
-        const parentEntry = get().workspaces.get(currentEntry.data.parentId)
-        if (parentEntry && (parentEntry.status === WorkspaceEntryStatus.Loaded || parentEntry.status === WorkspaceEntryStatus.OperationError)) {
-          void parentEntry.store.getState().gitController.getState().refreshRemoteStatus()
+      // Acquire session lock before merge (slow IO operation)
+      const holderId = config.windowUuid || ''
+      if (holderId) {
+        const lockResult = await deps.sessionApi.lock(config.sessionId, holderId, 60_000)
+        if (!lockResult.success || !lockResult.acquired) {
+          return { success: false, error: 'Session is locked by another window' }
         }
       }
 
-      return { success: true }
+      try {
+        const result = await mergeWorkspaceCore(id, squash)
+        if (!result.success) return result
+
+        // On success, ensure workspace is back to loaded status
+        const entry = get().workspaces.get(id)
+        if (entry && entry.status === WorkspaceEntryStatus.OperationError) {
+          store.setState(s => ({
+            workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: entry.data, store: entry.store })
+          }))
+        }
+
+        // Refresh workspace diff status and git info
+        const currentEntry = get().workspaces.get(id)
+        if (currentEntry && currentEntry.status === WorkspaceEntryStatus.Loaded) {
+          void currentEntry.store.getState().gitController.getState().refreshDiffStatus()
+        }
+        void get().refreshGitInfo(id)
+
+        // Refresh parent's remote status after merge
+        if (currentEntry && currentEntry.status === WorkspaceEntryStatus.Loaded && currentEntry.data.parentId) {
+          const parentEntry = get().workspaces.get(currentEntry.data.parentId)
+          if (parentEntry && (parentEntry.status === WorkspaceEntryStatus.Loaded || parentEntry.status === WorkspaceEntryStatus.OperationError)) {
+            void parentEntry.store.getState().gitController.getState().refreshRemoteStatus()
+          }
+        }
+
+        return { success: true }
+      } finally {
+        if (holderId) {
+          await deps.sessionApi.unlock(config.sessionId, holderId).catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
+        }
+      }
     },
 
     closeAndCleanWorkspace: async (id: string) => {
@@ -1036,7 +1069,7 @@ export function createSessionStore(
     handleRestore: async (daemonSession: Session) => {
       console.log('[Session] Restoring session', daemonSession.id, 'with', daemonSession.workspaces.length, 'workspaces, version:', daemonSession.version)
 
-      set({ isRestoring: true, sessionVersion: daemonSession.version })
+      set({ isRestoring: true, sessionVersion: daemonSession.version, sessionLock: daemonSession.lock })
       applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: true })
       set({ isRestoring: false })
 
@@ -1053,7 +1086,7 @@ export function createSessionStore(
 
       console.log('[Session] External session update received, version:', daemonSession.version, 'current:', currentVersion)
 
-      set({ isRestoring: true, sessionVersion: daemonSession.version })
+      set({ isRestoring: true, sessionVersion: daemonSession.version, sessionLock: daemonSession.lock })
       applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: false })
 
       // Remove workspaces not present in daemon session (skip non-loaded workspaces)

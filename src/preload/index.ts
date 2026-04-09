@@ -517,6 +517,12 @@ const preloadApi: PreloadApi = {
     update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number) => {
       return client.sessionUpdate(sessionId, workspaces, senderUuid, expectedVersion)
     },
+    lock: (sessionId: string, holderId: string, ttlMs?: number) => {
+      return client.sessionLock(sessionId, holderId, ttlMs)
+    },
+    unlock: (sessionId: string, holderId: string) => {
+      return client.sessionUnlock(sessionId, holderId)
+    },
     onSync: (callback: SessionSyncCallback): (() => void) => {
       sessionSyncListeners.push(callback)
       return () => {

@@ -122,7 +122,9 @@ const mockDeps = {
   },
   sessionApi: {
     onSync: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
-    update: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true, session: { id: 'test-session' } })
+    update: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true, session: { id: 'test-session' } }),
+    lock: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true, acquired: true, session: { id: 'test-session' } }),
+    unlock: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true, session: { id: 'test-session' } })
   },
   daemon: { onDisconnected: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}) },
   terminal: {
@@ -887,7 +889,7 @@ describe('useAppStore', () => {
           target: { type: 'remote' as const, config: { id: 'conn-1', host: 'myserver.com', user: 'alice', port: 22, portForwards: [] } },
           status: ConnectionStatus.Connected as const
         }
-        const session = { id: 'ssh-session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }
+        const session = { id: 'ssh-session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }
         await useAppStore.getState().addRemoteSession(session, connection)
         expect(useSessionNamesStore.getState().getName('ssh-session-1')).toBe('alice@myserver.com')
       })
@@ -898,7 +900,7 @@ describe('useAppStore', () => {
           target: { type: 'remote' as const, config: { id: 'conn-2', host: 'myserver.com', user: 'alice', port: 22, label: 'Production', portForwards: [] } },
           status: ConnectionStatus.Connected as const
         }
-        const session = { id: 'ssh-session-2', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }
+        const session = { id: 'ssh-session-2', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }
         await useAppStore.getState().addRemoteSession(session, connection)
         expect(useSessionNamesStore.getState().getName('ssh-session-2')).toBe('Production')
       })
@@ -910,7 +912,7 @@ describe('useAppStore', () => {
           target: { type: 'remote' as const, config: { id: 'conn-3', host: 'myserver.com', user: 'alice', port: 22, portForwards: [] } },
           status: ConnectionStatus.Connected as const
         }
-        const session = { id: 'ssh-session-3', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }
+        const session = { id: 'ssh-session-3', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }
         await useAppStore.getState().addRemoteSession(session, connection)
         expect(useSessionNamesStore.getState().getName('ssh-session-3')).toBe('My Server')
       })

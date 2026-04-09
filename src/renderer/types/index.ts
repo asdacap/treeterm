@@ -578,6 +578,8 @@ export interface SSHApi {
 
 export interface SessionApi {
   update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number) => Promise<IpcResult<{ session: Session }>>
+  lock: (sessionId: string, holderId: string, ttlMs?: number) => Promise<IpcResult<{ acquired: boolean; session: Session }>>
+  unlock: (sessionId: string, holderId: string) => Promise<IpcResult<{ session: Session }>>
   onSync: (callback: (connectionId: string, session: Session) => void) => () => void
 }
 

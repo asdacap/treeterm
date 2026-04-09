@@ -56,6 +56,8 @@ const CHANNELS = {
   runActionsDetect: 'runActions:detect',
   runActionsRun: 'runActions:run',
   sessionUpdate: 'session:update',
+  sessionLock: 'session:lock',
+  sessionUnlock: 'session:unlock',
   daemonShutdown: 'daemon:shutdown',
   dialogSelectFolder: 'dialog:selectFolder',
   dialogGetRecentDirectories: 'dialog:getRecentDirectories',
@@ -385,6 +387,14 @@ export class IpcClient {
   // Session requests
   sessionUpdate(...args: IpcRequests['sessionUpdate']['params']): Promise<IpcRequests['sessionUpdate']['result']> {
     return ipcRenderer.invoke(CHANNELS.sessionUpdate, ...args)
+  }
+
+  sessionLock(...args: IpcRequests['sessionLock']['params']): Promise<IpcRequests['sessionLock']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sessionLock, ...args)
+  }
+
+  sessionUnlock(...args: IpcRequests['sessionUnlock']['params']): Promise<IpcRequests['sessionUnlock']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sessionUnlock, ...args)
   }
 
   // Other requests

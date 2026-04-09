@@ -20,6 +20,9 @@ import {
   type Session as ProtoSession,
   type Workspace as ProtoWorkspace,
   type SessionWatchRequest,
+  type LockSessionRequest,
+  type LockSessionResponse,
+  type UnlockSessionRequest,
   type DirectoryContents,
   type FileEntry
 } from '../generated/treeterm'
@@ -310,6 +313,59 @@ export class GrpcDaemonClient {
     })
   }
 
+  async lockSession(
+    holderId: string,
+    ttlMs?: number
+  ): Promise<{ acquired: boolean; session: Session }> {
+    if (!this.client) {
+      throw new Error('Not connected to daemon')
+    }
+    const client = this.client
+
+    return new Promise((resolve, reject) => {
+      const request: LockSessionRequest = {
+        holderId,
+        ttlMs: ttlMs ?? 60_000
+      }
+
+      client.lockSession(request, (error: grpc.ServiceError | null, response: LockSessionResponse) => {
+        if (error) {
+          reject(new Error(error.message))
+        } else if (!response.session) {
+          reject(new Error('LockSession response missing session'))
+        } else {
+          resolve({
+            acquired: response.acquired,
+            session: this.convertFromProtoSession(response.session)
+          })
+        }
+      })
+    })
+  }
+
+  async unlockSession(
+    holderId: string
+  ): Promise<Session> {
+    if (!this.client) {
+      throw new Error('Not connected to daemon')
+    }
+    const client = this.client
+
+    return new Promise((resolve, reject) => {
+      const request: UnlockSessionRequest = {
+        holderId
+      }
+
+      client.unlockSession(request, (error: grpc.ServiceError | null, response: ProtoSession) => {
+        if (error) {
+          reject(new Error(error.message))
+        } else {
+          resolve(this.convertFromProtoSession(response))
+        }
+      })
+    })
+  }
+
   watchSession(
     listenerId: string,
     onUpdate: (session: Session) => void,
@@ -515,7 +571,10 @@ export class GrpcDaemonClient {
       workspaces: protoSession.workspaces.map(w => this.convertFromProtoWorkspace(w)),
       createdAt: protoSession.createdAt,
       lastActivity: protoSession.lastActivity,
-      version: protoSession.version
+      version: protoSession.version,
+      lock: protoSession.lock
+        ? { holderId: protoSession.lock.holderId, acquiredAt: protoSession.lock.acquiredAt, expiresAt: protoSession.lock.expiresAt }
+        : null
     }
   }
 

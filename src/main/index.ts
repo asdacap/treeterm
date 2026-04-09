@@ -453,6 +453,42 @@ server.onSessionUpdate(async (sessionId, workspaces, senderUuid, expectedVersion
   }
 })
 
+server.onSessionLock(async (sessionId, holderId, ttlMs) => {
+  if (!connectionManager) {
+    return { success: false, error: 'ConnectionManager not initialized' }
+  }
+
+  const connectionId = sessionConnectionMap.get(sessionId) ?? 'local'
+  const client = connectionManager.getClient(connectionId)
+
+  try {
+    const result = await client.lockSession(holderId, ttlMs)
+    return { success: true, acquired: result.acquired, session: result.session }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[main] failed to lock session:', errorMessage)
+    return { success: false, error: errorMessage }
+  }
+})
+
+server.onSessionUnlock(async (sessionId, holderId) => {
+  if (!connectionManager) {
+    return { success: false, error: 'ConnectionManager not initialized' }
+  }
+
+  const connectionId = sessionConnectionMap.get(sessionId) ?? 'local'
+  const client = connectionManager.getClient(connectionId)
+
+  try {
+    const session = await client.unlockSession(holderId)
+    return { success: true, session }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[main] failed to unlock session:', errorMessage)
+    return { success: false, error: errorMessage }
+  }
+})
+
 server.onClipboardWriteText((text) => { clipboard.writeText(text) })
 server.onClipboardReadText(() => clipboard.readText())
 

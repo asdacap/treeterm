@@ -38,12 +38,19 @@ message Workspace {
   bytes metadata = 17;  // JSON-encoded arbitrary dictionary
 }
 
+message SessionLock {
+  string holder_id = 1;
+  int64 acquired_at = 2;
+  int64 expires_at = 3;
+}
+
 message Session {
   string id = 1;
   repeated Workspace workspaces = 2;
   int64 created_at = 3;
   int64 last_activity = 4;
   uint64 version = 5;  // Monotonically increasing version, incremented on every update
+  optional SessionLock lock = 6;
 }
 
 message PtySessionInfo {
@@ -190,6 +197,20 @@ message SessionWatchEvent {
   string sender_id = 3;  // Who triggered the update
 }
 
+message LockSessionRequest {
+  string holder_id = 1;
+  optional int64 ttl_ms = 2;  // Lock TTL in milliseconds (default 60000)
+}
+
+message LockSessionResponse {
+  bool acquired = 1;
+  Session session = 2;
+}
+
+message UnlockSessionRequest {
+  string holder_id = 1;
+}
+
 // ============================================
 // File I/O Streaming Messages
 // ============================================
@@ -328,6 +349,8 @@ service TreeTermDaemon {
   // Workspace Session Management (one session per daemon)
   rpc UpdateSession(UpdateSessionRequest) returns (Session);
   rpc SessionWatch(SessionWatchRequest) returns (stream SessionWatchEvent);
+  rpc LockSession(LockSessionRequest) returns (LockSessionResponse);
+  rpc UnlockSession(UnlockSessionRequest) returns (Session);
 
   // Daemon Control
   rpc Shutdown(Empty) returns (Empty);

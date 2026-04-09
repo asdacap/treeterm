@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react'
 import type { ReactNode } from 'react'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
-import { GitFork, ChevronDown, ChevronRight, Loader2, AlertCircle } from 'lucide-react'
+import { GitFork, ChevronDown, ChevronRight, Loader2, AlertCircle, Lock } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { SessionState, WorkspaceEntry } from '../store/createSessionStore'
@@ -32,6 +32,7 @@ export default function SessionPanel({
   selectFolder,
 }: SessionPanelProps): React.JSX.Element {
   const connection = useStore(sessionStore, s => s.connection)
+  const sessionLock = useStore(sessionStore, s => s.sessionLock)
   const {
     workspaces,
     activeWorkspaceId,
@@ -496,6 +497,7 @@ export default function SessionPanel({
           >
             {connection && renderStatusIcon(connection.status)}
             {displayName || sessionId}
+            {sessionLock && <Lock size={14} style={{ opacity: 0.6 }} />}
           </span>
         )}
         {(!connection || connection.status === ConnectionStatus.Connected) && (

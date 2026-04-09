@@ -217,7 +217,7 @@ impl TreeTermDaemon for DaemonService {
 
         let (session, accepted) = self
             .session_store
-            .update_session(r.workspaces, r.expected_version)
+            .update_session(r.workspaces, r.expected_version, &sender_id)
             .await;
 
         // Only broadcast to other watchers if the update was accepted
@@ -256,6 +256,54 @@ impl TreeTermDaemon for DaemonService {
             .await;
 
         Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
+    async fn lock_session(
+        &self,
+        req: Request<LockSessionRequest>,
+    ) -> Result<Response<LockSessionResponse>, Status> {
+        let r = req.into_inner();
+        if r.holder_id.is_empty() {
+            return Err(Status::invalid_argument("holderId is required"));
+        }
+
+        let ttl_ms = r.ttl_ms.unwrap_or(60_000);
+        let (acquired, session) = self
+            .session_store
+            .lock_session(r.holder_id.clone(), ttl_ms)
+            .await;
+
+        if acquired {
+            self.session_store
+                .broadcast_update(&session, &r.holder_id)
+                .await;
+        }
+
+        Ok(Response::new(LockSessionResponse {
+            acquired,
+            session: Some(session),
+        }))
+    }
+
+    async fn unlock_session(
+        &self,
+        req: Request<UnlockSessionRequest>,
+    ) -> Result<Response<Session>, Status> {
+        let r = req.into_inner();
+        if r.holder_id.is_empty() {
+            return Err(Status::invalid_argument("holderId is required"));
+        }
+
+        let session = self
+            .session_store
+            .unlock_session(&r.holder_id)
+            .await;
+
+        self.session_store
+            .broadcast_update(&session, &r.holder_id)
+            .await;
+
+        Ok(Response::new(session))
     }
 
     // ---- Daemon Control ----
