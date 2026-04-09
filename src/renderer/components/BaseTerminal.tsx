@@ -456,6 +456,7 @@ export default function BaseTerminal({
           connectedAt: Date.now(),
           dataVersion: 0,
           pinnedToBottom: false,
+          badgeClickTimer: null,
           onExitUnmounted: (exitCode: number) => {
             console.log(`[${config.logPrefix} ${tabId}] PTY exited while unmounted, code:`, exitCode)
             // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist in appStates
@@ -516,6 +517,10 @@ export default function BaseTerminal({
       const currentRef = workspace.getState().getTabRef(tabId) as TerminalAppRef | null
       if (currentRef?.cachedTerminal) {
         currentRef.cachedTerminal.mountedHandler = null
+        if (currentRef.cachedTerminal.badgeClickTimer !== null) {
+          clearTimeout(currentRef.cachedTerminal.badgeClickTimer)
+          currentRef.cachedTerminal.badgeClickTimer = null
+        }
       }
 
       terminalRef.current = null
@@ -616,15 +621,33 @@ export default function BaseTerminal({
         className={`scroll-position-badge scroll-position-${scrollPosition}${pinnedToBottom ? ' pinned' : ''}`}
         onClick={() => {
           if (pinnedToBottom) {
+            // Unpin immediately, stay at bottom (normal scroll resumes)
             const ref = workspace.getState().getTabRef(tabId) as TerminalAppRef | null
             if (ref?.cachedTerminal) ref.cachedTerminal.pinnedToBottom = false
             setPinnedToBottom(false)
-            terminalRef.current?.scrollToTop()
           } else {
-            handleBadgeClick()
+            // Unpinned: use timer to distinguish single-click from double-click
+            const ref = workspace.getState().getTabRef(tabId) as TerminalAppRef | null
+            const cache = ref?.cachedTerminal
+            if (cache) {
+              if (cache.badgeClickTimer !== null) {
+                // Second click within window — activate pin
+                clearTimeout(cache.badgeClickTimer)
+                cache.badgeClickTimer = null
+                cache.pinnedToBottom = true
+                setPinnedToBottom(true)
+                terminalRef.current?.scrollToBottom()
+              } else {
+                // First click — delay to allow double-click
+                cache.badgeClickTimer = setTimeout(() => {
+                  cache.badgeClickTimer = null
+                  handleBadgeClick()
+                }, 250)
+              }
+            }
           }
         }}
-        title={pinnedToBottom ? 'Pinned to bottom (click to unpin)' : (scrollPosition === ScrollPosition.Bottom ? 'Scroll to top' : 'Scroll to bottom')}
+        title={pinnedToBottom ? 'Pinned to bottom (click to unpin)' : (scrollPosition === ScrollPosition.Bottom ? 'Scroll to top (double-click to pin)' : 'Scroll to bottom (double-click to pin)')}
       >
         {pinnedToBottom ? 'PINNED' : scrollPosition.toUpperCase()}
       </button>
