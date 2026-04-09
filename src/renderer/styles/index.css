@@ -1066,13 +1066,6 @@ body,
   border-color: var(--accent);
 }
 
-.terminal-circle-btn.pinned-active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  opacity: 1;
-}
-
 /* Scroll Position Badge */
 .scroll-position-badge {
   position: absolute;

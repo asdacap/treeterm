@@ -670,20 +670,11 @@ export default function BaseTerminal({
           ↻
         </button>
         <button
-          className={`scroll-down-btn terminal-circle-btn${pinnedToBottom ? ' pinned-active' : ''}`}
+          className="scroll-down-btn terminal-circle-btn"
           onClick={() => {
-            if (pinnedToBottom) {
-              const ref = workspace.getState().getTabRef(tabId) as TerminalAppRef | null
-              if (ref?.cachedTerminal) ref.cachedTerminal.pinnedToBottom = false
-              setPinnedToBottom(false)
-            } else {
-              const ref = workspace.getState().getTabRef(tabId) as TerminalAppRef | null
-              if (ref?.cachedTerminal) ref.cachedTerminal.pinnedToBottom = true
-              setPinnedToBottom(true)
-              terminalRef.current?.scrollToBottom()
-            }
+            terminalRef.current?.scrollToBottom()
           }}
-          title={pinnedToBottom ? 'Unpin from bottom' : 'Pin to bottom'}
+          title="Scroll to bottom"
         >
           ↓
         </button>
