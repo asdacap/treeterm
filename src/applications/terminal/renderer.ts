@@ -2,37 +2,28 @@ import type { Application, TerminalState, TerminalInstance, Tab, TerminalAppRef,
 import Terminal from '../../renderer/components/Terminal'
 import { createElement } from 'react'
 import { useActivityStateStore } from '../../renderer/store/activityState'
-import type { Analyzer } from '../../renderer/store/createAnalyzerStore'
 
 type TerminalDeps = { terminal: { kill: (connectionId: string, sessionId: string) => void } }
-
-export interface TerminalRef extends TerminalAppRef {
-  analyzer: Analyzer
-}
 
 function makeTerminalOnWorkspaceLoad(
   deps: TerminalDeps,
   startupCommand?: string
-): (tab: Tab, workspaceStore: WorkspaceStore) => TerminalRef {
-  return (tab: Tab, workspaceStore: WorkspaceStore): TerminalRef => {
+): (tab: Tab, workspaceStore: WorkspaceStore) => TerminalAppRef {
+  return (tab: Tab, workspaceStore: WorkspaceStore): TerminalAppRef => {
     const ws = workspaceStore.getState()
     const state = tab.state as TerminalState
-    const analyzer = ws.initAnalyzer(tab.id)
 
-    if (state.ptyId) {
-      analyzer.getState().start(state.ptyId)
-    } else {
+    if (!state.ptyId) {
       void ws.createTty(ws.workspace.path, undefined, startupCommand).then((ptyId) => {
         workspaceStore.getState().updateTabState<TerminalState>(tab.id, (s) => ({
           ...s,
           ptyId,
           connectionId: ws.connectionId,
         }))
-        analyzer.getState().start(ptyId)
       })
     }
-    const ref: TerminalRef = {
-      analyzer,
+
+    const ref: TerminalAppRef = {
       cachedTerminal: null,
       disposeCachedTerminal() {
         if (this.cachedTerminal) {
@@ -51,7 +42,6 @@ function makeTerminalOnWorkspaceLoad(
       },
       dispose: () => {
         ref.disposeCachedTerminal()
-        analyzer.getState().stop()
         useActivityStateStore.getState().removeTabState(tab.id)
       },
     }

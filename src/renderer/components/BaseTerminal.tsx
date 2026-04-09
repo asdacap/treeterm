@@ -112,8 +112,6 @@ export interface BaseTerminalState extends TerminalState {
 export interface BaseTerminalConfig {
   // Theme customization
   themeBackground: string
-  // Activity state detector prompt patterns (optional)
-  promptPatterns?: RegExp[]
   // Log prefix for console messages
   logPrefix: string
   // Whether to disable the scrollbar (for tools with own scrolling like opencode)
@@ -248,8 +246,7 @@ export default function BaseTerminal({
       detector = config.disableActivityDetector
         ? null
         : createActivityStateDetector(
-            (state) => { setTabState(tabId, state); },
-            config.promptPatterns ? { promptPatterns: config.promptPatterns } : undefined
+            (state) => { setTabState(tabId, state); }
           )
 
       // Focus subscription

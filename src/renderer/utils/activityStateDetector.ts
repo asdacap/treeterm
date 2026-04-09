@@ -1,19 +1,9 @@
 import { ActivityState } from '../types'
 
 interface DetectorConfig {
-  promptPatterns?: RegExp[] // Patterns indicating "waiting for input"
-  workingPatterns?: RegExp[] // Patterns indicating "working" (e.g., spinners)
-  idleTimeout?: number // ms of no activity before confirming state (default: 1000)
+  idleTimeout?: number // ms of no activity before switching to idle (default: 1000)
   debounceMs?: number // ms to debounce state changes (default: 100)
 }
-
-const DEFAULT_PROMPT_PATTERNS = [
-  /\$\s*$/, // bash $ prompt
-  /%\s*$/, // zsh % prompt
-  />\s*$/, // generic > prompt (used by Claude)
-  /#\s*$/, // root # prompt
-  /❯\s*$/ // fancy prompt
-]
 
 export function createActivityStateDetector(
   onStateChange: (state: ActivityState) => void,
@@ -22,12 +12,8 @@ export function createActivityStateDetector(
   processData: (data: string) => void
   destroy: () => void
 } {
-  const promptPatterns = config?.promptPatterns ?? DEFAULT_PROMPT_PATTERNS
   const idleTimeout = config?.idleTimeout ?? 1000
   const debounceMs = config?.debounceMs ?? 100
-
-  let buffer = ''
-  const MAX_BUFFER_SIZE = 500
 
   let currentState: ActivityState = ActivityState.Idle
   let idleTimerId: ReturnType<typeof setTimeout> | null = null
@@ -36,7 +22,7 @@ export function createActivityStateDetector(
   const emitState = (state: ActivityState) => {
     // Always clear pending debounce when trying to emit 'working'
     // This prevents a race where data arrives during a debounced transition
-    // to 'user_input_required' or 'idle', which would incorrectly fire after the early return
+    // to 'idle', which would incorrectly fire after the early return
     if (state === ActivityState.Working && debounceTimerId) {
       clearTimeout(debounceTimerId)
       debounceTimerId = null
@@ -68,42 +54,19 @@ export function createActivityStateDetector(
     }
   }
 
-  const checkForPrompt = (): boolean => {
-    // Strip ANSI escape sequences for cleaner matching
-    const cleanBuffer = buffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
-
-    for (const pattern of promptPatterns) {
-      if (pattern.test(cleanBuffer)) {
-        return true
-      }
-    }
-    return false
-  }
-
   const scheduleIdleCheck = () => {
     if (idleTimerId) {
       clearTimeout(idleTimerId)
     }
 
     idleTimerId = setTimeout(() => {
-      // After 1 second of no activity, determine final state
-      const hasPrompt = checkForPrompt()
-      if (hasPrompt) {
-        emitState(ActivityState.UserInputRequired)
-      } else {
-        emitState(ActivityState.Idle)
-      }
+      emitState(ActivityState.Idle)
       idleTimerId = null
     }, idleTimeout)
   }
 
-  const processData = (data: string) => {
-    // Update buffer
-    buffer += data
-    if (buffer.length > MAX_BUFFER_SIZE) {
-      buffer = buffer.slice(-MAX_BUFFER_SIZE)
-    }
-
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const processData = (_data: string) => {
     // Any stream activity = working
     emitState(ActivityState.Working)
     scheduleIdleCheck()

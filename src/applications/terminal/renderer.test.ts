@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   createTerminalApplication,
   createTerminalVariant,
-  type TerminalRef
 } from './renderer'
 import type { Tab, Workspace, TerminalInstance } from '../../renderer/types'
 import { createMockGitApi, createMockFilesystemApi, createMockRunActionsApi, createMockExecApi } from '../../shared/mockApis'
@@ -33,11 +32,6 @@ vi.mock('../../renderer/store/activityState', () => ({
 
 const mockTerminalKill = vi.fn<(connectionId: string, ptyId: string) => void>()
 const mockDeps = { terminal: { kill: mockTerminalKill } }
-
-function createMockAnalyzer() {
-  const state = { start: vi.fn(), stop: vi.fn(), getHistory: vi.fn<() => unknown[]>().mockReturnValue([]) }
-  return { getState: vi.fn().mockReturnValue(state), setState: vi.fn(), subscribe: vi.fn(), _state: state }
-}
 
 const mockWorkspaceStoreStateData = {
   workspace: { id: 'ws-1', path: '/test', appStates: {} } as Workspace,
@@ -74,7 +68,7 @@ const mockWorkspaceStoreStateData = {
   initTab: vi.fn(),
   getTabRef: vi.fn().mockReturnValue(null),
   disposeTabResources: vi.fn(),
-  initAnalyzer: vi.fn().mockReturnValue(createMockAnalyzer()),
+  initAnalyzer: vi.fn(),
   createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
   connectionId: 'local',
   updateSettings: vi.fn(),
@@ -235,79 +229,7 @@ describe('Terminal Renderer', () => {
         expect(mockWorkspaceStoreStateData.createTty).not.toHaveBeenCalled()
       })
 
-      it('returns ref with analyzer and dispose', () => {
-        const app = createTerminalApplication(mockDeps)
-        const tab: Tab = {
-          id: 'tab-1',
-          applicationId: 'terminal',
-          title: 'Terminal',
-          state: { ptyId: null }
-        }
-
-        const ref = app.onWorkspaceLoad(tab, mockWorkspaceStore) as TerminalRef
-
-        expect(typeof ref.dispose).toBe('function')
-        expect(ref.analyzer).toBeDefined()
-      })
-
-      it('starts analyzer immediately when ptyId exists (restore path)', () => {
-        const mockAnalyzer = createMockAnalyzer()
-        const store = createStore<WorkspaceStoreState>()(() => ({
-          ...mockWorkspaceStoreStateData,
-          initAnalyzer: vi.fn().mockReturnValue(mockAnalyzer),
-        }))
-
-        const app = createTerminalApplication(mockDeps)
-        const tab: Tab = {
-          id: 'tab-1',
-          applicationId: 'terminal',
-          title: 'Terminal',
-          state: { ptyId: 'pty-existing' }
-        }
-
-        app.onWorkspaceLoad(tab, store)
-
-        expect(mockAnalyzer._state.start).toHaveBeenCalledWith('pty-existing')
-        expect(store.getState().createTty).not.toHaveBeenCalled()
-      })
-
-      it('starts analyzer after createTty resolves (new tab path)', async () => {
-        const mockAnalyzer = createMockAnalyzer()
-        let resolveTty!: (value: string) => void
-        const ttyPromise = new Promise<string>((resolve) => { resolveTty = resolve })
-        const store = createStore<WorkspaceStoreState>()(() => ({
-          ...mockWorkspaceStoreStateData,
-          initAnalyzer: vi.fn().mockReturnValue(mockAnalyzer),
-          createTty: vi.fn().mockReturnValue(ttyPromise),
-          updateTabState: vi.fn(),
-        }))
-
-        const app = createTerminalApplication(mockDeps)
-        const tab: Tab = {
-          id: 'tab-1',
-          applicationId: 'terminal',
-          title: 'Terminal',
-          state: { ptyId: null }
-        }
-
-        app.onWorkspaceLoad(tab, store)
-
-        expect(mockAnalyzer._state.start).not.toHaveBeenCalled()
-
-        resolveTty('pty-new')
-        await ttyPromise
-        await new Promise(resolve => setTimeout(resolve, 0))
-
-        expect(mockAnalyzer._state.start).toHaveBeenCalledWith('pty-new')
-      })
-
-      it('dispose stops analyzer', () => {
-        const mockAnalyzer = createMockAnalyzer()
-        const store = createStore<WorkspaceStoreState>()(() => ({
-          ...mockWorkspaceStoreStateData,
-          initAnalyzer: vi.fn().mockReturnValue(mockAnalyzer),
-        }))
-
+      it('does not use analyzer', () => {
         const app = createTerminalApplication(mockDeps)
         const tab: Tab = {
           id: 'tab-1',
@@ -316,10 +238,9 @@ describe('Terminal Renderer', () => {
           state: { ptyId: 'pty-123' }
         }
 
-        const ref = app.onWorkspaceLoad(tab, store)
-        ref.dispose()
+        app.onWorkspaceLoad(tab, mockWorkspaceStore)
 
-        expect(mockAnalyzer._state.stop).toHaveBeenCalled()
+        expect(mockWorkspaceStoreStateData.initAnalyzer).not.toHaveBeenCalled()
       })
     })
 

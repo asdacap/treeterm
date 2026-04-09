@@ -22,7 +22,6 @@ export default function Terminal({ workspace, tabId, sandbox }: TerminalProps) {
   const [terminalConfig] = useState<BaseTerminalConfig>(() => ({
     themeBackground: isSandboxed ? '#1a1a2e' : '#1e1e1e',
     logPrefix: 'Terminal',
-    disableActivityDetector: true,
   }))
 
   if (!existingPtyId) {

@@ -111,7 +111,6 @@ function AiHarnessContent({
   // Stable config — useState initializer runs once, so BaseTerminal never re-renders from config changes
   const [config] = useState<BaseTerminalConfig>(() => ({
     themeBackground: backgroundColor,
-    promptPatterns: [/❯\s/],
     logPrefix: 'AiHarness',
     disableScrollbar,
     stripScrollbackClear,
