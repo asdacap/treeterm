@@ -1066,6 +1066,13 @@ body,
   border-color: var(--accent);
 }
 
+.terminal-circle-btn.pinned-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  opacity: 1;
+}
+
 /* Scroll Position Badge */
 .scroll-position-badge {
   position: absolute;
@@ -1082,6 +1089,12 @@ body,
   cursor: pointer;
   opacity: 0.6;
   transition: opacity 0.15s;
+}
+
+.scroll-position-badge.pinned {
+  border-color: var(--accent);
+  color: var(--accent);
+  opacity: 0.8;
 }
 
 .scroll-position-badge:hover {

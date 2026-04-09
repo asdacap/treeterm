@@ -148,6 +148,7 @@ export default function BaseTerminal({
   const [loading, setLoading] = useState(true)
   const [scrollPosition, setScrollPosition] = useState(ScrollPosition.Bottom)
   const scrollPositionRef = useRef(ScrollPosition.Bottom)
+  const [pinnedToBottom, setPinnedToBottom] = useState(false)
   const [isAlternateScreen, setIsAlternateScreen] = useState(false)
   const [sizeMismatch, setSizeMismatch] = useState<{ requested: { cols: number; rows: number }; actual: { cols: number; rows: number } } | null>(null)
   const [refreshCounter, setRefreshCounter] = useState(0)
@@ -215,9 +216,28 @@ export default function BaseTerminal({
           }
           scrollPositionRef.current = pos
           setScrollPosition(pos)
+
+          // Pin enforcement: if pinned and not at bottom, force scroll back
+          if (cache.pinnedToBottom && pos !== ScrollPosition.Bottom) {
+            terminal.scrollToBottom()
+          }
         }
+
+        // Auto-unpin on intentional mouse wheel scroll up
+        const onWheel = (e: Event): void => {
+          const wheelEvent = e as WheelEvent
+          if (wheelEvent.deltaY < 0 && cache.pinnedToBottom) {
+            cache.pinnedToBottom = false
+            setPinnedToBottom(false)
+          }
+        }
+
         viewportEl.addEventListener('scroll', onViewportScroll)
-        scrollDisposable = { dispose: () => { viewportEl.removeEventListener('scroll', onViewportScroll) } }
+        viewportEl.addEventListener('wheel', onWheel)
+        scrollDisposable = { dispose: () => {
+          viewportEl.removeEventListener('scroll', onViewportScroll)
+          viewportEl.removeEventListener('wheel', onWheel)
+        } }
       }
 
       bufferChangeDisposable = terminal.buffer.onBufferChange((buf) => {
@@ -252,10 +272,10 @@ export default function BaseTerminal({
             cache.dataVersion++
             setOverlay(null)
 
-            const wasAtBottom = scrollPositionRef.current === ScrollPosition.Bottom
+            const shouldScrollToBottom = cache.pinnedToBottom || scrollPositionRef.current === ScrollPosition.Bottom
 
             const afterWrite = () => {
-              if (wasAtBottom) {
+              if (shouldScrollToBottom) {
                 terminal.scrollToBottom()
                 scrollPositionRef.current = ScrollPosition.Bottom
                 setScrollPosition(ScrollPosition.Bottom)
@@ -302,7 +322,7 @@ export default function BaseTerminal({
             break
           }
           case 'resize': {
-            const wasAtBottom = scrollPositionRef.current === ScrollPosition.Bottom
+            const shouldStayAtBottom = cache.pinnedToBottom || scrollPositionRef.current === ScrollPosition.Bottom
             const buf = terminal.buffer.active
             const scrollRatio = buf.baseY > 0 ? buf.viewportY / buf.baseY : 0
 
@@ -316,7 +336,7 @@ export default function BaseTerminal({
               setSizeMismatch(null)
             }
 
-            if (wasAtBottom) {
+            if (shouldStayAtBottom) {
               terminal.scrollToBottom()
               scrollPositionRef.current = ScrollPosition.Bottom
               setScrollPosition(ScrollPosition.Bottom)
@@ -381,6 +401,9 @@ export default function BaseTerminal({
         cursorAccent: config.themeBackground,
       }
 
+      // Restore pinned state from cache
+      setPinnedToBottom(existingCache.pinnedToBottom)
+
       // Reparent terminal element to the new container
       setLoading(false)
       if (terminal.element) {
@@ -435,6 +458,7 @@ export default function BaseTerminal({
           stripScrollbackClear: config.stripScrollbackClear ?? false,
           connectedAt: Date.now(),
           dataVersion: 0,
+          pinnedToBottom: false,
           onExitUnmounted: (exitCode: number) => {
             console.log(`[${config.logPrefix} ${tabId}] PTY exited while unmounted, code:`, exitCode)
             // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist in appStates
@@ -592,11 +616,20 @@ export default function BaseTerminal({
       </ContextMenu>
 
       <button
-        className={`scroll-position-badge scroll-position-${scrollPosition}`}
-        onClick={handleBadgeClick}
-        title={scrollPosition === ScrollPosition.Bottom ? 'Scroll to top' : 'Scroll to bottom'}
+        className={`scroll-position-badge scroll-position-${scrollPosition}${pinnedToBottom ? ' pinned' : ''}`}
+        onClick={() => {
+          if (pinnedToBottom) {
+            const ref = workspace.getState().getTabRef(tabId) as TerminalAppRef | null
+            if (ref?.cachedTerminal) ref.cachedTerminal.pinnedToBottom = false
+            setPinnedToBottom(false)
+            terminalRef.current?.scrollToTop()
+          } else {
+            handleBadgeClick()
+          }
+        }}
+        title={pinnedToBottom ? 'Pinned to bottom (click to unpin)' : (scrollPosition === ScrollPosition.Bottom ? 'Scroll to top' : 'Scroll to bottom')}
       >
-        {scrollPosition.toUpperCase()}
+        {pinnedToBottom ? 'PINNED' : scrollPosition.toUpperCase()}
       </button>
       {isAlternateScreen && (
         <span className="alt-screen-badge" title="Terminal is in alternate screen mode (no scrollback)">
@@ -616,7 +649,22 @@ export default function BaseTerminal({
         <button className="terminal-circle-btn" onClick={handleRefreshStream} title="Refresh stream">
           ↻
         </button>
-        <button className="scroll-down-btn terminal-circle-btn" onClick={handleScrollDown} title="Scroll to bottom">
+        <button
+          className={`scroll-down-btn terminal-circle-btn${pinnedToBottom ? ' pinned-active' : ''}`}
+          onClick={() => {
+            if (pinnedToBottom) {
+              const ref = workspace.getState().getTabRef(tabId) as TerminalAppRef | null
+              if (ref?.cachedTerminal) ref.cachedTerminal.pinnedToBottom = false
+              setPinnedToBottom(false)
+            } else {
+              const ref = workspace.getState().getTabRef(tabId) as TerminalAppRef | null
+              if (ref?.cachedTerminal) ref.cachedTerminal.pinnedToBottom = true
+              setPinnedToBottom(true)
+              terminalRef.current?.scrollToBottom()
+            }
+          }}
+          title={pinnedToBottom ? 'Unpin from bottom' : 'Pin to bottom'}
+        >
           ↓
         </button>
       </div>

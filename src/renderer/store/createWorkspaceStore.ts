@@ -33,6 +33,8 @@ export interface CachedTerminal {
   dataVersion: number
   /** Exit handling when component is unmounted */
   onExitUnmounted: (exitCode: number) => void
+  /** When true, terminal is forced to stay at the bottom regardless of scroll events */
+  pinnedToBottom: boolean
 }
 
 /**
