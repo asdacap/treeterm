@@ -74,6 +74,7 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       kill: vi.fn(),
       onEvent: vi.fn().mockReturnValue(() => {}),
       onActiveProcessesOpen: vi.fn().mockReturnValue(() => {}),
+      createSession: vi.fn().mockResolvedValue({ success: true, sessionId: 'pty-1' }),
     },
     getSettings: vi.fn().mockReturnValue({
       terminal: { fontSize: 14, fontFamily: 'monospace', cursorStyle: 'block', cursorBlink: true, showRawChars: false, instances: [] },

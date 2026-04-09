@@ -334,6 +334,7 @@ export interface TerminalApi {
   kill: (connectionId: string, sessionId: string) => void
   onEvent: (handle: string, callback: (event: PtyEvent) => void) => () => void
   onActiveProcessesOpen: (callback: () => void) => () => void
+  createSession: (connectionId: string, cwd: string, startupCommand?: string) => Promise<IpcResult<{ sessionId: string }>>
 }
 
 export interface GitApi {
@@ -425,9 +426,6 @@ export type RawGitHubApi = WithConnectionId<GitHubApi>
 /** Raw filesystem API exposed by the preload — connectionId is the first parameter of every method */
 export type RawFilesystemApi = WithConnectionId<FilesystemApi>
 
-/** Raw run actions API exposed by the preload — connectionId is the first parameter of every method */
-export type RawRunActionsApi = WithConnectionId<RunActionsApi>
-
 /** Generic helper: bind connectionId to all methods of a raw (WithConnectionId) API */
 function bindConnectionId<T extends object>(raw: WithConnectionId<T>, connectionId: string): T {
   return Object.fromEntries(
@@ -445,11 +443,6 @@ export function createBoundGitHub(raw: RawGitHubApi, connectionId: string): GitH
 /** Bind a connectionId to a RawFilesystemApi, returning a FilesystemApi scoped to that connection */
 export function createBoundFilesystem(raw: RawFilesystemApi, connectionId: string): FilesystemApi {
   return bindConnectionId<FilesystemApi>(raw, connectionId)
-}
-
-/** Bind a connectionId to a RawRunActionsApi, returning a RunActionsApi scoped to that connection */
-export function createBoundRunActions(raw: RawRunActionsApi, connectionId: string): RunActionsApi {
-  return bindConnectionId<RunActionsApi>(raw, connectionId)
 }
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- intentional marker interface for tab state
@@ -597,7 +590,6 @@ export type PreloadApi = {
   settings: SettingsApi
   filesystem: RawFilesystemApi
   exec: ExecApi
-  runActions: RawRunActionsApi
   sandbox: SandboxApi
   getInitialWorkspace: () => Promise<string | null>
   app: AppApi

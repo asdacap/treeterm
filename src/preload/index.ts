@@ -232,6 +232,9 @@ const preloadApi: PreloadApi = {
         const index = activeProcessesOpenListeners.indexOf(callback)
         if (index > -1) activeProcessesOpenListeners.splice(index, 1)
       }
+    },
+    createSession: (connectionId: string, cwd: string, startupCommand?: string) => {
+      return client.ptyCreateSession(connectionId, cwd, startupCommand)
     }
   },
   selectFolder: (): Promise<string | null> => {
@@ -296,14 +299,6 @@ const preloadApi: PreloadApi = {
           if (index > -1) listeners.splice(index, 1)
         }
       }
-    }
-  },
-  runActions: {
-    detect: (connectionId: string, workspacePath: string) => {
-      return client.runActionsDetect(connectionId, workspacePath)
-    },
-    run: (connectionId: string, workspacePath: string, actionId: string) => {
-      return client.runActionsRun(connectionId, workspacePath, actionId)
     }
   },
   sandbox: {

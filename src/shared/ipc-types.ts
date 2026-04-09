@@ -14,7 +14,6 @@ import type {
   Session,
   TTYSessionInfo,
   WorkspaceInput,
-  RunAction,
   SSHConnectionConfig,
   ConnectionInfo,
   PortForwardConfig,
@@ -135,14 +134,10 @@ export interface IpcRequests {
     result: boolean
   }
 
-  // Run Actions operations
-  runActionsDetect: {
-    params: [connectionId: string, workspacePath: string]
-    result: RunAction[]
-  }
-  runActionsRun: {
-    params: [connectionId: string, workspacePath: string, actionId: string]
-    result: IpcResult<{ ptyId: string }>
+  // PTY create session (daemon primitive — no stream)
+  ptyCreateSession: {
+    params: [connectionId: string, cwd: string, startupCommand?: string]
+    result: IpcResult<{ sessionId: string }>
   }
 
   // App operations

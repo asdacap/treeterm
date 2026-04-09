@@ -4,7 +4,6 @@ import { join } from 'path'
 import { randomUUID } from 'crypto'
 import { GrpcDaemonClient, PtyStream } from './grpcClient'
 import { IpcServer } from './ipc/ipc-server'
-import { createRunActionsClient, RunActionsClient } from './runActions'
 import { ConnectionManager } from './connectionManager'
 import { windowManager } from './windowManager'
 import type { ExecInput, ExecOutput } from '../generated/treeterm'
@@ -537,10 +536,6 @@ server.onDialogGetRecentDirectories(() => {
   return settings.recentDirectories
 })
 
-function getRunActionsClientForConnection(connectionId: string): RunActionsClient {
-  return createRunActionsClient(getClientForConnection(connectionId))
-}
-
 function execCommand(
   client: GrpcDaemonClient,
   cwd: string,
@@ -797,13 +792,16 @@ server.onGithubGetPrInfo(async (connectionId, repoPath, head, base) => {
   }
 })
 
-// Run Actions IPC Handlers
-server.onRunActionsDetect((connectionId, workspacePath) => {
-  return getRunActionsClientForConnection(connectionId).detect(workspacePath)
-})
-
-server.onRunActionsRun((connectionId, workspacePath, actionId) => {
-  return getRunActionsClientForConnection(connectionId).run(workspacePath, actionId)
+// PTY create session (no stream) handler
+server.onPtyCreateSession(async (connectionId, cwd, startupCommand) => {
+  try {
+    const client = getClientForConnection(connectionId)
+    await client.ensureDaemonRunning()
+    const sessionId = await client.createPtySession({ cwd, startupCommand })
+    return { success: true, sessionId }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
 })
 
 // Settings IPC Handlers

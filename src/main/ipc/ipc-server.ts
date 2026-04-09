@@ -19,8 +19,7 @@ const CHANNELS = {
   fsReadFile: 'fs:readFile',
   fsWriteFile: 'fs:writeFile',
   fsSearchFiles: 'fs:searchFiles',
-  runActionsDetect: 'runActions:detect',
-  runActionsRun: 'runActions:run',
+  ptyCreateSession: 'pty:createSession',
   sessionUpdate: 'session:update',
   sessionLock: 'session:lock',
   sessionUnlock: 'session:unlock',
@@ -320,24 +319,14 @@ export class IpcServer {
     )
   }
 
-  // Run Actions request handlers
-  onRunActionsDetect(
+  // PTY create session handler (no stream)
+  onPtyCreateSession(
     handler: (
-      ...args: IpcRequests['runActionsDetect']['params']
-    ) => IpcRequests['runActionsDetect']['result'] | Promise<IpcRequests['runActionsDetect']['result']>
+      ...args: IpcRequests['ptyCreateSession']['params']
+    ) => IpcRequests['ptyCreateSession']['result'] | Promise<IpcRequests['ptyCreateSession']['result']>
   ): void {
-    ipcMain.handle(CHANNELS.runActionsDetect, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['runActionsDetect']['params']))
-    )
-  }
-
-  onRunActionsRun(
-    handler: (
-      ...args: IpcRequests['runActionsRun']['params']
-    ) => IpcRequests['runActionsRun']['result'] | Promise<IpcRequests['runActionsRun']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.runActionsRun, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['runActionsRun']['params']))
+    ipcMain.handle(CHANNELS.ptyCreateSession, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['ptyCreateSession']['params']))
     )
   }
 

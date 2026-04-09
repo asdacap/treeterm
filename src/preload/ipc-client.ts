@@ -19,8 +19,7 @@ const CHANNELS = {
   fsReadFile: 'fs:readFile',
   fsWriteFile: 'fs:writeFile',
   fsSearchFiles: 'fs:searchFiles',
-  runActionsDetect: 'runActions:detect',
-  runActionsRun: 'runActions:run',
+  ptyCreateSession: 'pty:createSession',
   sessionUpdate: 'session:update',
   sessionLock: 'session:lock',
   sessionUnlock: 'session:unlock',
@@ -150,17 +149,11 @@ export class IpcClient {
     return ipcRenderer.invoke(CHANNELS.fsSearchFiles, ...args)
   }
 
-  // Run Actions requests
-  runActionsDetect(
-    ...args: IpcRequests['runActionsDetect']['params']
-  ): Promise<IpcRequests['runActionsDetect']['result']> {
-    return ipcRenderer.invoke(CHANNELS.runActionsDetect, ...args)
-  }
-
-  runActionsRun(
-    ...args: IpcRequests['runActionsRun']['params']
-  ): Promise<IpcRequests['runActionsRun']['result']> {
-    return ipcRenderer.invoke(CHANNELS.runActionsRun, ...args)
+  // PTY create session (no stream)
+  ptyCreateSession(
+    ...args: IpcRequests['ptyCreateSession']['params']
+  ): Promise<IpcRequests['ptyCreateSession']['result']> {
+    return ipcRenderer.invoke(CHANNELS.ptyCreateSession, ...args)
   }
 
   // Session requests

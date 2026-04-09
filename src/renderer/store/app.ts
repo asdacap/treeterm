@@ -25,12 +25,13 @@ import { githubApplication } from '../../applications/github/renderer'
 import type {
   Workspace, Session, Application,
   Platform, TerminalApi, SessionApi, AppApi, DaemonApi,
-  RawFilesystemApi, ExecApi, SandboxApi, SettingsApi, RawRunActionsApi,
+  RawFilesystemApi, ExecApi, SandboxApi, SettingsApi,
   TerminalInstance, AiHarnessInstance, CustomRunnerInstance,
   ConnectionInfo, SSHConnectionConfig, SSHApi, LlmApi, ClipboardApi, RawGitHubApi
 } from '../types'
-import { createBoundGitHub, createBoundFilesystem, createBoundRunActions } from '../types'
+import { createBoundGitHub, createBoundFilesystem } from '../types'
 import { createGitApi } from '../lib/gitClient'
+import { createRunActionsApi } from '../lib/runActionsClient'
 import { ConnectionStatus } from '../../shared/types'
 
 export interface AppDeps {
@@ -42,7 +43,6 @@ export interface AppDeps {
   daemon: DaemonApi
   filesystem: RawFilesystemApi
   exec: ExecApi
-  runActions: RawRunActionsApi
   sandbox: SandboxApi
   ssh: SSHApi
   llm: LlmApi
@@ -107,7 +107,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
   daemon: UNINITIALIZED,
   filesystem: UNINITIALIZED,
   exec: UNINITIALIZED,
-  runActions: UNINITIALIZED,
   sandbox: UNINITIALIZED,
   ssh: UNINITIALIZED,
   llm: UNINITIALIZED,
@@ -484,7 +483,7 @@ function getOrCreateSession(
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
   connection?: ConnectionInfo
 ): StoreApi<SessionState> {
-  const { sessionStores, windowUuid, filesystem, exec, runActions, sessionApi, terminal, llm, github } = get()
+  const { sessionStores, windowUuid, filesystem, exec, sessionApi, terminal, llm, github } = get()
   const existing = sessionStores.get(sessionId)
   if (existing) {
     console.log(`[renderer:app] getOrCreateSession: reusing existing session store for session=${sessionId}`)
@@ -495,7 +494,7 @@ function getOrCreateSession(
   const boundFilesystem = createBoundFilesystem(filesystem, connId)
   const boundGit = createGitApi(exec, boundFilesystem, connId)
   const boundGithub = createBoundGitHub(github, connId)
-  const boundRunActions = createBoundRunActions(runActions, connId)
+  const boundRunActions = createRunActionsApi(boundFilesystem, terminal, connId)
   const store = createSessionStore(
     { sessionId, windowUuid, connection },
     {
