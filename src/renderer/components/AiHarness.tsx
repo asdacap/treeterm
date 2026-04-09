@@ -7,7 +7,7 @@ import { PromptCommitButton } from './PromptCommitButton'
 import { PromptRebaseButton } from './PromptRebaseButton'
 import { ReviewCommentsButton } from './ReviewCommentsButton'
 import { PromptGitHubCommentsButton } from './PromptGitHubCommentsButton'
-import type { ActivityState, SandboxConfig, WorkspaceStore } from '../types'
+import type { ActivityState, SandboxConfig, TerminalAppRef, WorkspaceStore } from '../types'
 import { isAiHarnessState } from '../types'
 import type { AiHarnessRef } from '../../applications/aiHarness/renderer'
 import type { AnalyzerState } from '../store/createAnalyzerStore'
@@ -152,6 +152,9 @@ function AiHarnessStatusBar({ analyzer, workspace, tabId }: AiHarnessStatusBarPr
   const reason = useStore(analyzer, s => s.reason)
   const autoApprove = useStore(analyzer, s => s.autoApprove)
 
+  const cache = (workspace.getState().getTabRef(tabId) as TerminalAppRef | null)?.cachedTerminal
+  const [stripScrollback, setStripScrollback] = useState(cache?.stripScrollbackClear ?? false)
+
   const openContextMenu = useContextMenuStore((s) => s.open)
   const closeContextMenu = useContextMenuStore((s) => s.close)
   const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
@@ -196,6 +199,19 @@ function AiHarnessStatusBar({ analyzer, workspace, tabId }: AiHarnessStatusBarPr
           />
           <span className="ai-harness-toggle-slider" />
           <span className="ai-harness-toggle-label">Auto-approve safe</span>
+        </label>
+        <label className="ai-harness-toggle">
+          <input
+            type="checkbox"
+            checked={stripScrollback}
+            onChange={(e) => {
+              const checked = e.target.checked
+              if (cache) cache.stripScrollbackClear = checked
+              setStripScrollback(checked)
+            }}
+          />
+          <span className="ai-harness-toggle-slider" />
+          <span className="ai-harness-toggle-label">Strip scrollback</span>
         </label>
       </div>
       <ContextMenu menuId={badgeMenuId} activeMenuId={activeMenuId} position={menuPosition}>
