@@ -67,9 +67,8 @@ export const useSessionNamesStore = create<SessionNamesState>()(
 
           const updated = new Map<string, SessionNameEntry>()
           for (let i = 0; i < ordered.length; i++) {
-            const item = ordered[i]
-            if (!item) continue
-            const [id, entry] = item
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- index within bounds
+            const [id, entry] = ordered[i]!
             updated.set(id, { ...entry, sortOrder: i })
           }
           return { names: updated }
