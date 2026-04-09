@@ -295,6 +295,13 @@ export function createSessionStore(
     }
 
     void (async () => {
+      const lockResult = await deps.sessionApi.lock(config.sessionId, 60_000)
+      if (!lockResult.success || !lockResult.acquired) {
+        store.setState(s => ({
+          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Error, name: worktreeName, error: 'Session is locked by another window' })
+        }))
+        return
+      }
       try {
         if (options.preOperation) {
           await options.preOperation()
@@ -359,6 +366,8 @@ export function createSessionStore(
         store.setState(s => ({
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Error, name: worktreeName, error: err instanceof Error ? err.message : String(err) })
         }))
+      } finally {
+        await deps.sessionApi.unlock(config.sessionId).catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
       }
     })()
 
@@ -473,7 +482,7 @@ export function createSessionStore(
     await syncSessionToDaemon(store.getState().isRestoring)
   }
 
-  // Helper: wraps removeWorkspaceInternal with loading state
+  // Helper: wraps removeWorkspaceInternal with loading state and session lock
   async function removeWorkspaceWithLoading(
     id: string,
     options: { keepBranch: boolean; keepWorktree: boolean }
@@ -481,6 +490,14 @@ export function createSessionStore(
     const entry = store.getState().workspaces.get(id)
     if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return
     const { data, store: wsStore } = entry
+
+    const lockResult = await deps.sessionApi.lock(config.sessionId, 60_000)
+    if (!lockResult.success || !lockResult.acquired) {
+      store.setState(s => ({
+        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data, store: wsStore, error: 'Session is locked by another window' })
+      }))
+      return
+    }
 
     // Temporarily show loading in the main pane — preserve data+store for recovery
     store.setState(s => ({
@@ -492,6 +509,8 @@ export function createSessionStore(
       store.setState(s => ({
         workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data, store: wsStore, error: err instanceof Error ? err.message : String(err) })
       }))
+    } finally {
+      await deps.sessionApi.unlock(config.sessionId).catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
     }
   }
 
@@ -753,9 +772,18 @@ export function createSessionStore(
         return { success: false, error: 'This worktree is already open' }
       }
 
-      const metadata: Record<string, string> = { branchIsUserDefined: 'true', ...(description ? { description } : {}) }
-      await addChildWorkspaceFromResult(parentId, name, worktreePath, branch, { settings, metadata })
-      return { success: true }
+      const lockResult = await deps.sessionApi.lock(config.sessionId, 60_000)
+      if (!lockResult.success || !lockResult.acquired) {
+        return { success: false, error: 'Session is locked by another window' }
+      }
+
+      try {
+        const metadata: Record<string, string> = { branchIsUserDefined: 'true', ...(description ? { description } : {}) }
+        await addChildWorkspaceFromResult(parentId, name, worktreePath, branch, { settings, metadata })
+        return { success: true }
+      } finally {
+        await deps.sessionApi.unlock(config.sessionId).catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
+      }
     },
 
     createWorktreeFromBranch: (parentId: string, branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => {
