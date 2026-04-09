@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useSettingsStore } from '../store/settings'
-import { useAppStore } from '../store/app'
 import type { ApplicationRenderProps, ReasoningEffort } from '../types'
+import { createLlmClient } from '../lib/llmClient'
+
+const llm = createLlmClient()
 
 interface DebuggerState {
   bufferText?: string
@@ -9,7 +11,6 @@ interface DebuggerState {
 
 export default function TerminalAnalyzerDebugger({ tab }: ApplicationRenderProps) {
   const settings = useSettingsStore((s) => s.settings)
-  const llm = useAppStore((s) => s.llm)
   const debuggerState = tab.state as DebuggerState | undefined
   const [systemPrompt, setSystemPrompt] = useState(settings.terminalAnalyzer.systemPrompt)
   const [bufferText, setBufferText] = useState(debuggerState?.bufferText ?? '')

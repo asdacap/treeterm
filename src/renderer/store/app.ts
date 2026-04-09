@@ -27,11 +27,13 @@ import type {
   Platform, TerminalApi, SessionApi, AppApi, DaemonApi,
   RawFilesystemApi, ExecApi, SandboxApi, SettingsApi,
   TerminalInstance, AiHarnessInstance, CustomRunnerInstance,
-  ConnectionInfo, SSHConnectionConfig, SSHApi, LlmApi, ClipboardApi, RawGitHubApi
+  ConnectionInfo, SSHConnectionConfig, SSHApi, ClipboardApi
 } from '../types'
-import { createBoundGitHub, createBoundFilesystem } from '../types'
+import { createBoundFilesystem } from '../types'
 import { createGitApi } from '../lib/gitClient'
+import { createGitHubApi } from '../lib/githubClient'
 import { createRunActionsApi } from '../lib/runActionsClient'
+import { createLlmClient } from '../lib/llmClient'
 import { ConnectionStatus } from '../../shared/types'
 
 export interface AppDeps {
@@ -45,9 +47,7 @@ export interface AppDeps {
   exec: ExecApi
   sandbox: SandboxApi
   ssh: SSHApi
-  llm: LlmApi
   clipboard: ClipboardApi
-  github: RawGitHubApi
   selectFolder: () => Promise<string | null>
   getWindowUuid: () => Promise<string>
   getInitialWorkspace: () => Promise<string | null>
@@ -109,9 +109,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   exec: UNINITIALIZED,
   sandbox: UNINITIALIZED,
   ssh: UNINITIALIZED,
-  llm: UNINITIALIZED,
   clipboard: UNINITIALIZED,
-  github: UNINITIALIZED,
   selectFolder: UNINITIALIZED,
   getWindowUuid: UNINITIALIZED,
   getInitialWorkspace: UNINITIALIZED,
@@ -483,7 +481,7 @@ function getOrCreateSession(
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
   connection?: ConnectionInfo
 ): StoreApi<SessionState> {
-  const { sessionStores, windowUuid, filesystem, exec, sessionApi, terminal, llm, github } = get()
+  const { sessionStores, windowUuid, filesystem, exec, sessionApi, terminal } = get()
   const existing = sessionStores.get(sessionId)
   if (existing) {
     console.log(`[renderer:app] getOrCreateSession: reusing existing session store for session=${sessionId}`)
@@ -493,7 +491,7 @@ function getOrCreateSession(
   const connId = connection?.id ?? 'local'
   const boundFilesystem = createBoundFilesystem(filesystem, connId)
   const boundGit = createGitApi(exec, boundFilesystem, connId)
-  const boundGithub = createBoundGitHub(github, connId)
+  const boundGithub = createGitHubApi(exec, get().settingsApi, connId)
   const boundRunActions = createRunActionsApi(boundFilesystem, terminal, connId)
   const store = createSessionStore(
     { sessionId, windowUuid, connection },
@@ -510,7 +508,7 @@ function getOrCreateSession(
         getDefaultApp: (appId?: string) => get().getDefaultApplication(appId),
       },
       github: boundGithub,
-      llm,
+      llm: createLlmClient(),
       setActivityTabState: (tabId, state) => { useActivityStateStore.getState().setTabState(tabId, state); },
     }
   )

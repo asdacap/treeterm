@@ -22,12 +22,7 @@ const copyLoadingHtmlPlugin = () => ({
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin(), copyLoadingHtmlPlugin()],
-    build: {
-      rollupOptions: {
-        external: ['openai']
-      }
-    }
+    plugins: [externalizeDepsPlugin(), copyLoadingHtmlPlugin()]
   },
   preload: {
     plugins: [externalizeDepsPlugin()]

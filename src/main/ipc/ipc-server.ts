@@ -12,7 +12,6 @@ const CHANNELS = {
   ptyCreate: 'pty:create',
   ptyAttach: 'pty:attach',
   ptyList: 'pty:list',
-  githubGetPrInfo: 'github:getPrInfo',
   settingsLoad: 'settings:load',
   settingsSave: 'settings:save',
   fsReadDirectory: 'fs:readDirectory',
@@ -54,12 +53,6 @@ const CHANNELS = {
   sshWatchPortForwardOutput: 'ssh:watchPortForwardOutput',
   sshUnwatchPortForwardOutput: 'ssh:unwatchPortForwardOutput',
 
-  // LLM operations
-  llmChatSend: 'llm:chat:send',
-  llmAnalyzeTerminal: 'llm:analyzeTerminal',
-  llmClearAnalyzerCache: 'llm:clearAnalyzerCache',
-  llmGenerateTitle: 'llm:generateTitle',
-
   // Clipboard operations
   clipboardReadText: 'clipboard:readText',
   clipboardWriteText: 'clipboard:writeText',
@@ -75,8 +68,6 @@ const CHANNELS = {
   ptyKill: 'pty:kill',
   appCloseConfirmed: 'app:close-confirmed',
   appCloseCancelled: 'app:close-cancelled',
-  llmChatCancel: 'llm:chat:cancel',
-
   // Event channels
   ptyEvent: 'pty:event',
   settingsOpen: 'settings:open',
@@ -95,9 +86,6 @@ const CHANNELS = {
   sshDaemonOutput: 'ssh:daemonOutput',
   sshPortForwardStatus: 'ssh:portForwardStatus',
   sshPortForwardOutput: 'ssh:portForwardOutput',
-  llmChatDelta: 'llm:chat:delta',
-  llmChatDone: 'llm:chat:done',
-  llmChatError: 'llm:chat:error'
 } as const
 
 export class IpcServer {
@@ -163,17 +151,6 @@ export class IpcServer {
     )
   }
 
-  // GitHub request handlers
-  onGithubGetPrInfo(
-    handler: (
-      ...args: IpcRequests['githubGetPrInfo']['params']
-    ) => IpcRequests['githubGetPrInfo']['result'] | Promise<IpcRequests['githubGetPrInfo']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.githubGetPrInfo, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['githubGetPrInfo']['params']))
-    )
-  }
-
   // Settings request handlers
   onSettingsLoad(
     handler: (
@@ -233,48 +210,6 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.fsSearchFiles, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['fsSearchFiles']['params']))
-    )
-  }
-
-  // LLM request handlers
-  onLlmChatSend(
-    handler: (
-      event: IpcMainInvokeEvent,
-      ...args: IpcRequests['llmChatSend']['params']
-    ) => IpcRequests['llmChatSend']['result'] | Promise<IpcRequests['llmChatSend']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.llmChatSend, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(event, ...(args as IpcRequests['llmChatSend']['params']))
-    )
-  }
-
-  onLlmAnalyzeTerminal(
-    handler: (
-      ...args: IpcRequests['llmAnalyzeTerminal']['params']
-    ) => IpcRequests['llmAnalyzeTerminal']['result'] | Promise<IpcRequests['llmAnalyzeTerminal']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.llmAnalyzeTerminal, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['llmAnalyzeTerminal']['params']))
-    )
-  }
-
-  onLlmClearAnalyzerCache(
-    handler: (
-      ...args: IpcRequests['llmClearAnalyzerCache']['params']
-    ) => IpcRequests['llmClearAnalyzerCache']['result'] | Promise<IpcRequests['llmClearAnalyzerCache']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.llmClearAnalyzerCache, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['llmClearAnalyzerCache']['params']))
-    )
-  }
-
-  onLlmGenerateTitle(
-    handler: (
-      ...args: IpcRequests['llmGenerateTitle']['params']
-    ) => IpcRequests['llmGenerateTitle']['result'] | Promise<IpcRequests['llmGenerateTitle']['result']>
-  ): void {
-    ipcMain.handle(CHANNELS.llmGenerateTitle, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['llmGenerateTitle']['params']))
     )
   }
 
@@ -638,12 +573,6 @@ export class IpcServer {
 
   onAppCloseCancelled(handler: (event: IpcMainEvent) => void): void {
     ipcMain.on(CHANNELS.appCloseCancelled, (event: IpcMainEvent) => { handler(event); })
-  }
-
-  onLlmChatCancel(handler: (...args: IpcSends['llmChatCancel']['params']) => void): void {
-    ipcMain.on(CHANNELS.llmChatCancel, (_event: IpcMainEvent, ...args: unknown[]) =>
-      { handler(...(args as IpcSends['llmChatCancel']['params'])); }
-    )
   }
 
   onClipboardWriteText(handler: (...args: IpcSends['clipboardWriteText']['params']) => void): void {

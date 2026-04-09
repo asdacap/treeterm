@@ -137,7 +137,6 @@ describe('IpcServer', () => {
     it.each([
       ['onPtyCreate', 'pty:create'],
       ['onPtyAttach', 'pty:attach'],
-      ['onLlmChatSend', 'llm:chat:send'],
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     ] as const)('%s wrapper forwards event and args to handler', async (method, _channel) => {
       const handler = vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('result')
@@ -164,19 +163,6 @@ describe('IpcServer', () => {
       expect(mockOn).toHaveBeenCalledWith('app:close-cancelled', expect.any(Function))
     })
 
-    it('onLlmChatCancel registers handler on llm:chat:cancel channel', () => {
-      const handler = vi.fn<(...args: any[]) => void>()
-      server.onLlmChatCancel(handler)
-      expect(mockOn).toHaveBeenCalledWith('llm:chat:cancel', expect.any(Function))
-    })
-
-    it('onLlmChatCancel wrapper forwards args to handler', () => {
-      const handler = vi.fn<(...args: any[]) => void>()
-      server.onLlmChatCancel(handler)
-      const wrapper = mockOn.mock.calls[0]![1] as (...args: any[]) => void
-      wrapper({}, 'request-123')
-      expect(handler).toHaveBeenCalledWith('request-123')
-    })
   })
 
   describe('event emitters (main → renderer)', () => {

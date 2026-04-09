@@ -5,11 +5,12 @@ import { useStore } from 'zustand'
 import type { ApplicationRenderProps, ChatState, ChatMessage } from '../types'
 import { ReasoningEffort } from '../../shared/types'
 import { useSettingsStore } from '../store/settings'
-import { useAppStore } from '../store/app'
+import { createLlmClient } from '../lib/llmClient'
+
+const llm = createLlmClient()
 
 export default function Chat({ tab, workspace, isVisible }: ApplicationRenderProps) {
   const { settings } = useSettingsStore()
-  const llm = useAppStore((s) => s.llm)
   const state = tab.state as ChatState
   const [messages, setMessages] = useState(state.messages)
   const [input, setInput] = useState('')
@@ -56,7 +57,7 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
       unsubDone()
       unsubError()
     }
-  }, [llm])
+  }, [])
 
   const handleSend = useCallback(async () => {
     const trimmed = input.trim()
@@ -104,7 +105,7 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
       setIsStreaming(false)
       activeRequestId.current = null
     }
-  }, [input, messages, isStreaming, settings.llm, llm, reasoning])
+  }, [input, messages, isStreaming, settings.llm, reasoning])
 
   const handleCancel = useCallback(() => {
     if (activeRequestId.current) {
@@ -112,7 +113,7 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
       setIsStreaming(false)
       activeRequestId.current = null
     }
-  }, [llm])
+  }, [])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useSettingsStore } from '../store/settings'
 import { useActivityStateStore } from '../store/activityState'
-import { useAppStore } from '../store/app'
 import { ActivityState } from '../types'
 import type { ApplicationRenderProps } from '../types'
 import { ReasoningEffort } from '../../shared/types'
+import { createLlmClient } from '../lib/llmClient'
+
+const llm = createLlmClient()
 
 enum DebugMode {
   Analyzer = 'analyzer',
@@ -17,7 +19,6 @@ interface DebuggerState {
 
 export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
   const settings = useSettingsStore((s) => s.settings)
-  const llm = useAppStore((s) => s.llm)
   const setTabState = useActivityStateStore((s) => s.setTabState)
   const removeTabState = useActivityStateStore((s) => s.removeTabState)
   const debuggerState = tab.state as DebuggerState | undefined

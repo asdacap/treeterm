@@ -1,5 +1,5 @@
 import { contextBridge } from 'electron'
-import type { SandboxConfig, Session, TTYSessionInfo, WorkspaceInput, Settings, SSHConnectionConfig, ConnectionInfo, PortForwardConfig, PortForwardInfo, ReasoningEffort } from '../shared/types'
+import type { SandboxConfig, Session, TTYSessionInfo, WorkspaceInput, Settings, SSHConnectionConfig, ConnectionInfo, PortForwardConfig, PortForwardInfo } from '../shared/types'
 import type { PtyEvent, ExecEvent } from '../shared/ipc-types'
 import { IpcClient } from './ipc-client'
 import type { PreloadApi, Platform } from '../renderer/types'
@@ -117,27 +117,6 @@ client.onSshConnectionStatus((info) => {
   sshConnectionStatusListeners.forEach((cb) => { cb(info); })
 })
 
-type LlmDeltaCallback = (requestId: string, text: string) => void
-const llmDeltaListeners: LlmDeltaCallback[] = []
-
-client.onLlmChatDelta((requestId, text) => {
-  llmDeltaListeners.forEach((cb) => { cb(requestId, text); })
-})
-
-type LlmDoneCallback = (requestId: string) => void
-const llmDoneListeners: LlmDoneCallback[] = []
-
-client.onLlmChatDone((requestId) => {
-  llmDoneListeners.forEach((cb) => { cb(requestId); })
-})
-
-type LlmErrorCallback = (requestId: string, error: string) => void
-const llmErrorListeners: LlmErrorCallback[] = []
-
-client.onLlmChatError((requestId, error) => {
-  llmErrorListeners.forEach((cb) => { cb(requestId, error); })
-})
-
 type SshOutputCallback = (connectionId: string, line: string) => void
 const sshBootstrapOutputListeners: SshOutputCallback[] = []
 const sshTunnelOutputListeners: SshOutputCallback[] = []
@@ -242,11 +221,6 @@ const preloadApi: PreloadApi = {
   },
   getRecentDirectories: (): Promise<string[]> => {
     return client.dialogGetRecentDirectories()
-  },
-  github: {
-    getPrInfo: (connectionId: string, repoPath: string, head: string, base: string) => {
-      return client.githubGetPrInfo(connectionId, repoPath, head, base)
-    }
   },
   settings: {
     load: () => {
@@ -417,44 +391,6 @@ const preloadApi: PreloadApi = {
   },
   getWindowUuid: (): Promise<string> => {
     return client.appGetWindowUuid()
-  },
-  llm: {
-    send: (requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string; reasoning: ReasoningEffort }): Promise<void> => {
-      return client.llmChatSend(requestId, messages, settings)
-    },
-    cancel: (requestId: string): void => {
-      client.llmChatCancel(requestId)
-    },
-    analyzeTerminal: (buffer, cwd, settings) => {
-      return client.llmAnalyzeTerminal(buffer, cwd, settings)
-    },
-    clearAnalyzerCache: (): Promise<void> => {
-      return client.llmClearAnalyzerCache()
-    },
-    generateTitle: (buffer: string, settings: { baseUrl: string; apiKey: string; model: string; titleSystemPrompt: string; reasoningEffort: ReasoningEffort }): Promise<{ title: string; description: string; branchName: string } | { error: string }> => {
-      return client.llmGenerateTitle(buffer, settings)
-    },
-    onDelta: (callback: LlmDeltaCallback): (() => void) => {
-      llmDeltaListeners.push(callback)
-      return () => {
-        const index = llmDeltaListeners.indexOf(callback)
-        if (index > -1) llmDeltaListeners.splice(index, 1)
-      }
-    },
-    onDone: (callback: LlmDoneCallback): (() => void) => {
-      llmDoneListeners.push(callback)
-      return () => {
-        const index = llmDoneListeners.indexOf(callback)
-        if (index > -1) llmDoneListeners.splice(index, 1)
-      }
-    },
-    onError: (callback: LlmErrorCallback): (() => void) => {
-      llmErrorListeners.push(callback)
-      return () => {
-        const index = llmErrorListeners.indexOf(callback)
-        if (index > -1) llmErrorListeners.splice(index, 1)
-      }
-    }
   },
   ssh: {
     connect: (config: SSHConnectionConfig, options?: { refreshDaemon?: boolean; allowOutdatedDaemon?: boolean }) => {

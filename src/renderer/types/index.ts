@@ -420,9 +420,6 @@ type WithConnectionId<T> = {
   [K in keyof T]: PrependConnectionId<T[K]>
 }
 
-/** Raw GitHub API exposed by the preload — connectionId is the first parameter */
-export type RawGitHubApi = WithConnectionId<GitHubApi>
-
 /** Raw filesystem API exposed by the preload — connectionId is the first parameter of every method */
 export type RawFilesystemApi = WithConnectionId<FilesystemApi>
 
@@ -433,11 +430,6 @@ function bindConnectionId<T extends object>(raw: WithConnectionId<T>, connection
       return [key, (...args: unknown[]) => (fn as (connId: string, ...rest: unknown[]) => unknown)(connectionId, ...args)]
     })
   ) as unknown as T
-}
-
-/** Bind a connectionId to a RawGitHubApi, returning a GitHubApi scoped to that connection */
-export function createBoundGitHub(raw: RawGitHubApi, connectionId: string): GitHubApi {
-  return bindConnectionId<GitHubApi>(raw, connectionId)
 }
 
 /** Bind a connectionId to a RawFilesystemApi, returning a FilesystemApi scoped to that connection */
@@ -586,7 +578,6 @@ export type PreloadApi = {
   terminal: TerminalApi
   selectFolder: () => Promise<string | null>
   getRecentDirectories: () => Promise<string[]>
-  github: RawGitHubApi
   settings: SettingsApi
   filesystem: RawFilesystemApi
   exec: ExecApi
@@ -597,7 +588,6 @@ export type PreloadApi = {
   session: SessionApi
   getWindowUuid: () => Promise<string>
   clipboard: ClipboardApi
-  llm: LlmApi
   ssh: SSHApi
 }
 

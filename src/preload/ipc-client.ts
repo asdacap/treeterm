@@ -12,7 +12,6 @@ const CHANNELS = {
   ptyCreate: 'pty:create',
   ptyAttach: 'pty:attach',
   ptyList: 'pty:list',
-  githubGetPrInfo: 'github:getPrInfo',
   settingsLoad: 'settings:load',
   settingsSave: 'settings:save',
   fsReadDirectory: 'fs:readDirectory',
@@ -53,11 +52,6 @@ const CHANNELS = {
   sshListPortForwards: 'ssh:listPortForwards',
   sshWatchPortForwardOutput: 'ssh:watchPortForwardOutput',
   sshUnwatchPortForwardOutput: 'ssh:unwatchPortForwardOutput',
-  llmChatSend: 'llm:chat:send',
-  llmAnalyzeTerminal: 'llm:analyzeTerminal',
-  llmClearAnalyzerCache: 'llm:clearAnalyzerCache',
-  llmGenerateTitle: 'llm:generateTitle',
-
   // Clipboard operations
   clipboardReadText: 'clipboard:readText',
   clipboardWriteText: 'clipboard:writeText',
@@ -73,8 +67,6 @@ const CHANNELS = {
   ptyKill: 'pty:kill',
   appCloseConfirmed: 'app:close-confirmed',
   appCloseCancelled: 'app:close-cancelled',
-  llmChatCancel: 'llm:chat:cancel',
-
   // Event channels
   ptyEvent: 'pty:event',
   settingsOpen: 'settings:open',
@@ -93,9 +85,6 @@ const CHANNELS = {
   sshDaemonOutput: 'ssh:daemonOutput',
   sshPortForwardStatus: 'ssh:portForwardStatus',
   sshPortForwardOutput: 'ssh:portForwardOutput',
-  llmChatDelta: 'llm:chat:delta',
-  llmChatDone: 'llm:chat:done',
-  llmChatError: 'llm:chat:error'
 } as const
 
 export class IpcClient {
@@ -112,13 +101,6 @@ export class IpcClient {
 
   ptyList(...args: IpcRequests['ptyList']['params']): Promise<IpcRequests['ptyList']['result']> {
     return ipcRenderer.invoke(CHANNELS.ptyList, ...args)
-  }
-
-  // GitHub requests
-  githubGetPrInfo(
-    ...args: IpcRequests['githubGetPrInfo']['params']
-  ): Promise<IpcRequests['githubGetPrInfo']['result']> {
-    return ipcRenderer.invoke(CHANNELS.githubGetPrInfo, ...args)
   }
 
   // Settings requests
@@ -301,29 +283,6 @@ export class IpcClient {
     return ipcRenderer.invoke(CHANNELS.sshUnwatchPortForwardOutput, ...args)
   }
 
-  // LLM requests
-  llmChatSend(
-    ...args: IpcRequests['llmChatSend']['params']
-  ): Promise<IpcRequests['llmChatSend']['result']> {
-    return ipcRenderer.invoke(CHANNELS.llmChatSend, ...args)
-  }
-
-  llmAnalyzeTerminal(
-    ...args: IpcRequests['llmAnalyzeTerminal']['params']
-  ): Promise<IpcRequests['llmAnalyzeTerminal']['result']> {
-    return ipcRenderer.invoke(CHANNELS.llmAnalyzeTerminal, ...args)
-  }
-
-  llmClearAnalyzerCache(): Promise<void> {
-    return ipcRenderer.invoke(CHANNELS.llmClearAnalyzerCache)
-  }
-
-  llmGenerateTitle(
-    ...args: IpcRequests['llmGenerateTitle']['params']
-  ): Promise<IpcRequests['llmGenerateTitle']['result']> {
-    return ipcRenderer.invoke(CHANNELS.llmGenerateTitle, ...args)
-  }
-
   // ==================== Fire-and-Forget Methods (send pattern, no return) ====================
 
   ptyWrite(...args: IpcSends['ptyWrite']['params']): void {
@@ -344,10 +303,6 @@ export class IpcClient {
 
   appCloseCancelled(...args: IpcSends['appCloseCancelled']['params']): void {
     ipcRenderer.send(CHANNELS.appCloseCancelled, ...args)
-  }
-
-  llmChatCancel(...args: IpcSends['llmChatCancel']['params']): void {
-    ipcRenderer.send(CHANNELS.llmChatCancel, ...args)
   }
 
   clipboardWriteText(...args: IpcSends['clipboardWriteText']['params']): void {
@@ -482,27 +437,6 @@ export class IpcClient {
       { callback(...(args as IpcEvents['sshPortForwardOutput']['params'])); }
     ipcRenderer.on(CHANNELS.sshPortForwardOutput, handler)
     return () => ipcRenderer.removeListener(CHANNELS.sshPortForwardOutput, handler)
-  }
-
-  onLlmChatDelta(callback: (...args: IpcEvents['llmChatDelta']['params']) => void): () => void {
-    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      { callback(...(args as IpcEvents['llmChatDelta']['params'])); }
-    ipcRenderer.on(CHANNELS.llmChatDelta, handler)
-    return () => ipcRenderer.removeListener(CHANNELS.llmChatDelta, handler)
-  }
-
-  onLlmChatDone(callback: (...args: IpcEvents['llmChatDone']['params']) => void): () => void {
-    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      { callback(...(args as IpcEvents['llmChatDone']['params'])); }
-    ipcRenderer.on(CHANNELS.llmChatDone, handler)
-    return () => ipcRenderer.removeListener(CHANNELS.llmChatDone, handler)
-  }
-
-  onLlmChatError(callback: (...args: IpcEvents['llmChatError']['params']) => void): () => void {
-    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      { callback(...(args as IpcEvents['llmChatError']['params'])); }
-    ipcRenderer.on(CHANNELS.llmChatError, handler)
-    return () => ipcRenderer.removeListener(CHANNELS.llmChatError, handler)
   }
 
   onExecEvent(callback: (...args: IpcEvents['execEvent']['params']) => void): () => void {

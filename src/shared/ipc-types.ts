@@ -17,8 +17,7 @@ import type {
   SSHConnectionConfig,
   ConnectionInfo,
   PortForwardConfig,
-  PortForwardInfo,
-  ReasoningEffort
+  PortForwardInfo
 } from './types'
 
 /** Discriminated union for PTY output events (mirrors gRPC PtyOutput) */
@@ -40,7 +39,6 @@ import type {
   DirectoryContents,
   FileContents,
   FileEntry,
-  GitHubPrInfoResult
 } from '../renderer/types'
 
 // === Request Types (renderer calls, server handles) ===
@@ -58,12 +56,6 @@ export interface IpcRequests {
   ptyList: {
     params: [connectionId: string]
     result: TTYSessionInfo[]
-  }
-
-  // GitHub operations
-  githubGetPrInfo: {
-    params: [connectionId: string, repoPath: string, head: string, base: string]
-    result: GitHubPrInfoResult
   }
 
   // Settings operations
@@ -246,24 +238,6 @@ export interface IpcRequests {
     result: undefined
   }
 
-  // LLM operations
-  llmChatSend: {
-    params: [requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string; reasoning: ReasoningEffort }]
-    result: undefined
-  }
-  llmAnalyzeTerminal: {
-    params: [buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; reasoningEffort: ReasoningEffort; safePaths: string[] }]
-    result: { state: string; reason: string } | { error: string }
-  }
-  llmClearAnalyzerCache: {
-    params: []
-    result: undefined
-  }
-  llmGenerateTitle: {
-    params: [buffer: string, settings: { baseUrl: string; apiKey: string; model: string; titleSystemPrompt: string; reasoningEffort: ReasoningEffort }]
-    result: { title: string; description: string; branchName: string } | { error: string }
-  }
-
   // Clipboard operations
   clipboardReadText: {
     params: []
@@ -294,9 +268,6 @@ export interface IpcSends {
   }
   appCloseCancelled: {
     params: []
-  }
-  llmChatCancel: {
-    params: [requestId: string]
   }
   clipboardWriteText: {
     params: [text: string]
@@ -359,15 +330,6 @@ export interface IpcEvents {
   }
   sshPortForwardOutput: {
     params: [portForwardId: string, line: string]
-  }
-  llmChatDelta: {
-    params: [requestId: string, text: string]
-  }
-  llmChatDone: {
-    params: [requestId: string]
-  }
-  llmChatError: {
-    params: [requestId: string, error: string]
   }
   execEvent: {
     params: [execId: string, event: ExecEvent]
