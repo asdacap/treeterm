@@ -106,6 +106,10 @@ body,
   border-bottom: 1px solid var(--border-color);
 }
 
+.session-panel + .session-panel {
+  margin-top: 12px;
+}
+
 .session-panel-header {
   display: flex;
   align-items: center;
@@ -113,6 +117,7 @@ body,
   gap: 4px;
   cursor: pointer;
   user-select: none;
+  border-left: 3px solid var(--accent);
 }
 
 .session-panel-header:hover {
