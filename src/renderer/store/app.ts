@@ -24,18 +24,18 @@ import { workspaceSettingsApplication } from '../../applications/workspaceSettin
 import { githubApplication } from '../../applications/github/renderer'
 import type {
   Workspace, Session, Application,
-  Platform, TerminalApi, RawGitApi, SessionApi, AppApi, DaemonApi,
+  Platform, TerminalApi, SessionApi, AppApi, DaemonApi,
   RawFilesystemApi, ExecApi, SandboxApi, SettingsApi, RawRunActionsApi,
   TerminalInstance, AiHarnessInstance, CustomRunnerInstance,
   ConnectionInfo, SSHConnectionConfig, SSHApi, LlmApi, ClipboardApi, RawGitHubApi
 } from '../types'
-import { createBoundGit, createBoundGitHub, createBoundFilesystem, createBoundRunActions } from '../types'
+import { createBoundGitHub, createBoundFilesystem, createBoundRunActions } from '../types'
+import { createGitApi } from '../lib/gitClient'
 import { ConnectionStatus } from '../../shared/types'
 
 export interface AppDeps {
   platform: Platform
   terminal: TerminalApi
-  git: RawGitApi
   sessionApi: SessionApi
   settingsApi: SettingsApi
   appApi: AppApi
@@ -101,7 +101,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
   // Injected APIs — overwritten by initialize(deps) before first use
   platform: UNINITIALIZED,
   terminal: UNINITIALIZED,
-  git: UNINITIALIZED,
   sessionApi: UNINITIALIZED,
   settingsApi: UNINITIALIZED,
   appApi: UNINITIALIZED,
@@ -485,7 +484,7 @@ function getOrCreateSession(
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
   connection?: ConnectionInfo
 ): StoreApi<SessionState> {
-  const { sessionStores, windowUuid, git, filesystem, exec, runActions, sessionApi, terminal, llm, github } = get()
+  const { sessionStores, windowUuid, filesystem, exec, runActions, sessionApi, terminal, llm, github } = get()
   const existing = sessionStores.get(sessionId)
   if (existing) {
     console.log(`[renderer:app] getOrCreateSession: reusing existing session store for session=${sessionId}`)
@@ -493,9 +492,9 @@ function getOrCreateSession(
   }
   console.log(`[renderer:app] getOrCreateSession: creating new session store for session=${sessionId}, connection=${connection?.id ?? 'local'}`)
   const connId = connection?.id ?? 'local'
-  const boundGit = createBoundGit(git, connId)
-  const boundGithub = createBoundGitHub(github, connId)
   const boundFilesystem = createBoundFilesystem(filesystem, connId)
+  const boundGit = createGitApi(exec, boundFilesystem, connId)
+  const boundGithub = createBoundGitHub(github, connId)
   const boundRunActions = createBoundRunActions(runActions, connId)
   const store = createSessionStore(
     { sessionId, windowUuid, connection },

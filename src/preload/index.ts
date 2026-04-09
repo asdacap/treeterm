@@ -153,13 +153,6 @@ client.onSshDaemonOutput((connectionId, line) => {
   sshDaemonOutputListeners.forEach((cb) => { cb(connectionId, line); })
 })
 
-type GitOutputCallback = (operationId: string, data: string) => void
-const gitOutputListeners: GitOutputCallback[] = []
-
-client.onGitOutput((operationId, data) => {
-  gitOutputListeners.forEach((cb) => { cb(operationId, data); })
-})
-
 type SshOutputWatchCallback = (line: string) => void
 const sshBootstrapWatchCallbacks = new Map<string, SshOutputWatchCallback>()
 const sshTunnelWatchCallbacks = new Map<string, SshOutputWatchCallback>()
@@ -246,117 +239,6 @@ const preloadApi: PreloadApi = {
   },
   getRecentDirectories: (): Promise<string[]> => {
     return client.dialogGetRecentDirectories()
-  },
-  git: {
-    getInfo: (connectionId: string, dirPath: string) => {
-      return client.gitGetInfo(connectionId, dirPath)
-    },
-    createWorktree: (connectionId: string, repoPath: string, name: string, baseBranch?: string, operationId?: string) => {
-      return client.gitCreateWorktree(connectionId, repoPath, name, baseBranch, operationId)
-    },
-    removeWorktree: (connectionId: string, repoPath: string, worktreePath: string, deleteBranch: boolean = true, operationId?: string) => {
-      return client.gitRemoveWorktree(connectionId, repoPath, worktreePath, deleteBranch, operationId)
-    },
-    listWorktrees: (connectionId: string, repoPath: string) => {
-      return client.gitListWorktrees(connectionId, repoPath)
-    },
-    listLocalBranches: (connectionId: string, repoPath: string) => {
-      return client.gitListLocalBranches(connectionId, repoPath)
-    },
-    listRemoteBranches: (connectionId: string, repoPath: string) => {
-      return client.gitListRemoteBranches(connectionId, repoPath)
-    },
-    getBranchesInWorktrees: (connectionId: string, repoPath: string) => {
-      return client.gitGetBranchesInWorktrees(connectionId, repoPath)
-    },
-    createWorktreeFromBranch: (connectionId: string, repoPath: string, branch: string, worktreeName: string, operationId?: string) => {
-      return client.gitCreateWorktreeFromBranch(connectionId, repoPath, branch, worktreeName, operationId)
-    },
-    createWorktreeFromRemote: (connectionId: string, repoPath: string, remoteBranch: string, worktreeName: string, operationId?: string) => {
-      return client.gitCreateWorktreeFromRemote(connectionId, repoPath, remoteBranch, worktreeName, operationId)
-    },
-    getDiff: (connectionId: string, worktreePath: string, parentBranch: string) => {
-      return client.gitGetDiff(connectionId, worktreePath, parentBranch)
-    },
-    getFileDiff: (connectionId: string, worktreePath: string, parentBranch: string, filePath: string) => {
-      return client.gitGetFileDiff(connectionId, worktreePath, parentBranch, filePath)
-    },
-    merge: (connectionId: string, targetWorktreePath: string, worktreeBranch: string, squash: boolean = false, operationId?: string) => {
-      return client.gitMerge(connectionId, targetWorktreePath, worktreeBranch, squash, operationId)
-    },
-    checkMergeConflicts: (connectionId: string, repoPath: string, sourceBranch: string, targetBranch: string) => {
-      return client.gitCheckMergeConflicts(connectionId, repoPath, sourceBranch, targetBranch)
-    },
-    hasUncommittedChanges: (connectionId: string, repoPath: string) => {
-      return client.gitHasUncommittedChanges(connectionId, repoPath)
-    },
-    commitAll: (connectionId: string, repoPath: string, message: string) => {
-      return client.gitCommitAll(connectionId, repoPath, message)
-    },
-    deleteBranch: (connectionId: string, repoPath: string, branchName: string, operationId?: string) => {
-      return client.gitDeleteBranch(connectionId, repoPath, branchName, operationId)
-    },
-    renameBranch: (connectionId: string, repoPath: string, oldName: string, newName: string) => {
-      return client.gitRenameBranch(connectionId, repoPath, oldName, newName)
-    },
-    getUncommittedChanges: (connectionId: string, repoPath: string) => {
-      return client.gitGetUncommittedChanges(connectionId, repoPath)
-    },
-    getUncommittedFileDiff: (connectionId: string, repoPath: string, filePath: string, staged: boolean) => {
-      return client.gitGetUncommittedFileDiff(connectionId, repoPath, filePath, staged)
-    },
-    stageFile: (connectionId: string, repoPath: string, filePath: string) => {
-      return client.gitStageFile(connectionId, repoPath, filePath)
-    },
-    unstageFile: (connectionId: string, repoPath: string, filePath: string) => {
-      return client.gitUnstageFile(connectionId, repoPath, filePath)
-    },
-    stageAll: (connectionId: string, repoPath: string) => {
-      return client.gitStageAll(connectionId, repoPath)
-    },
-    unstageAll: (connectionId: string, repoPath: string) => {
-      return client.gitUnstageAll(connectionId, repoPath)
-    },
-    commitStaged: (connectionId: string, repoPath: string, message: string) => {
-      return client.gitCommitStaged(connectionId, repoPath, message)
-    },
-    getFileContentsForDiff: (connectionId: string, worktreePath: string, parentBranch: string, filePath: string) => {
-      return client.gitGetFileContentsForDiff(connectionId, worktreePath, parentBranch, filePath)
-    },
-    getUncommittedFileContentsForDiff: (connectionId: string, repoPath: string, filePath: string, staged: boolean) => {
-      return client.gitGetUncommittedFileContentsForDiff(connectionId, repoPath, filePath, staged)
-    },
-    getHeadCommitHash: (connectionId: string, repoPath: string) => {
-      return client.gitGetHeadCommitHash(connectionId, repoPath)
-    },
-    getLog: (connectionId: string, repoPath: string, parentBranch: string | null, skip: number, limit: number) => {
-      return client.gitGetLog(connectionId, repoPath, parentBranch, skip, limit)
-    },
-    getCommitDiff: (connectionId: string, repoPath: string, commitHash: string) => {
-      return client.gitGetCommitDiff(connectionId, repoPath, commitHash)
-    },
-    getCommitFileDiff: (connectionId: string, repoPath: string, commitHash: string, filePath: string) => {
-      return client.gitGetCommitFileDiff(connectionId, repoPath, commitHash, filePath)
-    },
-    fetch: (connectionId: string, repoPath: string) => {
-      return client.gitFetch(connectionId, repoPath)
-    },
-    pull: (connectionId: string, repoPath: string) => {
-      return client.gitPull(connectionId, repoPath)
-    },
-    getBehindCount: (connectionId: string, repoPath: string) => {
-      return client.gitGetBehindCount(connectionId, repoPath)
-    },
-    getRemoteUrl: (connectionId: string, repoPath: string) => {
-      return client.gitGetRemoteUrl(connectionId, repoPath)
-    },
-    onOutput: (callback: GitOutputCallback): (() => void) => {
-      gitOutputListeners.push(callback)
-      return () => {
-        const index = gitOutputListeners.indexOf(callback)
-        if (index > -1) gitOutputListeners.splice(index, 1)
-      }
-    }
   },
   github: {
     getPrInfo: (connectionId: string, repoPath: string, head: string, base: string) => {

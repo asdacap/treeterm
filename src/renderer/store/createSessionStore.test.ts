@@ -42,7 +42,6 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       getCommitDiff: vi.fn().mockResolvedValue({ success: true, files: [] }),
       getCommitFileDiff: vi.fn().mockResolvedValue({ success: true, contents: null }),
       getRemoteUrl: vi.fn().mockResolvedValue({ url: 'https://github.com/test/repo.git' }),
-      onOutput: vi.fn().mockReturnValue(() => {}),
       fetch: vi.fn(),
       pull: vi.fn(),
       getBehindCount: vi.fn(),
@@ -306,7 +305,7 @@ describe('createSessionStore', () => {
       const result = store.getState().createWorktreeFromBranch(parentId, 'feature/my-feat', false)
       expect(result).toEqual({ success: true })
       await flushPromises()
-      expect(deps.git.createWorktreeFromBranch).toHaveBeenCalledWith('/repo', 'feature/my-feat', 'my-feat', expect.any(String))
+      expect(deps.git.createWorktreeFromBranch).toHaveBeenCalledWith('/repo', 'feature/my-feat', 'my-feat', expect.any(Function))
     })
 
     it('createWorktreeFromBranch fails for non-git parent', async () => {
@@ -321,7 +320,7 @@ describe('createSessionStore', () => {
       const result = store.getState().createWorktreeFromRemote(parentId, 'origin/feature', false)
       expect(result).toEqual({ success: true })
       await flushPromises()
-      expect(deps.git.createWorktreeFromRemote).toHaveBeenCalledWith('/repo', 'origin/feature', 'feature', expect.any(String))
+      expect(deps.git.createWorktreeFromRemote).toHaveBeenCalledWith('/repo', 'origin/feature', 'feature', expect.any(Function))
     })
 
     it('createWorktreeFromRemote fails for non-existent parent', () => {
@@ -355,7 +354,7 @@ describe('createSessionStore', () => {
       await store.getState().removeWorkspaceKeepBranch(childId)
       expect(store.getState().workspaces.get(childId)).toBeUndefined()
       // removeWorktree called with deleteBranch=false
-      expect(deps.git.removeWorktree).toHaveBeenCalledWith('/repo', expect.any(String), false, expect.any(String))
+      expect(deps.git.removeWorktree).toHaveBeenCalledWith('/repo', expect.any(String), false, undefined)
     })
 
     it('removeWorkspaceKeepBoth skips both worktree and branch removal', async () => {

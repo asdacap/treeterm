@@ -270,7 +270,7 @@ export function createSessionStore(
       description?: string
       initialBranch?: string | null
       message: string
-      gitOperation: (operationId: string) => Promise<{ success: boolean; path?: string; branch?: string; error?: string }>
+      gitOperation: (onProgress: (data: string) => void) => Promise<{ success: boolean; path?: string; branch?: string; error?: string }>
       preOperation?: () => Promise<void>
     }
   ): { success: true } {
@@ -279,22 +279,20 @@ export function createSessionStore(
     const parent = parentEntry && (parentEntry.status === WorkspaceEntryStatus.Loaded || parentEntry.status === WorkspaceEntryStatus.OperationError) ? parentEntry.data : undefined
 
     const id = generateId()
-    const operationId = generateId()
 
     store.setState((s) => ({
       workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loading, name: worktreeName, message: options.message, output: [] }),
       activeWorkspaceId: id,
     }))
 
-    const unsubOutput = deps.git.onOutput((opId, data) => {
-      if (opId !== operationId) return
+    const onProgress = (data: string): void => {
       const entry = store.getState().workspaces.get(id)
       if (entry?.status === WorkspaceEntryStatus.Loading) {
         store.setState(s => ({
           workspaces: new Map(s.workspaces).set(id, { ...entry, output: [...entry.output, data] })
         }))
       }
-    })
+    }
 
     void (async () => {
       try {
@@ -302,7 +300,7 @@ export function createSessionStore(
           await options.preOperation()
         }
 
-        const result = await options.gitOperation(operationId)
+        const result = await options.gitOperation(onProgress)
 
         if (!result.success) {
           store.setState(s => ({
@@ -361,8 +359,6 @@ export function createSessionStore(
         store.setState(s => ({
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Error, name: worktreeName, error: err instanceof Error ? err.message : String(err) })
         }))
-      } finally {
-        unsubOutput()
       }
     })()
 
@@ -433,7 +429,7 @@ export function createSessionStore(
    *  Renderer cleanup happens via onWorkspaceRemoved — do not call ref.dispose() here. */
   async function removeWorkspaceInternal(
     id: string,
-    options: { keepBranch: boolean; keepWorktree: boolean; operationId?: string }
+    options: { keepBranch: boolean; keepWorktree: boolean; onProgress?: (data: string) => void }
   ): Promise<void> {
     const entry = store.getState().workspaces.get(id)
     if (!entry) return
@@ -464,10 +460,10 @@ export function createSessionStore(
           workspace.gitRootPath,
           workspace.path,
           deleteBranch,
-          options.operationId
+          options.onProgress
         )
       } else if (!options.keepBranch && !workspace.isDetached && workspace.gitBranch) {
-        await deps.git.deleteBranch(workspace.gitRootPath, workspace.gitBranch, options.operationId)
+        await deps.git.deleteBranch(workspace.gitRootPath, workspace.gitBranch, options.onProgress)
       }
     }
 
@@ -477,7 +473,7 @@ export function createSessionStore(
     await syncSessionToDaemon(store.getState().isRestoring)
   }
 
-  // Helper: wraps removeWorkspaceInternal with loading state + output streaming
+  // Helper: wraps removeWorkspaceInternal with loading state
   async function removeWorkspaceWithLoading(
     id: string,
     options: { keepBranch: boolean; keepWorktree: boolean }
@@ -486,34 +482,27 @@ export function createSessionStore(
     if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return
     const { data, store: wsStore } = entry
 
-    const operationId = generateId()
     // Temporarily show loading in the main pane — preserve data+store for recovery
     store.setState(s => ({
       workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data, store: wsStore })
     }))
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const unsubOutput = deps.git.onOutput((opId, _data) => {
-      if (opId !== operationId) return
-      // Output streaming not needed for remove — workspace is removed on success
-    })
     try {
-      await removeWorkspaceInternal(id, { ...options, operationId })
+      await removeWorkspaceInternal(id, options)
     } catch (err) {
       store.setState(s => ({
         workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data, store: wsStore, error: err instanceof Error ? err.message : String(err) })
       }))
-    } finally {
-      unsubOutput()
     }
   }
 
   // Shared helper: validates workspace, sets loading state, auto-commits, and performs git merge.
-  // Returns { success, error, operationId } — caller decides post-merge behavior.
+  // Shared helper: validates workspace, sets loading state, auto-commits, and performs git merge.
+  // Returns { success, error } — caller decides post-merge behavior.
   async function mergeWorkspaceCore(
     id: string,
     squash: boolean
-  ): Promise<{ success: boolean; error?: string; operationId?: string }> {
-     
+  ): Promise<{ success: boolean; error?: string }> {
+
     const entry = store.getState().workspaces.get(id)
     if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) {
       return { success: false, error: 'Workspace not found' }
@@ -529,14 +518,6 @@ export function createSessionStore(
     if (!parent || !parent.gitRootPath || !parent.gitBranch) {
       return { success: false, error: 'Parent workspace not found or not a git repo' }
     }
-
-    const operationId = generateId()
-    // Keep data+store accessible during merge (for recovery on error)
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const unsubOutput = deps.git.onOutput((opId, _data) => {
-      if (opId !== operationId) return
-      // Merge output not streamed to UI — workspace stays in loaded state
-    })
 
     try {
       // Block merge if parent worktree has uncommitted changes
@@ -565,8 +546,7 @@ export function createSessionStore(
       const mergeResult = await deps.git.merge(
         parent.path,
         workspace.gitBranch ?? '',
-        squash,
-        operationId
+        squash
       )
 
       if (!mergeResult.success) {
@@ -576,14 +556,12 @@ export function createSessionStore(
         return { success: false, error: `Merge failed: ${mergeResult.error}` }
       }
 
-      return { success: true, operationId }
+      return { success: true }
     } catch (err) {
       store.setState(s => ({
         workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, error: err instanceof Error ? err.message : String(err) })
       }))
       return { success: false, error: err instanceof Error ? err.message : String(err) }
-    } finally {
-      unsubOutput()
     }
   }
 
@@ -749,14 +727,14 @@ export function createSessionStore(
             get().updateGitInfo(parentId, currentGitInfo)
           }
         },
-        gitOperation: (operationId) => {
+        gitOperation: (onProgress) => {
           const currentParentEntry = get().workspaces.get(parentId)
           const currentParent = currentParentEntry && (currentParentEntry.status === WorkspaceEntryStatus.Loaded || currentParentEntry.status === WorkspaceEntryStatus.OperationError) ? currentParentEntry.data : undefined
           return deps.git.createWorktree(
             parent.gitRootPath ?? '',
             name,
             currentParent?.gitBranch ?? undefined,
-            operationId
+            onProgress
           )
         },
       })
@@ -798,11 +776,11 @@ export function createSessionStore(
         isDetached, settings, description,
         initialBranch: branch,
         message: 'Creating worktree from branch...',
-        gitOperation: (operationId) => deps.git.createWorktreeFromBranch(
+        gitOperation: (onProgress) => deps.git.createWorktreeFromBranch(
           parent.gitRootPath ?? '',
           branch,
           worktreeName,
-          operationId
+          onProgress
         ),
       })
     },
@@ -825,11 +803,11 @@ export function createSessionStore(
         isDetached, settings, description,
         initialBranch: remoteBranch,
         message: 'Creating worktree from remote...',
-        gitOperation: (operationId) => deps.git.createWorktreeFromRemote(
+        gitOperation: (onProgress) => deps.git.createWorktreeFromRemote(
           parent.gitRootPath ?? '',
           remoteBranch,
           worktreeName,
-          operationId
+          onProgress
         ),
       })
     },
@@ -885,7 +863,7 @@ export function createSessionStore(
         }
 
         try {
-          await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: false, operationId: result.operationId })
+          await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: false })
         } catch (err) {
           // Merge succeeded but removal failed — show operation error
           const currentEntry = get().workspaces.get(id)

@@ -338,21 +338,21 @@ export interface TerminalApi {
 
 export interface GitApi {
   getInfo: (dirPath: string) => Promise<GitInfo>
-  createWorktree: (repoPath: string, name: string, baseBranch?: string, operationId?: string) => Promise<WorktreeResult>
-  removeWorktree: (repoPath: string, worktreePath: string, deleteBranch?: boolean, operationId?: string) => Promise<IpcResult>
+  createWorktree: (repoPath: string, name: string, baseBranch?: string, onProgress?: (data: string) => void) => Promise<WorktreeResult>
+  removeWorktree: (repoPath: string, worktreePath: string, deleteBranch?: boolean, onProgress?: (data: string) => void) => Promise<IpcResult>
   listWorktrees: (repoPath: string) => Promise<WorktreeInfo[]>
   listLocalBranches: (repoPath: string) => Promise<string[]>
   listRemoteBranches: (repoPath: string) => Promise<string[]>
   getBranchesInWorktrees: (repoPath: string) => Promise<string[]>
-  createWorktreeFromBranch: (repoPath: string, branch: string, worktreeName: string, operationId?: string) => Promise<WorktreeResult>
-  createWorktreeFromRemote: (repoPath: string, remoteBranch: string, worktreeName: string, operationId?: string) => Promise<WorktreeResult>
+  createWorktreeFromBranch: (repoPath: string, branch: string, worktreeName: string, onProgress?: (data: string) => void) => Promise<WorktreeResult>
+  createWorktreeFromRemote: (repoPath: string, remoteBranch: string, worktreeName: string, onProgress?: (data: string) => void) => Promise<WorktreeResult>
   getDiff: (worktreePath: string, parentBranch: string) => Promise<IpcResult<{ diff: DiffResult }>>
   getFileDiff: (worktreePath: string, parentBranch: string, filePath: string) => Promise<IpcResult<{ diff: string }>>
   checkMergeConflicts: (repoPath: string, sourceBranch: string, targetBranch: string) => Promise<ConflictCheckResult>
-  merge: (targetWorktreePath: string, worktreeBranch: string, squash?: boolean, operationId?: string) => Promise<IpcResult>
+  merge: (targetWorktreePath: string, worktreeBranch: string, squash?: boolean, onProgress?: (data: string) => void) => Promise<IpcResult>
   hasUncommittedChanges: (repoPath: string) => Promise<boolean>
   commitAll: (repoPath: string, message: string) => Promise<IpcResult>
-  deleteBranch: (repoPath: string, branchName: string, operationId?: string) => Promise<IpcResult>
+  deleteBranch: (repoPath: string, branchName: string, onProgress?: (data: string) => void) => Promise<IpcResult>
   renameBranch: (repoPath: string, oldName: string, newName: string) => Promise<IpcResult>
   getUncommittedChanges: (repoPath: string) => Promise<IpcResult<{ changes: UncommittedChanges }>>
   getUncommittedFileDiff: (repoPath: string, filePath: string, staged: boolean) => Promise<IpcResult<{ diff: string }>>
@@ -371,7 +371,6 @@ export interface GitApi {
   pull: (repoPath: string) => Promise<IpcResult>
   getBehindCount: (repoPath: string) => Promise<number>
   getRemoteUrl: (repoPath: string) => Promise<IpcResult<{ url: string }>>
-  onOutput: (callback: (operationId: string, data: string) => void) => () => void
 }
 
 export interface GitHubReviewThread {
@@ -415,13 +414,10 @@ type PrependConnectionId<F> = F extends (...args: infer A) => infer R
   ? (connectionId: string, ...args: A) => R
   : F
 
-/** Version of an API where every method (except onOutput) receives connectionId as the first argument */
+/** Version of an API where every method receives connectionId as the first argument */
 type WithConnectionId<T> = {
-  [K in keyof T]: K extends 'onOutput' ? T[K] : PrependConnectionId<T[K]>
+  [K in keyof T]: PrependConnectionId<T[K]>
 }
-
-/** Raw git API exposed by the preload — connectionId is the first parameter of every method */
-export type RawGitApi = WithConnectionId<GitApi>
 
 /** Raw GitHub API exposed by the preload — connectionId is the first parameter */
 export type RawGitHubApi = WithConnectionId<GitHubApi>
@@ -436,15 +432,9 @@ export type RawRunActionsApi = WithConnectionId<RunActionsApi>
 function bindConnectionId<T extends object>(raw: WithConnectionId<T>, connectionId: string): T {
   return Object.fromEntries(
     Object.entries(raw).map(([key, fn]) => {
-      if (key === 'onOutput') return [key, fn]
       return [key, (...args: unknown[]) => (fn as (connId: string, ...rest: unknown[]) => unknown)(connectionId, ...args)]
     })
   ) as unknown as T
-}
-
-/** Bind a connectionId to a RawGitApi, returning a GitApi scoped to that connection */
-export function createBoundGit(raw: RawGitApi, connectionId: string): GitApi {
-  return bindConnectionId<GitApi>(raw, connectionId)
 }
 
 /** Bind a connectionId to a RawGitHubApi, returning a GitHubApi scoped to that connection */
@@ -471,7 +461,7 @@ export interface GitHubAppState {
 export interface WorkspaceGitApi {
   getInfo: () => Promise<GitInfo>
   createWorktree: (name: string, baseBranch?: string) => Promise<WorktreeResult>
-  removeWorktree: (worktreePath: string, deleteBranch?: boolean, operationId?: string) => Promise<IpcResult>
+  removeWorktree: (worktreePath: string, deleteBranch?: boolean, onProgress?: (data: string) => void) => Promise<IpcResult>
   listWorktrees: () => Promise<WorktreeInfo[]>
   listLocalBranches: () => Promise<string[]>
   listRemoteBranches: () => Promise<string[]>
@@ -481,10 +471,10 @@ export interface WorkspaceGitApi {
   getDiff: (parentBranch: string) => Promise<IpcResult<{ diff: DiffResult }>>
   getFileDiff: (parentBranch: string, filePath: string) => Promise<IpcResult<{ diff: string }>>
   checkMergeConflicts: (sourceBranch: string, targetBranch: string) => Promise<ConflictCheckResult>
-  merge: (worktreeBranch: string, squash?: boolean, operationId?: string) => Promise<IpcResult>
+  merge: (worktreeBranch: string, squash?: boolean, onProgress?: (data: string) => void) => Promise<IpcResult>
   hasUncommittedChanges: () => Promise<boolean>
   commitAll: (message: string) => Promise<IpcResult>
-  deleteBranch: (branchName: string, operationId?: string) => Promise<IpcResult>
+  deleteBranch: (branchName: string, onProgress?: (data: string) => void) => Promise<IpcResult>
   getUncommittedChanges: () => Promise<IpcResult<{ changes: UncommittedChanges }>>
   getUncommittedFileDiff: (filePath: string, staged: boolean) => Promise<IpcResult<{ diff: string }>>
   stageFile: (filePath: string) => Promise<IpcResult>
@@ -603,7 +593,6 @@ export type PreloadApi = {
   terminal: TerminalApi
   selectFolder: () => Promise<string | null>
   getRecentDirectories: () => Promise<string[]>
-  git: RawGitApi
   github: RawGitHubApi
   settings: SettingsApi
   filesystem: RawFilesystemApi

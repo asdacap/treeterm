@@ -43,12 +43,6 @@ describe('IpcServer', () => {
       expect(result).toBe('pty-123')
     })
 
-    it('onGitGetInfo registers handler on git:getInfo channel', () => {
-      const handler = vi.fn<(...args: any[]) => any>()
-      server.onGitGetInfo(handler)
-      expect(mockHandle).toHaveBeenCalledWith('git:getInfo', expect.any(Function))
-    })
-
     it('onSessionUpdate registers handler on session:update channel', () => {
       const handler = vi.fn<(...args: any[]) => any>()
       server.onSessionUpdate(handler)
@@ -85,32 +79,6 @@ describe('IpcServer', () => {
 
     it.each([
       ['onPtyAttach', 'pty:attach'],
-      ['onGitCreateWorktree', 'git:createWorktree'],
-      ['onGitRemoveWorktree', 'git:removeWorktree'],
-      ['onGitListWorktrees', 'git:listWorktrees'],
-      ['onGitListLocalBranches', 'git:listLocalBranches'],
-      ['onGitListRemoteBranches', 'git:listRemoteBranches'],
-      ['onGitGetBranchesInWorktrees', 'git:getBranchesInWorktrees'],
-      ['onGitCreateWorktreeFromBranch', 'git:createWorktreeFromBranch'],
-      ['onGitCreateWorktreeFromRemote', 'git:createWorktreeFromRemote'],
-      ['onGitGetDiff', 'git:getDiff'],
-      ['onGitGetFileDiff', 'git:getFileDiff'],
-      ['onGitMerge', 'git:merge'],
-      ['onGitCheckMergeConflicts', 'git:checkMergeConflicts'],
-      ['onGitHasUncommittedChanges', 'git:hasUncommittedChanges'],
-      ['onGitCommitAll', 'git:commitAll'],
-      ['onGitDeleteBranch', 'git:deleteBranch'],
-      ['onGitRenameBranch', 'git:renameBranch'],
-      ['onGitGetUncommittedChanges', 'git:getUncommittedChanges'],
-      ['onGitGetUncommittedFileDiff', 'git:getUncommittedFileDiff'],
-      ['onGitStageFile', 'git:stageFile'],
-      ['onGitUnstageFile', 'git:unstageFile'],
-      ['onGitStageAll', 'git:stageAll'],
-      ['onGitUnstageAll', 'git:unstageAll'],
-      ['onGitCommitStaged', 'git:commitStaged'],
-      ['onGitGetFileContentsForDiff', 'git:getFileContentsForDiff'],
-      ['onGitGetUncommittedFileContentsForDiff', 'git:getUncommittedFileContentsForDiff'],
-      ['onGitGetHeadCommitHash', 'git:getHeadCommitHash'],
       ['onSettingsSave', 'settings:save'],
       ['onFsReadDirectory', 'fs:readDirectory'],
       ['onFsWriteFile', 'fs:writeFile'],
@@ -149,7 +117,6 @@ describe('IpcServer', () => {
     })
 
     it.each([
-      ['onGitCreateWorktree', 'git:createWorktree'],
       ['onSettingsSave', 'settings:save'],
       ['onFsReadDirectory', 'fs:readDirectory'],
       ['onSessionUpdate', 'session:update'],
@@ -344,14 +311,6 @@ describe('IpcServer', () => {
       expect(mockSend).toHaveBeenCalledWith('ssh:daemonOutput', 'conn-1', 'log line')
     })
 
-    it('gitOutput sends to window webContents', () => {
-      const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
-      server.setWindow(mockWindow)
-
-      server.gitOutput('op-1', 'Preparing worktree')
-      expect(mockSend).toHaveBeenCalledWith('git:output', 'op-1', 'Preparing worktree')
-    })
   })
 
   describe('setWindow', () => {

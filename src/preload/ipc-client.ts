@@ -12,40 +12,6 @@ const CHANNELS = {
   ptyCreate: 'pty:create',
   ptyAttach: 'pty:attach',
   ptyList: 'pty:list',
-  gitGetInfo: 'git:getInfo',
-  gitCreateWorktree: 'git:createWorktree',
-  gitRemoveWorktree: 'git:removeWorktree',
-  gitListWorktrees: 'git:listWorktrees',
-  gitListLocalBranches: 'git:listLocalBranches',
-  gitListRemoteBranches: 'git:listRemoteBranches',
-  gitGetBranchesInWorktrees: 'git:getBranchesInWorktrees',
-  gitCreateWorktreeFromBranch: 'git:createWorktreeFromBranch',
-  gitCreateWorktreeFromRemote: 'git:createWorktreeFromRemote',
-  gitGetDiff: 'git:getDiff',
-  gitGetFileDiff: 'git:getFileDiff',
-  gitMerge: 'git:merge',
-  gitCheckMergeConflicts: 'git:checkMergeConflicts',
-  gitHasUncommittedChanges: 'git:hasUncommittedChanges',
-  gitCommitAll: 'git:commitAll',
-  gitDeleteBranch: 'git:deleteBranch',
-  gitRenameBranch: 'git:renameBranch',
-  gitGetUncommittedChanges: 'git:getUncommittedChanges',
-  gitGetUncommittedFileDiff: 'git:getUncommittedFileDiff',
-  gitStageFile: 'git:stageFile',
-  gitUnstageFile: 'git:unstageFile',
-  gitStageAll: 'git:stageAll',
-  gitUnstageAll: 'git:unstageAll',
-  gitCommitStaged: 'git:commitStaged',
-  gitGetFileContentsForDiff: 'git:getFileContentsForDiff',
-  gitGetUncommittedFileContentsForDiff: 'git:getUncommittedFileContentsForDiff',
-  gitGetHeadCommitHash: 'git:getHeadCommitHash',
-  gitGetLog: 'git:getLog',
-  gitGetCommitDiff: 'git:getCommitDiff',
-  gitGetCommitFileDiff: 'git:getCommitFileDiff',
-  gitFetch: 'git:fetch',
-  gitPull: 'git:pull',
-  gitGetBehindCount: 'git:getBehindCount',
-  gitGetRemoteUrl: 'git:getRemoteUrl',
   githubGetPrInfo: 'github:getPrInfo',
   settingsLoad: 'settings:load',
   settingsSave: 'settings:save',
@@ -130,8 +96,7 @@ const CHANNELS = {
   sshPortForwardOutput: 'ssh:portForwardOutput',
   llmChatDelta: 'llm:chat:delta',
   llmChatDone: 'llm:chat:done',
-  llmChatError: 'llm:chat:error',
-  gitOutput: 'git:output'
+  llmChatError: 'llm:chat:error'
 } as const
 
 export class IpcClient {
@@ -150,194 +115,7 @@ export class IpcClient {
     return ipcRenderer.invoke(CHANNELS.ptyList, ...args)
   }
 
-  // Git requests
-  gitGetInfo(...args: IpcRequests['gitGetInfo']['params']): Promise<IpcRequests['gitGetInfo']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitGetInfo, ...args)
-  }
-
-  gitCreateWorktree(
-    ...args: IpcRequests['gitCreateWorktree']['params']
-  ): Promise<IpcRequests['gitCreateWorktree']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitCreateWorktree, ...args)
-  }
-
-  gitRemoveWorktree(
-    ...args: IpcRequests['gitRemoveWorktree']['params']
-  ): Promise<IpcRequests['gitRemoveWorktree']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitRemoveWorktree, ...args)
-  }
-
-  gitListWorktrees(
-    ...args: IpcRequests['gitListWorktrees']['params']
-  ): Promise<IpcRequests['gitListWorktrees']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitListWorktrees, ...args)
-  }
-
-
-  gitListLocalBranches(
-    ...args: IpcRequests['gitListLocalBranches']['params']
-  ): Promise<IpcRequests['gitListLocalBranches']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitListLocalBranches, ...args)
-  }
-
-  gitListRemoteBranches(
-    ...args: IpcRequests['gitListRemoteBranches']['params']
-  ): Promise<IpcRequests['gitListRemoteBranches']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitListRemoteBranches, ...args)
-  }
-
-  gitGetBranchesInWorktrees(
-    ...args: IpcRequests['gitGetBranchesInWorktrees']['params']
-  ): Promise<IpcRequests['gitGetBranchesInWorktrees']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitGetBranchesInWorktrees, ...args)
-  }
-
-  gitCreateWorktreeFromBranch(
-    ...args: IpcRequests['gitCreateWorktreeFromBranch']['params']
-  ): Promise<IpcRequests['gitCreateWorktreeFromBranch']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitCreateWorktreeFromBranch, ...args)
-  }
-
-  gitCreateWorktreeFromRemote(
-    ...args: IpcRequests['gitCreateWorktreeFromRemote']['params']
-  ): Promise<IpcRequests['gitCreateWorktreeFromRemote']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitCreateWorktreeFromRemote, ...args)
-  }
-
-  gitGetDiff(...args: IpcRequests['gitGetDiff']['params']): Promise<IpcRequests['gitGetDiff']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitGetDiff, ...args)
-  }
-
-  gitGetFileDiff(
-    ...args: IpcRequests['gitGetFileDiff']['params']
-  ): Promise<IpcRequests['gitGetFileDiff']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitGetFileDiff, ...args)
-  }
-
-  gitMerge(...args: IpcRequests['gitMerge']['params']): Promise<IpcRequests['gitMerge']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitMerge, ...args)
-  }
-
-  gitCheckMergeConflicts(
-    ...args: IpcRequests['gitCheckMergeConflicts']['params']
-  ): Promise<IpcRequests['gitCheckMergeConflicts']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitCheckMergeConflicts, ...args)
-  }
-
-  gitHasUncommittedChanges(
-    ...args: IpcRequests['gitHasUncommittedChanges']['params']
-  ): Promise<IpcRequests['gitHasUncommittedChanges']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitHasUncommittedChanges, ...args)
-  }
-
-  gitCommitAll(...args: IpcRequests['gitCommitAll']['params']): Promise<IpcRequests['gitCommitAll']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitCommitAll, ...args)
-  }
-
-  gitDeleteBranch(
-    ...args: IpcRequests['gitDeleteBranch']['params']
-  ): Promise<IpcRequests['gitDeleteBranch']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitDeleteBranch, ...args)
-  }
-
-  gitRenameBranch(
-    ...args: IpcRequests['gitRenameBranch']['params']
-  ): Promise<IpcRequests['gitRenameBranch']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitRenameBranch, ...args)
-  }
-
-  gitGetUncommittedChanges(
-    ...args: IpcRequests['gitGetUncommittedChanges']['params']
-  ): Promise<IpcRequests['gitGetUncommittedChanges']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitGetUncommittedChanges, ...args)
-  }
-
-  gitGetUncommittedFileDiff(
-    ...args: IpcRequests['gitGetUncommittedFileDiff']['params']
-  ): Promise<IpcRequests['gitGetUncommittedFileDiff']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitGetUncommittedFileDiff, ...args)
-  }
-
-  gitStageFile(...args: IpcRequests['gitStageFile']['params']): Promise<IpcRequests['gitStageFile']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitStageFile, ...args)
-  }
-
-  gitUnstageFile(
-    ...args: IpcRequests['gitUnstageFile']['params']
-  ): Promise<IpcRequests['gitUnstageFile']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitUnstageFile, ...args)
-  }
-
-  gitStageAll(...args: IpcRequests['gitStageAll']['params']): Promise<IpcRequests['gitStageAll']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitStageAll, ...args)
-  }
-
-  gitUnstageAll(...args: IpcRequests['gitUnstageAll']['params']): Promise<IpcRequests['gitUnstageAll']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitUnstageAll, ...args)
-  }
-
-  gitCommitStaged(
-    ...args: IpcRequests['gitCommitStaged']['params']
-  ): Promise<IpcRequests['gitCommitStaged']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitCommitStaged, ...args)
-  }
-
-  gitGetFileContentsForDiff(
-    ...args: IpcRequests['gitGetFileContentsForDiff']['params']
-  ): Promise<IpcRequests['gitGetFileContentsForDiff']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitGetFileContentsForDiff, ...args)
-  }
-
-  gitGetUncommittedFileContentsForDiff(
-    ...args: IpcRequests['gitGetUncommittedFileContentsForDiff']['params']
-  ): Promise<IpcRequests['gitGetUncommittedFileContentsForDiff']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitGetUncommittedFileContentsForDiff, ...args)
-  }
-
-  gitGetHeadCommitHash(
-    ...args: IpcRequests['gitGetHeadCommitHash']['params']
-  ): Promise<IpcRequests['gitGetHeadCommitHash']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitGetHeadCommitHash, ...args)
-  }
-
-  gitGetLog(
-    ...args: IpcRequests['gitGetLog']['params']
-  ): Promise<IpcRequests['gitGetLog']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitGetLog, ...args)
-  }
-
-  gitGetCommitDiff(
-    ...args: IpcRequests['gitGetCommitDiff']['params']
-  ): Promise<IpcRequests['gitGetCommitDiff']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitGetCommitDiff, ...args)
-  }
-
-  gitGetCommitFileDiff(
-    ...args: IpcRequests['gitGetCommitFileDiff']['params']
-  ): Promise<IpcRequests['gitGetCommitFileDiff']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitGetCommitFileDiff, ...args)
-  }
-
-  // Git fetch/pull requests
-  gitFetch(...args: IpcRequests['gitFetch']['params']): Promise<IpcRequests['gitFetch']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitFetch, ...args)
-  }
-
-  gitPull(...args: IpcRequests['gitPull']['params']): Promise<IpcRequests['gitPull']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitPull, ...args)
-  }
-
-  gitGetBehindCount(...args: IpcRequests['gitGetBehindCount']['params']): Promise<IpcRequests['gitGetBehindCount']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitGetBehindCount, ...args)
-  }
-
   // GitHub requests
-  gitGetRemoteUrl(
-    ...args: IpcRequests['gitGetRemoteUrl']['params']
-  ): Promise<IpcRequests['gitGetRemoteUrl']['result']> {
-    return ipcRenderer.invoke(CHANNELS.gitGetRemoteUrl, ...args)
-  }
-
   githubGetPrInfo(
     ...args: IpcRequests['githubGetPrInfo']['params']
   ): Promise<IpcRequests['githubGetPrInfo']['result']> {
@@ -732,13 +510,6 @@ export class IpcClient {
       { callback(...(args as IpcEvents['llmChatError']['params'])); }
     ipcRenderer.on(CHANNELS.llmChatError, handler)
     return () => ipcRenderer.removeListener(CHANNELS.llmChatError, handler)
-  }
-
-  onGitOutput(callback: (...args: IpcEvents['gitOutput']['params']) => void): () => void {
-    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
-      { callback(...(args as IpcEvents['gitOutput']['params'])); }
-    ipcRenderer.on(CHANNELS.gitOutput, handler)
-    return () => ipcRenderer.removeListener(CHANNELS.gitOutput, handler)
   }
 
   onExecEvent(callback: (...args: IpcEvents['execEvent']['params']) => void): () => void {

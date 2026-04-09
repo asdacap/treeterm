@@ -34,13 +34,6 @@ describe('IpcClient', () => {
       expect(result).toEqual({ success: true, sessionId: 'pty-123' })
     })
 
-    it('gitGetInfo calls ipcRenderer.invoke with correct channel and args', async () => {
-      mockInvoke.mockResolvedValue({ branch: 'main' })
-      const result = await client.gitGetInfo('local', '/repo')
-      expect(mockInvoke).toHaveBeenCalledWith('git:getInfo', 'local', '/repo')
-      expect(result).toEqual({ branch: 'main' })
-    })
-
     it('sessionUpdate calls ipcRenderer.invoke with correct channel and args', async () => {
       const workspaces = [{ id: 'ws-1', path: '/test' }]
       mockInvoke.mockResolvedValue({ success: true, session: { id: 'session-1' } })
@@ -74,32 +67,6 @@ describe('IpcClient', () => {
     it.each([
       ['ptyAttach', 'pty:attach'],
       ['ptyList', 'pty:list'],
-      ['gitCreateWorktree', 'git:createWorktree'],
-      ['gitRemoveWorktree', 'git:removeWorktree'],
-      ['gitListWorktrees', 'git:listWorktrees'],
-      ['gitListLocalBranches', 'git:listLocalBranches'],
-      ['gitListRemoteBranches', 'git:listRemoteBranches'],
-      ['gitGetBranchesInWorktrees', 'git:getBranchesInWorktrees'],
-      ['gitCreateWorktreeFromBranch', 'git:createWorktreeFromBranch'],
-      ['gitCreateWorktreeFromRemote', 'git:createWorktreeFromRemote'],
-      ['gitGetDiff', 'git:getDiff'],
-      ['gitGetFileDiff', 'git:getFileDiff'],
-      ['gitMerge', 'git:merge'],
-      ['gitCheckMergeConflicts', 'git:checkMergeConflicts'],
-      ['gitHasUncommittedChanges', 'git:hasUncommittedChanges'],
-      ['gitCommitAll', 'git:commitAll'],
-      ['gitDeleteBranch', 'git:deleteBranch'],
-      ['gitRenameBranch', 'git:renameBranch'],
-      ['gitGetUncommittedChanges', 'git:getUncommittedChanges'],
-      ['gitGetUncommittedFileDiff', 'git:getUncommittedFileDiff'],
-      ['gitStageFile', 'git:stageFile'],
-      ['gitUnstageFile', 'git:unstageFile'],
-      ['gitStageAll', 'git:stageAll'],
-      ['gitUnstageAll', 'git:unstageAll'],
-      ['gitCommitStaged', 'git:commitStaged'],
-      ['gitGetFileContentsForDiff', 'git:getFileContentsForDiff'],
-      ['gitGetUncommittedFileContentsForDiff', 'git:getUncommittedFileContentsForDiff'],
-      ['gitGetHeadCommitHash', 'git:getHeadCommitHash'],
       ['settingsSave', 'settings:save'],
       ['fsReadDirectory', 'fs:readDirectory'],
       ['fsWriteFile', 'fs:writeFile'],

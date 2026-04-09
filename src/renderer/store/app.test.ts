@@ -134,7 +134,6 @@ const mockDeps = {
     kill: vi.fn<(...args: any[]) => void>(),
     bind: vi.fn<(...args: any[]) => any>().mockReturnThis()
   },
-  git: { onOutput: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}) },
   github: { getPrInfo: vi.fn<(...args: any[]) => any>() },
   filesystem: {},
   reviews: {},
@@ -260,7 +259,7 @@ describe('useAppStore', () => {
         subscribe: vi.fn<(...args: any[]) => any>()
       }) as unknown as StoreApi<SessionState>)
 
-      // Initialize the store with deps so terminal/git/etc are available
+      // Initialize the store with deps so terminal/etc are available
       const cleanup = await useAppStore.getState().initialize(mockDeps)
       cleanup()
     })

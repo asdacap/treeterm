@@ -20,7 +20,6 @@ window.electron.app.onReady(() => {
   void useAppStore.getState().initialize({
     platform: e.platform,
     terminal: e.terminal,
-    git: e.git,
     filesystem: e.filesystem,
     exec: e.exec,
     runActions: e.runActions,
