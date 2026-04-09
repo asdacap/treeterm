@@ -182,7 +182,7 @@ describe('createGitHubApi', () => {
     expect(prInfo.state).toBe('OPEN')
     expect(prInfo.reviews).toHaveLength(1)
     expect(prInfo.checkRuns).toHaveLength(1)
-    expect(prInfo.checkRuns[0].name).toBe('CI')
+    expect(prInfo.checkRuns[0]!.name).toBe('CI')
     expect(prInfo.unresolvedThreads).toHaveLength(1)
     expect(prInfo.unresolvedCount).toBe(1)
   })
