@@ -1,5 +1,28 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+// Monaco-editor accesses jsdom-unsupported APIs at import time.
+// Mock the full monaco ecosystem to prevent crashes.
+vi.mock('monaco-editor', () => ({
+  languages: {
+    register: vi.fn(),
+    registerDefinitionProvider: vi.fn(),
+    registerCompletionItemProvider: vi.fn(),
+    setMonarchTokensProvider: vi.fn(),
+    setLanguageConfiguration: vi.fn(),
+  },
+  editor: { registerEditorOpener: vi.fn() },
+}))
+vi.mock('monaco-editor/esm/vs/editor/editor.worker?worker', () => ({ default: vi.fn() }))
+vi.mock('monaco-editor/esm/vs/language/json/json.worker?worker', () => ({ default: vi.fn() }))
+vi.mock('monaco-editor/esm/vs/language/css/css.worker?worker', () => ({ default: vi.fn() }))
+vi.mock('monaco-editor/esm/vs/language/html/html.worker?worker', () => ({ default: vi.fn() }))
+vi.mock('monaco-editor/esm/vs/language/typescript/ts.worker?worker', () => ({ default: vi.fn() }))
+vi.mock('@monaco-editor/react', () => ({
+  default: () => null,
+  loader: { config: vi.fn() },
+}))
+
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
 import { createStore } from 'zustand/vanilla'
