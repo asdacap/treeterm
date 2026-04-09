@@ -1484,6 +1484,710 @@ describe('createGitApi', () => {
     })
   })
 
+  describe('removeWorktree (failure branches)', () => {
+    it('returns failure when worktree remove fails', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stderr: 'worktree is dirty', exitCode: 1 },  // worktree remove fails
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.removeWorktree('/repo', '/repo/.worktrees/feature')
+      expect(result.success).toBe(false)
+    })
+
+    it('returns failure when worktree remove fails with deleteBranch', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: 'feature\n' },                   // rev-parse
+        { stderr: 'worktree is dirty', exitCode: 1 }, // worktree remove fails
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.removeWorktree('/repo', '/repo/.worktrees/feature', true)
+      expect(result.success).toBe(false)
+    })
+
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('connection lost'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.removeWorktree('/repo', '/repo/.worktrees/feature')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('connection lost')
+      }
+    })
+  })
+
+  describe('createWorktreeFromBranch (failure branches)', () => {
+    it('returns failure when rev-parse fails', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [{ stderr: 'not a git repository', exitCode: 1 }])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.createWorktreeFromBranch('/repo', 'develop', 'wt')
+      expect(result.success).toBe(false)
+    })
+
+    it('returns failure when worktree add fails', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: '/repo' },   // rev-parse
+        { stdout: '' },        // check-ignore
+        { stderr: 'already exists', exitCode: 1 }, // worktree add fails
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.createWorktreeFromBranch('/repo', 'develop', 'wt')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('Already exists')
+      }
+    })
+
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon crash'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.createWorktreeFromBranch('/repo', 'develop', 'wt')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon crash')
+      }
+    })
+  })
+
+  describe('createWorktreeFromRemote (failure branches)', () => {
+    it('returns failure when rev-parse fails', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [{ stderr: 'not a git repository', exitCode: 1 }])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.createWorktreeFromRemote('/repo', 'origin/feature', 'wt')
+      expect(result.success).toBe(false)
+    })
+
+    it('returns failure when worktree add fails', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: '/repo' },   // rev-parse
+        { stdout: '' },        // check-ignore
+        { stderr: 'already exists', exitCode: 1 }, // worktree add fails
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.createWorktreeFromRemote('/repo', 'origin/feature', 'wt')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('Already exists')
+      }
+    })
+
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon crash'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.createWorktreeFromRemote('/repo', 'origin/feature', 'wt')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon crash')
+      }
+    })
+  })
+
+  describe('getDiff (failure branches)', () => {
+    it('returns failure when current branch rev-parse fails', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [{ stderr: 'not a git repo', exitCode: 1 }])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getDiff('/repo', 'main')
+      expect(result.success).toBe(false)
+    })
+
+    it('returns failure when merge-base fails', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: 'feature' },                          // current branch
+        { stderr: 'no common ancestor', exitCode: 1 },  // merge-base fails
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getDiff('/repo', 'main')
+      expect(result.success).toBe(false)
+    })
+
+    it('parses D and R status types', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: 'feature' },
+        { stdout: 'base123' },
+        { stdout: '0\t10\tdel.ts\n2\t1\trenamed.ts' },
+        { stdout: 'D\tdel.ts\nR100\trenamed.ts' },
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getDiff('/repo', 'main')
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.diff.files.find(f => f.path === 'del.ts')?.status).toBe(FileChangeStatus.Deleted)
+        expect(result.diff.files.find(f => f.path === 'renamed.ts')?.status).toBe(FileChangeStatus.Renamed)
+      }
+    })
+
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('connection lost'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getDiff('/repo', 'main')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('connection lost')
+      }
+    })
+  })
+
+  describe('getFileDiff (failure branches)', () => {
+    it('returns failure when merge-base fails', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: 'feature' },
+        { stderr: 'no common ancestor', exitCode: 1 },
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getFileDiff('/repo', 'main', 'src/app.ts')
+      expect(result.success).toBe(false)
+    })
+
+    it('returns failure when diff command fails', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: 'feature' },
+        { stdout: 'base123' },
+        { stderr: 'diff failed', exitCode: 1 },
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getFileDiff('/repo', 'main', 'src/app.ts')
+      expect(result.success).toBe(false)
+    })
+
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('connection lost'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getFileDiff('/repo', 'main', 'src/app.ts')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('connection lost')
+      }
+    })
+  })
+
+  describe('getFileContentsForDiff (failure branches)', () => {
+    it('returns empty content when original show fails', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: 'feature' },
+        { stdout: 'base123' },
+        { stderr: 'path not found', exitCode: 128 }, // original fails
+        { stdout: 'modified content' },
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getFileContentsForDiff('/repo', 'main', 'new-file.ts')
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.contents.originalContent).toBe('')
+        expect(result.contents.modifiedContent).toBe('modified content')
+      }
+    })
+
+    it('returns empty content when modified show fails', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: 'feature' },
+        { stdout: 'base123' },
+        { stdout: 'original content' },
+        { stderr: 'path not found', exitCode: 128 }, // modified fails
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getFileContentsForDiff('/repo', 'main', 'deleted-file.ts')
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.contents.originalContent).toBe('original content')
+        expect(result.contents.modifiedContent).toBe('')
+      }
+    })
+
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('connection lost'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getFileContentsForDiff('/repo', 'main', 'file.ts')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('connection lost')
+      }
+    })
+  })
+
+  describe('getInfo (catch branch)', () => {
+    it('returns non-repo when exec throws', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon crash'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const info = await git.getInfo('/repo')
+      expect(info.isRepo).toBe(false)
+    })
+  })
+
+  describe('checkMergeConflicts (catch branch)', () => {
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon down'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.checkMergeConflicts('/repo', 'feature', 'main')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon down')
+      }
+    })
+  })
+
+  describe('merge (catch branch)', () => {
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon down'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.merge('/repo', 'feature')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon down')
+      }
+    })
+  })
+
+  describe('hasUncommittedChanges (edge cases)', () => {
+    it('returns false when exit code is non-zero', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [{ stderr: 'error', exitCode: 1 }])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      expect(await git.hasUncommittedChanges('/repo')).toBe(false)
+    })
+  })
+
+  describe('getUncommittedFileContentsForDiff (edge cases)', () => {
+    it('returns empty modified when unstaged readFile returns failure', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem({
+        readFile: vi.fn().mockResolvedValue({ success: false, error: 'not found' }),
+      })
+      autoComplete(exec, [
+        { stdout: 'index content' },
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getUncommittedFileContentsForDiff('/repo', 'src/app.ts', false)
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.contents.originalContent).toBe('index content')
+        expect(result.contents.modifiedContent).toBe('')
+      }
+    })
+
+    it('returns empty original when unstaged show fails', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem({
+        readFile: vi.fn().mockResolvedValue({ success: true, file: { content: 'working' } }),
+      })
+      autoComplete(exec, [
+        { stderr: 'path not found', exitCode: 128 }, // show :filePath fails
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getUncommittedFileContentsForDiff('/repo', 'new-file.ts', false)
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.contents.originalContent).toBe('')
+        expect(result.contents.modifiedContent).toBe('working')
+      }
+    })
+
+    it('returns empty modified when staged show fails', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: 'original from HEAD' },
+        { stderr: 'path not found', exitCode: 128 }, // show :filePath fails
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getUncommittedFileContentsForDiff('/repo', 'deleted.ts', true)
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.contents.originalContent).toBe('original from HEAD')
+        expect(result.contents.modifiedContent).toBe('')
+      }
+    })
+  })
+
+  describe('commitAll (catch branch)', () => {
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon down'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.commitAll('/repo', 'msg')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon down')
+      }
+    })
+  })
+
+  describe('commitStaged (catch branch)', () => {
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon down'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.commitStaged('/repo', 'msg')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon down')
+      }
+    })
+  })
+
+  describe('stageFile (catch branch)', () => {
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon down'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.stageFile('/repo', 'file.ts')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon down')
+      }
+    })
+  })
+
+  describe('unstageFile (catch branch)', () => {
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon down'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.unstageFile('/repo', 'file.ts')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon down')
+      }
+    })
+  })
+
+  describe('stageAll (catch branch)', () => {
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon down'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.stageAll('/repo')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon down')
+      }
+    })
+  })
+
+  describe('unstageAll (catch branch)', () => {
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon down'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.unstageAll('/repo')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon down')
+      }
+    })
+  })
+
+  describe('deleteBranch (catch branch)', () => {
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon down'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.deleteBranch('/repo', 'feature')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon down')
+      }
+    })
+  })
+
+  describe('renameBranch (catch branch)', () => {
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon down'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.renameBranch('/repo', 'old', 'new')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon down')
+      }
+    })
+  })
+
+  describe('getHeadCommitHash (catch branch)', () => {
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon down'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getHeadCommitHash('/repo')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon down')
+      }
+    })
+  })
+
+  describe('getLog (catch branch)', () => {
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon down'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getLog('/repo', 'main', 0, 10)
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon down')
+      }
+    })
+  })
+
+  describe('getCommitDiff (catch branch)', () => {
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon down'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getCommitDiff('/repo', 'abc123')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon down')
+      }
+    })
+  })
+
+  describe('getCommitFileDiff (catch branch)', () => {
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon down'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getCommitFileDiff('/repo', 'abc123', 'file.ts')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon down')
+      }
+    })
+  })
+
+  describe('fetch (catch branch)', () => {
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon down'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.fetch('/repo')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon down')
+      }
+    })
+  })
+
+  describe('pull (catch branch)', () => {
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon down'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.pull('/repo')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon down')
+      }
+    })
+  })
+
+  describe('getRemoteUrl (catch branch)', () => {
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon down'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getRemoteUrl('/repo')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon down')
+      }
+    })
+  })
+
+  describe('getUncommittedChanges (catch branch)', () => {
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon down'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getUncommittedChanges('/repo')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon down')
+      }
+    })
+  })
+
+  describe('getUncommittedFileDiff (catch branch)', () => {
+    it('catches thrown errors', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      ;(exec.start as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('daemon down'))
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getUncommittedFileDiff('/repo', 'file.ts', true)
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('daemon down')
+      }
+    })
+  })
+
+  describe('createWorktree (catch branch)', () => {
+    it('catches thrown errors from worktree add', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      // rev-parse succeeds, check-ignore succeeds, but worktree add throws
+      let callCount = 0
+      ;(exec.start as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        callCount++
+        if (callCount === 3) return Promise.reject(new Error('disk full'))
+        const execId = `exec-${String(callCount)}`
+        setTimeout(() => {
+          if (callCount === 1) exec._complete(execId, '/repo')
+          if (callCount === 2) exec._complete(execId, '')
+        })
+        return Promise.resolve({ success: true, execId })
+      })
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.createWorktree('/repo', 'feature')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('disk full')
+      }
+    })
+  })
+
+  describe('getUncommittedChanges (unstaged stats)', () => {
+    it('returns unstaged file stats', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: ' M src/app.ts' },        // status (unstaged)
+        { stdout: '' },                       // staged numstat
+        { stdout: '3\t1\tsrc/app.ts' },      // unstaged numstat
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getUncommittedChanges('/repo')
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.changes.files).toHaveLength(1)
+        expect(result.changes.files[0]!.additions).toBe(3)
+        expect(result.changes.files[0]!.deletions).toBe(1)
+      }
+    })
+
+    it('handles binary files in stats', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: 'M  image.png' },
+        { stdout: '-\t-\timage.png' },  // binary in staged numstat
+        { stdout: '' },
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getUncommittedChanges('/repo')
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.changes.files[0]!.additions).toBe(0)
+        expect(result.changes.files[0]!.deletions).toBe(0)
+      }
+    })
+  })
+
   describe('exec edge cases', () => {
     it('handles exec.start failure', async () => {
       const exec = createMockExec()
