@@ -79,7 +79,6 @@ const CHANNELS = {
   sessionSync: 'session:sync',
   sshAutoConnected: 'ssh:autoConnected',
   connectionReconnected: 'connection:reconnected',
-  daemonDisconnected: 'daemon:disconnected',
   activeProcessesOpen: 'active-processes:open',
   sshConnectionStatus: 'ssh:connectionStatus',
   sshBootstrapOutput: 'ssh:bootstrapOutput',
@@ -642,10 +641,6 @@ export class IpcServer {
 
   connectionReconnected(...args: IpcEvents['connectionReconnected']['params']): void {
     this.broadcast(CHANNELS.connectionReconnected, ...args)
-  }
-
-  daemonDisconnected(): void {
-    this.broadcast(CHANNELS.daemonDisconnected)
   }
 
   sshConnectionStatus(...args: IpcEvents['sshConnectionStatus']['params']): void {

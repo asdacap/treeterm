@@ -313,9 +313,6 @@ export interface IpcEvents {
   connectionReconnected: {
     params: [session: Session, connection: ConnectionInfo]
   }
-  daemonDisconnected: {
-    params: []
-  }
   activeProcessesOpen: {
     params: []
   }

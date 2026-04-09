@@ -94,13 +94,6 @@ client.onConnectionReconnected((session, connection) => {
   connectionReconnectedListeners.forEach((cb) => { cb(session, connection); })
 })
 
-type DaemonDisconnectedCallback = () => void
-const daemonDisconnectedListeners: DaemonDisconnectedCallback[] = []
-
-client.onDaemonDisconnected(() => {
-  daemonDisconnectedListeners.forEach((cb) => { cb(); })
-})
-
 type ActiveProcessesOpenCallback = () => void
 const activeProcessesOpenListeners: ActiveProcessesOpenCallback[] = []
 
@@ -354,15 +347,6 @@ const preloadApi: PreloadApi = {
         }
       }
     },
-    onDisconnected: (callback: DaemonDisconnectedCallback): (() => void) => {
-      daemonDisconnectedListeners.push(callback)
-      return () => {
-        const index = daemonDisconnectedListeners.indexOf(callback)
-        if (index > -1) {
-          daemonDisconnectedListeners.splice(index, 1)
-        }
-      }
-    }
   },
   session: {
     update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number) => {
