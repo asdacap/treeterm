@@ -35,6 +35,8 @@ export interface CachedTerminal {
   onExitUnmounted: (exitCode: number) => void
   /** When true, terminal is forced to stay at the bottom regardless of scroll events */
   pinnedToBottom: boolean
+  /** Timer ID for badge single-click delay (to discriminate from double-click) */
+  badgeClickTimer: ReturnType<typeof setTimeout> | null
 }
 
 /**
