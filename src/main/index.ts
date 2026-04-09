@@ -114,7 +114,8 @@ function createWindow(): BrowserWindow {
 
   // Assign a unique UUID to this window for session sync deduplication
   const windowUuid = randomUUID()
-  windowUuids.set(window.webContents.id, windowUuid)
+  const webContentsId = window.webContents.id
+  windowUuids.set(webContentsId, windowUuid)
 
 
   // Forward all keyboard events including Caps Lock to renderer
@@ -159,7 +160,7 @@ function createWindow(): BrowserWindow {
 
   // Intercept close event to check for unmerged workspaces
   window.on('close', (event) => {
-    if (!closeConfirmedWindows.delete(window.webContents.id)) {
+    if (!closeConfirmedWindows.delete(webContentsId)) {
       event.preventDefault()
       window.webContents.send('app:confirm-close')
     }
@@ -190,7 +191,7 @@ function createWindow(): BrowserWindow {
       })
       sessionWatchUnsubs.set(connId, remaining)
     }
-    windowUuids.delete(window.webContents.id)
+    windowUuids.delete(webContentsId)
 
     // Disconnect this window's local gRPC client
     const connId = windowConnectionMap.get(windowUuid)
