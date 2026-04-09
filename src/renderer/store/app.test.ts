@@ -555,7 +555,7 @@ describe('useAppStore', () => {
 
       // We need the store to exist before getInitialWorkspace resolves
       // Create a mock session store directly
-      const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', windowUuid: null, connection: { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const } }, {} as unknown as SessionDeps)
+      const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', connection: { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const } }, {} as unknown as SessionDeps)
       useAppStore.setState({
         sessionStores: new Map([['pre-session', { store: mockSessionStoreInstance }]])
       })
@@ -584,7 +584,7 @@ describe('useAppStore', () => {
         subscribe: vi.fn<(...args: any[]) => any>()
       } as unknown as StoreApi<SessionState>)
 
-      const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', windowUuid: null, connection: { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const } }, {} as unknown as SessionDeps)
+      const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', connection: { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const } }, {} as unknown as SessionDeps)
       useAppStore.setState({
         sessionStores: new Map([['pre-session', { store: mockSessionStoreInstance }]])
       })

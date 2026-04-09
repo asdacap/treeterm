@@ -51,8 +51,8 @@ const mockRemoteClient = {
 }
 
 vi.mock('./grpcClient', () => ({
-  GrpcDaemonClient: vi.fn().mockImplementation(function() {
-    return { ...mockRemoteClient }
+  GrpcDaemonClient: vi.fn().mockImplementation(function(socketPath: string) {
+    return { ...mockRemoteClient, socketPath }
   })
 }))
 
@@ -82,23 +82,9 @@ vi.mock('./portForward', () => ({
 import { ConnectionManager } from './connectionManager'
 import type { GrpcDaemonClient } from './grpcClient'
 
-function mockClient(overrides: Partial<GrpcDaemonClient> = {}): GrpcDaemonClient {
-  return {
-    connect: vi.fn().mockResolvedValue(undefined),
-    disconnect: vi.fn(),
-    onDisconnect: vi.fn(),
-    socketPath: '/tmp/test.sock',
-    watchSession: vi.fn().mockReturnValue({
-      initial: Promise.resolve({ id: 'test', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }),
-      unsubscribe: vi.fn(),
-    }),
-    ...overrides,
-  } as unknown as GrpcDaemonClient
-}
-
 describe('ConnectionManager', () => {
-  let localClient: GrpcDaemonClient
   let manager: ConnectionManager
+  let localConnectionId: string
 
   const remoteConfig = {
     id: 'remote-1',
@@ -108,15 +94,16 @@ describe('ConnectionManager', () => {
     portForwards: [],
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.useFakeTimers()
     vi.clearAllMocks()
     tunnelBootstrapOutputCallback = null
     tunnelOutputCallback = null
     tunnelDisconnectCallback = null
     grpcDisconnectCallback = null
-    localClient = mockClient()
-    manager = new ConnectionManager(localClient)
+    manager = new ConnectionManager('/tmp/test.sock')
+    const info = await manager.connectLocal()
+    localConnectionId = info.id
   })
 
   afterEach(() => {
@@ -124,18 +111,31 @@ describe('ConnectionManager', () => {
   })
 
   describe('constructor', () => {
-    it('registers local connection as connected', () => {
+    it('starts with no connections', () => {
+      const emptyManager = new ConnectionManager('/tmp/test.sock')
+      expect(emptyManager.listConnections()).toHaveLength(0)
+    })
+  })
+
+  describe('connectLocal', () => {
+    it('creates a connected local connection with auto-generated id', () => {
       const connections = manager.listConnections()
-      expect(connections).toHaveLength(1)
-      expect(connections[0]!.id).toBe('local')
-      expect(connections[0]!.status).toBe('connected')
-      expect(connections[0]!.target).toEqual({ type: 'local' })
+      const local = connections.find(c => c.id === localConnectionId)
+      expect(local).toBeDefined()
+      expect(local?.status).toBe('connected')
+      expect(local?.target).toEqual({ type: 'local' })
+    })
+
+    it('creates unique ids for each call', async () => {
+      const info2 = await manager.connectLocal()
+      expect(info2.id).not.toBe(localConnectionId)
+      expect(manager.listConnections()).toHaveLength(2)
     })
   })
 
   describe('getClient', () => {
     it('returns client for existing connection', () => {
-      expect(manager.getClient('local')).toBe(localClient)
+      expect(manager.getClient(localConnectionId)).toBeDefined()
     })
 
     it('throws for missing connection', () => {
@@ -143,29 +143,19 @@ describe('ConnectionManager', () => {
     })
   })
 
-  describe('getLocalClient', () => {
-    it('returns the local client', () => {
-      expect(manager.getLocalClient()).toBe(localClient)
-    })
-  })
-
   describe('listConnections', () => {
     it('returns all connection infos', () => {
       const connections = manager.listConnections()
       expect(connections).toHaveLength(1)
-      expect(connections[0]).toEqual({
-        id: 'local',
-        target: { type: 'local' },
-        status: 'connected',
-      })
+      expect(connections[0]!.target).toEqual({ type: 'local' })
+      expect(connections[0]!.status).toBe('connected')
     })
   })
 
   describe('getConnection', () => {
     it('returns connection info for existing connection', () => {
-      const info = manager.getConnection('local')
+      const info = manager.getConnection(localConnectionId)
       expect(info).toBeDefined()
-      expect(info?.id).toBe('local')
       expect(info?.status).toBe('connected')
     })
 
@@ -177,14 +167,14 @@ describe('ConnectionManager', () => {
   describe('watchBootstrapOutput', () => {
     it('sets up watcher and returns scrollback', () => {
       const cb = vi.fn()
-      const result = manager.watchBootstrapOutput('local', cb)
+      const result = manager.watchBootstrapOutput(localConnectionId, cb)
       expect(result.scrollback).toEqual([])
       expect(typeof result.unsubscribe).toBe('function')
     })
 
     it('unsubscribe removes the watcher', () => {
       const cb = vi.fn()
-      const { unsubscribe } = manager.watchBootstrapOutput('local', cb)
+      const { unsubscribe } = manager.watchBootstrapOutput(localConnectionId, cb)
       unsubscribe()
       // Should not throw
     })
@@ -192,8 +182,8 @@ describe('ConnectionManager', () => {
     it('creates new watcher set for connection without existing watchers', () => {
       const cb1 = vi.fn()
       const cb2 = vi.fn()
-      manager.watchBootstrapOutput('local', cb1)
-      manager.watchBootstrapOutput('local', cb2)
+      manager.watchBootstrapOutput(localConnectionId, cb1)
+      manager.watchBootstrapOutput(localConnectionId, cb2)
       // Both should be registered without error
     })
   })
@@ -201,9 +191,9 @@ describe('ConnectionManager', () => {
   describe('watchConnectionStatus', () => {
     it('returns initial connection info and unsubscribe', () => {
       const cb = vi.fn()
-      const result = manager.watchConnectionStatus('local', cb)
+      const result = manager.watchConnectionStatus(localConnectionId, cb)
       expect(result.initial).toBeDefined()
-      expect(result.initial?.id).toBe('local')
+      expect(result.initial?.id).toBe(localConnectionId)
       expect(typeof result.unsubscribe).toBe('function')
     })
 
@@ -215,7 +205,7 @@ describe('ConnectionManager', () => {
 
     it('unsubscribe removes the watcher', () => {
       const cb = vi.fn()
-      const { unsubscribe } = manager.watchConnectionStatus('local', cb)
+      const { unsubscribe } = manager.watchConnectionStatus(localConnectionId, cb)
       unsubscribe()
     })
   })
@@ -328,22 +318,24 @@ describe('ConnectionManager', () => {
     })
   })
 
-  describe('disconnectRemote', () => {
-    it('throws when trying to disconnect local', () => {
-      expect(() => { manager.disconnectRemote('local'); }).toThrow('Cannot disconnect local connection')
-    })
-
+  describe('disconnect', () => {
     it('no-ops for missing connection', () => {
-      manager.disconnectRemote('nonexistent')
+      manager.disconnect('nonexistent')
     })
 
     it('disconnects client and tunnel and removes connection', async () => {
       await manager.connectRemote(remoteConfig)
       expect(manager.listConnections()).toHaveLength(2)
 
-      manager.disconnectRemote('remote-1')
+      manager.disconnect('remote-1')
       expect(manager.listConnections()).toHaveLength(1)
       expect(manager.getConnection('remote-1')).toBeUndefined()
+    })
+
+    it('disconnects local connection', () => {
+      expect(manager.listConnections()).toHaveLength(1)
+      manager.disconnect(localConnectionId)
+      expect(manager.listConnections()).toHaveLength(0)
     })
 
     it('emits disconnected status', async () => {
@@ -351,7 +343,7 @@ describe('ConnectionManager', () => {
       const cb = vi.fn()
       manager.onStatusChange(cb)
 
-      manager.disconnectRemote('remote-1')
+      manager.disconnect('remote-1')
       expect(cb).toHaveBeenCalledWith(expect.objectContaining({ status: 'disconnected' }))
     })
 
@@ -366,7 +358,7 @@ describe('ConnectionManager', () => {
       })
       expect(manager.listPortForwards('remote-1')).toHaveLength(1)
 
-      manager.disconnectRemote('remote-1')
+      manager.disconnect('remote-1')
       expect(manager.listPortForwards('remote-1')).toHaveLength(0)
     })
   })
@@ -397,7 +389,7 @@ describe('ConnectionManager', () => {
     })
 
     it('addPortForward throws for local connection', () => {
-      expect(() => manager.addPortForward({ ...pfConfig, connectionId: 'local' })).toThrow()
+      expect(() => manager.addPortForward({ ...pfConfig, connectionId: localConnectionId })).toThrow()
     })
 
     it('addPortForward throws for unknown connection', () => {
@@ -461,13 +453,12 @@ describe('ConnectionManager', () => {
   })
 
   describe('disconnectAll', () => {
-    it('disconnects all remote connections but keeps local', async () => {
+    it('disconnects all connections including local', async () => {
       await manager.connectRemote(remoteConfig)
       expect(manager.listConnections()).toHaveLength(2)
 
       manager.disconnectAll()
-      expect(manager.listConnections()).toHaveLength(1)
-      expect(manager.getClient('local')).toBe(localClient)
+      expect(manager.listConnections()).toHaveLength(0)
     })
   })
 
@@ -478,7 +469,7 @@ describe('ConnectionManager', () => {
     })
 
     it('returns undefined for local connection', () => {
-      expect(manager.getSSHTunnel('local')).toBeUndefined()
+      expect(manager.getSSHTunnel(localConnectionId)).toBeUndefined()
     })
 
     it('returns undefined for missing connection', () => {
@@ -487,10 +478,9 @@ describe('ConnectionManager', () => {
   })
 
   describe('heartbeat monitoring', () => {
-    it('starts heartbeat for local connection on construction', () => {
-      // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(localClient.watchSession).toHaveBeenCalledWith(
-        expect.stringContaining('heartbeat-local-'),
+    it('starts heartbeat for local connection on connectLocal', () => {
+      expect(mockRemoteClient.watchSession).toHaveBeenCalledWith(
+        expect.stringContaining(`heartbeat-${localConnectionId}-`),
         expect.any(Function),
         expect.any(Function)
       )
@@ -513,7 +503,7 @@ describe('ConnectionManager', () => {
       // Advance past heartbeat timeout (50s)
       vi.advanceTimersByTime(50_000)
 
-      const info = manager.getConnection('local')
+      const info = manager.getConnection(localConnectionId)
       expect(info?.status).toBe('reconnecting')
       expect(info).toHaveProperty('error', 'Connection lost (no heartbeat from daemon)')
     })
@@ -572,7 +562,7 @@ describe('ConnectionManager', () => {
       mockWatchSessionUnsubscribe.mockClear()
       await manager.connectRemote(remoteConfig)
 
-      manager.disconnectRemote('remote-1')
+      manager.disconnect('remote-1')
 
       expect(mockWatchSessionUnsubscribe).toHaveBeenCalled()
     })
@@ -583,50 +573,50 @@ describe('ConnectionManager', () => {
       // Trigger heartbeat timeout to enter reconnecting state
       vi.advanceTimersByTime(50_000)
 
-      const info = manager.getConnection('local')
+      const info = manager.getConnection(localConnectionId)
       expect(info?.status).toBe('reconnecting')
       expect(info).toHaveProperty('attempt', 0)
 
       // Advance past first backoff delay (1s) and flush microtasks
       await vi.advanceTimersByTimeAsync(1_000)
 
-      const info2 = manager.getConnection('local')
+      const info2 = manager.getConnection(localConnectionId)
       expect(info2?.status).toBe('connected')
     })
 
     it('cancelReconnect stops retries and sets error', () => {
       vi.advanceTimersByTime(50_000)
 
-      expect(manager.getConnection('local')?.status).toBe('reconnecting')
+      expect(manager.getConnection(localConnectionId)?.status).toBe('reconnecting')
 
-      manager.cancelReconnect('local')
+      manager.cancelReconnect(localConnectionId)
 
-      const info = manager.getConnection('local')
+      const info = manager.getConnection(localConnectionId)
       expect(info?.status).toBe('error')
     })
 
     it('reconnectNow skips backoff delay', async () => {
       vi.advanceTimersByTime(50_000)
 
-      expect(manager.getConnection('local')?.status).toBe('reconnecting')
+      expect(manager.getConnection(localConnectionId)?.status).toBe('reconnecting')
 
       // reconnectNow should immediately attempt — need to flush the async connect promise
-      manager.reconnectNow('local')
+      manager.reconnectNow(localConnectionId)
       // Flush microtasks for the async reconnect
       // eslint-disable-next-line @typescript-eslint/unbound-method
       await new Promise(process.nextTick)
 
-      expect(manager.getConnection('local')?.status).toBe('connected')
+      expect(manager.getConnection(localConnectionId)?.status).toBe('connected')
     })
 
     it('reconnect from error state starts reconnecting', () => {
       vi.advanceTimersByTime(50_000)
 
-      manager.cancelReconnect('local')
-      expect(manager.getConnection('local')?.status).toBe('error')
+      manager.cancelReconnect(localConnectionId)
+      expect(manager.getConnection(localConnectionId)?.status).toBe('error')
 
-      manager.reconnect('local')
-      expect(manager.getConnection('local')?.status).toBe('reconnecting')
+      manager.reconnect(localConnectionId)
+      expect(manager.getConnection(localConnectionId)?.status).toBe('reconnecting')
     })
 
     it('failed reconnect attempt schedules retry with backoff', async () => {
@@ -644,12 +634,12 @@ describe('ConnectionManager', () => {
       // Trigger heartbeat timeout
       vi.advanceTimersByTime(50_000)
 
-      expect(manager.getConnection('local')?.status).toBe('reconnecting')
+      expect(manager.getConnection(localConnectionId)?.status).toBe('reconnecting')
 
       // First attempt after 1s delay — should fail
       await vi.advanceTimersByTimeAsync(1_000)
 
-      const info = manager.getConnection('local')
+      const info = manager.getConnection(localConnectionId)
       expect(info?.status).toBe('reconnecting')
       expect(info).toHaveProperty('attempt', 1)
 
@@ -662,9 +652,9 @@ describe('ConnectionManager', () => {
 
   describe('forceReconnect', () => {
     it('from connected state enters reconnecting', () => {
-      expect(manager.getConnection('local')?.status).toBe('connected')
-      manager.forceReconnect('local')
-      expect(manager.getConnection('local')?.status).toBe('reconnecting')
+      expect(manager.getConnection(localConnectionId)?.status).toBe('connected')
+      manager.forceReconnect(localConnectionId)
+      expect(manager.getConnection(localConnectionId)?.status).toBe('reconnecting')
     })
 
     it('throws for unknown connection', () => {
@@ -673,9 +663,9 @@ describe('ConnectionManager', () => {
 
     it('is no-op when already reconnecting', () => {
       vi.advanceTimersByTime(50_000)
-      expect(manager.getConnection('local')?.status).toBe('reconnecting')
-      manager.forceReconnect('local')
-      expect(manager.getConnection('local')?.status).toBe('reconnecting')
+      expect(manager.getConnection(localConnectionId)?.status).toBe('reconnecting')
+      manager.forceReconnect(localConnectionId)
+      expect(manager.getConnection(localConnectionId)?.status).toBe('reconnecting')
     })
   })
 })
