@@ -199,7 +199,6 @@ export function createWorkspaceStore(
     disposeTabResources: (tabId: string): void => {
       const ref = tabRefs.get(tabId)
       if (ref) {
-        ref.close()
         ref.dispose()
         tabRefs.delete(tabId)
       }
@@ -309,6 +308,8 @@ export function createWorkspaceStore(
       if (!app) return Promise.resolve()
       if (!app.canClose) return Promise.resolve()
 
+      // User explicitly closing tab — kill daemon-side resources first
+      get().getTabRef(tabId)?.close()
       get().disposeTabResources(tabId)
 
       updateWorkspace((ws) => {
