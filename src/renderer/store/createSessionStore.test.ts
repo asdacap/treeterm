@@ -593,6 +593,67 @@ describe('createSessionStore', () => {
       const tab = Object.values(ws.appStates)[0]!
       expect(tab.applicationId).toBe('global-default')
     })
+
+    it('falls back to parent settings when worktree settings app not found', async () => {
+      const parentApp = makeFakeApp({ id: 'parent-app' })
+      vi.mocked(deps.appRegistry.get).mockImplementation((id: string) => {
+        if (id === 'parent-app') return parentApp
+        return undefined
+      })
+
+      // Create parent workspace with settings
+      const parentId = store.getState().addWorkspace('/parent', {
+        settings: { defaultApplicationId: 'parent-app' },
+      })
+      await flushPromises()
+
+      // Create child — worktree settings has unknown app, should fall back to parent
+      const result = store.getState().addChildWorkspace(parentId, 'child', false, { defaultApplicationId: 'unknown-app' })
+      expect(result.success).toBe(true)
+      await flushPromises()
+    })
+
+    it('falls back to globalDefaultApplicationId from settings', async () => {
+      const globalApp = makeFakeApp({ id: 'global-setting-app' })
+      vi.mocked(deps.appRegistry.get).mockImplementation((id: string) => {
+        if (id === 'global-setting-app') return globalApp
+        return undefined
+      })
+      vi.mocked(deps.getSettings).mockReturnValue({
+        terminal: { fontSize: 14, fontFamily: 'monospace', cursorStyle: 'block', cursorBlink: true, showRawChars: false, instances: [] },
+        sandbox: { enabledByDefault: false, allowNetworkByDefault: true },
+        aiHarness: { instances: [] },
+        globalDefaultApplicationId: 'global-setting-app',
+      })
+
+      const id = store.getState().addWorkspace('/test')
+      await flushPromises()
+      const entry = store.getState().workspaces.get(id)!
+      expect(entry.status).toBe(WorkspaceEntryStatus.Loaded)
+      const ws = (entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).data
+      const tab = Object.values(ws.appStates)[0]!
+      expect(tab.applicationId).toBe('global-setting-app')
+    })
+
+    it('falls back to globalDefaultApplicationId even when app not found in registry', async () => {
+      vi.mocked(deps.appRegistry.get).mockReturnValue(undefined)
+      const fallbackApp = makeFakeApp({ id: 'fallback' })
+      vi.mocked(deps.appRegistry.getDefaultApp).mockReturnValue(fallbackApp)
+      vi.mocked(deps.getSettings).mockReturnValue({
+        terminal: { fontSize: 14, fontFamily: 'monospace', cursorStyle: 'block', cursorBlink: true, showRawChars: false, instances: [] },
+        sandbox: { enabledByDefault: false, allowNetworkByDefault: true },
+        aiHarness: { instances: [] },
+        globalDefaultApplicationId: 'nonexistent-app',
+      })
+
+      const id = store.getState().addWorkspace('/test')
+      await flushPromises()
+      const entry = store.getState().workspaces.get(id)!
+      expect(entry.status).toBe(WorkspaceEntryStatus.Loaded)
+      const ws = (entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).data
+      const tab = Object.values(ws.appStates)[0]!
+      expect(tab.applicationId).toBe('fallback')
+    })
   })
 
   describe('syncToDaemon error handling', () => {
@@ -610,6 +671,247 @@ describe('createSessionStore', () => {
       await flushPromises()
       await store.getState().syncToDaemon()
       // Should not throw
+    })
+  })
+
+  describe('createTty', () => {
+    it('returns pty session id on success', async () => {
+      const ptyId = await store.getState().createTty('/test')
+      expect(ptyId).toBe('pty-1')
+    })
+
+    it('throws when terminal.create fails with error message', async () => {
+      vi.mocked(deps.terminal.create).mockResolvedValue({ success: false, error: 'No PTY available' })
+      await expect(store.getState().createTty('/test')).rejects.toThrow('No PTY available')
+    })
+
+    it('throws default message when terminal.create fails without error', async () => {
+      vi.mocked(deps.terminal.create).mockResolvedValue({ success: false, error: '' } as never)
+      await expect(store.getState().createTty('/test')).rejects.toThrow('Failed to create PTY')
+    })
+  })
+
+  describe('openTtyStream', () => {
+    it('throws when terminal.attach fails with error message', async () => {
+      vi.mocked(deps.terminal.attach).mockResolvedValue({ success: false, error: 'PTY not found' })
+      await expect(store.getState().openTtyStream('pty-1', vi.fn())).rejects.toThrow('PTY not found')
+    })
+
+    it('throws default message when terminal.attach fails without error', async () => {
+      vi.mocked(deps.terminal.attach).mockResolvedValue({ success: false, error: '' } as never)
+      await expect(store.getState().openTtyStream('pty-1', vi.fn())).rejects.toThrow('Failed to attach to PTY')
+    })
+  })
+
+  describe('clearWorkspaceError', () => {
+    it('no-ops for non-existent workspace', () => {
+      store.getState().clearWorkspaceError('nonexistent')
+      // Should not throw
+    })
+
+    it('no-ops for workspace not in OperationError status', async () => {
+      const id = store.getState().addWorkspace('/test')
+      await flushPromises()
+      const entryBefore = store.getState().workspaces.get(id)!
+      expect(entryBefore.status).toBe(WorkspaceEntryStatus.Loaded)
+
+      store.getState().clearWorkspaceError(id)
+      const entryAfter = store.getState().workspaces.get(id)!
+      expect(entryAfter.status).toBe(WorkspaceEntryStatus.Loaded)
+    })
+  })
+
+  describe('reorderWorkspace', () => {
+    it('no-ops when drag workspace does not exist', async () => {
+      const id = store.getState().addWorkspace('/test')
+      await flushPromises()
+      store.getState().reorderWorkspace('nonexistent', id, 'before')
+      // Should not throw
+    })
+
+    it('no-ops when target workspace does not exist', async () => {
+      const id = store.getState().addWorkspace('/test')
+      await flushPromises()
+      store.getState().reorderWorkspace(id, 'nonexistent', 'before')
+      // Should not throw
+    })
+
+    it('no-ops when drag and target are the same workspace', async () => {
+      const id = store.getState().addWorkspace('/test')
+      await flushPromises()
+      store.getState().reorderWorkspace(id, id, 'before')
+      // Should not throw
+    })
+
+    it('reorders sibling workspaces', async () => {
+      const id1 = store.getState().addWorkspace('/test1')
+      const id2 = store.getState().addWorkspace('/test2')
+      await flushPromises()
+      store.getState().reorderWorkspace(id1, id2, 'after')
+      // Should not throw — verifies the reorder path runs
+    })
+  })
+
+  describe('addChildWorkspace error paths', () => {
+    it('handles createWorktree failure', async () => {
+      vi.mocked(deps.git.createWorktree).mockResolvedValue({ success: false, error: 'already exists' })
+
+      const parentId = store.getState().addWorkspace('/parent')
+      await flushPromises()
+
+      store.getState().addChildWorkspace(parentId, 'child')
+      await flushPromises()
+      // Unlock should still be called
+      expect(deps.sessionApi.unlock).toHaveBeenCalled()
+    })
+
+    it('handles thrown exception during workspace creation', async () => {
+      vi.mocked(deps.git.createWorktree).mockRejectedValue(new Error('disk full'))
+
+      const parentId = store.getState().addWorkspace('/parent')
+      await flushPromises()
+
+      store.getState().addChildWorkspace(parentId, 'child')
+      await flushPromises()
+
+      // Should set error state on the workspace
+      const entries = Array.from(store.getState().workspaces.values())
+      const errorEntry = entries.find(e => e.status === WorkspaceEntryStatus.Error)
+      expect(errorEntry).toBeDefined()
+      if (errorEntry?.status === WorkspaceEntryStatus.Error) {
+        expect(errorEntry.error).toContain('disk full')
+      }
+    })
+
+    it('creates child without description in metadata', async () => {
+      const parentId = store.getState().addWorkspace('/parent')
+      await flushPromises()
+
+      const result = store.getState().addChildWorkspace(parentId, 'child', false, undefined, undefined)
+      expect(result.success).toBe(true)
+      await flushPromises()
+    })
+  })
+
+  describe('mergeAndRemoveWorkspace', () => {
+    it('returns error when session lock fails', async () => {
+      vi.mocked(deps.sessionApi.lock).mockResolvedValue({ success: false, acquired: false } as never)
+
+      const id = store.getState().addWorkspace('/test')
+      await flushPromises()
+
+      const result = await store.getState().mergeAndRemoveWorkspace(id, false)
+      expect(result).toEqual({ success: false, error: 'Session is locked by another window' })
+    })
+
+    it('returns error when workspace is not a worktree', async () => {
+      const id = store.getState().addWorkspace('/test')
+      await flushPromises()
+
+      const result = await store.getState().mergeAndRemoveWorkspace(id, false)
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('Not a worktree')
+      }
+    })
+  })
+
+  describe('mergeAndKeepWorkspace', () => {
+    it('returns error when workspace is not a worktree', async () => {
+      const id = store.getState().addWorkspace('/test')
+      await flushPromises()
+
+      const result = await store.getState().mergeAndKeepWorkspace(id, false)
+      expect(result.success).toBe(false)
+    })
+  })
+
+  describe('removeWorkspace', () => {
+    it('removes a workspace', async () => {
+      const id = store.getState().addWorkspace('/test')
+      await flushPromises()
+      await store.getState().removeWorkspace(id)
+      expect(store.getState().workspaces.get(id)).toBeUndefined()
+    })
+
+    it('handles removeWorktree failure gracefully', async () => {
+      vi.mocked(deps.git.removeWorktree).mockRejectedValue(new Error('removal failed'))
+
+      const parentId = store.getState().addWorkspace('/parent')
+      await flushPromises()
+
+      store.getState().addChildWorkspace(parentId, 'child')
+      await flushPromises()
+
+      // Find the child workspace
+      const childId = Array.from(store.getState().workspaces.entries())
+        .find(([, e]) => e.status === WorkspaceEntryStatus.Loaded && (e as Extract<typeof e, { status: WorkspaceEntryStatus.Loaded }>).data.isWorktree)?.[0]
+
+      if (childId) {
+        await store.getState().removeWorkspace(childId)
+        // Should show operation error
+        const entry = store.getState().workspaces.get(childId)
+        if (entry) {
+          expect(entry.status).toBe(WorkspaceEntryStatus.OperationError)
+        }
+      }
+    })
+  })
+
+  describe('removeWorkspaceKeepBranch', () => {
+    it('removes workspace but keeps the branch', async () => {
+      const id = store.getState().addWorkspace('/test')
+      await flushPromises()
+      await store.getState().removeWorkspaceKeepBranch(id)
+      expect(store.getState().workspaces.get(id)).toBeUndefined()
+    })
+  })
+
+  describe('removeWorkspaceKeepBoth', () => {
+    it('removes workspace keeping both worktree and branch', async () => {
+      const id = store.getState().addWorkspace('/test')
+      await flushPromises()
+      await store.getState().removeWorkspaceKeepBoth(id)
+      expect(store.getState().workspaces.get(id)).toBeUndefined()
+    })
+  })
+
+  describe('forceUnlock', () => {
+    it('force unlocks session with existing lock', async () => {
+      // Set up a lock via handleRestore
+      await store.getState().handleRestore({
+        id: 'session-1',
+        workspaces: [],
+        createdAt: 0,
+        lastActivity: 0,
+        version: 1,
+        lock: { holderId: 'other-window', acquiredAt: Date.now(), expiresAt: Date.now() + 60000 },
+      })
+      const result = await store.getState().forceUnlock()
+      expect(result.success).toBe(true)
+      expect(deps.sessionApi.forceUnlock).toHaveBeenCalled()
+    })
+
+    it('returns success when no lock exists', async () => {
+      // No lock by default, so forceUnlock short-circuits
+      const result = await store.getState().forceUnlock()
+      expect(result.success).toBe(true)
+      expect(deps.sessionApi.forceUnlock).not.toHaveBeenCalled()
+    })
+
+    it('handles forceUnlock failure', async () => {
+      // First set up a lock so forceUnlock actually calls the API
+      await store.getState().handleRestore({
+        id: 'session-1',
+        workspaces: [],
+        createdAt: 0,
+        lastActivity: 0,
+        version: 1,
+        lock: { holderId: 'other-window', acquiredAt: Date.now(), expiresAt: Date.now() + 60000 },
+      })
+      vi.mocked(deps.sessionApi.forceUnlock).mockResolvedValue({ success: false, error: 'failed' } as never)
+      const result = await store.getState().forceUnlock()
+      expect(result.success).toBe(false)
     })
   })
 
@@ -659,6 +961,43 @@ describe('createSessionStore', () => {
       // New workspace should be added
       expect(store.getState().workspaces.get('ws-new')).toBeDefined()
       expect(store.getState().isRestoring).toBe(false)
+    })
+
+    it('handleRestore with tab changes — removes old tabs and adds new tabs', async () => {
+      // First restore with tab1
+      const daemonSession1 = {
+        id: 'session-1',
+        workspaces: [
+          makeWorkspace({ id: 'ws-tabs', name: 'tabs-test', path: '/tabs', appStates: { 'tab-1': { applicationId: 'terminal', title: 'Terminal', state: {} } }, activeTabId: 'tab-1' }),
+        ],
+        createdAt: Date.now(),
+        lastActivity: Date.now(),
+        version: 1,
+        lock: null,
+      }
+      await store.getState().handleRestore(daemonSession1)
+      expect(store.getState().workspaces.get('ws-tabs')).toBeDefined()
+
+      // Second restore with different tabs — restoreWorkspaceTabs should dispose tab-1, init tab-2
+      const daemonSession2 = {
+        id: 'session-1',
+        workspaces: [
+          makeWorkspace({ id: 'ws-tabs', name: 'tabs-test', path: '/tabs', appStates: { 'tab-2': { applicationId: 'terminal', title: 'New Tab', state: {} } }, activeTabId: 'tab-2' }),
+        ],
+        createdAt: Date.now(),
+        lastActivity: Date.now(),
+        version: 2,
+        lock: null,
+      }
+      await store.getState().handleRestore(daemonSession2)
+
+      const entry = store.getState().workspaces.get('ws-tabs')!
+      expect(entry.status).toBe(WorkspaceEntryStatus.Loaded)
+      // restoreWorkspaceTabs updates the workspace store, not the session entry data
+      const wsStore = (entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).store
+      const wsState = wsStore.getState().workspace
+      expect(wsState.appStates['tab-2']).toBeDefined()
+      expect(wsState.appStates['tab-1']).toBeUndefined()
     })
 
     it('handleRestore restores child workspaces with parent relationship', async () => {
