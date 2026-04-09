@@ -8,9 +8,8 @@ import { useActivityStateStore } from '../store/activityState'
 import { useSessionApi } from '../contexts/SessionStoreContext'
 import { createActivityStateDetector } from '../utils/activityStateDetector'
 import type { Tty } from '../store/createTtyStore'
-import type { CachedTerminal } from '../store/createWorkspaceStore'
 import { ScrollPosition } from '../types'
-import type { PtyEvent, SandboxConfig, TerminalState, WorkspaceStore } from '../types'
+import type { CachedTerminal, TerminalAppRef, PtyEvent, SandboxConfig, TerminalState, WorkspaceStore } from '../types'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
 import '@xterm/xterm/css/xterm.css'
@@ -140,7 +139,7 @@ export default function BaseTerminal({
   config,
   extraButtons,
 }: BaseTerminalProps) {
-  const { workspace: wsData, removeTab, disposeCachedTerminal } = useStore(workspace)
+  const { workspace: wsData, removeTab } = useStore(workspace)
   const workspaceId = wsData.id
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
@@ -182,7 +181,8 @@ export default function BaseTerminal({
     let requestedSize: { cols: number; rows: number } | null = null
 
     const wsState = workspace.getState()
-    const existingCache = wsState.getCachedTerminal(tabId)
+    const termAppRef = wsState.getTabRef(tabId) as TerminalAppRef | null
+    const existingCache = termAppRef?.cachedTerminal ?? null
 
     /** Attach all DOM-level handlers to a terminal. Shared by first mount and remount. */
     const attachMountedState = (terminal: XTerm, tty: Tty, cache: CachedTerminal) => {
@@ -465,7 +465,7 @@ export default function BaseTerminal({
 
         cache.tty = tty
 
-        wsState.setCachedTerminal(tabId, cache)
+        if (termAppRef) termAppRef.cachedTerminal = cache
 
         // Notify parent that terminal is ready (first mount only — handlers persist on the cached terminal)
         config.onTerminalReady?.(terminal)
@@ -491,9 +491,9 @@ export default function BaseTerminal({
       detector?.destroy()
 
       // Clear mounted handler so background fallback takes over
-      const cache = workspace.getState().getCachedTerminal(tabId)
-      if (cache) {
-        cache.mountedHandler = null
+      const currentRef = workspace.getState().getTabRef(tabId) as TerminalAppRef | null
+      if (currentRef?.cachedTerminal) {
+        currentRef.cachedTerminal.mountedHandler = null
       }
 
       terminalRef.current = null
@@ -511,14 +511,15 @@ export default function BaseTerminal({
   }, [terminalRef])
 
   const handleRefreshStream = useCallback(() => {
-    disposeCachedTerminal(tabId)
+    const ref = workspace.getState().getTabRef(tabId) as TerminalAppRef | null
+    ref?.disposeCachedTerminal()
     if (containerRef.current) {
       containerRef.current.innerHTML = ''
     }
     setLoading(true)
     setOverlay(null)
     setRefreshCounter((c) => c + 1)
-  }, [tabId, disposeCachedTerminal])
+  }, [tabId, workspace])
 
   const handleBadgeClick = scrollPosition === ScrollPosition.Bottom ? handleScrollToTop : handleScrollDown
 

@@ -526,12 +526,11 @@ function disposeSessionForConnection(connectionId: string, get: () => AppState):
 
     console.log(`[renderer:app] Disposing session ${sessionId} for reconnecting connection ${connectionId}`)
 
-    // Dispose all workspaces: cached terminals, tab refs, git controllers
+    // Dispose all workspaces: tab refs (includes cached terminals), git controllers
     const workspaces = entry.store.getState().workspaces
     for (const [, wsEntry] of Array.from(workspaces.entries())) {
       if (wsEntry.status === WorkspaceEntryStatus.Loaded || wsEntry.status === WorkspaceEntryStatus.OperationError) {
         wsEntry.store.getState().gitController.getState().dispose()
-        wsEntry.store.getState().disposeAllCachedTerminals()
         for (const tabId of Object.keys(wsEntry.data.appStates)) {
           const ref = wsEntry.store.getState().getTabRef(tabId)
           if (ref) ref.dispose()

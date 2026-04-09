@@ -35,6 +35,15 @@ export interface CachedTerminal {
   onExitUnmounted: (exitCode: number) => void
 }
 
+/**
+ * AppRef subtype for terminal-based tabs (Terminal, AiHarness, CustomRunner).
+ * Holds the cached xterm.js terminal that survives component mount/unmount.
+ */
+export interface TerminalAppRef extends AppRef {
+  cachedTerminal: CachedTerminal | null
+  disposeCachedTerminal: () => void
+}
+
 export interface WorkspaceStoreDeps {
   appRegistry: AppRegistryApi
   openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<{ tty: Tty }>
@@ -80,15 +89,6 @@ export interface WorkspaceStoreState {
   getTabRef: (tabId: string) => AppRef | null
   /** Dispose a tab's runtime resources (tabRef + cached terminal) without modifying appStates or syncing to daemon. */
   disposeTabResources: (tabId: string) => void
-
-  // Terminal cache for BaseTerminal-derived tabs (Terminal, AiHarness only).
-  // Caches xterm.js Terminal + TTY subscription across mount/unmount cycles.
-  getCachedTerminal: (tabId: string) => CachedTerminal | null
-  setCachedTerminal: (tabId: string, entry: CachedTerminal) => void
-  /** Dispose a single cached terminal (unsubscribe events, dispose xterm, remove from cache) */
-  disposeCachedTerminal: (tabId: string) => void
-  /** Dispose all cached terminals. Called by session store on workspace removal. */
-  disposeAllCachedTerminals: () => void
 
   // Analyzer factory (used by applications in onWorkspaceLoad)
   initAnalyzer: (tabId: string) => Analyzer
@@ -160,10 +160,6 @@ export function createWorkspaceStore(
   // Closure-level tab ref registry (non-serialized per-tab runtime state)
   const tabRefs = new Map<string, AppRef>()
 
-  // Cached xterm.js Terminal instances for BaseTerminal-derived tabs only
-  // (Terminal, AiHarness). Survives mount/unmount; disposed on removeTab.
-  const cachedTerminals = new Map<string, CachedTerminal>()
-
   // Write-only PTY handles, cached per workspace (separate stream from terminal events)
   const ttyWriters = new Map<string, TtyWriter>()
 
@@ -206,24 +202,6 @@ export function createWorkspaceStore(
         ref.close()
         ref.dispose()
         tabRefs.delete(tabId)
-      }
-      get().disposeCachedTerminal(tabId)
-    },
-
-    getCachedTerminal: (tabId: string): CachedTerminal | null => cachedTerminals.get(tabId) ?? null,
-    setCachedTerminal: (tabId: string, entry: CachedTerminal): void => { cachedTerminals.set(tabId, entry) },
-    disposeCachedTerminal: (tabId: string): void => {
-      const cached = cachedTerminals.get(tabId)
-      if (cached) {
-        cached.mountedHandler = null
-        cached.unsubscribeEvents()
-        cached.terminal.dispose()
-        cachedTerminals.delete(tabId)
-      }
-    },
-    disposeAllCachedTerminals: (): void => {
-      for (const tabId of Array.from(cachedTerminals.keys())) {
-        get().disposeCachedTerminal(tabId)
       }
     },
 

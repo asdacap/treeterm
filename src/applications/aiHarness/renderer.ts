@@ -1,4 +1,4 @@
-import type { Application, Tab, AppRef, AiHarnessState, AiHarnessInstance, WorkspaceStore } from '../../renderer/types'
+import type { Application, Tab, TerminalAppRef, AiHarnessState, AiHarnessInstance, WorkspaceStore } from '../../renderer/types'
 import { isAiHarnessState } from '../../renderer/types'
 import AiHarness from '../../renderer/components/AiHarness'
 import { createElement } from 'react'
@@ -6,7 +6,7 @@ import type { Analyzer } from '../../renderer/store/createAnalyzerStore'
 
 type TerminalDeps = { terminal: { kill: (connectionId: string, sessionId: string) => void } }
 
-export interface AiHarnessRef extends AppRef {
+export interface AiHarnessRef extends TerminalAppRef {
   analyzer: Analyzer
 }
 
@@ -51,8 +51,17 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
         })
       }
 
-      return {
+      const ref: AiHarnessRef = {
         analyzer,
+        cachedTerminal: null,
+        disposeCachedTerminal() {
+          if (this.cachedTerminal) {
+            this.cachedTerminal.mountedHandler = null
+            this.cachedTerminal.unsubscribeEvents()
+            this.cachedTerminal.terminal.dispose()
+            this.cachedTerminal = null
+          }
+        },
         close: () => {
           // Read current state for up-to-date ptyId (may have been set after onWorkspaceLoad)
           const current = workspaceStore.getState().workspace.appStates[tab.id]?.state as AiHarnessState | undefined
@@ -62,9 +71,11 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
           }
         },
         dispose: () => {
+          ref.disposeCachedTerminal()
           analyzer.getState().stop()
         },
       }
+      return ref
     },
 
     render: ({ tab, workspace, isVisible }) => {

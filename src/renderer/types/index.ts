@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
-import type { WorkspaceStore } from '../store/createWorkspaceStore'
-export type { WorkspaceStore }
+import type { WorkspaceStore, TerminalAppRef, CachedTerminal } from '../store/createWorkspaceStore'
+export type { WorkspaceStore, TerminalAppRef, CachedTerminal }
 
 // Import and re-export shared types
 import {
@@ -73,7 +73,18 @@ export enum ActivityState {
   Error = 'error',
 }
 
-// Base interface for application runtime refs (non-serialized per-tab state)
+/**
+ * Non-serialized per-tab runtime state. Lives in the workspace store closure,
+ * survives component mount/unmount. Created once per tab in onWorkspaceLoad.
+ *
+ * close() — Called when the user explicitly closes the tab in this window.
+ *           Kills daemon-side resources (e.g. PTY process). Prefer not to
+ *           clean up renderer resources here to prevent unexpected bugs.
+ *
+ * dispose() — Client-side resource cleanup (analyzers, activity state, etc.).
+ *             The tab may be removed from another window, so this must be
+ *             safe to call independently of close().
+ */
 export interface AppRef {
   close: () => void
   dispose: () => void

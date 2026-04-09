@@ -1,4 +1,4 @@
-import type { Application, TerminalState, CustomRunnerInstance, Tab, AppRef, WorkspaceStore } from '../../renderer/types'
+import type { Application, TerminalState, CustomRunnerInstance, Tab, TerminalAppRef, WorkspaceStore } from '../../renderer/types'
 import Terminal from '../../renderer/components/Terminal'
 import { createElement } from 'react'
 import { useActivityStateStore } from '../../renderer/store/activityState'
@@ -21,7 +21,7 @@ export function createCustomRunnerVariant(instance: CustomRunnerInstance, deps: 
       keepOnExit: false
     }),
 
-    onWorkspaceLoad: (tab: Tab, workspaceStore: WorkspaceStore): AppRef => {
+    onWorkspaceLoad: (tab: Tab, workspaceStore: WorkspaceStore): TerminalAppRef => {
       const ws = workspaceStore.getState()
       const state = tab.state as TerminalState
       if (!state.ptyId) {
@@ -34,7 +34,16 @@ export function createCustomRunnerVariant(instance: CustomRunnerInstance, deps: 
           }))
         })
       }
-      return {
+      const ref: TerminalAppRef = {
+        cachedTerminal: null,
+        disposeCachedTerminal() {
+          if (this.cachedTerminal) {
+            this.cachedTerminal.mountedHandler = null
+            this.cachedTerminal.unsubscribeEvents()
+            this.cachedTerminal.terminal.dispose()
+            this.cachedTerminal = null
+          }
+        },
         close: () => {
           const current = workspaceStore.getState().workspace.appStates[tab.id]?.state as TerminalState | undefined
           const ptyId = current?.ptyId ?? state.ptyId
@@ -43,9 +52,11 @@ export function createCustomRunnerVariant(instance: CustomRunnerInstance, deps: 
           }
         },
         dispose: () => {
+          ref.disposeCachedTerminal()
           useActivityStateStore.getState().removeTabState(tab.id)
         },
       }
+      return ref
     },
 
     render: ({ tab, workspace, isVisible }) => createElement(Terminal, {

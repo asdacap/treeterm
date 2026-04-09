@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createWorkspaceStore } from './createWorkspaceStore'
-import type { WorkspaceStoreDeps, CachedTerminal } from './createWorkspaceStore'
+import type { WorkspaceStoreDeps } from './createWorkspaceStore'
 import { getUnmergedSubWorkspaces, WorkspaceEntryStatus } from './createSessionStore'
 import type { WorkspaceEntry } from './createSessionStore'
 import type { LlmApi, Workspace, Application } from '../types'
@@ -833,37 +833,6 @@ describe('createWorkspaceStore', () => {
       const writer = await store.getState().getTtyWriter('pty-1')
       getOnEvent()({ type: 'error' })
       expect(() => { writer.kill(); }).toThrow('disconnected')
-    })
-  })
-
-  describe('disposeAllCachedTerminals', () => {
-    it('disposes all cached terminals', () => {
-      const store = createWorkspaceStore(makeWorkspace(), makeHandleDeps())
-      const disposeFns = [vi.fn<() => void>(), vi.fn<() => void>()]
-      const terminalMocks = disposeFns.map((unsub) => ({
-        terminal: { dispose: vi.fn<() => void>() },
-        tty: {} as unknown as CachedTerminal['tty'],
-        unsubscribeEvents: unsub,
-        mountedHandler: null,
-        stripScrollbackClear: false,
-        connectedAt: Date.now(),
-        dataVersion: 0,
-        onExitUnmounted: vi.fn<(...args: any[]) => void>(),
-      }))
-
-      store.getState().setCachedTerminal('tab-a', terminalMocks[0] as unknown as CachedTerminal)
-      store.getState().setCachedTerminal('tab-b', terminalMocks[1] as unknown as CachedTerminal)
-      expect(store.getState().getCachedTerminal('tab-a')).not.toBeNull()
-      expect(store.getState().getCachedTerminal('tab-b')).not.toBeNull()
-
-      store.getState().disposeAllCachedTerminals()
-
-      expect(store.getState().getCachedTerminal('tab-a')).toBeNull()
-      expect(store.getState().getCachedTerminal('tab-b')).toBeNull()
-      expect(disposeFns[0]).toHaveBeenCalled()
-      expect(disposeFns[1]).toHaveBeenCalled()
-      expect(terminalMocks[0]!.terminal.dispose).toHaveBeenCalled()
-      expect(terminalMocks[1]!.terminal.dispose).toHaveBeenCalled()
     })
   })
 

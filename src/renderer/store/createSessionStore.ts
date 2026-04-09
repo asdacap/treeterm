@@ -443,10 +443,9 @@ export function createSessionStore(
       await removeWorkspaceInternal(childId, options)
     }
 
-    // Dispose tab refs and cached terminals (stops analyzers, kills PTYs, etc.)
+    // Dispose tab refs (stops analyzers, kills PTYs, disposes cached terminals, etc.)
     if (handle && workspace) {
       handle.getState().gitController.getState().dispose()
-      handle.getState().disposeAllCachedTerminals()
       for (const tabId of Object.keys(workspace.appStates)) {
         const ref = handle.getState().getTabRef(tabId)
         if (ref) {
