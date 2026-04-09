@@ -6,6 +6,7 @@ import { createStore } from 'zustand/vanilla'
 import { SessionStoreContext } from '../contexts/SessionStoreContext'
 import { useTtyCreation } from './useTtyConnection'
 import type { SessionState } from '../store/createSessionStore'
+import { TtyCreationStatus } from '../types'
 
 function makeSessionStore(overrides: Partial<SessionState> = {}) {
   return createStore<SessionState>()(() => ({
@@ -39,7 +40,7 @@ describe('useTtyCreation', () => {
       { wrapper: makeWrapper(sessionStore) }
     )
 
-    expect(result.current).toEqual({ status: 'ready' })
+    expect(result.current).toEqual({ status: TtyCreationStatus.Ready })
     expect(sessionStore.getState().createTty).not.toHaveBeenCalled()
     expect(onCreated).not.toHaveBeenCalled()
   })
@@ -54,7 +55,7 @@ describe('useTtyCreation', () => {
     )
 
     await waitFor(() => {
-      expect(result.current).toEqual({ status: 'ready' })
+      expect(result.current).toEqual({ status: TtyCreationStatus.Ready })
     })
 
     expect(sessionStore.getState().createTty).toHaveBeenCalledWith('/test', undefined, undefined)
@@ -73,11 +74,11 @@ describe('useTtyCreation', () => {
     )
 
     await waitFor(() => {
-      expect(result.current.status).toBe('error')
+      expect(result.current.status).toBe(TtyCreationStatus.Error)
     })
 
-    expect(result.current.status).toBe('error')
-    if (result.current.status === 'error') {
+    expect(result.current.status).toBe(TtyCreationStatus.Error)
+    if (result.current.status === TtyCreationStatus.Error) {
       expect(result.current.error.message).toBe('pty creation failed')
     }
     expect(onCreated).not.toHaveBeenCalled()

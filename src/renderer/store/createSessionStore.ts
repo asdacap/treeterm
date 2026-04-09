@@ -14,11 +14,18 @@ import type {
   Application, SandboxConfig, TTYSessionInfo, LlmApi, GitHubApi, RunActionsApi
 } from '../types'
 
+export enum WorkspaceEntryStatus {
+  Loading = 'loading',
+  Error = 'error',
+  Loaded = 'loaded',
+  OperationError = 'operation-error',
+}
+
 export type WorkspaceEntry =
-  | { status: 'loading'; name: string; message: string; output: string[] }
-  | { status: 'error'; name: string; error: string }
-  | { status: 'loaded'; data: Workspace; store: WorkspaceStore }
-  | { status: 'operation-error'; data: Workspace; store: WorkspaceStore; error: string }
+  | { status: WorkspaceEntryStatus.Loading; name: string; message: string; output: string[] }
+  | { status: WorkspaceEntryStatus.Error; name: string; error: string }
+  | { status: WorkspaceEntryStatus.Loaded; data: Workspace; store: WorkspaceStore }
+  | { status: WorkspaceEntryStatus.OperationError; data: Workspace; store: WorkspaceStore; error: string }
 
 export type SessionEntry = { store: StoreApi<SessionState> }
 
@@ -122,8 +129,8 @@ function getDefaultAppForWorktree(
  */
 export function getUnmergedSubWorkspaces(workspaces: Map<string, WorkspaceEntry>): Workspace[] {
   return Array.from(workspaces.values())
-    .filter((e): e is Extract<WorkspaceEntry, { status: 'loaded' | 'operation-error' }> =>
-      e.status === 'loaded' || e.status === 'operation-error')
+    .filter((e): e is Extract<WorkspaceEntry, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }> =>
+      e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError)
     .map(e => e.data)
     .filter(ws => ws.isWorktree && ws.status === 'active')
 }
@@ -138,7 +145,7 @@ export function createSessionStore(
     const workspaces = store.getState().workspaces
     let max = -1
     for (const entry of Array.from(workspaces.values())) {
-      if (entry.status !== 'loaded' && entry.status !== 'operation-error') continue
+      if (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError) continue
       const ws = entry.data
       const isMatch = parentId === null ? !ws.parentId : ws.parentId === parentId
       if (isMatch) {
@@ -165,7 +172,7 @@ export function createSessionStore(
       }
 
       const daemonWorkspaces = Array.from(workspaces.values())
-        .filter((e): e is Extract<WorkspaceEntry, { status: 'loaded' }> => e.status === 'loaded')
+        .filter((e): e is Extract<WorkspaceEntry, { status: WorkspaceEntryStatus.Loaded }> => e.status === WorkspaceEntryStatus.Loaded)
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         .map(e => { const { createdAt: _createdAt, lastActivity: _lastActivity, ...ws } = e.data; return ws })
 
@@ -226,7 +233,7 @@ export function createSessionStore(
       refreshGitInfo: (id) => store.getState().refreshGitInfo(id),
       lookupWorkspace: (id) => {
         const entry = store.getState().workspaces.get(id)
-        return entry && (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined
+        return entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data : undefined
       },
       github: deps.github,
     }
@@ -239,7 +246,7 @@ export function createSessionStore(
     handle.subscribe((state) => {
       store.setState((s) => {
         const entry = s.workspaces.get(state.workspace.id)
-        if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return s
+        if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return s
         return {
           workspaces: new Map(s.workspaces).set(state.workspace.id, { ...entry, data: state.workspace })
         }
@@ -265,20 +272,20 @@ export function createSessionStore(
   ): { success: true } {
     const state = store.getState()
     const parentEntry = state.workspaces.get(parentId)
-    const parent = parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error') ? parentEntry.data : undefined
+    const parent = parentEntry && (parentEntry.status === WorkspaceEntryStatus.Loaded || parentEntry.status === WorkspaceEntryStatus.OperationError) ? parentEntry.data : undefined
 
     const id = generateId()
     const operationId = generateId()
 
     store.setState((s) => ({
-      workspaces: new Map(s.workspaces).set(id, { status: 'loading' as const, name: worktreeName, message: options.message, output: [] }),
+      workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loading, name: worktreeName, message: options.message, output: [] }),
       activeWorkspaceId: id,
     }))
 
     const unsubOutput = deps.git.onOutput((opId, data) => {
       if (opId !== operationId) return
       const entry = store.getState().workspaces.get(id)
-      if (entry?.status === 'loading') {
+      if (entry?.status === WorkspaceEntryStatus.Loading) {
         store.setState(s => ({
           workspaces: new Map(s.workspaces).set(id, { ...entry, output: [...entry.output, data] })
         }))
@@ -295,7 +302,7 @@ export function createSessionStore(
 
         if (!result.success) {
           store.setState(s => ({
-            workspaces: new Map(s.workspaces).set(id, { status: 'error', name: worktreeName, error: result.error || 'Operation failed' })
+            workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Error, name: worktreeName, error: result.error || 'Operation failed' })
           }))
           return
         }
@@ -343,12 +350,12 @@ export function createSessionStore(
         }
 
         store.setState(s => ({
-          workspaces: new Map(s.workspaces).set(id, { status: 'loaded', data: childWorkspace, store: handle })
+          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: childWorkspace, store: handle })
         }))
         await syncSessionToDaemon(store.getState().isRestoring)
       } catch (err) {
         store.setState(s => ({
-          workspaces: new Map(s.workspaces).set(id, { status: 'error', name: worktreeName, error: err instanceof Error ? err.message : String(err) })
+          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Error, name: worktreeName, error: err instanceof Error ? err.message : String(err) })
         }))
       } finally {
         unsubOutput()
@@ -367,7 +374,7 @@ export function createSessionStore(
     options: { isDetached?: boolean; isWorktree?: boolean; settings?: WorktreeSettings; metadata?: Record<string, string> } = {}
   ): Promise<string> {
     const parentEntry = store.getState().workspaces.get(parentId)
-    const parent = parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error') ? parentEntry.data : undefined
+    const parent = parentEntry && (parentEntry.status === WorkspaceEntryStatus.Loaded || parentEntry.status === WorkspaceEntryStatus.OperationError) ? parentEntry.data : undefined
 
     const id = generateId()
     const appStates: Record<string, AppState> = {}
@@ -406,7 +413,7 @@ export function createSessionStore(
     const handle = createHandleForWorkspace(childWorkspace)
 
     store.setState((s) => ({
-      workspaces: new Map(s.workspaces).set(id, { status: 'loaded', data: childWorkspace, store: handle }),
+      workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: childWorkspace, store: handle }),
       activeWorkspaceId: id
     }))
 
@@ -425,12 +432,12 @@ export function createSessionStore(
   ): Promise<void> {
     const entry = store.getState().workspaces.get(id)
     if (!entry) return
-    const workspace = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined
-    const handle = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.store : undefined
+    const workspace = (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data : undefined
+    const handle = (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.store : undefined
 
     // Recursively remove children first (derived from parentId)
     const childIds = Array.from(store.getState().workspaces.entries())
-      .filter(([, e]) => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === id)
+      .filter(([, e]) => (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) && e.data.parentId === id)
       .map(([childId]) => childId)
     for (const childId of childIds) {
       await removeWorkspaceInternal(childId, options)
@@ -483,13 +490,13 @@ export function createSessionStore(
     options: { keepBranch: boolean; keepWorktree: boolean }
   ): Promise<void> {
     const entry = store.getState().workspaces.get(id)
-    if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
+    if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return
     const { data, store: wsStore } = entry
 
     const operationId = generateId()
     // Temporarily show loading in the main pane — preserve data+store for recovery
     store.setState(s => ({
-      workspaces: new Map(s.workspaces).set(id, { status: 'loaded', data, store: wsStore })
+      workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data, store: wsStore })
     }))
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const unsubOutput = deps.git.onOutput((opId, _data) => {
@@ -500,7 +507,7 @@ export function createSessionStore(
       await removeWorkspaceInternal(id, { ...options, operationId })
     } catch (err) {
       store.setState(s => ({
-        workspaces: new Map(s.workspaces).set(id, { status: 'operation-error', data, store: wsStore, error: err instanceof Error ? err.message : String(err) })
+        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data, store: wsStore, error: err instanceof Error ? err.message : String(err) })
       }))
     } finally {
       unsubOutput()
@@ -515,7 +522,7 @@ export function createSessionStore(
   ): Promise<{ success: boolean; error?: string; operationId?: string }> {
      
     const entry = store.getState().workspaces.get(id)
-    if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) {
+    if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) {
       return { success: false, error: 'Workspace not found' }
     }
     const { data: workspace, store: wsStore } = entry
@@ -525,7 +532,7 @@ export function createSessionStore(
     }
 
     const parentEntry = store.getState().workspaces.get(workspace.parentId)
-    const parent = parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error') ? parentEntry.data : undefined
+    const parent = parentEntry && (parentEntry.status === WorkspaceEntryStatus.Loaded || parentEntry.status === WorkspaceEntryStatus.OperationError) ? parentEntry.data : undefined
     if (!parent || !parent.gitRootPath || !parent.gitBranch) {
       return { success: false, error: 'Parent workspace not found or not a git repo' }
     }
@@ -543,7 +550,7 @@ export function createSessionStore(
       const parentHasChanges = await deps.git.hasUncommittedChanges(parent.path)
       if (parentHasChanges) {
         store.setState(s => ({
-          workspaces: new Map(s.workspaces).set(id, { status: 'operation-error', data: workspace, store: wsStore, error: 'Parent workspace has uncommitted changes. Commit or stash them before merging.' })
+          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, error: 'Parent workspace has uncommitted changes. Commit or stash them before merging.' })
         }))
         return { success: false, error: 'Parent workspace has uncommitted changes. Commit or stash them before merging.' }
       }
@@ -556,7 +563,7 @@ export function createSessionStore(
         )
         if (!commitResult.success) {
           store.setState(s => ({
-            workspaces: new Map(s.workspaces).set(id, { status: 'operation-error', data: workspace, store: wsStore, error: `Failed to commit changes: ${commitResult.error}` })
+            workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, error: `Failed to commit changes: ${commitResult.error}` })
           }))
           return { success: false, error: `Failed to commit changes: ${commitResult.error}` }
         }
@@ -571,7 +578,7 @@ export function createSessionStore(
 
       if (!mergeResult.success) {
         store.setState(s => ({
-          workspaces: new Map(s.workspaces).set(id, { status: 'operation-error', data: workspace, store: wsStore, error: `Merge failed: ${mergeResult.error}` })
+          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, error: `Merge failed: ${mergeResult.error}` })
         }))
         return { success: false, error: `Merge failed: ${mergeResult.error}` }
       }
@@ -579,7 +586,7 @@ export function createSessionStore(
       return { success: true, operationId }
     } catch (err) {
       store.setState(s => ({
-        workspaces: new Map(s.workspaces).set(id, { status: 'operation-error', data: workspace, store: wsStore, error: err instanceof Error ? err.message : String(err) })
+        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, error: err instanceof Error ? err.message : String(err) })
       }))
       return { success: false, error: err instanceof Error ? err.message : String(err) }
     } finally {
@@ -636,9 +643,9 @@ export function createSessionStore(
 
     clearWorkspaceError: (id: string): void => {
       const entry = get().workspaces.get(id)
-      if (!entry || entry.status !== 'operation-error') return
+      if (!entry || entry.status !== WorkspaceEntryStatus.OperationError) return
       set((s) => ({
-        workspaces: new Map(s.workspaces).set(id, { status: 'loaded', data: entry.data, store: entry.store })
+        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: entry.data, store: entry.store })
       }))
     },
 
@@ -659,7 +666,7 @@ export function createSessionStore(
       const name = getNameFromPath(path)
 
       set((s) => ({
-        workspaces: new Map(s.workspaces).set(id, { status: 'loading' as const, name, message: 'Loading workspace...', output: [] }),
+        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loading, name, message: 'Loading workspace...', output: [] }),
         activeWorkspaceId: id,
       }))
 
@@ -706,12 +713,12 @@ export function createSessionStore(
         }
 
         set(s => ({
-          workspaces: new Map(s.workspaces).set(id, { status: 'loaded', data: workspace, store: handle })
+          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: workspace, store: handle })
         }))
         void syncSessionToDaemon(get().isRestoring)
       }).catch((err: unknown) => {
         set(s => ({
-          workspaces: new Map(s.workspaces).set(id, { status: 'error', name, error: err instanceof Error ? err.message : String(err) })
+          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Error, name, error: err instanceof Error ? err.message : String(err) })
         }))
       })
 
@@ -720,7 +727,7 @@ export function createSessionStore(
 
     addChildWorkspace: (parentId: string, name: string, isDetached: boolean = false, settings?: WorktreeSettings, description?: string) => {
       const parentEntry = get().workspaces.get(parentId)
-      const parent = parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error') ? parentEntry.data : undefined
+      const parent = parentEntry && (parentEntry.status === WorkspaceEntryStatus.Loaded || parentEntry.status === WorkspaceEntryStatus.OperationError) ? parentEntry.data : undefined
 
       if (!parent) {
         return { success: false, error: 'Parent workspace not found' }
@@ -741,7 +748,7 @@ export function createSessionStore(
         },
         gitOperation: (operationId) => {
           const currentParentEntry = get().workspaces.get(parentId)
-          const currentParent = currentParentEntry && (currentParentEntry.status === 'loaded' || currentParentEntry.status === 'operation-error') ? currentParentEntry.data : undefined
+          const currentParent = currentParentEntry && (currentParentEntry.status === WorkspaceEntryStatus.Loaded || currentParentEntry.status === WorkspaceEntryStatus.OperationError) ? currentParentEntry.data : undefined
           return deps.git.createWorktree(
             parent.gitRootPath ?? '',
             name,
@@ -754,12 +761,12 @@ export function createSessionStore(
 
     adoptExistingWorktree: async (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => {
       const parentEntry = get().workspaces.get(parentId)
-      if (!parentEntry || (parentEntry.status !== 'loaded' && parentEntry.status !== 'operation-error')) {
+      if (!parentEntry || (parentEntry.status !== WorkspaceEntryStatus.Loaded && parentEntry.status !== WorkspaceEntryStatus.OperationError)) {
         return { success: false, error: 'Parent workspace not found' }
       }
 
       const alreadyOpen = Array.from(get().workspaces.values()).some(
-        e => (e.status === 'loaded' || e.status === 'operation-error') && e.data.path === worktreePath
+        e => (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) && e.data.path === worktreePath
       )
       if (alreadyOpen) {
         return { success: false, error: 'This worktree is already open' }
@@ -773,7 +780,7 @@ export function createSessionStore(
     createWorktreeFromBranch: (parentId: string, branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => {
       console.log('[session] createWorktreeFromBranch called:', { parentId, branch, isDetached })
       const parentEntry = get().workspaces.get(parentId)
-      const parent = parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error') ? parentEntry.data : undefined
+      const parent = parentEntry && (parentEntry.status === WorkspaceEntryStatus.Loaded || parentEntry.status === WorkspaceEntryStatus.OperationError) ? parentEntry.data : undefined
 
       if (!parent) {
         return { success: false, error: 'Parent workspace not found' }
@@ -800,7 +807,7 @@ export function createSessionStore(
     createWorktreeFromRemote: (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => {
       console.log('[session] createWorktreeFromRemote called:', { parentId, remoteBranch, isDetached })
       const parentEntry = get().workspaces.get(parentId)
-      const parent = parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error') ? parentEntry.data : undefined
+      const parent = parentEntry && (parentEntry.status === WorkspaceEntryStatus.Loaded || parentEntry.status === WorkspaceEntryStatus.OperationError) ? parentEntry.data : undefined
 
       if (!parent) {
         return { success: false, error: 'Parent workspace not found' }
@@ -851,7 +858,7 @@ export function createSessionStore(
 
     updateGitInfo: (id: string, gitInfo: GitInfo) => {
       const entry = get().workspaces.get(id)
-      if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
+      if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return
       entry.store.setState(s => ({
         workspace: {
           ...s.workspace,
@@ -865,7 +872,7 @@ export function createSessionStore(
 
     refreshGitInfo: async (id: string) => {
       const entry = get().workspaces.get(id)
-      if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
+      if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return
       const gitInfo = await deps.git.getInfo(entry.data.path)
       get().updateGitInfo(id, gitInfo)
     },
@@ -875,7 +882,7 @@ export function createSessionStore(
       if (!result.success) return result
 
       const entry = get().workspaces.get(id)
-      if (entry && (entry.status === 'loaded' || entry.status === 'operation-error')) {
+      if (entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError)) {
         entry.store.getState().updateStatus('merged')
       }
 
@@ -884,19 +891,19 @@ export function createSessionStore(
       } catch (err) {
         // Merge succeeded but removal failed — show operation error
         const currentEntry = get().workspaces.get(id)
-        if (currentEntry && (currentEntry.status === 'loaded' || currentEntry.status === 'operation-error')) {
+        if (currentEntry && (currentEntry.status === WorkspaceEntryStatus.Loaded || currentEntry.status === WorkspaceEntryStatus.OperationError)) {
           store.setState(s => ({
-            workspaces: new Map(s.workspaces).set(id, { status: 'operation-error', data: currentEntry.data, store: currentEntry.store, error: `Merge succeeded but cleanup failed: ${err instanceof Error ? err.message : String(err)}` })
+            workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: currentEntry.data, store: currentEntry.store, error: `Merge succeeded but cleanup failed: ${err instanceof Error ? err.message : String(err)}` })
           }))
         }
         return { success: false, error: err instanceof Error ? err.message : String(err) }
       }
 
       // Refresh parent's remote status after merge
-      const wsData = entry && (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined
+      const wsData = entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data : undefined
       if (wsData?.parentId) {
         const parentEntry = get().workspaces.get(wsData.parentId)
-        if (parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error')) {
+        if (parentEntry && (parentEntry.status === WorkspaceEntryStatus.Loaded || parentEntry.status === WorkspaceEntryStatus.OperationError)) {
           void parentEntry.store.getState().gitController.getState().refreshRemoteStatus()
         }
       }
@@ -910,23 +917,23 @@ export function createSessionStore(
 
       // On success, ensure workspace is back to loaded status
       const entry = get().workspaces.get(id)
-      if (entry && entry.status === 'operation-error') {
+      if (entry && entry.status === WorkspaceEntryStatus.OperationError) {
         store.setState(s => ({
-          workspaces: new Map(s.workspaces).set(id, { status: 'loaded', data: entry.data, store: entry.store })
+          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: entry.data, store: entry.store })
         }))
       }
 
       // Refresh workspace diff status and git info
       const currentEntry = get().workspaces.get(id)
-      if (currentEntry && currentEntry.status === 'loaded') {
+      if (currentEntry && currentEntry.status === WorkspaceEntryStatus.Loaded) {
         void currentEntry.store.getState().gitController.getState().refreshDiffStatus()
       }
       void get().refreshGitInfo(id)
 
       // Refresh parent's remote status after merge
-      if (currentEntry && currentEntry.status === 'loaded' && currentEntry.data.parentId) {
+      if (currentEntry && currentEntry.status === WorkspaceEntryStatus.Loaded && currentEntry.data.parentId) {
         const parentEntry = get().workspaces.get(currentEntry.data.parentId)
-        if (parentEntry && (parentEntry.status === 'loaded' || parentEntry.status === 'operation-error')) {
+        if (parentEntry && (parentEntry.status === WorkspaceEntryStatus.Loaded || parentEntry.status === WorkspaceEntryStatus.OperationError)) {
           void parentEntry.store.getState().gitController.getState().refreshRemoteStatus()
         }
       }
@@ -936,7 +943,7 @@ export function createSessionStore(
 
     closeAndCleanWorkspace: async (id: string) => {
       const entry = get().workspaces.get(id)
-      if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) {
+      if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) {
         return { success: false, error: 'Workspace not found' }
       }
       const workspace = entry.data
@@ -946,7 +953,7 @@ export function createSessionStore(
       }
 
       const parentEntry = get().workspaces.get(workspace.parentId)
-      if (!parentEntry || (parentEntry.status !== 'loaded' && parentEntry.status !== 'operation-error') || !parentEntry.data.gitRootPath) {
+      if (!parentEntry || (parentEntry.status !== WorkspaceEntryStatus.Loaded && parentEntry.status !== WorkspaceEntryStatus.OperationError) || !parentEntry.data.gitRootPath) {
         return { success: false, error: 'Parent workspace not found or not a git repo' }
       }
 
@@ -956,7 +963,7 @@ export function createSessionStore(
 
     quickForkWorkspace: async (workspaceId: string) => {
       const entry = get().workspaces.get(workspaceId)
-      if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) {
+      if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) {
         return { success: false, error: 'Workspace not found' }
       }
       const ws = entry.data
@@ -990,8 +997,8 @@ export function createSessionStore(
       const dragEntry = workspaces.get(workspaceId)
       const targetEntry = workspaces.get(targetWorkspaceId)
       if (!dragEntry || !targetEntry) return
-      if (dragEntry.status !== 'loaded' && dragEntry.status !== 'operation-error') return
-      if (targetEntry.status !== 'loaded' && targetEntry.status !== 'operation-error') return
+      if (dragEntry.status !== WorkspaceEntryStatus.Loaded && dragEntry.status !== WorkspaceEntryStatus.OperationError) return
+      if (targetEntry.status !== WorkspaceEntryStatus.Loaded && targetEntry.status !== WorkspaceEntryStatus.OperationError) return
       if (workspaceId === targetWorkspaceId) return
 
       const dragParent = dragEntry.data.parentId
@@ -999,9 +1006,9 @@ export function createSessionStore(
       if (dragParent !== targetParent) return
 
       // Gather siblings sorted by current sortOrder
-      const siblings: { id: string; entry: Extract<WorkspaceEntry, { status: 'loaded' | 'operation-error' }> }[] = []
+      const siblings: { id: string; entry: Extract<WorkspaceEntry, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }> }[] = []
       for (const [id, entry] of Array.from(workspaces.entries())) {
-        if (entry.status !== 'loaded' && entry.status !== 'operation-error') continue
+        if (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError) continue
         const isMatch = dragParent === null ? !entry.data.parentId : entry.data.parentId === dragParent
         if (isMatch) siblings.push({ id, entry })
       }
@@ -1066,7 +1073,7 @@ export function createSessionStore(
       const incomingPaths = new Set(daemonSession.workspaces.map(ws => ws.path))
       const updatedState = get()
       for (const [id, entry] of Array.from(updatedState.workspaces.entries())) {
-        if (entry.status === 'loaded' && !incomingPaths.has(entry.data.path)) {
+        if (entry.status === WorkspaceEntryStatus.Loaded && !incomingPaths.has(entry.data.path)) {
           get().removeOrphanWorkspace(id)
         }
       }
@@ -1086,7 +1093,7 @@ function updateWorkspaceFields(
   daemonWorkspace: Workspace
 ): void {
   const entry = store.getState().workspaces.get(existingId)
-  if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
+  if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return
   const ws = entry.store.getState().workspace
   entry.store.setState({
     workspace: { ...ws, metadata: daemonWorkspace.metadata, name: daemonWorkspace.name }
@@ -1099,7 +1106,7 @@ function findLoadedByPath(
   path: string
 ): { id: string } | undefined {
   for (const [id, entry] of Array.from(store.getState().workspaces.entries())) {
-    if ((entry.status === 'loaded' || entry.status === 'operation-error') && entry.data.path === path) {
+    if ((entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) && entry.data.path === path) {
       return { id }
     }
   }
@@ -1153,7 +1160,7 @@ function restoreWorkspaceTabs(
   daemonWorkspace: Workspace
 ): void {
   const entry = store.getState().workspaces.get(workspaceId)
-  if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
+  if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return
 
   const wsState = entry.store.getState()
   const oldTabIds = Object.keys(wsState.workspace.appStates)
@@ -1202,7 +1209,7 @@ function reconstructWorkspace(
   const handle = createHandleForWorkspace(workspace)
 
   store.setState((s) => ({
-    workspaces: new Map(s.workspaces).set(id, { status: 'loaded' as const, data: workspace, store: handle }),
+    workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: workspace, store: handle }),
     activeWorkspaceId: id
   }))
 

@@ -4,6 +4,7 @@ import { useStore } from 'zustand'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
 import { getTabs } from '../types'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, GitLogCommit, WorkspaceStore, ReviewState } from '../types'
+import { FileChangeStatus } from '../types'
 import { useGitApi } from '../hooks/useWorkspaceApis'
 import { MonacoDiffViewer } from './MonacoDiffViewer'
 import { CommittedDiffFileTree, UncommittedDiffFileTree, getSortedFilePaths } from './DiffFileTree'
@@ -603,17 +604,17 @@ export default function ReviewBrowser({
     void removeTab(tabId)
   }
 
-  const getStatusIcon = (status: DiffFile['status'] | UncommittedFile['status']) => {
+  const getStatusIcon = (status: FileChangeStatus) => {
     switch (status) {
-      case 'added':
+      case FileChangeStatus.Added:
         return <span className="diff-status added">A</span>
-      case 'modified':
+      case FileChangeStatus.Modified:
         return <span className="diff-status modified">M</span>
-      case 'deleted':
+      case FileChangeStatus.Deleted:
         return <span className="diff-status deleted">D</span>
-      case 'renamed':
+      case FileChangeStatus.Renamed:
         return <span className="diff-status renamed">R</span>
-      case 'untracked':
+      case FileChangeStatus.Untracked:
         return <span className="diff-status untracked">?</span>
     }
   }

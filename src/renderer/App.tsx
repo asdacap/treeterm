@@ -10,6 +10,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import AppErrorFallback from './components/AppErrorFallback'
 import { useAppStore } from './store/app'
 import { useNavigationStore } from './store/navigation'
+import { WorkspaceEntryStatus } from './store/createSessionStore'
 import { useSettingsStore } from './store/settings'
 
 // One-time migration: clear localStorage since daemon is now source of truth
@@ -141,8 +142,8 @@ export default function App() {
             <ActiveProcessesDialog
               workspaces={Object.fromEntries(
                 Array.from(activeSessionStore.getState().workspaces.entries())
-                  .filter(([, e]) => e.status === 'loaded' || e.status === 'operation-error')
-                  .map(([id, e]) => [id, (e as Extract<typeof e, { status: 'loaded' | 'operation-error' }>).data])
+                  .filter(([, e]) => e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError)
+                  .map(([id, e]) => [id, (e as Extract<typeof e, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }>).data])
               )}
               connectionId={activeSessionStore.getState().connection?.id ?? 'local'}
               onClose={() => { useAppStore.setState({ isActiveProcessesOpen: false }); }}

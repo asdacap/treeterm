@@ -3,6 +3,7 @@ import Editor, { OnMount, OnChange } from '@monaco-editor/react'
 import { editor, KeyMod, KeyCode } from 'monaco-editor'
 import { useStore } from 'zustand'
 import type { EditorState, WorkspaceStore } from '../types'
+import { EditorStatus, EditorViewMode } from '../types'
 import { useFilesystemApi, useExecApi } from '../hooks/useWorkspaceApis'
 import { monacoNavigationBridge } from '../monaco-config'
 import { searchDefinition } from '../utils/definitionSearch'
@@ -32,19 +33,19 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): React.JSX.Ele
   const appState = wsData.appStates[tabId]!
   const state = appState.state as EditorState | undefined
 
-  const scrollTop = state?.status === 'ready' ? state.scrollTop ?? 0 : 0
+  const scrollTop = state?.status === EditorStatus.Ready ? state.scrollTop ?? 0 : 0
   const lastScrollTopRef = useRef(scrollTop)
   const [saving, setSaving] = useState(false)
 
-  const pendingScrollToLine = state && state.status !== 'error' ? state.scrollToLine : undefined
+  const pendingScrollToLine = state && state.status !== EditorStatus.Error ? state.scrollToLine : undefined
 
   // Load file content on mount
   useEffect(() => {
-    if (!state?.filePath || state.status === 'loading') return
+    if (!state?.filePath || state.status === EditorStatus.Loading) return
 
     const loadFile = async () => {
       updateTabState<EditorState>(tabId, () => ({
-        status: 'loading',
+        status: EditorStatus.Loading,
         filePath: state.filePath,
         scrollToLine: pendingScrollToLine,
       }))
@@ -56,12 +57,12 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): React.JSX.Ele
           const language = mapLanguageToMonaco(result.file.language)
 
           updateTabState<EditorState>(tabId, () => ({
-            status: 'ready',
+            status: EditorStatus.Ready,
             filePath: state.filePath,
             originalContent: result.file.content,
             currentContent: result.file.content,
             language,
-            viewMode: language === 'markdown' ? 'preview' : 'editor',
+            viewMode: language === 'markdown' ? EditorViewMode.Preview : EditorViewMode.Editor,
             isDirty: false,
             scrollToLine: pendingScrollToLine,
           }))
@@ -69,27 +70,27 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): React.JSX.Ele
           updateTabTitle(tabId, getFilename(state.filePath))
         } else {
           updateTabState<EditorState>(tabId, () => ({
-            status: 'error',
+            status: EditorStatus.Error,
             filePath: state.filePath,
             error: result.error
           }))
         }
       } catch (err) {
         updateTabState<EditorState>(tabId, () => ({
-          status: 'error',
+          status: EditorStatus.Error,
           filePath: state.filePath,
           error: `Error loading file: ${err instanceof Error ? err.message : String(err)}`
         }))
       }
     }
 
-    if (state.status !== 'ready') {
+    if (state.status !== EditorStatus.Ready) {
       void loadFile()
     }
   }, [state?.filePath, wsData.path, tabId, filesystem, updateTabState, updateTabTitle, state?.status, pendingScrollToLine])
 
   // Update tab title with dirty indicator
-  const isDirty = state?.status === 'ready' ? state.isDirty : false
+  const isDirty = state?.status === EditorStatus.Ready ? state.isDirty : false
   useEffect(() => {
     if (!state?.filePath) return
     const filename = getFilename(state.filePath)
@@ -101,14 +102,14 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): React.JSX.Ele
   useEffect(() => {
     return () => {
       updateTabState<EditorState>(tabId, (s) => {
-        if (s.status !== 'ready') return s
+        if (s.status !== EditorStatus.Ready) return s
         return { ...s, scrollTop: lastScrollTopRef.current }
       })
     }
   }, [tabId, updateTabState])
 
   const handleSave = useCallback(async () => {
-    if (!state || state.status !== 'ready' || !state.isDirty || saving) return
+    if (!state || state.status !== EditorStatus.Ready || !state.isDirty || saving) return
 
     setSaving(true)
     try {
@@ -119,7 +120,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): React.JSX.Ele
 
       if (result.success) {
         updateTabState<EditorState>(tabId, (s) => {
-          if (s.status !== 'ready') return s
+          if (s.status !== EditorStatus.Ready) return s
           return { ...s, originalContent: s.currentContent, isDirty: false }
         })
       } else {
@@ -141,10 +142,10 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): React.JSX.Ele
       })
 
       // Scroll to specific line if requested (from go-to-definition)
-      if (state?.status === 'ready' && state.scrollToLine) {
+      if (state?.status === EditorStatus.Ready && state.scrollToLine) {
         editor.revealLineInCenter(state.scrollToLine)
         updateTabState<EditorState>(tabId, (s) => {
-          if (s.status !== 'ready') return s
+          if (s.status !== EditorStatus.Ready) return s
           return { ...s, scrollToLine: undefined }
         })
       } else if (lastScrollTopRef.current > 0) {
@@ -159,7 +160,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): React.JSX.Ele
       monacoNavigationBridge.searchDefinition = (symbol, language) =>
         searchDefinition(execApi, connectionId, wsData.path, symbol, language)
       monacoNavigationBridge.openFileAtLine = (targetFilePath, line) => {
-        addTab<EditorState>('editor', { status: 'loading', filePath: targetFilePath, scrollToLine: line })
+        addTab<EditorState>('editor', { status: EditorStatus.Loading, filePath: targetFilePath, scrollToLine: line })
       }
       monacoNavigationBridge.getWorkspacePath = () => wsData.path
     },
@@ -171,7 +172,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): React.JSX.Ele
       if (value === undefined) return
 
       updateTabState<EditorState>(tabId, (s) => {
-        if (s.status !== 'ready') return s
+        if (s.status !== EditorStatus.Ready) return s
         return { ...s, currentContent: value, isDirty: value !== s.originalContent }
       })
     },
@@ -180,8 +181,8 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): React.JSX.Ele
 
   const toggleViewMode = useCallback(() => {
     updateTabState<EditorState>(tabId, (s) => {
-      if (s.status !== 'ready') return s
-      return { ...s, viewMode: s.viewMode === 'preview' ? 'editor' : 'preview' }
+      if (s.status !== EditorStatus.Ready) return s
+      return { ...s, viewMode: s.viewMode === EditorViewMode.Preview ? EditorViewMode.Editor : EditorViewMode.Preview }
     })
   }, [tabId, updateTabState])
 
@@ -191,7 +192,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): React.JSX.Ele
     return <div className="file-editor-error">Invalid tab</div>
   }
 
-  if (state.status === 'loading') {
+  if (state.status === EditorStatus.Loading) {
     return (
       <div className="file-editor">
         <div className="file-editor-placeholder">Loading...</div>
@@ -199,7 +200,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): React.JSX.Ele
     )
   }
 
-  if (state.status === 'error') {
+  if (state.status === EditorStatus.Error) {
     return (
       <div className="file-editor">
         <div className="file-editor-error">{state.error}</div>
@@ -222,9 +223,9 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): React.JSX.Ele
             <button
               className="file-editor-toggle-btn"
               onClick={toggleViewMode}
-              title={state.viewMode === 'preview' ? 'Edit' : 'Preview'}
+              title={state.viewMode === EditorViewMode.Preview ? 'Edit' : 'Preview'}
             >
-              {state.viewMode === 'preview' ? '\u270F Edit' : '\uD83D\uDC41 Preview'}
+              {state.viewMode === EditorViewMode.Preview ? '\u270F Edit' : '\uD83D\uDC41 Preview'}
             </button>
           )}
           <button
@@ -239,7 +240,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): React.JSX.Ele
         </div>
       </div>
       <div className="file-editor-content">
-        {isMarkdown && state.viewMode === 'preview' ? (
+        {isMarkdown && state.viewMode === EditorViewMode.Preview ? (
           <MarkdownPreview content={state.currentContent} />
         ) : (
           <Editor

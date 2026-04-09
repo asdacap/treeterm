@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { editorApplication } from './renderer'
 import type { Tab, Workspace } from '../../renderer/types'
+import { EditorStatus, EditorViewMode } from '../../renderer/types'
 import { createStore } from 'zustand/vanilla'
 import type { WorkspaceStoreState, WorkspaceStore } from '../../renderer/store/createWorkspaceStore'
 import type { GitControllerState } from '../../renderer/store/createGitControllerStore'
@@ -105,13 +106,13 @@ describe('Editor Renderer', () => {
         const state = editorApplication.createInitialState()
 
         expect(state).toEqual({
-          status: 'ready',
+          status: EditorStatus.Ready,
           filePath: '',
           originalContent: '',
           currentContent: '',
           language: 'plaintext',
           isDirty: false,
-          viewMode: 'editor',
+          viewMode: EditorViewMode.Editor,
         })
       })
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createWorkspaceStore } from './createWorkspaceStore'
 import type { WorkspaceStoreDeps, CachedTerminal } from './createWorkspaceStore'
-import { getUnmergedSubWorkspaces } from './createSessionStore'
+import { getUnmergedSubWorkspaces, WorkspaceEntryStatus } from './createSessionStore'
 import type { WorkspaceEntry } from './createSessionStore'
 import type { Workspace, Application } from '../types'
 import { createMockExecApi } from '../../shared/mockApis'
@@ -86,7 +86,7 @@ function makeFakeApp(overrides: Partial<Application> = {}): Application {
 }
 
 function toLoaded(ws: Workspace): WorkspaceEntry {
-  return { status: 'loaded', data: ws, store: createWorkspaceStore(ws, makeHandleDeps()) }
+  return { status: WorkspaceEntryStatus.Loaded, data: ws, store: createWorkspaceStore(ws, makeHandleDeps()) }
 }
 
 describe('getUnmergedSubWorkspaces', () => {

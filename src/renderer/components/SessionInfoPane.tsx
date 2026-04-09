@@ -5,6 +5,7 @@ import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import { Loader2 } from 'lucide-react'
 import type { SessionState } from '../store/createSessionStore'
+import { WorkspaceEntryStatus } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import { useSessionNamesStore } from '../store/sessionNames'
 import type { PortForwardConfig, PortForwardInfo } from '../types'
@@ -219,9 +220,9 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
     workspaces: Object.fromEntries(
       Array.from(rawWorkspaces.entries()).map(([id, entry]) => [
         id,
-        entry.status === 'loaded' || entry.status === 'operation-error'
+        entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError
           ? { status: entry.status, data: entry.data }
-          : entry.status === 'loading'
+          : entry.status === WorkspaceEntryStatus.Loading
             ? { status: entry.status, name: entry.name, message: entry.message }
             : { status: entry.status, name: entry.name, error: entry.error },
       ]),

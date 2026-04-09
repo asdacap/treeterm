@@ -177,6 +177,14 @@ export interface RunAction {
   description: string
 }
 
+export enum FileChangeStatus {
+  Added = 'added',
+  Modified = 'modified',
+  Deleted = 'deleted',
+  Renamed = 'renamed',
+  Untracked = 'untracked',
+}
+
 export enum ReasoningEffort {
   Off = 'off',
   Low = 'low',
