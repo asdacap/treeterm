@@ -620,9 +620,7 @@ describe('createSessionStore', () => {
         return undefined
       })
       vi.mocked(deps.getSettings).mockReturnValue({
-        terminal: { fontSize: 14, fontFamily: 'monospace', cursorStyle: 'block', cursorBlink: true, showRawChars: false, instances: [] },
-        sandbox: { enabledByDefault: false, allowNetworkByDefault: true },
-        aiHarness: { instances: [] },
+        ...deps.getSettings(),
         globalDefaultApplicationId: 'global-setting-app',
       })
 
@@ -640,9 +638,7 @@ describe('createSessionStore', () => {
       const fallbackApp = makeFakeApp({ id: 'fallback' })
       vi.mocked(deps.appRegistry.getDefaultApp).mockReturnValue(fallbackApp)
       vi.mocked(deps.getSettings).mockReturnValue({
-        terminal: { fontSize: 14, fontFamily: 'monospace', cursorStyle: 'block', cursorBlink: true, showRawChars: false, instances: [] },
-        sandbox: { enabledByDefault: false, allowNetworkByDefault: true },
-        aiHarness: { instances: [] },
+        ...deps.getSettings(),
         globalDefaultApplicationId: 'nonexistent-app',
       })
 
@@ -885,7 +881,7 @@ describe('createSessionStore', () => {
         createdAt: 0,
         lastActivity: 0,
         version: 1,
-        lock: { holderId: 'other-window', acquiredAt: Date.now(), expiresAt: Date.now() + 60000 },
+        lock: { acquiredAt: Date.now(), expiresAt: Date.now() + 60000 },
       })
       const result = await store.getState().forceUnlock()
       expect(result.success).toBe(true)
@@ -907,7 +903,7 @@ describe('createSessionStore', () => {
         createdAt: 0,
         lastActivity: 0,
         version: 1,
-        lock: { holderId: 'other-window', acquiredAt: Date.now(), expiresAt: Date.now() + 60000 },
+        lock: { acquiredAt: Date.now(), expiresAt: Date.now() + 60000 },
       })
       vi.mocked(deps.sessionApi.forceUnlock).mockResolvedValue({ success: false, error: 'failed' } as never)
       const result = await store.getState().forceUnlock()
