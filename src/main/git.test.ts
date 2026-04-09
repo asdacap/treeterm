@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import { GitClient } from './git'
 import type { GrpcDaemonClient } from './grpcClient'
+import { FileChangeStatus } from '../shared/types'
 
 type ExecOutput = {
   stdout?: { data: Buffer }
@@ -62,7 +63,7 @@ describe('GitClient', () => {
 
       expect(entries).toHaveLength(1)
       expect(entries[0]!.path).toBe('src/app.ts')
-      expect(entries[0]!.status).toBe('modified')
+      expect(entries[0]!.status).toBe(FileChangeStatus.Modified)
       expect(entries[0]!.staged).toBe(false)
     })
 
@@ -71,7 +72,7 @@ describe('GitClient', () => {
       const git = new GitClient(client)
       const entries = await git.getStatus('/repo')
 
-      expect(entries[0]!.status).toBe('added')
+      expect(entries[0]!.status).toBe(FileChangeStatus.Added)
       expect(entries[0]!.staged).toBe(true)
     })
 
@@ -80,7 +81,7 @@ describe('GitClient', () => {
       const git = new GitClient(client)
       const entries = await git.getStatus('/repo')
 
-      expect(entries[0]!.status).toBe('deleted')
+      expect(entries[0]!.status).toBe(FileChangeStatus.Deleted)
     })
 
     it('parses untracked file', async () => {
@@ -88,7 +89,7 @@ describe('GitClient', () => {
       const git = new GitClient(client)
       const entries = await git.getStatus('/repo')
 
-      expect(entries[0]!.status).toBe('untracked')
+      expect(entries[0]!.status).toBe(FileChangeStatus.Untracked)
       expect(entries[0]!.staged).toBe(false)
     })
 
@@ -97,7 +98,7 @@ describe('GitClient', () => {
       const git = new GitClient(client)
       const entries = await git.getStatus('/repo')
 
-      expect(entries[0]!.status).toBe('renamed')
+      expect(entries[0]!.status).toBe(FileChangeStatus.Renamed)
       expect(entries[0]!.path).toBe('old.ts')
       expect(entries[0]!.originalPath).toBe('new.ts')
     })
@@ -112,8 +113,8 @@ describe('GitClient', () => {
       const unstaged = entries.find(e => e.path === 'src/app.ts' && !e.staged)
       expect(staged).toBeDefined()
       expect(unstaged).toBeDefined()
-      expect(staged?.status).toBe('modified')
-      expect(unstaged?.status).toBe('modified')
+      expect(staged?.status).toBe(FileChangeStatus.Modified)
+      expect(unstaged?.status).toBe(FileChangeStatus.Modified)
     })
 
     it('parses file with only staged changes', async () => {
@@ -123,7 +124,7 @@ describe('GitClient', () => {
 
       expect(entries).toHaveLength(1)
       expect(entries[0]!.staged).toBe(true)
-      expect(entries[0]!.status).toBe('modified')
+      expect(entries[0]!.status).toBe(FileChangeStatus.Modified)
     })
 
     it('throws when getStatus fails', async () => {
@@ -277,12 +278,12 @@ describe('GitClient', () => {
       expect(diff.files).toHaveLength(2)
 
       const appFile = diff.files.find(f => f.path === 'src/app.ts')
-      expect(appFile?.status).toBe('modified')
+      expect(appFile?.status).toBe(FileChangeStatus.Modified)
       expect(appFile?.additions).toBe(10)
       expect(appFile?.deletions).toBe(5)
 
       const newFile = diff.files.find(f => f.path === 'src/new.ts')
-      expect(newFile?.status).toBe('added')
+      expect(newFile?.status).toBe(FileChangeStatus.Added)
       expect(newFile?.additions).toBe(3)
     })
 
@@ -746,10 +747,10 @@ describe('GitClient', () => {
       const files = await git.getCommitDiff('/repo', 'abc123')
 
       expect(files).toHaveLength(4)
-      expect(files.find(f => f.path === 'new.ts')?.status).toBe('added')
-      expect(files.find(f => f.path === 'mod.ts')?.status).toBe('modified')
-      expect(files.find(f => f.path === 'del.ts')?.status).toBe('deleted')
-      expect(files.find(f => f.path === 'renamed.ts')?.status).toBe('renamed')
+      expect(files.find(f => f.path === 'new.ts')?.status).toBe(FileChangeStatus.Added)
+      expect(files.find(f => f.path === 'mod.ts')?.status).toBe(FileChangeStatus.Modified)
+      expect(files.find(f => f.path === 'del.ts')?.status).toBe(FileChangeStatus.Deleted)
+      expect(files.find(f => f.path === 'renamed.ts')?.status).toBe(FileChangeStatus.Renamed)
     })
 
     it('handles binary files', async () => {

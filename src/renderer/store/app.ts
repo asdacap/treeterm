@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { StoreApi } from 'zustand'
-import { createSessionStore } from './createSessionStore'
+import { createSessionStore, WorkspaceEntryStatus } from './createSessionStore'
 import type { SessionState, SessionEntry } from './createSessionStore'
 import { getUnmergedSubWorkspaces } from './createSessionStore'
 import { useSettingsStore } from './settings'
@@ -345,7 +345,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         const { workspaces, addWorkspace, setActiveWorkspace } = sessionEntry.store.getState()
         let existingId: string | undefined
         for (const [wsId, e] of Array.from(workspaces.entries())) {
-          if ((e.status === 'loaded' || e.status === 'operation-error') && e.data.path === initialPath) {
+          if ((e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) && e.data.path === initialPath) {
             existingId = wsId
             break
           }
@@ -529,7 +529,7 @@ function disposeSessionForConnection(connectionId: string, get: () => AppState):
     // Dispose all workspaces: cached terminals, tab refs, git controllers
     const workspaces = entry.store.getState().workspaces
     for (const [, wsEntry] of Array.from(workspaces.entries())) {
-      if (wsEntry.status === 'loaded' || wsEntry.status === 'operation-error') {
+      if (wsEntry.status === WorkspaceEntryStatus.Loaded || wsEntry.status === WorkspaceEntryStatus.OperationError) {
         wsEntry.store.getState().gitController.getState().dispose()
         wsEntry.store.getState().disposeAllCachedTerminals()
         for (const tabId of Object.keys(wsEntry.data.appStates)) {

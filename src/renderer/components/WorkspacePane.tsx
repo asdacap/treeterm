@@ -4,6 +4,7 @@ import { ChevronDown, Github, Loader2, ArrowDownToLine, RefreshCw, AlertTriangle
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { SessionState } from '../store/createSessionStore'
+import { WorkspaceEntryStatus } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import { useKeybindingStore } from '../store/keybinding'
 import FlexLayoutPane from './FlexLayoutPane'
@@ -49,8 +50,8 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const [branchCopied, setBranchCopied] = useState(false)
 
   const activeEntry = activeWorkspaceId ? workspaces.get(activeWorkspaceId) ?? null : null
-  const activeWorkspace = activeEntry && (activeEntry.status === 'loaded' || activeEntry.status === 'operation-error') ? activeEntry.data : null
-  const activeHandle = activeEntry && (activeEntry.status === 'loaded' || activeEntry.status === 'operation-error') ? activeEntry.store : null
+  const activeWorkspace = activeEntry && (activeEntry.status === WorkspaceEntryStatus.Loaded || activeEntry.status === WorkspaceEntryStatus.OperationError) ? activeEntry.data : null
+  const activeHandle = activeEntry && (activeEntry.status === WorkspaceEntryStatus.Loaded || activeEntry.status === WorkspaceEntryStatus.OperationError) ? activeEntry.store : null
 
   // Dialog state
   const [showCreateChildDialog, setShowCreateChildDialog] = useState(false)
@@ -131,8 +132,8 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
 
   // Compute paths of already-open worktrees
   const openWorktreePaths = Array.from(workspaces.values())
-    .filter((e): e is Extract<typeof e, { status: 'loaded' | 'operation-error' }> =>
-      e.status === 'loaded' || e.status === 'operation-error')
+    .filter((e): e is Extract<typeof e, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }> =>
+      e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError)
     .filter(e => e.data.isWorktree)
     .map(e => e.data.path)
 
@@ -198,7 +199,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     const result: string[] = []
     const parentMap = new Map<string | null, string[]>()
     for (const [id, entry] of Array.from(workspaces.entries())) {
-      const parentId = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data.parentId : null
+      const parentId = (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data.parentId : null
       const children = parentMap.get(parentId) ?? []
       children.push(id)
       parentMap.set(parentId, children)
@@ -271,7 +272,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     <ErrorBoundary FallbackComponent={WorkspaceErrorFallback}>
       <div className="workspace-content">
         {/* Show loading pane when a workspace is being created (e.g. fork / new worktree) */}
-        {activeEntry?.status === 'loading' ? (
+        {activeEntry?.status === WorkspaceEntryStatus.Loading ? (
           <div className="workspace-loading">
             <div className="workspace-loading-header">
               <Loader2 size={16} className="spinning" />
@@ -435,13 +436,13 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                 )}
               </div>
             </div>
-            {(activeEntry?.status === 'error' || activeEntry?.status === 'operation-error') && (
+            {(activeEntry?.status === WorkspaceEntryStatus.Error || activeEntry?.status === WorkspaceEntryStatus.OperationError) && (
               <div className="workspace-load-error">
                 <div className="workspace-load-error-content">
                   <h3>Operation failed</h3>
                   <p className="workspace-load-error-message">{activeEntry.error}</p>
                   <div className="workspace-load-error-actions">
-                    {activeEntry.status === 'operation-error' && (
+                    {activeEntry.status === WorkspaceEntryStatus.OperationError && (
                       <button className="workspace-action-btn" onClick={() => { if (activeWorkspaceId) clearWorkspaceError(activeWorkspaceId); }}>
                         Cancel
                       </button>
@@ -455,9 +456,9 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
             )}
           </>
         )}
-        <div className="workspace-terminal" style={{ display: activeEntry?.status === 'loaded' ? 'flex' : 'none' }}>
+        <div className="workspace-terminal" style={{ display: activeEntry?.status === WorkspaceEntryStatus.Loaded ? 'flex' : 'none' }}>
           {Array.from(workspaces.entries()).map(([wsId, entry]) => {
-            if (entry.status !== 'loaded' && entry.status !== 'operation-error') return null
+            if (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError) return null
             const isActive = wsId === activeWorkspaceId
             return (
               <div key={wsId} style={{ display: isActive ? 'contents' : 'none', height: '100%', width: '100%' }}>

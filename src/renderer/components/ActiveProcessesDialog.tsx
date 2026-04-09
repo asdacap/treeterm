@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { fitTerminal } from '../utils/fitTerminal'
 import { useAppStore } from '../store/app'
 import type { TerminalApi, TTYSessionInfo, Workspace } from '../types'
+import { PtyViewerStatus } from '../types'
 
 interface ActiveProcessesDialogProps {
   workspaces: Record<string, Workspace>
@@ -29,7 +30,7 @@ function lastSegment(cwd: string): string {
 function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connectionId: string; terminalApi: TerminalApi }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [status, setStatus] = useState(PtyViewerStatus.Loading)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   useEffect(() => {
@@ -88,7 +89,7 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
       if (cancelled) return
 
       if (!result.success) {
-        setStatus('error')
+        setStatus(PtyViewerStatus.Error)
         setErrorMessage(result.error)
         return
       }
@@ -99,10 +100,10 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
       })
       cleanups.push(() => { onDataDisposable.dispose(); })
 
-      setStatus('ready')
+      setStatus(PtyViewerStatus.Ready)
     }).catch((err: unknown) => {
       if (cancelled) return
-      setStatus('error')
+      setStatus(PtyViewerStatus.Error)
       setErrorMessage(err instanceof Error ? err.message : `Failed to attach to PTY session ${ptyId}`)
     })
 
@@ -114,7 +115,7 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
     }
   }, [ptyId, terminalApi, connectionId])
 
-  if (status === 'error') {
+  if (status === PtyViewerStatus.Error) {
     return (
       <div className="active-processes-pty-viewer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f44336', padding: '24px', textAlign: 'center' }}>
         <div>
@@ -127,7 +128,7 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      {status === 'loading' && (
+      {status === PtyViewerStatus.Loading && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888', zIndex: 1 }}>
           Attaching to process...
         </div>

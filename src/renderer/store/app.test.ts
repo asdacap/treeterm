@@ -68,30 +68,35 @@ import { useAppStore, type AppDeps } from './app'
 import { useNavigationStore } from './navigation'
 import { useSessionNamesStore } from './sessionNames'
 import type { SessionState, SessionDeps } from './createSessionStore'
+import { WorkspaceEntryStatus } from './createSessionStore'
 import type { Workspace } from '../types'
 import { ConnectionStatus } from '../../shared/types'
 
 // Mock createSessionStore and its utilities
-vi.mock('./createSessionStore', () => ({
-  createSessionStore: vi.fn<(...args: any[]) => any>().mockImplementation(() => ({
-    getState: vi.fn<() => any>().mockReturnValue({
-      workspaces: {},
-      workspaceStores: {},
-      activeWorkspaceId: null,
-      isRestoring: false,
-      addWorkspace: vi.fn<(...args: any[]) => any>(),
-      setActiveWorkspace: vi.fn<(...args: any[]) => void>(),
-      getWorkspace: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
-      syncToDaemon: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
-      handleRestore: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
-      handleExternalUpdate: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
-      removeOrphanWorkspace: vi.fn<(...args: any[]) => void>(),
-    }),
-    setState: vi.fn<(...args: any[]) => void>(),
-    subscribe: vi.fn<(...args: any[]) => any>()
-  })),
-  getUnmergedSubWorkspaces: vi.fn<(...args: any[]) => any[]>().mockReturnValue([])
-}))
+vi.mock('./createSessionStore', async (importOriginal) => {
+  const actual: Record<string, unknown> = await importOriginal<Record<string, unknown>>()
+  return {
+    ...actual,
+    createSessionStore: vi.fn<(...args: any[]) => any>().mockImplementation(() => ({
+      getState: vi.fn<() => any>().mockReturnValue({
+        workspaces: {},
+        workspaceStores: {},
+        activeWorkspaceId: null,
+        isRestoring: false,
+        addWorkspace: vi.fn<(...args: any[]) => any>(),
+        setActiveWorkspace: vi.fn<(...args: any[]) => void>(),
+        getWorkspace: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
+        syncToDaemon: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+        handleRestore: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
+        handleExternalUpdate: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
+        removeOrphanWorkspace: vi.fn<(...args: any[]) => void>(),
+      }),
+      setState: vi.fn<(...args: any[]) => void>(),
+      subscribe: vi.fn<(...args: any[]) => any>()
+    })),
+    getUnmergedSubWorkspaces: vi.fn<(...args: any[]) => any[]>().mockReturnValue([])
+  }
+})
 
 vi.mock('./settings', () => ({
   useSettingsStore: {
@@ -513,7 +518,7 @@ describe('useAppStore', () => {
       const { createSessionStore } = await import('./createSessionStore')
       vi.mocked(createSessionStore).mockReturnValue({
         getState: vi.fn<() => any>().mockReturnValue({
-          workspaces: new Map([['ws-existing', { status: 'loaded', data: { id: 'ws-existing', path: '/projects/existing', name: 'existing' }, store: {} }]]),
+          workspaces: new Map([['ws-existing', { status: WorkspaceEntryStatus.Loaded, data: { id: 'ws-existing', path: '/projects/existing', name: 'existing' }, store: {} }]]),
           activeWorkspaceId: null,
           isRestoring: false,
           addWorkspace: vi.fn<(...args: any[]) => any>(),

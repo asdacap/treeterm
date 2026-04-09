@@ -6,6 +6,7 @@ import { GitFork, ChevronDown, ChevronRight, Loader2, AlertCircle } from 'lucide
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { SessionState, WorkspaceEntry } from '../store/createSessionStore'
+import { WorkspaceEntryStatus } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import { useNavigationStore } from '../store/navigation'
 import { useKeybindingStore, PrefixModeState } from '../store/keybinding'
@@ -60,7 +61,7 @@ export default function SessionPanel({
   const menuPosition = useContextMenuStore((s) => s.position)
   const getChildren = (parentId: string) =>
     Array.from(workspaces.values())
-      .filter((e): e is Extract<typeof e, { status: 'loaded' | 'operation-error' }> => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === parentId)
+      .filter((e): e is Extract<typeof e, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }> => (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) && e.data.parentId === parentId)
       .map(e => e.data)
       .sort((a, b) => parseInt(a.metadata.sortOrder || '0') - parseInt(b.metadata.sortOrder || '0'))
 
@@ -119,7 +120,7 @@ export default function SessionPanel({
     const parentIds = Array.from(workspaces.keys())
       .filter((id) =>
         Array.from(workspaces.values())
-          .filter(e => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === id)
+          .filter(e => (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) && e.data.parentId === id)
           .length > 0
       )
     if (parentIds.length > 0) {
@@ -133,8 +134,8 @@ export default function SessionPanel({
 
   // Compute paths of already-open worktrees
   const openWorktreePaths = Array.from(workspaces.values())
-    .filter((e): e is Extract<typeof e, { status: 'loaded' | 'operation-error' }> =>
-      e.status === 'loaded' || e.status === 'operation-error')
+    .filter((e): e is Extract<typeof e, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }> =>
+      e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError)
     .filter(e => e.data.isWorktree)
     .map(e => e.data.path)
 
@@ -161,7 +162,7 @@ export default function SessionPanel({
   const handleCreateChild = (parentId: string) => {
     closeContextMenu()
     const entry = workspaces.get(parentId)
-    if (entry && (entry.status === 'loaded' || entry.status === 'operation-error')) {
+    if (entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError)) {
       const behindCount = entry.store.getState().gitController.getState().behindCount
       if (behindCount > 0) {
         setUpstreamWarning({
@@ -179,7 +180,7 @@ export default function SessionPanel({
 
   const handleQuickFork = async (wsId: string) => {
     const entry = workspaces.get(wsId)
-    if (entry && (entry.status === 'loaded' || entry.status === 'operation-error')) {
+    if (entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError)) {
       const behindCount = entry.store.getState().gitController.getState().behindCount
       if (behindCount > 0) {
         setUpstreamWarning({
@@ -270,7 +271,7 @@ export default function SessionPanel({
   const handleRemove = async (id: string) => {
     closeContextMenu()
     const entry = workspaces.get(id)
-    if (!entry || (entry.status !== 'loaded' && entry.status !== 'operation-error')) return
+    if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return
     const ws = entry.data
 
     // For worktree workspaces with a parent, open the Review tab
@@ -292,7 +293,7 @@ export default function SessionPanel({
   const handleOpenSettings = (workspaceId: string) => {
     closeContextMenu()
     const entry = workspaces.get(workspaceId)
-    if (entry && (entry.status === 'loaded' || entry.status === 'operation-error')) {
+    if (entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError)) {
       entry.store.getState().addTab('workspace-settings')
     }
   }
@@ -312,12 +313,12 @@ export default function SessionPanel({
   // Get root workspaces (those without parents) — includes loading/error entries (no parentId)
   const rootWorkspaceIds = Array.from(workspaces.entries())
     .filter(([, e]) => {
-      if (e.status === 'loaded' || e.status === 'operation-error') return !e.data.parentId
+      if (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) return !e.data.parentId
       return true // loading/error entries are always top-level
     })
     .sort(([, a], [, b]) => {
-      const aOrder = (a.status === 'loaded' || a.status === 'operation-error') ? parseInt(a.data.metadata.sortOrder || '0') : Infinity
-      const bOrder = (b.status === 'loaded' || b.status === 'operation-error') ? parseInt(b.data.metadata.sortOrder || '0') : Infinity
+      const aOrder = (a.status === WorkspaceEntryStatus.Loaded || a.status === WorkspaceEntryStatus.OperationError) ? parseInt(a.data.metadata.sortOrder || '0') : Infinity
+      const bOrder = (b.status === WorkspaceEntryStatus.Loaded || b.status === WorkspaceEntryStatus.OperationError) ? parseInt(b.data.metadata.sortOrder || '0') : Infinity
       return aOrder - bOrder
     })
     .map(([id]) => id)
@@ -325,7 +326,7 @@ export default function SessionPanel({
   // Get create child dialog parent handle
   const createChildDialogParentEntry = createChildDialogParentId ? workspaces.get(createChildDialogParentId) : undefined
   const createChildDialogParentHandle = createChildDialogParentEntry &&
-    (createChildDialogParentEntry.status === 'loaded' || createChildDialogParentEntry.status === 'operation-error')
+    (createChildDialogParentEntry.status === WorkspaceEntryStatus.Loaded || createChildDialogParentEntry.status === WorkspaceEntryStatus.OperationError)
     ? createChildDialogParentEntry.store
     : null
 
@@ -345,8 +346,8 @@ export default function SessionPanel({
     const dragEntry = workspaces.get(dragState.dragId)
     const overEntry = workspaces.get(id)
     if (!dragEntry || !overEntry) return
-    if (dragEntry.status !== 'loaded' && dragEntry.status !== 'operation-error') return
-    if (overEntry.status !== 'loaded' && overEntry.status !== 'operation-error') return
+    if (dragEntry.status !== WorkspaceEntryStatus.Loaded && dragEntry.status !== WorkspaceEntryStatus.OperationError) return
+    if (overEntry.status !== WorkspaceEntryStatus.Loaded && overEntry.status !== WorkspaceEntryStatus.OperationError) return
     if (dragEntry.data.parentId !== overEntry.data.parentId) return
 
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -607,7 +608,7 @@ function WorkspaceTreeItem({
   const menuPosition = useContextMenuStore((s) => s.position)
   const menuId = `ws-context-${id}`
 
-  const ws = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined
+  const ws = (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data : undefined
   const displayName = ws ? (ws.metadata.displayName || ws.name) : (entry as { name: string }).name
   const hasChildren = children.length > 0
   const tabIds = ws ? Object.keys(ws.appStates) : []
@@ -652,7 +653,7 @@ function WorkspaceTreeItem({
           <span className="tree-item-expand-placeholder" />
         )}
         <span className="tree-item-icon">
-          <WorkspaceIcon tabIds={tabIds} loadStatus={entry.status === 'loading' || entry.status === 'error' ? entry.status : undefined} isWorktree={ws?.isWorktree ?? false} />
+          <WorkspaceIcon tabIds={tabIds} loadStatus={entry.status === WorkspaceEntryStatus.Loading || entry.status === WorkspaceEntryStatus.Error ? entry.status : undefined} isWorktree={ws?.isWorktree ?? false} />
         </span>
         <span className="tree-item-name">
           {displayName}
@@ -711,18 +712,18 @@ export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSess
 
   const getChildren = (parentId: string): Workspace[] =>
     Array.from(workspaces.values())
-      .filter((e): e is Extract<typeof e, { status: 'loaded' | 'operation-error' }> => (e.status === 'loaded' || e.status === 'operation-error') && e.data.parentId === parentId)
+      .filter((e): e is Extract<typeof e, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }> => (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) && e.data.parentId === parentId)
       .map(e => e.data)
       .sort((a, b) => parseInt(a.metadata.sortOrder || '0') - parseInt(b.metadata.sortOrder || '0'))
 
   const rootWorkspaceIds = Array.from(workspaces.entries())
     .filter(([, e]) => {
-      if (e.status === 'loaded' || e.status === 'operation-error') return !e.data.parentId
+      if (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) return !e.data.parentId
       return true
     })
     .sort(([, a], [, b]) => {
-      const aOrder = (a.status === 'loaded' || a.status === 'operation-error') ? parseInt(a.data.metadata.sortOrder || '0') : Infinity
-      const bOrder = (b.status === 'loaded' || b.status === 'operation-error') ? parseInt(b.data.metadata.sortOrder || '0') : Infinity
+      const aOrder = (a.status === WorkspaceEntryStatus.Loaded || a.status === WorkspaceEntryStatus.OperationError) ? parseInt(a.data.metadata.sortOrder || '0') : Infinity
+      const bOrder = (b.status === WorkspaceEntryStatus.Loaded || b.status === WorkspaceEntryStatus.OperationError) ? parseInt(b.data.metadata.sortOrder || '0') : Infinity
       return aOrder - bOrder
     })
     .map(([id]) => id)
@@ -736,7 +737,7 @@ export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSess
     const entry = workspaces.get(id)
     if (!entry) return null
 
-    const ws = (entry.status === 'loaded' || entry.status === 'operation-error') ? entry.data : undefined
+    const ws = (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data : undefined
     const displayName = ws ? (ws.metadata.displayName || ws.name) : (entry as { name: string }).name
     const tabIds = ws ? Object.keys(ws.appStates) : []
     const isActive = isActiveSession && activeWorkspaceId === id
@@ -751,7 +752,7 @@ export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSess
         >
           <WorkspaceIcon
             tabIds={tabIds}
-            loadStatus={entry.status === 'loading' || entry.status === 'error' ? entry.status : undefined}
+            loadStatus={entry.status === WorkspaceEntryStatus.Loading || entry.status === WorkspaceEntryStatus.Error ? entry.status : undefined}
             isWorktree={ws?.isWorktree ?? false}
           />
         </div>

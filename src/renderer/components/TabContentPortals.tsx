@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { StoreApi } from 'zustand'
 import { useStore } from 'zustand'
 import type { SessionState } from '../store/createSessionStore'
+import { WorkspaceEntryStatus } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import { SessionStoreContext } from '../contexts/SessionStoreContext'
 import { ErrorBoundary } from './ErrorBoundary'
@@ -57,13 +58,13 @@ export default function TabContentPortals({ sessionStore, activeWorkspaceId }: T
 
   // Collect tab IDs for the active workspace to detect unassigned portal slots
   const activeEntry = activeWorkspaceId ? workspaces.get(activeWorkspaceId) ?? null : null
-  const activeWsData = activeEntry && (activeEntry.status === 'loaded' || activeEntry.status === 'operation-error') ? activeEntry.data : null
+  const activeWsData = activeEntry && (activeEntry.status === WorkspaceEntryStatus.Loaded || activeEntry.status === WorkspaceEntryStatus.OperationError) ? activeEntry.data : null
   const activeTabIds = activeWsData ? new Set(getTabs(activeWsData).map(t => t.id)) : new Set<string>()
 
   return (
     <SessionStoreContext.Provider value={sessionStore}>
       {Array.from(workspaces.entries()).map(([wsId, entry]) => {
-        if (entry.status !== 'loaded' && entry.status !== 'operation-error') return null
+        if (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError) return null
         const workspace = entry.data
         const wsTabs = getTabs(workspace)
         const isActiveWorkspace = wsId === activeWorkspaceId

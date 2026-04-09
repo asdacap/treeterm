@@ -9,17 +9,18 @@
 import { GrpcDaemonClient } from './grpcClient'
 import type { ExecInput, ExecOutput } from '../generated/treeterm'
 import { join } from 'path'
+import { FileChangeStatus } from '../shared/types'
 
 export interface GitStatusEntry {
   path: string
-  status: 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked'
+  status: FileChangeStatus
   staged: boolean
   originalPath?: string
 }
 
 export interface GitDiffFile {
   path: string
-  status: 'added' | 'modified' | 'deleted' | 'renamed'
+  status: FileChangeStatus
   additions: number
   deletions: number
 }
@@ -231,17 +232,17 @@ export class GitClient {
 
       // Helper to determine status from status char
       const getStatusFromChar = (c: string): GitStatusEntry['status'] => {
-        if (c === 'A') return 'added'
-        if (c === 'D') return 'deleted'
-        if (c === 'R') return 'renamed'
-        return 'modified'
+        if (c === 'A') return FileChangeStatus.Added
+        if (c === 'D') return FileChangeStatus.Deleted
+        if (c === 'R') return FileChangeStatus.Renamed
+        return FileChangeStatus.Modified
       }
 
       // Untracked files
       if (stagedChar === '?' && unstagedChar === '?') {
         entries.push({
           path,
-          status: 'untracked',
+          status: FileChangeStatus.Untracked,
           staged: false,
           originalPath
         })
@@ -646,10 +647,10 @@ export class GitClient {
       const filePath = pathParts[pathParts.length - 1] ?? '' // Handle renames
       if (!status) continue
 
-      if (status.startsWith('A')) statusMap.set(filePath, 'added')
-      else if (status.startsWith('M')) statusMap.set(filePath, 'modified')
-      else if (status.startsWith('D')) statusMap.set(filePath, 'deleted')
-      else if (status.startsWith('R')) statusMap.set(filePath, 'renamed')
+      if (status.startsWith('A')) statusMap.set(filePath, FileChangeStatus.Added)
+      else if (status.startsWith('M')) statusMap.set(filePath, FileChangeStatus.Modified)
+      else if (status.startsWith('D')) statusMap.set(filePath, FileChangeStatus.Deleted)
+      else if (status.startsWith('R')) statusMap.set(filePath, FileChangeStatus.Renamed)
     }
 
     // Parse numstat
@@ -663,7 +664,7 @@ export class GitClient {
 
       files.push({
         path: resolvedPath,
-        status: statusMap.get(resolvedPath) || 'modified',
+        status: statusMap.get(resolvedPath) || FileChangeStatus.Modified,
         additions,
         deletions
       })
@@ -981,10 +982,10 @@ export class GitClient {
       const [status, ...pathParts] = line.split('\t')
       const filePath = pathParts[pathParts.length - 1] ?? ''
       if (!status) continue
-      if (status.startsWith('A')) statusMap.set(filePath, 'added')
-      else if (status.startsWith('M')) statusMap.set(filePath, 'modified')
-      else if (status.startsWith('D')) statusMap.set(filePath, 'deleted')
-      else if (status.startsWith('R')) statusMap.set(filePath, 'renamed')
+      if (status.startsWith('A')) statusMap.set(filePath, FileChangeStatus.Added)
+      else if (status.startsWith('M')) statusMap.set(filePath, FileChangeStatus.Modified)
+      else if (status.startsWith('D')) statusMap.set(filePath, FileChangeStatus.Deleted)
+      else if (status.startsWith('R')) statusMap.set(filePath, FileChangeStatus.Renamed)
     }
 
     const files: GitDiffFile[] = []
@@ -993,7 +994,7 @@ export class GitClient {
       const resolvedPath = filePath ?? ''
       files.push({
         path: resolvedPath,
-        status: statusMap.get(resolvedPath) || 'modified',
+        status: statusMap.get(resolvedPath) || FileChangeStatus.Modified,
         additions: (add ?? '') === '-' ? 0 : parseInt(add ?? '', 10) || 0,
         deletions: (del ?? '') === '-' ? 0 : parseInt(del ?? '', 10) || 0
       })

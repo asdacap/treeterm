@@ -4,11 +4,12 @@ import { render, screen, fireEvent } from '@testing-library/react'
 
 import { getSortedFilePaths, CommittedDiffFileTree, UncommittedDiffFileTree } from './DiffFileTree'
 import type { DiffFile, UncommittedFile } from '../types'
+import { FileChangeStatus } from '../types'
 
 function makeDiffFile(overrides: Partial<DiffFile> = {}): DiffFile {
   return {
     path: 'src/app.ts',
-    status: 'modified',
+    status: FileChangeStatus.Modified,
     additions: 10,
     deletions: 5,
     ...overrides,
@@ -18,7 +19,7 @@ function makeDiffFile(overrides: Partial<DiffFile> = {}): DiffFile {
 function makeUncommittedFile(overrides: Partial<UncommittedFile> = {}): UncommittedFile {
   return {
     path: 'src/app.ts',
-    status: 'modified',
+    status: FileChangeStatus.Modified,
     staged: false,
     additions: 10,
     deletions: 5,
@@ -131,7 +132,7 @@ describe('CommittedDiffFileTree', () => {
   })
 
   it('calls getStatusIcon for each file', () => {
-    const files = [makeDiffFile({ status: 'added' })]
+    const files = [makeDiffFile({ status: FileChangeStatus.Added })]
     render(
       <CommittedDiffFileTree
         files={files}
@@ -140,7 +141,7 @@ describe('CommittedDiffFileTree', () => {
         getStatusIcon={getStatusIcon}
       />
     )
-    expect(getStatusIcon).toHaveBeenCalledWith('added')
+    expect(getStatusIcon).toHaveBeenCalledWith(FileChangeStatus.Added)
   })
 
   it('renders directories expanded by default', () => {

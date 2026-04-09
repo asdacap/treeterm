@@ -3,6 +3,9 @@ import type { WorkspaceStore } from '../store/createWorkspaceStore'
 export type { WorkspaceStore }
 
 // Import and re-export shared types
+import {
+  FileChangeStatus,
+} from '../../shared/types'
 import type {
   SandboxConfig,
   AppState,
@@ -24,6 +27,7 @@ import type {
   PortForwardInfo,
   ReasoningEffort
 } from '../../shared/types'
+export { FileChangeStatus }
 import type { PtyEvent, ExecEvent, IpcResult } from '../../shared/ipc-types'
 export type { PtyEvent, ExecEvent, IpcResult }
 
@@ -144,10 +148,33 @@ export interface ChatState {
   messages: ChatMessage[]
 }
 
+export enum EditorStatus {
+  Loading = 'loading',
+  Ready = 'ready',
+  Error = 'error',
+}
+
+export enum EditorViewMode {
+  Editor = 'editor',
+  Preview = 'preview',
+}
+
+export enum TtyCreationStatus {
+  Loading = 'loading',
+  Ready = 'ready',
+  Error = 'error',
+}
+
+export enum PtyViewerStatus {
+  Loading = 'loading',
+  Ready = 'ready',
+  Error = 'error',
+}
+
 export type EditorState =
-  | { status: 'loading'; filePath: string; scrollToLine?: number }
-  | { status: 'ready'; filePath: string; originalContent: string; currentContent: string; language: string; isDirty: boolean; viewMode: 'editor' | 'preview'; scrollTop?: number; scrollToLine?: number }
-  | { status: 'error'; filePath: string; error: string }
+  | { status: EditorStatus.Loading; filePath: string; scrollToLine?: number }
+  | { status: EditorStatus.Ready; filePath: string; originalContent: string; currentContent: string; language: string; isDirty: boolean; viewMode: EditorViewMode; scrollTop?: number; scrollToLine?: number }
+  | { status: EditorStatus.Error; filePath: string; error: string }
 
 export interface FileEntry {
   name: string
@@ -210,7 +237,7 @@ export interface BranchInfo {
 
 export interface DiffFile {
   path: string
-  status: 'added' | 'modified' | 'deleted' | 'renamed'
+  status: FileChangeStatus
   additions: number
   deletions: number
 }
@@ -231,7 +258,7 @@ export interface ConflictInfo {
 
 export interface UncommittedFile {
   path: string
-  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked'
+  status: FileChangeStatus
   staged: boolean
   additions: number
   deletions: number
@@ -624,9 +651,9 @@ export function isEditorState(state: unknown): state is EditorState {
     typeof state === 'object' &&
     'status' in state &&
     'filePath' in state &&
-    ((state as { status: unknown }).status === 'loading' ||
-      (state as { status: unknown }).status === 'ready' ||
-      (state as { status: unknown }).status === 'error') &&
+    ((state as { status: unknown }).status === EditorStatus.Loading ||
+      (state as { status: unknown }).status === EditorStatus.Ready ||
+      (state as { status: unknown }).status === EditorStatus.Error) &&
     typeof (state as EditorState).filePath === 'string'
   )
 }

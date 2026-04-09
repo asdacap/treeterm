@@ -4,6 +4,7 @@ import Editor, { OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
 import { useStore } from 'zustand'
 import type { EditorState, ReviewComment, WorkspaceStore } from '../types'
+import { EditorStatus, EditorViewMode } from '../types'
 import { useFilesystemApi, useExecApi } from '../hooks/useWorkspaceApis'
 import { monacoNavigationBridge } from '../monaco-config'
 import { searchDefinition } from '../utils/definitionSearch'
@@ -166,7 +167,7 @@ export function FileViewer({
     monacoNavigationBridge.searchDefinition = (symbol, language) =>
       searchDefinition(execApi, connectionId, wsData.path, symbol, language)
     monacoNavigationBridge.openFileAtLine = (targetFilePath, line) => {
-      addTab<EditorState>('editor', { status: 'loading', filePath: targetFilePath, scrollToLine: line })
+      addTab<EditorState>('editor', { status: EditorStatus.Loading, filePath: targetFilePath, scrollToLine: line })
     }
     monacoNavigationBridge.getWorkspacePath = () => wsData.path
   }, [onLineClick, execApi, connectionId, wsData.path, addTab])
@@ -339,13 +340,13 @@ export function FileViewer({
     if (!filePath) return
 
     addTab<EditorState>('editor', {
-      status: 'ready',
+      status: EditorStatus.Ready,
       filePath: filePath,
       originalContent: fileState.content,
       currentContent: fileState.content,
       language: fileState.language,
       isDirty: false,
-      viewMode: fileState.language === 'markdown' ? 'preview' : 'editor',
+      viewMode: fileState.language === 'markdown' ? EditorViewMode.Preview : EditorViewMode.Editor,
     })
   }, [filePath, fileState, addTab])
 

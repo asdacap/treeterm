@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createSessionStore } from './createSessionStore'
+import { createSessionStore, WorkspaceEntryStatus } from './createSessionStore'
 import type { SessionDeps, SessionState } from './createSessionStore'
 import type { LlmApi, Workspace, Application, GitInfo } from '../types'
 import { ConnectionStatus } from '../../shared/types'
@@ -176,15 +176,15 @@ describe('createSessionStore', () => {
       expect(store.getState().workspaces.get(id)).toBeDefined()
       // Immediately after addWorkspace, status is 'loading' with name available
       const loadingEntry = store.getState().workspaces.get(id)!
-      expect(loadingEntry.status).toBe('loading')
+      expect(loadingEntry.status).toBe(WorkspaceEntryStatus.Loading)
       expect((loadingEntry as { name: string }).name).toBe('project')
       expect(store.getState().activeWorkspaceId).toBe(id)
       // After flush, workspace transitions to 'loaded' with full data
       await flushPromises()
       const entry = store.getState().workspaces.get(id)!
-      expect(entry.status).toBe('loaded')
-      expect((entry as Extract<typeof entry, { status: 'loaded' }>).data.name).toBe('project')
-      expect((entry as Extract<typeof entry, { status: 'loaded' }>).data.path).toBe('/my/project')
+      expect(entry.status).toBe(WorkspaceEntryStatus.Loaded)
+      expect((entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).data.name).toBe('project')
+      expect((entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).data.path).toBe('/my/project')
     })
 
     it('addWorkspace queries git info', async () => {
@@ -192,8 +192,8 @@ describe('createSessionStore', () => {
       await flushPromises()
       expect(deps.git.getInfo).toHaveBeenCalledWith('/my/repo')
       const entry = Array.from(store.getState().workspaces.values())[0]!
-      expect(entry.status).toBe('loaded')
-      const ws = (entry as Extract<typeof entry, { status: 'loaded' }>).data
+      expect(entry.status).toBe(WorkspaceEntryStatus.Loaded)
+      const ws = (entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).data
       expect(ws.isGitRepo).toBe(true)
       expect(ws.gitBranch).toBe('main')
     })
@@ -204,8 +204,8 @@ describe('createSessionStore', () => {
       const id = store.getState().addWorkspace('/test')
       await flushPromises()
       const entry = store.getState().workspaces.get(id)!
-      expect(entry.status).toBe('loaded')
-      const ws = (entry as Extract<typeof entry, { status: 'loaded' }>).data
+      expect(entry.status).toBe(WorkspaceEntryStatus.Loaded)
+      const ws = (entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).data
       expect(Object.keys(ws.appStates)).toHaveLength(1)
       expect(ws.activeTabId).toBeDefined()
     })
@@ -216,8 +216,8 @@ describe('createSessionStore', () => {
       const id = store.getState().addWorkspace('/test', { skipDefaultTabs: true })
       await flushPromises()
       const entry = store.getState().workspaces.get(id)!
-      expect(entry.status).toBe('loaded')
-      const ws = (entry as Extract<typeof entry, { status: 'loaded' }>).data
+      expect(entry.status).toBe(WorkspaceEntryStatus.Loaded)
+      const ws = (entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).data
       expect(Object.keys(ws.appStates)).toHaveLength(0)
     })
 
@@ -246,7 +246,7 @@ describe('createSessionStore', () => {
 
       const workspaces = store.getState().workspaces
       const children = Array.from(workspaces.values())
-        .filter((e): e is Extract<typeof e, { status: 'loaded' }> => e.status === 'loaded' && e.data.parentId === parentId)
+        .filter((e): e is Extract<typeof e, { status: WorkspaceEntryStatus.Loaded }> => e.status === WorkspaceEntryStatus.Loaded && e.data.parentId === parentId)
         .map(e => e.data)
       expect(children).toHaveLength(1)
       expect(children[0]!.name).toBe('feature')
@@ -272,10 +272,10 @@ describe('createSessionStore', () => {
       expect(result).toEqual({ success: true })
       await flushPromises()
       const workspaces = store.getState().workspaces
-      const errorEntry = Array.from(workspaces.values()).find(e => e.status === 'error')
+      const errorEntry = Array.from(workspaces.values()).find(e => e.status === WorkspaceEntryStatus.Error)
       expect(errorEntry).toBeDefined()
       if (errorEntry) {
-        expect(errorEntry.status).toBe('error')
+        expect(errorEntry.status).toBe(WorkspaceEntryStatus.Error)
         expect(errorEntry.error).toBe('git error')
       }
     })
@@ -336,7 +336,7 @@ describe('createSessionStore', () => {
       store.getState().addChildWorkspace(parentId, 'child')
       await flushPromises()
       const childEntry = Array.from(store.getState().workspaces.values())
-        .find((e): e is Extract<typeof e, { status: 'loaded' }> => e.status === 'loaded' && e.data.name === 'child')
+        .find((e): e is Extract<typeof e, { status: WorkspaceEntryStatus.Loaded }> => e.status === WorkspaceEntryStatus.Loaded && e.data.name === 'child')
       expect(childEntry).toBeDefined()
       childId = childEntry?.data.id ?? ''
     })
@@ -390,8 +390,8 @@ describe('createSessionStore', () => {
       await flushPromises()
       store.getState().updateGitInfo(id, { isRepo: true, branch: 'develop', rootPath: '/test' })
       const entry = store.getState().workspaces.get(id)!
-      expect(entry.status).toBe('loaded')
-      expect((entry as Extract<typeof entry, { status: 'loaded' }>).data.gitBranch).toBe('develop')
+      expect(entry.status).toBe(WorkspaceEntryStatus.Loaded)
+      expect((entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).data.gitBranch).toBe('develop')
     })
 
     it('updateGitInfo does nothing for non-existent workspace', () => {
@@ -405,8 +405,8 @@ describe('createSessionStore', () => {
       vi.mocked(deps.git.getInfo).mockResolvedValue({ isRepo: true, branch: 'feature', rootPath: '/test' })
       await store.getState().refreshGitInfo(id)
       const entry = store.getState().workspaces.get(id)!
-      expect(entry.status).toBe('loaded')
-      expect((entry as Extract<typeof entry, { status: 'loaded' }>).data.gitBranch).toBe('feature')
+      expect(entry.status).toBe(WorkspaceEntryStatus.Loaded)
+      expect((entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).data.gitBranch).toBe('feature')
     })
 
     it('refreshGitInfo does nothing for non-existent workspace', async () => {
@@ -425,7 +425,7 @@ describe('createSessionStore', () => {
       store.getState().addChildWorkspace(parentId, 'child')
       await flushPromises()
       const childEntry = Array.from(store.getState().workspaces.values())
-        .find((e): e is Extract<typeof e, { status: 'loaded' }> => e.status === 'loaded' && e.data.name === 'child')
+        .find((e): e is Extract<typeof e, { status: WorkspaceEntryStatus.Loaded }> => e.status === WorkspaceEntryStatus.Loaded && e.data.name === 'child')
       expect(childEntry).toBeDefined()
       childId = childEntry?.data.id ?? ''
     })
@@ -573,8 +573,8 @@ describe('createSessionStore', () => {
       })
       await flushPromises()
       const entry = store.getState().workspaces.get(id)!
-      expect(entry.status).toBe('loaded')
-      const ws = (entry as Extract<typeof entry, { status: 'loaded' }>).data
+      expect(entry.status).toBe(WorkspaceEntryStatus.Loaded)
+      const ws = (entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).data
       const tab = Object.values(ws.appStates)[0]!
       expect(tab.applicationId).toBe('custom-app')
     })
@@ -587,8 +587,8 @@ describe('createSessionStore', () => {
       const id = store.getState().addWorkspace('/test')
       await flushPromises()
       const entry = store.getState().workspaces.get(id)!
-      expect(entry.status).toBe('loaded')
-      const ws = (entry as Extract<typeof entry, { status: 'loaded' }>).data
+      expect(entry.status).toBe(WorkspaceEntryStatus.Loaded)
+      const ws = (entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).data
       const tab = Object.values(ws.appStates)[0]!
       expect(tab.applicationId).toBe('global-default')
     })
@@ -628,8 +628,8 @@ describe('createSessionStore', () => {
 
       const entry = store.getState().workspaces.get('ws-restored')!
       expect(entry).toBeDefined()
-      expect(entry.status).toBe('loaded')
-      expect((entry as Extract<typeof entry, { status: 'loaded' }>).data.name).toBe('restored')
+      expect(entry.status).toBe(WorkspaceEntryStatus.Loaded)
+      expect((entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).data.name).toBe('restored')
       expect(store.getState().isRestoring).toBe(false)
     })
 
@@ -675,8 +675,8 @@ describe('createSessionStore', () => {
       expect(store.getState().workspaces.get('ws-parent')).toBeDefined()
       expect(store.getState().workspaces.get('ws-child')).toBeDefined()
       const childEntry = store.getState().workspaces.get('ws-child')!
-      expect(childEntry.status).toBe('loaded')
-      expect((childEntry as Extract<typeof childEntry, { status: 'loaded' }>).data.parentId).toBe('ws-parent')
+      expect(childEntry.status).toBe(WorkspaceEntryStatus.Loaded)
+      expect((childEntry as Extract<typeof childEntry, { status: WorkspaceEntryStatus.Loaded }>).data.parentId).toBe('ws-parent')
     })
   })
 })
