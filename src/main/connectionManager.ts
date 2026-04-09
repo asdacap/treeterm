@@ -3,6 +3,7 @@
  * Registry of all connections (local + remotes). Each connection owns a GrpcDaemonClient.
  */
 
+import { randomUUID } from 'crypto'
 import { GrpcDaemonClient } from './grpcClient'
 import { SSHTunnel } from './ssh'
 import { PortForwardProcess } from './portForward'
@@ -403,16 +404,35 @@ export class ConnectionManager {
   private connectingPromises: Map<string, Promise<ConnectionInfo>> = new Map()
   private statusListeners: Set<StatusChangeCallback> = new Set()
 
-  constructor(localClient: GrpcDaemonClient) {
-    const localConn = new Connection('local', { type: 'local' }, localClient, ConnectionStatus.Connected)
-    this.connections.set('local', localConn)
-    localConn.startHeartbeatMonitor(() => {
-      const c = this.connections.get('local')
+  constructor(readonly socketPath: string) {
+  }
+
+  async connectLocal(): Promise<ConnectionInfo> {
+    const id = randomUUID()
+    const client = new GrpcDaemonClient(this.socketPath)
+    await client.connect()
+
+    const conn = new Connection(id, { type: 'local' }, client, ConnectionStatus.Connected)
+    this.connections.set(id, conn)
+
+    conn.startHeartbeatMonitor(() => {
+      const c = this.connections.get(id)
       if (c && c.status === ConnectionStatus.Connected) {
         c.error = 'Connection lost (no heartbeat from daemon)'
-        c.startReconnect(() => { this.emitStatus('local') })
+        c.startReconnect(() => { this.emitStatus(id) })
       }
     })
+
+    client.onDisconnect(() => {
+      const c = this.connections.get(id)
+      if (c && c.status === ConnectionStatus.Connected) {
+        c.error = 'gRPC connection lost'
+        c.startReconnect(() => { this.emitStatus(id) })
+      }
+    })
+
+    this.emitStatus(id)
+    return conn.toInfo()
   }
 
   getClient(connectionId: string): GrpcDaemonClient {
@@ -424,10 +444,6 @@ export class ConnectionManager {
       throw new Error(`Connection ${connectionId} is ${conn.status}${conn.error ? ': ' + conn.error : ''}`)
     }
     return conn.client
-  }
-
-  getLocalClient(): GrpcDaemonClient {
-    return this.getClient('local')
   }
 
   listConnections(): ConnectionInfo[] {
@@ -582,11 +598,7 @@ export class ConnectionManager {
     }
   }
 
-  disconnectRemote(connectionId: string): void {
-    if (connectionId === 'local') {
-      throw new Error('Cannot disconnect local connection')
-    }
-
+  disconnect(connectionId: string): void {
     const conn = this.connections.get(connectionId)
     if (!conn) return
 
@@ -675,9 +687,7 @@ export class ConnectionManager {
 
   disconnectAll(): void {
     for (const [id] of this.connections) {
-      if (id !== 'local') {
-        this.disconnectRemote(id)
-      }
+      this.disconnect(id)
     }
   }
 

@@ -483,7 +483,7 @@ function getOrCreateSession(
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
   connection: ConnectionInfo
 ): StoreApi<SessionState> {
-  const { sessionStores, windowUuid, filesystem, exec, sessionApi, terminal } = get()
+  const { sessionStores, filesystem, exec, sessionApi, terminal } = get()
   const existing = sessionStores.get(sessionId)
   if (existing) {
     console.log(`[renderer:app] getOrCreateSession: reusing existing session store for session=${sessionId}`)
@@ -496,7 +496,7 @@ function getOrCreateSession(
   const boundGithub = createGitHubApi(exec, get().settingsApi, connId)
   const boundRunActions = createRunActionsApi(boundFilesystem, terminal, connId)
   const store = createSessionStore(
-    { sessionId, windowUuid, connection },
+    { sessionId, connection },
     {
       git: boundGit,
       filesystem: boundFilesystem,

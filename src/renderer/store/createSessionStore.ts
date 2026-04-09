@@ -140,7 +140,7 @@ export function getUnmergedSubWorkspaces(workspaces: Map<string, WorkspaceEntry>
 }
 
 export function createSessionStore(
-  config: { sessionId: string; windowUuid: string | null; connection: ConnectionInfo },
+  config: { sessionId: string; connection: ConnectionInfo },
   deps: SessionDeps
 ): StoreApi<SessionState> {
   let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -184,8 +184,8 @@ export function createSessionStore(
 
       const currentVersion = store.getState().sessionVersion
       const { sessionId } = store.getState()
-      console.log('[session] updating session:', sessionId, 'senderUuid:', config.windowUuid, 'expectedVersion:', currentVersion)
-      const result = await deps.sessionApi.update(sessionId, daemonWorkspaces, config.windowUuid || undefined, currentVersion)
+      console.log('[session] updating session:', sessionId, 'senderUuid:', config.connection.id, 'expectedVersion:', currentVersion)
+      const result = await deps.sessionApi.update(sessionId, daemonWorkspaces, config.connection.id, currentVersion)
       if (!result.success) {
         console.error('[session] failed to update session:', result.error)
       } else {
