@@ -279,7 +279,7 @@ export default function BaseTerminal({
               }
             }
 
-            if (config.stripScrollbackClear) {
+            if (cache.stripScrollbackClear) {
               const decoder = new TextDecoder('utf-8', { fatal: false })
               const dataStr = decoder.decode(event.data)
               const stripped = dataStr.replace(/\x1b\[3J/g, '')
