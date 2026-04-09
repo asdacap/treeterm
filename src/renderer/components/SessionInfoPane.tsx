@@ -394,30 +394,42 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
                         {isExpanded ? 'Hide' : 'Log'}
                       </button>
                       {(pf.status === PortForwardStatus.Error || pf.status === PortForwardStatus.Stopped) && (
-                        <button
-                          className="ssh-pane-tab"
-                          style={{ color: '#ff9800' }}
-                          onClick={() => {
-                            void (async () => {
-                              await ssh.removePortForward(pf.id).catch(() => {})
-                              const config: PortForwardConfig = {
-                                id: crypto.randomUUID(),
-                                connectionId: pf.connectionId,
-                                localPort: pf.localPort,
-                                remoteHost: pf.remoteHost,
-                                remotePort: pf.remotePort,
-                              }
-                              try {
-                                const info = await ssh.addPortForward(config)
-                                setPortForwards(prev => prev.filter(p => p.id !== pf.id).concat(info))
-                              } catch (err) {
-                                console.error('Failed to restart port forward:', err)
-                              }
-                            })()
-                          }}
-                        >
-                          Restart
-                        </button>
+                        <>
+                          <button
+                            className="ssh-pane-tab"
+                            style={{ color: '#ff9800' }}
+                            onClick={() => {
+                              void (async () => {
+                                await ssh.removePortForward(pf.id).catch(() => {})
+                                const config: PortForwardConfig = {
+                                  id: crypto.randomUUID(),
+                                  connectionId: pf.connectionId,
+                                  localPort: pf.localPort,
+                                  remoteHost: pf.remoteHost,
+                                  remotePort: pf.remotePort,
+                                }
+                                try {
+                                  const info = await ssh.addPortForward(config)
+                                  setPortForwards(prev => prev.filter(p => p.id !== pf.id).concat(info))
+                                } catch (err) {
+                                  console.error('Failed to restart port forward:', err)
+                                }
+                              })()
+                            }}
+                          >
+                            Restart
+                          </button>
+                          <button
+                            className="ssh-pane-tab"
+                            style={{ color: '#f44336' }}
+                            onClick={() => {
+                              void ssh.removePortForward(pf.id).catch((e: unknown) => { console.error(e) })
+                              setPortForwards(prev => prev.filter(p => p.id !== pf.id))
+                            }}
+                          >
+                            Remove
+                          </button>
+                        </>
                       )}
                       {pf.status !== PortForwardStatus.Stopped && pf.status !== PortForwardStatus.Error && (
                         <button
