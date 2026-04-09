@@ -60,7 +60,6 @@ export interface AppDeps {
 interface AppState extends AppDeps {
   // Lifecycle
   windowUuid: string | null
-  daemonDisconnected: boolean
   isSettingsOpen: boolean
   isActiveProcessesOpen: boolean
   showCloseConfirm: boolean
@@ -119,7 +118,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
   isKeyDiagEnabled: UNINITIALIZED,
 
   windowUuid: null,
-  daemonDisconnected: false,
   isSettingsOpen: false,
   isActiveProcessesOpen: false,
   showCloseConfirm: false,
@@ -241,7 +239,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   initialize: async (deps: AppDeps) => {
     set(deps)
-    const { terminal, sessionApi, settingsApi, appApi, daemon, ssh, getWindowUuid, getInitialWorkspace, keyEventTarget, isKeyDiagEnabled } = deps
+    const { terminal, sessionApi, settingsApi, appApi, ssh, getWindowUuid, getInitialWorkspace, keyEventTarget, isKeyDiagEnabled } = deps
 
     get().initializeApplications()
     useSettingsStore.getState().init(settingsApi, terminal.kill.bind(terminal))
@@ -326,11 +324,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
       }
     })
 
-    const unsubDisconnect = daemon.onDisconnected(() => {
-      console.error('[App] Daemon disconnected')
-      set({ daemonDisconnected: true })
-    })
-
     const unsubActiveProcesses = terminal.onActiveProcessesOpen(() => {
       set({ isActiveProcessesOpen: true })
     })
@@ -374,7 +367,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
       unsubSync()
       unsubSshAutoConnected()
       unsubReconnected()
-      unsubDisconnect()
       unsubActiveProcesses()
       unsubSshStatus()
     }

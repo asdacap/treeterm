@@ -934,12 +934,6 @@ void app.whenReady().then(async () => {
     const prevStatus = previousConnectionStatuses.get(info.id)
     previousConnectionStatuses.set(info.id, info.status)
 
-    // If a local connection loses the daemon, notify renderers
-    const conn = connectionManager?.getConnection(info.id)
-    if (conn?.target.type === 'local' && (info.status === ConnectionStatus.Reconnecting || info.status === ConnectionStatus.Error)) {
-      server.daemonDisconnected()
-    }
-
     server.sshConnectionStatus(info)
 
     // On reconnect success: re-establish session watch and notify renderer

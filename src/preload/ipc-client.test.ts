@@ -192,20 +192,6 @@ describe('IpcClient', () => {
       expect(callback).toHaveBeenCalledWith({ id: 'session-1' })
     })
 
-    it('onDaemonDisconnected registers on correct channel', () => {
-      const callback = vi.fn<() => void>()
-      client.onDaemonDisconnected(callback)
-      expect(mockOn).toHaveBeenCalledWith('daemon:disconnected', expect.any(Function))
-    })
-
-    it('onDaemonDisconnected unsubscribe works', () => {
-      const callback = vi.fn<() => void>()
-      const unsub = client.onDaemonDisconnected(callback)
-      const handler = mockOn.mock.calls[0]![1] as (...args: any[]) => void
-      unsub()
-      expect(mockRemoveListener).toHaveBeenCalledWith('daemon:disconnected', handler)
-    })
-
     it('onSettingsOpen registers and fires callback', () => {
       const callback = vi.fn<() => void>()
       client.onSettingsOpen(callback)

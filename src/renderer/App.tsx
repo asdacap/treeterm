@@ -34,7 +34,6 @@ export default function App() {
     isActiveProcessesOpen,
     showCloseConfirm,
     unmergedWorkspaces,
-    daemonDisconnected,
     showConnectionPicker,
   } = useAppStore()
 
@@ -91,11 +90,6 @@ export default function App() {
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
         >
-          {daemonDisconnected && (
-            <div className="daemon-disconnect-banner">
-              Daemon disconnected — terminal sessions may be unavailable. Please restart the app.
-            </div>
-          )}
           <div className="tree-pane" style={{ width: isTreeCollapsed ? 36 : treeWidth }}>
             <TreePane
               selectFolder={selectFolder}

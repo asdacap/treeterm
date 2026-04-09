@@ -78,7 +78,6 @@ const CHANNELS = {
   sessionSync: 'session:sync',
   sshAutoConnected: 'ssh:autoConnected',
   connectionReconnected: 'connection:reconnected',
-  daemonDisconnected: 'daemon:disconnected',
   activeProcessesOpen: 'active-processes:open',
   sshConnectionStatus: 'ssh:connectionStatus',
   sshBootstrapOutput: 'ssh:bootstrapOutput',
@@ -389,12 +388,6 @@ export class IpcClient {
       { callback(...(args as IpcEvents['connectionReconnected']['params'])); }
     ipcRenderer.on(CHANNELS.connectionReconnected, handler)
     return () => ipcRenderer.removeListener(CHANNELS.connectionReconnected, handler)
-  }
-
-  onDaemonDisconnected(callback: () => void): () => void {
-    const handler = () => { callback(); }
-    ipcRenderer.on(CHANNELS.daemonDisconnected, handler)
-    return () => ipcRenderer.removeListener(CHANNELS.daemonDisconnected, handler)
   }
 
   onActiveProcessesOpen(callback: () => void): () => void {

@@ -512,7 +512,6 @@ export interface AppApi {
 export interface DaemonApi {
   shutdown: (connectionId: string) => Promise<IpcResult>
   onSessions: (callback: (sessions: TTYSessionInfo[]) => void) => () => void
-  onDisconnected: (callback: () => void) => () => void
 }
 
 export interface LlmApi {

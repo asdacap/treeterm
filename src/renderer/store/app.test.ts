@@ -131,7 +131,7 @@ const mockDeps = {
     unlock: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true, session: { id: 'test-session' } }),
     forceUnlock: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true, session: { id: 'test-session' } })
   },
-  daemon: { onDisconnected: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}) },
+  daemon: {},
   terminal: {
     onActiveProcessesOpen: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
     list: vi.fn<(...args: any[]) => Promise<any[]>>().mockResolvedValue([]),
@@ -171,7 +171,6 @@ describe('useAppStore', () => {
     vi.clearAllMocks()
     useAppStore.setState({
       windowUuid: null,
-      daemonDisconnected: false,
       isSettingsOpen: false,
       showCloseConfirm: false,
       unmergedWorkspaces: [],
@@ -183,10 +182,6 @@ describe('useAppStore', () => {
   describe('initial state', () => {
     it('has null windowUuid by default', () => {
       expect(useAppStore.getState().windowUuid).toBeNull()
-    })
-
-    it('has daemonDisconnected false by default', () => {
-      expect(useAppStore.getState().daemonDisconnected).toBe(false)
     })
 
     it('has empty sessionStores by default', () => {
@@ -419,7 +414,6 @@ describe('useAppStore', () => {
       expect(mockDeps.appApi.onCloseConfirm).toHaveBeenCalled()
       expect(mockDeps.appApi.localConnect).toHaveBeenCalled()
       expect(mockDeps.sessionApi.onSync).toHaveBeenCalled()
-      expect(mockDeps.daemon.onDisconnected).toHaveBeenCalled()
       cleanup()
     })
 
@@ -515,16 +509,6 @@ describe('useAppStore', () => {
       const cleanup = await useAppStore.getState().initialize(mockDeps)
 
       expect(useAppStore.getState().sessionStores.get('empty-session')).toBeDefined()
-      cleanup()
-    })
-
-    it('onDisconnected sets daemonDisconnected', async () => {
-      const cleanup = await useAppStore.getState().initialize(mockDeps)
-
-      const disconnectCallback = vi.mocked(mockDeps.daemon.onDisconnected).mock.calls[0]![0] as () => void
-      disconnectCallback()
-
-      expect(useAppStore.getState().daemonDisconnected).toBe(true)
       cleanup()
     })
 

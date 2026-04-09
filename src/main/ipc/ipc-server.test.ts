@@ -258,14 +258,6 @@ describe('IpcServer', () => {
       expect(mockSend2).toHaveBeenCalledWith('session:sync', 'local', sessionData)
     })
 
-    it('daemonDisconnected broadcasts to all windows', () => {
-      const mockSend = vi.fn<(...args: any[]) => void>()
-      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
-
-      server.daemonDisconnected()
-      expect(mockSend).toHaveBeenCalledWith('daemon:disconnected')
-    })
-
     it('daemonSessions broadcasts to all windows', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
       mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
@@ -310,7 +302,7 @@ describe('IpcServer', () => {
 
     it('broadcasts to no windows when none exist', () => {
       mockGetAllWindows.mockReturnValue([])
-      expect(() => { server.daemonDisconnected() }).not.toThrow()
+      expect(() => { server.daemonSessions([]) }).not.toThrow()
     })
 
     it('execEvent broadcasts to all windows', () => {
