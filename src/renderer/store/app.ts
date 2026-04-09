@@ -503,7 +503,7 @@ function getOrCreateSession(
         getDefaultApp: (appId?: string) => get().getDefaultApplication(appId),
       },
       github: boundGithub,
-      llm: { analyzeTerminal: llm.analyzeTerminal, generateTitle: llm.generateTitle },
+      llm,
       setActivityTabState: (tabId, state) => { useActivityStateStore.getState().setTabState(tabId, state); },
     }
   )

@@ -7,7 +7,7 @@ import type { Tty } from './createTtyStore'
 
 export interface AnalyzerDeps {
   getSettings: () => Settings
-  llm: Pick<LlmApi, 'analyzeTerminal' | 'generateTitle'>
+  llm: LlmApi
   updateMetadata: (key: string, value: string) => void
   getDisplayName: () => string | undefined
   getDescription: () => string | undefined

@@ -23,7 +23,11 @@ export default tseslint.config(
     },
     rules: {
       '@typescript-eslint/no-explicit-any': 'error',
-      'custom/no-string-literal-union': 'error'
+      'custom/no-string-literal-union': 'error',
+      'no-restricted-syntax': ['error', {
+        selector: "TSTypeReference[typeName.name='Pick']",
+        message: 'Pick<T, K> is banned. Pass the full type instead of narrowing with Pick.'
+      }]
     }
   },
   {

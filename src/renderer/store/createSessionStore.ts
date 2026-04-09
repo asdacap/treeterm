@@ -37,7 +37,7 @@ export interface SessionDeps {
   github: GitHubApi
   getSettings: () => Settings
   appRegistry: AppRegistryApi
-  llm: Pick<LlmApi, 'analyzeTerminal' | 'generateTitle'>
+  llm: LlmApi
   setActivityTabState: (tabId: string, state: ActivityState) => void
 }
 
@@ -97,7 +97,7 @@ function getNameFromPath(path: string): string {
 }
 
 function getDefaultAppForWorktree(
-  deps: Pick<SessionDeps, 'appRegistry' | 'getSettings'>,
+  deps: SessionDeps,
   settings?: WorktreeSettings,
   parentSettings?: WorktreeSettings
 ): Application | null | undefined {

@@ -3,7 +3,7 @@ import { createWorkspaceStore } from './createWorkspaceStore'
 import type { WorkspaceStoreDeps, CachedTerminal } from './createWorkspaceStore'
 import { getUnmergedSubWorkspaces } from './createSessionStore'
 import type { WorkspaceEntry } from './createSessionStore'
-import type { Workspace, Application } from '../types'
+import type { LlmApi, Workspace, Application } from '../types'
 import { createMockExecApi } from '../../shared/mockApis'
 
 interface TestComment { id: string; filePath: string; lineNumber: number; text: string; commitHash: string | null; createdAt: number; isOutdated: boolean; addressed: boolean; side: string }
@@ -38,7 +38,7 @@ function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStore
     llm: {
       analyzeTerminal: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ state: 'idle', reason: '' }),
       generateTitle: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ title: '', description: '', branchName: '' }),
-    },
+    } as unknown as LlmApi,
     setActivityTabState: vi.fn<(...args: any[]) => void>(),
     github: {
       getPrInfo: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ noPr: true, createUrl: 'https://github.com/test/repo/compare/main...feat?expand=1' }),

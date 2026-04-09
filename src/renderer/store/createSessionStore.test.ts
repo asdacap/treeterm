@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createSessionStore } from './createSessionStore'
 import type { SessionDeps, SessionState } from './createSessionStore'
-import type { Workspace, Application, GitInfo } from '../types'
+import type { LlmApi, Workspace, Application, GitInfo } from '../types'
 import { ConnectionStatus } from '../../shared/types'
 import type { StoreApi } from 'zustand'
 import { createMockExecApi } from '../../shared/mockApis'
@@ -84,7 +84,7 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
     llm: {
       analyzeTerminal: vi.fn().mockResolvedValue({ state: 'idle', reason: '' }),
       generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
-    },
+    } as unknown as LlmApi,
     setActivityTabState: vi.fn(),
     github: {
       getPrInfo: vi.fn().mockResolvedValue({ noPr: true, createUrl: 'https://github.com/test/repo/compare/main...feat?expand=1' }),

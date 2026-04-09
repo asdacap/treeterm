@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createAnalyzerStore } from './createAnalyzerStore'
 import type { AnalyzerDeps } from './createAnalyzerStore'
 import { ActivityState } from '../types'
-import type { Settings } from '../types'
+import type { LlmApi, Settings } from '../types'
 import type { TtyState } from './createTtyStore'
 import { createStore } from 'zustand/vanilla'
 
@@ -45,7 +45,7 @@ function makeDeps(overrides?: Partial<AnalyzerDeps>): AnalyzerDeps {
     llm: {
       analyzeTerminal: vi.fn().mockResolvedValue({ state: 'idle', reason: 'prompt visible' }),
       generateTitle: vi.fn().mockResolvedValue({ title: 'Test Title', description: 'Test Description', branchName: 'test-title' }),
-    },
+    } as unknown as LlmApi,
     updateMetadata: vi.fn(),
     getDisplayName: vi.fn().mockReturnValue(undefined),
     getDescription: vi.fn().mockReturnValue(undefined),
@@ -199,7 +199,7 @@ describe('createAnalyzerStore', () => {
       llm: {
         analyzeTerminal: vi.fn().mockResolvedValue({ error: 'API error' }),
         generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
-      },
+      } as unknown as LlmApi,
       openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
     })
     const store = createAnalyzerStore('tab-1', deps)
@@ -225,7 +225,7 @@ describe('createAnalyzerStore', () => {
       llm: {
         analyzeTerminal: vi.fn().mockRejectedValue(new Error('Network error')),
         generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
-      },
+      } as unknown as LlmApi,
       openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
     })
     const store = createAnalyzerStore('tab-1', deps)
@@ -252,7 +252,7 @@ describe('createAnalyzerStore', () => {
       llm: {
         analyzeTerminal: vi.fn().mockImplementation(() => new Promise(r => { calls.push(r) })),
         generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
-      },
+      } as unknown as LlmApi,
       openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
     })
 
@@ -296,7 +296,7 @@ describe('createAnalyzerStore', () => {
       llm: {
         analyzeTerminal: vi.fn().mockImplementation(() => new Promise(r => { resolveAnalysis = r })),
         generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
-      },
+      } as unknown as LlmApi,
       openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
     })
 
@@ -366,7 +366,7 @@ describe('createAnalyzerStore', () => {
           return Promise.resolve({ state: 'idle', reason: `call-${String(callCount)}` })
         }),
         generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
-      },
+      } as unknown as LlmApi,
       openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
     })
     const store = createAnalyzerStore('tab-1', deps)
@@ -664,7 +664,7 @@ describe('createAnalyzerStore', () => {
         llm: {
           analyzeTerminal: vi.fn().mockResolvedValue({ error: 'API error' }),
           generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
-        },
+        } as unknown as LlmApi,
         openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
       })
       const store = createAnalyzerStore('tab-1', deps)
@@ -693,7 +693,7 @@ describe('createAnalyzerStore', () => {
         llm: {
           analyzeTerminal: vi.fn().mockRejectedValue(new Error('Network error')),
           generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
-        },
+        } as unknown as LlmApi,
         openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
       })
       const store = createAnalyzerStore('tab-1', deps)
@@ -722,7 +722,7 @@ describe('createAnalyzerStore', () => {
         llm: {
           analyzeTerminal: vi.fn().mockResolvedValue({ something: 'unexpected' }),
           generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
-        },
+        } as unknown as LlmApi,
         openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
       })
       const store = createAnalyzerStore('tab-1', deps)
@@ -838,7 +838,7 @@ describe('createAnalyzerStore', () => {
         llm: {
           analyzeTerminal: vi.fn().mockResolvedValue({ state: 'idle', reason: '' }),
           generateTitle: vi.fn().mockRejectedValue(new Error('Title API error')),
-        },
+        } as unknown as LlmApi,
         openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }) }),
       })
       const store = createAnalyzerStore('tab-1', deps)

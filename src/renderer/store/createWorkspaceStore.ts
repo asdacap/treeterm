@@ -45,7 +45,7 @@ export interface WorkspaceStoreDeps {
   exec: ExecApi
   runActions: RunActionsApi
   getSettings: () => Settings
-  llm: Pick<LlmApi, 'analyzeTerminal' | 'generateTitle'>
+  llm: LlmApi
   setActivityTabState: (tabId: string, state: ActivityState) => void
   // Session-level callbacks
   syncToDaemon: () => void
