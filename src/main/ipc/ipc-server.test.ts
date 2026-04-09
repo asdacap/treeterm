@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const { mockHandle, mockOn } = vi.hoisted(() => ({
+const { mockHandle, mockOn, mockGetAllWindows } = vi.hoisted(() => ({
   mockHandle: vi.fn<(...args: any[]) => any>(),
-  mockOn: vi.fn<(...args: any[]) => any>()
+  mockOn: vi.fn<(...args: any[]) => any>(),
+  mockGetAllWindows: vi.fn<() => any[]>(() => [])
 }))
 
 vi.mock('electron', () => ({
@@ -10,7 +11,9 @@ vi.mock('electron', () => ({
     handle: mockHandle,
     on: mockOn
   },
-  BrowserWindow: vi.fn<(...args: any[]) => any>()
+  BrowserWindow: Object.assign(vi.fn<(...args: any[]) => any>(), {
+    getAllWindows: mockGetAllWindows
+  })
 }))
 
 import type { BrowserWindow } from 'electron'
@@ -165,159 +168,133 @@ describe('IpcServer', () => {
 
   })
 
-  describe('event emitters (main → renderer)', () => {
-    it('ptyEvent sends to window webContents with correct channel and args', () => {
+  describe('per-window event emitters', () => {
+    it('ptyEventTo sends to specific window with correct channel and args', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
-      server.setWindow(mockWindow)
 
       const dataBytes = new TextEncoder().encode('hello-data')
-      server.ptyEvent('pty-1', { type: 'data', data: dataBytes })
+      server.ptyEventTo(mockWindow, 'pty-1', { type: 'data', data: dataBytes })
       expect(mockSend).toHaveBeenCalledWith('pty:event', 'pty-1', { type: 'data', data: dataBytes })
     })
 
-    it('ptyEvent sends exit to window webContents with correct channel and args', () => {
+    it('ptyEventTo sends exit to specific window with correct channel and args', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
-      server.setWindow(mockWindow)
 
-      server.ptyEvent('pty-1', { type: 'exit', exitCode: 0 })
+      server.ptyEventTo(mockWindow, 'pty-1', { type: 'exit', exitCode: 0 })
       expect(mockSend).toHaveBeenCalledWith('pty:event', 'pty-1', { type: 'exit', exitCode: 0 })
     })
 
-    it('settingsOpen sends to window webContents with correct channel', () => {
+    it('settingsOpenTo sends to specific window with correct channel', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
-      server.setWindow(mockWindow)
 
-      server.settingsOpen()
+      server.settingsOpenTo(mockWindow)
       expect(mockSend).toHaveBeenCalledWith('settings:open')
     })
 
-    it('appConfirmClose sends to window webContents', () => {
+    it('appReadyTo sends to specific window', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
-      server.setWindow(mockWindow)
 
-      server.appConfirmClose()
-      expect(mockSend).toHaveBeenCalledWith('app:confirm-close')
+      server.appReadyTo(mockWindow, 'uuid-1' as unknown as Session | null)
+      expect(mockSend).toHaveBeenCalledWith('app:ready', 'uuid-1')
     })
 
-    it('sessionSync sends to window with correct args', () => {
+    it('capsLockEventTo sends to specific window', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
-      server.setWindow(mockWindow)
+
+      server.capsLockEventTo(mockWindow, true as unknown as { type: string; key: string; code: string })
+      expect(mockSend).toHaveBeenCalledWith('capslock-event', true)
+    })
+
+    it('activeProcessesOpenTo sends to specific window', () => {
+      const mockSend = vi.fn<(...args: any[]) => void>()
+      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
+
+      server.activeProcessesOpenTo(mockWindow)
+      expect(mockSend).toHaveBeenCalledWith('active-processes:open')
+    })
+  })
+
+  describe('broadcast event emitters', () => {
+    it('sessionSync broadcasts to all windows', () => {
+      const mockSend1 = vi.fn<(...args: any[]) => void>()
+      const mockSend2 = vi.fn<(...args: any[]) => void>()
+      mockGetAllWindows.mockReturnValue([
+        { webContents: { send: mockSend1 } },
+        { webContents: { send: mockSend2 } },
+      ])
 
       const sessionData = { id: 'session-1' } as unknown as Session
       server.sessionSync('local', sessionData)
-      expect(mockSend).toHaveBeenCalledWith('session:sync', 'local', sessionData)
+      expect(mockSend1).toHaveBeenCalledWith('session:sync', 'local', sessionData)
+      expect(mockSend2).toHaveBeenCalledWith('session:sync', 'local', sessionData)
     })
 
-    it('daemonDisconnected sends to window', () => {
+    it('daemonDisconnected broadcasts to all windows', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
-      server.setWindow(mockWindow)
+      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
 
       server.daemonDisconnected()
       expect(mockSend).toHaveBeenCalledWith('daemon:disconnected')
     })
 
-    it('appReady sends to window webContents', () => {
+    it('daemonSessions broadcasts to all windows', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
-      server.setWindow(mockWindow)
-
-      server.appReady('uuid-1' as unknown as Session | null)
-      expect(mockSend).toHaveBeenCalledWith('app:ready', 'uuid-1')
-    })
-
-    it('capsLockEvent sends to window webContents', () => {
-      const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
-      server.setWindow(mockWindow)
-
-      server.capsLockEvent(true as unknown as { type: string; key: string; code: string })
-      expect(mockSend).toHaveBeenCalledWith('capslock-event', true)
-    })
-
-    it('daemonSessions sends to window webContents', () => {
-      const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
-      server.setWindow(mockWindow)
+      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
 
       const sessions = [{ id: 's1' }] as unknown as TTYSessionInfo[]
       server.daemonSessions(sessions)
       expect(mockSend).toHaveBeenCalledWith('daemon:sessions', sessions)
     })
 
-    it('activeProcessesOpen sends to window webContents', () => {
+    it('sshConnectionStatus broadcasts to all windows', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
-      server.setWindow(mockWindow)
-
-      server.activeProcessesOpen()
-      expect(mockSend).toHaveBeenCalledWith('active-processes:open')
-    })
-
-    it('sshConnectionStatus sends to window webContents', () => {
-      const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
-      server.setWindow(mockWindow)
+      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
 
       const info = { id: 'conn-1', status: 'connected' } as unknown as ConnectionInfo
       server.sshConnectionStatus(info)
       expect(mockSend).toHaveBeenCalledWith('ssh:connectionStatus', info)
     })
 
-    it('sshBootstrapOutput sends to window webContents', () => {
+    it('sshBootstrapOutput broadcasts to all windows', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
-      server.setWindow(mockWindow)
+      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
 
       server.sshBootstrapOutput('conn-1', 'log line')
       expect(mockSend).toHaveBeenCalledWith('ssh:bootstrapOutput', 'conn-1', 'log line')
     })
 
-    it('sshTunnelOutput sends to window webContents', () => {
+    it('sshTunnelOutput broadcasts to all windows', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
-      server.setWindow(mockWindow)
+      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
 
       server.sshTunnelOutput('conn-1', 'log line')
       expect(mockSend).toHaveBeenCalledWith('ssh:tunnelOutput', 'conn-1', 'log line')
     })
 
-    it('sshDaemonOutput sends to window webContents', () => {
+    it('sshDaemonOutput broadcasts to all windows', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
-      server.setWindow(mockWindow)
+      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
 
       server.sshDaemonOutput('conn-1', 'log line')
       expect(mockSend).toHaveBeenCalledWith('ssh:daemonOutput', 'conn-1', 'log line')
     })
 
-  })
+    it('broadcasts to no windows when none exist', () => {
+      mockGetAllWindows.mockReturnValue([])
+      expect(() => { server.daemonDisconnected() }).not.toThrow()
+    })
 
-  describe('setWindow', () => {
-    it('sets the window for event emission', () => {
+    it('execEvent broadcasts to all windows', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
-      server.setWindow(mockWindow)
+      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
 
-      server.ptyEvent('pty-1', { type: 'data', data: new TextEncoder().encode('data') })
-      expect(mockSend).toHaveBeenCalled()
-    })
-
-    it('null window does not throw on emit', () => {
-      const dataBytes = new TextEncoder().encode('data')
-      server.setWindow(null)
-      expect(() => { server.ptyEvent('pty-1', { type: 'data', data: dataBytes }); }).not.toThrow()
-      expect(() => { server.settingsOpen(); }).not.toThrow()
-      expect(() => { server.daemonDisconnected(); }).not.toThrow()
-    })
-
-    it('no window set (default) does not throw on emit', () => {
-      expect(() => { server.ptyEvent('pty-1', { type: 'data', data: new TextEncoder().encode('data') }); }).not.toThrow()
+      server.execEvent('exec-1', { type: 'stdout', data: 'output' })
+      expect(mockSend).toHaveBeenCalledWith('exec:event', 'exec-1', { type: 'stdout', data: 'output' })
     })
   })
 })

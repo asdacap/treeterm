@@ -89,13 +89,12 @@ const CHANNELS = {
 } as const
 
 export class IpcServer {
-  private window: BrowserWindow | null = null
+  // ==================== Broadcast Helper ====================
 
-  /**
-   * Set the browser window to send events to.
-   */
-  setWindow(window: BrowserWindow | null): void {
-    this.window = window
+  private broadcast(channel: string, ...args: unknown[]): void {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send(channel, ...args)
+    }
   }
 
   // ==================== Request Handlers (invoke/handle pattern) ====================
@@ -325,12 +324,11 @@ export class IpcServer {
   // SSH request handlers
   onSshConnect(
     handler: (
-      event: IpcMainInvokeEvent,
       ...args: IpcRequests['sshConnect']['params']
     ) => IpcRequests['sshConnect']['result'] | Promise<IpcRequests['sshConnect']['result']>
   ): void {
-    ipcMain.handle(CHANNELS.sshConnect, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(event, ...(args as IpcRequests['sshConnect']['params']))
+    ipcMain.handle(CHANNELS.sshConnect, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshConnect']['params']))
     )
   }
 
@@ -426,100 +424,91 @@ export class IpcServer {
 
   onSshWatchBootstrapOutput(
     handler: (
-      event: IpcMainInvokeEvent,
       ...args: IpcRequests['sshWatchBootstrapOutput']['params']
     ) => IpcRequests['sshWatchBootstrapOutput']['result'] | Promise<IpcRequests['sshWatchBootstrapOutput']['result']>
   ): void {
-    ipcMain.handle(CHANNELS.sshWatchBootstrapOutput, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(event, ...(args as IpcRequests['sshWatchBootstrapOutput']['params']))
+    ipcMain.handle(CHANNELS.sshWatchBootstrapOutput, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshWatchBootstrapOutput']['params']))
     )
   }
 
   onSshUnwatchBootstrapOutput(
     handler: (
-      event: IpcMainInvokeEvent,
       ...args: IpcRequests['sshUnwatchBootstrapOutput']['params']
     ) => IpcRequests['sshUnwatchBootstrapOutput']['result'] | Promise<IpcRequests['sshUnwatchBootstrapOutput']['result']>
   ): void {
-    ipcMain.handle(CHANNELS.sshUnwatchBootstrapOutput, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(event, ...(args as IpcRequests['sshUnwatchBootstrapOutput']['params']))
+    ipcMain.handle(CHANNELS.sshUnwatchBootstrapOutput, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshUnwatchBootstrapOutput']['params']))
     )
   }
 
   onSshWatchTunnelOutput(
     handler: (
-      event: IpcMainInvokeEvent,
       ...args: IpcRequests['sshWatchTunnelOutput']['params']
     ) => IpcRequests['sshWatchTunnelOutput']['result'] | Promise<IpcRequests['sshWatchTunnelOutput']['result']>
   ): void {
-    ipcMain.handle(CHANNELS.sshWatchTunnelOutput, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(event, ...(args as IpcRequests['sshWatchTunnelOutput']['params']))
+    ipcMain.handle(CHANNELS.sshWatchTunnelOutput, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshWatchTunnelOutput']['params']))
     )
   }
 
   onSshUnwatchTunnelOutput(
     handler: (
-      event: IpcMainInvokeEvent,
       ...args: IpcRequests['sshUnwatchTunnelOutput']['params']
     ) => IpcRequests['sshUnwatchTunnelOutput']['result'] | Promise<IpcRequests['sshUnwatchTunnelOutput']['result']>
   ): void {
-    ipcMain.handle(CHANNELS.sshUnwatchTunnelOutput, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(event, ...(args as IpcRequests['sshUnwatchTunnelOutput']['params']))
+    ipcMain.handle(CHANNELS.sshUnwatchTunnelOutput, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshUnwatchTunnelOutput']['params']))
     )
   }
 
   onSshWatchDaemonOutput(
     handler: (
-      event: IpcMainInvokeEvent,
       ...args: IpcRequests['sshWatchDaemonOutput']['params']
     ) => IpcRequests['sshWatchDaemonOutput']['result'] | Promise<IpcRequests['sshWatchDaemonOutput']['result']>
   ): void {
-    ipcMain.handle(CHANNELS.sshWatchDaemonOutput, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(event, ...(args as IpcRequests['sshWatchDaemonOutput']['params']))
+    ipcMain.handle(CHANNELS.sshWatchDaemonOutput, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshWatchDaemonOutput']['params']))
     )
   }
 
   onSshUnwatchDaemonOutput(
     handler: (
-      event: IpcMainInvokeEvent,
       ...args: IpcRequests['sshUnwatchDaemonOutput']['params']
     ) => IpcRequests['sshUnwatchDaemonOutput']['result'] | Promise<IpcRequests['sshUnwatchDaemonOutput']['result']>
   ): void {
-    ipcMain.handle(CHANNELS.sshUnwatchDaemonOutput, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(event, ...(args as IpcRequests['sshUnwatchDaemonOutput']['params']))
+    ipcMain.handle(CHANNELS.sshUnwatchDaemonOutput, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshUnwatchDaemonOutput']['params']))
     )
   }
 
   onSshWatchConnectionStatus(
     handler: (
-      event: IpcMainInvokeEvent,
       ...args: IpcRequests['sshWatchConnectionStatus']['params']
     ) => IpcRequests['sshWatchConnectionStatus']['result'] | Promise<IpcRequests['sshWatchConnectionStatus']['result']>
   ): void {
-    ipcMain.handle(CHANNELS.sshWatchConnectionStatus, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(event, ...(args as IpcRequests['sshWatchConnectionStatus']['params']))
+    ipcMain.handle(CHANNELS.sshWatchConnectionStatus, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshWatchConnectionStatus']['params']))
     )
   }
 
   onSshUnwatchConnectionStatus(
     handler: (
-      event: IpcMainInvokeEvent,
       ...args: IpcRequests['sshUnwatchConnectionStatus']['params']
     ) => IpcRequests['sshUnwatchConnectionStatus']['result'] | Promise<IpcRequests['sshUnwatchConnectionStatus']['result']>
   ): void {
-    ipcMain.handle(CHANNELS.sshUnwatchConnectionStatus, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(event, ...(args as IpcRequests['sshUnwatchConnectionStatus']['params']))
+    ipcMain.handle(CHANNELS.sshUnwatchConnectionStatus, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshUnwatchConnectionStatus']['params']))
     )
   }
 
   onSshAddPortForward(
     handler: (
-      event: IpcMainInvokeEvent,
       ...args: IpcRequests['sshAddPortForward']['params']
     ) => IpcRequests['sshAddPortForward']['result'] | Promise<IpcRequests['sshAddPortForward']['result']>
   ): void {
-    ipcMain.handle(CHANNELS.sshAddPortForward, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(event, ...(args as IpcRequests['sshAddPortForward']['params']))
+    ipcMain.handle(CHANNELS.sshAddPortForward, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshAddPortForward']['params']))
     )
   }
 
@@ -545,23 +534,21 @@ export class IpcServer {
 
   onSshWatchPortForwardOutput(
     handler: (
-      event: IpcMainInvokeEvent,
       ...args: IpcRequests['sshWatchPortForwardOutput']['params']
     ) => IpcRequests['sshWatchPortForwardOutput']['result'] | Promise<IpcRequests['sshWatchPortForwardOutput']['result']>
   ): void {
-    ipcMain.handle(CHANNELS.sshWatchPortForwardOutput, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(event, ...(args as IpcRequests['sshWatchPortForwardOutput']['params']))
+    ipcMain.handle(CHANNELS.sshWatchPortForwardOutput, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshWatchPortForwardOutput']['params']))
     )
   }
 
   onSshUnwatchPortForwardOutput(
     handler: (
-      event: IpcMainInvokeEvent,
       ...args: IpcRequests['sshUnwatchPortForwardOutput']['params']
     ) => IpcRequests['sshUnwatchPortForwardOutput']['result'] | Promise<IpcRequests['sshUnwatchPortForwardOutput']['result']>
   ): void {
-    ipcMain.handle(CHANNELS.sshUnwatchPortForwardOutput, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(event, ...(args as IpcRequests['sshUnwatchPortForwardOutput']['params']))
+    ipcMain.handle(CHANNELS.sshUnwatchPortForwardOutput, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshUnwatchPortForwardOutput']['params']))
     )
   }
 
@@ -606,75 +593,75 @@ export class IpcServer {
 
   // ==================== Event Emitters (main → renderer) ====================
 
-  ptyEvent(...args: IpcEvents['ptyEvent']['params']): void {
-    this.window?.webContents.send(CHANNELS.ptyEvent, ...args)
+  // --- Per-window events (sent to a specific window) ---
+
+  ptyEventTo(window: BrowserWindow, ...args: IpcEvents['ptyEvent']['params']): void {
+    window.webContents.send(CHANNELS.ptyEvent, ...args)
   }
 
-  settingsOpen(): void {
-    this.window?.webContents.send(CHANNELS.settingsOpen)
+  settingsOpenTo(window: BrowserWindow): void {
+    window.webContents.send(CHANNELS.settingsOpen)
   }
 
-  appConfirmClose(): void {
-    this.window?.webContents.send(CHANNELS.appConfirmClose)
+  appReadyTo(window: BrowserWindow, ...args: IpcEvents['appReady']['params']): void {
+    window.webContents.send(CHANNELS.appReady, ...args)
   }
 
-  appReady(...args: IpcEvents['appReady']['params']): void {
-    this.window?.webContents.send(CHANNELS.appReady, ...args)
+  capsLockEventTo(window: BrowserWindow, ...args: IpcEvents['capsLockEvent']['params']): void {
+    window.webContents.send(CHANNELS.capsLockEvent, ...args)
   }
 
-  capsLockEvent(...args: IpcEvents['capsLockEvent']['params']): void {
-    this.window?.webContents.send(CHANNELS.capsLockEvent, ...args)
+  activeProcessesOpenTo(window: BrowserWindow): void {
+    window.webContents.send(CHANNELS.activeProcessesOpen)
   }
+
+  // --- Broadcast events (sent to all windows) ---
 
   daemonSessions(...args: IpcEvents['daemonSessions']['params']): void {
-    this.window?.webContents.send(CHANNELS.daemonSessions, ...args)
+    this.broadcast(CHANNELS.daemonSessions, ...args)
   }
 
   sessionSync(...args: IpcEvents['sessionSync']['params']): void {
-    this.window?.webContents.send(CHANNELS.sessionSync, ...args)
+    this.broadcast(CHANNELS.sessionSync, ...args)
   }
 
   sshAutoConnected(...args: IpcEvents['sshAutoConnected']['params']): void {
-    this.window?.webContents.send(CHANNELS.sshAutoConnected, ...args)
+    this.broadcast(CHANNELS.sshAutoConnected, ...args)
   }
 
   connectionReconnected(...args: IpcEvents['connectionReconnected']['params']): void {
-    this.window?.webContents.send(CHANNELS.connectionReconnected, ...args)
+    this.broadcast(CHANNELS.connectionReconnected, ...args)
   }
 
   daemonDisconnected(): void {
-    this.window?.webContents.send(CHANNELS.daemonDisconnected)
-  }
-
-  activeProcessesOpen(): void {
-    this.window?.webContents.send(CHANNELS.activeProcessesOpen)
+    this.broadcast(CHANNELS.daemonDisconnected)
   }
 
   sshConnectionStatus(...args: IpcEvents['sshConnectionStatus']['params']): void {
-    this.window?.webContents.send(CHANNELS.sshConnectionStatus, ...args)
+    this.broadcast(CHANNELS.sshConnectionStatus, ...args)
   }
 
   sshBootstrapOutput(...args: IpcEvents['sshBootstrapOutput']['params']): void {
-    this.window?.webContents.send(CHANNELS.sshBootstrapOutput, ...args)
+    this.broadcast(CHANNELS.sshBootstrapOutput, ...args)
   }
 
   sshTunnelOutput(...args: IpcEvents['sshTunnelOutput']['params']): void {
-    this.window?.webContents.send(CHANNELS.sshTunnelOutput, ...args)
+    this.broadcast(CHANNELS.sshTunnelOutput, ...args)
   }
 
   sshDaemonOutput(...args: IpcEvents['sshDaemonOutput']['params']): void {
-    this.window?.webContents.send(CHANNELS.sshDaemonOutput, ...args)
+    this.broadcast(CHANNELS.sshDaemonOutput, ...args)
   }
 
   sshPortForwardStatus(...args: IpcEvents['sshPortForwardStatus']['params']): void {
-    this.window?.webContents.send(CHANNELS.sshPortForwardStatus, ...args)
+    this.broadcast(CHANNELS.sshPortForwardStatus, ...args)
   }
 
   sshPortForwardOutput(...args: IpcEvents['sshPortForwardOutput']['params']): void {
-    this.window?.webContents.send(CHANNELS.sshPortForwardOutput, ...args)
+    this.broadcast(CHANNELS.sshPortForwardOutput, ...args)
   }
 
   execEvent(...args: IpcEvents['execEvent']['params']): void {
-    this.window?.webContents.send(CHANNELS.execEvent, ...args)
+    this.broadcast(CHANNELS.execEvent, ...args)
   }
 }

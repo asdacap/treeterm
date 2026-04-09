@@ -18,14 +18,7 @@ vi.mock('electron', () => ({
   }
 }))
 
-vi.mock('./windowManager', () => ({
-  windowManager: {
-    getWindow: vi.fn(() => undefined)
-  }
-}))
-
 import { Menu, app, shell, BrowserWindow } from 'electron'
-import { windowManager, type WindowInfo } from './windowManager'
 import { createApplicationMenu } from './menu'
 
 type MenuItem = {
@@ -42,8 +35,8 @@ function getTemplate(): MenuItem[] {
 
 describe('menu', () => {
   const mockServer = {
-    settingsOpen: vi.fn(),
-    activeProcessesOpen: vi.fn()
+    settingsOpenTo: vi.fn(),
+    activeProcessesOpenTo: vi.fn()
   }
 
   beforeEach(() => {
@@ -52,7 +45,7 @@ describe('menu', () => {
 
   describe('createApplicationMenu', () => {
     it('builds menu from template', () => {
-      createApplicationMenu(null, mockServer as unknown as IpcServer)
+      createApplicationMenu(mockServer as unknown as IpcServer)
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(vi.mocked(Menu.buildFromTemplate)).toHaveBeenCalled()
@@ -63,7 +56,7 @@ describe('menu', () => {
     it('includes app menu on macOS', () => {
       Object.defineProperty(process, 'platform', { value: 'darwin' })
 
-      createApplicationMenu(null, mockServer as unknown as IpcServer)
+      createApplicationMenu(mockServer as unknown as IpcServer)
 
       const template = getTemplate()
       expect(template[0]!.label).toBe('TreeTerm')
@@ -72,17 +65,20 @@ describe('menu', () => {
     it('includes settings in File menu on non-macOS', () => {
       Object.defineProperty(process, 'platform', { value: 'linux' })
 
-      createApplicationMenu(null, mockServer as unknown as IpcServer)
+      createApplicationMenu(mockServer as unknown as IpcServer)
 
       const template = getTemplate()
       const fileMenu = template.find((item) => item.label === 'File')
       expect(fileMenu).toBeDefined()
     })
 
-    it('calls settingsOpen when Preferences clicked', () => {
+    it('calls settingsOpenTo when Preferences clicked with focused window', () => {
       Object.defineProperty(process, 'platform', { value: 'darwin' })
+      const mockWindow = { id: 1 } as unknown as BrowserWindow
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      vi.mocked(BrowserWindow.getFocusedWindow).mockReturnValue(mockWindow)
 
-      createApplicationMenu(null, mockServer as unknown as IpcServer)
+      createApplicationMenu(mockServer as unknown as IpcServer)
 
       const template = getTemplate()
       const appMenu = template[0]!
@@ -90,13 +86,32 @@ describe('menu', () => {
 
       preferencesItem?.click?.()
 
-      expect(mockServer.settingsOpen).toHaveBeenCalled()
+      expect(mockServer.settingsOpenTo).toHaveBeenCalledWith(mockWindow)
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      vi.mocked(BrowserWindow.getFocusedWindow).mockReturnValue(null)
+    })
+
+    it('does not call settingsOpenTo when no focused window', () => {
+      Object.defineProperty(process, 'platform', { value: 'darwin' })
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      vi.mocked(BrowserWindow.getFocusedWindow).mockReturnValue(null)
+
+      createApplicationMenu(mockServer as unknown as IpcServer)
+
+      const template = getTemplate()
+      const appMenu = template[0]!
+      const preferencesItem = appMenu.submenu?.find((item) => item.label === 'Preferences...')
+
+      preferencesItem?.click?.()
+
+      expect(mockServer.settingsOpenTo).not.toHaveBeenCalled()
     })
 
     it('calls onQuitAndKillDaemon callback when Exit and Kill Daemon clicked', () => {
       const onQuitAndKillDaemon = vi.fn()
 
-      createApplicationMenu(null, mockServer as unknown as IpcServer, onQuitAndKillDaemon)
+      createApplicationMenu(mockServer as unknown as IpcServer, onQuitAndKillDaemon)
 
       const template = getTemplate()
       const fileMenu = template.find((item) => item.label === 'File')
@@ -110,7 +125,7 @@ describe('menu', () => {
     it('calls app.quit when Exit and Kill Daemon clicked without callback', () => {
       Object.defineProperty(process, 'platform', { value: 'linux' })
 
-      createApplicationMenu(null, mockServer as unknown as IpcServer)
+      createApplicationMenu(mockServer as unknown as IpcServer)
 
       const template = getTemplate()
       const fileMenu = template.find((item) => item.label === 'File')
@@ -122,56 +137,45 @@ describe('menu', () => {
       expect(vi.mocked(app.quit)).toHaveBeenCalled()
     })
 
-    it('uses focused window ipcServer when available', () => {
-      const focusedServer = { settingsOpen: vi.fn(), activeProcessesOpen: vi.fn() }
-      // eslint-disable-next-line @typescript-eslint/unbound-method
-      vi.mocked(BrowserWindow.getFocusedWindow).mockReturnValue({ id: 1 } as unknown as BrowserWindow)
-      // eslint-disable-next-line @typescript-eslint/unbound-method
-      vi.mocked(windowManager.getWindow).mockReturnValue({ ipcServer: focusedServer } as unknown as WindowInfo)
-
-      Object.defineProperty(process, 'platform', { value: 'darwin' })
-      createApplicationMenu(null, mockServer as unknown as IpcServer)
-
-      const template = getTemplate()
-      const appMenu = template[0]!
-      const preferencesItem = appMenu.submenu?.find((item) => item.label === 'Preferences...')
-      preferencesItem?.click?.()
-
-      expect(focusedServer.settingsOpen).toHaveBeenCalled()
-      expect(mockServer.settingsOpen).not.toHaveBeenCalled()
-
-      // eslint-disable-next-line @typescript-eslint/unbound-method
-      vi.mocked(BrowserWindow.getFocusedWindow).mockReturnValue(null)
-      // eslint-disable-next-line @typescript-eslint/unbound-method
-      vi.mocked(windowManager.getWindow).mockReturnValue(undefined)
-    })
-
-    it('calls settingsOpen when Settings clicked on non-macOS', () => {
+    it('calls settingsOpenTo when Settings clicked on non-macOS', () => {
       Object.defineProperty(process, 'platform', { value: 'linux' })
+      const mockWindow = { id: 1 } as unknown as BrowserWindow
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      vi.mocked(BrowserWindow.getFocusedWindow).mockReturnValue(mockWindow)
 
-      createApplicationMenu(null, mockServer as unknown as IpcServer)
+      createApplicationMenu(mockServer as unknown as IpcServer)
 
       const template = getTemplate()
       const fileMenu = template.find((item) => item.label === 'File')
       const settingsItem = fileMenu?.submenu?.find((item) => item.label === 'Settings')
       settingsItem?.click?.()
 
-      expect(mockServer.settingsOpen).toHaveBeenCalled()
+      expect(mockServer.settingsOpenTo).toHaveBeenCalledWith(mockWindow)
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      vi.mocked(BrowserWindow.getFocusedWindow).mockReturnValue(null)
     })
 
-    it('calls activeProcessesOpen when Active Processes clicked', () => {
-      createApplicationMenu(null, mockServer as unknown as IpcServer)
+    it('calls activeProcessesOpenTo when Active Processes clicked', () => {
+      const mockWindow = { id: 1 } as unknown as BrowserWindow
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      vi.mocked(BrowserWindow.getFocusedWindow).mockReturnValue(mockWindow)
+
+      createApplicationMenu(mockServer as unknown as IpcServer)
 
       const template = getTemplate()
       const windowMenu = template.find((item) => item.label === 'Window')
       const activeProcessesItem = windowMenu?.submenu?.find((item) => item.label === 'Active Processes')
       activeProcessesItem?.click?.()
 
-      expect(mockServer.activeProcessesOpen).toHaveBeenCalled()
+      expect(mockServer.activeProcessesOpenTo).toHaveBeenCalledWith(mockWindow)
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      vi.mocked(BrowserWindow.getFocusedWindow).mockReturnValue(null)
     })
 
     it('opens external link when Learn More clicked', async () => {
-      createApplicationMenu(null, mockServer as unknown as IpcServer)
+      createApplicationMenu(mockServer as unknown as IpcServer)
 
       const template = getTemplate()
       const helpMenu = template.find((item) => item.role === 'help')

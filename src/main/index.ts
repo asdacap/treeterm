@@ -5,7 +5,6 @@ import { randomUUID } from 'crypto'
 import { GrpcDaemonClient, PtyStream } from './grpcClient'
 import { IpcServer } from './ipc/ipc-server'
 import { ConnectionManager } from './connectionManager'
-import { windowManager } from './windowManager'
 import type { ExecInput, ExecOutput } from '../generated/treeterm'
 import { ConnectionStatus } from '../shared/types'
 import type { SSHConnectionConfig, PortForwardConfig } from '../shared/types'
@@ -23,7 +22,6 @@ for (const arg of process.argv) {
 }
 import { loadSettings, saveSettings, addRecentDirectory } from './settings'
 import { createApplicationMenu } from './menu'
-let mainWindow: BrowserWindow | null = null
 let loadingWindow: BrowserWindow | null = null
 const closeConfirmedWindows: Set<number> = new Set()
 let connectionManager: ConnectionManager | null = null
@@ -31,6 +29,8 @@ let connectionManager: ConnectionManager | null = null
 const sessionConnectionMap = new Map<string, string>()
 // Maps sessionId to a per-session GrpcDaemonClient (separate gRPC connection for lock identity)
 const sessionClientMap = new Map<string, GrpcDaemonClient>()
+// Maps webContentsId to window UUID for session sync deduplication
+const windowUuids = new Map<number, string>()
 
 async function createSessionClient(sessionId: string, socketPath: string): Promise<void> {
   const client = new GrpcDaemonClient(socketPath)
@@ -43,7 +43,7 @@ const ptyStreams = new Map<string, PtyStream>()
 // Active exec streams keyed by execId for streaming output and kill support.
 const execStreams = new Map<string, ReturnType<GrpcDaemonClient['execStream']>>()
 // Session watch unsubscribers per connectionId, so reconnect can re-establish watches
-const sessionWatchUnsubs = new Map<string, { windowId: number; uuid: string; unsubscribe: () => void }[]>()
+const sessionWatchUnsubs = new Map<string, { uuid: string; unsubscribe: () => void }[]>()
 // Track previous connection status per connectionId for detecting reconnect transitions
 const previousConnectionStatuses = new Map<string, ConnectionStatus>()
 
@@ -109,12 +109,9 @@ function createWindow(): BrowserWindow {
     window.show()
   })
 
-  // Create a dedicated IPC server for this window
-  const windowServer = new IpcServer()
-  windowServer.setWindow(window)
-
   // Assign a unique UUID to this window for session sync deduplication
   const windowUuid = randomUUID()
+  windowUuids.set(window.webContents.id, windowUuid)
 
   // Cleanup for session watch stream (kept for window close cleanup)
   let unwatchSession: (() => void) | null = null
@@ -123,7 +120,7 @@ function createWindow(): BrowserWindow {
   window.webContents.on('before-input-event', (_event, input) => {
     // Forward Caps Lock events to renderer via IPC
     if (input.code === 'CapsLock' || input.key === 'CapsLock') {
-      windowServer.capsLockEvent({
+      server.capsLockEventTo(window, {
         type: input.type, // 'keyDown' or 'keyUp'
         key: input.key,
         code: input.code
@@ -178,7 +175,7 @@ function createWindow(): BrowserWindow {
   // Signal renderer when ready to initialize with the session
   window.webContents.on('did-finish-load', () => { void (async () => {
     if (!connectionManager) {
-      windowServer.appReady(null)
+      server.appReadyTo(window, null)
       return
     }
 
@@ -195,21 +192,21 @@ function createWindow(): BrowserWindow {
           sessionId: updatedSession.id,
           workspaces: updatedSession.workspaces.map(ws => ({ path: ws.path, metadata: ws.metadata })),
         })
-        windowServer.sessionSync('local', updatedSession)
+        server.sessionSync('local', updatedSession)
       })
       unwatchSession = watch.unsubscribe
 
       // Register in shared map so reconnect can re-establish this watch
-      registerSessionWatch('local', window.id, windowUuid, watch.unsubscribe)
+      registerSessionWatch('local', windowUuid, watch.unsubscribe)
 
       const session = await watch.initial
       console.log('[main] loaded session:', session.id)
       sessionConnectionMap.set(session.id, 'local')
       await createSessionClient(session.id, localClient.socketPath)
-      windowServer.appReady(session)
+      server.appReadyTo(window, session)
     } catch (error) {
       console.error('[main] failed to get session:', error)
-      windowServer.appReady(null)
+      server.appReadyTo(window, null)
     }
   })() })
 
@@ -219,20 +216,17 @@ function createWindow(): BrowserWindow {
       unwatchSession()
       unwatchSession = null
     }
+    windowUuids.delete(window.webContents.id)
   })
-
-  // Register with window manager (session ID updated later in did-finish-load)
-  windowManager.registerWindow(window, windowServer, windowUuid)
 
   return window
 }
 
 // Helper: register a session watch unsubscriber for reconnect tracking
-function registerSessionWatch(connectionId: string, windowId: number, uuid: string, unsubscribe: () => void): void {
+function registerSessionWatch(connectionId: string, uuid: string, unsubscribe: () => void): void {
   const existing = sessionWatchUnsubs.get(connectionId) ?? []
-  // Replace any existing entry for this window
-  const filtered = existing.filter(e => e.windowId !== windowId)
-  filtered.push({ windowId, uuid, unsubscribe })
+  const filtered = existing.filter(e => e.uuid !== uuid)
+  filtered.push({ uuid, unsubscribe })
   sessionWatchUnsubs.set(connectionId, filtered)
 }
 
@@ -245,21 +239,18 @@ function reestablishSessionWatches(connectionId: string, client: GrpcDaemonClien
     entry.unsubscribe()
   }
 
-  // Create new watches for each window
-  const newEntries: { windowId: number; uuid: string; unsubscribe: () => void }[] = []
+  // Create new watches for each uuid
+  const newEntries: { uuid: string; unsubscribe: () => void }[] = []
   for (const entry of entries) {
-    const winInfo = windowManager.getWindow(entry.windowId)
-    if (!winInfo) continue
-
     const watch = client.watchSession(entry.uuid, (updatedSession) => {
-      console.log(`[main] session sync received after reconnect for window ${String(entry.windowId)}`, {
+      console.log(`[main] session sync received after reconnect for uuid ${entry.uuid}`, {
         sessionId: updatedSession.id,
         workspaces: updatedSession.workspaces.map(ws => ({ path: ws.path, metadata: ws.metadata })),
       })
-      winInfo.ipcServer.sessionSync(connectionId, updatedSession)
+      server.sessionSync(connectionId, updatedSession)
     })
 
-    newEntries.push({ windowId: entry.windowId, uuid: entry.uuid, unsubscribe: watch.unsubscribe })
+    newEntries.push({ uuid: entry.uuid, unsubscribe: watch.unsubscribe })
 
     // Send the initial session data to renderer as a reconnect event
     void watch.initial.then(async (session) => {
@@ -271,7 +262,7 @@ function reestablishSessionWatches(connectionId: string, client: GrpcDaemonClien
       }
       const connectionInfo = connectionManager?.getConnection(connectionId)
       if (connectionInfo) {
-        winInfo.ipcServer.connectionReconnected(session, connectionInfo)
+        server.connectionReconnected(session, connectionInfo)
       }
     }).catch((error: unknown) => {
       console.error(`[main] reconnect: failed to load session for connection ${connectionId}:`, error)
@@ -440,8 +431,9 @@ server.onClipboardWriteText((text) => { clipboard.writeText(text) })
 server.onClipboardReadText(() => clipboard.readText())
 
 server.onDialogSelectFolder(async () => {
-  if (!mainWindow) return null
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const focusedWindow = BrowserWindow.getFocusedWindow()
+  if (!focusedWindow) return null
+  const result = await dialog.showOpenDialog(focusedWindow, {
     properties: ['openDirectory']
   })
   if (result.canceled || result.filePaths.length === 0) {
@@ -575,8 +567,7 @@ server.onAppGetInitialWorkspace(() => {
 })
 
 server.onAppGetWindowUuid((event) => {
-  const windowInfo = windowManager.findWindowByWebContentsId(event.sender.id)
-  return windowInfo?.uuid || ''
+  return windowUuids.get(event.sender.id) || ''
 })
 
 // Helper: sync port forwards for a connection to the saved connection in settings
@@ -594,14 +585,11 @@ function syncSavedPortForwards(connectionId: string): void {
   saveSettings(settings)
 }
 
-// Helper: start port forwards from config and register watchers for a window
+// Helper: start port forwards from config and register watchers
 function autoStartPortForwards(
   config: SSHConnectionConfig,
-  senderWindow: BrowserWindow
 ): void {
   if (!connectionManager || config.portForwards.length === 0) return
-  const winId = senderWindow.id
-  const windowInfo = windowManager.getWindow(winId)
 
   for (const spec of config.portForwards) {
     const pfConfig: PortForwardConfig = {
@@ -616,14 +604,9 @@ function autoStartPortForwards(
       connectionManager.addPortForward(pfConfig)
 
       const { unsubscribe } = connectionManager.watchPortForwardStatus(pfConfig.id, (pfInfo) => {
-        if (windowInfo) {
-          windowInfo.ipcServer.sshPortForwardStatus(pfInfo)
-        }
+        server.sshPortForwardStatus(pfInfo)
       })
-      if (!pfStatusWatchUnsubscribers.has(winId)) {
-        pfStatusWatchUnsubscribers.set(winId, new Map())
-      }
-      pfStatusWatchUnsubscribers.get(winId)?.set(pfConfig.id, unsubscribe)
+      pfStatusWatchUnsubs.set(pfConfig.id, unsubscribe)
     } catch (err) {
       console.error(`[main:ssh] Failed to auto-start port forward ${String(spec.localPort)}:${spec.remoteHost}:${String(spec.remotePort)}:`, err)
     }
@@ -631,55 +614,46 @@ function autoStartPortForwards(
 }
 
 // SSH IPC Handlers
-server.onSshConnect(async (event, config, options) => {
+server.onSshConnect(async (config, options) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
 
   console.log(`[main:ssh] onSshConnect called for host=${config.host}, id=${config.id}, refreshDaemon=${String(options?.refreshDaemon ?? false)}, allowOutdatedDaemon=${String(options?.allowOutdatedDaemon ?? false)}`)
   const info = await connectionManager.connectRemote(config, { refreshDaemon: options?.refreshDaemon, allowOutdatedDaemon: options?.allowOutdatedDaemon })
   console.log(`[main:ssh] connectRemote returned status=${info.status}${info.status === ConnectionStatus.Error ? `, error=${info.error}` : ''}`)
 
-  // Switch the calling window to use the remote daemon
   if (info.status === ConnectionStatus.Connected) {
-    const senderWindow = BrowserWindow.fromWebContents(event.sender)
-    if (senderWindow) {
-      // Load session from remote daemon and return it alongside connection info
-      const remoteClient = connectionManager.getClient(config.id)
-      try {
-        console.log(`[main:ssh] Starting session watch for remote daemon`)
-        const watchUuid = randomUUID()
-        const remoteWatch = remoteClient.watchSession(watchUuid, (updatedSession) => {
-          console.log(`[main:ssh] Session sync update received for session=${updatedSession.id}, workspaces=${String(updatedSession.workspaces.length)}`)
-          const windowInfo = windowManager.getWindow(senderWindow.id)
-          if (windowInfo) {
-            windowInfo.ipcServer.sessionSync(config.id, updatedSession)
-          }
-        })
-        // Register for reconnect re-establishment
-        registerSessionWatch(config.id, senderWindow.id, watchUuid, remoteWatch.unsubscribe)
+    // Load session from remote daemon and return it alongside connection info
+    const remoteClient = connectionManager.getClient(config.id)
+    try {
+      console.log(`[main:ssh] Starting session watch for remote daemon`)
+      const watchUuid = randomUUID()
+      const remoteWatch = remoteClient.watchSession(watchUuid, (updatedSession) => {
+        console.log(`[main:ssh] Session sync update received for session=${updatedSession.id}, workspaces=${String(updatedSession.workspaces.length)}`)
+        server.sessionSync(config.id, updatedSession)
+      })
+      // Register for reconnect re-establishment
+      registerSessionWatch(config.id, watchUuid, remoteWatch.unsubscribe)
 
-        const session = await remoteWatch.initial
-        console.log(`[main:ssh] Initial session loaded: id=${session.id}, workspaces=${String(session.workspaces.length)}`)
-        sessionConnectionMap.set(session.id, config.id)
-        await createSessionClient(session.id, remoteClient.socketPath)
+      const session = await remoteWatch.initial
+      console.log(`[main:ssh] Initial session loaded: id=${session.id}, workspaces=${String(session.workspaces.length)}`)
+      sessionConnectionMap.set(session.id, config.id)
+      await createSessionClient(session.id, remoteClient.socketPath)
 
-        // Auto-start saved port forwards
-        autoStartPortForwards(config, senderWindow)
+      // Auto-start saved port forwards
+      autoStartPortForwards(config)
 
-        return { info, session }
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error)
-        console.error('[main:ssh] Failed to load remote session:', errorMsg)
-        const isOldDaemon = errorMsg.includes('NOT_FOUND') && errorMsg.includes('session')
-        const userError = isOldDaemon
-          ? `Remote daemon is outdated. Retry with 'Refresh remote daemon' checked. (${errorMsg})`
-          : `Connected but failed to load session: ${errorMsg}`
-        return {
-          info: { ...info, status: ConnectionStatus.Error, error: userError },
-          session: null
-        }
+      return { info, session }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      console.error('[main:ssh] Failed to load remote session:', errorMsg)
+      const isOldDaemon = errorMsg.includes('NOT_FOUND') && errorMsg.includes('session')
+      const userError = isOldDaemon
+        ? `Remote daemon is outdated. Retry with 'Refresh remote daemon' checked. (${errorMsg})`
+        : `Connected but failed to load session: ${errorMsg}`
+      return {
+        info: { ...info, status: ConnectionStatus.Error, error: userError },
+        session: null
       }
-    } else {
-      console.warn('[main:ssh] Could not find sender window')
     }
   }
 
@@ -747,147 +721,104 @@ server.onSshRemoveSavedConnection(async (id) => {
   saveSettings(settings)
 })
 
-// Per-window watch subscriptions
-const bootstrapOutputUnsubscribers = new Map<number, Map<string, () => void>>()
-const tunnelOutputUnsubscribers = new Map<number, Map<string, () => void>>()
-const daemonOutputUnsubscribers = new Map<number, Map<string, () => void>>()
-const statusWatchUnsubscribers = new Map<number, Map<string, () => void>>()
+// Flat watch subscriptions (keyed by "type:connId" or connId or pfId)
+const outputWatchUnsubs = new Map<string, () => void>()
+const statusWatchUnsubs = new Map<string, () => void>()
 
 function registerOutputWatch(
-  unsubs: Map<number, Map<string, () => void>>,
-  event: Electron.IpcMainInvokeEvent,
-  connectionId: string,
+  unsubs: Map<string, () => void>,
+  key: string,
   watchFn: (id: string, cb: (line: string) => void) => { scrollback: string[], unsubscribe: () => void },
-  emitFn: (ipcServer: IpcServer, connectionId: string, line: string) => void,
+  connectionId: string,
+  emitFn: (connectionId: string, line: string) => void,
 ): { scrollback: string[] } {
-  const senderWindow = BrowserWindow.fromWebContents(event.sender)
-  if (!senderWindow) throw new Error('No window found for event sender')
-  const winId = senderWindow.id
+  unsubs.get(key)?.()
 
-  unsubs.get(winId)?.get(connectionId)?.()
-
-  const windowInfo = windowManager.getWindow(winId)
   const { scrollback, unsubscribe } = watchFn.call(connectionManager, connectionId, (line: string) => {
-    if (windowInfo) {
-      emitFn(windowInfo.ipcServer, connectionId, line)
-    }
+    emitFn(connectionId, line)
   })
 
-  if (!unsubs.has(winId)) {
-    unsubs.set(winId, new Map())
-  }
-  unsubs.get(winId)?.set(connectionId, unsubscribe)
+  unsubs.set(key, unsubscribe)
 
   return { scrollback }
 }
 
 function unregisterOutputWatch(
-  unsubs: Map<number, Map<string, () => void>>,
-  event: Electron.IpcMainInvokeEvent,
-  connectionId: string,
+  unsubs: Map<string, () => void>,
+  key: string,
 ): void {
-  const senderWindow = BrowserWindow.fromWebContents(event.sender)
-  if (!senderWindow) return
-  const winId = senderWindow.id
-  unsubs.get(winId)?.get(connectionId)?.()
-  unsubs.get(winId)?.delete(connectionId)
+  unsubs.get(key)?.()
+  unsubs.delete(key)
 }
 
-server.onSshWatchBootstrapOutput((event, connectionId) => {
+server.onSshWatchBootstrapOutput((connectionId) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
-  return registerOutputWatch(bootstrapOutputUnsubscribers, event, connectionId,
-    connectionManager.watchBootstrapOutput.bind(connectionManager),
-    (ipc, cid, line) => { ipc.sshBootstrapOutput(cid, line) })
+  return registerOutputWatch(outputWatchUnsubs, `bootstrap:${connectionId}`, connectionManager.watchBootstrapOutput.bind(connectionManager),
+    connectionId, (cid, line) => { server.sshBootstrapOutput(cid, line) })
 })
 
 // eslint-disable-next-line @typescript-eslint/require-await
-server.onSshUnwatchBootstrapOutput(async (event, connectionId) => {
-  unregisterOutputWatch(bootstrapOutputUnsubscribers, event, connectionId)
+server.onSshUnwatchBootstrapOutput(async (connectionId) => {
+  unregisterOutputWatch(outputWatchUnsubs, `bootstrap:${connectionId}`)
 })
 
-server.onSshWatchTunnelOutput((event, connectionId) => {
+server.onSshWatchTunnelOutput((connectionId) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
-  return registerOutputWatch(tunnelOutputUnsubscribers, event, connectionId,
-    connectionManager.watchTunnelOutput.bind(connectionManager),
-    (ipc, cid, line) => { ipc.sshTunnelOutput(cid, line) })
+  return registerOutputWatch(outputWatchUnsubs, `tunnel:${connectionId}`, connectionManager.watchTunnelOutput.bind(connectionManager),
+    connectionId, (cid, line) => { server.sshTunnelOutput(cid, line) })
 })
 
 // eslint-disable-next-line @typescript-eslint/require-await
-server.onSshUnwatchTunnelOutput(async (event, connectionId) => {
-  unregisterOutputWatch(tunnelOutputUnsubscribers, event, connectionId)
+server.onSshUnwatchTunnelOutput(async (connectionId) => {
+  unregisterOutputWatch(outputWatchUnsubs, `tunnel:${connectionId}`)
 })
 
-server.onSshWatchDaemonOutput((event, connectionId) => {
+server.onSshWatchDaemonOutput((connectionId) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
-  return registerOutputWatch(daemonOutputUnsubscribers, event, connectionId,
-    connectionManager.watchDaemonOutput.bind(connectionManager),
-    (ipc, cid, line) => { ipc.sshDaemonOutput(cid, line) })
+  return registerOutputWatch(outputWatchUnsubs, `daemon:${connectionId}`, connectionManager.watchDaemonOutput.bind(connectionManager),
+    connectionId, (cid, line) => { server.sshDaemonOutput(cid, line) })
 })
 
 // eslint-disable-next-line @typescript-eslint/require-await
-server.onSshUnwatchDaemonOutput(async (event, connectionId) => {
-  unregisterOutputWatch(daemonOutputUnsubscribers, event, connectionId)
+server.onSshUnwatchDaemonOutput(async (connectionId) => {
+  unregisterOutputWatch(outputWatchUnsubs, `daemon:${connectionId}`)
 })
 
-server.onSshWatchConnectionStatus((event, connectionId) => {
+server.onSshWatchConnectionStatus((connectionId) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
 
-  const senderWindow = BrowserWindow.fromWebContents(event.sender)
-  if (!senderWindow) throw new Error('No window found for event sender')
-  const winId = senderWindow.id
+  // Clean up any existing watch for this connection
+  statusWatchUnsubs.get(connectionId)?.()
 
-  // Clean up any existing watch for this window+connection
-  statusWatchUnsubscribers.get(winId)?.get(connectionId)?.()
-
-  const windowInfo = windowManager.getWindow(winId)
   const { initial, unsubscribe } = connectionManager.watchConnectionStatus(connectionId, (info) => {
-    if (windowInfo) {
-      windowInfo.ipcServer.sshConnectionStatus(info)
-    }
+    server.sshConnectionStatus(info)
   })
 
   if (!initial) throw new Error(`Connection not found: ${connectionId}`)
 
-  if (!statusWatchUnsubscribers.has(winId)) {
-    statusWatchUnsubscribers.set(winId, new Map())
-  }
-  statusWatchUnsubscribers.get(winId)?.set(connectionId, unsubscribe)
+  statusWatchUnsubs.set(connectionId, unsubscribe)
 
   return { initial }
 })
 
 // eslint-disable-next-line @typescript-eslint/require-await
-server.onSshUnwatchConnectionStatus(async (event, connectionId) => {
-  const senderWindow = BrowserWindow.fromWebContents(event.sender)
-  if (!senderWindow) return
-
-  const winId = senderWindow.id
-  statusWatchUnsubscribers.get(winId)?.get(connectionId)?.()
-  statusWatchUnsubscribers.get(winId)?.delete(connectionId)
+server.onSshUnwatchConnectionStatus(async (connectionId) => {
+  statusWatchUnsubs.get(connectionId)?.()
+  statusWatchUnsubs.delete(connectionId)
 })
 
 // Port forward IPC handlers
-const pfStatusWatchUnsubscribers = new Map<number, Map<string, () => void>>()
+const pfStatusWatchUnsubs = new Map<string, () => void>()
 
-server.onSshAddPortForward((event, config) => {
+server.onSshAddPortForward((config) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
   const info = connectionManager.addPortForward(config)
 
-  // Register a status watcher for the sender window
-  const senderWindow = BrowserWindow.fromWebContents(event.sender)
-  if (senderWindow) {
-    const winId = senderWindow.id
-    const windowInfo = windowManager.getWindow(winId)
-    const { unsubscribe } = connectionManager.watchPortForwardStatus(config.id, (pfInfo) => {
-      if (windowInfo) {
-        windowInfo.ipcServer.sshPortForwardStatus(pfInfo)
-      }
-    })
-    if (!pfStatusWatchUnsubscribers.has(winId)) {
-      pfStatusWatchUnsubscribers.set(winId, new Map())
-    }
-    pfStatusWatchUnsubscribers.get(winId)?.set(config.id, unsubscribe)
-  }
+  // Register a status watcher (broadcast to all windows)
+  const { unsubscribe } = connectionManager.watchPortForwardStatus(config.id, (pfInfo) => {
+    server.sshPortForwardStatus(pfInfo)
+  })
+  pfStatusWatchUnsubs.set(config.id, unsubscribe)
 
   // Sync saved connection with updated port forwards
   syncSavedPortForwards(config.connectionId)
@@ -919,49 +850,35 @@ server.onSshListPortForwards((connectionId) => {
   return connectionManager.listPortForwards(connectionId)
 })
 
-// Per-window port forward watch subscriptions
-const pfOutputWatchUnsubscribers = new Map<number, Map<string, () => void>>()
+// Port forward output watch subscriptions
+const pfOutputWatchUnsubs = new Map<string, () => void>()
 
-server.onSshWatchPortForwardOutput((event, portForwardId) => {
+server.onSshWatchPortForwardOutput((portForwardId) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
 
-  const senderWindow = BrowserWindow.fromWebContents(event.sender)
-  if (!senderWindow) throw new Error('No window found for event sender')
-  const winId = senderWindow.id
+  pfOutputWatchUnsubs.get(portForwardId)?.()
 
-  pfOutputWatchUnsubscribers.get(winId)?.get(portForwardId)?.()
-
-  const windowInfo = windowManager.getWindow(winId)
   const { scrollback, unsubscribe } = connectionManager.watchPortForwardOutput(portForwardId, (line) => {
-    if (windowInfo) {
-      windowInfo.ipcServer.sshPortForwardOutput(portForwardId, line)
-    }
+    server.sshPortForwardOutput(portForwardId, line)
   })
 
-  if (!pfOutputWatchUnsubscribers.has(winId)) {
-    pfOutputWatchUnsubscribers.set(winId, new Map())
-  }
-  pfOutputWatchUnsubscribers.get(winId)?.set(portForwardId, unsubscribe)
+  pfOutputWatchUnsubs.set(portForwardId, unsubscribe)
 
   return { scrollback }
 })
 
 // eslint-disable-next-line @typescript-eslint/require-await
-server.onSshUnwatchPortForwardOutput(async (event, portForwardId) => {
-  const senderWindow = BrowserWindow.fromWebContents(event.sender)
-  if (!senderWindow) return
-
-  const winId = senderWindow.id
-  pfOutputWatchUnsubscribers.get(winId)?.get(portForwardId)?.()
-  pfOutputWatchUnsubscribers.get(winId)?.delete(portForwardId)
+server.onSshUnwatchPortForwardOutput(async (portForwardId) => {
+  pfOutputWatchUnsubs.get(portForwardId)?.()
+  pfOutputWatchUnsubs.delete(portForwardId)
 })
 
 // App close confirmation IPC handlers
 server.onAppCloseConfirmed((event) => {
-  const windowInfo = windowManager.findWindowByWebContentsId(event.sender.id)
-  if (windowInfo) {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  if (window) {
     closeConfirmedWindows.add(event.sender.id)
-    windowInfo.window.close()
+    window.close()
   }
 })
 
@@ -997,9 +914,7 @@ void app.whenReady().then(async () => {
     const prevStatus = previousConnectionStatuses.get(info.id)
     previousConnectionStatuses.set(info.id, info.status)
 
-    for (const winInfo of windowManager.getAllWindows()) {
-      winInfo.ipcServer.sshConnectionStatus(info)
-    }
+    server.sshConnectionStatus(info)
 
     // On reconnect success: re-establish session watch and notify renderer
     if (info.status === ConnectionStatus.Connected && prevStatus === ConnectionStatus.Reconnecting) {
@@ -1020,9 +935,8 @@ void app.whenReady().then(async () => {
     loadingWindow = null
   }
 
-  mainWindow = createWindow()
-  server.setWindow(mainWindow)
-  createApplicationMenu(mainWindow, server, () => { void quitAndKillDaemon() })
+  createWindow()
+  createApplicationMenu(server, () => { void quitAndKillDaemon() })
 
   // Handle --ssh startup argument
   if (initialSSHTarget) {
@@ -1032,33 +946,24 @@ void app.whenReady().then(async () => {
       void connectionManager.connectRemote(parsed).then(async (info) => {
         if (info.status === ConnectionStatus.Connected) {
           console.log('[main] SSH connected:', info.id)
-          if (mainWindow) {
-            // Load session from remote daemon and re-initialize the renderer
-            try {
-              if (!connectionManager) throw new Error('ConnectionManager not initialized')
-              const remoteClient = connectionManager.getClient(parsed.id)
-              const windowId = mainWindow.id
-              const autoWatchUuid = randomUUID()
-              const remoteWatch = remoteClient.watchSession(autoWatchUuid, (updatedSession) => {
-                const windowInfo = windowManager.getWindow(windowId)
-                if (windowInfo) {
-                  windowInfo.ipcServer.sessionSync(parsed.id, updatedSession)
-                }
-              })
-              // Register for reconnect re-establishment
-              registerSessionWatch(parsed.id, windowId, autoWatchUuid, remoteWatch.unsubscribe)
+          // Load session from remote daemon and re-initialize the renderer
+          try {
+            if (!connectionManager) throw new Error('ConnectionManager not initialized')
+            const remoteClient = connectionManager.getClient(parsed.id)
+            const autoWatchUuid = randomUUID()
+            const remoteWatch = remoteClient.watchSession(autoWatchUuid, (updatedSession) => {
+              server.sessionSync(parsed.id, updatedSession)
+            })
+            // Register for reconnect re-establishment
+            registerSessionWatch(parsed.id, autoWatchUuid, remoteWatch.unsubscribe)
 
-              const session = await remoteWatch.initial
-              sessionConnectionMap.set(session.id, parsed.id)
-              const autoClient = connectionManager.getClient(parsed.id)
-              await createSessionClient(session.id, autoClient.socketPath)
-              const windowInfo = windowManager.getWindow(windowId)
-              if (windowInfo) {
-                windowInfo.ipcServer.sshAutoConnected(session, info)
-              }
-            } catch (error) {
-              console.error('[main] Failed to load remote session:', error)
-            }
+            const session = await remoteWatch.initial
+            sessionConnectionMap.set(session.id, parsed.id)
+            const autoClient = connectionManager.getClient(parsed.id)
+            await createSessionClient(session.id, autoClient.socketPath)
+            server.sshAutoConnected(session, info)
+          } catch (error) {
+            console.error('[main] Failed to load remote session:', error)
           }
         } else {
           console.error('[main] SSH connection failed:', info.status === ConnectionStatus.Error ? info.error : `status=${info.status}`)
@@ -1072,9 +977,7 @@ void app.whenReady().then(async () => {
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createWindow()
-      server.setWindow(mainWindow)
-      createApplicationMenu(mainWindow, server, () => { void quitAndKillDaemon() })
+      createWindow()
     }
   })
 }).catch((error: unknown) => {

@@ -1,21 +1,7 @@
 import { Menu, app, BrowserWindow, shell } from 'electron'
 import type { IpcServer } from './ipc/ipc-server'
-import { windowManager } from './windowManager'
-
-function sendToFocusedWindow(fallbackServer: IpcServer, action: (server: IpcServer) => void): void {
-  const focused = BrowserWindow.getFocusedWindow()
-  if (focused) {
-    const windowInfo = windowManager.getWindow(focused.id)
-    if (windowInfo) {
-      action(windowInfo.ipcServer)
-      return
-    }
-  }
-  action(fallbackServer)
-}
 
 export function createApplicationMenu(
-  _mainWindow: BrowserWindow | null,
   server: IpcServer,
   onQuitAndKillDaemon?: () => void
 ): void {
@@ -34,7 +20,10 @@ export function createApplicationMenu(
                 label: 'Preferences...',
                 accelerator: 'Cmd+,',
                 click: () => {
-                  sendToFocusedWindow(server, s => { s.settingsOpen(); })
+                  const focused = BrowserWindow.getFocusedWindow()
+                  if (focused) {
+                    server.settingsOpenTo(focused)
+                  }
                 }
               },
               { type: 'separator' as const },
@@ -61,7 +50,10 @@ export function createApplicationMenu(
                 label: 'Settings',
                 accelerator: 'Ctrl+,',
                 click: () => {
-                  sendToFocusedWindow(server, s => { s.settingsOpen(); })
+                  const focused = BrowserWindow.getFocusedWindow()
+                  if (focused) {
+                    server.settingsOpenTo(focused)
+                  }
                 }
               },
               { type: 'separator' as const }
@@ -139,7 +131,10 @@ export function createApplicationMenu(
         {
           label: 'Active Processes',
           click: () => {
-            sendToFocusedWindow(server, s => { s.activeProcessesOpen(); })
+            const focused = BrowserWindow.getFocusedWindow()
+            if (focused) {
+              server.activeProcessesOpenTo(focused)
+            }
           }
         },
         ...(isMac
