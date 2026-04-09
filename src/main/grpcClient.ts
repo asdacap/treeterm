@@ -77,6 +77,7 @@ export class PtyStream {
 
     this.stream.on('error', (error) => {
       console.error(`[PtyStream ${this.handle}] stream error for ${sessionId}:`, error)
+      this.closed = true
       onEvent({ type: 'error', message: error.message })
     })
 
@@ -94,6 +95,7 @@ export class PtyStream {
       this.stream.write({ write: { data: Buffer.from(data, 'utf-8') } })
     } catch (error) {
       console.error(`[PtyStream ${this.handle}] failed to write:`, error)
+      this.closed = true
     }
   }
 
@@ -103,6 +105,7 @@ export class PtyStream {
       this.stream.write({ resize: { cols, rows } })
     } catch (error) {
       console.error(`[PtyStream ${this.handle}] failed to resize:`, error)
+      this.closed = true
     }
   }
 

@@ -282,7 +282,7 @@ server.onPtyCreate(async (event, connectionId, handle, cwd, sandbox, startupComm
     const sessionId = await client.createPtySession({ cwd, sandbox: sandbox, startupCommand })
     const ptyStream = client.openPtyStream(handle, sessionId, (evt) => {
       event.sender.send('pty:event', handle, evt)
-      if (evt.type === 'end') ptyStreams.delete(handle)
+      if (evt.type === 'end' || evt.type === 'error') ptyStreams.delete(handle)
     })
     ptyStreams.set(handle, ptyStream)
 
@@ -304,7 +304,7 @@ server.onPtyAttach(async (event, connectionId, handle, sessionId) => {
     await client.ensureDaemonRunning()
     const ptyStream = client.openPtyStream(handle, sessionId, (evt) => {
       event.sender.send('pty:event', handle, evt)
-      if (evt.type === 'end') ptyStreams.delete(handle)
+      if (evt.type === 'end' || evt.type === 'error') ptyStreams.delete(handle)
     })
     ptyStreams.set(handle, ptyStream)
 

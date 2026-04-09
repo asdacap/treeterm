@@ -19,7 +19,7 @@ client.onPtyEvent((handle, event) => {
   if (listeners) {
     listeners.forEach((cb) => { cb(event); })
   }
-  if (event.type === 'end') {
+  if (event.type === 'end' || event.type === 'error') {
     ptyEventListeners.delete(handle)
   }
 })
