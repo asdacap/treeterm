@@ -26,13 +26,15 @@ The daemon is a standalone Rust binary. Built with `npm run build:daemon-rs` (or
 | Session Store | `session_store.rs` | In-memory session persistence + watch broadcasting |
 | gRPC Server | `grpc_server.rs` | Exposes all 15 operations via gRPC (tonic) |
 
-**Git ops are NOT in the daemon** — they live in `src/main/git.ts` using `ExecStream`.
+**Git ops are NOT in the daemon** — they live in the renderer, using `ExecStream` proxied through Main.
 
 ## Layer Responsibilities
 
 **Daemon exposes stable primitives:** `ExecStream`, `PtyStream`, `ReadFile`/`WriteFile`, session persistence and multiplexin.
 
-**Main handles high-level logic:** Git orchestration via `ExecStream`, output parsing, error interpretation, workflow composition (stage → commit → push). Crucually, it should not do multiplexing, each of the window or application is self contained, and for pty, each terminal should have a new connection to the daemon.
+**Main is a light proxy:** It forwards IPC calls to the daemon and provides a synthetic ID per gRPC client. It should not contain business logic, output parsing, workflow orchestration, or window tracking. Each window is self-contained, and for PTY, each terminal should have a new connection to the gRPC client.
+
+**Renderer handles high-level logic:** Git orchestration, output parsing, error interpretation, workflow composition (stage → commit → push). Business logic lives in Zustand stores, not in Main IPC handlers.
 
 **Never add business logic to the daemon.** Never do direct filesystem ops in Main — use daemon's `WriteFile` gRPC.
 
@@ -44,7 +46,7 @@ daemon-rs/              # Rust daemon (standalone binary)
 │   ├── treeterm-proto/ # Generated gRPC stubs from treeterm.proto
 │   └── treeterm-daemon/# Daemon logic + binary
 src/
-├── main/           # Electron main — git.ts, ipc.ts, grpcClient.ts
+├── main/           # Electron main — ipc.ts, grpcClient.ts (light proxy)
 ├── renderer/       # React UI — components/, store/, hooks/
 ├── proto/          # treeterm.proto (gRPC definitions)
 ├── applications/   # Application types (Terminal, AI Harness, etc.)
@@ -53,11 +55,11 @@ src/
 
 ## Adding New Operations
 
-**New Git op:** Add to `src/main/git.ts`, add IPC handler in `src/main/index.ts`, call from renderer via IPC.
+**New Git op:** Add to a renderer Zustand store. Use `ExecStream` via IPC (Main proxies to daemon). Parse output in the renderer.
 
 **New PTY feature:** Keep it primitive in `ptyManager.ts` (create/write/resize/kill). Compose complex logic in the renderer.
 
-**New exec command:** Use daemon's `ExecStream` from the Main process — write start event, collect stdout/stderr chunks, resolve on result event.
+**New exec command:** Renderer initiates via IPC, Main proxies to daemon's `ExecStream` — renderer writes start event, collects stdout/stderr chunks, resolves on result event.
 
 ## Development Rules
 
@@ -98,6 +100,16 @@ the error UI.
 - Use the same data as Daemon as much as possible.
 - Use the same id for example.
 - Do not copy the daemon state, rather wrap them if needed. 
+
+### Update via daemon watch
+- After an operation (e.g., git commit, session create), do NOT optimistically update UI state inline within the operation.
+- Instead, let the daemon watch/subscription push the updated state to the renderer.
+- This prevents inconsistencies when multiple windows observe the same session — every window gets the update through the same watch channel.
+
+### Main must not track windows
+- Main should not maintain window-to-connection or window-to-session mappings.
+- The synthetic ID is per gRPC client, not per window.
+- Each renderer (window) is responsible for tracking and sending the correct gRPC client ID with its IPC requests.
 
 ### Remove simple code if redundant.
 - Let say you have two function, A and B. 
@@ -158,5 +170,5 @@ Prefer to validate data at the last minute. Eg: do not check for valid parent id
 
 > "Is this a primitive operation or a workflow?"
 - **Primitive** (exec, I/O, PTY) → Daemon
-- **Workflow** (git, complex parsing) → Main
+- **Workflow** (git, complex parsing) → Renderer (Zustand stores)
 - **UI State** → Renderer
