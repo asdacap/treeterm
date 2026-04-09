@@ -210,18 +210,12 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         updateAiState(result.state as ActivityState, result.reason)
         history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), cached: result.cached, systemPrompt, durationMs })
         if (history.length > MAX_HISTORY) history.shift()
-      } else if ('error' in result) {
+      } else {
         console.error('[terminal-analyzer] error:', result.error)
         inFlightBuffer = null
         store.setState({ analyzing: false })
         updateAiState(ActivityState.Error)
         history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), error: result.error, systemPrompt, durationMs })
-        if (history.length > MAX_HISTORY) history.shift()
-      } else {
-        console.debug('[terminal-analyzer] ignored (no state in result)')
-        inFlightBuffer = null
-        store.setState({ analyzing: false })
-        history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), error: '[unexpected] no state in result', systemPrompt, durationMs })
         if (history.length > MAX_HISTORY) history.shift()
       }
 

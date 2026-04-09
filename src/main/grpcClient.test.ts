@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => {
     killPty: vi.fn<(...args: any[]) => any>(),
     listPtySessions: vi.fn<(...args: any[]) => any>(),
     shutdown: vi.fn<(...args: any[]) => any>(),
+    lockSession: vi.fn<(...args: any[]) => any>(),
+    unlockSession: vi.fn<(...args: any[]) => any>(),
+    forceUnlockSession: vi.fn<(...args: any[]) => any>(),
     ptyStream: vi.fn<(...args: any[]) => any>(),
     execStream: vi.fn<(...args: any[]) => any>(),
     updateSession: vi.fn<(...args: any[]) => any>(),
@@ -638,6 +641,168 @@ describe('GrpcDaemonClient', () => {
       client.disconnect()
       const result = client.watchSession('listener-1', vi.fn<(...args: any[]) => void>())
       await expect(result.initial).rejects.toThrow('Not connected')
+    })
+  })
+
+  describe('lockSession', () => {
+    beforeEach(async () => {
+      connectClient()
+      await client.connect()
+    })
+
+    it('resolves with acquired and session on success', async () => {
+      const mockProtoSession = {
+        id: 'session-1',
+        workspaces: [],
+        createdAt: 100,
+        lastActivity: 200,
+        version: 1,
+        lock: { acquiredAt: 1000, expiresAt: 2000 }
+      }
+      mockClientInstance.lockSession.mockImplementation((_req: any, cb: (err: any, res: any) => void) => {
+        cb(null, { acquired: true, session: mockProtoSession })
+      })
+      const result = await client.lockSession()
+      expect(result.acquired).toBe(true)
+      expect(result.session.id).toBe('session-1')
+      expect(result.session.lock).toEqual({ acquiredAt: 1000, expiresAt: 2000 })
+    })
+
+    it('rejects when response.session is missing', async () => {
+      mockClientInstance.lockSession.mockImplementation((_req: any, cb: (err: any, res: any) => void) => {
+        cb(null, { acquired: false, session: null })
+      })
+      await expect(client.lockSession()).rejects.toThrow('LockSession response missing session')
+    })
+
+    it('rejects on error', async () => {
+      mockClientInstance.lockSession.mockImplementation((_req: any, cb: (err: any) => void) => {
+        cb({ message: 'lock failed' })
+      })
+      await expect(client.lockSession()).rejects.toThrow('lock failed')
+    })
+
+    it('throws when not connected', async () => {
+      client.disconnect()
+      await expect(client.lockSession()).rejects.toThrow('Not connected')
+    })
+  })
+
+  describe('unlockSession', () => {
+    beforeEach(async () => {
+      connectClient()
+      await client.connect()
+    })
+
+    it('resolves with session on success', async () => {
+      const mockProtoSession = {
+        id: 'session-1',
+        workspaces: [],
+        createdAt: 100,
+        lastActivity: 200,
+        version: 1,
+        lock: null
+      }
+      mockClientInstance.unlockSession.mockImplementation((_req: any, cb: (err: any, res: any) => void) => {
+        cb(null, mockProtoSession)
+      })
+      const result = await client.unlockSession()
+      expect(result.id).toBe('session-1')
+      expect(result.lock).toBeNull()
+    })
+
+    it('rejects on error', async () => {
+      mockClientInstance.unlockSession.mockImplementation((_req: any, cb: (err: any) => void) => {
+        cb({ message: 'unlock failed' })
+      })
+      await expect(client.unlockSession()).rejects.toThrow('unlock failed')
+    })
+  })
+
+  describe('forceUnlockSession', () => {
+    beforeEach(async () => {
+      connectClient()
+      await client.connect()
+    })
+
+    it('resolves with session on success', async () => {
+      const mockProtoSession = {
+        id: 'session-1',
+        workspaces: [],
+        createdAt: 100,
+        lastActivity: 200,
+        version: 1,
+        lock: null
+      }
+      mockClientInstance.forceUnlockSession.mockImplementation((_req: any, cb: (err: any, res: any) => void) => {
+        cb(null, mockProtoSession)
+      })
+      const result = await client.forceUnlockSession()
+      expect(result.id).toBe('session-1')
+    })
+
+    it('rejects on error', async () => {
+      mockClientInstance.forceUnlockSession.mockImplementation((_req: any, cb: (err: any) => void) => {
+        cb({ message: 'force unlock failed' })
+      })
+      await expect(client.forceUnlockSession()).rejects.toThrow('force unlock failed')
+    })
+  })
+
+  describe('shutdownDaemon', () => {
+    beforeEach(async () => {
+      connectClient()
+      await client.connect()
+    })
+
+    it('calls disconnect after shutdown', async () => {
+      mockClientInstance.shutdown.mockImplementation((_req: any, cb: (err: any) => void) => {
+        cb(null)
+      })
+      await client.shutdownDaemon()
+      expect(client.isConnected()).toBe(false)
+      expect(mockClientInstance.close).toHaveBeenCalled()
+    })
+
+    it('rejects on error', async () => {
+      mockClientInstance.shutdown.mockImplementation((_req: any, cb: (err: any) => void) => {
+        cb({ message: 'shutdown failed' })
+      })
+      await expect(client.shutdownDaemon()).rejects.toThrow('shutdown failed')
+    })
+
+    it('throws when not connected', async () => {
+      client.disconnect()
+      await expect(client.shutdownDaemon()).rejects.toThrow('Not connected')
+    })
+  })
+
+  describe('readFile with image', () => {
+    beforeEach(async () => {
+      connectClient()
+      await client.connect()
+    })
+
+    it('returns base64 content and language=image for image files', async () => {
+      const imageData = Buffer.from([0x89, 0x50, 0x4e, 0x47])
+      mockClientInstance.readFile.mockImplementation(() => {
+        const handlers: Record<string, (...args: any[]) => void> = {}
+        const stream = {
+          on: (event: string, handler: (...args: any[]) => void) => { handlers[event] = handler; return stream },
+        }
+        setTimeout(() => {
+          handlers['data']!({ header: { path: '/ws/image.png', size: 4, language: 'plaintext' } })
+          handlers['data']!({ data: { data: imageData } })
+          handlers['data']!({ end: { success: true } })
+        }, 0)
+        return stream
+      })
+      const result = await client.readFile('/ws', '/ws/image.png')
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.file.language).toBe('image')
+        expect(result.file.content).toBe(imageData.toString('base64'))
+      }
     })
   })
 

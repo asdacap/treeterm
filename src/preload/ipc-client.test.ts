@@ -64,6 +64,13 @@ describe('IpcClient', () => {
       expect(result).toBe('uuid-abc')
     })
 
+    it('clipboardReadText calls ipcRenderer.invoke with correct channel', async () => {
+      mockInvoke.mockResolvedValue('clipboard content')
+      const result = await client.clipboardReadText()
+      expect(mockInvoke).toHaveBeenCalledWith('clipboard:readText')
+      expect(result).toBe('clipboard content')
+    })
+
     it.each([
       ['ptyAttach', 'pty:attach'],
       ['ptyList', 'pty:list'],
@@ -77,6 +84,34 @@ describe('IpcClient', () => {
       ['dialogGetRecentDirectories', 'dialog:getRecentDirectories'],
       ['sandboxIsAvailable', 'sandbox:isAvailable'],
       ['appGetInitialWorkspace', 'app:getInitialWorkspace'],
+      ['ptyCreateSession', 'pty:createSession'],
+      ['sessionLock', 'session:lock'],
+      ['sessionUnlock', 'session:unlock'],
+      ['sessionForceUnlock', 'session:forceUnlock'],
+      ['sshConnect', 'ssh:connect'],
+      ['sshDisconnect', 'ssh:disconnect'],
+      ['sshReconnect', 'ssh:reconnect'],
+      ['sshReconnectNow', 'ssh:reconnectNow'],
+      ['sshForceReconnect', 'ssh:forceReconnect'],
+      ['sshCancelReconnect', 'ssh:cancelReconnect'],
+      ['sshListConnections', 'ssh:listConnections'],
+      ['sshSaveConnection', 'ssh:saveConnection'],
+      ['sshGetSavedConnections', 'ssh:getSavedConnections'],
+      ['sshRemoveSavedConnection', 'ssh:removeSavedConnection'],
+      ['sshWatchBootstrapOutput', 'ssh:watchBootstrapOutput'],
+      ['sshUnwatchBootstrapOutput', 'ssh:unwatchBootstrapOutput'],
+      ['sshWatchTunnelOutput', 'ssh:watchTunnelOutput'],
+      ['sshUnwatchTunnelOutput', 'ssh:unwatchTunnelOutput'],
+      ['sshWatchDaemonOutput', 'ssh:watchDaemonOutput'],
+      ['sshUnwatchDaemonOutput', 'ssh:unwatchDaemonOutput'],
+      ['sshWatchConnectionStatus', 'ssh:watchConnectionStatus'],
+      ['sshUnwatchConnectionStatus', 'ssh:unwatchConnectionStatus'],
+      ['sshAddPortForward', 'ssh:addPortForward'],
+      ['sshRemovePortForward', 'ssh:removePortForward'],
+      ['sshListPortForwards', 'ssh:listPortForwards'],
+      ['sshWatchPortForwardOutput', 'ssh:watchPortForwardOutput'],
+      ['sshUnwatchPortForwardOutput', 'ssh:unwatchPortForwardOutput'],
+      ['execStart', 'exec:start'],
     ] as const)('%s calls ipcRenderer.invoke with %s channel', async (method, channel) => {
       mockInvoke.mockResolvedValue('test-result')
       // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
@@ -110,6 +145,16 @@ describe('IpcClient', () => {
     it('appCloseCancelled calls ipcRenderer.send with correct channel', () => {
       client.appCloseCancelled()
       expect(mockSend).toHaveBeenCalledWith('app:close-cancelled')
+    })
+
+    it('clipboardWriteText calls ipcRenderer.send with correct channel and args', () => {
+      client.clipboardWriteText('copied text')
+      expect(mockSend).toHaveBeenCalledWith('clipboard:writeText', 'copied text')
+    })
+
+    it('execKill calls ipcRenderer.send with correct channel and args', () => {
+      client.execKill('exec-1')
+      expect(mockSend).toHaveBeenCalledWith('exec:kill', 'exec-1')
     })
   })
 
@@ -182,6 +227,16 @@ describe('IpcClient', () => {
       ['onAppReady', 'app:ready'],
       ['onCapsLockEvent', 'capslock-event'],
       ['onDaemonSessions', 'daemon:sessions'],
+      ['onSshAutoConnected', 'ssh:autoConnected'],
+      ['onConnectionReconnected', 'connection:reconnected'],
+      ['onActiveProcessesOpen', 'active-processes:open'],
+      ['onSshConnectionStatus', 'ssh:connectionStatus'],
+      ['onSshBootstrapOutput', 'ssh:bootstrapOutput'],
+      ['onSshTunnelOutput', 'ssh:tunnelOutput'],
+      ['onSshDaemonOutput', 'ssh:daemonOutput'],
+      ['onSshPortForwardStatus', 'ssh:portForwardStatus'],
+      ['onSshPortForwardOutput', 'ssh:portForwardOutput'],
+      ['onExecEvent', 'exec:event'],
     ] as const)('%s registers listener on %s and unsubscribe works', (method, channel) => {
       const callback = vi.fn<(...args: any[]) => void>()
       // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access

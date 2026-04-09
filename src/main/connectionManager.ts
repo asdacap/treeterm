@@ -187,10 +187,8 @@ class Connection {
     if (!this.portForwardOutputWatchers.has(portForwardId)) {
       this.portForwardOutputWatchers.set(portForwardId, new Set())
     }
-    const outputWatchers = this.portForwardOutputWatchers.get(portForwardId)
-    if (outputWatchers) {
-      outputWatchers.add(cb)
-    }
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guaranteed by .set() above
+    this.portForwardOutputWatchers.get(portForwardId)!.add(cb)
 
     return {
       scrollback,
@@ -204,10 +202,8 @@ class Connection {
     if (!this.portForwardStatusWatchers.has(portForwardId)) {
       this.portForwardStatusWatchers.set(portForwardId, new Set())
     }
-    const statusWatchers = this.portForwardStatusWatchers.get(portForwardId)
-    if (statusWatchers) {
-      statusWatchers.add(cb)
-    }
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guaranteed by .set() above
+    this.portForwardStatusWatchers.get(portForwardId)!.add(cb)
 
     return {
       initial,

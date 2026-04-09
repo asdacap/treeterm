@@ -17,7 +17,7 @@ vi.mock('electron', () => ({
 }))
 
 import type { BrowserWindow } from 'electron'
-import type { Session, ConnectionInfo, TTYSessionInfo } from '../../shared/types'
+import type { Session, ConnectionInfo, TTYSessionInfo, PortForwardInfo, PortForwardStatus } from '../../shared/types'
 import { IpcServer } from './ipc-server'
 
 describe('IpcServer', () => {
@@ -111,6 +111,17 @@ describe('IpcServer', () => {
       ['onSshUnwatchDaemonOutput', 'ssh:unwatchDaemonOutput'],
       ['onSshWatchConnectionStatus', 'ssh:watchConnectionStatus'],
       ['onSshUnwatchConnectionStatus', 'ssh:unwatchConnectionStatus'],
+      ['onPtyList', 'pty:list'],
+      ['onSessionLock', 'session:lock'],
+      ['onSessionUnlock', 'session:unlock'],
+      ['onSessionForceUnlock', 'session:forceUnlock'],
+      ['onSshAddPortForward', 'ssh:addPortForward'],
+      ['onSshRemovePortForward', 'ssh:removePortForward'],
+      ['onSshListPortForwards', 'ssh:listPortForwards'],
+      ['onSshWatchPortForwardOutput', 'ssh:watchPortForwardOutput'],
+      ['onSshUnwatchPortForwardOutput', 'ssh:unwatchPortForwardOutput'],
+      ['onClipboardReadText', 'clipboard:readText'],
+      ['onExecStart', 'exec:start'],
     ] as const)('%s registers handler on %s channel', (method, channel) => {
       const handler = vi.fn<(...args: any[]) => any>()
       // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
@@ -166,6 +177,18 @@ describe('IpcServer', () => {
       expect(mockOn).toHaveBeenCalledWith('app:close-cancelled', expect.any(Function))
     })
 
+    it.each([
+      ['onPtyWrite', 'pty:write'],
+      ['onPtyResize', 'pty:resize'],
+      ['onPtyKill', 'pty:kill'],
+      ['onClipboardWriteText', 'clipboard:writeText'],
+      ['onExecKill', 'exec:kill'],
+    ] as const)('%s registers handler on %s channel', (method, channel) => {
+      const handler = vi.fn<(...args: any[]) => void>()
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+      ;(server as any)[method](handler)
+      expect(mockOn).toHaveBeenCalledWith(channel, expect.any(Function))
+    })
   })
 
   describe('per-window event emitters', () => {
@@ -295,6 +318,43 @@ describe('IpcServer', () => {
 
       server.execEvent('exec-1', { type: 'stdout', data: 'output' })
       expect(mockSend).toHaveBeenCalledWith('exec:event', 'exec-1', { type: 'stdout', data: 'output' })
+    })
+
+    it('sshAutoConnected broadcasts to all windows', () => {
+      const mockSend = vi.fn<(...args: any[]) => void>()
+      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
+
+      const session = { id: 's1' } as unknown as Session
+      const info = { id: 'conn-1' } as unknown as ConnectionInfo
+      server.sshAutoConnected(session, info)
+      expect(mockSend).toHaveBeenCalledWith('ssh:autoConnected', session, info)
+    })
+
+    it('connectionReconnected broadcasts to all windows', () => {
+      const mockSend = vi.fn<(...args: any[]) => void>()
+      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
+
+      const session = { id: 's1' } as unknown as Session
+      const info = { id: 'conn-1' } as unknown as ConnectionInfo
+      server.connectionReconnected(session, info)
+      expect(mockSend).toHaveBeenCalledWith('connection:reconnected', session, info)
+    })
+
+    it('sshPortForwardStatus broadcasts to all windows', () => {
+      const mockSend = vi.fn<(...args: any[]) => void>()
+      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
+
+      const info = { id: 'pf-1', connectionId: 'conn-1', localPort: 8080, remoteHost: 'localhost', remotePort: 80, status: 'active' as PortForwardStatus } as PortForwardInfo
+      server.sshPortForwardStatus(info)
+      expect(mockSend).toHaveBeenCalledWith('ssh:portForwardStatus', info)
+    })
+
+    it('sshPortForwardOutput broadcasts to all windows', () => {
+      const mockSend = vi.fn<(...args: any[]) => void>()
+      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
+
+      server.sshPortForwardOutput('pf-1', 'log line')
+      expect(mockSend).toHaveBeenCalledWith('ssh:portForwardOutput', 'pf-1', 'log line')
     })
   })
 })

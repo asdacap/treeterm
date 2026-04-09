@@ -163,7 +163,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
   getDefaultApplication: (appId?: string) => {
     const apps = get().applications
     if (appId && apps.has(appId)) {
-      return apps.get(appId) ?? null
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guaranteed by .has() check
+      return apps.get(appId)!
     }
     const allApps = Array.from(apps.values())
     return allApps[0] ?? null

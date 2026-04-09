@@ -715,35 +715,6 @@ describe('createAnalyzerStore', () => {
       vi.useRealTimers()
     })
 
-    it('logs unexpected response (no state) to history', async () => {
-      vi.useFakeTimers()
-      const mock = makeMockTty()
-      deps = makeDeps({
-        llm: {
-          analyzeTerminal: vi.fn().mockResolvedValue({ something: 'unexpected' }),
-          generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
-        } as unknown as LlmApi,
-        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
-      })
-      const store = createAnalyzerStore('tab-1', deps)
-
-      store.getState().start('pty-1')
-      await vi.advanceTimersByTimeAsync(0)
-
-      mock.emitData('$ echo hello\r\nhello\r\n$ ')
-      vi.advanceTimersByTime(1000)
-      await vi.advanceTimersByTimeAsync(0)
-
-      const history = store.getState().getHistory()
-      expect(history).toHaveLength(1)
-      expect(history[0]!.kind).toBe('analyzer')
-      expect(history[0]!.error).toBe('[unexpected] no state in result')
-      expect(history[0]!.response).toBe(JSON.stringify({ something: 'unexpected' }))
-
-      store.getState().stop()
-      vi.useRealTimers()
-    })
-
     it('logs title generation to history', async () => {
       const mock = makeMockTty()
       deps = makeDeps({
