@@ -89,7 +89,7 @@ vi.mock('./createSessionStore', async (importOriginal) => {
         syncToDaemon: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
         handleRestore: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
         handleExternalUpdate: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
-        removeOrphanWorkspace: vi.fn<(...args: any[]) => void>(),
+        onWorkspaceRemoved: vi.fn<(...args: any[]) => void>(),
       }),
       setState: vi.fn<(...args: any[]) => void>(),
       subscribe: vi.fn<(...args: any[]) => any>()

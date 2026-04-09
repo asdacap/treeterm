@@ -367,19 +367,19 @@ describe('createSessionStore', () => {
       expect(store.getState().activeWorkspaceId).toBeNull()
     })
 
-    it('removeOrphanWorkspace removes without git cleanup', () => {
-      store.getState().removeOrphanWorkspace(childId)
+    it('onWorkspaceRemoved removes without git cleanup', () => {
+      store.getState().onWorkspaceRemoved(childId)
       expect(store.getState().workspaces.get(childId)).toBeUndefined()
       expect(deps.git.removeWorktree).not.toHaveBeenCalled()
     })
 
-    it('removeOrphanWorkspace does nothing for non-existent workspace', () => {
-      store.getState().removeOrphanWorkspace('bad-id')
+    it('onWorkspaceRemoved does nothing for non-existent workspace', () => {
+      store.getState().onWorkspaceRemoved('bad-id')
       // Should not throw
     })
 
-    it('removeOrphanWorkspace removes workspace from state', () => {
-      store.getState().removeOrphanWorkspace(childId)
+    it('onWorkspaceRemoved removes workspace from state', () => {
+      store.getState().onWorkspaceRemoved(childId)
       expect(store.getState().workspaces.get(childId)).toBeUndefined()
     })
   })

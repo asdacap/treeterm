@@ -66,7 +66,9 @@ export interface SessionState {
   sessionVersion: number
 
   clearWorkspaceError: (id: string) => void
-  closeWorkspace: (id: string) => void
+  /** Reactive cleanup when a workspace is no longer in the daemon session.
+   *  Disposes all tab refs (renderer-side), git controller, and removes from map. */
+  onWorkspaceRemoved: (id: string) => void
   addWorkspace: (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => string
   addChildWorkspace: (parentId: string, name: string, isDetached?: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
   adoptExistingWorktree: (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
@@ -75,7 +77,6 @@ export interface SessionState {
   removeWorkspace: (id: string) => Promise<void>
   removeWorkspaceKeepBranch: (id: string) => Promise<void>
   removeWorkspaceKeepBoth: (id: string) => Promise<void>
-  removeOrphanWorkspace: (id: string) => void
   mergeAndRemoveWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
   mergeAndKeepWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
   closeAndCleanWorkspace: (id: string) => Promise<{ success: boolean; error?: string }>
@@ -425,7 +426,8 @@ export function createSessionStore(
     return id
   }
 
-  // Shared helper: removes a workspace with configurable git cleanup behavior
+  /** Destructive: removes workspace from daemon (kills PTYs, deletes worktree/branch).
+   *  Renderer cleanup happens via onWorkspaceRemoved — do not call ref.dispose() here. */
   async function removeWorkspaceInternal(
     id: string,
     options: { keepBranch: boolean; keepWorktree: boolean; operationId?: string }
@@ -443,15 +445,11 @@ export function createSessionStore(
       await removeWorkspaceInternal(childId, options)
     }
 
-    // Dispose tab refs (stops analyzers, kills PTYs, disposes cached terminals, etc.)
+    // Kill daemon-side resources (PTYs) — renderer cleanup deferred to onWorkspaceRemoved
     if (handle && workspace) {
-      handle.getState().gitController.getState().dispose()
       for (const tabId of Object.keys(workspace.appStates)) {
         const ref = handle.getState().getTabRef(tabId)
-        if (ref) {
-          ref.close()
-          ref.dispose()
-        }
+        if (ref) ref.close()
       }
     }
 
@@ -470,15 +468,8 @@ export function createSessionStore(
       }
     }
 
-    // Remove workspace entry
-    store.setState((s) => {
-      const remaining = new Map(s.workspaces)
-      remaining.delete(id)
-      return {
-        workspaces: remaining,
-        activeWorkspaceId: s.activeWorkspaceId === id ? null : s.activeWorkspaceId
-      }
-    })
+    // Renderer cleanup + remove from map
+    store.getState().onWorkspaceRemoved(id)
 
     await syncSessionToDaemon(store.getState().isRestoring)
   }
@@ -648,12 +639,21 @@ export function createSessionStore(
       }))
     },
 
-    closeWorkspace: (id: string): void => {
+    onWorkspaceRemoved: (id: string): void => {
+      const entry = get().workspaces.get(id)
+      if (!entry) return
+      if (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) {
+        entry.store.getState().gitController.getState().dispose()
+        for (const tabId of Object.keys(entry.data.appStates)) {
+          const ref = entry.store.getState().getTabRef(tabId)
+          if (ref) ref.dispose()
+        }
+      }
       set((s) => {
-        const rest = new Map(s.workspaces)
-        rest.delete(id)
+        const remaining = new Map(s.workspaces)
+        remaining.delete(id)
         return {
-          workspaces: rest,
+          workspaces: remaining,
           activeWorkspaceId: s.activeWorkspaceId === id ? null : s.activeWorkspaceId
         }
       })
@@ -838,18 +838,6 @@ export function createSessionStore(
 
     removeWorkspaceKeepBoth: (id: string) =>
       removeWorkspaceWithLoading(id, { keepBranch: true, keepWorktree: true }),
-
-    removeOrphanWorkspace: (id: string) => {
-      if (!get().workspaces.has(id)) return
-      set((s) => {
-        const remaining = new Map(s.workspaces)
-        remaining.delete(id)
-        return {
-          workspaces: remaining,
-          activeWorkspaceId: s.activeWorkspaceId === id ? null : s.activeWorkspaceId
-        }
-      })
-    },
 
     setActiveWorkspace: (id: string | null) => {
       set({ activeWorkspaceId: id })
@@ -1073,7 +1061,7 @@ export function createSessionStore(
       const updatedState = get()
       for (const [id, entry] of Array.from(updatedState.workspaces.entries())) {
         if (entry.status === WorkspaceEntryStatus.Loaded && !incomingPaths.has(entry.data.path)) {
-          get().removeOrphanWorkspace(id)
+          get().onWorkspaceRemoved(id)
         }
       }
 

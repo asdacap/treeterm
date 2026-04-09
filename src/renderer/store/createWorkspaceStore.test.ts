@@ -900,7 +900,7 @@ describe('createWorkspaceStore', () => {
 
   // TODO: Collection-level tests (addWorkspace, addChildWorkspace, removeWorkspace,
   // adoptExistingWorktree, createWorktreeFromBranch, createWorktreeFromRemote,
-  // removeWorkspaceKeep*, removeOrphanWorkspace, mergeAndRemoveWorkspace,
+  // removeWorkspaceKeep*, onWorkspaceRemoved, mergeAndRemoveWorkspace,
   // closeAndCleanWorkspace, refreshGitInfo, syncSessionToDaemon) need to be
   // moved to a createSessionStore.test.ts file that tests against the session store.
 })
