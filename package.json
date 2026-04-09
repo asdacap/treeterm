@@ -35,7 +35,8 @@
     "test:daemon:coverage": "cd daemon-rs && cargo llvm-cov --lcov --output-path ../coverage/daemon-lcov.info",
     "test:all": "vitest run && npm run test:daemon && playwright test",
     "lint": "eslint src/",
-    "daemon:stop": "pkill -f 'treeterm-daemon' || echo 'No daemon running'"
+    "daemon:stop": "pkill -f 'treeterm-daemon' || echo 'No daemon running'",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
@@ -54,7 +55,9 @@
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
     "grpc-tools": "^1.13.1",
+    "husky": "^9.1.7",
     "jsdom": "^27.0.1",
+    "lint-staged": "^16.4.0",
     "playwright": "^1.58.2",
     "ts-proto": "^2.11.6",
     "typescript": "^5.6.0",
@@ -84,5 +87,8 @@
     "tinykeys": "^3.0.0",
     "zod": "^4.3.6",
     "zustand": "^5.0.0"
+  },
+  "lint-staged": {
+    "src/**/*.{ts,tsx}": "eslint"
   }
 }
