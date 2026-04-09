@@ -60,12 +60,12 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
     }
 
     term.open(container)
-    fitTerminal(term, resizePty)
+    fitTerminal(term, resizePty, getComputedStyle)
 
     termRef.current = term
 
     const resizeObserver = new ResizeObserver(() => {
-      fitTerminal(term, resizePty)
+      fitTerminal(term, resizePty, getComputedStyle)
     })
     resizeObserver.observe(container)
     cleanups.push(() => { resizeObserver.disconnect(); })

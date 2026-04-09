@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 
 import AppErrorFallback from './AppErrorFallback'
@@ -7,47 +7,39 @@ import AppErrorFallback from './AppErrorFallback'
 describe('AppErrorFallback', () => {
   const reloadMock = vi.fn()
 
-  beforeEach(() => {
-    vi.clearAllMocks()
-    Object.defineProperty(window, 'location', {
-      value: { reload: reloadMock },
-      writable: true,
-    })
-  })
-
   it('renders "Application Error" heading', () => {
-    render(<AppErrorFallback />)
+    render(<AppErrorFallback onReload={reloadMock} />)
     expect(screen.getByText('Application Error')).toBeDefined()
   })
 
   it('renders error message when error is provided', () => {
-    render(<AppErrorFallback error={new Error('Something broke')} />)
+    render(<AppErrorFallback error={new Error('Something broke')} onReload={reloadMock} />)
     expect(screen.getByText('Something broke')).toBeDefined()
   })
 
   it('renders without error details when error is undefined', () => {
-    const { container } = render(<AppErrorFallback />)
+    const { container } = render(<AppErrorFallback onReload={reloadMock} />)
     expect(container.querySelector('.app-error-details')).toBeNull()
   })
 
   it('shows "Show Stack Trace" button when error has stack', () => {
     const err = new Error('fail')
     err.stack = 'Error: fail\n    at test.ts:1'
-    render(<AppErrorFallback error={err} />)
+    render(<AppErrorFallback error={err} onReload={reloadMock} />)
     expect(screen.getByText('Show Stack Trace')).toBeDefined()
   })
 
   it('does not show stack toggle when error has no stack', () => {
     const err = new Error('fail')
     err.stack = undefined
-    render(<AppErrorFallback error={err} />)
+    render(<AppErrorFallback error={err} onReload={reloadMock} />)
     expect(screen.queryByText('Show Stack Trace')).toBeNull()
   })
 
   it('toggles stack trace visibility on button click', () => {
     const err = new Error('fail')
     err.stack = 'Error: fail\n    at test.ts:1'
-    render(<AppErrorFallback error={err} />)
+    render(<AppErrorFallback error={err} onReload={reloadMock} />)
 
     // Initially hidden
     expect(screen.queryByText(/at test.ts:1/)).toBeNull()
@@ -62,8 +54,8 @@ describe('AppErrorFallback', () => {
     expect(screen.queryByText(/at test.ts:1/)).toBeNull()
   })
 
-  it('calls window.location.reload on "Reload Application" click', () => {
-    render(<AppErrorFallback />)
+  it('calls onReload on "Reload Application" click', () => {
+    render(<AppErrorFallback onReload={reloadMock} />)
     fireEvent.click(screen.getByText('Reload Application'))
     expect(reloadMock).toHaveBeenCalledTimes(1)
   })

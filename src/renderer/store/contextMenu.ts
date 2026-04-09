@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useAppStore } from './app'
 
 function clampContextMenuPosition(
   x: number,
@@ -6,8 +7,7 @@ function clampContextMenuPosition(
   menuWidth = 160,
   menuHeight = 200
 ): { x: number; y: number } {
-  const vw = window.innerWidth
-  const vh = window.innerHeight
+  const { width: vw, height: vh } = useAppStore.getState().getViewportSize()
   return {
     x: Math.min(x, vw - menuWidth),
     y: Math.min(y, vh - menuHeight),

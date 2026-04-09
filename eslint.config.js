@@ -79,8 +79,8 @@ export default tseslint.config(
       'react-hooks/set-state-in-effect': 'error',
       'react-hooks/set-state-in-render': 'error',
       'no-restricted-syntax': ['error', {
-        selector: "MemberExpression[object.name='window'][property.name='electron']",
-        message: 'window.electron is only allowed in main.tsx. Use useAppStore() instead.'
+        selector: "MemberExpression[object.name='window']",
+        message: 'Direct window access is only allowed in main.tsx. Inject dependencies via useAppStore() or function parameters instead.'
       }, {
         selector: "CallExpression[callee.name=/^use.*Store$/] > ArrowFunctionExpression CallExpression[callee.property.name=/^(filter|map|flatMap|slice|concat|flat|reduce)$/]",
         message: 'Zustand selectors must return stable references. Array methods like .filter()/.map() create new arrays every call, causing infinite re-renders. Select the parent object and derive in the function body.'

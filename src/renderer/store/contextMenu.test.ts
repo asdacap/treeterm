@@ -1,5 +1,14 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+
+vi.mock('./app', () => ({
+  useAppStore: {
+    getState: () => ({
+      getViewportSize: () => ({ width: 1024, height: 768 }),
+    }),
+  },
+}))
+
 import { useContextMenuStore, handleClickOutside, installClickListener } from './contextMenu'
 
 describe('ContextMenuStore', () => {
@@ -65,7 +74,6 @@ describe('ContextMenuStore', () => {
   })
 
   it('clamps position to viewport bounds', () => {
-    // jsdom defaults: innerWidth=1024, innerHeight=768
     useContextMenuStore.getState().open('menu-a', 950, 700)
 
     const { position } = useContextMenuStore.getState()

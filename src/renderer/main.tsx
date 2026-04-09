@@ -7,7 +7,13 @@ import '@aptre/flex-layout/style/dark.css'
 import './styles/index.css'
 import './styles/flexlayout-overrides.css'
 
-// Single point of window.electron access — everything else reads from the store
+declare global {
+  interface Window {
+    __enableKeyDiag?: boolean
+  }
+}
+
+// Single point of window/electron access — everything else reads from the store
 window.electron.app.onReady(() => {
   const e = window.electron
 
@@ -30,6 +36,10 @@ window.electron.app.onReady(() => {
     selectFolder: e.selectFolder,
     getWindowUuid: e.getWindowUuid,
     getInitialWorkspace: e.getInitialWorkspace,
+    openExternal: (url: string) => { window.open(url, '_blank') },
+    getViewportSize: () => ({ width: window.innerWidth, height: window.innerHeight }),
+    keyEventTarget: window,
+    isKeyDiagEnabled: () => !!window.__enableKeyDiag,
   })
 
   const rootEl = document.getElementById('root')

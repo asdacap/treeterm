@@ -2,14 +2,11 @@ import { useState } from 'react'
 
 interface AppErrorFallbackProps {
   error?: Error
+  onReload: () => void
 }
 
-export default function AppErrorFallback({ error }: AppErrorFallbackProps) {
+export default function AppErrorFallback({ error, onReload }: AppErrorFallbackProps) {
   const [showStack, setShowStack] = useState(false)
-
-  const handleReload = () => {
-    window.location.reload()
-  }
 
   return (
     <div className="app-error-fallback">
@@ -39,7 +36,7 @@ export default function AppErrorFallback({ error }: AppErrorFallbackProps) {
           </div>
         )}
 
-        <button className="app-error-reload-btn" onClick={handleReload}>
+        <button className="app-error-reload-btn" onClick={onReload}>
           Reload Application
         </button>
       </div>

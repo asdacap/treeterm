@@ -5,6 +5,7 @@ import type { SessionState, SessionEntry } from './createSessionStore'
 import { getUnmergedSubWorkspaces } from './createSessionStore'
 import { useSettingsStore } from './settings'
 import { useKeybindingStore } from './keybinding'
+import type { KeyEventTarget } from './keybinding'
 import { initKeyboardHealthMonitor } from '../utils/keyboardHealthMonitor'
 import { useNavigationStore } from './navigation'
 import { useActivityStateStore } from './activityState'
@@ -50,6 +51,10 @@ export interface AppDeps {
   selectFolder: () => Promise<string | null>
   getWindowUuid: () => Promise<string>
   getInitialWorkspace: () => Promise<string | null>
+  openExternal: (url: string) => void
+  getViewportSize: () => { width: number; height: number }
+  keyEventTarget: KeyEventTarget
+  isKeyDiagEnabled: () => boolean
 }
 
 interface AppState extends AppDeps {
@@ -112,6 +117,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
   selectFolder: UNINITIALIZED,
   getWindowUuid: UNINITIALIZED,
   getInitialWorkspace: UNINITIALIZED,
+  openExternal: UNINITIALIZED,
+  getViewportSize: UNINITIALIZED,
+  keyEventTarget: UNINITIALIZED,
+  isKeyDiagEnabled: UNINITIALIZED,
 
   windowUuid: null,
   daemonDisconnected: false,
@@ -235,12 +244,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   initialize: async (deps: AppDeps) => {
     set(deps)
-    const { terminal, sessionApi, settingsApi, appApi, daemon, ssh, getWindowUuid, getInitialWorkspace } = deps
+    const { terminal, sessionApi, settingsApi, appApi, daemon, ssh, getWindowUuid, getInitialWorkspace, keyEventTarget, isKeyDiagEnabled } = deps
 
     get().initializeApplications()
     useSettingsStore.getState().init(settingsApi, terminal.kill.bind(terminal))
-    useKeybindingStore.getState().init()
-    initKeyboardHealthMonitor()
+    useKeybindingStore.getState().init(keyEventTarget)
+    initKeyboardHealthMonitor(keyEventTarget, isKeyDiagEnabled)
 
     // Fetch this window's UUID
     try {

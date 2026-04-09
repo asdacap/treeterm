@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useStore } from 'zustand'
 import { RefreshCw, Loader2, ExternalLink, CheckCircle2, XCircle, Clock, AlertCircle, MessageSquare } from 'lucide-react'
+import { useAppStore } from '../store/app'
 import type { WorkspaceStore } from '../types'
 import type { GitHubPrInfo, GitHubReview, GitHubCheckRun, GitHubReviewThread } from '../types'
 
@@ -12,6 +13,7 @@ interface GitHubBrowserProps {
 export default function GitHubBrowser({ workspace, isVisible }: GitHubBrowserProps) {
   const { gitController } = useStore(workspace)
   const { prInfo, refreshPrStatus } = useStore(gitController)
+  const openExternal = useAppStore((s) => s.openExternal)
   const [refreshing, setRefreshing] = useState(false)
 
   const handleRefresh = async () => {
@@ -52,7 +54,7 @@ export default function GitHubBrowser({ workspace, isVisible }: GitHubBrowserPro
             </button>
             <button
               className="workspace-action-btn"
-              onClick={() => window.open(prInfo.url, '_blank')}
+              onClick={() => { openExternal(prInfo.url) }}
               title="Open on GitHub"
             >
               <ExternalLink size={14} />
@@ -65,7 +67,7 @@ export default function GitHubBrowser({ workspace, isVisible }: GitHubBrowserPro
       <div className="github-browser-sections">
         <ReviewsSection reviews={prInfo.reviews} />
         <CheckRunsSection checkRuns={prInfo.checkRuns} />
-        <UnresolvedThreadsSection threads={prInfo.unresolvedThreads} prUrl={prInfo.url} />
+        <UnresolvedThreadsSection threads={prInfo.unresolvedThreads} prUrl={prInfo.url} openExternal={openExternal} />
       </div>
     </div>
   )
@@ -151,7 +153,7 @@ function CheckRunIcon({ check }: { check: GitHubCheckRun }) {
   }
 }
 
-function UnresolvedThreadsSection({ threads, prUrl }: { threads: GitHubReviewThread[]; prUrl: string }) {
+function UnresolvedThreadsSection({ threads, prUrl, openExternal }: { threads: GitHubReviewThread[]; prUrl: string; openExternal: (url: string) => void }) {
   if (threads.length === 0) {
     return (
       <div className="github-section">
@@ -166,7 +168,7 @@ function UnresolvedThreadsSection({ threads, prUrl }: { threads: GitHubReviewThr
       <h3 className="github-section-title">Unresolved Comments ({threads.length})</h3>
       <div className="github-section-list">
         {threads.map((thread) => (
-          <div key={`${thread.path}:${String(thread.line ?? 'general')}-${thread.author}`} className="github-thread-item" onClick={() => window.open(prUrl, '_blank')}>
+          <div key={`${thread.path}:${String(thread.line ?? 'general')}-${thread.author}`} className="github-thread-item" onClick={() => { openExternal(prUrl) }}>
             <div className="github-thread-header">
               <span className="github-thread-path">{thread.path}{thread.line ? `:${String(thread.line)}` : ''}</span>
               <span className="github-thread-author">{thread.author}</span>

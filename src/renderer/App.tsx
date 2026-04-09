@@ -84,7 +84,7 @@ export default function App() {
   }
 
   return (
-    <ErrorBoundary fallback={<AppErrorFallback />}>
+    <ErrorBoundary fallback={<AppErrorFallback onReload={() => { location.reload() }} />}>
         <div
           className="app"
           onMouseMove={handleMouseMove}

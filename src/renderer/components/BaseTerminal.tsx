@@ -156,6 +156,7 @@ export default function BaseTerminal({
   const setTabState = useActivityStateStore((state) => state.setTabState)
   const settings = useSettingsStore((state) => state.settings)
   const clipboard = useAppStore((state) => state.clipboard)
+  const openExternal = useAppStore((state) => state.openExternal)
 
   // Get existing ptyId from store for reconnection
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist in appStates
@@ -341,7 +342,7 @@ export default function BaseTerminal({
       // ResizeObserver — gated on initialResizeDone to prevent resize during mount
       resizeObserver = new ResizeObserver(() => {
         if (!initialResizeDone) return
-        fitTerminal(terminal, resize)
+        fitTerminal(terminal, resize, getComputedStyle)
       })
       if (containerRef.current) {
         resizeObserver.observe(containerRef.current)
@@ -351,7 +352,7 @@ export default function BaseTerminal({
       if (resizeTimeout) clearTimeout(resizeTimeout)
       resizeTimeout = setTimeout(() => {
         if (cancelled) return
-        fitTerminal(terminal, resize)
+        fitTerminal(terminal, resize, getComputedStyle)
         console.log(`[${config.logPrefix} ${tabId}] resize (initial):`, { cols: terminal.cols, rows: terminal.rows })
         initialResizeDone = true
       }, 100)
@@ -414,7 +415,7 @@ export default function BaseTerminal({
           fontFamily: settings.terminal.fontFamily,
           scrollback: 50000,
           linkHandler: {
-            activate: (_event, uri) => window.open(uri, '_blank')
+            activate: (_event, uri) => { openExternal(uri) }
           },
           theme: {
             ...TERMINAL_THEME_COLORS,
@@ -500,7 +501,7 @@ export default function BaseTerminal({
       ttyRef.current = null
       // Do NOT dispose terminal or unsubscribe TTY — they stay cached
     }
-  }, [tabId, workspaceId, config, settings, removeTab, setTabState, sessionStore, workspace, refreshCounter])
+  }, [tabId, workspaceId, config, settings, removeTab, setTabState, sessionStore, workspace, refreshCounter, openExternal])
 
   const handleScrollDown = useCallback(() => {
     terminalRef.current?.scrollToBottom()

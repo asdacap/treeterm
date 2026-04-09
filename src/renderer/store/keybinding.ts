@@ -22,6 +22,11 @@ export interface KeybindingHandlers {
   switchToTab?: (index: number) => void
 }
 
+export interface KeyEventTarget {
+  addEventListener: Window['addEventListener']
+  removeEventListener: Window['removeEventListener']
+}
+
 interface KeybindingStore {
   // Prefix mode state
   prefixState: PrefixModeState
@@ -33,7 +38,7 @@ interface KeybindingStore {
   handlers: KeybindingHandlers
 
   // Lifecycle
-  init: () => void
+  init: (target: KeyEventTarget) => void
   dispose: () => void
 
   // Handler registration
@@ -66,7 +71,7 @@ export function matchesKeybinding(event: KeyboardEvent, modifiers: string[], key
 }
 
 // Module-level variables for internal state that shouldn't trigger re-renders
-let timeoutId: number | null = null
+let timeoutId: ReturnType<typeof setTimeout> | null = null
 let cleanupListener: (() => void) | null = null
 
 export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
@@ -76,12 +81,9 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
   workspaceIds: [],
   handlers: {},
 
-  init: () => {
+  init: (target: KeyEventTarget) => {
     // Clean up any previous listener
     cleanupListener?.()
-
-    // Guard for non-browser environments (e.g. Node tests)
-    if (typeof window === 'undefined') return
 
     const handleKeyDown = (e: KeyboardEvent): void => {
       const { settings } = useSettingsStore.getState()
@@ -203,8 +205,8 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
       }
     }
 
-    window.addEventListener('keydown', handleKeyDown, true)
-    cleanupListener = () => { window.removeEventListener('keydown', handleKeyDown, true); }
+    target.addEventListener('keydown', handleKeyDown, true)
+    cleanupListener = () => { target.removeEventListener('keydown', handleKeyDown, true); }
   },
 
   dispose: () => {
@@ -220,7 +222,7 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
     if (timeoutId) clearTimeout(timeoutId)
 
     const timeout = useSettingsStore.getState().settings.prefixMode.timeout
-    timeoutId = window.setTimeout(() => {
+    timeoutId = setTimeout(() => {
       get().deactivate()
     }, timeout)
 
@@ -246,7 +248,7 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
     if (timeoutId) clearTimeout(timeoutId)
 
     const timeout = useSettingsStore.getState().settings.prefixMode.timeout
-    timeoutId = window.setTimeout(() => {
+    timeoutId = setTimeout(() => {
       get().deactivate()
     }, timeout)
 

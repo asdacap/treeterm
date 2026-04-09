@@ -156,6 +156,10 @@ const mockDeps = {
     analyzeTerminal: vi.fn<(...args: any[]) => any>(),
     generateTitle: vi.fn<(...args: any[]) => any>(),
   },
+  openExternal: vi.fn<(url: string) => void>(),
+  getViewportSize: vi.fn<() => { width: number; height: number }>().mockReturnValue({ width: 1024, height: 768 }),
+  keyEventTarget: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
+  isKeyDiagEnabled: vi.fn<() => boolean>().mockReturnValue(false),
 } as unknown as AppDeps
 
 describe('useAppStore', () => {

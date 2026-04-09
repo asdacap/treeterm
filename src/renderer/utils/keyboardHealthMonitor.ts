@@ -3,15 +3,9 @@
  * Toggle via DevTools: window.__enableKeyDiag = true
  */
 
-declare global {
-  interface Window {
-    __enableKeyDiag?: boolean
-  }
-}
+import type { KeyEventTarget } from '../store/keybinding'
 
-export function initKeyboardHealthMonitor(): () => void {
-  if (typeof window === 'undefined') return () => {}
-
+export function initKeyboardHealthMonitor(target: KeyEventTarget, isEnabled: () => boolean): () => void {
   let lastShiftOrEnter = Date.now()
   let lastAnyKey = Date.now()
   let warned = false
@@ -25,7 +19,7 @@ export function initKeyboardHealthMonitor(): () => void {
   }
 
   const checkHealth = (): void => {
-    if (!window.__enableKeyDiag) return
+    if (!isEnabled()) return
     const now = Date.now()
     // If other keys active but Shift/Enter not seen for 30s
     if (now - lastShiftOrEnter > 30_000 && now - lastAnyKey < 5_000 && !warned) {
@@ -37,10 +31,10 @@ export function initKeyboardHealthMonitor(): () => void {
     }
   }
 
-  window.addEventListener('keydown', onKeyDown)
+  target.addEventListener('keydown', onKeyDown)
   const interval = setInterval(checkHealth, 5_000)
   return () => {
-    window.removeEventListener('keydown', onKeyDown)
+    target.removeEventListener('keydown', onKeyDown)
     clearInterval(interval)
   }
 }

@@ -659,6 +659,7 @@ interface GitHubButtonProps {
 function GitHubButton({ workspace }: GitHubButtonProps) {
   const { gitController, openOrFocusTab } = useStore(workspace)
   const { prInfo, openGitHub } = useStore(gitController)
+  const openExternal = useAppStore((s) => s.openExternal)
   const [loading, setLoading] = useState(false)
 
   const hasPr = prInfo !== null
@@ -674,7 +675,7 @@ function GitHubButton({ workspace }: GitHubButtonProps) {
     try {
       const result = await openGitHub()
       if ('url' in result) {
-        window.open(result.url, '_blank')
+        openExternal(result.url)
       } else {
         console.error('[GitHubButton] error:', result.error)
         alert(result.error)

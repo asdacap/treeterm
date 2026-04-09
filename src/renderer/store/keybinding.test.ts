@@ -1,14 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
-// Stub window for node environment (activate uses window.setTimeout)
 const addEventListenerMock = vi.fn()
 const removeEventListenerMock = vi.fn()
-vi.stubGlobal('window', {
-  setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
-  clearTimeout: (id: ReturnType<typeof setTimeout>) => { clearTimeout(id); },
+
+const mockTarget = {
   addEventListener: addEventListenerMock,
   removeEventListener: removeEventListenerMock,
-})
+} as unknown as { addEventListener: Window['addEventListener']; removeEventListener: Window['removeEventListener'] }
 
 // Mock dependencies
 vi.mock('./settings', () => ({
@@ -50,7 +48,7 @@ function createKeyEvent(overrides: Partial<KeyboardEvent> = {}): KeyboardEvent {
 /** Call init(), return the captured handleKeyDown listener */
 function initAndGetHandler(): (e: KeyboardEvent) => void {
   addEventListenerMock.mockClear()
-  useKeybindingStore.getState().init()
+  useKeybindingStore.getState().init(mockTarget)
   return addEventListenerMock.mock.calls[0]![1] as (e: KeyboardEvent) => void
 }
 
@@ -327,12 +325,12 @@ describe('useKeybindingStore', () => {
 
   describe('init/dispose lifecycle', () => {
     it('init registers keydown listener', () => {
-      useKeybindingStore.getState().init()
+      useKeybindingStore.getState().init(mockTarget)
       expect(addEventListenerMock).toHaveBeenCalledWith('keydown', expect.any(Function), true)
     })
 
     it('dispose removes keydown listener', () => {
-      useKeybindingStore.getState().init()
+      useKeybindingStore.getState().init(mockTarget)
       useKeybindingStore.getState().dispose()
       expect(removeEventListenerMock).toHaveBeenCalledWith('keydown', expect.any(Function), true)
     })
