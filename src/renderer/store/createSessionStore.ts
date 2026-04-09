@@ -88,6 +88,7 @@ export interface SessionState {
   quickForkWorkspace: (workspaceId: string) => Promise<{ success: boolean; error?: string }>
   reorderWorkspace: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after') => void
   syncToDaemon: () => Promise<void>
+  forceUnlock: () => Promise<{ success: boolean; error?: string }>
 
   // Session lifecycle
   handleRestore: (session: Session) => Promise<void>
@@ -869,12 +870,9 @@ export function createSessionStore(
 
     mergeAndRemoveWorkspace: async (id: string, squash: boolean) => {
       // Acquire session lock before merge (slow IO operation)
-      const holderId = config.windowUuid || ''
-      if (holderId) {
-        const lockResult = await deps.sessionApi.lock(config.sessionId, holderId, 60_000)
-        if (!lockResult.success || !lockResult.acquired) {
-          return { success: false, error: 'Session is locked by another window' }
-        }
+      const lockResult = await deps.sessionApi.lock(config.sessionId, 60_000)
+      if (!lockResult.success || !lockResult.acquired) {
+        return { success: false, error: 'Session is locked by another window' }
       }
 
       try {
@@ -910,20 +908,15 @@ export function createSessionStore(
 
         return { success: true }
       } finally {
-        if (holderId) {
-          await deps.sessionApi.unlock(config.sessionId, holderId).catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
-        }
+        await deps.sessionApi.unlock(config.sessionId).catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
       }
     },
 
     mergeAndKeepWorkspace: async (id: string, squash: boolean) => {
       // Acquire session lock before merge (slow IO operation)
-      const holderId = config.windowUuid || ''
-      if (holderId) {
-        const lockResult = await deps.sessionApi.lock(config.sessionId, holderId, 60_000)
-        if (!lockResult.success || !lockResult.acquired) {
-          return { success: false, error: 'Session is locked by another window' }
-        }
+      const lockResult = await deps.sessionApi.lock(config.sessionId, 60_000)
+      if (!lockResult.success || !lockResult.acquired) {
+        return { success: false, error: 'Session is locked by another window' }
       }
 
       try {
@@ -955,9 +948,7 @@ export function createSessionStore(
 
         return { success: true }
       } finally {
-        if (holderId) {
-          await deps.sessionApi.unlock(config.sessionId, holderId).catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
-        }
+        await deps.sessionApi.unlock(config.sessionId).catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
       }
     },
 
@@ -1063,6 +1054,15 @@ export function createSessionStore(
 
     syncToDaemon: async () => {
       await syncSessionToDaemon(get().isRestoring)
+    },
+
+    forceUnlock: async () => {
+      const lock = get().sessionLock
+      if (!lock) return { success: true }
+      const result = await deps.sessionApi.forceUnlock(config.sessionId)
+      if (!result.success) return { success: false, error: result.error }
+      set({ sessionLock: null })
+      return { success: true }
     },
 
     // eslint-disable-next-line @typescript-eslint/require-await -- interface requires Promise<void> but implementation is synchronous

@@ -250,11 +250,15 @@ export interface IpcRequests {
     result: IpcResult<{ session: Session }>
   }
   sessionLock: {
-    params: [sessionId: string, holderId: string, ttlMs?: number]
+    params: [sessionId: string, ttlMs?: number]
     result: IpcResult<{ acquired: boolean; session: Session }>
   }
   sessionUnlock: {
-    params: [sessionId: string, holderId: string]
+    params: [sessionId: string]
+    result: IpcResult<{ session: Session }>
+  }
+  sessionForceUnlock: {
+    params: [sessionId: string]
     result: IpcResult<{ session: Session }>
   }
 

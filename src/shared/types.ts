@@ -110,7 +110,6 @@ export interface Workspace {
 }
 
 export interface SessionLock {
-  holderId: string
   acquiredAt: number
   expiresAt: number
 }

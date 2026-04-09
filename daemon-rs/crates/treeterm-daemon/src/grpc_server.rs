@@ -7,10 +7,18 @@ use tonic::{Request, Response, Status, Streaming};
 use treeterm_proto::treeterm::*;
 use treeterm_proto::treeterm::tree_term_daemon_server::TreeTermDaemon;
 
+use crate::connection_id::ConnectionId;
 use crate::exec_manager;
 use crate::filesystem;
 use crate::pty_manager::BufferEvent;
 use crate::session_store::SessionStore;
+
+fn connection_id<T>(req: &Request<T>) -> Result<String, Status> {
+    req.extensions()
+        .get::<ConnectionId>()
+        .map(|c| c.0.clone())
+        .ok_or_else(|| Status::internal("missing connection ID"))
+}
 
 pub struct DaemonService {
     session_store: SessionStore,
@@ -206,6 +214,7 @@ impl TreeTermDaemon for DaemonService {
         &self,
         req: Request<UpdateSessionRequest>,
     ) -> Result<Response<Session>, Status> {
+        let conn_id = connection_id(&req)?;
         let r = req.into_inner();
 
         let sender_id = r.sender_id.unwrap_or_default();
@@ -217,7 +226,7 @@ impl TreeTermDaemon for DaemonService {
 
         let (session, accepted) = self
             .session_store
-            .update_session(r.workspaces, r.expected_version, &sender_id)
+            .update_session(r.workspaces, r.expected_version, &sender_id, &conn_id)
             .await;
 
         // Only broadcast to other watchers if the update was accepted
@@ -262,20 +271,18 @@ impl TreeTermDaemon for DaemonService {
         &self,
         req: Request<LockSessionRequest>,
     ) -> Result<Response<LockSessionResponse>, Status> {
+        let conn_id = connection_id(&req)?;
         let r = req.into_inner();
-        if r.holder_id.is_empty() {
-            return Err(Status::invalid_argument("holderId is required"));
-        }
 
         let ttl_ms = r.ttl_ms.unwrap_or(60_000);
         let (acquired, session) = self
             .session_store
-            .lock_session(r.holder_id.clone(), ttl_ms)
+            .lock_session(conn_id.clone(), ttl_ms)
             .await;
 
         if acquired {
             self.session_store
-                .broadcast_update(&session, &r.holder_id)
+                .broadcast_update(&session, "")
                 .await;
         }
 
@@ -289,18 +296,31 @@ impl TreeTermDaemon for DaemonService {
         &self,
         req: Request<UnlockSessionRequest>,
     ) -> Result<Response<Session>, Status> {
-        let r = req.into_inner();
-        if r.holder_id.is_empty() {
-            return Err(Status::invalid_argument("holderId is required"));
-        }
+        let conn_id = connection_id(&req)?;
 
         let session = self
             .session_store
-            .unlock_session(&r.holder_id)
+            .unlock_session(&conn_id)
             .await;
 
         self.session_store
-            .broadcast_update(&session, &r.holder_id)
+            .broadcast_update(&session, "")
+            .await;
+
+        Ok(Response::new(session))
+    }
+
+    async fn force_unlock_session(
+        &self,
+        _req: Request<ForceUnlockSessionRequest>,
+    ) -> Result<Response<Session>, Status> {
+        let session = self
+            .session_store
+            .force_unlock_session()
+            .await;
+
+        self.session_store
+            .broadcast_update(&session, "")
             .await;
 
         Ok(Response::new(session))
