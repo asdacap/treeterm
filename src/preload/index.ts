@@ -56,15 +56,13 @@ client.onCapsLockEvent((event) => {
   capsLockListeners.forEach((cb) => { cb(event); })
 })
 
-type ReadyCallback = (session: Session | null) => void
+type ReadyCallback = () => void
 const readyListeners: ReadyCallback[] = []
 let isReady = false
-let initialSession: Session | null = null
 
-client.onAppReady((session) => {
+client.onAppReady(() => {
   isReady = true
-  initialSession = session
-  readyListeners.forEach((cb) => { cb(session); })
+  readyListeners.forEach((cb) => { cb(); })
 })
 
 type SessionsCallback = (sessions: TTYSessionInfo[]) => void
@@ -286,8 +284,7 @@ const preloadApi: PreloadApi = {
   app: {
     onReady: (callback: ReadyCallback): (() => void) => {
       if (isReady) {
-        // Already ready, call immediately with the initial session
-        callback(initialSession)
+        callback()
       } else {
         readyListeners.push(callback)
       }
@@ -297,6 +294,9 @@ const preloadApi: PreloadApi = {
           readyListeners.splice(index, 1)
         }
       }
+    },
+    localConnect: (windowUuid: string) => {
+      return client.localConnect(windowUuid)
     },
     onCloseConfirm: (callback: CloseConfirmCallback): (() => void) => {
       closeConfirmListeners.push(callback)

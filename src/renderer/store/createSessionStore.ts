@@ -52,8 +52,8 @@ export interface SessionDeps {
 export interface SessionState {
   sessionId: string
 
-  // SSH connection for this session (transitions: connecting → connected/error)
-  connection: ConnectionInfo | null
+  // Connection for this session (local or remote, transitions: connecting → connected/error)
+  connection: ConnectionInfo
 
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
   openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<{ tty: Tty }>
@@ -140,7 +140,7 @@ export function getUnmergedSubWorkspaces(workspaces: Map<string, WorkspaceEntry>
 }
 
 export function createSessionStore(
-  config: { sessionId: string; windowUuid: string | null; connection?: ConnectionInfo },
+  config: { sessionId: string; windowUuid: string | null; connection: ConnectionInfo },
   deps: SessionDeps
 ): StoreApi<SessionState> {
   let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -165,7 +165,7 @@ export function createSessionStore(
       const { workspaces, connection } = store.getState()
       console.log('[session] syncSessionToDaemon called - workspaces:', workspaces.size, 'isRestoring:', isRestoring)
 
-      if (connection && connection.status !== ConnectionStatus.Connected) {
+      if (connection.status !== ConnectionStatus.Connected) {
         console.log('[session] connection not yet established, skipping sync')
         return
       }
@@ -218,7 +218,7 @@ export function createSessionStore(
       appRegistry: deps.appRegistry,
       openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => store.getState().openTtyStream(ptyId, onEvent),
       createTty: (cwd, sandbox?, startupCommand?) => store.getState().createTty(cwd, sandbox, startupCommand),
-      connectionId: config.connection?.id ?? 'local',
+      connectionId: config.connection.id,
       git: deps.git,
       filesystem: deps.filesystem,
       exec: deps.exec,
@@ -584,7 +584,7 @@ export function createSessionStore(
     }
   }
 
-  const connectionId = config.connection?.id ?? 'local'
+  const connectionId = config.connection.id
 
   // Create a terminal wrapper with connectionId bound for tty stores
   const boundTerminal: TtyTerminalDeps = {
@@ -601,7 +601,7 @@ export function createSessionStore(
     sessionVersion: 0,
     sessionLock: null,
 
-    connection: config.connection ?? null,
+    connection: config.connection,
 
     createTty: async (cwd: string, sandbox?: SandboxConfig, startupCommand?: string): Promise<string> => {
       const handle = crypto.randomUUID()

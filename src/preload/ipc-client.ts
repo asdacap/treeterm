@@ -29,6 +29,7 @@ const CHANNELS = {
   sandboxIsAvailable: 'sandbox:isAvailable',
   appGetInitialWorkspace: 'app:getInitialWorkspace',
   appGetWindowUuid: 'app:getWindowUuid',
+  localConnect: 'local:connect',
   sshConnect: 'ssh:connect',
   sshDisconnect: 'ssh:disconnect',
   sshReconnect: 'ssh:reconnect',
@@ -188,6 +189,11 @@ export class IpcClient {
 
   appGetWindowUuid(): Promise<IpcRequests['appGetWindowUuid']['result']> {
     return ipcRenderer.invoke(CHANNELS.appGetWindowUuid)
+  }
+
+  // Local daemon connection
+  localConnect(...args: IpcRequests['localConnect']['params']): Promise<IpcRequests['localConnect']['result']> {
+    return ipcRenderer.invoke(CHANNELS.localConnect, ...args)
   }
 
   // SSH requests

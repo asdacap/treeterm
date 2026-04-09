@@ -29,6 +29,7 @@ const CHANNELS = {
   sandboxIsAvailable: 'sandbox:isAvailable',
   appGetInitialWorkspace: 'app:getInitialWorkspace',
   appGetWindowUuid: 'app:getWindowUuid',
+  localConnect: 'local:connect',
   sshConnect: 'ssh:connect',
   sshDisconnect: 'ssh:disconnect',
   sshReconnect: 'ssh:reconnect',
@@ -322,6 +323,16 @@ export class IpcServer {
   }
 
   // SSH request handlers
+  onLocalConnect(
+    handler: (
+      ...args: IpcRequests['localConnect']['params']
+    ) => IpcRequests['localConnect']['result'] | Promise<IpcRequests['localConnect']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.localConnect, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['localConnect']['params']))
+    )
+  }
+
   onSshConnect(
     handler: (
       ...args: IpcRequests['sshConnect']['params']

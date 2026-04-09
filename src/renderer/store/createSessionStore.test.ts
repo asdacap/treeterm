@@ -142,7 +142,8 @@ describe('createSessionStore', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     deps = makeDeps()
-    store = createSessionStore({ sessionId: 'session-1', windowUuid: 'win-1' }, deps)
+    const localConn = { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const }
+    store = createSessionStore({ sessionId: 'session-1', windowUuid: 'win-1', connection: localConn }, deps)
   })
 
   describe('initial state', () => {
@@ -162,11 +163,7 @@ describe('createSessionStore', () => {
       expect(store.getState().isRestoring).toBe(false)
     })
 
-    it('has null connection by default', () => {
-      expect(store.getState().connection).toBeNull()
-    })
-
-    it('preserves connection when provided', () => {
+    it('preserves connection from config', () => {
       const conn = { id: 'conn-1', target: { type: 'local' as const }, host: 'example.com', status: ConnectionStatus.Connected as const }
       const s = createSessionStore({ sessionId: 's', windowUuid: null, connection: conn }, deps)
       expect(s.getState().connection).toEqual(conn)

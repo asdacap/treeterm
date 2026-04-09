@@ -93,6 +93,7 @@ describe('IpcServer', () => {
       ['onSandboxIsAvailable', 'sandbox:isAvailable'],
       ['onAppGetInitialWorkspace', 'app:getInitialWorkspace'],
       ['onPtyCreateSession', 'pty:createSession'],
+      ['onLocalConnect', 'local:connect'],
       ['onSshConnect', 'ssh:connect'],
       ['onSshDisconnect', 'ssh:disconnect'],
       ['onSshReconnect', 'ssh:reconnect'],
@@ -221,8 +222,8 @@ describe('IpcServer', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
 
-      server.appReadyTo(mockWindow, 'uuid-1' as unknown as Session | null)
-      expect(mockSend).toHaveBeenCalledWith('app:ready', 'uuid-1')
+      server.appReadyTo(mockWindow)
+      expect(mockSend).toHaveBeenCalledWith('app:ready')
     })
 
     it('capsLockEventTo sends to specific window', () => {

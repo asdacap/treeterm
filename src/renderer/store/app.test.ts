@@ -115,6 +115,10 @@ const mockDeps = {
   appApi: {
     onCloseConfirm: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
     onReady: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
+    localConnect: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({
+      info: { id: 'local', target: { type: 'local' }, status: ConnectionStatus.Connected },
+      session: { id: 'test-session', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }
+    }),
     onSshAutoConnected: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
     onConnectionReconnected: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
     confirmClose: vi.fn<() => void>(),
@@ -229,10 +233,11 @@ describe('useAppStore', () => {
     })
   })
 
-  describe('session restore via onReady', () => {
+  describe('session restore via localConnect', () => {
     let mockAddWorkspace: ReturnType<typeof vi.fn>
     let mockSyncToDaemon: ReturnType<typeof vi.fn>
     let mockHandleRestore: ReturnType<typeof vi.fn>
+    const localConn = { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const }
 
     beforeEach(async () => {
       mockAddWorkspace = vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('ws-new-id')
@@ -258,13 +263,9 @@ describe('useAppStore', () => {
         setState: vi.fn<(...args: any[]) => void>(),
         subscribe: vi.fn<(...args: any[]) => any>()
       }) as unknown as StoreApi<SessionState>)
-
-      // Initialize the store with deps so terminal/etc are available
-      const cleanup = await useAppStore.getState().initialize(mockDeps)
-      cleanup()
     })
 
-    it('restores root + child workspaces with parent-child links', () => {
+    it('restores root + child workspaces with parent-child links', async () => {
       const session: any = {
         id: 'session-1',
         workspaces: [
@@ -287,16 +288,17 @@ describe('useAppStore', () => {
         ]
       }
 
-      // Trigger onReady with the session
-      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
-      readyCallback(session)
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- test fixture
+      vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({ info: localConn, session })
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
 
       // Workspaces restored via handleRestore (not addWorkspace)
       expect(mockAddWorkspace).not.toHaveBeenCalled()
       expect(mockHandleRestore).toHaveBeenCalledWith(session)
+      cleanup()
     })
 
-    it('child workspace restored even when parent not in state', () => {
+    it('child workspace restored even when parent not in state', async () => {
       const session: any = {
         id: 'session-2',
         workspaces: [
@@ -311,14 +313,16 @@ describe('useAppStore', () => {
         ]
       }
 
-      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
-      readyCallback(session)
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- test fixture
+      vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({ info: localConn, session })
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
 
       // Child should still be restored via handleRestore
       expect(mockHandleRestore).toHaveBeenCalledWith(session)
+      cleanup()
     })
 
-    it('PTY IDs preserved as-is without sessionMap validation', () => {
+    it('PTY IDs preserved as-is without sessionMap validation', async () => {
       const session: any = {
         id: 'session-3',
         workspaces: [
@@ -336,15 +340,17 @@ describe('useAppStore', () => {
         ]
       }
 
-      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
-      readyCallback(session)
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- test fixture
+      vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({ info: localConn, session })
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
 
       // terminal.list() should NOT have been called
       expect(mockDeps.terminal.list).not.toHaveBeenCalled()
       expect(mockHandleRestore).toHaveBeenCalledWith(session)
+      cleanup()
     })
 
-    it('child without parentId still restored', () => {
+    it('child without parentId still restored', async () => {
       const session: any = {
         id: 'session-4',
         workspaces: [
@@ -359,14 +365,16 @@ describe('useAppStore', () => {
         ]
       }
 
-      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
-      readyCallback(session)
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- test fixture
+      vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({ info: localConn, session })
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
 
       expect(mockAddWorkspace).not.toHaveBeenCalled()
       expect(mockHandleRestore).toHaveBeenCalledWith(session)
+      cleanup()
     })
 
-    it('syncToDaemon is not called after restore', () => {
+    it('syncToDaemon is not called after restore', async () => {
       const session: any = {
         id: 'session-5',
         workspaces: [
@@ -381,10 +389,12 @@ describe('useAppStore', () => {
         ]
       }
 
-      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
-      readyCallback(session)
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- test fixture
+      vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({ info: localConn, session })
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
 
       expect(mockSyncToDaemon).not.toHaveBeenCalled()
+      cleanup()
     })
   })
 
@@ -407,7 +417,7 @@ describe('useAppStore', () => {
       const cleanup = await useAppStore.getState().initialize(mockDeps)
       expect(mockDeps.settingsApi.onOpen).toHaveBeenCalled()
       expect(mockDeps.appApi.onCloseConfirm).toHaveBeenCalled()
-      expect(mockDeps.appApi.onReady).toHaveBeenCalled()
+      expect(mockDeps.appApi.localConnect).toHaveBeenCalled()
       expect(mockDeps.sessionApi.onSync).toHaveBeenCalled()
       expect(mockDeps.daemon.onDisconnected).toHaveBeenCalled()
       cleanup()
@@ -451,10 +461,6 @@ describe('useAppStore', () => {
 
       const cleanup = await useAppStore.getState().initialize(mockDeps)
 
-      // Trigger onReady to create a session store
-      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
-      readyCallback({ id: 'session-1', workspaces: [] })
-
       const closeCallback = vi.mocked(mockDeps.appApi.onCloseConfirm).mock.calls[0]![0] as () => void
       closeCallback()
 
@@ -463,7 +469,7 @@ describe('useAppStore', () => {
       cleanup()
     })
 
-    it('onReady restores session with workspaces', async () => {
+    it('localConnect restores session with workspaces', async () => {
       const { createSessionStore } = await import('./createSessionStore')
       const mockSetState = vi.fn<(...args: any[]) => void>()
       vi.mocked(createSessionStore).mockReturnValue({
@@ -483,27 +489,30 @@ describe('useAppStore', () => {
         subscribe: vi.fn<(...args: any[]) => any>()
       } as unknown as StoreApi<SessionState>)
 
-      const cleanup = await useAppStore.getState().initialize(mockDeps)
-      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
-
-      const session = {
+      const session: any = {
         id: 'session-ready',
         workspaces: [{
           id: 'ws-1', path: '/test', name: 'test',
           parentId: null, appStates: {}, activeTabId: null
-        }]
+        }],
+        createdAt: 0, lastActivity: 0, version: 1, lock: null
       }
-      readyCallback(session)
+      const localConn = { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const }
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- test fixture
+      vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({ info: localConn, session })
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
 
       expect(useAppStore.getState().sessionStores.get('session-ready')).toBeDefined()
       cleanup()
     })
 
-    it('onReady creates store for session with no workspaces', async () => {
+    it('localConnect creates store for session with no workspaces', async () => {
+      const localConn = { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const }
+      vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({
+        info: localConn,
+        session: { id: 'empty-session', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }
+      })
       const cleanup = await useAppStore.getState().initialize(mockDeps)
-      const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
-
-      readyCallback({ id: 'empty-session', workspaces: [] })
 
       expect(useAppStore.getState().sessionStores.get('empty-session')).toBeDefined()
       cleanup()
@@ -525,6 +534,7 @@ describe('useAppStore', () => {
       vi.mocked(createSessionStore).mockReturnValue({
         getState: vi.fn<() => any>().mockReturnValue({
           workspaces: new Map([['ws-existing', { status: WorkspaceEntryStatus.Loaded, data: { id: 'ws-existing', path: '/projects/existing', name: 'existing' }, store: {} }]]),
+          connection: { id: 'local', target: { type: 'local' }, status: ConnectionStatus.Connected },
           activeWorkspaceId: null,
           isRestoring: false,
           addWorkspace: vi.fn<(...args: any[]) => any>(),
@@ -541,20 +551,11 @@ describe('useAppStore', () => {
       const deps = {
         ...mockDeps,
         getInitialWorkspace: vi.fn<() => Promise<string>>().mockResolvedValue('/projects/existing'),
-        appApi: {
-          ...mockDeps.appApi,
-          onReady: vi.fn<(...args: any[]) => () => void>().mockImplementation((cb: (session: any) => void) => {
-            // Immediately fire onReady with a session so the store exists
-            setTimeout(() => { cb({ id: 'session-init', workspaces: [] }); }, 0)
-            return () => {}
-          }),
-          onCloseConfirm: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
-        }
       }
 
       // We need the store to exist before getInitialWorkspace resolves
       // Create a mock session store directly
-      const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', windowUuid: null }, {} as unknown as SessionDeps)
+      const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', windowUuid: null, connection: { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const } }, {} as unknown as SessionDeps)
       useAppStore.setState({
         sessionStores: new Map([['pre-session', { store: mockSessionStoreInstance }]])
       })
@@ -570,6 +571,7 @@ describe('useAppStore', () => {
       vi.mocked(createSessionStore).mockReturnValue({
         getState: vi.fn<() => any>().mockReturnValue({
           workspaces: new Map(),
+          connection: { id: 'local', target: { type: 'local' }, status: ConnectionStatus.Connected },
           activeWorkspaceId: null,
           isRestoring: false,
           addWorkspace: mockAddWorkspace,
@@ -582,7 +584,7 @@ describe('useAppStore', () => {
         subscribe: vi.fn<(...args: any[]) => any>()
       } as unknown as StoreApi<SessionState>)
 
-      const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', windowUuid: null }, {} as unknown as SessionDeps)
+      const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', windowUuid: null, connection: { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const } }, {} as unknown as SessionDeps)
       useAppStore.setState({
         sessionStores: new Map([['pre-session', { store: mockSessionStoreInstance }]])
       })
@@ -865,28 +867,41 @@ describe('useAppStore', () => {
   })
 
   describe('session auto-naming', () => {
-    beforeEach(async () => {
+    beforeEach(() => {
       useSessionNamesStore.setState({ names: new Map() })
-      const cleanup = await useAppStore.getState().initialize(mockDeps)
-      cleanup()
     })
 
-    describe('local session via onReady', () => {
-      it('names local session LOCAL', () => {
-        const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
-        readyCallback({ id: 'local-session-1', workspaces: [] })
+    describe('local session via localConnect', () => {
+      it('names local session LOCAL', async () => {
+        const localConn = { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const }
+        vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({
+          info: localConn,
+          session: { id: 'local-session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }
+        })
+        const cleanup = await useAppStore.getState().initialize(mockDeps)
         expect(useSessionNamesStore.getState().getName('local-session-1')).toBe('LOCAL')
+        cleanup()
       })
 
-      it('does not overwrite existing custom name', () => {
+      it('does not overwrite existing custom name', async () => {
         useSessionNamesStore.getState().setName('local-session-2', 'My Custom Name')
-        const readyCallback = vi.mocked(mockDeps.appApi.onReady).mock.calls[0]![0] as (session: any) => void
-        readyCallback({ id: 'local-session-2', workspaces: [] })
+        const localConn = { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const }
+        vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({
+          info: localConn,
+          session: { id: 'local-session-2', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }
+        })
+        const cleanup = await useAppStore.getState().initialize(mockDeps)
         expect(useSessionNamesStore.getState().getName('local-session-2')).toBe('My Custom Name')
+        cleanup()
       })
     })
 
     describe('SSH session via addRemoteSession', () => {
+      beforeEach(async () => {
+        const cleanup = await useAppStore.getState().initialize(mockDeps)
+        cleanup()
+      })
+
       it('names session with user@host when no label', async () => {
         const connection = {
           id: 'conn-1',

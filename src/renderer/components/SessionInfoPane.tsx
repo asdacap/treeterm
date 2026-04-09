@@ -61,9 +61,9 @@ interface SessionInfoPaneProps {
 export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) {
   const sessionId = useStore(sessionStore, s => s.sessionId)
   const connection = useStore(sessionStore, s => s.connection)
-  const isRemote = connection?.target.type === 'remote'
-  const isConnected = connection?.status === ConnectionStatus.Connected
-  const connectionError = (connection?.status === ConnectionStatus.Error || connection?.status === ConnectionStatus.Disconnected) ? connection.error : undefined
+  const isRemote = connection.target.type === 'remote'
+  const isConnected = connection.status === ConnectionStatus.Connected
+  const connectionError = (connection.status === ConnectionStatus.Error || connection.status === ConnectionStatus.Disconnected) ? connection.error : undefined
 
   const ssh = useAppStore(s => s.ssh)
   const exec = useAppStore(s => s.exec)
@@ -251,12 +251,12 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
         {connectionError && (
           <span className="ssh-pane-error">{connectionError}</span>
         )}
-        {connection && connection.status === ConnectionStatus.Connected && (
+        {connection.status === ConnectionStatus.Connected && (
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             <button className="ssh-pane-tab" onClick={() => { void ssh.forceReconnect(connection.id) }}>Reconnect</button>
           </div>
         )}
-        {connection && (connection.status === ConnectionStatus.Error || connection.status === ConnectionStatus.Disconnected) && (
+        {(connection.status === ConnectionStatus.Error || connection.status === ConnectionStatus.Disconnected) && (
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             <button className="ssh-pane-tab" onClick={handleRetry}>Retry</button>
             <button className="ssh-pane-tab" style={{ color: '#f44336' }} onClick={() => { disconnectSession(sessionId); }}>Remove</button>
@@ -365,7 +365,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
             ))
           )}
         </div>
-      ) : sshSubTab === SshSubTab.Monitor && connection ? (
+      ) : sshSubTab === SshSubTab.Monitor ? (
         <SystemMonitor connectionId={connection.id} exec={exec} />
       ) : (
         <div className="ssh-pane-output">

@@ -275,11 +275,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
       }
     })
 
-    const unsubReady = appApi.onReady((session) => {
-      console.log('[App] Received app:ready with session:', session?.id)
-      if (session) {
-        const localConnection: ConnectionInfo = { id: 'local', target: { type: 'local' }, status: ConnectionStatus.Connected }
-        const sessionStore = getOrCreateSession(session.id, get, set, localConnection)
+    // Renderer drives local connection — mirrors sshConnect pattern
+    const windowUuid = get().windowUuid
+    if (windowUuid) {
+      try {
+        const { info, session } = await appApi.localConnect(windowUuid)
+        console.log('[App] Local connection established, session:', session.id)
+        const sessionStore = getOrCreateSession(session.id, get, set, info)
         if (!useSessionNamesStore.getState().getName(session.id)) {
           useSessionNamesStore.getState().setName(session.id, 'LOCAL')
         }
@@ -289,14 +291,16 @@ export const useAppStore = create<AppState>()((set, get) => ({
           const firstWs = session.workspaces[0]!
           useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: session.id })
         }
+      } catch (error) {
+        console.error('[App] Failed to establish local connection:', error)
       }
-    })
+    }
 
     const unsubSync = sessionApi.onSync((connectionId, session) => {
       console.log(`[App] Received session:sync from connection ${connectionId} with ${String(session.workspaces.length)} workspaces for session ${session.id}`)
       const entry = get().sessionStores.get(session.id)
       if (!entry) return
-      const storeConnId = entry.store.getState().connection?.id ?? 'local'
+      const storeConnId = entry.store.getState().connection.id
       if (storeConnId !== connectionId) {
         console.warn('[App] Ignoring session:sync from wrong connection', connectionId, 'expected', storeConnId)
         return
@@ -334,7 +338,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const unsubSshStatus = ssh.onConnectionStatus((info) => {
       for (const entry of Array.from(get().sessionStores.values())) {
         const conn = entry.store.getState().connection
-        if (conn && conn.id === info.id) {
+        if (conn.id === info.id) {
           entry.store.setState({ connection: info })
         }
       }
@@ -346,7 +350,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const { activeView } = useNavigationStore.getState()
       const sessionId = activeView?.type === 'workspace' ? activeView.sessionId : null
       const sessionEntry = sessionId ? get().sessionStores.get(sessionId) : Array.from(get().sessionStores.values())[0]
-      const connStatus = sessionEntry?.store.getState().connection?.status
+      const connStatus = sessionEntry?.store.getState().connection.status
       if (sessionEntry && connStatus !== ConnectionStatus.Connecting) {
         const { workspaces, addWorkspace, setActiveWorkspace } = sessionEntry.store.getState()
         let existingId: string | undefined
@@ -367,7 +371,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
     return () => {
       unsubSettings()
       unsubClose()
-      unsubReady()
       unsubSync()
       unsubSshAutoConnected()
       unsubReconnected()
@@ -460,9 +463,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- connectionId guaranteed to exist in sessionStores
     const entry = get().sessionStores.get(connectionId)!
     const conn = entry.store.getState().connection
-    if (conn) {
-      entry.store.setState({ connection: { ...conn, status: ConnectionStatus.Error, error } })
-    }
+    entry.store.setState({ connection: { ...conn, status: ConnectionStatus.Error, error } })
   },
 
   removeSession: (id: string) => {
@@ -480,7 +481,7 @@ function getOrCreateSession(
   sessionId: string,
   get: () => AppState,
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
-  connection?: ConnectionInfo
+  connection: ConnectionInfo
 ): StoreApi<SessionState> {
   const { sessionStores, windowUuid, filesystem, exec, sessionApi, terminal } = get()
   const existing = sessionStores.get(sessionId)
@@ -488,8 +489,8 @@ function getOrCreateSession(
     console.log(`[renderer:app] getOrCreateSession: reusing existing session store for session=${sessionId}`)
     return existing.store
   }
-  console.log(`[renderer:app] getOrCreateSession: creating new session store for session=${sessionId}, connection=${connection?.id ?? 'local'}`)
-  const connId = connection?.id ?? 'local'
+  console.log(`[renderer:app] getOrCreateSession: creating new session store for session=${sessionId}, connection=${connection.id}`)
+  const connId = connection.id
   const boundFilesystem = createBoundFilesystem(filesystem, connId)
   const boundGit = createGitApi(exec, boundFilesystem, connId)
   const boundGithub = createGitHubApi(exec, get().settingsApi, connId)
@@ -527,7 +528,7 @@ function disposeSessionForConnection(connectionId: string, get: () => AppState):
 
   for (const [sessionId, entry] of Array.from(sessionStores.entries())) {
     const conn = entry.store.getState().connection
-    const connId = conn?.id ?? 'local'
+    const connId = conn.id
     if (connId !== connectionId) continue
 
     console.log(`[renderer:app] Disposing session ${sessionId} for reconnecting connection ${connectionId}`)

@@ -417,7 +417,7 @@ export default function SessionPanel({
   }
 
   const renderStatusContent = (status: ConnectionStatus): ReactNode => {
-    const phaseLabel = connection?.status === ConnectionStatus.Connecting && 'connectPhase' in connection
+    const phaseLabel = connection.status === ConnectionStatus.Connecting && 'connectPhase' in connection
       ? { bootstrap: 'Bootstrapping...', tunnel: 'Establishing tunnel...', daemon: 'Connecting to daemon...' }[connection.connectPhase ?? 'bootstrap']
       : 'Connecting...'
     switch (status) {
@@ -429,10 +429,9 @@ export default function SessionPanel({
     }
   }
 
-  const isDegraded = connection != null && connection.status !== ConnectionStatus.Connected && connection.status !== ConnectionStatus.Connecting
+  const isDegraded = connection.status !== ConnectionStatus.Connected && connection.status !== ConnectionStatus.Connecting
 
   const renderConnectionBanner = (): ReactNode => {
-    if (!connection) return null
     const errorMsg = 'error' in connection ? connection.error : undefined
     switch (connection.status) {
       case ConnectionStatus.Reconnecting:
@@ -496,7 +495,7 @@ export default function SessionPanel({
             onDoubleClick={(e) => { e.stopPropagation(); handleStartEditName() }}
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            {connection && renderStatusIcon(connection.status)}
+            {renderStatusIcon(connection.status)}
             {displayName || sessionId}
             {sessionLock && (
               <button
@@ -509,7 +508,7 @@ export default function SessionPanel({
             )}
           </span>
         )}
-        {(!connection || connection.status === ConnectionStatus.Connected) && (
+        {connection.status === ConnectionStatus.Connected && (
           <button
             className="add-button"
             onClick={(e) => { e.stopPropagation(); handleAddWorkspace() }}
@@ -523,7 +522,7 @@ export default function SessionPanel({
       {!isSessionCollapsed && (
         <div className="tree-list">
           {renderConnectionBanner()}
-          {connection && renderStatusContent(connection.status) ? (
+          {renderStatusContent(connection.status) ? (
             renderStatusContent(connection.status)
           ) : rootWorkspaceIds.length === 0 ? (
             <div className="tree-empty">No workspaces. Click + to add one.</div>
@@ -572,11 +571,11 @@ export default function SessionPanel({
           onOpen={handleOpenWorkspaceSubmit}
           onCancel={() => { setIsOpenWorkspaceDialogOpen(false); }}
           selectFolder={selectFolder}
-          connectionKey={connection?.target.type === 'remote'
+          connectionKey={connection.target.type === 'remote'
             ? `${connection.target.config.user}@${connection.target.config.host}:${String(connection.target.config.port)}`
             : 'local'}
-          isRemote={connection?.target.type === 'remote'}
-          readDirectory={connection?.target.type === 'remote'
+          isRemote={connection.target.type === 'remote'}
+          readDirectory={connection.target.type === 'remote'
             ? (dirPath: string) => filesystem.readDirectory(connection.id, '/', dirPath)
             : undefined}
         />

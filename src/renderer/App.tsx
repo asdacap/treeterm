@@ -145,7 +145,7 @@ export default function App() {
                   .filter(([, e]) => e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError)
                   .map(([id, e]) => [id, (e as Extract<typeof e, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }>).data])
               )}
-              connectionId={activeSessionStore.getState().connection?.id ?? 'local'}
+              connectionId={activeSessionStore.getState().connection.id}
               onClose={() => { useAppStore.setState({ isActiveProcessesOpen: false }); }}
             />
           )}

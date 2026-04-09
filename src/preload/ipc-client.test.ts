@@ -88,6 +88,7 @@ describe('IpcClient', () => {
       ['sessionLock', 'session:lock'],
       ['sessionUnlock', 'session:unlock'],
       ['sessionForceUnlock', 'session:forceUnlock'],
+      ['localConnect', 'local:connect'],
       ['sshConnect', 'ssh:connect'],
       ['sshDisconnect', 'ssh:disconnect'],
       ['sshReconnect', 'ssh:reconnect'],

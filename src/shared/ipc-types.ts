@@ -144,6 +144,12 @@ export interface IpcRequests {
     result: string
   }
 
+  // Local daemon connection (renderer-driven, mirrors sshConnect)
+  localConnect: {
+    params: [windowUuid: string]
+    result: { info: ConnectionInfo; session: Session }
+  }
+
   // SSH operations
   sshConnect: {
     params: [config: SSHConnectionConfig, options?: { refreshDaemon?: boolean; allowOutdatedDaemon?: boolean }]
@@ -290,7 +296,7 @@ export interface IpcEvents {
     params: []
   }
   appReady: {
-    params: [session: Session | null]
+    params: []
   }
   capsLockEvent: {
     params: [event: { type: string; key: string; code: string }]

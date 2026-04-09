@@ -113,8 +113,6 @@ function createWindow(): BrowserWindow {
   const windowUuid = randomUUID()
   windowUuids.set(window.webContents.id, windowUuid)
 
-  // Cleanup for session watch stream (kept for window close cleanup)
-  let unwatchSession: (() => void) | null = null
 
   // Forward all keyboard events including Caps Lock to renderer
   window.webContents.on('before-input-event', (_event, input) => {
@@ -172,49 +170,22 @@ function createWindow(): BrowserWindow {
   // Load the renderer
   void window.loadURL(loadUrl)
 
-  // Signal renderer when ready to initialize with the session
-  window.webContents.on('did-finish-load', () => { void (async () => {
-    if (!connectionManager) {
-      server.appReadyTo(window, null)
-      return
-    }
-
-    try {
-      const localClient = connectionManager.getClient('local')
-      await localClient.ensureDaemonRunning()
-
-      // Start watching the single session (cancel previous if HMR reload)
-      if (unwatchSession) {
-        unwatchSession()
-      }
-      const watch = localClient.watchSession(windowUuid, (updatedSession) => {
-        console.log('[main] session sync received for window', window.id, {
-          sessionId: updatedSession.id,
-          workspaces: updatedSession.workspaces.map(ws => ({ path: ws.path, metadata: ws.metadata })),
-        })
-        server.sessionSync('local', updatedSession)
-      })
-      unwatchSession = watch.unsubscribe
-
-      // Register in shared map so reconnect can re-establish this watch
-      registerSessionWatch('local', windowUuid, watch.unsubscribe)
-
-      const session = await watch.initial
-      console.log('[main] loaded session:', session.id)
-      sessionConnectionMap.set(session.id, 'local')
-      await createSessionClient(session.id, localClient.socketPath)
-      server.appReadyTo(window, session)
-    } catch (error) {
-      console.error('[main] failed to get session:', error)
-      server.appReadyTo(window, null)
-    }
-  })() })
+  // Signal renderer that main is ready — renderer drives session creation via localConnect
+  window.webContents.on('did-finish-load', () => {
+    server.appReadyTo(window)
+  })
 
   window.on('closed', () => {
-    // Stop watching session
-    if (unwatchSession) {
-      unwatchSession()
-      unwatchSession = null
+    // Unsubscribe session watches for this window across all connections
+    for (const [connId, entries] of sessionWatchUnsubs.entries()) {
+      const remaining = entries.filter(e => {
+        if (e.uuid === windowUuid) {
+          e.unsubscribe()
+          return false
+        }
+        return true
+      })
+      sessionWatchUnsubs.set(connId, remaining)
     }
     windowUuids.delete(window.webContents.id)
   })
@@ -612,6 +583,40 @@ function autoStartPortForwards(
     }
   }
 }
+
+// Local connection handler — renderer-driven, mirrors sshConnect pattern
+server.onLocalConnect(async (windowUuid) => {
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
+
+  const localClient = connectionManager.getClient('local')
+  await localClient.ensureDaemonRunning()
+
+  // Cancel previous watch for this window (HMR reload)
+  const existing = sessionWatchUnsubs.get('local') ?? []
+  for (const entry of existing) {
+    if (entry.uuid === windowUuid) {
+      entry.unsubscribe()
+    }
+  }
+
+  const watch = localClient.watchSession(windowUuid, (updatedSession) => {
+    console.log('[main] session sync received for window uuid', windowUuid, {
+      sessionId: updatedSession.id,
+      workspaces: updatedSession.workspaces.map(ws => ({ path: ws.path, metadata: ws.metadata })),
+    })
+    server.sessionSync('local', updatedSession)
+  })
+
+  registerSessionWatch('local', windowUuid, watch.unsubscribe)
+
+  const session = await watch.initial
+  console.log('[main] localConnect: loaded session:', session.id)
+  sessionConnectionMap.set(session.id, 'local')
+  await createSessionClient(session.id, localClient.socketPath)
+
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- local connection always exists
+  return { info: connectionManager.getConnection('local')!, session }
+})
 
 // SSH IPC Handlers
 server.onSshConnect(async (config, options) => {

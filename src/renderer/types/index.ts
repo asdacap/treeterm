@@ -499,7 +499,8 @@ export interface SandboxApi {
 }
 
 export interface AppApi {
-  onReady: (callback: (session: Session | null) => void) => () => void
+  onReady: (callback: () => void) => () => void
+  localConnect: (windowUuid: string) => Promise<{ info: ConnectionInfo; session: Session }>
   onCloseConfirm: (callback: () => void) => () => void
   confirmClose: () => void
   cancelClose: () => void
