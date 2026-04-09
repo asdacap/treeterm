@@ -1,3 +1,4 @@
+pub mod connection_id;
 mod exec_manager;
 pub mod filesystem;
 mod grpc_server;
@@ -96,6 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     Server::builder()
+        .layer(connection_id::ConnectionIdLayer)
         .add_service(
             TreeTermDaemonServer::new(svc)
                 .max_decoding_message_size(8 * 1024 * 1024)

@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react'
 import type { ReactNode } from 'react'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
-import { GitFork, ChevronDown, ChevronRight, Loader2, AlertCircle, Lock } from 'lucide-react'
+import { GitFork, ChevronDown, ChevronRight, Loader2, AlertCircle, LockOpen } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { SessionState, WorkspaceEntry } from '../store/createSessionStore'
@@ -44,6 +44,7 @@ export default function SessionPanel({
     quickForkWorkspace,
     setActiveWorkspace,
     reorderWorkspace,
+    forceUnlock,
   } = useStore(sessionStore)
   const { activeView, setActiveView } = useNavigationStore()
   const {
@@ -497,7 +498,15 @@ export default function SessionPanel({
           >
             {connection && renderStatusIcon(connection.status)}
             {displayName || sessionId}
-            {sessionLock && <Lock size={14} style={{ opacity: 0.6 }} />}
+            {sessionLock && (
+              <button
+                className="force-unlock-button"
+                title="Force unlock session"
+                onClick={(e) => { e.stopPropagation(); void forceUnlock() }}
+              >
+                <LockOpen size={14} />
+              </button>
+            )}
           </span>
         )}
         {(!connection || connection.status === ConnectionStatus.Connected) && (

@@ -124,7 +124,8 @@ const mockDeps = {
     onSync: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
     update: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true, session: { id: 'test-session' } }),
     lock: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true, acquired: true, session: { id: 'test-session' } }),
-    unlock: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true, session: { id: 'test-session' } })
+    unlock: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true, session: { id: 'test-session' } }),
+    forceUnlock: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true, session: { id: 'test-session' } })
   },
   daemon: { onDisconnected: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}) },
   terminal: {

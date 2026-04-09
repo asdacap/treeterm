@@ -62,6 +62,8 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       update: vi.fn().mockResolvedValue({ success: true }),
       lock: vi.fn().mockResolvedValue({ success: true, acquired: true, session: { id: 'session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null } }),
       unlock: vi.fn().mockResolvedValue({ success: true, session: { id: 'session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null } }),
+      forceUnlock: vi.fn().mockResolvedValue({ success: true, session: { id: 'session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null } }),
+      // Note: lock/unlock signatures no longer take holderId (daemon-generated identity via per-session gRPC connection)
       onSync: vi.fn().mockReturnValue(() => {}),
     },
     terminal: {

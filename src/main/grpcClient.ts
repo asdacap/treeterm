@@ -22,7 +22,6 @@ import {
   type SessionWatchRequest,
   type LockSessionRequest,
   type LockSessionResponse,
-  type UnlockSessionRequest,
   type DirectoryContents,
   type FileEntry
 } from '../generated/treeterm'
@@ -314,7 +313,6 @@ export class GrpcDaemonClient {
   }
 
   async lockSession(
-    holderId: string,
     ttlMs?: number
   ): Promise<{ acquired: boolean; session: Session }> {
     if (!this.client) {
@@ -324,7 +322,6 @@ export class GrpcDaemonClient {
 
     return new Promise((resolve, reject) => {
       const request: LockSessionRequest = {
-        holderId,
         ttlMs: ttlMs ?? 60_000
       }
 
@@ -343,20 +340,31 @@ export class GrpcDaemonClient {
     })
   }
 
-  async unlockSession(
-    holderId: string
-  ): Promise<Session> {
+  async unlockSession(): Promise<Session> {
     if (!this.client) {
       throw new Error('Not connected to daemon')
     }
     const client = this.client
 
     return new Promise((resolve, reject) => {
-      const request: UnlockSessionRequest = {
-        holderId
-      }
+      client.unlockSession({}, (error: grpc.ServiceError | null, response: ProtoSession) => {
+        if (error) {
+          reject(new Error(error.message))
+        } else {
+          resolve(this.convertFromProtoSession(response))
+        }
+      })
+    })
+  }
 
-      client.unlockSession(request, (error: grpc.ServiceError | null, response: ProtoSession) => {
+  async forceUnlockSession(): Promise<Session> {
+    if (!this.client) {
+      throw new Error('Not connected to daemon')
+    }
+    const client = this.client
+
+    return new Promise((resolve, reject) => {
+      client.forceUnlockSession({}, (error: grpc.ServiceError | null, response: ProtoSession) => {
         if (error) {
           reject(new Error(error.message))
         } else {
@@ -573,7 +581,7 @@ export class GrpcDaemonClient {
       lastActivity: protoSession.lastActivity,
       version: protoSession.version,
       lock: protoSession.lock
-        ? { holderId: protoSession.lock.holderId, acquiredAt: protoSession.lock.acquiredAt, expiresAt: protoSession.lock.expiresAt }
+        ? { acquiredAt: protoSession.lock.acquiredAt, expiresAt: protoSession.lock.expiresAt }
         : null
     }
   }

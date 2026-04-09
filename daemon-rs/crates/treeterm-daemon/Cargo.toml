@@ -18,7 +18,10 @@ serde.workspace = true
 serde_json.workspace = true
 libc.workspace = true
 tokio-stream = "0.1"
+http.workspace = true
 rand.workspace = true
+tower.workspace = true
+uuid.workspace = true
 vt100.workspace = true
 
 [dev-dependencies]

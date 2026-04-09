@@ -58,6 +58,7 @@ const CHANNELS = {
   sessionUpdate: 'session:update',
   sessionLock: 'session:lock',
   sessionUnlock: 'session:unlock',
+  sessionForceUnlock: 'session:forceUnlock',
   daemonShutdown: 'daemon:shutdown',
   dialogSelectFolder: 'dialog:selectFolder',
   dialogGetRecentDirectories: 'dialog:getRecentDirectories',
@@ -395,6 +396,10 @@ export class IpcClient {
 
   sessionUnlock(...args: IpcRequests['sessionUnlock']['params']): Promise<IpcRequests['sessionUnlock']['result']> {
     return ipcRenderer.invoke(CHANNELS.sessionUnlock, ...args)
+  }
+
+  sessionForceUnlock(...args: IpcRequests['sessionForceUnlock']['params']): Promise<IpcRequests['sessionForceUnlock']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sessionForceUnlock, ...args)
   }
 
   // Other requests

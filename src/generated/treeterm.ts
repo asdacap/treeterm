@@ -71,7 +71,6 @@ export interface Workspace_AppStatesEntry {
 }
 
 export interface SessionLock {
-  holderId: string;
   acquiredAt: number;
   expiresAt: number;
 }
@@ -229,7 +228,6 @@ export interface SessionWatchEvent {
 }
 
 export interface LockSessionRequest {
-  holderId: string;
   /** Lock TTL in milliseconds (default 60000) */
   ttlMs?: number | undefined;
 }
@@ -240,7 +238,9 @@ export interface LockSessionResponse {
 }
 
 export interface UnlockSessionRequest {
-  holderId: string;
+}
+
+export interface ForceUnlockSessionRequest {
 }
 
 /** File read streaming messages */
@@ -1040,14 +1040,11 @@ export const Workspace_AppStatesEntry: MessageFns<Workspace_AppStatesEntry> = {
 };
 
 function createBaseSessionLock(): SessionLock {
-  return { holderId: "", acquiredAt: 0, expiresAt: 0 };
+  return { acquiredAt: 0, expiresAt: 0 };
 }
 
 export const SessionLock: MessageFns<SessionLock> = {
   encode(message: SessionLock, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.holderId !== "") {
-      writer.uint32(10).string(message.holderId);
-    }
     if (message.acquiredAt !== 0) {
       writer.uint32(16).int64(message.acquiredAt);
     }
@@ -1064,14 +1061,6 @@ export const SessionLock: MessageFns<SessionLock> = {
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.holderId = reader.string();
-          continue;
-        }
         case 2: {
           if (tag !== 16) {
             break;
@@ -1099,11 +1088,6 @@ export const SessionLock: MessageFns<SessionLock> = {
 
   fromJSON(object: any): SessionLock {
     return {
-      holderId: isSet(object.holderId)
-        ? globalThis.String(object.holderId)
-        : isSet(object.holder_id)
-        ? globalThis.String(object.holder_id)
-        : "",
       acquiredAt: isSet(object.acquiredAt)
         ? globalThis.Number(object.acquiredAt)
         : isSet(object.acquired_at)
@@ -1119,9 +1103,6 @@ export const SessionLock: MessageFns<SessionLock> = {
 
   toJSON(message: SessionLock): unknown {
     const obj: any = {};
-    if (message.holderId !== "") {
-      obj.holderId = message.holderId;
-    }
     if (message.acquiredAt !== 0) {
       obj.acquiredAt = Math.round(message.acquiredAt);
     }
@@ -1136,7 +1117,6 @@ export const SessionLock: MessageFns<SessionLock> = {
   },
   fromPartial<I extends Exact<DeepPartial<SessionLock>, I>>(object: I): SessionLock {
     const message = createBaseSessionLock();
-    message.holderId = object.holderId ?? "";
     message.acquiredAt = object.acquiredAt ?? 0;
     message.expiresAt = object.expiresAt ?? 0;
     return message;
@@ -3334,14 +3314,11 @@ export const SessionWatchEvent: MessageFns<SessionWatchEvent> = {
 };
 
 function createBaseLockSessionRequest(): LockSessionRequest {
-  return { holderId: "", ttlMs: undefined };
+  return { ttlMs: undefined };
 }
 
 export const LockSessionRequest: MessageFns<LockSessionRequest> = {
   encode(message: LockSessionRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.holderId !== "") {
-      writer.uint32(10).string(message.holderId);
-    }
     if (message.ttlMs !== undefined) {
       writer.uint32(16).int64(message.ttlMs);
     }
@@ -3355,14 +3332,6 @@ export const LockSessionRequest: MessageFns<LockSessionRequest> = {
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.holderId = reader.string();
-          continue;
-        }
         case 2: {
           if (tag !== 16) {
             break;
@@ -3382,11 +3351,6 @@ export const LockSessionRequest: MessageFns<LockSessionRequest> = {
 
   fromJSON(object: any): LockSessionRequest {
     return {
-      holderId: isSet(object.holderId)
-        ? globalThis.String(object.holderId)
-        : isSet(object.holder_id)
-        ? globalThis.String(object.holder_id)
-        : "",
       ttlMs: isSet(object.ttlMs)
         ? globalThis.Number(object.ttlMs)
         : isSet(object.ttl_ms)
@@ -3397,9 +3361,6 @@ export const LockSessionRequest: MessageFns<LockSessionRequest> = {
 
   toJSON(message: LockSessionRequest): unknown {
     const obj: any = {};
-    if (message.holderId !== "") {
-      obj.holderId = message.holderId;
-    }
     if (message.ttlMs !== undefined) {
       obj.ttlMs = Math.round(message.ttlMs);
     }
@@ -3411,7 +3372,6 @@ export const LockSessionRequest: MessageFns<LockSessionRequest> = {
   },
   fromPartial<I extends Exact<DeepPartial<LockSessionRequest>, I>>(object: I): LockSessionRequest {
     const message = createBaseLockSessionRequest();
-    message.holderId = object.holderId ?? "";
     message.ttlMs = object.ttlMs ?? undefined;
     return message;
   },
@@ -3496,14 +3456,11 @@ export const LockSessionResponse: MessageFns<LockSessionResponse> = {
 };
 
 function createBaseUnlockSessionRequest(): UnlockSessionRequest {
-  return { holderId: "" };
+  return {};
 }
 
 export const UnlockSessionRequest: MessageFns<UnlockSessionRequest> = {
-  encode(message: UnlockSessionRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.holderId !== "") {
-      writer.uint32(10).string(message.holderId);
-    }
+  encode(_: UnlockSessionRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     return writer;
   },
 
@@ -3514,14 +3471,6 @@ export const UnlockSessionRequest: MessageFns<UnlockSessionRequest> = {
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.holderId = reader.string();
-          continue;
-        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3531,30 +3480,63 @@ export const UnlockSessionRequest: MessageFns<UnlockSessionRequest> = {
     return message;
   },
 
-  fromJSON(object: any): UnlockSessionRequest {
-    return {
-      holderId: isSet(object.holderId)
-        ? globalThis.String(object.holderId)
-        : isSet(object.holder_id)
-        ? globalThis.String(object.holder_id)
-        : "",
-    };
+  fromJSON(_: any): UnlockSessionRequest {
+    return {};
   },
 
-  toJSON(message: UnlockSessionRequest): unknown {
+  toJSON(_: UnlockSessionRequest): unknown {
     const obj: any = {};
-    if (message.holderId !== "") {
-      obj.holderId = message.holderId;
-    }
     return obj;
   },
 
   create<I extends Exact<DeepPartial<UnlockSessionRequest>, I>>(base?: I): UnlockSessionRequest {
     return UnlockSessionRequest.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<UnlockSessionRequest>, I>>(object: I): UnlockSessionRequest {
+  fromPartial<I extends Exact<DeepPartial<UnlockSessionRequest>, I>>(_: I): UnlockSessionRequest {
     const message = createBaseUnlockSessionRequest();
-    message.holderId = object.holderId ?? "";
+    return message;
+  },
+};
+
+function createBaseForceUnlockSessionRequest(): ForceUnlockSessionRequest {
+  return {};
+}
+
+export const ForceUnlockSessionRequest: MessageFns<ForceUnlockSessionRequest> = {
+  encode(_: ForceUnlockSessionRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ForceUnlockSessionRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseForceUnlockSessionRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(_: any): ForceUnlockSessionRequest {
+    return {};
+  },
+
+  toJSON(_: ForceUnlockSessionRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ForceUnlockSessionRequest>, I>>(base?: I): ForceUnlockSessionRequest {
+    return ForceUnlockSessionRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ForceUnlockSessionRequest>, I>>(_: I): ForceUnlockSessionRequest {
+    const message = createBaseForceUnlockSessionRequest();
     return message;
   },
 };
@@ -5296,6 +5278,16 @@ export const TreeTermDaemonService = {
     responseSerialize: (value: Session): Buffer => Buffer.from(Session.encode(value).finish()),
     responseDeserialize: (value: Buffer): Session => Session.decode(value),
   },
+  forceUnlockSession: {
+    path: "/treeterm.TreeTermDaemon/ForceUnlockSession" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: ForceUnlockSessionRequest): Buffer =>
+      Buffer.from(ForceUnlockSessionRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ForceUnlockSessionRequest => ForceUnlockSessionRequest.decode(value),
+    responseSerialize: (value: Session): Buffer => Buffer.from(Session.encode(value).finish()),
+    responseDeserialize: (value: Buffer): Session => Session.decode(value),
+  },
   /** Daemon Control */
   shutdown: {
     path: "/treeterm.TreeTermDaemon/Shutdown" as const,
@@ -5366,6 +5358,7 @@ export interface TreeTermDaemonServer extends UntypedServiceImplementation {
   sessionWatch: handleServerStreamingCall<SessionWatchRequest, SessionWatchEvent>;
   lockSession: handleUnaryCall<LockSessionRequest, LockSessionResponse>;
   unlockSession: handleUnaryCall<UnlockSessionRequest, Session>;
+  forceUnlockSession: handleUnaryCall<ForceUnlockSessionRequest, Session>;
   /** Daemon Control */
   shutdown: handleUnaryCall<Empty, Empty>;
   /** Filesystem Operations */
@@ -5481,6 +5474,21 @@ export interface TreeTermDaemonClient extends Client {
   ): ClientUnaryCall;
   unlockSession(
     request: UnlockSessionRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: Session) => void,
+  ): ClientUnaryCall;
+  forceUnlockSession(
+    request: ForceUnlockSessionRequest,
+    callback: (error: ServiceError | null, response: Session) => void,
+  ): ClientUnaryCall;
+  forceUnlockSession(
+    request: ForceUnlockSessionRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: Session) => void,
+  ): ClientUnaryCall;
+  forceUnlockSession(
+    request: ForceUnlockSessionRequest,
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: Session) => void,
