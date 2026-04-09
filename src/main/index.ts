@@ -3,6 +3,7 @@ import { execSync } from 'child_process'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 import { GrpcDaemonClient, PtyStream } from './grpcClient'
+import { getDefaultSocketPath } from './socketPath'
 import { IpcServer } from './ipc/ipc-server'
 import { ConnectionManager } from './connectionManager'
 import type { ExecInput, ExecOutput } from '../generated/treeterm'
@@ -918,7 +919,7 @@ void app.whenReady().then(async () => {
     createLoadingWindow()
   }
 
-  const socketPath = process.env.TREETERM_SOCKET_PATH ?? ''
+  const socketPath = process.env.TREETERM_SOCKET_PATH || getDefaultSocketPath()
 
   // Bootstrap: ensure daemon is running before any window connects
   const bootstrapClient = new GrpcDaemonClient(socketPath)

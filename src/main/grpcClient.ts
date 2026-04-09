@@ -129,7 +129,9 @@ export class GrpcDaemonClient {
   private disconnectListeners: Set<DisconnectListener> = new Set()
   private clientId: string = `client-${String(Date.now())}`
 
-  constructor(private _socketPath: string = getDefaultSocketPath()) {}
+  constructor(private _socketPath: string = getDefaultSocketPath()) {
+    console.log('[grpcDaemonClient] initialized with socket path:', _socketPath)
+  }
 
   get socketPath(): string {
     return this._socketPath
@@ -137,13 +139,19 @@ export class GrpcDaemonClient {
 
   async connect(): Promise<void> {
     if (this.connected) {
+      console.log('[grpcDaemonClient] already connected, skipping')
       return
     }
 
+    console.log('[grpcDaemonClient] attempting connection to', this.socketPath)
+
     // Fast fail: check if socket file exists before attempting gRPC connection
     if (!fs.existsSync(this.socketPath)) {
+      console.log('[grpcDaemonClient] socket file does not exist at', this.socketPath)
       throw new Error(`Daemon socket not found at ${this.socketPath}`)
     }
+
+    console.log('[grpcDaemonClient] socket file exists, connecting via gRPC...')
 
     return new Promise((resolve, reject) => {
       const socketUri = `unix://${this.socketPath}`
@@ -159,9 +167,11 @@ export class GrpcDaemonClient {
 
       this.client = new TreeTermDaemonClient(socketUri, credentials, channelOptions)
 
-      this.client.waitForReady(Date.now() + 5000, (error) => {
+      const deadline = Date.now() + 5000
+      console.log('[grpcDaemonClient] waitForReady with 5s deadline')
+      this.client.waitForReady(deadline, (error) => {
         if (error) {
-          console.error('[grpcDaemonClient] connection failed:', error)
+          console.error('[grpcDaemonClient] gRPC waitForReady failed:', error.message)
           reject(error)
           return
         }
@@ -194,16 +204,42 @@ export class GrpcDaemonClient {
   }
 
   async ensureDaemonRunning(): Promise<void> {
+    console.log('[grpcDaemonClient] ensureDaemonRunning: checking existing daemon...')
     try {
       await this.connect()
-    } catch {
-      console.log('[grpcDaemonClient] daemon not running, starting it...')
+      console.log('[grpcDaemonClient] ensureDaemonRunning: connected to existing daemon')
+    } catch (err) {
+      console.log('[grpcDaemonClient] ensureDaemonRunning: connect failed:', err instanceof Error ? err.message : String(err))
+
+      // Clean up stale state so the new daemon's check_already_running()
+      // doesn't see an old alive PID and exit immediately
+      const pidFile = path.join(app.getPath('home'), '.treeterm', 'daemon.pid')
+      const pidExists = fs.existsSync(pidFile)
+      const socketExists = fs.existsSync(this.socketPath)
+      console.log('[grpcDaemonClient] stale state: pidFile=%s (exists=%s), socket=%s (exists=%s)',
+        pidFile, String(pidExists), this.socketPath, String(socketExists))
+
+      if (pidExists) {
+        const pidContent = fs.readFileSync(pidFile, 'utf-8').trim()
+        console.log('[grpcDaemonClient] stale PID file contains:', pidContent)
+        fs.unlinkSync(pidFile)
+        console.log('[grpcDaemonClient] removed stale PID file')
+      }
+      if (socketExists) {
+        fs.unlinkSync(this.socketPath)
+        console.log('[grpcDaemonClient] removed stale socket')
+      }
+
       this.spawnDaemon()
 
       // Wait for socket file to appear, then give gRPC server a moment to fully bind
+      console.log('[grpcDaemonClient] waiting for socket to appear...')
       await this.waitForSocket()
+      console.log('[grpcDaemonClient] socket appeared, waiting 300ms for gRPC to bind...')
       await new Promise(resolve => setTimeout(resolve, 300))
+      console.log('[grpcDaemonClient] attempting connection to new daemon...')
       await this.connect()
+      console.log('[grpcDaemonClient] ensureDaemonRunning: connected to new daemon')
     }
   }
 
@@ -624,13 +660,15 @@ export class GrpcDaemonClient {
       ? path.join(process.resourcesPath, 'daemon-rs', 'treeterm-daemon')
       : path.join(__dirname, '../daemon-rs/treeterm-daemon')
 
+    console.log('[grpcDaemonClient] daemon binary path:', daemonPath, 'exists:', String(fs.existsSync(daemonPath)))
+
     if (!fs.existsSync(daemonPath)) {
       throw new Error(`Daemon executable not found at ${daemonPath}`)
     }
 
     const logPath = path.join(app.getPath('userData'), 'daemon.log')
-
-    console.log('[grpcDaemonClient] spawning daemon at', daemonPath)
+    console.log('[grpcDaemonClient] daemon log path:', logPath)
+    console.log('[grpcDaemonClient] TREETERM_SOCKET_PATH will be:', this.socketPath)
 
     const child = spawn(daemonPath, [], {
       detached: true,
@@ -639,6 +677,13 @@ export class GrpcDaemonClient {
         ...process.env,
         TREETERM_SOCKET_PATH: this.socketPath
       }
+    })
+
+    child.on('error', (err) => {
+      console.error('[grpcDaemonClient] daemon spawn error:', err.message)
+    })
+    child.on('exit', (code, signal) => {
+      console.log('[grpcDaemonClient] daemon process exited: code=%s signal=%s', String(code), String(signal))
     })
 
     child.unref()
@@ -651,12 +696,16 @@ export class GrpcDaemonClient {
 
     for (let i = 0; i < maxAttempts; i++) {
       if (fs.existsSync(this.socketPath)) {
-        console.log('[grpcDaemonClient] socket ready')
+        console.log('[grpcDaemonClient] socket ready after %d attempts', i + 1)
         return
+      }
+      if (i > 0 && i % 4 === 0) {
+        console.log('[grpcDaemonClient] still waiting for socket... attempt %d/%d', i + 1, maxAttempts)
       }
       await new Promise((resolve) => setTimeout(resolve, delay))
     }
 
+    console.error('[grpcDaemonClient] socket not found after %dms at %s', maxAttempts * delay, this.socketPath)
     throw new Error('Daemon failed to create socket in time')
   }
 }
