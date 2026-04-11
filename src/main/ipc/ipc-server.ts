@@ -93,7 +93,9 @@ export class IpcServer {
 
   private broadcast(channel: string, ...args: unknown[]): void {
     for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send(channel, ...args)
+      if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+        win.webContents.send(channel, ...args)
+      }
     }
   }
 
@@ -605,24 +607,30 @@ export class IpcServer {
 
   // --- Per-window events (sent to a specific window) ---
 
+  private sendTo(window: BrowserWindow, channel: string, ...args: unknown[]): void {
+    if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+      window.webContents.send(channel, ...args)
+    }
+  }
+
   ptyEventTo(window: BrowserWindow, ...args: IpcEvents['ptyEvent']['params']): void {
-    window.webContents.send(CHANNELS.ptyEvent, ...args)
+    this.sendTo(window, CHANNELS.ptyEvent, ...args)
   }
 
   settingsOpenTo(window: BrowserWindow): void {
-    window.webContents.send(CHANNELS.settingsOpen)
+    this.sendTo(window, CHANNELS.settingsOpen)
   }
 
   appReadyTo(window: BrowserWindow, ...args: IpcEvents['appReady']['params']): void {
-    window.webContents.send(CHANNELS.appReady, ...args)
+    this.sendTo(window, CHANNELS.appReady, ...args)
   }
 
   capsLockEventTo(window: BrowserWindow, ...args: IpcEvents['capsLockEvent']['params']): void {
-    window.webContents.send(CHANNELS.capsLockEvent, ...args)
+    this.sendTo(window, CHANNELS.capsLockEvent, ...args)
   }
 
   activeProcessesOpenTo(window: BrowserWindow): void {
-    window.webContents.send(CHANNELS.activeProcessesOpen)
+    this.sendTo(window, CHANNELS.activeProcessesOpen)
   }
 
   // --- Broadcast events (sent to all windows) ---
