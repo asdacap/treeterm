@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 
-import SystemMonitor, { formatBytes, getUtilizationColor, parseMetrics } from './SystemMonitor'
+import SystemMonitor, { formatBytes, getUtilizationColor, parseMetrics, cpuHistory, pushCpuSample } from './SystemMonitor'
 import type { ExecEvent } from '../../shared/ipc-types'
 
 // --- formatBytes ---
@@ -168,9 +168,47 @@ describe('parseMetrics', () => {
   })
 })
 
+// --- CPU history ---
+
+describe('cpuHistory', () => {
+  beforeEach(() => {
+    cpuHistory.clear()
+  })
+
+  it('stores samples per connection', () => {
+    pushCpuSample('conn-a', 10)
+    pushCpuSample('conn-a', 20)
+    pushCpuSample('conn-b', 50)
+
+    expect(cpuHistory.get('conn-a')).toHaveLength(2)
+    expect(cpuHistory.get('conn-b')).toHaveLength(1)
+    expect(cpuHistory.get('conn-a')![1]!.usagePercent).toBe(20)
+  })
+
+  it('caps at MAX_CPU_SAMPLES (60)', () => {
+    for (let i = 0; i < 70; i++) {
+      pushCpuSample('conn-a', i)
+    }
+    const samples = cpuHistory.get('conn-a')!
+    expect(samples).toHaveLength(60)
+    expect(samples[0]!.usagePercent).toBe(10) // oldest kept is 10 (0-9 dropped)
+    expect(samples[59]!.usagePercent).toBe(69)
+  })
+
+  it('returns the current samples array', () => {
+    const result = pushCpuSample('conn-a', 42)
+    expect(result).toHaveLength(1)
+    expect(result[0]!.usagePercent).toBe(42)
+  })
+})
+
 // --- Component rendering ---
 
 describe('SystemMonitor component', () => {
+  beforeEach(() => {
+    cpuHistory.clear()
+  })
+
   it('shows loading state initially', () => {
     const mockExec = {
       start: () => new Promise<never>(() => {}),
@@ -181,7 +219,7 @@ describe('SystemMonitor component', () => {
     expect(screen.getByText('Collecting system metrics...')).toBeDefined()
   })
 
-  it('renders stop and kill buttons for each process after metrics load', async () => {
+  it('renders CPU graph and process buttons after metrics load', async () => {
     let capturedCallback: ((event: ExecEvent) => void) | null = null
     const mockExec = {
       start: () => Promise.resolve({ success: true as const, execId: 'exec-1' }),
@@ -193,14 +231,17 @@ describe('SystemMonitor component', () => {
     }
     render(<SystemMonitor connectionId="test-conn" exec={mockExec} />)
 
-    // Wait for exec.start promise to resolve and trigger onEvent registration
     await act(async () => { await new Promise(r => { setTimeout(r, 0) }) })
 
-    // Simulate stdout + exit within act so state updates are flushed
     act(() => {
       capturedCallback!({ type: 'stdout', data: LINUX_OUTPUT })
       capturedCallback!({ type: 'exit', exitCode: 0 })
     })
+
+    // CPU graph SVG should be rendered
+    expect(screen.getByTestId('cpu-graph-svg')).toBeDefined()
+    // Current value shown
+    expect(screen.getByText('23.5%')).toBeDefined()
 
     const stopButtons = screen.getAllByTitle('Stop (SIGTERM)')
     const killButtons = screen.getAllByTitle('Kill (SIGKILL)')
@@ -237,5 +278,35 @@ describe('SystemMonitor component', () => {
     // First call is the monitor script, second is the kill
     expect(startCalls.length).toBeGreaterThanOrEqual(2)
     expect(startCalls[1]).toEqual(['kill', '-TERM', '1234'])
+  })
+
+  it('persists CPU history across unmount/remount', async () => {
+    let capturedCallback: ((event: ExecEvent) => void) | null = null
+    const mockExec = {
+      start: () => Promise.resolve({ success: true as const, execId: 'exec-1' }),
+      kill: () => {},
+      onEvent: (_id: string, cb: (event: ExecEvent) => void) => {
+        capturedCallback = cb
+        return () => {}
+      },
+    }
+
+    const { unmount } = render(<SystemMonitor connectionId="persist-conn" exec={mockExec} />)
+
+    await act(async () => { await new Promise(r => { setTimeout(r, 0) }) })
+
+    act(() => {
+      capturedCallback!({ type: 'stdout', data: LINUX_OUTPUT })
+      capturedCallback!({ type: 'exit', exitCode: 0 })
+    })
+
+    // Data stored in module-level map
+    expect(cpuHistory.get('persist-conn')).toHaveLength(1)
+    expect(cpuHistory.get('persist-conn')![0]!.usagePercent).toBe(23.5)
+
+    unmount()
+
+    // History persists after unmount
+    expect(cpuHistory.get('persist-conn')).toHaveLength(1)
   })
 })

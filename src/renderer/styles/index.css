@@ -6054,6 +6054,31 @@ body,
   text-align: right;
 }
 
+.system-monitor-cpu-graph {
+  font-family: monospace;
+}
+
+.system-monitor-cpu-graph-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.system-monitor-cpu-graph-value {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.system-monitor-cpu-graph-svg {
+  width: 100%;
+  height: 80px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  margin-bottom: 6px;
+}
+
 .system-monitor-stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

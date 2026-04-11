@@ -47,11 +47,6 @@ interface SystemMetrics {
   collectedAt: number
 }
 
-type MonitorState =
-  | { status: MonitorStatus.Loading }
-  | { status: MonitorStatus.Active; metrics: SystemMetrics }
-  | { status: MonitorStatus.Error; error: string }
-
 // --- Shell script ---
 
 const MONITOR_SCRIPT = `
@@ -71,7 +66,7 @@ if [ "$OS" = "Linux" ]; then
   CORES=$(nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 1)
   echo "CPU_CORES=$CORES"
 elif [ "$OS" = "Darwin" ]; then
-  CPU_LINE=$(top -l 1 -n 0 -s 0 2>/dev/null | grep "CPU usage" | head -1)
+  CPU_LINE=$(top -l 2 -n 0 -s 0 2>/dev/null | grep "CPU usage" | tail -1)
   if [ -n "$CPU_LINE" ]; then
     USER_PCT=$(echo "$CPU_LINE" | awk '{print $3}' | tr -d '%')
     SYS_PCT=$(echo "$CPU_LINE" | awk '{print $5}' | tr -d '%')
@@ -244,6 +239,30 @@ export function parseMetrics(stdout: string): SystemMetrics {
   }
 }
 
+// --- CPU history (persists across unmounts) ---
+
+interface CpuSample {
+  timestamp: number
+  usagePercent: number
+}
+
+const MAX_CPU_SAMPLES = 60
+
+export const cpuHistory = new Map<string, CpuSample[]>()
+
+export function pushCpuSample(connectionId: string, usagePercent: number): CpuSample[] {
+  let samples = cpuHistory.get(connectionId)
+  if (!samples) {
+    samples = []
+    cpuHistory.set(connectionId, samples)
+  }
+  samples.push({ timestamp: Date.now(), usagePercent })
+  if (samples.length > MAX_CPU_SAMPLES) {
+    samples.splice(0, samples.length - MAX_CPU_SAMPLES)
+  }
+  return samples
+}
+
 // --- Component ---
 
 interface SystemMonitorProps {
@@ -253,6 +272,7 @@ interface SystemMonitorProps {
 
 interface SystemMetricsProps {
   metrics: SystemMetrics
+  cpuSamples: CpuSample[]
   onRefresh: () => void
   exec: ExecApi
   connectionId: string
@@ -264,16 +284,80 @@ function sendSignal(exec: ExecApi, connectionId: string, pid: number, signal: st
   })
 }
 
-function MonitorDashboard({ metrics, onRefresh, exec, connectionId }: SystemMetricsProps) {
+function CpuGraph({ samples, coreCount }: { samples: CpuSample[]; coreCount: number }) {
+  const width = 300
+  const height = 80
+  const padding = { top: 4, right: 4, bottom: 4, left: 4 }
+  const graphW = width - padding.left - padding.right
+  const graphH = height - padding.top - padding.bottom
+
+  const lastSample = samples[samples.length - 1]
+  const current = lastSample ? lastSample.usagePercent : 0
+  const color = getUtilizationColor(current)
+
+  let polylinePoints = ''
+  let areaPoints = ''
+
+  if (samples.length > 1) {
+    const points: string[] = []
+    for (let i = 0; i < samples.length; i++) {
+      const sample = samples[i]
+      if (!sample) continue
+      const x = padding.left + (i / (samples.length - 1)) * graphW
+      const y = padding.top + graphH - (sample.usagePercent / 100) * graphH
+      points.push(`${String(x)},${String(y)}`)
+    }
+    polylinePoints = points.join(' ')
+    const bottomLeft = `${String(padding.left)},${String(padding.top + graphH)}`
+    const bottomRight = `${String(padding.left + graphW)},${String(padding.top + graphH)}`
+    areaPoints = `${bottomLeft} ${polylinePoints} ${bottomRight}`
+  } else if (samples.length === 1) {
+    const firstSample = samples[0]
+    const pct = firstSample ? firstSample.usagePercent : 0
+    const y = padding.top + graphH - (pct / 100) * graphH
+    polylinePoints = `${String(padding.left)},${String(y)} ${String(padding.left + graphW)},${String(y)}`
+    areaPoints = `${String(padding.left)},${String(padding.top + graphH)} ${polylinePoints} ${String(padding.left + graphW)},${String(padding.top + graphH)}`
+  }
+
+  return (
+    <div className="system-monitor-cpu-graph">
+      <div className="system-monitor-cpu-graph-header">
+        <span className="system-monitor-gauge-label">CPU</span>
+        <span className="system-monitor-cpu-graph-value" style={{ color }}>{current.toFixed(1)}%</span>
+        <span className="system-monitor-gauge-detail">{String(coreCount)} cores</span>
+      </div>
+      <svg viewBox={`0 0 ${String(width)} ${String(height)}`} className="system-monitor-cpu-graph-svg" data-testid="cpu-graph-svg">
+        {/* Grid lines at 25%, 50%, 75% */}
+        {[25, 50, 75].map(pct => {
+          const y = padding.top + graphH - (pct / 100) * graphH
+          return (
+            <line
+              key={pct}
+              x1={padding.left} y1={y}
+              x2={padding.left + graphW} y2={y}
+              stroke="var(--border-color)" strokeWidth="0.5" strokeDasharray="4,3"
+            />
+          )
+        })}
+        {/* Area fill */}
+        {areaPoints && (
+          <polygon points={areaPoints} fill={color} opacity="0.15" />
+        )}
+        {/* Line */}
+        {polylinePoints && (
+          <polyline points={polylinePoints} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+        )}
+      </svg>
+    </div>
+  )
+}
+
+function MonitorDashboard({ metrics, cpuSamples, onRefresh, exec, connectionId }: SystemMetricsProps) {
   return (
     <>
       <div className="system-monitor-section">
         <div className="system-monitor-section-title">Resources</div>
-        <Gauge
-          label="CPU"
-          percent={metrics.cpu.usagePercent}
-          detail={`${String(metrics.cpu.coreCount)} cores`}
-        />
+        <CpuGraph samples={cpuSamples} coreCount={metrics.cpu.coreCount} />
         <Gauge
           label="MEM"
           percent={metrics.memory.usagePercent}
@@ -381,8 +465,20 @@ function Gauge({ label, percent, detail }: { label: string; percent: number; det
   )
 }
 
+type MonitorWithHistory =
+  | { status: MonitorStatus.Loading }
+  | { status: MonitorStatus.Active; metrics: SystemMetrics; cpuSamples: CpuSample[] }
+  | { status: MonitorStatus.Error; error: string }
+
 export default function SystemMonitor({ connectionId, exec }: SystemMonitorProps) {
-  const [state, setState] = useState<MonitorState>({ status: MonitorStatus.Loading })
+  const [state, setState] = useState<MonitorWithHistory>(() => {
+    // Restore from history on mount if available
+    const existing = cpuHistory.get(connectionId)
+    if (existing && existing.length > 0) {
+      return { status: MonitorStatus.Loading }
+    }
+    return { status: MonitorStatus.Loading }
+  })
   const [retryCount, setRetryCount] = useState(0)
 
   useEffect(() => {
@@ -416,7 +512,8 @@ export default function SystemMonitor({ connectionId, exec }: SystemMonitorProps
               if (event.exitCode === 0) {
                 try {
                   const metrics = parseMetrics(stdout)
-                  setState({ status: MonitorStatus.Active, metrics })
+                  const cpuSamples = pushCpuSample(connectionId, metrics.cpu.usagePercent)
+                  setState({ status: MonitorStatus.Active, metrics, cpuSamples: [...cpuSamples] })
                 } catch (e) {
                   setState({ status: MonitorStatus.Error, error: `Parse error: ${e instanceof Error ? e.message : String(e)}` })
                 }
@@ -468,7 +565,7 @@ export default function SystemMonitor({ connectionId, exec }: SystemMonitorProps
         </div>
       )}
       {state.status === MonitorStatus.Active && (
-        <MonitorDashboard metrics={state.metrics} onRefresh={handleRetry} exec={exec} connectionId={connectionId} />
+        <MonitorDashboard metrics={state.metrics} cpuSamples={state.cpuSamples} onRefresh={handleRetry} exec={exec} connectionId={connectionId} />
       )}
     </div>
   )
