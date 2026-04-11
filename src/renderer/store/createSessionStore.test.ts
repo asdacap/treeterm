@@ -790,14 +790,25 @@ describe('createSessionStore', () => {
   })
 
   describe('mergeAndRemoveWorkspace', () => {
-    it('returns error when session lock fails', async () => {
-      vi.mocked(deps.sessionApi.lock).mockResolvedValue({ success: false, acquired: false } as never)
+    it('returns error when session lock is held by another', async () => {
+      // Lock returns success but not acquired — held by another, force-unlock + retry still fails
+      vi.mocked(deps.sessionApi.lock).mockResolvedValue({ success: true, acquired: false, session: { id: 'session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null } } as never)
 
       const id = store.getState().addWorkspace('/test')
       await flushPromises()
 
       const result = await store.getState().mergeAndRemoveWorkspace(id, false)
       expect(result).toEqual({ success: false, error: 'Session is locked by another window' })
+    })
+
+    it('returns actual error when lock IPC call fails', async () => {
+      vi.mocked(deps.sessionApi.lock).mockResolvedValue({ success: false, error: 'gRPC connection lost' } as never)
+
+      const id = store.getState().addWorkspace('/test')
+      await flushPromises()
+
+      const result = await store.getState().mergeAndRemoveWorkspace(id, false)
+      expect(result).toEqual({ success: false, error: 'gRPC connection lost' })
     })
 
     it('returns error when workspace is not a worktree', async () => {
@@ -841,7 +852,7 @@ describe('createSessionStore', () => {
 
       // Find the child workspace
       const childId = Array.from(store.getState().workspaces.entries())
-        .find(([, e]) => e.status === WorkspaceEntryStatus.Loaded && (e as Extract<typeof e, { status: WorkspaceEntryStatus.Loaded }>).data.isWorktree)?.[0]
+        .find(([, e]) => e.status === WorkspaceEntryStatus.Loaded && e.data.isWorktree)?.[0]
 
       if (childId) {
         await store.getState().removeWorkspace(childId)
@@ -889,10 +900,10 @@ describe('createSessionStore', () => {
     })
 
     it('returns success when no lock exists', async () => {
-      // No lock by default, so forceUnlock short-circuits
+      // No lock by default — still calls daemon to clear any stale locks
       const result = await store.getState().forceUnlock()
       expect(result.success).toBe(true)
-      expect(deps.sessionApi.forceUnlock).not.toHaveBeenCalled()
+      expect(deps.sessionApi.forceUnlock).toHaveBeenCalled()
     })
 
     it('handles forceUnlock failure', async () => {

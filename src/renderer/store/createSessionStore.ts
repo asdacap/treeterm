@@ -146,6 +146,26 @@ export function createSessionStore(
 ): StoreApi<SessionState> {
   let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
+  // Acquire session lock, retrying once with force-unlock if the lock is held by a stale connection
+  // (common on remote machines after SSH reconnect where the old connection's lock lingers)
+  async function acquireLock(): Promise<{ acquired: true } | { acquired: false; error: string }> {
+    const lockResult = await deps.sessionApi.lock(config.sessionId, 60_000)
+    if (lockResult.success && lockResult.acquired) return { acquired: true }
+
+    // If the IPC call itself failed (e.g. broken gRPC connection), surface the real error
+    if (!lockResult.success) return { acquired: false, error: lockResult.error }
+
+    // Lock held by another connection — force-unlock and retry once (likely stale after reconnect)
+    console.warn('[session] lock acquisition failed, force-unlocking and retrying')
+    await deps.sessionApi.forceUnlock(config.sessionId).catch((e: unknown) => {
+      console.error('[session] force-unlock failed:', e)
+    })
+    const retryResult = await deps.sessionApi.lock(config.sessionId, 60_000)
+    if (retryResult.success && retryResult.acquired) return { acquired: true }
+    if (!retryResult.success) return { acquired: false, error: retryResult.error }
+    return { acquired: false, error: 'Session is locked by another window' }
+  }
+
   function nextSortOrder(parentId: string | null): string {
     const workspaces = store.getState().workspaces
     let max = -1
@@ -296,10 +316,10 @@ export function createSessionStore(
     }
 
     void (async () => {
-      const lockResult = await deps.sessionApi.lock(config.sessionId, 60_000)
-      if (!lockResult.success || !lockResult.acquired) {
+      const lockStatus = await acquireLock()
+      if (!lockStatus.acquired) {
         store.setState(s => ({
-          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Error, name: worktreeName, error: 'Session is locked by another window' })
+          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Error, name: worktreeName, error: lockStatus.error })
         }))
         return
       }
@@ -492,10 +512,10 @@ export function createSessionStore(
     if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return
     const { data, store: wsStore } = entry
 
-    const lockResult = await deps.sessionApi.lock(config.sessionId, 60_000)
-    if (!lockResult.success || !lockResult.acquired) {
+    const lockStatus = await acquireLock()
+    if (!lockStatus.acquired) {
       store.setState(s => ({
-        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data, store: wsStore, error: 'Session is locked by another window' })
+        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data, store: wsStore, error: lockStatus.error })
       }))
       return
     }
@@ -786,9 +806,9 @@ export function createSessionStore(
         return { success: false, error: 'This worktree is already open' }
       }
 
-      const lockResult = await deps.sessionApi.lock(config.sessionId, 60_000)
-      if (!lockResult.success || !lockResult.acquired) {
-        return { success: false, error: 'Session is locked by another window' }
+      const lockStatus = await acquireLock()
+      if (!lockStatus.acquired) {
+        return { success: false, error: lockStatus.error }
       }
 
       try {
@@ -890,9 +910,9 @@ export function createSessionStore(
 
     mergeAndRemoveWorkspace: async (id: string, squash: boolean) => {
       // Acquire session lock before merge (slow IO operation)
-      const lockResult = await deps.sessionApi.lock(config.sessionId, 60_000)
-      if (!lockResult.success || !lockResult.acquired) {
-        return { success: false, error: 'Session is locked by another window' }
+      const lockStatus = await acquireLock()
+      if (!lockStatus.acquired) {
+        return { success: false, error: lockStatus.error }
       }
 
       try {
@@ -934,9 +954,9 @@ export function createSessionStore(
 
     mergeAndKeepWorkspace: async (id: string, squash: boolean) => {
       // Acquire session lock before merge (slow IO operation)
-      const lockResult = await deps.sessionApi.lock(config.sessionId, 60_000)
-      if (!lockResult.success || !lockResult.acquired) {
-        return { success: false, error: 'Session is locked by another window' }
+      const lockStatus = await acquireLock()
+      if (!lockStatus.acquired) {
+        return { success: false, error: lockStatus.error }
       }
 
       try {
@@ -1077,8 +1097,6 @@ export function createSessionStore(
     },
 
     forceUnlock: async () => {
-      const lock = get().sessionLock
-      if (!lock) return { success: true }
       const result = await deps.sessionApi.forceUnlock(config.sessionId)
       if (!result.success) return { success: false, error: result.error }
       set({ sessionLock: null })
