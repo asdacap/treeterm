@@ -44,6 +44,7 @@ export default function SessionPanel({
   const setActiveWorkspace = useStore(sessionStore, s => s.setActiveWorkspace)
   const reorderWorkspace = useStore(sessionStore, s => s.reorderWorkspace)
   const forceUnlock = useStore(sessionStore, s => s.forceUnlock)
+  const dismissWorkspace = useStore(sessionStore, s => s.dismissWorkspace)
   const { activeView, setActiveView } = useNavigationStore()
   const {
     prefixState,
@@ -391,6 +392,7 @@ export default function SessionPanel({
         onQuickFork={(wsId) => { void handleQuickFork(wsId); }}
         onCreateChild={handleCreateChild}
         onRemove={(wsId) => { void handleRemove(wsId); }}
+        onDismiss={dismissWorkspace}
         onOpenSettings={handleOpenSettings}
         children={children}
         renderChild={renderWorkspace}
@@ -594,6 +596,7 @@ interface WorkspaceTreeItemProps {
   onQuickFork: (id: string) => void
   onCreateChild: (id: string) => void
   onRemove: (id: string) => void
+  onDismiss: (id: string) => void
   onOpenSettings: (id: string) => void
   children: Workspace[]
   renderChild: (id: string, depth: number) => ReactNode
@@ -607,7 +610,7 @@ interface WorkspaceTreeItemProps {
 
 function WorkspaceTreeItem({
   id, depth, entry, isActive, isFocused, isExpanded,
-  onToggleExpand, onClick, onQuickFork, onCreateChild, onRemove, onOpenSettings,
+  onToggleExpand, onClick, onQuickFork, onCreateChild, onRemove, onDismiss, onOpenSettings,
   children, renderChild,
   isDragging, dragOverPosition, onDragStart, onDragOver, onDrop, onDragEnd,
 }: WorkspaceTreeItemProps): React.JSX.Element {
@@ -698,6 +701,11 @@ function WorkspaceTreeItem({
         {ws && !ws.isWorktree && (
           <div className="context-menu-item danger" onClick={() => { onRemove(id); }}>
             Remove
+          </div>
+        )}
+        {!ws && (
+          <div className="context-menu-item danger" onClick={() => { onDismiss(id); }}>
+            Dismiss
           </div>
         )}
       </ContextMenu>

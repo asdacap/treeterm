@@ -68,6 +68,7 @@ export interface SessionState {
   sessionLock: SessionLock | null
 
   clearWorkspaceError: (id: string) => void
+  dismissWorkspace: (id: string) => void
   /** Reactive cleanup when a workspace is no longer in the daemon session.
    *  Disposes all tab refs (renderer-side), git controller, and removes from map. */
   onWorkspaceRemoved: (id: string) => void
@@ -638,6 +639,19 @@ export function createSessionStore(
       set((s) => ({
         workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: entry.data, store: entry.store })
       }))
+    },
+
+    dismissWorkspace: (id: string): void => {
+      const entry = get().workspaces.get(id)
+      if (!entry || (entry.status !== WorkspaceEntryStatus.Error && entry.status !== WorkspaceEntryStatus.Loading)) return
+      set((s) => {
+        const remaining = new Map(s.workspaces)
+        remaining.delete(id)
+        return {
+          workspaces: remaining,
+          activeWorkspaceId: s.activeWorkspaceId === id ? null : s.activeWorkspaceId
+        }
+      })
     },
 
     onWorkspaceRemoved: (id: string): void => {
