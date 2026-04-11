@@ -86,21 +86,21 @@ export interface IpcRequests {
     result: IpcResult<{ entries: FileEntry[] }>
   }
 
-  // Session operations
+  // Session operations (keyed by connectionId — the renderer passes connection.id to identify which daemon session)
   sessionUpdate: {
-    params: [sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number]
+    params: [connectionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number]
     result: IpcResult<{ session: Session }>
   }
   sessionLock: {
-    params: [sessionId: string, ttlMs?: number]
+    params: [connectionId: string, ttlMs?: number]
     result: IpcResult<{ acquired: boolean; session: Session }>
   }
   sessionUnlock: {
-    params: [sessionId: string]
+    params: [connectionId: string]
     result: IpcResult<{ session: Session }>
   }
   sessionForceUnlock: {
-    params: [sessionId: string]
+    params: [connectionId: string]
     result: IpcResult<{ session: Session }>
   }
 
