@@ -146,23 +146,11 @@ export function createSessionStore(
 ): StoreApi<SessionState> {
   let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
-  // Acquire session lock, retrying once with force-unlock if the lock is held by a stale connection
-  // (common on remote machines after SSH reconnect where the old connection's lock lingers)
+  // Acquire session lock. Surfaces the real error on failure instead of a generic message.
   async function acquireLock(): Promise<{ acquired: true } | { acquired: false; error: string }> {
     const lockResult = await deps.sessionApi.lock(config.sessionId, 60_000)
     if (lockResult.success && lockResult.acquired) return { acquired: true }
-
-    // If the IPC call itself failed (e.g. broken gRPC connection), surface the real error
     if (!lockResult.success) return { acquired: false, error: lockResult.error }
-
-    // Lock held by another connection — force-unlock and retry once (likely stale after reconnect)
-    console.warn('[session] lock acquisition failed, force-unlocking and retrying')
-    await deps.sessionApi.forceUnlock(config.sessionId).catch((e: unknown) => {
-      console.error('[session] force-unlock failed:', e)
-    })
-    const retryResult = await deps.sessionApi.lock(config.sessionId, 60_000)
-    if (retryResult.success && retryResult.acquired) return { acquired: true }
-    if (!retryResult.success) return { acquired: false, error: retryResult.error }
     return { acquired: false, error: 'Session is locked by another window' }
   }
 
