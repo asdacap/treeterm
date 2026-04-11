@@ -137,7 +137,7 @@ describe('createAnalyzerStore', () => {
     vi.useRealTimers()
   })
 
-  it('start polls but analyze resets to idle when settings are missing', async () => {
+  it('start polls but analyze shows error once when model is missing', async () => {
     vi.useFakeTimers()
     const mock = makeMockTty()
     deps = makeDeps({
@@ -157,7 +157,40 @@ describe('createAnalyzerStore', () => {
     // Poll fires and sets 'working', then schedules analyze
     expect(store.getState().aiState).toBe(ActivityState.Working)
     await vi.advanceTimersByTimeAsync(500)
-    // analyze() sees missing settings and resets to idle
+    // analyze() sees missing model and sets error once
+    expect(store.getState().aiState).toBe(ActivityState.Error)
+    expect(store.getState().reason).toBe('Terminal analyzer model not configured')
+
+    // Second poll should not call setActivityTabState again (error shown once)
+    const callCount = vi.mocked(deps.setActivityTabState).mock.calls.length
+    mock.emitData('$ more data')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(vi.mocked(deps.setActivityTabState).mock.calls.length).toBe(callCount + 1) // only the Working state from poll
+
+    store.getState().stop()
+    vi.useRealTimers()
+  })
+
+  it('analyzes with empty apiKey (valid for self-hosted like Ollama)', async () => {
+    vi.useFakeTimers()
+    const mock = makeMockTty()
+    deps = makeDeps({
+      getSettings: vi.fn().mockReturnValue({
+        llm: { apiKey: '', baseUrl: 'http://localhost:11434/v1' },
+        terminalAnalyzer: { model: 'llama3', systemPrompt: 'test prompt', titleSystemPrompt: 'title prompt', reasoningEffort: 'off', safePaths: [], bufferLines: 10 },
+      } as unknown as Settings),
+      openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: [], exitCode: undefined }) }),
+    })
+    const store = createAnalyzerStore('tab-1', deps)
+
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0)
+
+    mock.emitData('$ echo hello\r\nhello\r\n$ ')
+    vi.advanceTimersByTime(1000)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalled()
     expect(store.getState().aiState).toBe(ActivityState.Idle)
 
     store.getState().stop()

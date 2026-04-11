@@ -86,6 +86,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   const cache: { buffer: string; result: AnalyzerResult }[] = []
   let requestInFlight = false
   let pendingAnalyze = false
+  let modelErrorShown = false
 
   // History log
   const history: AnalyzerHistoryEntry[] = []
@@ -141,9 +142,12 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     const requestVersion = dataVersion
     const settings = deps.getSettings()
 
-    if (!settings.llm.apiKey || !settings.terminalAnalyzer.model) {
-      store.setState({ analyzing: false })
-      updateAiState(ActivityState.Idle)
+    if (!settings.terminalAnalyzer.model) {
+      if (!modelErrorShown) {
+        modelErrorShown = true
+        store.setState({ analyzing: false })
+        updateAiState(ActivityState.Error, 'Terminal analyzer model not configured')
+      }
       return
     }
 
@@ -279,11 +283,12 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     lastVersion = 0
     requestInFlight = false
     pendingAnalyze = false
+    modelErrorShown = false
   }
 
   async function generateTitle(): Promise<void> {
     const settings = deps.getSettings()
-    if (!settings.llm.apiKey || !settings.terminalAnalyzer.model) return
+    if (!settings.terminalAnalyzer.model) return
     if (deps.getDisplayName() && deps.getDescription()) return
 
     const buffer = extractBuffer()
