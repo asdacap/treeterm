@@ -309,10 +309,16 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
     const unsubReconnected = appApi.onConnectionReconnected((session, connection) => {
       console.log('[App] Connection reconnected:', connection.id, 'session:', session.id)
+      // Preserve session name before disposing old session
+      const oldSession = findSessionByConnectionId(get, connection.id)
+      const oldName = oldSession ? useSessionNamesStore.getState().getName(oldSession.key) : undefined
       // Dispose old session and recreate fresh
       disposeSessionForConnection(connection.id, get)
       const reconnSessionId = generateSessionId()
       const newStore = getOrCreateSession(reconnSessionId, get, set, connection)
+      if (oldName) {
+        useSessionNamesStore.getState().setName(reconnSessionId, oldName)
+      }
       if (session.workspaces.length > 0) {
         void newStore.getState().handleRestore(session)
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length > 0 checked above
