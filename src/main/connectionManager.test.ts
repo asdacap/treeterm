@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { PortForwardConfig } from '../shared/types'
+import { ConnectionStatus, type PortForwardConfig } from '../shared/types'
 
 // Mock ssh module before importing connectionManager
 let tunnelBootstrapOutputCallback: ((line: string) => void) | null = null
@@ -704,7 +704,7 @@ describe('ConnectionManager', () => {
   })
 
   describe('getClient edge cases', () => {
-    it('throws when connection exists but is not connected', async () => {
+    it('throws when connection exists but is not connected', () => {
       // Put local connection into reconnecting state via heartbeat timeout
       vi.advanceTimersByTime(50_000)
       expect(manager.getConnection(localConnectionId)?.status).toBe('reconnecting')
@@ -712,7 +712,7 @@ describe('ConnectionManager', () => {
       expect(() => manager.getClient(localConnectionId)).toThrow(/is reconnecting/)
     })
 
-    it('includes error message in thrown error when present', async () => {
+    it('includes error message in thrown error when present', () => {
       vi.advanceTimersByTime(50_000)
       const info = manager.getConnection(localConnectionId)
       expect(info?.status).toBe('reconnecting')
@@ -734,7 +734,7 @@ describe('ConnectionManager', () => {
 
       const result = await manager.connectRemote({ ...remoteConfig, id: 'daemon-fail' })
       expect(result.status).toBe('error')
-      if (result.status === 'error') {
+      if (result.status === ConnectionStatus.Error) {
         expect(result.error).toContain('SSH tunnel OK')
         expect(result.error).toContain('daemon not running')
       }

@@ -2129,7 +2129,7 @@ describe('createGitApi', () => {
       const fs = createMockFilesystem()
       // rev-parse succeeds, check-ignore succeeds, but worktree add throws
       let callCount = 0
-      ;(exec.start as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      vi.mocked(exec.start).mockImplementation(() => {
         callCount++
         if (callCount === 3) return Promise.reject(new Error('disk full'))
         const execId = `exec-${String(callCount)}`
