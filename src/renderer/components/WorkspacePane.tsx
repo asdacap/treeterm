@@ -34,6 +34,8 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const createWorktreeFromRemote = useStore(sessionStore, s => s.createWorktreeFromRemote)
   const setActiveWorkspace = useStore(sessionStore, s => s.setActiveWorkspace)
   const clearWorkspaceError = useStore(sessionStore, s => s.clearWorkspaceError)
+  const dismissWorkspace = useStore(sessionStore, s => s.dismissWorkspace)
+  const forceUnlock = useStore(sessionStore, s => s.forceUnlock)
   const enterWorkspaceFocus = useKeybindingStore(s => s.enterWorkspaceFocus)
   const applications = useAppStore((s) => s.applications)
   const clipboard = useAppStore((s) => s.clipboard)
@@ -438,13 +440,21 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                 <div className="workspace-load-error-content">
                   <h3>Operation failed</h3>
                   <p className="workspace-load-error-message">{activeEntry.error}</p>
-                  {activeEntry.status === WorkspaceEntryStatus.OperationError && (
-                    <div className="workspace-load-error-actions">
+                  <div className="workspace-load-error-actions">
+                    <button className="workspace-action-btn" onClick={() => { void forceUnlock() }}>
+                      Force Unlock
+                    </button>
+                    {activeEntry.status === WorkspaceEntryStatus.OperationError && (
                       <button className="workspace-action-btn" onClick={() => { if (activeWorkspaceId) clearWorkspaceError(activeWorkspaceId); }}>
                         Cancel
                       </button>
-                    </div>
-                  )}
+                    )}
+                    {activeEntry.status === WorkspaceEntryStatus.Error && (
+                      <button className="workspace-action-btn" onClick={() => { if (activeWorkspaceId) dismissWorkspace(activeWorkspaceId); }}>
+                        Dismiss
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
