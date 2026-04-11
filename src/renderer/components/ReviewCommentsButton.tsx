@@ -8,8 +8,10 @@ interface ReviewCommentsButtonProps {
 }
 
 export function ReviewCommentsButton({ workspace }: ReviewCommentsButtonProps): React.JSX.Element | null {
-  const { reviewComments: reviewCommentStore, promptHarness } = useStore(workspace)
-  const { getReviewComments, markAllReviewCommentsAddressed } = useStore(reviewCommentStore)
+  const reviewCommentStore = useStore(workspace, s => s.reviewComments)
+  const promptHarness = useStore(workspace, s => s.promptHarness)
+  const getReviewComments = useStore(reviewCommentStore, s => s.getReviewComments)
+  const markAllReviewCommentsAddressed = useStore(reviewCommentStore, s => s.markAllReviewCommentsAddressed)
   const comments = getReviewComments()
   const prompt = generateReviewPrompt(comments)
 

@@ -53,7 +53,7 @@ export default function AiHarness({
   disableScrollbar,
   stripScrollbackClear,
 }: AiHarnessProps) {
-  const { workspace: wsData } = useStore(workspace)
+  const wsData = useStore(workspace, s => s.workspace)
   const appState = wsData.appStates[tabId]
 
   if (!appState) {

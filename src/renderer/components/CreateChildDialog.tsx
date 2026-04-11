@@ -32,7 +32,7 @@ export default function CreateChildDialog({
   openWorktreePaths,
   initialMode
 }: CreateChildDialogProps) {
-  const { workspace: parentWsData } = useStore(parentWorkspace)
+  const parentWsData = useStore(parentWorkspace, s => s.workspace)
   const git = useGitApi(parentWorkspace)
   const [mode, setMode] = useState(initialMode ?? TabMode.Create)
   const [name, setName] = useState('')

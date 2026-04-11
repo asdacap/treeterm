@@ -31,7 +31,7 @@ export function FileTree({
   onSelectFile,
   onToggleDir
 }: FileTreeProps): React.JSX.Element {
-  const { workspace: wsData } = useStore(workspace)
+  const wsData = useStore(workspace, s => s.workspace)
   const workspacePath = wsData.path
   const filesystem = useFilesystemApi(workspace)
   const [dirContents, setDirContents] = useState(new Map<string, DirectoryState>())

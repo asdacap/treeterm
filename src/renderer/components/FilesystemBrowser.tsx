@@ -14,7 +14,7 @@ export function FilesystemBrowser({
   workspace,
   tabId,
 }: FilesystemBrowserProps): React.JSX.Element {
-  const { workspace: wsData } = useStore(workspace)
+  const wsData = useStore(workspace, s => s.workspace)
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist in appStates
   const appState = wsData.appStates[tabId]!
   const state = appState.state as FilesystemState | undefined
@@ -35,9 +35,14 @@ function FilesystemBrowserContent({
   tabId: string
   state: FilesystemState
 }): React.JSX.Element {
-  const { workspace: wsData, updateTabState, reviewComments: reviewCommentStore } = useStore(workspace)
+  const wsData = useStore(workspace, s => s.workspace)
+  const updateTabState = useStore(workspace, s => s.updateTabState)
+  const reviewCommentStore = useStore(workspace, s => s.reviewComments)
   const git = useGitApi(workspace)
-  const { getReviewComments, addReviewComment, deleteReviewComment, updateOutdatedReviewComments } = useStore(reviewCommentStore)
+  const getReviewComments = useStore(reviewCommentStore, s => s.getReviewComments)
+  const addReviewComment = useStore(reviewCommentStore, s => s.addReviewComment)
+  const deleteReviewComment = useStore(reviewCommentStore, s => s.deleteReviewComment)
+  const updateOutdatedReviewComments = useStore(reviewCommentStore, s => s.updateOutdatedReviewComments)
   const workspacePath = wsData.path
 
   // Resize state

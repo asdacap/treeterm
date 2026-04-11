@@ -87,6 +87,9 @@ export default tseslint.config(
       }, {
         selector: "CallExpression[callee.name=/^use.*Store$/] > ArrowFunctionExpression CallExpression[callee.object.name='Object'][callee.property.name=/^(values|keys|entries|assign)$/]",
         message: 'Zustand selectors must return stable references. Object.values()/keys()/entries() create new arrays every call. Select the parent object and derive in the function body.'
+      }, {
+        selector: "CallExpression[callee.name='useStore']:not([arguments.1])",
+        message: 'useStore() must have a selector: useStore(store, s => s.field). Subscribing to the entire store causes re-renders on every state change.'
       }]
     }
   }

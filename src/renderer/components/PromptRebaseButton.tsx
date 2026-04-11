@@ -3,8 +3,11 @@ import { useStore } from 'zustand'
 import type { WorkspaceStore } from '../types'
 
 export function PromptRebaseButton({ workspace }: { workspace: WorkspaceStore }): React.JSX.Element | null {
-  const { gitController, promptHarness, workspace: wsData, lookupWorkspace } = useStore(workspace)
-  const { hasConflictsWithParent } = useStore(gitController)
+  const gitController = useStore(workspace, s => s.gitController)
+  const promptHarness = useStore(workspace, s => s.promptHarness)
+  const wsData = useStore(workspace, s => s.workspace)
+  const lookupWorkspace = useStore(workspace, s => s.lookupWorkspace)
+  const hasConflictsWithParent = useStore(gitController, s => s.hasConflictsWithParent)
 
   const parentBranch = wsData.parentId ? lookupWorkspace(wsData.parentId)?.gitBranch : null
 
