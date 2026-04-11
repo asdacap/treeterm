@@ -279,15 +279,16 @@ export const useAppStore = create<AppState>()((set, get) => ({
       try {
         const { info, session } = await appApi.localConnect(windowUuid)
         console.log('[App] Local connection established, session:', session.id)
-        const sessionStore = getOrCreateSession(session.id, get, set, info)
-        if (!useSessionNamesStore.getState().getName(session.id)) {
-          useSessionNamesStore.getState().setName(session.id, 'LOCAL')
+        const localSessionId = generateSessionId()
+        const sessionStore = getOrCreateSession(localSessionId, get, set, info)
+        if (!useSessionNamesStore.getState().getName(localSessionId)) {
+          useSessionNamesStore.getState().setName(localSessionId, 'LOCAL')
         }
         if (session.workspaces.length > 0) {
           void sessionStore.getState().handleRestore(session)
           // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length > 0 checked above
           const firstWs = session.workspaces[0]!
-          useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: session.id })
+          useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: localSessionId })
         }
       } catch (error) {
         console.error('[App] Failed to establish local connection:', error)
@@ -296,14 +297,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
     const unsubSync = sessionApi.onSync((connectionId, session) => {
       console.log(`[App] Received session:sync from connection ${connectionId} with ${String(session.workspaces.length)} workspaces for session ${session.id}`)
-      const entry = get().sessionStores.get(session.id)
-      if (!entry) return
-      const storeConnId = entry.store.getState().connection.id
-      if (storeConnId !== connectionId) {
-        console.warn('[App] Ignoring session:sync from wrong connection', connectionId, 'expected', storeConnId)
-        return
-      }
-      void entry.store.getState().handleExternalUpdate(session)
+      const found = findSessionByConnectionId(get, connectionId)
+      if (!found) return
+      void found.entry.store.getState().handleExternalUpdate(session)
     })
 
     const unsubSshAutoConnected = appApi.onSshAutoConnected((session, connection) => {
@@ -315,12 +311,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
       console.log('[App] Connection reconnected:', connection.id, 'session:', session.id)
       // Dispose old session and recreate fresh
       disposeSessionForConnection(connection.id, get)
-      const newStore = getOrCreateSession(session.id, get, set, connection)
+      const reconnSessionId = generateSessionId()
+      const newStore = getOrCreateSession(reconnSessionId, get, set, connection)
       if (session.workspaces.length > 0) {
         void newStore.getState().handleRestore(session)
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length > 0 checked above
         const firstWs = session.workspaces[0]!
-        useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: session.id })
+        useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: reconnSessionId })
       }
     })
 
@@ -399,44 +396,38 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   addRemoteSession: async (session: Session, connection: ConnectionInfo) => {
     console.log(`[renderer:app] addRemoteSession called: session=${session.id}, connection=${connection.id}, status=${connection.status}, workspaces=${String(session.workspaces.length)}`)
-    // Reuse existing store (created eagerly in startRemoteConnect) or create new one
-    const existingEntry = get().sessionStores.get(connection.id)
+    // Find existing store (created eagerly in startRemoteConnect) by connection ID
+    const existing = findSessionByConnectionId(get, connection.id)
     let store: StoreApi<SessionState>
-    if (existingEntry) {
-      store = existingEntry.store
-      // Update session ID and connection status on the existing store
-      store.setState({ sessionId: session.id, connection })
-      // Re-key from connection.id to session.id
-      if (connection.id !== session.id) {
-        set((state) => {
-          const updated = new Map(state.sessionStores)
-          updated.delete(connection.id)
-          updated.set(session.id, { store })
-          return { sessionStores: updated }
-        })
-      }
+    let storeKey: string
+    if (existing) {
+      store = existing.entry.store
+      storeKey = existing.key
+      // Update connection status — no re-keying
+      store.setState({ connection })
     } else {
       // Fallback: no prior connecting entry (e.g. --ssh auto-connect flow)
-      store = getOrCreateSession(session.id, get, set, connection)
+      storeKey = generateSessionId()
+      store = getOrCreateSession(storeKey, get, set, connection)
     }
-    if (!useSessionNamesStore.getState().getName(session.id)) {
+    if (!useSessionNamesStore.getState().getName(storeKey)) {
       const label = connection.target.type === 'remote'
         ? (connection.target.config.label || `${connection.target.config.user}@${connection.target.config.host}`)
-        : session.id
-      useSessionNamesStore.getState().setName(session.id, label)
+        : storeKey
+      useSessionNamesStore.getState().setName(storeKey, label)
     }
-    console.log(`[renderer:app] Session store created/retrieved for session=${session.id}`)
+    console.log(`[renderer:app] Session store created/retrieved for session=${session.id}, storeKey=${storeKey}`)
     if (session.workspaces.length > 0) {
       console.log(`[renderer:app] Restoring ${String(session.workspaces.length)} workspaces for session=${session.id}`)
       await store.getState().handleRestore(session)
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length > 0 checked above
       const firstWs = session.workspaces[0]!
-      useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: session.id })
+      useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: storeKey })
     } else if (connection.target.type === 'remote') {
       const defaultPath = `/home/${connection.target.config.user}`
       console.log(`[renderer:app] No workspaces for session=${session.id}, creating default workspace at ${defaultPath}`)
       const workspaceId = store.getState().addWorkspace(defaultPath)
-      useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId, sessionId: session.id })
+      useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId, sessionId: storeKey })
     } else {
       console.log(`[renderer:app] No workspaces to restore for session=${session.id}`)
     }
@@ -444,18 +435,19 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   startRemoteConnect: (config: SSHConnectionConfig) => {
     const connection: ConnectionInfo = { id: config.id, target: { type: 'remote', config }, status: ConnectionStatus.Connecting }
-    getOrCreateSession(config.id, get, set, connection)
-    if (!useSessionNamesStore.getState().getName(config.id)) {
-      useSessionNamesStore.getState().setName(config.id, config.label || `${config.user}@${config.host}`)
+    const remoteSessionId = generateSessionId()
+    getOrCreateSession(remoteSessionId, get, set, connection)
+    if (!useSessionNamesStore.getState().getName(remoteSessionId)) {
+      useSessionNamesStore.getState().setName(remoteSessionId, config.label || `${config.user}@${config.host}`)
     }
-    useNavigationStore.getState().setActiveView({ type: 'session', sessionId: config.id })
+    useNavigationStore.getState().setActiveView({ type: 'session', sessionId: remoteSessionId })
   },
 
   setSessionError: (connectionId: string, error: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- connectionId guaranteed to exist in sessionStores
-    const entry = get().sessionStores.get(connectionId)!
-    const conn = entry.store.getState().connection
-    entry.store.setState({ connection: { ...conn, status: ConnectionStatus.Error, error } })
+    const found = findSessionByConnectionId(get, connectionId)
+    if (!found) return
+    const conn = found.entry.store.getState().connection
+    found.entry.store.setState({ connection: { ...conn, status: ConnectionStatus.Error, error } })
   },
 
   removeSession: (id: string) => {
@@ -467,6 +459,20 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
 }))
+
+function generateSessionId(): string {
+  return `session-${String(Date.now())}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+// Helper: find a session store by connection ID
+function findSessionByConnectionId(get: () => AppState, connectionId: string): { key: string; entry: SessionEntry } | undefined {
+  for (const [key, entry] of Array.from(get().sessionStores.entries())) {
+    if (entry.store.getState().connection.id === connectionId) {
+      return { key, entry }
+    }
+  }
+  return undefined
+}
 
 // Helper: get or create a session store
 function getOrCreateSession(

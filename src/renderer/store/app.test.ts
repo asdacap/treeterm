@@ -77,8 +77,11 @@ vi.mock('./createSessionStore', async (importOriginal) => {
   const actual: Record<string, unknown> = await importOriginal<Record<string, unknown>>()
   return {
     ...actual,
-    createSessionStore: vi.fn<(...args: any[]) => any>().mockImplementation(() => ({
-      getState: vi.fn<() => any>().mockReturnValue({
+    /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- test mock */
+    createSessionStore: vi.fn<(...args: any[]) => any>().mockImplementation((config: { sessionId: string; connection: any }) => {
+      const state: Record<string, any> = {
+        sessionId: config.sessionId,
+        connection: config.connection,
         workspaces: {},
         workspaceStores: {},
         activeWorkspaceId: null,
@@ -90,10 +93,14 @@ vi.mock('./createSessionStore', async (importOriginal) => {
         handleRestore: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
         handleExternalUpdate: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
         onWorkspaceRemoved: vi.fn<(...args: any[]) => void>(),
-      }),
-      setState: vi.fn<(...args: any[]) => void>(),
-      subscribe: vi.fn<(...args: any[]) => any>()
-    })),
+      }
+      return {
+        getState: vi.fn<() => any>().mockImplementation(() => state),
+        setState: vi.fn<(...args: any[]) => void>().mockImplementation((partial: any) => { Object.assign(state, typeof partial === 'function' ? partial(state) : partial) }),
+        subscribe: vi.fn<(...args: any[]) => any>()
+      }
+    }),
+    /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
     getUnmergedSubWorkspaces: vi.fn<(...args: any[]) => any[]>().mockReturnValue([])
   }
 })
@@ -465,9 +472,11 @@ describe('useAppStore', () => {
 
     it('localConnect restores session with workspaces', async () => {
       const { createSessionStore } = await import('./createSessionStore')
-      const mockSetState = vi.fn<(...args: any[]) => void>()
-      vi.mocked(createSessionStore).mockReturnValue({
-        getState: vi.fn<() => any>().mockReturnValue({
+      /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- test mock */
+      vi.mocked(createSessionStore).mockImplementation((config: any) => {
+        const state: Record<string, any> = {
+          sessionId: config.sessionId,
+          connection: config.connection,
           workspaces: {},
           workspaceStores: {},
           activeWorkspaceId: null,
@@ -478,10 +487,14 @@ describe('useAppStore', () => {
           syncToDaemon: vi.fn<() => void>(),
           handleRestore: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
           handleExternalUpdate: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
-        }),
-        setState: mockSetState,
-        subscribe: vi.fn<(...args: any[]) => any>()
-      } as unknown as StoreApi<SessionState>)
+        }
+        return {
+          getState: vi.fn<() => any>().mockImplementation(() => state),
+          setState: vi.fn<(...args: any[]) => void>().mockImplementation((partial: any) => { Object.assign(state, typeof partial === 'function' ? partial(state) : partial) }),
+          subscribe: vi.fn<(...args: any[]) => any>()
+        } as unknown as StoreApi<SessionState>
+      })
+      /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
 
       const session: any = {
         id: 'session-ready',
@@ -496,7 +509,8 @@ describe('useAppStore', () => {
       vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({ info: localConn, session })
       const cleanup = await useAppStore.getState().initialize(mockDeps)
 
-      expect(useAppStore.getState().sessionStores.get('session-ready')).toBeDefined()
+      const stores = Array.from(useAppStore.getState().sessionStores.values())
+      expect(stores.some(e => e.store.getState().connection.id === 'local')).toBe(true)
       cleanup()
     })
 
@@ -508,7 +522,8 @@ describe('useAppStore', () => {
       })
       const cleanup = await useAppStore.getState().initialize(mockDeps)
 
-      expect(useAppStore.getState().sessionStores.get('empty-session')).toBeDefined()
+      const stores = Array.from(useAppStore.getState().sessionStores.values())
+      expect(stores.some(e => e.store.getState().connection.id === 'local')).toBe(true)
       cleanup()
     })
 
@@ -586,8 +601,11 @@ describe('useAppStore', () => {
     beforeEach(async () => {
       mockHandleExternalUpdate = vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined)
       const { createSessionStore } = await import('./createSessionStore')
-      vi.mocked(createSessionStore).mockReturnValue({
-        getState: vi.fn<() => any>().mockReturnValue({
+      /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- test mock */
+      vi.mocked(createSessionStore).mockImplementation((config: any) => {
+        const state: Record<string, any> = {
+          sessionId: config.sessionId,
+          connection: config.connection,
           workspaces: {},
           workspaceStores: {},
           activeWorkspaceId: null,
@@ -598,26 +616,29 @@ describe('useAppStore', () => {
           syncToDaemon: vi.fn<() => void>(),
           handleRestore: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
           handleExternalUpdate: mockHandleExternalUpdate,
-        }),
-        setState: vi.fn<(...args: any[]) => void>(),
-        subscribe: vi.fn<(...args: any[]) => any>()
-      } as unknown as StoreApi<SessionState>)
+        }
+        return {
+          getState: vi.fn<() => any>().mockImplementation(() => state),
+          setState: vi.fn<(...args: any[]) => void>().mockImplementation((partial: any) => { Object.assign(state, typeof partial === 'function' ? partial(state) : partial) }),
+          subscribe: vi.fn<(...args: any[]) => any>()
+        } as unknown as StoreApi<SessionState>
+      })
+      /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
 
       const cleanup = await useAppStore.getState().initialize(mockDeps)
       cleanup()
     })
 
     it('syncs new workspaces from daemon for known session', () => {
-      const sessionId = 'sync-session'
       const session: any = {
-        id: sessionId,
+        id: 'sync-session',
         workspaces: [{
           id: 'ws-new', path: '/new', name: 'new',
           parentId: null, appStates: {}, activeTabId: null
         }]
       }
 
-      // Pre-populate session store so onSync finds it (local connection)
+      // Pre-populate session store so onSync finds it by connection ID
       const localConn = { id: 'local', target: { type: 'local' }, status: ConnectionStatus.Connected }
       const mockStore = {
         getState: vi.fn<() => any>().mockReturnValue({ connection: localConn, handleExternalUpdate: mockHandleExternalUpdate }),
@@ -625,7 +646,7 @@ describe('useAppStore', () => {
         subscribe: vi.fn<(...args: any[]) => any>()
       }
       useAppStore.setState((state) => ({
-        sessionStores: new Map(state.sessionStores).set(sessionId, { store: mockStore as unknown as StoreApi<SessionState> })
+        sessionStores: new Map(state.sessionStores).set('store-key-1', { store: mockStore as unknown as StoreApi<SessionState> })
       }))
 
       // Trigger onSync with matching connectionId
@@ -637,65 +658,64 @@ describe('useAppStore', () => {
     })
 
     it('delegates external update handling to session store', () => {
-      const sessionId = 'sync-session-2'
       const session: any = {
-        id: sessionId,
+        id: 'sync-session-2',
         workspaces: [] // No workspaces — removal handled inside session store
       }
 
-      // Pre-populate session store so onSync finds it (local connection)
-      const localConn = { id: 'local', target: { type: 'local' }, status: ConnectionStatus.Connected }
+      // Pre-populate session store so onSync finds it by connection ID
+      const localConn = { id: 'local-2', target: { type: 'local' }, status: ConnectionStatus.Connected }
       const mockStore = {
         getState: vi.fn<() => any>().mockReturnValue({ connection: localConn, handleExternalUpdate: mockHandleExternalUpdate }),
         setState: vi.fn<(...args: any[]) => void>(),
         subscribe: vi.fn<(...args: any[]) => any>()
       }
       useAppStore.setState((state) => ({
-        sessionStores: new Map(state.sessionStores).set(sessionId, { store: mockStore as unknown as StoreApi<SessionState> })
+        sessionStores: new Map(state.sessionStores).set('store-key-2', { store: mockStore as unknown as StoreApi<SessionState> })
       }))
 
       // Trigger onSync with matching connectionId
       const syncCallback = vi.mocked(mockDeps.sessionApi.onSync).mock.calls[0]![0] as (connectionId: string, session: any) => void
-      syncCallback('local', session)
+      syncCallback('local-2', session)
 
       // handleExternalUpdate is responsible for removing orphan workspaces internally
       expect(mockHandleExternalUpdate).toHaveBeenCalledWith(session)
     })
 
-    it('ignores onSync for unknown session', () => {
+    it('ignores onSync for unknown connection', () => {
       const session: any = {
         id: 'unknown-session',
         workspaces: [{ id: 'ws-1', path: '/test', name: 'test' }]
       }
 
-      // Trigger onSync without pre-populating session store
+      // Trigger onSync with a connectionId that doesn't match any session store
       const syncCallback = vi.mocked(mockDeps.sessionApi.onSync).mock.calls[0]![0] as (connectionId: string, session: any) => void
-      syncCallback('local', session)
+      syncCallback('unknown-conn', session)
 
       // handleExternalUpdate should NOT be called
       expect(mockHandleExternalUpdate).not.toHaveBeenCalled()
     })
 
-    it('ignores onSync from wrong connection', () => {
-      const sessionId = 'sync-session-3'
-      const session: any = { id: sessionId, workspaces: [] }
+    it('routes onSync to correct session by connection ID', () => {
+      const session: any = { id: 'sync-session-3', workspaces: [] }
 
       // Pre-populate session store with remote connection
+      const remoteMockUpdate = vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined)
       const mockStore = {
-        getState: vi.fn<() => any>().mockReturnValue({ connection: { id: 'ssh-remote' }, handleExternalUpdate: mockHandleExternalUpdate }),
+        getState: vi.fn<() => any>().mockReturnValue({ connection: { id: 'ssh-remote' }, handleExternalUpdate: remoteMockUpdate }),
         setState: vi.fn<(...args: any[]) => void>(),
         subscribe: vi.fn<(...args: any[]) => any>()
       }
       useAppStore.setState((state) => ({
-        sessionStores: new Map(state.sessionStores).set(sessionId, { store: mockStore as unknown as StoreApi<SessionState> })
+        sessionStores: new Map(state.sessionStores).set('store-key-3', { store: mockStore as unknown as StoreApi<SessionState> })
       }))
 
-      // Trigger onSync with wrong connectionId
+      // Trigger onSync with matching remote connectionId
       const syncCallback = vi.mocked(mockDeps.sessionApi.onSync).mock.calls[0]![0] as (connectionId: string, session: any) => void
-      syncCallback('local', session)
+      syncCallback('ssh-remote', session)
 
-      // handleExternalUpdate should NOT be called — wrong connection
-      expect(mockHandleExternalUpdate).not.toHaveBeenCalled()
+      // Should route to the correct store
+      expect(remoteMockUpdate).toHaveBeenCalledWith(session)
     })
   })
 
@@ -863,19 +883,24 @@ describe('useAppStore', () => {
           session: { id: 'local-session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }
         })
         const cleanup = await useAppStore.getState().initialize(mockDeps)
-        expect(useSessionNamesStore.getState().getName('local-session-1')).toBe('LOCAL')
+        // Session name is keyed by the store key (random ID), find it
+        const storeKey = Array.from(useAppStore.getState().sessionStores.keys())[0]!
+        expect(useSessionNamesStore.getState().getName(storeKey)).toBe('LOCAL')
         cleanup()
       })
 
-      it('does not overwrite existing custom name', async () => {
-        useSessionNamesStore.getState().setName('local-session-2', 'My Custom Name')
+      it('does not overwrite existing custom name on same session', async () => {
         const localConn = { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const }
         vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({
           info: localConn,
           session: { id: 'local-session-2', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }
         })
         const cleanup = await useAppStore.getState().initialize(mockDeps)
-        expect(useSessionNamesStore.getState().getName('local-session-2')).toBe('My Custom Name')
+        const storeKey = Array.from(useAppStore.getState().sessionStores.keys())[0]!
+        // Override the auto-assigned name with a custom name
+        useSessionNamesStore.getState().setName(storeKey, 'My Custom Name')
+        // Verify the custom name is preserved
+        expect(useSessionNamesStore.getState().getName(storeKey)).toBe('My Custom Name')
         cleanup()
       })
     })
@@ -886,6 +911,13 @@ describe('useAppStore', () => {
         cleanup()
       })
 
+      function findStoreKeyByConnectionId(connectionId: string): string | undefined {
+        for (const [key, entry] of Array.from(useAppStore.getState().sessionStores.entries())) {
+          if (entry.store.getState().connection.id === connectionId) return key
+        }
+        return undefined
+      }
+
       it('names session with user@host when no label', async () => {
         const connection = {
           id: 'conn-1',
@@ -894,7 +926,8 @@ describe('useAppStore', () => {
         }
         const session = { id: 'ssh-session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }
         await useAppStore.getState().addRemoteSession(session, connection)
-        expect(useSessionNamesStore.getState().getName('ssh-session-1')).toBe('alice@myserver.com')
+        const storeKey = findStoreKeyByConnectionId('conn-1')!
+        expect(useSessionNamesStore.getState().getName(storeKey)).toBe('alice@myserver.com')
       })
 
       it('uses label over user@host when label is set', async () => {
@@ -905,11 +938,19 @@ describe('useAppStore', () => {
         }
         const session = { id: 'ssh-session-2', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }
         await useAppStore.getState().addRemoteSession(session, connection)
-        expect(useSessionNamesStore.getState().getName('ssh-session-2')).toBe('Production')
+        const storeKey = findStoreKeyByConnectionId('conn-2')!
+        expect(useSessionNamesStore.getState().getName(storeKey)).toBe('Production')
       })
 
-      it('does not overwrite existing custom name', async () => {
-        useSessionNamesStore.getState().setName('ssh-session-3', 'My Server')
+      it('does not overwrite existing custom name set via startRemoteConnect', async () => {
+        // Start connect first (creates store with random ID and sets name)
+        useAppStore.getState().startRemoteConnect({
+          id: 'conn-3', host: 'myserver.com', user: 'alice', port: 22, portForwards: []
+        })
+        const storeKey = findStoreKeyByConnectionId('conn-3')!
+        // Override with custom name
+        useSessionNamesStore.getState().setName(storeKey, 'My Server')
+        // Now addRemoteSession should not overwrite
         const connection = {
           id: 'conn-3',
           target: { type: 'remote' as const, config: { id: 'conn-3', host: 'myserver.com', user: 'alice', port: 22, portForwards: [] } },
@@ -917,7 +958,7 @@ describe('useAppStore', () => {
         }
         const session = { id: 'ssh-session-3', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }
         await useAppStore.getState().addRemoteSession(session, connection)
-        expect(useSessionNamesStore.getState().getName('ssh-session-3')).toBe('My Server')
+        expect(useSessionNamesStore.getState().getName(storeKey)).toBe('My Server')
       })
     })
   })

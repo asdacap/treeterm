@@ -26,20 +26,18 @@ import { createApplicationMenu } from './menu'
 let loadingWindow: BrowserWindow | null = null
 const closeConfirmedWindows: Set<number> = new Set()
 let connectionManager: ConnectionManager | null = null
-// Maps sessionId to the daemon connection that owns it
-const sessionConnectionMap = new Map<string, string>()
-// Maps sessionId to a per-session GrpcDaemonClient (separate gRPC connection for lock identity)
+// Maps connectionId to a per-session GrpcDaemonClient (separate gRPC connection for lock identity)
 const sessionClientMap = new Map<string, GrpcDaemonClient>()
 // Maps webContentsId to window UUID for session sync deduplication
 const windowUuids = new Map<number, string>()
 // Maps windowUuid to the connectionId for its local gRPC client
 const windowConnectionMap = new Map<string, string>()
 
-async function createSessionClient(sessionId: string, socketPath: string): Promise<void> {
+async function createSessionClient(connectionId: string, socketPath: string): Promise<void> {
   const client = new GrpcDaemonClient(socketPath)
   await client.connect()
-  sessionClientMap.set(sessionId, client)
-  console.log(`[main] per-session gRPC client created for session ${sessionId}`)
+  sessionClientMap.set(connectionId, client)
+  console.log(`[main] per-session gRPC client created for connection ${connectionId}`)
 }
 // Simple object storage — each entry is an independent terminal's stream.
 const ptyStreams = new Map<string, PtyStream>()
@@ -237,10 +235,9 @@ function reestablishSessionWatches(connectionId: string, client: GrpcDaemonClien
     // Send the initial session data to renderer as a reconnect event
     void watch.initial.then(async (session) => {
       console.log(`[main] reconnect: session loaded for connection ${connectionId}, session ${session.id}`)
-      sessionConnectionMap.set(session.id, connectionId)
       const reconnClient = connectionManager?.getClient(connectionId)
       if (reconnClient) {
-        await createSessionClient(session.id, reconnClient.socketPath)
+        await createSessionClient(connectionId, reconnClient.socketPath)
       }
       const connectionInfo = connectionManager?.getConnection(connectionId)
       if (connectionInfo) {
@@ -350,21 +347,19 @@ server.onDaemonShutdown(async (connectionId) => {
 // Session IPC Handlers (workspace sessions)
 // Session operations use per-session gRPC clients for daemon-generated lock identity.
 
-function getSessionClient(sessionId: string): GrpcDaemonClient {
-  const client = sessionClientMap.get(sessionId)
+function getSessionClient(connectionId: string): GrpcDaemonClient {
+  const client = sessionClientMap.get(connectionId)
   if (!client) {
-    // Fallback to connection manager client for this session's connection
+    // Fallback to connection manager client
     if (!connectionManager) throw new Error('ConnectionManager not initialized')
-    const connectionId = sessionConnectionMap.get(sessionId)
-    if (!connectionId) throw new Error(`No connection found for session: ${sessionId}`)
     return connectionManager.getClient(connectionId)
   }
   return client
 }
 
-server.onSessionUpdate(async (sessionId, workspaces, senderUuid, expectedVersion) => {
+server.onSessionUpdate(async (connectionId, workspaces, senderUuid, expectedVersion) => {
   try {
-    const client = getSessionClient(sessionId)
+    const client = getSessionClient(connectionId)
     const result = await client.updateSession(workspaces, senderUuid, expectedVersion)
     return { success: true, session: result }
   } catch (error) {
@@ -374,9 +369,9 @@ server.onSessionUpdate(async (sessionId, workspaces, senderUuid, expectedVersion
   }
 })
 
-server.onSessionLock(async (sessionId, ttlMs) => {
+server.onSessionLock(async (connectionId, ttlMs) => {
   try {
-    const client = getSessionClient(sessionId)
+    const client = getSessionClient(connectionId)
     const result = await client.lockSession(ttlMs)
     return { success: true, acquired: result.acquired, session: result.session }
   } catch (error) {
@@ -386,9 +381,9 @@ server.onSessionLock(async (sessionId, ttlMs) => {
   }
 })
 
-server.onSessionUnlock(async (sessionId) => {
+server.onSessionUnlock(async (connectionId) => {
   try {
-    const client = getSessionClient(sessionId)
+    const client = getSessionClient(connectionId)
     const session = await client.unlockSession()
     return { success: true, session }
   } catch (error) {
@@ -398,9 +393,9 @@ server.onSessionUnlock(async (sessionId) => {
   }
 })
 
-server.onSessionForceUnlock(async (sessionId) => {
+server.onSessionForceUnlock(async (connectionId) => {
   try {
-    const client = getSessionClient(sessionId)
+    const client = getSessionClient(connectionId)
     const session = await client.forceUnlockSession()
     return { success: true, session }
   } catch (error) {
@@ -631,8 +626,7 @@ server.onLocalConnect(async (windowUuid) => {
 
   const session = await watch.initial
   console.log('[main] localConnect: loaded session:', session.id)
-  sessionConnectionMap.set(session.id, connectionId)
-  await createSessionClient(session.id, client.socketPath)
+  await createSessionClient(connectionId, client.socketPath)
 
   return { info, session }
 })
@@ -660,8 +654,7 @@ server.onSshConnect(async (config, options) => {
 
       const session = await remoteWatch.initial
       console.log(`[main:ssh] Initial session loaded: id=${session.id}, workspaces=${String(session.workspaces.length)}`)
-      sessionConnectionMap.set(session.id, config.id)
-      await createSessionClient(session.id, remoteClient.socketPath)
+      await createSessionClient(config.id, remoteClient.socketPath)
 
       // Auto-start saved port forwards
       autoStartPortForwards(config)
@@ -979,9 +972,8 @@ void app.whenReady().then(async () => {
             registerSessionWatch(parsed.id, autoWatchUuid, remoteWatch.unsubscribe)
 
             const session = await remoteWatch.initial
-            sessionConnectionMap.set(session.id, parsed.id)
             const autoClient = connectionManager.getClient(parsed.id)
-            await createSessionClient(session.id, autoClient.socketPath)
+            await createSessionClient(parsed.id, autoClient.socketPath)
             server.sshAutoConnected(session, info)
           } catch (error) {
             console.error('[main] Failed to load remote session:', error)
