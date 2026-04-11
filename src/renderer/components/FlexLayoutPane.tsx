@@ -36,7 +36,10 @@ function buildModel(ws: WorkspaceStore, getApplication: (id: string) => ReturnTy
 }
 
 export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPaneProps) {
-  const { workspace, removeTab, setActiveTab, updateMetadata } = useStore(ws)
+  const workspace = useStore(ws, s => s.workspace)
+  const removeTab = useStore(ws, s => s.removeTab)
+  const setActiveTab = useStore(ws, s => s.setActiveTab)
+  const updateMetadata = useStore(ws, s => s.updateMetadata)
   const applications = useAppStore((s) => s.applications)
   const getApplication = useCallback((id: string) => applications.get(id), [applications])
   const menuApplications = Array.from(applications.values()).filter((app) => app.showInNewTabMenu)

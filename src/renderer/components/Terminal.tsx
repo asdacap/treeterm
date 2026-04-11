@@ -13,7 +13,7 @@ interface TerminalProps {
 }
 
 export default function Terminal({ workspace, tabId, sandbox }: TerminalProps) {
-  const { workspace: wsData } = useStore(workspace)
+  const wsData = useStore(workspace, s => s.workspace)
   const appState = wsData.appStates[tabId]
   const existingPtyId = (appState?.state as BaseTerminalState | undefined)?.ptyId
 

@@ -11,8 +11,9 @@ interface GitHubBrowserProps {
 }
 
 export default function GitHubBrowser({ workspace, isVisible }: GitHubBrowserProps) {
-  const { gitController } = useStore(workspace)
-  const { prInfo, refreshPrStatus } = useStore(gitController)
+  const gitController = useStore(workspace, s => s.gitController)
+  const prInfo = useStore(gitController, s => s.prInfo)
+  const refreshPrStatus = useStore(gitController, s => s.refreshPrStatus)
   const openExternal = useAppStore((s) => s.openExternal)
   const [refreshing, setRefreshing] = useState(false)
 

@@ -76,7 +76,9 @@ export function FileViewer({
   initialScrollTop,
   onScrollPositionChange
 }: FileViewerProps): React.JSX.Element {
-  const { workspace: wsData, addTab, connectionId } = useStore(workspace)
+  const wsData = useStore(workspace, s => s.workspace)
+  const addTab = useStore(workspace, s => s.addTab)
+  const connectionId = useStore(workspace, s => s.connectionId)
   const filesystem = useFilesystemApi(workspace)
   const execApi = useExecApi(workspace)
   const [fileState, setFileState] = useState<FileState>({

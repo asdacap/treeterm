@@ -33,19 +33,17 @@ export default function SessionPanel({
 }: SessionPanelProps): React.JSX.Element {
   const connection = useStore(sessionStore, s => s.connection)
   const sessionLock = useStore(sessionStore, s => s.sessionLock)
-  const {
-    workspaces,
-    activeWorkspaceId,
-    addWorkspace,
-    addChildWorkspace,
-    adoptExistingWorktree,
-    createWorktreeFromBranch,
-    createWorktreeFromRemote,
-    quickForkWorkspace,
-    setActiveWorkspace,
-    reorderWorkspace,
-    forceUnlock,
-  } = useStore(sessionStore)
+  const workspaces = useStore(sessionStore, s => s.workspaces)
+  const activeWorkspaceId = useStore(sessionStore, s => s.activeWorkspaceId)
+  const addWorkspace = useStore(sessionStore, s => s.addWorkspace)
+  const addChildWorkspace = useStore(sessionStore, s => s.addChildWorkspace)
+  const adoptExistingWorktree = useStore(sessionStore, s => s.adoptExistingWorktree)
+  const createWorktreeFromBranch = useStore(sessionStore, s => s.createWorktreeFromBranch)
+  const createWorktreeFromRemote = useStore(sessionStore, s => s.createWorktreeFromRemote)
+  const quickForkWorkspace = useStore(sessionStore, s => s.quickForkWorkspace)
+  const setActiveWorkspace = useStore(sessionStore, s => s.setActiveWorkspace)
+  const reorderWorkspace = useStore(sessionStore, s => s.reorderWorkspace)
+  const forceUnlock = useStore(sessionStore, s => s.forceUnlock)
   const { activeView, setActiveView } = useNavigationStore()
   const {
     prefixState,
@@ -716,7 +714,9 @@ interface CollapsedSessionPanelProps {
 }
 
 export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSessionPanelProps): React.JSX.Element {
-  const { workspaces, activeWorkspaceId, setActiveWorkspace } = useStore(sessionStore)
+  const workspaces = useStore(sessionStore, s => s.workspaces)
+  const activeWorkspaceId = useStore(sessionStore, s => s.activeWorkspaceId)
+  const setActiveWorkspace = useStore(sessionStore, s => s.setActiveWorkspace)
   const { activeView, setActiveView } = useNavigationStore()
   const isActiveSession = activeView?.type === 'workspace' && activeView.sessionId === sessionId
 

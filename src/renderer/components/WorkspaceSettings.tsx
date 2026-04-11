@@ -8,7 +8,9 @@ interface WorkspaceSettingsProps {
 }
 
 export default function WorkspaceSettings({ workspace, applications }: WorkspaceSettingsProps) {
-  const { workspace: ws, updateMetadata, updateSettings } = useStore(workspace)
+  const ws = useStore(workspace, s => s.workspace)
+  const updateMetadata = useStore(workspace, s => s.updateMetadata)
+  const updateSettings = useStore(workspace, s => s.updateSettings)
   const appList = Array.from(applications.values()).filter((app) => app.showInNewTabMenu)
 
   const [name, setName] = useState(ws.metadata.displayName || ws.name)

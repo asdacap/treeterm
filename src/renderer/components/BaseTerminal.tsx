@@ -137,7 +137,8 @@ export default function BaseTerminal({
   config,
   extraButtons,
 }: BaseTerminalProps) {
-  const { workspace: wsData, removeTab } = useStore(workspace)
+  const wsData = useStore(workspace, s => s.workspace)
+  const removeTab = useStore(workspace, s => s.removeTab)
   const workspaceId = wsData.id
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)

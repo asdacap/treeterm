@@ -26,16 +26,14 @@ interface WorkspacePaneProps {
 }
 
 export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneProps) {
-  const {
-    workspaces,
-    activeWorkspaceId,
-    addChildWorkspace,
-    adoptExistingWorktree,
-    createWorktreeFromBranch,
-    createWorktreeFromRemote,
-    setActiveWorkspace,
-    clearWorkspaceError,
-  } = useStore(sessionStore)
+  const workspaces = useStore(sessionStore, s => s.workspaces)
+  const activeWorkspaceId = useStore(sessionStore, s => s.activeWorkspaceId)
+  const addChildWorkspace = useStore(sessionStore, s => s.addChildWorkspace)
+  const adoptExistingWorktree = useStore(sessionStore, s => s.adoptExistingWorktree)
+  const createWorktreeFromBranch = useStore(sessionStore, s => s.createWorktreeFromBranch)
+  const createWorktreeFromRemote = useStore(sessionStore, s => s.createWorktreeFromRemote)
+  const setActiveWorkspace = useStore(sessionStore, s => s.setActiveWorkspace)
+  const clearWorkspaceError = useStore(sessionStore, s => s.clearWorkspaceError)
   const enterWorkspaceFocus = useKeybindingStore(s => s.enterWorkspaceFocus)
   const applications = useAppStore((s) => s.applications)
   const clipboard = useAppStore((s) => s.clipboard)
@@ -505,8 +503,8 @@ interface MergeAbandonButtonProps {
 }
 
 function MergeAbandonButton({ workspace, onOpenReview }: MergeAbandonButtonProps) {
-  const { gitController } = useStore(workspace)
-  const { isDiffCleanFromParent } = useStore(gitController)
+  const gitController = useStore(workspace, s => s.gitController)
+  const isDiffCleanFromParent = useStore(gitController, s => s.isDiffCleanFromParent)
 
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = React.useRef<HTMLDivElement>(null)
@@ -611,8 +609,11 @@ interface GitStatusButtonProps {
 }
 
 function GitStatusButton({ workspace }: GitStatusButtonProps) {
-  const { gitController } = useStore(workspace)
-  const { gitRefreshing, hasUncommittedChanges, hasConflictsWithParent, refreshDiffStatus } = useStore(gitController)
+  const gitController = useStore(workspace, s => s.gitController)
+  const gitRefreshing = useStore(gitController, s => s.gitRefreshing)
+  const hasUncommittedChanges = useStore(gitController, s => s.hasUncommittedChanges)
+  const hasConflictsWithParent = useStore(gitController, s => s.hasConflictsWithParent)
+  const refreshDiffStatus = useStore(gitController, s => s.refreshDiffStatus)
 
   const handleRefresh = () => {
     void refreshDiffStatus()
@@ -657,8 +658,10 @@ interface GitHubButtonProps {
 }
 
 function GitHubButton({ workspace }: GitHubButtonProps) {
-  const { gitController, openOrFocusTab } = useStore(workspace)
-  const { prInfo, openGitHub } = useStore(gitController)
+  const gitController = useStore(workspace, s => s.gitController)
+  const openOrFocusTab = useStore(workspace, s => s.openOrFocusTab)
+  const prInfo = useStore(gitController, s => s.prInfo)
+  const openGitHub = useStore(gitController, s => s.openGitHub)
   const openExternal = useAppStore((s) => s.openExternal)
   const [loading, setLoading] = useState(false)
 
@@ -720,8 +723,11 @@ interface GitPullButtonProps {
 }
 
 function GitPullButton({ workspace }: GitPullButtonProps) {
-  const { gitController } = useStore(workspace)
-  const { behindCount, pullLoading, refreshRemoteStatus, pullFromRemote } = useStore(gitController)
+  const gitController = useStore(workspace, s => s.gitController)
+  const behindCount = useStore(gitController, s => s.behindCount)
+  const pullLoading = useStore(gitController, s => s.pullLoading)
+  const refreshRemoteStatus = useStore(gitController, s => s.refreshRemoteStatus)
+  const pullFromRemote = useStore(gitController, s => s.pullFromRemote)
 
   const handleRefresh = () => {
     void refreshRemoteStatus()

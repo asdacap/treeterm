@@ -26,7 +26,11 @@ function getFilename(filePath: string): string {
 }
 
 export function FileEditor({ workspace, tabId }: FileEditorProps): React.JSX.Element {
-  const { workspace: wsData, updateTabState, updateTabTitle, addTab, connectionId } = useStore(workspace)
+  const wsData = useStore(workspace, s => s.workspace)
+  const updateTabState = useStore(workspace, s => s.updateTabState)
+  const updateTabTitle = useStore(workspace, s => s.updateTabTitle)
+  const addTab = useStore(workspace, s => s.addTab)
+  const connectionId = useStore(workspace, s => s.connectionId)
   const filesystem = useFilesystemApi(workspace)
   const execApi = useExecApi(workspace)
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist in appStates

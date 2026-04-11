@@ -18,12 +18,12 @@ export default function Chat({ tab, workspace, isVisible }: ApplicationRenderPro
   const [error, setError] = useState<string | null>(null)
   const [reasoning, setReasoning] = useState(ReasoningEffort.Off)
   const activeRequestId = React.useRef<string | null>(null)
-  const workspaceStore = useStore(workspace)
+  const updateTabState = useStore(workspace, s => s.updateTabState)
 
   // Persist messages to tab state
   useEffect(() => {
-    workspaceStore.updateTabState<ChatState>(tab.id, () => ({ messages }))
-  }, [messages, tab.id, workspaceStore])
+    updateTabState<ChatState>(tab.id, () => ({ messages }))
+  }, [messages, tab.id, updateTabState])
 
   // Subscribe to LLM events
   useEffect(() => {

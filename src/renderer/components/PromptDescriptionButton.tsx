@@ -9,7 +9,7 @@ interface PromptDescriptionButtonProps {
 }
 
 export function PromptDescriptionButton({ description, workspace, onDismiss }: PromptDescriptionButtonProps): React.JSX.Element | null {
-  const { promptHarness } = useStore(workspace)
+  const promptHarness = useStore(workspace, s => s.promptHarness)
 
   const handlePrompt = () => {
     void promptHarness(description)

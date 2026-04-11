@@ -30,13 +30,21 @@ export default function ReviewBrowser({
   parentWorkspaceId,
   isVisible,
 }: ReviewBrowserProps) {
-  const {
-    workspace: wsData, lookupWorkspace,
-    promptHarness, mergeAndRemove, mergeAndKeep, closeAndClean, removeTab,
-    reviewComments: reviewCommentStore, gitController, updateTabState,
-  } = useStore(workspace)
-  const { getReviewComments, addReviewComment, deleteReviewComment, updateOutdatedReviewComments } = useStore(reviewCommentStore)
-  const { refreshDiffStatus } = useStore(gitController)
+  const wsData = useStore(workspace, s => s.workspace)
+  const lookupWorkspace = useStore(workspace, s => s.lookupWorkspace)
+  const promptHarness = useStore(workspace, s => s.promptHarness)
+  const mergeAndRemove = useStore(workspace, s => s.mergeAndRemove)
+  const mergeAndKeep = useStore(workspace, s => s.mergeAndKeep)
+  const closeAndClean = useStore(workspace, s => s.closeAndClean)
+  const removeTab = useStore(workspace, s => s.removeTab)
+  const reviewCommentStore = useStore(workspace, s => s.reviewComments)
+  const gitController = useStore(workspace, s => s.gitController)
+  const updateTabState = useStore(workspace, s => s.updateTabState)
+  const getReviewComments = useStore(reviewCommentStore, s => s.getReviewComments)
+  const addReviewComment = useStore(reviewCommentStore, s => s.addReviewComment)
+  const deleteReviewComment = useStore(reviewCommentStore, s => s.deleteReviewComment)
+  const updateOutdatedReviewComments = useStore(reviewCommentStore, s => s.updateOutdatedReviewComments)
+  const refreshDiffStatus = useStore(gitController, s => s.refreshDiffStatus)
   const git = useGitApi(workspace)
   const workspaceId = wsData.id
   const parentWorkspace = parentWorkspaceId ? lookupWorkspace(parentWorkspaceId) : undefined
