@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useState } from 'react'
+import React, { useCallback, useState } from 'react'
  
 import { ChevronDown, Github, Loader2, ArrowDownToLine, RefreshCw, AlertTriangle, CircleDot, Check } from 'lucide-react'
 import { useStore } from 'zustand'
@@ -96,11 +96,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     setIsEditingDescription(false)
   }
 
-  // Signal active tab to focus after workspace switch (keyboard navigation)
-  useEffect(() => {
-    if (!activeHandle) return
-    activeHandle.getState().requestFocus()
-  }, [activeWorkspaceId, activeHandle])
+
 
   // Create new tab using the first available application
   const handleNewDefaultTab = useCallback(() => {
