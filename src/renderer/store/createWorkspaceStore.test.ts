@@ -43,6 +43,7 @@ function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStore
     github: {
       getPrInfo: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ noPr: true, createUrl: 'https://github.com/test/repo/compare/main...feat?expand=1' }),
     },
+    getActiveWorkspaceId: vi.fn<() => string | null>().mockReturnValue('ws-1'),
     ...overrides,
   }
 }

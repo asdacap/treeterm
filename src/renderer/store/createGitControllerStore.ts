@@ -9,6 +9,7 @@ export interface GitControllerDeps {
   refreshGitInfo: () => Promise<void>
   getWorkspace: () => Workspace
   initialWorkspace: Workspace
+  isActiveWorkspace: () => boolean
 }
 
 export interface GitControllerState {
@@ -24,6 +25,7 @@ export interface GitControllerState {
   pullFromRemote: () => Promise<{ success: boolean; error?: string }>
   refreshPrStatus: () => Promise<void>
   openGitHub: () => Promise<{ url: string; hasPr: boolean } | { error: string }>
+  triggerRefresh: () => void
   // Called by createWorkspaceStore after the workspace store is fully initialized
   startPolling: () => void
   dispose: () => void
@@ -89,7 +91,7 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
     if (!deps.initialWorkspace.isGitRepo) return
 
     void refreshDiffStatus()
-    gitControllerInterval = setInterval(() => { void refreshDiffStatus(); }, 10_000)
+    gitControllerInterval = setInterval(() => { if (deps.isActiveWorkspace()) void refreshDiffStatus(); }, 10_000)
   }
 
   function stopGitController(): void {
@@ -109,6 +111,7 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
     prInfo: null,
 
     refreshDiffStatus,
+    triggerRefresh: (): void => { void refreshDiffStatus(); },
 
     refreshRemoteStatus: async () => {
       const ws = deps.getWorkspace()

@@ -72,6 +72,7 @@ export interface WorkspaceStoreDeps {
   refreshGitInfo: (id: string) => Promise<void>
   lookupWorkspace: (id: string) => Workspace | undefined
   github: GitHubApi
+  getActiveWorkspaceId: () => string | null
 }
 
 export interface WorkspaceStoreState {
@@ -169,6 +170,7 @@ export function createWorkspaceStore(
     refreshGitInfo: () => deps.refreshGitInfo(id),
     getWorkspace: () => store.getState().workspace,
     initialWorkspace: workspace,
+    isActiveWorkspace: () => deps.getActiveWorkspaceId() === id,
   })
 
   const reviewComments = createReviewCommentStore({

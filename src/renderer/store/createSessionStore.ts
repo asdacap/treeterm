@@ -274,6 +274,7 @@ export function createSessionStore(
         return entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data : undefined
       },
       github: deps.github,
+      getActiveWorkspaceId: () => store.getState().activeWorkspaceId,
     }
   }
 
@@ -898,6 +899,12 @@ export function createSessionStore(
 
     setActiveWorkspace: (id: string | null) => {
       set({ activeWorkspaceId: id })
+      if (id) {
+        const entry = get().workspaces.get(id)
+        if (entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError)) {
+          entry.store.getState().gitController.getState().triggerRefresh()
+        }
+      }
     },
 
     updateGitInfo: (id: string, gitInfo: GitInfo) => {

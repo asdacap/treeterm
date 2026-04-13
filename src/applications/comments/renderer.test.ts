@@ -70,6 +70,7 @@ const mockWorkspaceStoreStateData = {
     refreshPrStatus: vi.fn(),
     openGitHub: vi.fn(),
     startPolling: vi.fn(),
+    triggerRefresh: vi.fn(),
     dispose: vi.fn(),
   } as GitControllerState)),
 } as WorkspaceStoreState
