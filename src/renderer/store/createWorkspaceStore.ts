@@ -281,6 +281,7 @@ export function createWorkspaceStore(
         }
       })
 
+      console.log('[workspace] addTab: activeTabId changed to', tabId, 'workspace:', get().workspace.id)
       deps.syncToDaemon()
       get().initTab(tabId)
       return tabId
@@ -324,6 +325,7 @@ export function createWorkspaceStore(
           const removedIndex = allIds.indexOf(tabId)
           const newIndex = Math.min(removedIndex, remainingIds.length - 1)
           newActiveTabId = remainingIds[newIndex] || null
+          console.log('[workspace] removeTab: activeTabId changed from', tabId, 'to', newActiveTabId, 'workspace:', ws.id, '(removedIndex:', removedIndex, 'newIndex:', newIndex, ')')
         }
 
         return {
@@ -338,6 +340,7 @@ export function createWorkspaceStore(
     },
 
     setActiveTab: (tabId: string): void => {
+      console.log('[workspace] setActiveTab: activeTabId changed to', tabId, 'workspace:', get().workspace.id)
       updateWorkspace((ws) => ({ ...ws, activeTabId: tabId }))
       deps.syncToDaemon()
     },

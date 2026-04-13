@@ -238,13 +238,29 @@ export function createSessionStore(
     }
   }
 
+  let pendingSyncSnapshot: Record<string, string | null> | null = null
+
   function debouncedSyncToDaemon(): void {
+    const currentSnapshot = getActiveTabSnapshot()
     if (syncDebounceTimer) {
       clearTimeout(syncDebounceTimer)
+      console.log('[session] debounce: skipped state:', JSON.stringify(pendingSyncSnapshot), '-> new state:', JSON.stringify(currentSnapshot))
     }
+    pendingSyncSnapshot = currentSnapshot
     syncDebounceTimer = setTimeout(() => {
+      pendingSyncSnapshot = null
       void syncSessionToDaemon(store.getState().isRestoring)
-    }, 500)
+    }, 100)
+  }
+
+  function getActiveTabSnapshot(): Record<string, string | null> {
+    const snapshot: Record<string, string | null> = {}
+    for (const [id, entry] of store.getState().workspaces) {
+      if (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) {
+        snapshot[id] = entry.store.getState().workspace.activeTabId
+      }
+    }
+    return snapshot
   }
 
   function makeHandleDeps(): WorkspaceStoreDeps {
@@ -1338,11 +1354,13 @@ function restoreWorkspaceTabs(
     }
   }
 
+  const reconciledActiveTabId = daemonWorkspace.activeTabId || newTabIds[0] || null
+  console.log('[session] restoreWorkspaceTabs: activeTabId changed to', reconciledActiveTabId, 'workspace:', daemonWorkspace.id, 'session:', store.getState().sessionId)
   entry.store.setState({
     workspace: {
       ...wsState.workspace,
       appStates: daemonWorkspace.appStates,
-      activeTabId: daemonWorkspace.activeTabId || newTabIds[0] || null
+      activeTabId: reconciledActiveTabId
     }
   })
 
@@ -1364,10 +1382,12 @@ function reconstructWorkspace(
   const id = daemonWorkspace.id
   const parentId = daemonWorkspace.parentId
 
+  const reconstructedActiveTabId = daemonWorkspace.activeTabId || (Object.keys(daemonWorkspace.appStates).length > 0 ? Object.keys(daemonWorkspace.appStates)[0] ?? null : null)
+  console.log('[session] reconstructWorkspace: activeTabId set to', reconstructedActiveTabId, 'workspace:', id, 'session:', store.getState().sessionId)
   const workspace: Workspace = {
     ...daemonWorkspace,
     id,
-    activeTabId: daemonWorkspace.activeTabId || (Object.keys(daemonWorkspace.appStates).length > 0 ? Object.keys(daemonWorkspace.appStates)[0] ?? null : null)
+    activeTabId: reconstructedActiveTabId
   }
 
   const handle = createHandleForWorkspace(workspace)
