@@ -33,6 +33,7 @@ interface StackedDiffListProps {
   onScrollToFileHandled?: () => void
   isFileViewed?: (filePath: string) => boolean
   onToggleViewed?: (file: DiffFile | UncommittedFile) => void
+  onMarkViewedAbove?: (files: (DiffFile | UncommittedFile)[]) => void
 }
 
 export function StackedDiffList({
@@ -53,6 +54,7 @@ export function StackedDiffList({
   onScrollToFileHandled,
   isFileViewed,
   onToggleViewed,
+  onMarkViewedAbove,
 }: StackedDiffListProps): React.JSX.Element {
   const [loadStates, setLoadStates] = useState<Map<string, FileLoadState>>(new Map())
   const sectionRefsRef = useRef<Map<string, HTMLElement>>(new Map())
@@ -135,7 +137,7 @@ export function StackedDiffList({
 
   return (
     <div className="stacked-diff-list" ref={scrollContainerRef}>
-      {files.map(file => {
+      {files.map((file, index) => {
         const state = loadStates.get(file.path)
         const fileComments = reviews.filter(c => c.filePath === file.path)
         const fileCommentInput = commentInput?.filePath === file.path
@@ -163,6 +165,8 @@ export function StackedDiffList({
               stagingAction={stagingAction}
               isViewed={isFileViewed?.(file.path) ?? false}
               onToggleViewed={onToggleViewed ? () => { onToggleViewed(file) } : undefined}
+              onMarkViewedAbove={onMarkViewedAbove ? () => { onMarkViewedAbove(files.slice(0, index)) } : undefined}
+              isFirstFile={index === 0}
             />
           </div>
         )

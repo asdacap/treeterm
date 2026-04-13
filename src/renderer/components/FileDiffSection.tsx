@@ -28,6 +28,8 @@ interface FileDiffSectionProps {
   stagingAction?: StagingAction
   isViewed?: boolean
   onToggleViewed?: () => void
+  onMarkViewedAbove?: () => void
+  isFirstFile?: boolean
 }
 
 export function FileDiffSection({
@@ -48,6 +50,8 @@ export function FileDiffSection({
   stagingAction,
   isViewed,
   onToggleViewed,
+  onMarkViewedAbove,
+  isFirstFile,
 }: FileDiffSectionProps): React.JSX.Element {
   const [collapsed, setCollapsed] = useState(isViewed ?? false)
 
@@ -114,6 +118,12 @@ export function FileDiffSection({
           <label
             className={`file-diff-viewed-label ${isViewed ? 'viewed' : ''}`}
             onClick={(e) => { e.stopPropagation() }}
+            onContextMenu={!isFirstFile && onMarkViewedAbove ? (e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              onMarkViewedAbove()
+            } : undefined}
+            title={!isFirstFile && onMarkViewedAbove ? 'Right-click to mark all above as viewed' : undefined}
           >
             <input
               type="checkbox"

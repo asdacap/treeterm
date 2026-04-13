@@ -609,6 +609,19 @@ export default function ReviewBrowser({
     })
   }, [persistViewState])
 
+  const handleMarkViewedAbove = useCallback((filesToMark: (DiffFile | UncommittedFile)[]) => {
+    setViewedFiles(prev => {
+      const next = { ...prev }
+      for (const file of filesToMark) {
+        if (!next[file.path]) {
+          next[file.path] = { additions: file.additions, deletions: file.deletions }
+        }
+      }
+      persistViewState({ viewedFiles: next })
+      return next
+    })
+  }, [persistViewState])
+
   const isFileViewed = useCallback((filePath: string): boolean => {
     return filePath in viewedFiles
   }, [viewedFiles])
@@ -961,6 +974,7 @@ export default function ReviewBrowser({
                         onScrollToFileHandled={handleScrollToFileHandled}
                         isFileViewed={isFileViewed}
                         onToggleViewed={handleToggleViewed}
+                        onMarkViewedAbove={handleMarkViewedAbove}
                       />
                     </WorkerPoolContextProvider>
                   </div>
@@ -1034,6 +1048,7 @@ export default function ReviewBrowser({
                       onScrollToFileHandled={handleScrollToFileHandled}
                       isFileViewed={isFileViewed}
                       onToggleViewed={handleToggleViewed}
+                      onMarkViewedAbove={handleMarkViewedAbove}
                     />
                   </WorkerPoolContextProvider>
                 </div>
@@ -1135,6 +1150,7 @@ export default function ReviewBrowser({
                       onScrollToFileHandled={handleScrollToFileHandled}
                       isFileViewed={isFileViewed}
                       onToggleViewed={handleToggleViewed}
+                      onMarkViewedAbove={handleMarkViewedAbove}
                     />
                   </WorkerPoolContextProvider>
                 </div>

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, act } from '@testing-library/react'
+import { render, screen, act, fireEvent } from '@testing-library/react'
 import React from 'react'
 
 // Track all IntersectionObserver instances for testing
@@ -158,5 +158,39 @@ describe('StackedDiffList', () => {
 
     render(<StackedDiffList {...defaultProps} scrollToFile="src/a.ts" onScrollToFileHandled={onScrollToFileHandled} />)
     expect(onScrollToFileHandled).toHaveBeenCalled()
+  })
+
+  it('calls onMarkViewedAbove with files above on right-click of viewed label', () => {
+    const files = [makeDiffFile('src/a.ts'), makeDiffFile('src/b.ts'), makeDiffFile('src/c.ts')]
+    const onMarkViewedAbove = vi.fn()
+    render(
+      <StackedDiffList
+        {...defaultProps}
+        files={files}
+        onToggleViewed={vi.fn()}
+        onMarkViewedAbove={onMarkViewedAbove}
+      />
+    )
+    const viewedLabels = screen.getAllByText('Viewed')
+    // Right-click on third file's viewed label (index 2) - should mark files at index 0 and 1
+    fireEvent.contextMenu(viewedLabels[2]!)
+    expect(onMarkViewedAbove).toHaveBeenCalledWith([files[0], files[1]])
+  })
+
+  it('does not call onMarkViewedAbove on right-click of first file viewed label', () => {
+    const files = [makeDiffFile('src/a.ts'), makeDiffFile('src/b.ts')]
+    const onMarkViewedAbove = vi.fn()
+    render(
+      <StackedDiffList
+        {...defaultProps}
+        files={files}
+        onToggleViewed={vi.fn()}
+        onMarkViewedAbove={onMarkViewedAbove}
+      />
+    )
+    const viewedLabels = screen.getAllByText('Viewed')
+    // Right-click on first file's viewed label - should not trigger
+    fireEvent.contextMenu(viewedLabels[0]!)
+    expect(onMarkViewedAbove).not.toHaveBeenCalled()
   })
 })

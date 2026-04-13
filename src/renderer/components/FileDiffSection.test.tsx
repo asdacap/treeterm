@@ -369,4 +369,49 @@ describe('FileDiffSection', () => {
 
     globalThis.requestAnimationFrame = originalRaf
   })
+
+  it('calls onMarkViewedAbove on right-click of viewed label when not first file', () => {
+    const onMarkViewedAbove = vi.fn()
+    render(
+      <FileDiffSection
+        {...defaultProps}
+        isViewed={false}
+        onToggleViewed={vi.fn()}
+        onMarkViewedAbove={onMarkViewedAbove}
+        isFirstFile={false}
+      />
+    )
+    fireEvent.contextMenu(screen.getByText('Viewed'))
+    expect(onMarkViewedAbove).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not call onMarkViewedAbove on right-click when isFirstFile', () => {
+    const onMarkViewedAbove = vi.fn()
+    render(
+      <FileDiffSection
+        {...defaultProps}
+        isViewed={false}
+        onToggleViewed={vi.fn()}
+        onMarkViewedAbove={onMarkViewedAbove}
+        isFirstFile={true}
+      />
+    )
+    fireEvent.contextMenu(screen.getByText('Viewed'))
+    expect(onMarkViewedAbove).not.toHaveBeenCalled()
+  })
+
+  it('right-clicking viewed label does not collapse the section', () => {
+    render(
+      <FileDiffSection
+        {...defaultProps}
+        contents={makeContents()}
+        isViewed={false}
+        onToggleViewed={vi.fn()}
+        onMarkViewedAbove={vi.fn()}
+        isFirstFile={false}
+      />
+    )
+    fireEvent.contextMenu(screen.getByText('Viewed'))
+    expect(screen.getByTestId('multi-file-diff')).toBeDefined()
+  })
 })
