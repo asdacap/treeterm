@@ -66,6 +66,7 @@ export interface SessionState {
   isRestoring: boolean
   sessionVersion: number
   sessionLock: SessionLock | null
+  lastDaemonSessionJson: string
 
   clearWorkspaceError: (id: string) => void
   dismissWorkspace: (id: string) => void
@@ -225,11 +226,11 @@ export function createSessionStore(
       } else {
         if (result.session.version === currentVersion + 1) {
           // Update accepted
-          store.setState({ sessionVersion: result.session.version, sessionLock: result.session.lock })
+          store.setState({ sessionVersion: result.session.version, sessionLock: result.session.lock, lastDaemonSessionJson: JSON.stringify(result.session) })
           console.log('[session] session updated successfully, version:', result.session.version)
         } else {
           // Update rejected (version mismatch) — reconcile from daemon's current state
-          console.log('[session] session update rejected, expected version:', currentVersion + 1, 'got:', result.session.version, '— reconciling')
+          console.warn('[session] session update rejected, expected version:', currentVersion + 1, 'got:', result.session.version, '— reconciling')
           await store.getState().handleExternalUpdate(result.session)
         }
       }
@@ -651,6 +652,7 @@ export function createSessionStore(
     isRestoring: false,
     sessionVersion: 0,
     sessionLock: null,
+    lastDaemonSessionJson: '',
 
     connection: config.connection,
 
@@ -1229,7 +1231,7 @@ export function createSessionStore(
     handleRestore: async (daemonSession: Session) => {
       console.log('[Session] Restoring session', daemonSession.id, 'with', daemonSession.workspaces.length, 'workspaces, version:', daemonSession.version)
 
-      set({ isRestoring: true, sessionVersion: daemonSession.version, sessionLock: daemonSession.lock })
+      set({ isRestoring: true, sessionVersion: daemonSession.version, sessionLock: daemonSession.lock, lastDaemonSessionJson: JSON.stringify(daemonSession) })
       applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: true })
       set({ isRestoring: false })
 
@@ -1240,13 +1242,19 @@ export function createSessionStore(
     handleExternalUpdate: async (daemonSession: Session) => {
       const currentVersion = get().sessionVersion
       if (daemonSession.version <= currentVersion) {
-        console.log('[Session] Ignoring stale external update, incoming version:', daemonSession.version, 'current:', currentVersion)
+        const incomingJson = JSON.stringify(daemonSession)
+        const lastJson = get().lastDaemonSessionJson
+        if (incomingJson !== lastJson) {
+          console.warn('[Session] Stale external update has different content!',
+            'incoming version:', daemonSession.version, 'current:', currentVersion,
+            'incoming:', incomingJson, 'last:', lastJson)
+        }
         return
       }
 
       console.log('[Session] External session update received, version:', daemonSession.version, 'current:', currentVersion)
 
-      set({ isRestoring: true, sessionVersion: daemonSession.version, sessionLock: daemonSession.lock })
+      set({ isRestoring: true, sessionVersion: daemonSession.version, sessionLock: daemonSession.lock, lastDaemonSessionJson: JSON.stringify(daemonSession) })
       applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: false })
 
       // Remove workspaces not present in daemon session (skip non-loaded workspaces)
