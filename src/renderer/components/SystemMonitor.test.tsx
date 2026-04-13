@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 
-import SystemMonitor, { formatBytes, getUtilizationColor, parseMetrics, cpuHistory, pushCpuSample } from './SystemMonitor'
+import SystemMonitor, { formatBytes, getUtilizationColor, parseMetrics, cpuHistory, pushCpuSample, memoryHistory, pushMemorySample } from './SystemMonitor'
 import type { ExecEvent } from '../../shared/ipc-types'
 
 // --- formatBytes ---
@@ -185,7 +185,7 @@ describe('cpuHistory', () => {
     expect(cpuHistory.get('conn-a')![1]!.usagePercent).toBe(20)
   })
 
-  it('caps at MAX_CPU_SAMPLES (60)', () => {
+  it('caps at MAX_SAMPLES (60)', () => {
     for (let i = 0; i < 70; i++) {
       pushCpuSample('conn-a', i)
     }
@@ -202,11 +202,46 @@ describe('cpuHistory', () => {
   })
 })
 
+// --- Memory history ---
+
+describe('memoryHistory', () => {
+  beforeEach(() => {
+    memoryHistory.clear()
+  })
+
+  it('stores samples per connection', () => {
+    pushMemorySample('conn-a', 30)
+    pushMemorySample('conn-a', 40)
+    pushMemorySample('conn-b', 70)
+
+    expect(memoryHistory.get('conn-a')).toHaveLength(2)
+    expect(memoryHistory.get('conn-b')).toHaveLength(1)
+    expect(memoryHistory.get('conn-a')![1]!.usagePercent).toBe(40)
+  })
+
+  it('caps at MAX_SAMPLES (60)', () => {
+    for (let i = 0; i < 70; i++) {
+      pushMemorySample('conn-a', i)
+    }
+    const samples = memoryHistory.get('conn-a')!
+    expect(samples).toHaveLength(60)
+    expect(samples[0]!.usagePercent).toBe(10)
+    expect(samples[59]!.usagePercent).toBe(69)
+  })
+
+  it('returns the current samples array', () => {
+    const result = pushMemorySample('conn-a', 55)
+    expect(result).toHaveLength(1)
+    expect(result[0]!.usagePercent).toBe(55)
+  })
+})
+
 // --- Component rendering ---
 
 describe('SystemMonitor component', () => {
   beforeEach(() => {
     cpuHistory.clear()
+    memoryHistory.clear()
   })
 
   it('shows loading state initially', () => {
@@ -219,7 +254,7 @@ describe('SystemMonitor component', () => {
     expect(screen.getByText('Collecting system metrics...')).toBeDefined()
   })
 
-  it('renders CPU graph and process buttons after metrics load', async () => {
+  it('renders CPU and memory graphs and process buttons after metrics load', async () => {
     let capturedCallback: ((event: ExecEvent) => void) | null = null
     const mockExec = {
       start: () => Promise.resolve({ success: true as const, execId: 'exec-1' }),
@@ -238,9 +273,10 @@ describe('SystemMonitor component', () => {
       capturedCallback!({ type: 'exit', exitCode: 0 })
     })
 
-    // CPU graph SVG should be rendered
+    // CPU and memory graph SVGs should be rendered
     expect(screen.getByTestId('cpu-graph-svg')).toBeDefined()
-    // Current value shown
+    expect(screen.getByTestId('mem-graph-svg')).toBeDefined()
+    // Current CPU value shown
     expect(screen.getByText('23.5%')).toBeDefined()
 
     const stopButtons = screen.getAllByTitle('Stop (SIGTERM)')
@@ -303,10 +339,13 @@ describe('SystemMonitor component', () => {
     // Data stored in module-level map
     expect(cpuHistory.get('persist-conn')).toHaveLength(1)
     expect(cpuHistory.get('persist-conn')![0]!.usagePercent).toBe(23.5)
+    expect(memoryHistory.get('persist-conn')).toHaveLength(1)
+    expect(memoryHistory.get('persist-conn')![0]!.usagePercent).toBeCloseTo(50, 1)
 
     unmount()
 
     // History persists after unmount
     expect(cpuHistory.get('persist-conn')).toHaveLength(1)
+    expect(memoryHistory.get('persist-conn')).toHaveLength(1)
   })
 })
