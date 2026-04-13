@@ -31,7 +31,7 @@ The daemon survives app restarts — terminal sessions and state persist when El
   - **Filesystem** - File browser and viewer
   - **Editor** - Monaco-based code editor with vim mode, go-to-definition via grep-based search
   - **AI Harness** - Integration with configurable AI CLI tools (Claude is the default)
-  - **Review** - Review and merge changes from parent workspaces with collapsible diff tree view
+  - **Review** - Review and merge changes from parent workspaces with collapsible diff tree view, powered by [@pierre/diffs](https://www.npmjs.com/package/@pierre/diffs) (from [Pierre](https://github.com/nichochar/pierre))
   - **Chat** - Built-in LLM chat with configurable model, reasoning, and effort level settings
   - **Comments** - Comment display and management
   - **Terminal Analyzer Debugger** - Debug and inspect AI system prompts with model/reasoning/timing controls
@@ -215,6 +215,7 @@ All keybindings are customizable in settings.
 - **forkpty** - Pseudo-terminal creation (in the Rust daemon via libc)
 - **@grpc/grpc-js** + **ts-proto** - gRPC communication between Main and Daemon
 - **Monaco Editor** - Code editor with vim mode support (monaco-vim)
+- **@pierre/diffs** - Diff viewer with Shiki syntax highlighting
 - **pino** - Structured logging
 - **lucide-react** - Icons
 - **OpenAI SDK** - Speech-to-text via Whisper API
