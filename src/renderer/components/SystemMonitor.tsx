@@ -57,7 +57,7 @@ echo "OS=$OS"
 if [ "$OS" = "Linux" ]; then
   CPU_LINE=$(top -bn1 2>/dev/null | grep "Cpu(s)" | head -1)
   if [ -n "$CPU_LINE" ]; then
-    IDLE=$(echo "$CPU_LINE" | sed 's/.* \\([0-9.]*\\)[ ]*id.*/\\1/')
+    IDLE=$(echo "$CPU_LINE" | sed 's/.* \\([0-9.][0-9.]*\\)[ ]*id.*/\\1/')
     USAGE=$(awk "BEGIN {printf \\"%.1f\\", 100 - $IDLE}")
     echo "CPU_USAGE=$USAGE"
   else
