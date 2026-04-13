@@ -255,11 +255,11 @@ export function createSessionStore(
 
   function getActiveTabSnapshot(): Record<string, string | null> {
     const snapshot: Record<string, string | null> = {}
-    for (const [id, entry] of store.getState().workspaces) {
+    store.getState().workspaces.forEach((entry, id) => {
       if (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) {
         snapshot[id] = entry.store.getState().workspace.activeTabId
       }
-    }
+    })
     return snapshot
   }
 
