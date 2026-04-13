@@ -748,6 +748,106 @@ describe('createSessionStore', () => {
     })
   })
 
+  describe('moveWorkspace', () => {
+    function getLoadedData(id: string) {
+      const entry = store.getState().workspaces.get(id)
+      if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return null
+      return entry.data
+    }
+
+    it('no-ops when drag workspace does not exist', async () => {
+      const id = store.getState().addWorkspace('/test')
+      await flushPromises()
+      store.getState().moveWorkspace('nonexistent', id, 'onto')
+      // Should not throw
+    })
+
+    it('no-ops when target workspace does not exist', async () => {
+      const id = store.getState().addWorkspace('/test')
+      await flushPromises()
+      store.getState().moveWorkspace(id, 'nonexistent', 'onto')
+      // Should not throw
+    })
+
+    it('no-ops when drag and target are the same', async () => {
+      const id = store.getState().addWorkspace('/test')
+      await flushPromises()
+      store.getState().moveWorkspace(id, id, 'onto')
+      expect(getLoadedData(id)?.parentId).toBeNull()
+    })
+
+    it('delegates to reorderWorkspace for same-parent before/after', async () => {
+      const id1 = store.getState().addWorkspace('/test1')
+      const id2 = store.getState().addWorkspace('/test2')
+      await flushPromises()
+      // id1 sortOrder=0, id2 sortOrder=1
+      store.getState().moveWorkspace(id1, id2, 'after')
+      // id1 should now be after id2: sortOrder id2=0, id1=1
+      expect(parseInt(getLoadedData(id1)?.metadata.sortOrder || '0')).toBeGreaterThan(
+        parseInt(getLoadedData(id2)?.metadata.sortOrder || '0')
+      )
+    })
+
+    it('reparents workspace onto target', async () => {
+      const parent = store.getState().addWorkspace('/parent')
+      const child = store.getState().addWorkspace('/child')
+      await flushPromises()
+      expect(getLoadedData(child)?.parentId).toBeNull()
+
+      store.getState().moveWorkspace(child, parent, 'onto')
+      expect(getLoadedData(child)?.parentId).toBe(parent)
+    })
+
+    it('moves workspace before target in different parent group', async () => {
+      const root1 = store.getState().addWorkspace('/root1')
+      const root2 = store.getState().addWorkspace('/root2')
+      await flushPromises()
+      // Create children under root1
+      store.getState().addChildWorkspace(root1, 'child-a')
+      await flushPromises()
+      const childA = Array.from(store.getState().workspaces.entries())
+        .find(([, e]) => e.status === WorkspaceEntryStatus.Loaded && e.data.name === 'child-a')?.[0]
+
+      // Move root2 before childA (which has parentId=root1)
+      store.getState().moveWorkspace(root2, childA!, 'before')
+      // root2 should now have parentId=root1
+      expect(getLoadedData(root2)?.parentId).toBe(root1)
+      // root2 should be before childA in sort order
+      expect(parseInt(getLoadedData(root2)?.metadata.sortOrder || '0')).toBeLessThan(
+        parseInt(getLoadedData(childA!)?.metadata.sortOrder || '0')
+      )
+    })
+
+    it('prevents cycle when dropping onto own descendant', async () => {
+      const parent = store.getState().addWorkspace('/parent')
+      await flushPromises()
+      store.getState().addChildWorkspace(parent, 'child')
+      await flushPromises()
+      const child = Array.from(store.getState().workspaces.entries())
+        .find(([, e]) => e.status === WorkspaceEntryStatus.Loaded && e.data.name === 'child')?.[0]
+
+      // Try to drop parent onto its own child — should be a no-op
+      store.getState().moveWorkspace(parent, child!, 'onto')
+      expect(getLoadedData(parent)?.parentId).toBeNull()
+    })
+
+    it('reindexes old siblings after reparent', async () => {
+      const ws1 = store.getState().addWorkspace('/ws1')
+      const ws2 = store.getState().addWorkspace('/ws2')
+      const ws3 = store.getState().addWorkspace('/ws3')
+      const target = store.getState().addWorkspace('/target')
+      await flushPromises()
+      // ws1=0, ws2=1, ws3=2, target=3
+
+      // Move ws2 onto target — remaining roots should be ws1=0, ws3=1, target=2
+      store.getState().moveWorkspace(ws2, target, 'onto')
+      expect(getLoadedData(ws2)?.parentId).toBe(target)
+      expect(getLoadedData(ws1)?.metadata.sortOrder).toBe('0')
+      expect(getLoadedData(ws3)?.metadata.sortOrder).toBe('1')
+      expect(getLoadedData(target)?.metadata.sortOrder).toBe('2')
+    })
+  })
+
   describe('addChildWorkspace error paths', () => {
     it('handles createWorktree failure', async () => {
       vi.mocked(deps.git.createWorktree).mockResolvedValue({ success: false, error: 'already exists' })
