@@ -56,9 +56,6 @@ const mockWorkspaceStoreStateData = {
   createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
   connectionId: 'local',
   updateSettings: vi.fn(),
-  focusTabId: null,
-  requestFocus: vi.fn(),
-  clearFocusRequest: vi.fn(),
   gitController: createStore<GitControllerState>()(() => ({
     hasUncommittedChanges: false,
     isDiffCleanFromParent: false,

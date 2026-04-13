@@ -43,7 +43,6 @@ const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => ({
   initAnalyzer: vi.fn(), createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
   connectionId: 'local', updateSettings: vi.fn(),
   gitApi: createMockGitApi(), filesystemApi: createMockFilesystemApi(), runActionsApi: createMockRunActionsApi(), execApi: createMockExecApi(),
-  focusTabId: null, requestFocus: vi.fn(), clearFocusRequest: vi.fn(),
   gitController: createStore<GitControllerState>()(() => ({
     hasUncommittedChanges: false, isDiffCleanFromParent: false,
     hasConflictsWithParent: false, behindCount: 0, pullLoading: false,

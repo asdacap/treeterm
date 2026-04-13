@@ -250,17 +250,14 @@ export default function BaseTerminal({
             (state) => { setTabState(tabId, state); }
           )
 
-      // Focus subscription
+      // Focus when this tab becomes active
       unsubscribeFocus = workspace.subscribe((state) => {
-        if (state.focusTabId === tabId && terminalRef.current) {
+        if (state.workspace.activeTabId === tabId && terminalRef.current) {
           terminalRef.current.focus()
-          state.clearFocusRequest()
         }
       })
-      const currentWsState = workspace.getState()
-      if (currentWsState.focusTabId === tabId) {
+      if (workspace.getState().workspace.activeTabId === tabId) {
         terminal.focus()
-        currentWsState.clearFocusRequest()
       }
 
       // Set mounted handler — the background subscription forwards all events here
@@ -375,8 +372,11 @@ export default function BaseTerminal({
         initialResizeDone = true
       }, 100)
 
-      // Forward terminal input to PTY
+      // Forward terminal input to PTY only when this tab is active.
+      // Inactive tabs can't receive keystrokes so any onData during
+      // replay is an auto-response (OSC 11, DA, etc.) — drop it.
       inputDisposable = terminal.onData((data) => {
+        if (workspace.getState().workspace.activeTabId !== tabId) return
         if (ttyRef.current) {
           writeChunked(ttyRef.current.getState(), data)
         }

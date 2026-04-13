@@ -106,11 +106,6 @@ export interface WorkspaceStoreState {
   // Git controller (polling, diff status, PR status)
   gitController: GitController
 
-  // Focus signal (ephemeral, not persisted)
-  focusTabId: string | null
-  requestFocus: () => void
-  clearFocusRequest: () => void
-
   // Other per-workspace
   promptHarness: (text: string) => Promise<boolean>
   updateMetadata: (key: string, value: string) => void
@@ -181,7 +176,7 @@ export function createWorkspaceStore(
     updateMetadata: (key, value) => { store.getState().updateMetadata(key, value); },
   })
 
-  store = createStore<WorkspaceStoreState>()((set, get) => ({
+  store = createStore<WorkspaceStoreState>()((_set, get) => ({
     workspace,
 
     gitController,
@@ -345,9 +340,6 @@ export function createWorkspaceStore(
       deps.syncToDaemon()
     },
 
-    focusTabId: null,
-    requestFocus: (): void => { set({ focusTabId: get().workspace.activeTabId }); },
-    clearFocusRequest: (): void => { set({ focusTabId: null }); },
 
     updateTabTitle: (tabId: string, title: string): void => {
       updateWorkspace((ws) => ({
