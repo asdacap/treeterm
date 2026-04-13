@@ -1,22 +1,16 @@
-import React, { useState } from 'react'
-import { MultiFileDiff, WorkerPoolContextProvider } from '@pierre/diffs/react'
+import React from 'react'
+import { MultiFileDiff } from '@pierre/diffs/react'
 import type { DiffLineAnnotation, OnDiffLineClickProps, AnnotationSide } from '@pierre/diffs'
-import { ChevronLeft, ChevronRight, Columns2, AlignJustify, Eye, EyeOff, MessageSquare } from 'lucide-react'
 import type { ReviewComment } from '../types'
 import { CommentInput } from './CommentInput'
 import { CommentDisplay } from './CommentDisplay'
-import { createDiffsWorker } from '../pierre-diffs-config'
 
 interface PierreDiffViewerProps {
   originalContent: string
   modifiedContent: string
   filePath: string
-  originalLabel: string
-  modifiedLabel: string
-  onPreviousFile?: () => void
-  onNextFile?: () => void
-  hasPreviousFile: boolean
-  hasNextFile: boolean
+  diffStyle: 'split' | 'unified'
+  expandUnchanged: boolean
   comments: ReviewComment[]
   onLineClick?: (lineNumber: number, side: 'original' | 'modified') => void
   inlineCommentInput: { lineNumber: number; side: 'original' | 'modified' } | null
@@ -43,12 +37,8 @@ export function PierreDiffViewer({
   originalContent,
   modifiedContent,
   filePath,
-  originalLabel,
-  modifiedLabel,
-  onPreviousFile,
-  onNextFile,
-  hasPreviousFile,
-  hasNextFile,
+  diffStyle,
+  expandUnchanged,
   comments,
   onLineClick,
   inlineCommentInput,
@@ -56,9 +46,6 @@ export function PierreDiffViewer({
   onCommentCancel,
   onCommentDelete,
 }: PierreDiffViewerProps): React.JSX.Element {
-  const [isSplitView, setIsSplitView] = useState(true)
-  const [hideUnchangedRegions, setHideUnchangedRegions] = useState(false)
-
   const handleLineNumberClick = (props: OnDiffLineClickProps) => {
     onLineClick?.(props.lineNumber, annotationToSide(props.annotationSide))
   }
@@ -133,84 +120,23 @@ export function PierreDiffViewer({
   }
 
   return (
-    <WorkerPoolContextProvider
-      poolOptions={{ workerFactory: createDiffsWorker, poolSize: 2 }}
-      highlighterOptions={{ preferredHighlighter: 'shiki-wasm' }}
-    >
-      <div className="pierre-diff-wrapper">
-        <div className="pierre-diff-toolbar">
-          <div className="pierre-diff-labels">
-            <span className="pierre-diff-label">{originalLabel}</span>
-            <span className="pierre-diff-arrow">→</span>
-            <span className="pierre-diff-label">{modifiedLabel}</span>
-          </div>
-
-          <div className="pierre-diff-controls">
-            {onPreviousFile && (
-              <button
-                className="pierre-diff-btn"
-                onClick={onPreviousFile}
-                disabled={!hasPreviousFile}
-                title="Previous file"
-              >
-                <ChevronLeft size={14} />
-              </button>
-            )}
-            {onNextFile && (
-              <button
-                className="pierre-diff-btn"
-                onClick={onNextFile}
-                disabled={!hasNextFile}
-                title="Next file"
-              >
-                <ChevronRight size={14} />
-              </button>
-            )}
-
-            <button
-              className={`pierre-diff-btn ${isSplitView ? 'active' : ''}`}
-              onClick={() => { setIsSplitView(!isSplitView) }}
-              title={isSplitView ? 'Switch to unified view' : 'Switch to split view'}
-            >
-              {isSplitView ? <Columns2 size={14} /> : <AlignJustify size={14} />}
-            </button>
-
-            <button
-              className={`pierre-diff-btn ${hideUnchangedRegions ? 'active' : ''}`}
-              onClick={() => { setHideUnchangedRegions(!hideUnchangedRegions) }}
-              title={hideUnchangedRegions ? 'Show unchanged regions' : 'Hide unchanged regions'}
-            >
-              {hideUnchangedRegions ? <EyeOff size={14} /> : <Eye size={14} />}
-            </button>
-
-            {comments.length > 0 && (
-              <span className="pierre-diff-comment-count" title={`${String(comments.length)} comment(s)`}>
-                <MessageSquare size={14} />
-                {comments.length}
-              </span>
-            )}
-          </div>
-        </div>
-
-        <div className="pierre-diff-content">
-          <MultiFileDiff<CommentAnnotationData>
-            oldFile={{ name: filePath, contents: originalContent }}
-            newFile={{ name: filePath, contents: modifiedContent }}
-            lineAnnotations={lineAnnotations}
-            renderAnnotation={renderAnnotation}
-            options={{
-              diffStyle: isSplitView ? 'split' : 'unified',
-              expandUnchanged: !hideUnchangedRegions,
-              theme: 'treeterm-dark',
-              themeType: 'dark',
-              disableFileHeader: true,
-              overflow: 'wrap',
-              onLineNumberClick: handleLineNumberClick,
-            }}
-            style={{ height: '100%', width: '100%' }}
-          />
-        </div>
-      </div>
-    </WorkerPoolContextProvider>
+    <div className="pierre-diff-content">
+      <MultiFileDiff<CommentAnnotationData>
+        oldFile={{ name: filePath, contents: originalContent }}
+        newFile={{ name: filePath, contents: modifiedContent }}
+        lineAnnotations={lineAnnotations}
+        renderAnnotation={renderAnnotation}
+        options={{
+          diffStyle,
+          expandUnchanged,
+          theme: 'treeterm-dark',
+          themeType: 'dark',
+          disableFileHeader: true,
+          overflow: 'wrap',
+          onLineNumberClick: handleLineNumberClick,
+        }}
+        style={{ height: '100%', width: '100%' }}
+      />
+    </div>
   )
 }

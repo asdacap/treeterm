@@ -140,7 +140,6 @@ export interface ReviewState {
   parentWorkspaceId?: string
   viewMode: 'committed' | 'uncommitted' | 'commits'
   selectedFilePath?: string
-  selectedUncommittedFilePath?: string
   scrollTop?: number
 }
 

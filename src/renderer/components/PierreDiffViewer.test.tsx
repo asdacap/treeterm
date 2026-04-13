@@ -58,10 +58,8 @@ const defaultProps = {
   originalContent: 'line1\nline2\n',
   modifiedContent: 'line1\nline2 changed\n',
   filePath: 'src/test.ts',
-  originalLabel: 'base',
-  modifiedLabel: 'head',
-  hasPreviousFile: false,
-  hasNextFile: false,
+  diffStyle: 'split' as const,
+  expandUnchanged: true,
   comments: [] as ReviewComment[],
   inlineCommentInput: null,
 }
@@ -78,32 +76,27 @@ describe('PierreDiffViewer', () => {
     expect(diff.getAttribute('data-new-name')).toBe('src/test.ts')
   })
 
-  it('renders labels in toolbar', () => {
-    render(<PierreDiffViewer {...defaultProps} />)
-    expect(screen.getByText('base')).toBeDefined()
-    expect(screen.getByText('head')).toBeDefined()
-  })
-
-  it('defaults to split view', () => {
-    render(<PierreDiffViewer {...defaultProps} />)
+  it('passes diffStyle prop to MultiFileDiff', () => {
+    render(<PierreDiffViewer {...defaultProps} diffStyle="split" />)
     const diff = screen.getByTestId('multi-file-diff')
     expect(diff.getAttribute('data-diff-style')).toBe('split')
   })
 
-  it('toggles to unified view on button click', () => {
-    render(<PierreDiffViewer {...defaultProps} />)
-    const toggleBtn = screen.getByTitle('Switch to unified view')
-    fireEvent.click(toggleBtn)
+  it('passes unified diffStyle to MultiFileDiff', () => {
+    render(<PierreDiffViewer {...defaultProps} diffStyle="unified" />)
     const diff = screen.getByTestId('multi-file-diff')
     expect(diff.getAttribute('data-diff-style')).toBe('unified')
   })
 
-  it('toggles hide unchanged regions', () => {
-    render(<PierreDiffViewer {...defaultProps} />)
+  it('passes expandUnchanged prop to MultiFileDiff', () => {
+    render(<PierreDiffViewer {...defaultProps} expandUnchanged={true} />)
     const diff = screen.getByTestId('multi-file-diff')
     expect(diff.getAttribute('data-expand-unchanged')).toBe('true')
-    const toggleBtn = screen.getByTitle('Hide unchanged regions')
-    fireEvent.click(toggleBtn)
+  })
+
+  it('passes expandUnchanged false to MultiFileDiff', () => {
+    render(<PierreDiffViewer {...defaultProps} expandUnchanged={false} />)
+    const diff = screen.getByTestId('multi-file-diff')
     expect(diff.getAttribute('data-expand-unchanged')).toBe('false')
   })
 
@@ -111,43 +104,6 @@ describe('PierreDiffViewer', () => {
     render(<PierreDiffViewer {...defaultProps} />)
     const diff = screen.getByTestId('multi-file-diff')
     expect(diff.getAttribute('data-disable-file-header')).toBe('true')
-  })
-
-  it('does not render navigation buttons when no handlers provided', () => {
-    render(<PierreDiffViewer {...defaultProps} />)
-    expect(screen.queryByTitle('Previous file')).toBeNull()
-    expect(screen.queryByTitle('Next file')).toBeNull()
-  })
-
-  it('renders navigation buttons when handlers provided', () => {
-    const onPrev = vi.fn()
-    const onNext = vi.fn()
-    render(
-      <PierreDiffViewer
-        {...defaultProps}
-        onPreviousFile={onPrev}
-        onNextFile={onNext}
-        hasPreviousFile={true}
-        hasNextFile={false}
-      />
-    )
-    const prevBtn = screen.getByTitle('Previous file')
-    const nextBtn = screen.getByTitle('Next file')
-    expect((prevBtn as HTMLButtonElement).disabled).toBe(false)
-    expect((nextBtn as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.click(prevBtn)
-    expect(onPrev).toHaveBeenCalledTimes(1)
-  })
-
-  it('shows comment count when comments exist', () => {
-    const comments = [makeComment({ id: 'c1' }), makeComment({ id: 'c2' })]
-    render(<PierreDiffViewer {...defaultProps} comments={comments} />)
-    expect(screen.getByTitle('2 comment(s)')).toBeDefined()
-  })
-
-  it('does not show comment count when no comments', () => {
-    render(<PierreDiffViewer {...defaultProps} />)
-    expect(screen.queryByTitle(/comment/)).toBeNull()
   })
 
   it('renders comment text when comments are provided', () => {

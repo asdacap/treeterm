@@ -6747,3 +6747,136 @@ body,
   border-top: 1px solid var(--border-color);
   background: var(--bg-secondary);
 }
+
+/* Global diff toolbar */
+.diff-toolbar-global {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 4px 8px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.diff-toolbar-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Stacked diff list */
+.stacked-diff-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  --diffs-font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  --diffs-font-size: 12px;
+  --diffs-line-height: 18px;
+  --diffs-bg-buffer-override: var(--bg-secondary);
+  --diffs-bg-hover-override: var(--bg-hover);
+  --diffs-bg-context-override: var(--bg-primary);
+  --diffs-fg-number-override: var(--text-secondary);
+  --diffs-addition-color-override: #3fb950;
+  --diffs-deletion-color-override: #f85149;
+  --diffs-modified-color-override: #d29922;
+  --diffs-selection-color-override: var(--bg-active);
+}
+
+/* File diff section */
+.file-diff-section {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.file-diff-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-tertiary, #2d2d2d);
+  border-bottom: 1px solid var(--border-color);
+  cursor: pointer;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  font-size: 12px;
+  user-select: none;
+}
+
+.file-diff-header:hover {
+  background: var(--bg-hover);
+}
+
+.file-diff-header.collapsed {
+  border-bottom: none;
+}
+
+.file-diff-collapse-icon {
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.file-diff-path {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+}
+
+.file-diff-stats {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.file-diff-stage-btn {
+  font-size: 11px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.file-diff-stage-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.file-diff-stage-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.file-diff-body {
+  min-height: 40px;
+}
+
+.file-diff-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.file-diff-error {
+  padding: 12px;
+  color: var(--error-text, #f85149);
+  font-size: 12px;
+}
+
+.file-diff-placeholder {
+  padding: 16px 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-style: italic;
+}

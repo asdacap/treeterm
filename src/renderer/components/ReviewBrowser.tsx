@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { ChevronDown, RefreshCw, Loader2 } from 'lucide-react'
+import { WorkerPoolContextProvider } from '@pierre/diffs/react'
 import { useStore } from 'zustand'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
 import { getTabs } from '../types'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, GitLogCommit, WorkspaceStore, ReviewState } from '../types'
 import { FileChangeStatus } from '../types'
 import { useGitApi } from '../hooks/useWorkspaceApis'
-import { PierreDiffViewer } from './PierreDiffViewer'
-import { CommittedDiffFileTree, UncommittedDiffFileTree, getSortedFilePaths } from './DiffFileTree'
+import { CommittedDiffFileTree, UncommittedDiffFileTree } from './DiffFileTree'
+import { StackedDiffList } from './StackedDiffList'
+import { DiffToolbar } from './DiffToolbar'
+import { createDiffsWorker } from '../pierre-diffs-config'
 
 interface ReviewBrowserProps {
   workspace: WorkspaceStore
@@ -58,14 +61,16 @@ export default function ReviewBrowser({
   const [diff, setDiff] = useState<DiffResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedFile, setSelectedFile] = useState(reviewState?.selectedFilePath ?? null)
-  const [fileDiffContents, setFileDiffContents] = useState<FileDiffContents | null>(null)
-  const [loadingFileDiff, setLoadingFileDiff] = useState(false)
+
+  // Stacked diff view state
+  const [isSplitView, setIsSplitView] = useState(true)
+  const [hideUnchangedRegions, setHideUnchangedRegions] = useState(false)
+  const [scrollToFile, setScrollToFile] = useState<string | null>(reviewState?.selectedFilePath ?? null)
+  const [activeFile, setActiveFile] = useState<string | null>(null)
 
   // Uncommitted changes state
   const [uncommitted, setUncommitted] = useState<UncommittedChanges | null>(null)
   const [viewMode, setViewMode] = useState((reviewState?.viewMode as ViewMode | undefined) ?? (hasParent ? ViewMode.Committed : ViewMode.Uncommitted))
-  const [selectedUncommittedFile, setSelectedUncommittedFile] = useState<UncommittedFile | null>(null)
 
   // Staging state
   const [stagingInProgress, setStagingInProgress] = useState(false)
@@ -90,7 +95,7 @@ export default function ReviewBrowser({
   // Reviews state
   const reviews = getReviewComments()
   const [commentInput, setCommentInput] = useState<{
-    visible: boolean
+    filePath: string
     lineNumber: number
     side: 'original' | 'modified'
   } | null>(null)
@@ -108,7 +113,6 @@ export default function ReviewBrowser({
   const [selectedCommit, setSelectedCommit] = useState<GitLogCommit | null>(null)
   const [commitDiffFiles, setCommitDiffFiles] = useState<DiffFile[]>([])
   const [commitDiffLoading, setCommitDiffLoading] = useState(false)
-  const [selectedCommitFile, setSelectedCommitFile] = useState<string | null>(null)
 
   // AI harness prompt support
   const runningHarness = findRunningHarness(getTabs(wsData))
@@ -174,10 +178,6 @@ export default function ReviewBrowser({
     setIsResizing(false)
   }, [])
 
-  // Track whether we need to restore persisted file selection after initial data load
-  const pendingRestoreRef = useRef(
-    !!(reviewState?.selectedFilePath || reviewState?.selectedUncommittedFilePath)
-  )
   // Capture initial viewMode for mount-only commits loading (tab click handler loads on interaction)
   const [initialViewMode] = useState(viewMode)
 
@@ -204,31 +204,6 @@ export default function ReviewBrowser({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- initialViewMode is intentionally excluded: it captures the mount-time value and should not re-trigger the effect
   }, [workspaceId, parentWorkspaceId, currentGitBranch, parentGitBranch])
-
-  // Auto-restore persisted file selection after initial data load
-  useEffect(() => {
-    if (!pendingRestoreRef.current) return
-
-    if (viewMode === ViewMode.Committed && diff && reviewState?.selectedFilePath) {
-      const fileExists = diff.files.some(f => f.path === reviewState.selectedFilePath)
-      if (fileExists) {
-        pendingRestoreRef.current = false
-        void helpersRef.current.loadFileDiff(reviewState.selectedFilePath)
-      }
-    }
-  }, [diff, viewMode, reviewState?.selectedFilePath])
-
-  useEffect(() => {
-    if (!pendingRestoreRef.current) return
-
-    if (viewMode === ViewMode.Uncommitted && uncommitted && reviewState?.selectedUncommittedFilePath) {
-      const file = uncommitted.files.find(f => f.path === reviewState.selectedUncommittedFilePath)
-      if (file) {
-        pendingRestoreRef.current = false
-        void helpersRef.current.loadUncommittedFileDiff(file)
-      }
-    }
-  }, [uncommitted, viewMode, reviewState?.selectedUncommittedFilePath])
 
   const loadReviews = async () => {
     try {
@@ -296,8 +271,6 @@ export default function ReviewBrowser({
   const loadCommitDiff = async (commit: GitLogCommit) => {
     setSelectedCommit(commit)
     setCommitDiffFiles([])
-    setSelectedCommitFile(null)
-    setFileDiffContents(null)
     setCommitDiffLoading(true)
     try {
       const result = await git.getCommitDiff(commit.hash)
@@ -308,24 +281,6 @@ export default function ReviewBrowser({
       setLoadError(`Failed to load commit diff: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
     setCommitDiffLoading(false)
-  }
-
-  const loadCommitFileDiff = async (commitHash: string, filePath: string) => {
-    setSelectedCommitFile(filePath)
-    setLoadingFileDiff(true)
-    setFileDiffContents(null)
-    setLoadError(null)
-    try {
-      const result = await git.getCommitFileDiff(commitHash, filePath)
-      if (result.success) {
-        setFileDiffContents(result.contents)
-      } else {
-        setLoadError(result.error || 'Failed to load commit file diff')
-      }
-    } catch (err) {
-      setLoadError(`Failed to load commit file diff: ${err instanceof Error ? err.message : 'Unknown error'}`)
-    }
-    setLoadingFileDiff(false)
   }
 
   const checkConflicts = async () => {
@@ -349,59 +304,31 @@ export default function ReviewBrowser({
     setIsCheckingConflicts(false)
   }
 
-  const loadFileDiff = async (filePath: string) => {
-    if (!parentWorkspace?.gitBranch) return
+  // Load file contents callbacks for StackedDiffList
+  const loadCommittedFileContents = useCallback(async (filePath: string): Promise<FileDiffContents> => {
+    if (!parentWorkspace?.gitBranch) throw new Error('No parent branch')
+    const result = await git.getFileContentsForDiff(parentWorkspace.gitBranch, filePath)
+    if (result.success) return result.contents
+    throw new Error(result.error || 'Failed to load file diff')
+  }, [git, parentWorkspace?.gitBranch])
 
-    setSelectedFile(filePath)
-    setSelectedUncommittedFile(null)
-    // Don't clear scrollTop during restore — only on user-initiated file selection
-    if (!pendingRestoreRef.current) {
-      persistViewState({ selectedFilePath: filePath, selectedUncommittedFilePath: undefined, scrollTop: undefined })
-    }
-    setLoadingFileDiff(true)
-    setFileDiffContents(null)
-    setLoadError(null)
-    try {
-      const result = await git.getFileContentsForDiff(parentWorkspace.gitBranch, filePath)
-      if (result.success) {
-        setFileDiffContents(result.contents)
-      } else {
-        setFileDiffContents(null)
-        setLoadError(result.error || 'Failed to load file diff')
-      }
-    } catch (err) {
-      setFileDiffContents(null)
-      setLoadError(`Failed to load file diff: ${err instanceof Error ? err.message : 'Unknown error'}`)
-    }
-    setLoadingFileDiff(false)
-  }
+  const loadUncommittedFileContents = useCallback(async (filePath: string): Promise<FileDiffContents> => {
+    const file = uncommitted?.files.find(f => f.path === filePath)
+    if (!file) throw new Error(`File not found: ${filePath}`)
+    const result = await git.getUncommittedFileContentsForDiff(filePath, file.staged)
+    if (result.success) return result.contents
+    throw new Error(result.error || 'Failed to load uncommitted file diff')
+  }, [git, uncommitted?.files])
 
-  const loadUncommittedFileDiff = async (file: UncommittedFile) => {
-    setSelectedUncommittedFile(file)
-    setSelectedFile(null)
-    if (!pendingRestoreRef.current) {
-      persistViewState({ selectedUncommittedFilePath: file.path, selectedFilePath: undefined, scrollTop: undefined })
-    }
-    setLoadingFileDiff(true)
-    setFileDiffContents(null)
-    setLoadError(null)
-    try {
-      const result = await git.getUncommittedFileContentsForDiff(file.path, file.staged)
-      if (result.success) {
-        setFileDiffContents(result.contents)
-      } else {
-        setFileDiffContents(null)
-        setLoadError(result.error || 'Failed to load uncommitted file diff')
-      }
-    } catch (err) {
-      setFileDiffContents(null)
-      setLoadError(`Failed to load uncommitted file diff: ${err instanceof Error ? err.message : 'Unknown error'}`)
-    }
-    setLoadingFileDiff(false)
-  }
+  const loadCommitFileContents = useCallback(async (filePath: string): Promise<FileDiffContents> => {
+    if (!selectedCommit) throw new Error('No commit selected')
+    const result = await git.getCommitFileDiff(selectedCommit.hash, filePath)
+    if (result.success) return result.contents
+    throw new Error(result.error || 'Failed to load commit file diff')
+  }, [git, selectedCommit])
 
-  const helpersRef = useRef({ loadDiff, loadReviews, loadUncommittedChanges, checkConflicts, loadCommits, loadFileDiff, loadUncommittedFileDiff })
-  helpersRef.current = { loadDiff, loadReviews, loadUncommittedChanges, checkConflicts, loadCommits, loadFileDiff, loadUncommittedFileDiff }
+  const helpersRef = useRef({ loadDiff, loadReviews, loadUncommittedChanges, checkConflicts, loadCommits })
+  helpersRef.current = { loadDiff, loadReviews, loadUncommittedChanges, checkConflicts, loadCommits }
 
   const handleStageFile = async (filePath: string) => {
     setStagingInProgress(true)
@@ -629,49 +556,17 @@ export default function ReviewBrowser({
   const hasCommittedChanges = diff && diff.files.length > 0
   const hasConflicts = conflictInfo?.hasConflicts || false
 
-  const fileList = viewMode === ViewMode.Committed
-    ? getSortedFilePaths(diff?.files || [])
-    : getSortedFilePaths([...stagedFiles, ...unstagedFiles])
-
-  const currentFileIndex = selectedFile
-    ? fileList.indexOf(selectedFile)
-    : selectedUncommittedFile
-      ? fileList.indexOf(selectedUncommittedFile.path)
-      : -1
-
-  const handlePreviousFile = () => {
-    if (currentFileIndex > 0) {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- currentFileIndex > 0 guarantees valid index
-      const prevFilePath = fileList[currentFileIndex - 1]!
-      if (viewMode === ViewMode.Committed) {
-        void loadFileDiff(prevFilePath)
-      } else {
-        const prevFile = [...stagedFiles, ...unstagedFiles].find(f => f.path === prevFilePath)
-        if (prevFile) void loadUncommittedFileDiff(prevFile)
-      }
-    }
+  const handleLineClick = (filePath: string, lineNumber: number, side: 'original' | 'modified') => {
+    setCommentInput({ filePath, lineNumber, side })
   }
 
-  const handleNextFile = () => {
-    if (currentFileIndex < fileList.length - 1) {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- currentFileIndex < length - 1 guarantees valid index
-      const nextFilePath = fileList[currentFileIndex + 1]!
-      if (viewMode === ViewMode.Committed) {
-        void loadFileDiff(nextFilePath)
-      } else {
-        const nextFile = [...stagedFiles, ...unstagedFiles].find(f => f.path === nextFilePath)
-        if (nextFile) void loadUncommittedFileDiff(nextFile)
-      }
-    }
-  }
-
-  const handleLineClick = (lineNumber: number, side: 'original' | 'modified') => {
-    setCommentInput({ visible: true, lineNumber, side })
-  }
+  const handleScrollToFileHandled = useCallback(() => {
+    setScrollToFile(null)
+  }, [])
 
   const handleCommentSubmit = (text: string) => {
-    const filePath = selectedFile || selectedUncommittedFile?.path
-    if (!commentInput || !currentCommitHash || !filePath) return
+    if (!commentInput || !currentCommitHash) return
+    const filePath = commentInput.filePath
 
     try {
       addReviewComment({
@@ -694,10 +589,22 @@ export default function ReviewBrowser({
     deleteReviewComment(commentId)
   }
 
-  const currentFilePath = selectedFile || selectedUncommittedFile?.path
-  const fileComments = currentFilePath
-    ? reviews.filter(c => c.filePath === currentFilePath)
-    : []
+  // Staging action factory for uncommitted files
+  const getUncommittedStagingAction = (file: DiffFile | UncommittedFile) => {
+    const ucFile = file as UncommittedFile
+    if (ucFile.staged) {
+      return {
+        label: 'Unstage',
+        onAction: () => { void handleUnstageFile(ucFile.path) },
+        disabled: stagingInProgress,
+      }
+    }
+    return {
+      label: 'Stage',
+      onAction: () => { void handleStageFile(ucFile.path) },
+      disabled: stagingInProgress,
+    }
+  }
 
   return (
     <div className="review-browser">
@@ -954,52 +861,56 @@ export default function ReviewBrowser({
                 )}
               </div>
               {selectedCommit && (
-                <div
-                  className="diff-content"
-                  onMouseMove={handleResizeMouseMove}
-                  onMouseUp={handleResizeMouseUp}
-                  onMouseLeave={handleResizeMouseUp}
-                >
-                  <div className="diff-file-list" style={{ width: fileListWidth }}>
-                    {commitDiffLoading ? (
-                      <div className="diff-loading">Loading...</div>
-                    ) : (
-                      <CommittedDiffFileTree
-                        files={commitDiffFiles}
-                        selectedFile={selectedCommitFile}
-                        onSelectFile={(path) => { void loadCommitFileDiff(selectedCommit.hash, path); }}
-                        getStatusIcon={getStatusIcon}
-                      />
-                    )}
-                  </div>
-                  <div
-                    className={`divider ${isResizing ? 'active' : ''}`}
-                    onMouseDown={handleResizeMouseDown}
+                <>
+                  <DiffToolbar
+                    isSplitView={isSplitView}
+                    onToggleSplit={() => { setIsSplitView(!isSplitView) }}
+                    hideUnchanged={hideUnchangedRegions}
+                    onToggleHideUnchanged={() => { setHideUnchangedRegions(!hideUnchangedRegions) }}
+                    totalComments={0}
                   />
-                  <div className="diff-file-content">
-                    {selectedCommitFile ? (
-                      loadingFileDiff ? (
+                  <div
+                    className="diff-content"
+                    onMouseMove={handleResizeMouseMove}
+                    onMouseUp={handleResizeMouseUp}
+                    onMouseLeave={handleResizeMouseUp}
+                  >
+                    <div className="diff-file-list" style={{ width: fileListWidth }}>
+                      {commitDiffLoading ? (
                         <div className="diff-loading">Loading...</div>
-                      ) : fileDiffContents ? (
-                        <PierreDiffViewer
-                          originalContent={fileDiffContents.originalContent}
-                          modifiedContent={fileDiffContents.modifiedContent}
-                          filePath={selectedCommitFile}
-                          originalLabel={`${selectedCommit.shortHash}~1`}
-                          modifiedLabel={selectedCommit.shortHash}
-                          hasPreviousFile={false}
-                          hasNextFile={false}
-                          comments={[]}
-                          inlineCommentInput={null}
-                        />
                       ) : (
-                        <div className="diff-placeholder">Failed to load diff contents</div>
-                      )
-                    ) : (
-                      <div className="diff-placeholder">Select a file to view changes</div>
-                    )}
+                        <CommittedDiffFileTree
+                          files={commitDiffFiles}
+                          selectedFile={activeFile}
+                          onSelectFile={(path) => { setScrollToFile(path) }}
+                          getStatusIcon={getStatusIcon}
+                        />
+                      )}
+                    </div>
+                    <div
+                      className={`divider ${isResizing ? 'active' : ''}`}
+                      onMouseDown={handleResizeMouseDown}
+                    />
+                    <WorkerPoolContextProvider
+                      poolOptions={{ workerFactory: createDiffsWorker, poolSize: 2 }}
+                      highlighterOptions={{ preferredHighlighter: 'shiki-wasm' }}
+                    >
+                      <StackedDiffList
+                        files={commitDiffFiles}
+                        loadFileContents={loadCommitFileContents}
+                        diffStyle={isSplitView ? 'split' : 'unified'}
+                        expandUnchanged={!hideUnchangedRegions}
+                        getStatusIcon={getStatusIcon}
+                        reviews={[]}
+                        onLineClick={handleLineClick}
+                        commentInput={null}
+                        scrollToFile={scrollToFile}
+                        onActiveFileChange={setActiveFile}
+                        onScrollToFileHandled={handleScrollToFileHandled}
+                      />
+                    </WorkerPoolContextProvider>
                   </div>
-                </div>
+                </>
               )}
             </div>
           ) : viewMode === ViewMode.Committed ? (
@@ -1017,6 +928,14 @@ export default function ReviewBrowser({
                   </span>
                 </div>
 
+                <DiffToolbar
+                  isSplitView={isSplitView}
+                  onToggleSplit={() => { setIsSplitView(!isSplitView) }}
+                  hideUnchanged={hideUnchangedRegions}
+                  onToggleHideUnchanged={() => { setHideUnchangedRegions(!hideUnchangedRegions) }}
+                  totalComments={reviews.length}
+                />
+
                 <div
                   className="diff-content"
                   onMouseMove={handleResizeMouseMove}
@@ -1026,8 +945,8 @@ export default function ReviewBrowser({
                   <div className="diff-file-list" style={{ width: fileListWidth }}>
                     <CommittedDiffFileTree
                       files={diff.files}
-                      selectedFile={selectedFile}
-                      onSelectFile={(path) => { void loadFileDiff(path); }}
+                      selectedFile={activeFile}
+                      onSelectFile={(path) => { setScrollToFile(path); persistViewState({ selectedFilePath: path }) }}
                       getStatusIcon={getStatusIcon}
                     />
                   </div>
@@ -1037,36 +956,27 @@ export default function ReviewBrowser({
                     onMouseDown={handleResizeMouseDown}
                   />
 
-                  <div className="diff-file-content">
-                    {selectedFile ? (
-                      loadingFileDiff ? (
-                        <div className="diff-loading">Loading...</div>
-                      ) : fileDiffContents ? (
-                        <PierreDiffViewer
-                          originalContent={fileDiffContents.originalContent}
-                          modifiedContent={fileDiffContents.modifiedContent}
-                          filePath={selectedFile}
-                          originalLabel={diff.baseBranch || 'Original'}
-                          modifiedLabel={diff.headBranch || 'Modified'}
-                          onPreviousFile={handlePreviousFile}
-                          onNextFile={handleNextFile}
-                          hasPreviousFile={currentFileIndex > 0}
-                          hasNextFile={currentFileIndex < fileList.length - 1}
-                          comments={fileComments}
-                          onLineClick={handleLineClick}
-                          inlineCommentInput={commentInput}
-                          onCommentSubmit={handleCommentSubmit}
-                          onCommentCancel={() => { setCommentInput(null); }}
-                          onCommentDelete={handleCommentDelete}
-                        />
-                      ) : (
-                        <div className="diff-placeholder">Failed to load diff contents</div>
-                      )
-                    ) : (
-                      <div className="diff-placeholder">Select a file to view changes</div>
-                    )}
-                  </div>
-
+                  <WorkerPoolContextProvider
+                    poolOptions={{ workerFactory: createDiffsWorker, poolSize: 2 }}
+                    highlighterOptions={{ preferredHighlighter: 'shiki-wasm' }}
+                  >
+                    <StackedDiffList
+                      files={diff.files}
+                      loadFileContents={loadCommittedFileContents}
+                      diffStyle={isSplitView ? 'split' : 'unified'}
+                      expandUnchanged={!hideUnchangedRegions}
+                      getStatusIcon={getStatusIcon}
+                      reviews={reviews}
+                      onLineClick={handleLineClick}
+                      commentInput={commentInput}
+                      onCommentSubmit={handleCommentSubmit}
+                      onCommentCancel={() => { setCommentInput(null) }}
+                      onCommentDelete={handleCommentDelete}
+                      scrollToFile={scrollToFile}
+                      onActiveFileChange={setActiveFile}
+                      onScrollToFileHandled={handleScrollToFileHandled}
+                    />
+                  </WorkerPoolContextProvider>
                 </div>
               </>
             )
@@ -1092,6 +1002,14 @@ export default function ReviewBrowser({
                 </div>
                 {stageError && <div className="review-load-error">{stageError}</div>}
 
+                <DiffToolbar
+                  isSplitView={isSplitView}
+                  onToggleSplit={() => { setIsSplitView(!isSplitView) }}
+                  hideUnchanged={hideUnchangedRegions}
+                  onToggleHideUnchanged={() => { setHideUnchangedRegions(!hideUnchangedRegions) }}
+                  totalComments={reviews.length}
+                />
+
                 <div
                   className="diff-content"
                   onMouseMove={handleResizeMouseMove}
@@ -1104,8 +1022,8 @@ export default function ReviewBrowser({
                         <div className="diff-file-section">Staged</div>
                         <UncommittedDiffFileTree
                           files={stagedFiles}
-                          selectedFile={selectedUncommittedFile}
-                          onSelectFile={(file) => { void loadUncommittedFileDiff(file); }}
+                          selectedFile={null}
+                          onSelectFile={(file) => { setScrollToFile(file.path) }}
                           getStatusIcon={getStatusIcon}
                           onAction={(path) => { void handleUnstageFile(path); }}
                           actionLabel="Unstage"
@@ -1118,8 +1036,8 @@ export default function ReviewBrowser({
                         <div className="diff-file-section">Unstaged</div>
                         <UncommittedDiffFileTree
                           files={unstagedFiles}
-                          selectedFile={selectedUncommittedFile}
-                          onSelectFile={(file) => { void loadUncommittedFileDiff(file); }}
+                          selectedFile={null}
+                          onSelectFile={(file) => { setScrollToFile(file.path) }}
                           getStatusIcon={getStatusIcon}
                           onAction={(path) => { void handleStageFile(path); }}
                           actionLabel="Stage"
@@ -1134,35 +1052,28 @@ export default function ReviewBrowser({
                     onMouseDown={handleResizeMouseDown}
                   />
 
-                  <div className="diff-file-content">
-                    {selectedUncommittedFile ? (
-                      loadingFileDiff ? (
-                        <div className="diff-loading">Loading...</div>
-                      ) : fileDiffContents ? (
-                        <PierreDiffViewer
-                          originalContent={fileDiffContents.originalContent}
-                          modifiedContent={fileDiffContents.modifiedContent}
-                          filePath={selectedUncommittedFile.path}
-                          originalLabel={selectedUncommittedFile.staged ? 'HEAD' : 'Index/HEAD'}
-                          modifiedLabel={selectedUncommittedFile.staged ? 'Staged' : 'Working Tree'}
-                          onPreviousFile={handlePreviousFile}
-                          onNextFile={handleNextFile}
-                          hasPreviousFile={currentFileIndex > 0}
-                          hasNextFile={currentFileIndex < fileList.length - 1}
-                          comments={fileComments}
-                          onLineClick={handleLineClick}
-                          inlineCommentInput={commentInput}
-                          onCommentSubmit={handleCommentSubmit}
-                          onCommentCancel={() => { setCommentInput(null); }}
-                          onCommentDelete={handleCommentDelete}
-                        />
-                      ) : (
-                        <div className="diff-placeholder">Failed to load diff contents</div>
-                      )
-                    ) : (
-                      <div className="diff-placeholder">Select a file to view changes</div>
-                    )}
-                  </div>
+                  <WorkerPoolContextProvider
+                    poolOptions={{ workerFactory: createDiffsWorker, poolSize: 2 }}
+                    highlighterOptions={{ preferredHighlighter: 'shiki-wasm' }}
+                  >
+                    <StackedDiffList
+                      files={[...stagedFiles, ...unstagedFiles]}
+                      loadFileContents={loadUncommittedFileContents}
+                      diffStyle={isSplitView ? 'split' : 'unified'}
+                      expandUnchanged={!hideUnchangedRegions}
+                      getStatusIcon={getStatusIcon}
+                      reviews={reviews}
+                      onLineClick={handleLineClick}
+                      commentInput={commentInput}
+                      onCommentSubmit={handleCommentSubmit}
+                      onCommentCancel={() => { setCommentInput(null) }}
+                      onCommentDelete={handleCommentDelete}
+                      getStagingAction={getUncommittedStagingAction}
+                      scrollToFile={scrollToFile}
+                      onActiveFileChange={setActiveFile}
+                      onScrollToFileHandled={handleScrollToFileHandled}
+                    />
+                  </WorkerPoolContextProvider>
                 </div>
 
                 {stagedFiles.length > 0 && (
