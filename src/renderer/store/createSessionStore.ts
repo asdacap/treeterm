@@ -56,7 +56,7 @@ export interface SessionState {
   connection: ConnectionInfo
 
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
-  openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<{ tty: Tty }>
+  openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<{ tty: Tty; unsubscribe: () => void }>
   killTty: (ptyId: string) => void
   listTty: () => Promise<TTYSessionInfo[]>
 
@@ -663,7 +663,7 @@ export function createSessionStore(
       return result.sessionId
     },
 
-    openTtyStream: async (ptyId: string, onEvent: (event: PtyEvent) => void): Promise<{ tty: Tty }> => {
+    openTtyStream: async (ptyId: string, onEvent: (event: PtyEvent) => void): Promise<{ tty: Tty; unsubscribe: () => void }> => {
       const handle = crypto.randomUUID()
       const unsubscribe = deps.terminal.onEvent(handle, onEvent)
       const result = await deps.terminal.attach(connectionId, handle, ptyId)
@@ -672,7 +672,7 @@ export function createSessionStore(
         throw new Error(result.error || 'Failed to attach to PTY')
       }
       const tty = createTtyStore(ptyId, handle, boundTerminal)
-      return { tty }
+      return { tty, unsubscribe }
     },
 
     killTty: (ptyId: string): void => {

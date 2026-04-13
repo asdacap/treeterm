@@ -50,7 +50,7 @@ export interface TerminalAppRef extends AppRef {
 
 export interface WorkspaceStoreDeps {
   appRegistry: AppRegistryApi
-  openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<{ tty: Tty }>
+  openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<{ tty: Tty; unsubscribe: () => void }>
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
   connectionId: string
   git: GitApi

@@ -461,8 +461,8 @@ export default function BaseTerminal({
           badgeClickTimer: null,
           onExitUnmounted: (exitCode: number) => {
             console.log(`[${config.logPrefix} ${tabId}] PTY exited while unmounted, code:`, exitCode)
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist in appStates
-            const currentTab = workspace.getState().workspace.appStates[tabId]!
+            const currentTab = workspace.getState().workspace.appStates[tabId]
+            if (!currentTab) return // Tab already removed (PTY exit arrived after tab close)
             const keepOnExit = (currentTab.state as BaseTerminalState | undefined)?.keepOnExit
             if (keepOnExit) {
               terminal.write(`\r\n\x1b[2mProcess exited with exit code ${String(exitCode)}\x1b[0m\r\n`)
@@ -479,6 +479,7 @@ export default function BaseTerminal({
           })
           console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, currentExistingPtyId)
           tty = result.tty
+          cache.unsubscribeEvents = result.unsubscribe
         } catch (error) {
           console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, currentExistingPtyId, error)
           if (cancelled) return
