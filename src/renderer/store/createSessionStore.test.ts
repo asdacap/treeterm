@@ -229,6 +229,21 @@ describe('createSessionStore', () => {
       store.getState().setActiveWorkspace(id)
       expect(store.getState().activeWorkspaceId).toBe(id)
     })
+
+    it('setActiveWorkspace triggers git refresh on new active workspace', async () => {
+      const id = store.getState().addWorkspace('/test')
+      await flushPromises()
+
+      const entry = store.getState().workspaces.get(id)
+      expect(entry?.status).toBe(WorkspaceEntryStatus.Loaded)
+      if (entry?.status !== WorkspaceEntryStatus.Loaded) return
+
+      const triggerRefresh = vi.spyOn(entry.store.getState().gitController.getState(), 'triggerRefresh')
+
+      store.getState().setActiveWorkspace(null)
+      store.getState().setActiveWorkspace(id)
+      expect(triggerRefresh).toHaveBeenCalled()
+    })
   })
 
   describe('child workspace operations', () => {

@@ -44,6 +44,7 @@ function makeDeps(overrides: Partial<GitControllerDeps> = {}): GitControllerDeps
     refreshGitInfo: vi.fn().mockResolvedValue(undefined),
     getWorkspace: vi.fn().mockReturnValue(ws),
     initialWorkspace: ws,
+    isActiveWorkspace: vi.fn().mockReturnValue(true),
     ...overrides,
   }
 }
@@ -537,6 +538,50 @@ describe('createGitControllerStore', () => {
       store.getState().startPolling()
       expect(deps.github.getPrInfo).toHaveBeenCalled()
       store.getState().dispose()
+    })
+
+    it('skips refreshDiffStatus on interval tick when workspace is not active', () => {
+      const deps = makeDeps({ isActiveWorkspace: vi.fn().mockReturnValue(false) })
+      const store = createGitControllerStore(deps)
+
+      store.getState().startPolling()
+      // Initial call still happens (from startGitController's void refreshDiffStatus())
+      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
+
+      vi.advanceTimersByTime(10_000)
+      // Interval tick skipped because workspace is not active
+      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
+
+      store.getState().dispose()
+    })
+
+    it('resumes refreshDiffStatus on interval tick when workspace becomes active', () => {
+      const isActive = vi.fn().mockReturnValue(false)
+      const deps = makeDeps({ isActiveWorkspace: isActive })
+      const store = createGitControllerStore(deps)
+
+      store.getState().startPolling()
+      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
+
+      vi.advanceTimersByTime(10_000)
+      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
+
+      isActive.mockReturnValue(true)
+      vi.advanceTimersByTime(10_000)
+      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(2)
+
+      store.getState().dispose()
+    })
+  })
+
+  describe('triggerRefresh', () => {
+    it('calls refreshDiffStatus immediately', () => {
+      const deps = makeDeps()
+      const store = createGitControllerStore(deps)
+      store.getState().dispose()
+
+      store.getState().triggerRefresh()
+      expect(deps.git.hasUncommittedChanges).toHaveBeenCalled()
     })
   })
 })
