@@ -195,7 +195,7 @@ describe('IpcServer', () => {
   describe('per-window event emitters', () => {
     it('ptyEventTo sends to specific window with correct channel and args', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
+      const mockWindow = { isDestroyed: vi.fn(() => false), webContents: { send: mockSend, isDestroyed: vi.fn(() => false) } } as unknown as BrowserWindow
 
       const dataBytes = new TextEncoder().encode('hello-data')
       server.ptyEventTo(mockWindow, 'pty-1', { type: 'data', data: dataBytes })
@@ -204,7 +204,7 @@ describe('IpcServer', () => {
 
     it('ptyEventTo sends exit to specific window with correct channel and args', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
+      const mockWindow = { isDestroyed: vi.fn(() => false), webContents: { send: mockSend, isDestroyed: vi.fn(() => false) } } as unknown as BrowserWindow
 
       server.ptyEventTo(mockWindow, 'pty-1', { type: 'exit', exitCode: 0 })
       expect(mockSend).toHaveBeenCalledWith('pty:event', 'pty-1', { type: 'exit', exitCode: 0 })
@@ -212,7 +212,7 @@ describe('IpcServer', () => {
 
     it('settingsOpenTo sends to specific window with correct channel', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
+      const mockWindow = { isDestroyed: vi.fn(() => false), webContents: { send: mockSend, isDestroyed: vi.fn(() => false) } } as unknown as BrowserWindow
 
       server.settingsOpenTo(mockWindow)
       expect(mockSend).toHaveBeenCalledWith('settings:open')
@@ -220,7 +220,7 @@ describe('IpcServer', () => {
 
     it('appReadyTo sends to specific window', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
+      const mockWindow = { isDestroyed: vi.fn(() => false), webContents: { send: mockSend, isDestroyed: vi.fn(() => false) } } as unknown as BrowserWindow
 
       server.appReadyTo(mockWindow)
       expect(mockSend).toHaveBeenCalledWith('app:ready')
@@ -228,7 +228,7 @@ describe('IpcServer', () => {
 
     it('capsLockEventTo sends to specific window', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
+      const mockWindow = { isDestroyed: vi.fn(() => false), webContents: { send: mockSend, isDestroyed: vi.fn(() => false) } } as unknown as BrowserWindow
 
       server.capsLockEventTo(mockWindow, true as unknown as { type: string; key: string; code: string })
       expect(mockSend).toHaveBeenCalledWith('capslock-event', true)
@@ -236,7 +236,7 @@ describe('IpcServer', () => {
 
     it('activeProcessesOpenTo sends to specific window', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      const mockWindow = { webContents: { send: mockSend } } as unknown as BrowserWindow
+      const mockWindow = { isDestroyed: vi.fn(() => false), webContents: { send: mockSend, isDestroyed: vi.fn(() => false) } } as unknown as BrowserWindow
 
       server.activeProcessesOpenTo(mockWindow)
       expect(mockSend).toHaveBeenCalledWith('active-processes:open')
@@ -244,12 +244,17 @@ describe('IpcServer', () => {
   })
 
   describe('broadcast event emitters', () => {
+    const mockWin = (send: ReturnType<typeof vi.fn>) => ({
+      isDestroyed: vi.fn(() => false),
+      webContents: { send, isDestroyed: vi.fn(() => false) }
+    })
+
     it('sessionSync broadcasts to all windows', () => {
       const mockSend1 = vi.fn<(...args: any[]) => void>()
       const mockSend2 = vi.fn<(...args: any[]) => void>()
       mockGetAllWindows.mockReturnValue([
-        { webContents: { send: mockSend1 } },
-        { webContents: { send: mockSend2 } },
+        mockWin(mockSend1),
+        mockWin(mockSend2),
       ])
 
       const sessionData = { id: 'session-1' } as unknown as Session
@@ -260,7 +265,7 @@ describe('IpcServer', () => {
 
     it('daemonSessions broadcasts to all windows', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
+      mockGetAllWindows.mockReturnValue([mockWin(mockSend)])
 
       const sessions = [{ id: 's1' }] as unknown as TTYSessionInfo[]
       server.daemonSessions(sessions)
@@ -269,7 +274,7 @@ describe('IpcServer', () => {
 
     it('sshConnectionStatus broadcasts to all windows', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
+      mockGetAllWindows.mockReturnValue([mockWin(mockSend)])
 
       const info = { id: 'conn-1', status: 'connected' } as unknown as ConnectionInfo
       server.sshConnectionStatus(info)
@@ -278,7 +283,7 @@ describe('IpcServer', () => {
 
     it('sshBootstrapOutput broadcasts to all windows', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
+      mockGetAllWindows.mockReturnValue([mockWin(mockSend)])
 
       server.sshBootstrapOutput('conn-1', 'log line')
       expect(mockSend).toHaveBeenCalledWith('ssh:bootstrapOutput', 'conn-1', 'log line')
@@ -286,7 +291,7 @@ describe('IpcServer', () => {
 
     it('sshTunnelOutput broadcasts to all windows', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
+      mockGetAllWindows.mockReturnValue([mockWin(mockSend)])
 
       server.sshTunnelOutput('conn-1', 'log line')
       expect(mockSend).toHaveBeenCalledWith('ssh:tunnelOutput', 'conn-1', 'log line')
@@ -294,7 +299,7 @@ describe('IpcServer', () => {
 
     it('sshDaemonOutput broadcasts to all windows', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
+      mockGetAllWindows.mockReturnValue([mockWin(mockSend)])
 
       server.sshDaemonOutput('conn-1', 'log line')
       expect(mockSend).toHaveBeenCalledWith('ssh:daemonOutput', 'conn-1', 'log line')
@@ -307,7 +312,7 @@ describe('IpcServer', () => {
 
     it('execEvent broadcasts to all windows', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
+      mockGetAllWindows.mockReturnValue([mockWin(mockSend)])
 
       server.execEvent('exec-1', { type: 'stdout', data: 'output' })
       expect(mockSend).toHaveBeenCalledWith('exec:event', 'exec-1', { type: 'stdout', data: 'output' })
@@ -315,7 +320,7 @@ describe('IpcServer', () => {
 
     it('sshAutoConnected broadcasts to all windows', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
+      mockGetAllWindows.mockReturnValue([mockWin(mockSend)])
 
       const session = { id: 's1' } as unknown as Session
       const info = { id: 'conn-1' } as unknown as ConnectionInfo
@@ -325,7 +330,7 @@ describe('IpcServer', () => {
 
     it('connectionReconnected broadcasts to all windows', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
+      mockGetAllWindows.mockReturnValue([mockWin(mockSend)])
 
       const session = { id: 's1' } as unknown as Session
       const info = { id: 'conn-1' } as unknown as ConnectionInfo
@@ -335,7 +340,7 @@ describe('IpcServer', () => {
 
     it('sshPortForwardStatus broadcasts to all windows', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
+      mockGetAllWindows.mockReturnValue([mockWin(mockSend)])
 
       const info = { id: 'pf-1', connectionId: 'conn-1', localPort: 8080, remoteHost: 'localhost', remotePort: 80, status: 'active' as PortForwardStatus } as PortForwardInfo
       server.sshPortForwardStatus(info)
@@ -344,7 +349,7 @@ describe('IpcServer', () => {
 
     it('sshPortForwardOutput broadcasts to all windows', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
-      mockGetAllWindows.mockReturnValue([{ webContents: { send: mockSend } }])
+      mockGetAllWindows.mockReturnValue([mockWin(mockSend)])
 
       server.sshPortForwardOutput('pf-1', 'log line')
       expect(mockSend).toHaveBeenCalledWith('ssh:portForwardOutput', 'pf-1', 'log line')

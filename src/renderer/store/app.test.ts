@@ -77,7 +77,7 @@ vi.mock('./createSessionStore', async (importOriginal) => {
   const actual: Record<string, unknown> = await importOriginal<Record<string, unknown>>()
   return {
     ...actual,
-    /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call -- test mock */
+    /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call -- test mock */
     createSessionStore: vi.fn<(...args: any[]) => any>().mockImplementation((config: { sessionId: string; connection: any }) => {
       const state: Record<string, any> = {
         sessionId: config.sessionId,
@@ -100,7 +100,7 @@ vi.mock('./createSessionStore', async (importOriginal) => {
         subscribe: vi.fn<(...args: any[]) => any>()
       }
     }),
-    /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
+    /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call */
     getUnmergedSubWorkspaces: vi.fn<(...args: any[]) => any[]>().mockReturnValue([])
   }
 })
