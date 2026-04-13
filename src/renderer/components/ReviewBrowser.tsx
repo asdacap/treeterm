@@ -6,7 +6,7 @@ import { getTabs } from '../types'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, GitLogCommit, WorkspaceStore, ReviewState } from '../types'
 import { FileChangeStatus } from '../types'
 import { useGitApi } from '../hooks/useWorkspaceApis'
-import { MonacoDiffViewer } from './MonacoDiffViewer'
+import { PierreDiffViewer } from './PierreDiffViewer'
 import { CommittedDiffFileTree, UncommittedDiffFileTree, getSortedFilePaths } from './DiffFileTree'
 
 interface ReviewBrowserProps {
@@ -119,10 +119,6 @@ export default function ReviewBrowser({
   const persistViewState = useCallback((updates: Partial<ReviewState>) => {
     updateTabState<ReviewState>(tabId, (s) => ({ ...s, ...updates }))
   }, [tabId, updateTabState])
-
-  const handleScrollPositionChange = useCallback((scrollTop: number) => {
-    persistViewState({ scrollTop })
-  }, [persistViewState])
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true)
@@ -985,12 +981,16 @@ export default function ReviewBrowser({
                       loadingFileDiff ? (
                         <div className="diff-loading">Loading...</div>
                       ) : fileDiffContents ? (
-                        <MonacoDiffViewer
+                        <PierreDiffViewer
                           originalContent={fileDiffContents.originalContent}
                           modifiedContent={fileDiffContents.modifiedContent}
-                          language={fileDiffContents.language}
+                          filePath={selectedCommitFile}
                           originalLabel={`${selectedCommit.shortHash}~1`}
                           modifiedLabel={selectedCommit.shortHash}
+                          hasPreviousFile={false}
+                          hasNextFile={false}
+                          comments={[]}
+                          inlineCommentInput={null}
                         />
                       ) : (
                         <div className="diff-placeholder">Failed to load diff contents</div>
@@ -1042,10 +1042,10 @@ export default function ReviewBrowser({
                       loadingFileDiff ? (
                         <div className="diff-loading">Loading...</div>
                       ) : fileDiffContents ? (
-                        <MonacoDiffViewer
+                        <PierreDiffViewer
                           originalContent={fileDiffContents.originalContent}
                           modifiedContent={fileDiffContents.modifiedContent}
-                          language={fileDiffContents.language}
+                          filePath={selectedFile}
                           originalLabel={diff.baseBranch || 'Original'}
                           modifiedLabel={diff.headBranch || 'Modified'}
                           onPreviousFile={handlePreviousFile}
@@ -1058,8 +1058,6 @@ export default function ReviewBrowser({
                           onCommentSubmit={handleCommentSubmit}
                           onCommentCancel={() => { setCommentInput(null); }}
                           onCommentDelete={handleCommentDelete}
-                          initialScrollTop={reviewState?.scrollTop}
-                          onScrollPositionChange={handleScrollPositionChange}
                         />
                       ) : (
                         <div className="diff-placeholder">Failed to load diff contents</div>
@@ -1141,10 +1139,10 @@ export default function ReviewBrowser({
                       loadingFileDiff ? (
                         <div className="diff-loading">Loading...</div>
                       ) : fileDiffContents ? (
-                        <MonacoDiffViewer
+                        <PierreDiffViewer
                           originalContent={fileDiffContents.originalContent}
                           modifiedContent={fileDiffContents.modifiedContent}
-                          language={fileDiffContents.language}
+                          filePath={selectedUncommittedFile.path}
                           originalLabel={selectedUncommittedFile.staged ? 'HEAD' : 'Index/HEAD'}
                           modifiedLabel={selectedUncommittedFile.staged ? 'Staged' : 'Working Tree'}
                           onPreviousFile={handlePreviousFile}
@@ -1157,8 +1155,6 @@ export default function ReviewBrowser({
                           onCommentSubmit={handleCommentSubmit}
                           onCommentCancel={() => { setCommentInput(null); }}
                           onCommentDelete={handleCommentDelete}
-                          initialScrollTop={reviewState?.scrollTop}
-                          onScrollPositionChange={handleScrollPositionChange}
                         />
                       ) : (
                         <div className="diff-placeholder">Failed to load diff contents</div>

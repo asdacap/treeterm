@@ -29,6 +29,9 @@ export default defineConfig({
   },
   renderer: {
     plugins: [react()],
+    worker: {
+      format: 'es'
+    },
     build: {
       rollupOptions: {
         output: {
