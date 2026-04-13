@@ -1,5 +1,5 @@
 import React from 'react'
-import { Columns2, AlignJustify, Eye, EyeOff, MessageSquare } from 'lucide-react'
+import { Columns2, AlignJustify, Eye, EyeOff, MessageSquare, CheckCircle2 } from 'lucide-react'
 
 interface DiffToolbarProps {
   isSplitView: boolean
@@ -7,6 +7,8 @@ interface DiffToolbarProps {
   hideUnchanged: boolean
   onToggleHideUnchanged: () => void
   totalComments: number
+  viewedCount?: number
+  totalFiles?: number
 }
 
 export function DiffToolbar({
@@ -15,9 +17,19 @@ export function DiffToolbar({
   hideUnchanged,
   onToggleHideUnchanged,
   totalComments,
+  viewedCount,
+  totalFiles,
 }: DiffToolbarProps): React.JSX.Element {
   return (
     <div className="diff-toolbar-global">
+      <div className="diff-toolbar-viewed-progress">
+        {totalFiles !== undefined && totalFiles > 0 && (
+          <span className="diff-toolbar-viewed-count" title={`${String(viewedCount ?? 0)} of ${String(totalFiles)} files viewed`}>
+            <CheckCircle2 size={14} />
+            {viewedCount ?? 0}/{totalFiles} files viewed
+          </span>
+        )}
+      </div>
       <div className="diff-toolbar-controls">
         <button
           className={`pierre-diff-btn ${isSplitView ? 'active' : ''}`}

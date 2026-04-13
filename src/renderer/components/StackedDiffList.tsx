@@ -31,6 +31,8 @@ interface StackedDiffListProps {
   scrollToFile: string | null
   onActiveFileChange?: (filePath: string) => void
   onScrollToFileHandled?: () => void
+  isFileViewed?: (filePath: string) => boolean
+  onToggleViewed?: (file: DiffFile | UncommittedFile) => void
 }
 
 export function StackedDiffList({
@@ -49,6 +51,8 @@ export function StackedDiffList({
   scrollToFile,
   onActiveFileChange,
   onScrollToFileHandled,
+  isFileViewed,
+  onToggleViewed,
 }: StackedDiffListProps): React.JSX.Element {
   const [loadStates, setLoadStates] = useState<Map<string, FileLoadState>>(new Map())
   const sectionRefsRef = useRef<Map<string, HTMLElement>>(new Map())
@@ -157,6 +161,8 @@ export function StackedDiffList({
               onCommentCancel={onCommentCancel}
               onCommentDelete={onCommentDelete}
               stagingAction={stagingAction}
+              isViewed={isFileViewed?.(file.path) ?? false}
+              onToggleViewed={onToggleViewed ? () => { onToggleViewed(file) } : undefined}
             />
           </div>
         )

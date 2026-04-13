@@ -277,3 +277,67 @@ describe('UncommittedDiffFileTree', () => {
     expect(onSelectFile).not.toHaveBeenCalled()
   })
 })
+
+describe('CommittedDiffFileTree viewedFiles', () => {
+  const onSelectFile = vi.fn()
+  const getStatusIcon = vi.fn((status: string) => <span data-testid={`icon-${status}`} />)
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('renders viewed icon for viewed files', () => {
+    const files = [makeDiffFile({ path: 'app.ts' })]
+    const { container } = render(
+      <CommittedDiffFileTree
+        files={files}
+        selectedFile={null}
+        onSelectFile={onSelectFile}
+        getStatusIcon={getStatusIcon}
+        viewedFiles={new Set(['app.ts'])}
+      />
+    )
+    expect(container.querySelector('.diff-file-viewed-icon')).not.toBeNull()
+  })
+
+  it('dims viewed files in file tree', () => {
+    const files = [makeDiffFile({ path: 'app.ts' })]
+    const { container } = render(
+      <CommittedDiffFileTree
+        files={files}
+        selectedFile={null}
+        onSelectFile={onSelectFile}
+        getStatusIcon={getStatusIcon}
+        viewedFiles={new Set(['app.ts'])}
+      />
+    )
+    expect(container.querySelector('.diff-file-item.viewed')).not.toBeNull()
+  })
+
+  it('does not dim unviewed files', () => {
+    const files = [makeDiffFile({ path: 'app.ts' })]
+    const { container } = render(
+      <CommittedDiffFileTree
+        files={files}
+        selectedFile={null}
+        onSelectFile={onSelectFile}
+        getStatusIcon={getStatusIcon}
+        viewedFiles={new Set()}
+      />
+    )
+    expect(container.querySelector('.diff-file-item.viewed')).toBeNull()
+  })
+
+  it('does not show viewed icon when viewedFiles is not provided', () => {
+    const files = [makeDiffFile({ path: 'app.ts' })]
+    const { container } = render(
+      <CommittedDiffFileTree
+        files={files}
+        selectedFile={null}
+        onSelectFile={onSelectFile}
+        getStatusIcon={getStatusIcon}
+      />
+    )
+    expect(container.querySelector('.diff-file-viewed-icon')).toBeNull()
+  })
+})

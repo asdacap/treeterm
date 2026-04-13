@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { Check } from 'lucide-react'
 import type { DiffFile, UncommittedFile } from '../types'
 
 interface TreeNode {
@@ -111,6 +112,7 @@ interface CommittedTreeProps {
   selectedFile: string | null
   onSelectFile: (path: string) => void
   getStatusIcon: (status: DiffFile['status']) => React.JSX.Element
+  viewedFiles?: Set<string>
 }
 
 export function CommittedDiffFileTree({
@@ -118,6 +120,7 @@ export function CommittedDiffFileTree({
   selectedFile,
   onSelectFile,
   getStatusIcon,
+  viewedFiles,
 }: CommittedTreeProps): React.JSX.Element {
   const tree = buildTree(files)
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => getAllDirPaths(tree))
@@ -137,10 +140,11 @@ export function CommittedDiffFileTree({
   function renderNode(node: TreeNode, depth: number): React.JSX.Element {
     if (node.file !== null) {
       const file = node.file as DiffFile
+      const isViewed = viewedFiles?.has(file.path) ?? false
       return (
         <div
           key={node.path}
-          className={`diff-file-item ${selectedFile === file.path ? 'selected' : ''}`}
+          className={`diff-file-item ${selectedFile === file.path ? 'selected' : ''} ${isViewed ? 'viewed' : ''}`}
           style={{ paddingLeft: `${String(depth * 16 + 12)}px` }}
           onClick={() => { onSelectFile(file.path); }}
           title={file.path}
@@ -151,6 +155,7 @@ export function CommittedDiffFileTree({
             <span className="additions">+{file.additions}</span>
             <span className="deletions">-{file.deletions}</span>
           </span>
+          {isViewed && <Check size={12} className="diff-file-viewed-icon" />}
         </div>
       )
     }

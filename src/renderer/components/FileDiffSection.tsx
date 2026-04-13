@@ -26,6 +26,8 @@ interface FileDiffSectionProps {
   onCommentCancel?: () => void
   onCommentDelete?: (commentId: string) => void
   stagingAction?: StagingAction
+  isViewed?: boolean
+  onToggleViewed?: () => void
 }
 
 export function FileDiffSection({
@@ -44,8 +46,19 @@ export function FileDiffSection({
   onCommentCancel,
   onCommentDelete,
   stagingAction,
+  isViewed,
+  onToggleViewed,
 }: FileDiffSectionProps): React.JSX.Element {
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(isViewed ?? false)
+
+  // Auto-collapse when isViewed transitions false→true (React previous-value-in-state pattern)
+  const [prevIsViewed, setPrevIsViewed] = useState(isViewed ?? false)
+  if (isViewed !== undefined && isViewed !== prevIsViewed) {
+    setPrevIsViewed(isViewed)
+    if (isViewed) {
+      setCollapsed(true)
+    }
+  }
   const sectionRef = useRef<HTMLDivElement>(null)
   const loadRequestedRef = useRef(false)
 
@@ -96,6 +109,20 @@ export function FileDiffSection({
           >
             {stagingAction.label}
           </button>
+        )}
+        {onToggleViewed && (
+          <label
+            className={`file-diff-viewed-label ${isViewed ? 'viewed' : ''}`}
+            onClick={(e) => { e.stopPropagation() }}
+          >
+            <input
+              type="checkbox"
+              checked={isViewed ?? false}
+              onChange={() => { onToggleViewed() }}
+              className="file-diff-viewed-checkbox"
+            />
+            Viewed
+          </label>
         )}
       </div>
 

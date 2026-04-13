@@ -198,4 +198,81 @@ describe('FileDiffSection', () => {
     )
     expect(screen.getByText<HTMLButtonElement>('Stage').disabled).toBe(true)
   })
+
+  it('renders viewed checkbox when onToggleViewed is provided', () => {
+    render(
+      <FileDiffSection
+        {...defaultProps}
+        isViewed={false}
+        onToggleViewed={vi.fn()}
+      />
+    )
+    expect(screen.getByText('Viewed')).toBeDefined()
+  })
+
+  it('does not render viewed checkbox when onToggleViewed is undefined', () => {
+    render(<FileDiffSection {...defaultProps} />)
+    expect(screen.queryByText('Viewed')).toBeNull()
+  })
+
+  it('calls onToggleViewed when checkbox clicked', () => {
+    const onToggleViewed = vi.fn()
+    render(
+      <FileDiffSection
+        {...defaultProps}
+        isViewed={false}
+        onToggleViewed={onToggleViewed}
+      />
+    )
+    fireEvent.click(screen.getByText('Viewed'))
+    expect(onToggleViewed).toHaveBeenCalledTimes(1)
+  })
+
+  it('clicking viewed checkbox does not collapse the section', () => {
+    render(
+      <FileDiffSection
+        {...defaultProps}
+        contents={makeContents()}
+        isViewed={false}
+        onToggleViewed={vi.fn()}
+      />
+    )
+    fireEvent.click(screen.getByText('Viewed'))
+    // Should NOT collapse
+    expect(screen.getByTestId('multi-file-diff')).toBeDefined()
+  })
+
+  it('auto-collapses when isViewed transitions from false to true', () => {
+    const { rerender } = render(
+      <FileDiffSection
+        {...defaultProps}
+        contents={makeContents()}
+        isViewed={false}
+        onToggleViewed={vi.fn()}
+      />
+    )
+    expect(screen.getByTestId('multi-file-diff')).toBeDefined()
+
+    rerender(
+      <FileDiffSection
+        {...defaultProps}
+        contents={makeContents()}
+        isViewed={true}
+        onToggleViewed={vi.fn()}
+      />
+    )
+    expect(screen.queryByTestId('multi-file-diff')).toBeNull()
+  })
+
+  it('starts collapsed when isViewed is true on initial render', () => {
+    render(
+      <FileDiffSection
+        {...defaultProps}
+        contents={makeContents()}
+        isViewed={true}
+        onToggleViewed={vi.fn()}
+      />
+    )
+    expect(screen.queryByTestId('multi-file-diff')).toBeNull()
+  })
 })

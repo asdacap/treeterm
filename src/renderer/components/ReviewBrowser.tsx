@@ -4,7 +4,7 @@ import { WorkerPoolContextProvider } from '@pierre/diffs/react'
 import { useStore } from 'zustand'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
 import { getTabs } from '../types'
-import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, GitLogCommit, WorkspaceStore, ReviewState } from '../types'
+import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, GitLogCommit, WorkspaceStore, ReviewState, ViewedFileStats } from '../types'
 import { FileChangeStatus } from '../types'
 import { useGitApi } from '../hooks/useWorkspaceApis'
 import { CommittedDiffFileTree, UncommittedDiffFileTree } from './DiffFileTree'
@@ -64,9 +64,14 @@ export default function ReviewBrowser({
 
   // Stacked diff view state
   const [isSplitView, setIsSplitView] = useState(true)
-  const [hideUnchangedRegions, setHideUnchangedRegions] = useState(false)
+  const [hideUnchangedRegions, setHideUnchangedRegions] = useState(true)
   const [scrollToFile, setScrollToFile] = useState<string | null>(reviewState?.selectedFilePath ?? null)
   const [activeFile, setActiveFile] = useState<string | null>(null)
+
+  // Viewed files state — maps file path to diff stats at time of marking viewed
+  const [viewedFiles, setViewedFiles] = useState<Record<string, ViewedFileStats>>(
+    reviewState?.viewedFiles ?? {}
+  )
 
   // Uncommitted changes state
   const [uncommitted, setUncommitted] = useState<UncommittedChanges | null>(null)
@@ -218,6 +223,25 @@ export default function ReviewBrowser({
     }
   }
 
+  // Filter viewed files: keep only entries where the file still exists and its stats match
+  const reconcileViewedFiles = (files: (DiffFile | UncommittedFile)[]) => {
+    setViewedFiles(prev => {
+      const next: Record<string, ViewedFileStats> = {}
+      let changed = false
+      for (const [path, stats] of Object.entries(prev)) {
+        const file = files.find(f => f.path === path)
+        if (file && file.additions === stats.additions && file.deletions === stats.deletions) {
+          next[path] = stats
+        } else {
+          changed = true
+        }
+      }
+      if (!changed) return prev
+      persistViewState({ viewedFiles: next })
+      return next
+    })
+  }
+
   const loadDiff = async () => {
     if (!wsData.gitBranch || !parentWorkspace?.gitBranch) return
 
@@ -229,6 +253,7 @@ export default function ReviewBrowser({
       const result = await git.getDiff(parentWorkspace.gitBranch)
       if (result.success) {
         setDiff(result.diff)
+        reconcileViewedFiles(result.diff.files)
       } else {
         setError(result.error || 'Failed to load diff')
       }
@@ -244,6 +269,7 @@ export default function ReviewBrowser({
       const result = await git.getUncommittedChanges()
       if (result.success) {
         setUncommitted(result.changes)
+        reconcileViewedFiles(result.changes.files)
       }
     } catch (err) {
       setLoadError(`Failed to load uncommitted changes: ${err instanceof Error ? err.message : 'Unknown error'}`)
@@ -556,6 +582,12 @@ export default function ReviewBrowser({
   const hasCommittedChanges = diff && diff.files.length > 0
   const hasConflicts = conflictInfo?.hasConflicts || false
 
+  // Viewed files computed values
+  const viewedFilePaths = new Set(Object.keys(viewedFiles))
+  const committedViewedCount = diff?.files.filter(f => f.path in viewedFiles).length ?? 0
+  const uncommittedViewedCount = uncommitted?.files.filter(f => f.path in viewedFiles).length ?? 0
+  const commitDiffViewedCount = commitDiffFiles.filter(f => f.path in viewedFiles).length
+
   const handleLineClick = (filePath: string, lineNumber: number, side: 'original' | 'modified') => {
     setCommentInput({ filePath, lineNumber, side })
   }
@@ -563,6 +595,23 @@ export default function ReviewBrowser({
   const handleScrollToFileHandled = useCallback(() => {
     setScrollToFile(null)
   }, [])
+
+  const handleToggleViewed = useCallback((file: DiffFile | UncommittedFile) => {
+    setViewedFiles(prev => {
+      let next: Record<string, ViewedFileStats>
+      if (prev[file.path]) {
+        next = Object.fromEntries(Object.entries(prev).filter(([k]) => k !== file.path))
+      } else {
+        next = { ...prev, [file.path]: { additions: file.additions, deletions: file.deletions } }
+      }
+      persistViewState({ viewedFiles: next })
+      return next
+    })
+  }, [persistViewState])
+
+  const isFileViewed = useCallback((filePath: string): boolean => {
+    return filePath in viewedFiles
+  }, [viewedFiles])
 
   const handleCommentSubmit = (text: string) => {
     if (!commentInput || !currentCommitHash) return
@@ -868,6 +917,8 @@ export default function ReviewBrowser({
                     hideUnchanged={hideUnchangedRegions}
                     onToggleHideUnchanged={() => { setHideUnchangedRegions(!hideUnchangedRegions) }}
                     totalComments={0}
+                    viewedCount={commitDiffViewedCount}
+                    totalFiles={commitDiffFiles.length}
                   />
                   <div
                     className="diff-content"
@@ -884,6 +935,7 @@ export default function ReviewBrowser({
                           selectedFile={activeFile}
                           onSelectFile={(path) => { setScrollToFile(path) }}
                           getStatusIcon={getStatusIcon}
+                          viewedFiles={viewedFilePaths}
                         />
                       )}
                     </div>
@@ -907,6 +959,8 @@ export default function ReviewBrowser({
                         scrollToFile={scrollToFile}
                         onActiveFileChange={setActiveFile}
                         onScrollToFileHandled={handleScrollToFileHandled}
+                        isFileViewed={isFileViewed}
+                        onToggleViewed={handleToggleViewed}
                       />
                     </WorkerPoolContextProvider>
                   </div>
@@ -934,6 +988,8 @@ export default function ReviewBrowser({
                   hideUnchanged={hideUnchangedRegions}
                   onToggleHideUnchanged={() => { setHideUnchangedRegions(!hideUnchangedRegions) }}
                   totalComments={reviews.length}
+                  viewedCount={committedViewedCount}
+                  totalFiles={diff.files.length}
                 />
 
                 <div
@@ -948,6 +1004,7 @@ export default function ReviewBrowser({
                       selectedFile={activeFile}
                       onSelectFile={(path) => { setScrollToFile(path); persistViewState({ selectedFilePath: path }) }}
                       getStatusIcon={getStatusIcon}
+                      viewedFiles={viewedFilePaths}
                     />
                   </div>
 
@@ -975,6 +1032,8 @@ export default function ReviewBrowser({
                       scrollToFile={scrollToFile}
                       onActiveFileChange={setActiveFile}
                       onScrollToFileHandled={handleScrollToFileHandled}
+                      isFileViewed={isFileViewed}
+                      onToggleViewed={handleToggleViewed}
                     />
                   </WorkerPoolContextProvider>
                 </div>
@@ -1008,6 +1067,8 @@ export default function ReviewBrowser({
                   hideUnchanged={hideUnchangedRegions}
                   onToggleHideUnchanged={() => { setHideUnchangedRegions(!hideUnchangedRegions) }}
                   totalComments={reviews.length}
+                  viewedCount={uncommittedViewedCount}
+                  totalFiles={uncommitted.files.length}
                 />
 
                 <div
@@ -1072,6 +1133,8 @@ export default function ReviewBrowser({
                       scrollToFile={scrollToFile}
                       onActiveFileChange={setActiveFile}
                       onScrollToFileHandled={handleScrollToFileHandled}
+                      isFileViewed={isFileViewed}
+                      onToggleViewed={handleToggleViewed}
                     />
                   </WorkerPoolContextProvider>
                 </div>

@@ -2047,6 +2047,20 @@ body,
   background: var(--bg-active);
 }
 
+.diff-file-item.viewed {
+  opacity: 0.6;
+}
+
+.diff-file-item.viewed:hover {
+  opacity: 0.8;
+}
+
+.diff-file-viewed-icon {
+  color: var(--accent, #58a6ff);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
 .diff-status {
   width: 16px;
   height: 16px;
@@ -6752,11 +6766,25 @@ body,
 .diff-toolbar-global {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   padding: 4px 8px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
+}
+
+.diff-toolbar-viewed-progress {
+  display: flex;
+  align-items: center;
+}
+
+.diff-toolbar-viewed-count {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 2px 6px;
 }
 
 .diff-toolbar-controls {
@@ -6853,6 +6881,27 @@ body,
 .file-diff-stage-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.file-diff-viewed-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 1px 6px;
+}
+
+.file-diff-viewed-label.viewed {
+  color: var(--accent, #58a6ff);
+}
+
+.file-diff-viewed-checkbox {
+  cursor: pointer;
+  accent-color: var(--accent, #58a6ff);
 }
 
 .file-diff-body {

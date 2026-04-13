@@ -134,6 +134,11 @@ export interface FilesystemState {
   scrollTop?: number
 }
 
+export interface ViewedFileStats {
+  additions: number
+  deletions: number
+}
+
 export interface ReviewState {
   // parentWorkspaceId identifies the target branch for merging.
   // If undefined/null, this is a top-level worktree - review shows only uncommitted changes
@@ -141,6 +146,7 @@ export interface ReviewState {
   viewMode: 'committed' | 'uncommitted' | 'commits'
   selectedFilePath?: string
   scrollTop?: number
+  viewedFiles?: Record<string, ViewedFileStats>
 }
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- intentional marker interface for tab state

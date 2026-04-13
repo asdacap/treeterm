@@ -60,4 +60,19 @@ describe('DiffToolbar', () => {
     render(<DiffToolbar {...defaultProps} totalComments={0} />)
     expect(screen.queryByTitle(/comment/)).toBeNull()
   })
+
+  it('shows viewed progress when totalFiles > 0', () => {
+    render(<DiffToolbar {...defaultProps} viewedCount={3} totalFiles={10} />)
+    expect(screen.getByTitle('3 of 10 files viewed')).toBeDefined()
+  })
+
+  it('does not show viewed progress when totalFiles is 0', () => {
+    render(<DiffToolbar {...defaultProps} viewedCount={0} totalFiles={0} />)
+    expect(screen.queryByTitle(/files viewed/)).toBeNull()
+  })
+
+  it('does not show viewed progress when totalFiles is undefined', () => {
+    render(<DiffToolbar {...defaultProps} />)
+    expect(screen.queryByTitle(/files viewed/)).toBeNull()
+  })
 })
