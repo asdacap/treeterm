@@ -275,4 +275,98 @@ describe('FileDiffSection', () => {
     )
     expect(screen.queryByTestId('multi-file-diff')).toBeNull()
   })
+
+  it('scrolls scroll container by header height when marking expanded file as viewed', () => {
+    const onToggleViewed = vi.fn()
+    const rafCallbacks: FrameRequestCallback[] = []
+    const originalRaf = globalThis.requestAnimationFrame
+    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => { rafCallbacks.push(cb); return 0 }) as typeof requestAnimationFrame
+
+    const { container } = render(
+      <div className="stacked-diff-list">
+        <FileDiffSection
+          {...defaultProps}
+          contents={makeContents()}
+          isViewed={false}
+          onToggleViewed={onToggleViewed}
+        />
+      </div>
+    )
+
+    const scrollContainer = container.querySelector('.stacked-diff-list') as HTMLElement
+    const header = container.querySelector('.file-diff-header') as HTMLElement
+
+    vi.spyOn(header, 'getBoundingClientRect').mockReturnValue({
+      height: 36, width: 100, top: 0, left: 0, bottom: 36, right: 100, x: 0, y: 0, toJSON: () => {},
+    })
+    Object.defineProperty(scrollContainer, 'scrollTop', { value: 100, writable: true })
+
+    const checkbox = container.querySelector('.file-diff-viewed-checkbox') as HTMLInputElement
+    fireEvent.click(checkbox)
+
+    expect(onToggleViewed).toHaveBeenCalledTimes(1)
+    expect(rafCallbacks).toHaveLength(1)
+
+    // Execute the rAF callback
+    rafCallbacks[0]!(0)
+    expect(scrollContainer.scrollTop).toBe(136)
+
+    globalThis.requestAnimationFrame = originalRaf
+  })
+
+  it('does not scroll when unchecking viewed', () => {
+    const onToggleViewed = vi.fn()
+    const rafCallbacks: FrameRequestCallback[] = []
+    const originalRaf = globalThis.requestAnimationFrame
+    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => { rafCallbacks.push(cb); return 0 }) as typeof requestAnimationFrame
+
+    const { container } = render(
+      <div className="stacked-diff-list">
+        <FileDiffSection
+          {...defaultProps}
+          contents={makeContents()}
+          isViewed={true}
+          onToggleViewed={onToggleViewed}
+        />
+      </div>
+    )
+
+    const checkbox = container.querySelector('.file-diff-viewed-checkbox') as HTMLInputElement
+    fireEvent.click(checkbox)
+
+    expect(onToggleViewed).toHaveBeenCalledTimes(1)
+    expect(rafCallbacks).toHaveLength(0)
+
+    globalThis.requestAnimationFrame = originalRaf
+  })
+
+  it('does not scroll when marking already-collapsed file as viewed', () => {
+    const onToggleViewed = vi.fn()
+    const rafCallbacks: FrameRequestCallback[] = []
+    const originalRaf = globalThis.requestAnimationFrame
+    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => { rafCallbacks.push(cb); return 0 }) as typeof requestAnimationFrame
+
+    const { container } = render(
+      <div className="stacked-diff-list">
+        <FileDiffSection
+          {...defaultProps}
+          contents={makeContents()}
+          isViewed={false}
+          onToggleViewed={onToggleViewed}
+        />
+      </div>
+    )
+
+    // Manually collapse first
+    fireEvent.click(screen.getByText('src/app.ts'))
+    expect(screen.queryByTestId('multi-file-diff')).toBeNull()
+
+    const checkbox = container.querySelector('.file-diff-viewed-checkbox') as HTMLInputElement
+    fireEvent.click(checkbox)
+
+    expect(onToggleViewed).toHaveBeenCalledTimes(1)
+    expect(rafCallbacks).toHaveLength(0)
+
+    globalThis.requestAnimationFrame = originalRaf
+  })
 })

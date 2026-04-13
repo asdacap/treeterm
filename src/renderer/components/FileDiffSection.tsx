@@ -118,7 +118,21 @@ export function FileDiffSection({
             <input
               type="checkbox"
               checked={isViewed ?? false}
-              onChange={() => { onToggleViewed() }}
+              onChange={(e) => {
+                if (!isViewed && !collapsed) {
+                  const headerEl = (e.target as HTMLElement).closest('.file-diff-header')
+                  if (headerEl) {
+                    const headerHeight = headerEl.getBoundingClientRect().height
+                    requestAnimationFrame(() => {
+                      const scrollParent = headerEl.closest('.stacked-diff-list')
+                      if (scrollParent) {
+                        scrollParent.scrollTop += headerHeight
+                      }
+                    })
+                  }
+                }
+                onToggleViewed()
+              }}
               className="file-diff-viewed-checkbox"
             />
             Viewed
