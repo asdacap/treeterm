@@ -287,7 +287,7 @@ function sendSignal(exec: ExecApi, connectionId: string, pid: number, signal: st
 function CpuGraph({ samples, coreCount }: { samples: CpuSample[]; coreCount: number }) {
   const width = 300
   const height = 80
-  const padding = { top: 4, right: 4, bottom: 4, left: 4 }
+  const padding = { top: 2, right: 2, bottom: 2, left: 2 }
   const graphW = width - padding.left - padding.right
   const graphH = height - padding.top - padding.bottom
 
@@ -326,28 +326,36 @@ function CpuGraph({ samples, coreCount }: { samples: CpuSample[]; coreCount: num
         <span className="system-monitor-cpu-graph-value" style={{ color }}>{current.toFixed(1)}%</span>
         <span className="system-monitor-gauge-detail">{String(coreCount)} cores</span>
       </div>
-      <svg viewBox={`0 0 ${String(width)} ${String(height)}`} className="system-monitor-cpu-graph-svg" data-testid="cpu-graph-svg">
-        {/* Grid lines at 25%, 50%, 75% */}
-        {[25, 50, 75].map(pct => {
-          const y = padding.top + graphH - (pct / 100) * graphH
-          return (
-            <line
-              key={pct}
-              x1={padding.left} y1={y}
-              x2={padding.left + graphW} y2={y}
-              stroke="var(--border-color)" strokeWidth="0.5" strokeDasharray="4,3"
-            />
-          )
-        })}
-        {/* Area fill */}
-        {areaPoints && (
-          <polygon points={areaPoints} fill={color} opacity="0.15" />
-        )}
-        {/* Line */}
-        {polylinePoints && (
-          <polyline points={polylinePoints} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
-        )}
-      </svg>
+      <div className="system-monitor-cpu-graph-chart">
+        <div className="system-monitor-cpu-graph-y-axis">
+          <span>100%</span>
+          <span>50%</span>
+          <span>0%</span>
+        </div>
+        <svg viewBox={`0 0 ${String(width)} ${String(height)}`} preserveAspectRatio="none" className="system-monitor-cpu-graph-svg" data-testid="cpu-graph-svg">
+          {/* Grid lines at 0%, 50%, 100% */}
+          {[0, 50, 100].map(pct => {
+            const y = padding.top + graphH - (pct / 100) * graphH
+            return (
+              <line
+                key={pct}
+                x1={padding.left} y1={y}
+                x2={padding.left + graphW} y2={y}
+                stroke="var(--border-color)" strokeWidth="0.5" strokeDasharray="4,3"
+                vectorEffect="non-scaling-stroke"
+              />
+            )
+          })}
+          {/* Area fill */}
+          {areaPoints && (
+            <polygon points={areaPoints} fill={color} opacity="0.15" />
+          )}
+          {/* Line */}
+          {polylinePoints && (
+            <polyline points={polylinePoints} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+          )}
+        </svg>
+      </div>
     </div>
   )
 }

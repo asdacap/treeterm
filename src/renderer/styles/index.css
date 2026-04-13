@@ -6076,13 +6076,29 @@ body,
   font-weight: 600;
 }
 
+.system-monitor-cpu-graph-chart {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.system-monitor-cpu-graph-y-axis {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--text-muted);
+  text-align: right;
+  min-width: 28px;
+  padding: 2px 0;
+}
+
 .system-monitor-cpu-graph-svg {
-  width: 100%;
+  flex: 1;
   height: 80px;
   border: 1px solid var(--border-color);
   border-radius: 4px;
   background: var(--bg-tertiary);
-  margin-bottom: 6px;
 }
 
 .system-monitor-stats {
