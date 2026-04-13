@@ -376,7 +376,8 @@ export default function BaseTerminal({
       // Inactive tabs can't receive keystrokes so any onData during
       // replay is an auto-response (OSC 11, DA, etc.) — drop it.
       inputDisposable = terminal.onData((data) => {
-        if (workspace.getState().workspace.activeTabId !== tabId) return
+        const activeTab = workspace.getState().workspace.activeTabId
+        if (activeTab !== null && activeTab !== tabId) return
         if (ttyRef.current) {
           writeChunked(ttyRef.current.getState(), data)
         }
