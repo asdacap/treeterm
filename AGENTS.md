@@ -80,6 +80,13 @@ Never silently swallow errors or return empty/default values on failure. Throw e
 - For react component that conditionally render based on the union type, use `Record<StateType, () => ReactNode>`. 
 - If a prop can be nullable then just return early rather than making further state nullable. Same case with type check, if the type assumption fail, then return error rather than making the type nullable.
 
+### For each change make test
+- Make test. Focus on branch coverage. Untestable branch is likely removable branch or out of scope or impossible case.
+
+### Do not store information that can be re-calculated when needed.
+- For example, do not store parent branch name. This is because parent branch can be calculated using the parent id. 
+- If parent branch is stored, then if parent id changed, then parent branch also need to change which adds failure point and more cored.
+
 ### Onclosed ID on large object
 - Prefer to have store with id within it and expose operation to that store instead of having a service based pattern.
 - eg: Instead of WorkspaceApi.addTab(workspaceId), have SessionApi.getWorkspace(workspaceId).addTab()

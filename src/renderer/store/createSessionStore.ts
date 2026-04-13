@@ -88,6 +88,7 @@ export interface SessionState {
   refreshGitInfo: (id: string) => Promise<void>
   quickForkWorkspace: (workspaceId: string) => Promise<{ success: boolean; error?: string }>
   reorderWorkspace: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after') => void
+  moveWorkspace: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after' | 'onto') => void
   syncToDaemon: () => Promise<void>
   forceUnlock: () => Promise<{ success: boolean; error?: string }>
 
@@ -167,6 +168,30 @@ export function createSessionStore(
       }
     }
     return String(max + 1)
+  }
+
+  function reindexSiblings(parentId: string | null, excludeId: string): void {
+    const workspaces = store.getState().workspaces
+    const siblings: { id: string; entry: Extract<WorkspaceEntry, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }> }[] = []
+    for (const [id, entry] of Array.from(workspaces.entries())) {
+      if (id === excludeId) continue
+      if (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError) continue
+      const isMatch = parentId === null ? !entry.data.parentId : entry.data.parentId === parentId
+      if (isMatch) siblings.push({ id, entry })
+    }
+    siblings.sort((a, b) => parseInt(a.entry.data.metadata.sortOrder || '0') - parseInt(b.entry.data.metadata.sortOrder || '0'))
+    for (let i = 0; i < siblings.length; i++) {
+      const item = siblings[i]
+      if (!item) continue
+      const { id, entry } = item
+      const newMetadata = { ...entry.data.metadata, sortOrder: String(i) }
+      entry.store.setState(s => ({
+        workspace: { ...s.workspace, metadata: newMetadata }
+      }))
+      store.setState(s => ({
+        workspaces: new Map(s.workspaces).set(id, { ...entry, data: { ...entry.data, metadata: newMetadata } })
+      }))
+    }
   }
 
   async function syncSessionToDaemon(isRestoring: boolean = false): Promise<void> {
@@ -1075,6 +1100,92 @@ export function createSessionStore(
         set(s => ({
           workspaces: new Map(s.workspaces).set(id, { ...entry, data: { ...entry.data, metadata: newMetadata } })
         }))
+      }
+
+      debouncedSyncToDaemon()
+    },
+
+    moveWorkspace: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after' | 'onto') => {
+      const workspaces = get().workspaces
+      const dragEntry = workspaces.get(workspaceId)
+      const targetEntry = workspaces.get(targetWorkspaceId)
+      if (!dragEntry || !targetEntry) return
+      if (dragEntry.status !== WorkspaceEntryStatus.Loaded && dragEntry.status !== WorkspaceEntryStatus.OperationError) return
+      if (targetEntry.status !== WorkspaceEntryStatus.Loaded && targetEntry.status !== WorkspaceEntryStatus.OperationError) return
+      if (workspaceId === targetWorkspaceId) return
+
+      const dragParent = dragEntry.data.parentId
+
+      // Cycle check: walk up from target to ensure dragged item is not an ancestor
+      const checkAncestor = (startId: string): boolean => {
+        let current: string | null = startId
+        while (current) {
+          if (current === workspaceId) return true
+          const entry = workspaces.get(current)
+          if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) break
+          current = entry.data.parentId
+        }
+        return false
+      }
+
+      if (position === 'onto') {
+        // Reparent: make dragged item a child of target
+        if (checkAncestor(targetWorkspaceId)) return
+
+        const newSortOrder = nextSortOrder(targetWorkspaceId)
+        const newData = { ...dragEntry.data, parentId: targetWorkspaceId, metadata: { ...dragEntry.data.metadata, sortOrder: newSortOrder } }
+
+        dragEntry.store.setState(s => ({
+          workspace: { ...s.workspace, parentId: targetWorkspaceId, metadata: { ...s.workspace.metadata, sortOrder: newSortOrder } }
+        }))
+        set(s => ({
+          workspaces: new Map(s.workspaces).set(workspaceId, { ...dragEntry, data: newData })
+        }))
+
+        reindexSiblings(dragParent, workspaceId)
+      } else {
+        // before/after: reorder among target's siblings
+        const newParentId = targetEntry.data.parentId
+
+        if (dragParent === newParentId) {
+          get().reorderWorkspace(workspaceId, targetWorkspaceId, position)
+          return
+        }
+
+        // Cross-parent move
+        if (newParentId && checkAncestor(newParentId)) return
+
+        // Gather new siblings (excluding the dragged item)
+        const newSiblings: { id: string; entry: Extract<WorkspaceEntry, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }> }[] = []
+        for (const [id, entry] of Array.from(workspaces.entries())) {
+          if (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError) continue
+          const isMatch = newParentId === null ? !entry.data.parentId : entry.data.parentId === newParentId
+          if (isMatch && id !== workspaceId) newSiblings.push({ id, entry })
+        }
+        newSiblings.sort((a, b) => parseInt(a.entry.data.metadata.sortOrder || '0') - parseInt(b.entry.data.metadata.sortOrder || '0'))
+
+        const targetIdx = newSiblings.findIndex(s => s.id === targetWorkspaceId)
+        const insertIdx = position === 'before' ? targetIdx : targetIdx + 1
+        newSiblings.splice(insertIdx, 0, { id: workspaceId, entry: dragEntry })
+
+        // Update all new siblings' sortOrder, and parentId on the dragged item
+        for (let i = 0; i < newSiblings.length; i++) {
+          const item = newSiblings[i]
+          if (!item) continue
+          const { id, entry } = item
+          const isTheDraggedItem = id === workspaceId
+          const newMetadata = { ...entry.data.metadata, sortOrder: String(i) }
+          const parentId = isTheDraggedItem ? newParentId : entry.data.parentId
+
+          entry.store.setState(s => ({
+            workspace: { ...s.workspace, parentId, metadata: newMetadata }
+          }))
+          set(s => ({
+            workspaces: new Map(s.workspaces).set(id, { ...entry, data: { ...entry.data, parentId, metadata: newMetadata } })
+          }))
+        }
+
+        reindexSiblings(dragParent, workspaceId)
       }
 
       debouncedSyncToDaemon()
