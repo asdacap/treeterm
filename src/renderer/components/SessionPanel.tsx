@@ -42,7 +42,7 @@ export default function SessionPanel({
   const createWorktreeFromRemote = useStore(sessionStore, s => s.createWorktreeFromRemote)
   const quickForkWorkspace = useStore(sessionStore, s => s.quickForkWorkspace)
   const setActiveWorkspace = useStore(sessionStore, s => s.setActiveWorkspace)
-  const reorderWorkspace = useStore(sessionStore, s => s.reorderWorkspace)
+  const moveWorkspace = useStore(sessionStore, s => s.moveWorkspace)
   const forceUnlock = useStore(sessionStore, s => s.forceUnlock)
   const dismissWorkspace = useStore(sessionStore, s => s.dismissWorkspace)
   const { activeView, setActiveView } = useNavigationStore()
@@ -81,11 +81,11 @@ export default function SessionPanel({
     action: 'quickFork' | 'createChild'
   } | null>(null)
 
-  // Drag-and-drop state for workspace reordering
+  // Drag-and-drop state for workspace reordering and reparenting
   const [dragState, setDragState] = useState<{
     dragId: string
     overId: string
-    position: 'before' | 'after'
+    position: 'before' | 'after' | 'onto'
   } | null>(null)
 
   // Session name editing
@@ -342,17 +342,32 @@ export default function SessionPanel({
 
   const handleDragOver = (e: React.DragEvent, id: string) => {
     e.preventDefault()
-    if (!dragState) return
-    // Only allow drop on same-parent siblings
+    if (!dragState || id === dragState.dragId) return
     const dragEntry = workspaces.get(dragState.dragId)
     const overEntry = workspaces.get(id)
     if (!dragEntry || !overEntry) return
     if (dragEntry.status !== WorkspaceEntryStatus.Loaded && dragEntry.status !== WorkspaceEntryStatus.OperationError) return
     if (overEntry.status !== WorkspaceEntryStatus.Loaded && overEntry.status !== WorkspaceEntryStatus.OperationError) return
-    if (dragEntry.data.parentId !== overEntry.data.parentId) return
 
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    const position: 'before' | 'after' = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+    const y = e.clientY - rect.top
+    let position: 'before' | 'after' | 'onto'
+    if (y < rect.height * 0.25) {
+      position = 'before'
+    } else if (y > rect.height * 0.75) {
+      position = 'after'
+    } else {
+      position = 'onto'
+      // Cycle check: cannot drop onto own descendant
+      let current: string | null = id
+      while (current) {
+        if (current === dragState.dragId) return
+        const entry = workspaces.get(current)
+        if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) break
+        current = entry.data.parentId
+      }
+    }
+
     if (dragState.overId !== id || dragState.position !== position) {
       setDragState({ ...dragState, overId: id, position })
     }
@@ -363,7 +378,10 @@ export default function SessionPanel({
       setDragState(null)
       return
     }
-    reorderWorkspace(dragState.dragId, dragState.overId, dragState.position)
+    moveWorkspace(dragState.dragId, dragState.overId, dragState.position)
+    if (dragState.position === 'onto') {
+      setExpanded(prev => new Set([...Array.from(prev), dragState.overId]))
+    }
     setDragState(null)
   }
 
@@ -601,7 +619,7 @@ interface WorkspaceTreeItemProps {
   children: Workspace[]
   renderChild: (id: string, depth: number) => ReactNode
   isDragging: boolean
-  dragOverPosition: 'before' | 'after' | null
+  dragOverPosition: 'before' | 'after' | 'onto' | null
   onDragStart: (id: string) => void
   onDragOver: (e: React.DragEvent, id: string) => void
   onDrop: () => void
@@ -634,6 +652,7 @@ function WorkspaceTreeItem({
     isDragging ? 'dragging' : '',
     dragOverPosition === 'before' ? 'drag-before' : '',
     dragOverPosition === 'after' ? 'drag-after' : '',
+    dragOverPosition === 'onto' ? 'drag-onto' : '',
   ].filter(Boolean).join(' ')
 
   return (
