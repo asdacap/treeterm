@@ -124,7 +124,7 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
 
     // Persist final model state after bulk mutations (onModelChange was suppressed during mutations)
     if (added.length > 0 || removed.length > 0 || reconciled) {
-      updateMetadata('layoutModel', JSON.stringify(model.toJson()))
+      updateMetadata('layoutModel', JSON.stringify(model.toJson()), 'flexLayoutReconcile')
     }
   }, [model, appStates, getApplication, ws, updateMetadata])
 
@@ -166,7 +166,7 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
   const handleModelChange = useCallback((m: Model) => {
     if (suppressModelChangeRef.current) return
     const json = JSON.stringify(m.toJson())
-    updateMetadata('layoutModel', json)
+    updateMetadata('layoutModel', json, 'flexLayoutModelChange')
   }, [updateMetadata])
 
   // Customize tab rendering with icons and activity indicators

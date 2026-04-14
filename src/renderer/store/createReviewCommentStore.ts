@@ -4,7 +4,7 @@ import type { ReviewComment } from '../types'
 
 export interface ReviewCommentDeps {
   getMetadata: () => Record<string, string>
-  updateMetadata: (key: string, value: string) => void
+  updateMetadata: (key: string, value: string, reason: string) => void
 }
 
 export interface ReviewCommentState {
@@ -46,13 +46,13 @@ export function createReviewCommentStore(deps: ReviewCommentDeps): ReviewComment
         createdAt: Date.now(),
       }
       comments.push(newComment)
-      deps.updateMetadata('reviewComments', serializeReviewComments(comments))
+      deps.updateMetadata('reviewComments', serializeReviewComments(comments), 'addReviewComment')
     },
 
     deleteReviewComment: (commentId: string): void => {
       const comments = parseReviewComments(deps.getMetadata())
       const filtered = comments.filter(c => c.id !== commentId)
-      deps.updateMetadata('reviewComments', serializeReviewComments(filtered))
+      deps.updateMetadata('reviewComments', serializeReviewComments(filtered), 'deleteReviewComment')
     },
 
     toggleReviewCommentAddressed: (commentId: string): void => {
@@ -60,7 +60,7 @@ export function createReviewCommentStore(deps: ReviewCommentDeps): ReviewComment
       const updated = comments.map(c =>
         c.id === commentId ? { ...c, addressed: !c.addressed } : c
       )
-      deps.updateMetadata('reviewComments', serializeReviewComments(updated))
+      deps.updateMetadata('reviewComments', serializeReviewComments(updated), 'toggleReviewCommentAddressed')
     },
 
     updateOutdatedReviewComments: (currentCommitHash: string): void => {
@@ -73,17 +73,17 @@ export function createReviewCommentStore(deps: ReviewCommentDeps): ReviewComment
         }
         return comment
       })
-      deps.updateMetadata('reviewComments', serializeReviewComments(updated))
+      deps.updateMetadata('reviewComments', serializeReviewComments(updated), 'updateOutdatedReviewComments')
     },
 
     clearReviewComments: (): void => {
-      deps.updateMetadata('reviewComments', serializeReviewComments([]))
+      deps.updateMetadata('reviewComments', serializeReviewComments([]), 'clearReviewComments')
     },
 
     markAllReviewCommentsAddressed: (): void => {
       const comments = parseReviewComments(deps.getMetadata())
       const updated = comments.map(c => c.addressed ? c : { ...c, addressed: true })
-      deps.updateMetadata('reviewComments', serializeReviewComments(updated))
+      deps.updateMetadata('reviewComments', serializeReviewComments(updated), 'markAllReviewCommentsAddressed')
     },
   }))
 }

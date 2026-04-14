@@ -109,7 +109,7 @@ export interface WorkspaceStoreState {
 
   // Other per-workspace
   promptHarness: (text: string) => Promise<boolean>
-  updateMetadata: (key: string, value: string) => void
+  updateMetadata: (key: string, value: string, reason: string) => void
   updateSettings: (settings: Partial<WorktreeSettings>) => void
   updateStatus: (status: Workspace['status']) => void
 
@@ -175,7 +175,7 @@ export function createWorkspaceStore(
 
   const reviewComments = createReviewCommentStore({
     getMetadata: () => store.getState().workspace.metadata,
-    updateMetadata: (key, value) => { store.getState().updateMetadata(key, value); },
+    updateMetadata: (key, value, reason) => { store.getState().updateMetadata(key, value, reason); },
   })
 
   store = createStore<WorkspaceStoreState>()((_set, get) => ({
@@ -208,7 +208,7 @@ export function createWorkspaceStore(
     initAnalyzer: (tabId: string): Analyzer => createAnalyzerStore(tabId, {
       getSettings: deps.getSettings,
       llm: deps.llm,
-      updateMetadata: (key, value) => { get().updateMetadata(key, value); },
+      updateMetadata: (key, value, reason) => { get().updateMetadata(key, value, reason); },
       getDisplayName: () => get().workspace.metadata.displayName,
       getDescription: () => get().workspace.metadata.description,
       setActivityTabState: deps.setActivityTabState,
@@ -373,12 +373,12 @@ export function createWorkspaceStore(
       deps.syncToDaemon('updateTabState')
     },
 
-    updateMetadata: (key: string, value: string): void => {
+    updateMetadata: (key: string, value: string, reason: string): void => {
       updateWorkspace((ws) => ({
         ...ws,
         metadata: { ...ws.metadata, [key]: value }
       }))
-      deps.syncToDaemon('updateMetadata')
+      deps.syncToDaemon(reason)
     },
 
     updateSettings: (newSettings: Partial<WorktreeSettings>): void => {

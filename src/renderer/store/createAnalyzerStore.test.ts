@@ -474,10 +474,10 @@ describe('createAnalyzerStore', () => {
         expect(deps.llm.generateTitle).toHaveBeenCalled()
       })
       await vi.waitFor(() => {
-        expect(deps.updateMetadata).toHaveBeenCalledWith('displayName', 'Test Title')
+        expect(deps.updateMetadata).toHaveBeenCalledWith('displayName', 'Test Title', 'analyzerSetDisplayName')
       })
       await vi.waitFor(() => {
-        expect(deps.updateMetadata).toHaveBeenCalledWith('description', 'Test Description')
+        expect(deps.updateMetadata).toHaveBeenCalledWith('description', 'Test Description', 'analyzerSetDescription')
       })
 
       store.getState().stop()
@@ -566,10 +566,10 @@ describe('createAnalyzerStore', () => {
         expect(deps.llm.generateTitle).toHaveBeenCalled()
       })
       await vi.waitFor(() => {
-        expect(deps.updateMetadata).toHaveBeenCalledWith('description', 'Test Description')
+        expect(deps.updateMetadata).toHaveBeenCalledWith('description', 'Test Description', 'analyzerSetDescription')
       })
       // Should not overwrite existing displayName
-      expect(deps.updateMetadata).not.toHaveBeenCalledWith('displayName', expect.anything())
+      expect(deps.updateMetadata).not.toHaveBeenCalledWith('displayName', expect.anything(), expect.anything())
 
       store.getState().stop()
     })
@@ -800,7 +800,7 @@ describe('createAnalyzerStore', () => {
       })
 
       await vi.waitFor(() => {
-        expect(deps.updateMetadata).toHaveBeenCalledWith('displayName', 'Test Title')
+        expect(deps.updateMetadata).toHaveBeenCalledWith('displayName', 'Test Title', 'analyzerSetDisplayName')
       })
 
       expect(deps.renameBranch).not.toHaveBeenCalled()
@@ -828,7 +828,7 @@ describe('createAnalyzerStore', () => {
       })
 
       await vi.waitFor(() => {
-        expect(deps.updateMetadata).toHaveBeenCalledWith('displayName', 'Test Title')
+        expect(deps.updateMetadata).toHaveBeenCalledWith('displayName', 'Test Title', 'analyzerSetDisplayName')
       })
 
       expect(deps.renameBranch).not.toHaveBeenCalled()

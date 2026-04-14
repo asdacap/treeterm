@@ -6,7 +6,8 @@ function makeDeps(metadata: Record<string, string> = {}): ReviewCommentDeps {
   const state = { metadata }
   return {
     getMetadata: () => state.metadata,
-    updateMetadata: (key: string, value: string) => { state.metadata[key] = value },
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    updateMetadata: (key: string, value: string, _reason: string) => { state.metadata[key] = value },
   }
 }
 

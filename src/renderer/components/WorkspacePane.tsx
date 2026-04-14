@@ -71,7 +71,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     if (!activeHandle) return
     const trimmedName = editName.trim()
     if (trimmedName) {
-      activeHandle.getState().updateMetadata('displayName', trimmedName)
+      activeHandle.getState().updateMetadata('displayName', trimmedName, 'workspacePaneEditName')
     }
     setIsEditingName(false)
   }, [activeHandle, editName])
@@ -84,7 +84,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
 
   const handleSaveDescription = useCallback(() => {
     if (!activeHandle) return
-    activeHandle.getState().updateMetadata('description', editDescription.trim())
+    activeHandle.getState().updateMetadata('description', editDescription.trim(), 'workspacePaneEditDescription')
     setIsEditingDescription(false)
   }, [activeHandle, editDescription])
 
@@ -259,7 +259,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
 
   const handlePromptDescriptionDismiss = useCallback(() => {
     if (activeHandle) {
-      activeHandle.getState().updateMetadata('descriptionPrompted', 'true')
+      activeHandle.getState().updateMetadata('descriptionPrompted', 'true', 'dismissDescriptionPrompt')
     }
   }, [activeHandle])
 

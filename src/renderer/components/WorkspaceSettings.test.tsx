@@ -56,7 +56,7 @@ describe('WorkspaceSettings', () => {
     fireEvent.change(input, { target: { value: 'New Name' } })
     fireEvent.blur(input)
 
-    expect(updateMetadata).toHaveBeenCalledWith('displayName', 'New Name')
+    expect(updateMetadata).toHaveBeenCalledWith('displayName', 'New Name', 'workspaceSettingsEditName')
   })
 
   it('does not call updateMetadata when name is empty on blur', () => {
@@ -67,7 +67,7 @@ describe('WorkspaceSettings', () => {
     fireEvent.change(input, { target: { value: '   ' } })
     fireEvent.blur(input)
 
-    expect(updateMetadata).not.toHaveBeenCalledWith('displayName', expect.anything())
+    expect(updateMetadata).not.toHaveBeenCalledWith('displayName', expect.anything(), expect.anything())
   })
 
   it('calls updateMetadata with description on textarea blur', () => {
@@ -78,7 +78,7 @@ describe('WorkspaceSettings', () => {
     fireEvent.change(textarea, { target: { value: 'Updated desc' } })
     fireEvent.blur(textarea)
 
-    expect(updateMetadata).toHaveBeenCalledWith('description', 'Updated desc')
+    expect(updateMetadata).toHaveBeenCalledWith('description', 'Updated desc', 'workspaceSettingsEditDescription')
   })
 
   it('calls updateSettings on default app change', () => {

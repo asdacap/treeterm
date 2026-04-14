@@ -20,12 +20,12 @@ export default function WorkspaceSettings({ workspace, applications }: Workspace
   const handleNameBlur = () => {
     const trimmed = name.trim()
     if (trimmed) {
-      updateMetadata('displayName', trimmed)
+      updateMetadata('displayName', trimmed, 'workspaceSettingsEditName')
     }
   }
 
   const handleDescriptionBlur = () => {
-    updateMetadata('description', description.trim())
+    updateMetadata('description', description.trim(), 'workspaceSettingsEditDescription')
   }
 
   const handleDefaultAppChange = (e: React.ChangeEvent<HTMLSelectElement>) => {

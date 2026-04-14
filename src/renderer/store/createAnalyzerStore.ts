@@ -8,7 +8,7 @@ import type { Tty } from './createTtyStore'
 export interface AnalyzerDeps {
   getSettings: () => Settings
   llm: LlmApi
-  updateMetadata: (key: string, value: string) => void
+  updateMetadata: (key: string, value: string, reason: string) => void
   getDisplayName: () => string | undefined
   getDescription: () => string | undefined
   setActivityTabState: (tabId: string, state: ActivityState) => void
@@ -311,11 +311,11 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
       if ('title' in result && result.title) {
         if (!deps.getDisplayName()) {
-          deps.updateMetadata('displayName', result.title)
+          deps.updateMetadata('displayName', result.title, 'analyzerSetDisplayName')
         }
         if (!deps.getDescription() && result.description) {
-          deps.updateMetadata('description', result.description)
-          deps.updateMetadata('descriptionPrompted', 'true')
+          deps.updateMetadata('description', result.description, 'analyzerSetDescription')
+          deps.updateMetadata('descriptionPrompted', 'true', 'analyzerSetDescriptionPrompted')
         }
         if (result.branchName && isValidBranchName(result.branchName) && deps.getGitBranch() && !deps.getBranchIsUserDefined() && deps.getParentId()) {
           const currentBranch = deps.getGitBranch()
