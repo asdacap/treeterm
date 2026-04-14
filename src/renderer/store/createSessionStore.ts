@@ -142,6 +142,49 @@ export function getUnmergedSubWorkspaces(workspaces: Map<string, WorkspaceEntry>
     .filter(ws => ws.isWorktree && ws.status === 'active')
 }
 
+function deepDiff(oldVal: unknown, newVal: unknown, path: string): string[] {
+  if (oldVal === newVal) return []
+  if (typeof oldVal !== typeof newVal || oldVal === null || newVal === null || typeof oldVal !== 'object') {
+    return [`${path}: ${JSON.stringify(oldVal)} → ${JSON.stringify(newVal)}`]
+  }
+  if (Array.isArray(oldVal) || Array.isArray(newVal)) {
+    if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
+      return [`${path}: ${JSON.stringify(oldVal)} → ${JSON.stringify(newVal)}`]
+    }
+    return []
+  }
+  const allKeys = Array.from(new Set([...Object.keys(oldVal as Record<string, unknown>), ...Object.keys(newVal as Record<string, unknown>)]))
+  const changes: string[] = []
+  for (const key of allKeys) {
+    changes.push(...deepDiff((oldVal as Record<string, unknown>)[key], (newVal as Record<string, unknown>)[key], `${path}.${key}`))
+  }
+  return changes
+}
+
+function diffWorkspaces(oldJson: string, newJson: string): string {
+  if (!oldJson) return '(initial sync)'
+  const oldArr = JSON.parse(oldJson) as Array<Record<string, unknown> & { path: string }>
+  const newArr = JSON.parse(newJson) as Array<Record<string, unknown> & { path: string }>
+  const changes: string[] = []
+
+  const oldByPath = Object.fromEntries(oldArr.map(w => [w.path, w]))
+  const newByPath = Object.fromEntries(newArr.map(w => [w.path, w]))
+
+  for (const path of Object.keys(newByPath)) {
+    if (!(path in oldByPath)) changes.push(`added workspace: ${path}`)
+  }
+  for (const path of Object.keys(oldByPath)) {
+    if (!(path in newByPath)) changes.push(`removed workspace: ${path}`)
+  }
+  for (const path of Object.keys(newByPath)) {
+    const oldWs = oldByPath[path]
+    const newWs = newByPath[path]
+    if (!oldWs || !newWs) continue
+    changes.push(...deepDiff(oldWs, newWs, path))
+  }
+  return changes.length > 0 ? changes.join(', ') : '(no changes)'
+}
+
 export function createSessionStore(
   config: { sessionId: string; connection: ConnectionInfo },
   deps: SessionDeps
@@ -193,10 +236,11 @@ export function createSessionStore(
     }
   }
 
+  let lastSyncedWorkspacesJson = ''
+
   async function syncSessionToDaemon(isRestoring: boolean = false): Promise<void> {
     try {
       const { workspaces, connection } = store.getState()
-      console.log('[session] syncSessionToDaemon called - workspaces:', workspaces.size, 'isRestoring:', isRestoring)
 
       if (connection.status !== ConnectionStatus.Connected) {
         console.log('[session] connection not yet established, skipping sync')
@@ -213,7 +257,11 @@ export function createSessionStore(
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         .map(e => { const { createdAt: _createdAt, lastActivity: _lastActivity, ...ws } = e.data; return ws })
 
-      console.log('[session] syncing to daemon:', daemonWorkspaces.length, 'workspaces', JSON.stringify(daemonWorkspaces))
+      const currentJson = JSON.stringify(daemonWorkspaces)
+      if (currentJson === lastSyncedWorkspacesJson) {
+        return
+      }
+      console.log('[session] syncing changes to daemon:', diffWorkspaces(lastSyncedWorkspacesJson, currentJson))
 
       const currentVersion = store.getState().sessionVersion
       const connectionId = store.getState().connection.id
@@ -224,6 +272,7 @@ export function createSessionStore(
       } else {
         if (result.session.version === currentVersion + 1) {
           // Update accepted
+          lastSyncedWorkspacesJson = currentJson
           store.setState({ sessionVersion: result.session.version, sessionLock: result.session.lock, lastDaemonSessionJson: JSON.stringify(result.session) })
           console.log('[session] session updated successfully, version:', result.session.version)
         } else {
