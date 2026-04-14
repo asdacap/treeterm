@@ -385,7 +385,7 @@ describe('createWorkspaceStore', () => {
       expect(tab.state).toEqual({ count: 1 })
     })
 
-    it('syncs to daemon only when ptyId is present in updated state', () => {
+    it('always syncs to daemon on tab state update', () => {
       const deps = makeHandleDeps()
       const ws = makeWorkspace({
         id: 'ws-1',
@@ -393,14 +393,13 @@ describe('createWorkspaceStore', () => {
       })
       const store = createWorkspaceStore(ws, deps)
 
-      // Update without ptyId — syncToDaemon called only for the state update, not for ptyId
+      // Update without ptyId — syncToDaemon should still be called
       store.getState().updateTabState('tab-1', (s: { count: number }) => ({ ...s, count: 1 }))
-      // syncToDaemon should NOT be called for non-pty state updates
-      expect(deps.syncToDaemon).not.toHaveBeenCalled()
+      expect(deps.syncToDaemon).toHaveBeenCalledTimes(1)
 
-      // Update WITH ptyId — should sync
+      // Update WITH ptyId — should also sync
       store.getState().updateTabState('tab-1', (s: { count: number }) => ({ ...s, count: 2, ptyId: 'pty-1' }))
-      expect(deps.syncToDaemon).toHaveBeenCalled()
+      expect(deps.syncToDaemon).toHaveBeenCalledTimes(2)
     })
   })
 

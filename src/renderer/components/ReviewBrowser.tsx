@@ -223,17 +223,24 @@ export default function ReviewBrowser({
     }
   }
 
-  // Filter viewed files: keep only entries where the file still exists and its stats match
+  // Filter viewed files: invalidate entries whose stats changed, but preserve entries
+  // for files not in the provided list (they belong to a different view mode).
   const reconcileViewedFiles = (files: (DiffFile | UncommittedFile)[]) => {
     setViewedFiles(prev => {
+      const fileMap = new Map(files.map(f => [f.path, f]))
       const next: Record<string, ViewedFileStats> = {}
       let changed = false
       for (const [path, stats] of Object.entries(prev)) {
-        const file = files.find(f => f.path === path)
-        if (file && file.additions === stats.additions && file.deletions === stats.deletions) {
-          next[path] = stats
+        const file = fileMap.get(path)
+        if (file) {
+          if (file.additions === stats.additions && file.deletions === stats.deletions) {
+            next[path] = stats
+          } else {
+            changed = true
+          }
         } else {
-          changed = true
+          // File not in this list — preserve (belongs to another view mode)
+          next[path] = stats
         }
       }
       if (!changed) return prev

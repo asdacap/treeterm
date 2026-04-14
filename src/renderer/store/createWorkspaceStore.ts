@@ -370,11 +370,7 @@ export function createWorkspaceStore(
           }
         }
       })
-      // Only sync if the tab state contains a ptyId (persisted state)
-      const appState = get().workspace.appStates[tabId]
-      if (appState?.state && (appState.state as { ptyId?: string }).ptyId) {
-        deps.syncToDaemon()
-      }
+      deps.syncToDaemon()
     },
 
     updateMetadata: (key: string, value: string): void => {
