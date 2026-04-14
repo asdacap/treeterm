@@ -60,6 +60,7 @@ const defaultProps = {
   filePath: 'src/test.ts',
   diffStyle: 'split' as const,
   expandUnchanged: true,
+  ignoreWhitespace: false,
   comments: [] as ReviewComment[],
   inlineCommentInput: null,
 }

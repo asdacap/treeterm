@@ -62,6 +62,7 @@ const defaultProps = {
   loadFileContents: vi.fn(() => Promise.resolve(makeContents())),
   diffStyle: 'split' as const,
   expandUnchanged: true,
+  ignoreWhitespace: false,
   getStatusIcon: vi.fn(() => <span>M</span>),
   reviews: [] as ReviewComment[],
   onLineClick: vi.fn(),

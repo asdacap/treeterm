@@ -66,6 +66,7 @@ const defaultProps = {
   onRequestLoad: vi.fn(),
   diffStyle: 'split' as const,
   expandUnchanged: true,
+  ignoreWhitespace: false,
   getStatusIcon: vi.fn((status: FileChangeStatus) => <span data-testid={`icon-${status}`}>M</span>),
   comments: [] as ReviewComment[],
   onLineClick: vi.fn(),

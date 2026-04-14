@@ -9,6 +9,8 @@ const defaultProps = {
   onToggleSplit: vi.fn(),
   hideUnchanged: false,
   onToggleHideUnchanged: vi.fn(),
+  ignoreWhitespace: false,
+  onToggleIgnoreWhitespace: vi.fn(),
   totalComments: 0,
 }
 
