@@ -1249,14 +1249,20 @@ export function createSessionStore(
       return { success: true }
     },
 
-    // eslint-disable-next-line @typescript-eslint/require-await -- interface requires Promise<void> but implementation is synchronous
     handleRestore: async (daemonSession: Session) => {
       console.log('[Session] Restoring session', daemonSession.id, 'with', daemonSession.workspaces.length, 'workspaces, version:', daemonSession.version)
+      await get().handleExternalUpdate(daemonSession)
 
-      set({ isRestoring: true, sessionVersion: daemonSession.version, sessionLock: daemonSession.lock, lastDaemonSessionJson: JSON.stringify(daemonSession) })
-      applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: true })
-      set({ isRestoring: false })
-
+      // Set active workspace to the first root workspace
+      const firstRoot = daemonSession.workspaces.find(w => !w.parentId)
+      if (firstRoot) {
+        const existing = Array.from(get().workspaces.entries()).find(
+          ([, entry]) => (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) && entry.data.path === firstRoot.path
+        )
+        if (existing) {
+          get().setActiveWorkspace(existing[0])
+        }
+      }
       console.log('[Session] Session restore complete, workspace count:', get().workspaces.size)
     },
 
@@ -1277,7 +1283,7 @@ export function createSessionStore(
       console.log('[Session] External session update received, version:', daemonSession.version, 'current:', currentVersion)
 
       set({ isRestoring: true, sessionVersion: daemonSession.version, sessionLock: daemonSession.lock, lastDaemonSessionJson: JSON.stringify(daemonSession) })
-      applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: false })
+      applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace)
 
       // Remove workspaces not present in daemon session (skip non-loaded workspaces)
       const incomingPaths = new Set(daemonSession.workspaces.map(ws => ws.path))
@@ -1294,20 +1300,6 @@ export function createSessionStore(
   }))
 
   return store
-}
-
-// Helper: sync metadata and name from daemon workspace to existing workspace handle
-function updateWorkspaceFields(
-  store: StoreApi<SessionState>,
-  existingId: string,
-  daemonWorkspace: Workspace
-): void {
-  const entry = store.getState().workspaces.get(existingId)
-  if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return
-  const ws = entry.store.getState().workspace
-  entry.store.setState({
-    workspace: { ...ws, metadata: daemonWorkspace.metadata, name: daemonWorkspace.name }
-  })
 }
 
 // Helper: find existing loaded workspace by path
@@ -1327,36 +1319,16 @@ function findLoadedByPath(
 function applySessionWorkspaces(
   store: StoreApi<SessionState>,
   daemonWorkspaces: Workspace[],
-  createHandleForWorkspace: (ws: Workspace) => WorkspaceStore,
-  options: { restoreExisting: boolean }
+  createHandleForWorkspace: (ws: Workspace) => WorkspaceStore
 ): void {
   const rootWorkspaces = daemonWorkspaces.filter(w => !w.parentId)
   const childWorkspaces = daemonWorkspaces.filter(w => w.parentId)
 
-  for (const daemonWorkspace of rootWorkspaces) {
+  for (const daemonWorkspace of [...rootWorkspaces, ...childWorkspaces]) {
     const existing = findLoadedByPath(store, daemonWorkspace.path)
 
     if (existing) {
-      if (options.restoreExisting) {
-        store.getState().setActiveWorkspace(existing.id)
-        restoreWorkspaceTabs(store, existing.id, daemonWorkspace)
-      } else {
-        updateWorkspaceFields(store, existing.id, daemonWorkspace)
-      }
-    } else {
-      reconstructWorkspace(store, daemonWorkspace, createHandleForWorkspace)
-    }
-  }
-
-  for (const daemonWorkspace of childWorkspaces) {
-    const existing = findLoadedByPath(store, daemonWorkspace.path)
-
-    if (existing) {
-      if (options.restoreExisting) {
-        restoreWorkspaceTabs(store, existing.id, daemonWorkspace)
-      } else {
-        updateWorkspaceFields(store, existing.id, daemonWorkspace)
-      }
+      restoreWorkspaceTabs(store, existing.id, daemonWorkspace)
     } else {
       reconstructWorkspace(store, daemonWorkspace, createHandleForWorkspace)
     }
