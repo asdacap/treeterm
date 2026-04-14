@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 
-import { getSortedFilePaths, CommittedDiffFileTree, UncommittedDiffFileTree } from './DiffFileTree'
+import { getSortedFilePaths, sortFilesAsTree, CommittedDiffFileTree, UncommittedDiffFileTree } from './DiffFileTree'
 import type { DiffFile, UncommittedFile } from '../types'
 import { FileChangeStatus } from '../types'
 
@@ -66,6 +66,30 @@ describe('getSortedFilePaths', () => {
     const files = [makeDiffFile({ path: 'src/renderer/app.ts' })]
     const sorted = getSortedFilePaths(files)
     expect(sorted).toEqual(['src/renderer/app.ts'])
+  })
+})
+
+describe('sortFilesAsTree', () => {
+  it('returns files sorted with directories first', () => {
+    const files = [
+      makeDiffFile({ path: 'z.ts' }),
+      makeDiffFile({ path: 'src/a.ts' }),
+      makeDiffFile({ path: 'a.ts' }),
+    ]
+    const sorted = sortFilesAsTree(files)
+    expect(sorted.map(f => f.path)).toEqual(['src/a.ts', 'a.ts', 'z.ts'])
+  })
+
+  it('preserves original file objects', () => {
+    const fileA = makeDiffFile({ path: 'b.ts', additions: 99 })
+    const fileB = makeDiffFile({ path: 'a.ts', additions: 1 })
+    const sorted = sortFilesAsTree([fileA, fileB])
+    expect(sorted[0]).toBe(fileB)
+    expect(sorted[1]).toBe(fileA)
+  })
+
+  it('returns empty array for empty input', () => {
+    expect(sortFilesAsTree([])).toEqual([])
   })
 })
 

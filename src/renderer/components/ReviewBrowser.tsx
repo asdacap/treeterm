@@ -7,7 +7,7 @@ import { getTabs } from '../types'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, GitLogCommit, WorkspaceStore, ReviewState, ViewedFileStats } from '../types'
 import { FileChangeStatus } from '../types'
 import { useGitApi } from '../hooks/useWorkspaceApis'
-import { CommittedDiffFileTree, UncommittedDiffFileTree } from './DiffFileTree'
+import { CommittedDiffFileTree, UncommittedDiffFileTree, sortFilesAsTree } from './DiffFileTree'
 import { StackedDiffList } from './StackedDiffList'
 import { DiffToolbar } from './DiffToolbar'
 import { createDiffsWorker } from '../pierre-diffs-config'
@@ -968,7 +968,7 @@ export default function ReviewBrowser({
                       highlighterOptions={{ preferredHighlighter: 'shiki-wasm' }}
                     >
                       <StackedDiffList
-                        files={commitDiffFiles}
+                        files={sortFilesAsTree(commitDiffFiles)}
                         loadFileContents={loadCommitFileContents}
                         diffStyle={isSplitView ? 'split' : 'unified'}
                         expandUnchanged={!hideUnchangedRegions}
@@ -1039,7 +1039,7 @@ export default function ReviewBrowser({
                     highlighterOptions={{ preferredHighlighter: 'shiki-wasm' }}
                   >
                     <StackedDiffList
-                      files={diff.files}
+                      files={sortFilesAsTree(diff.files)}
                       loadFileContents={loadCommittedFileContents}
                       diffStyle={isSplitView ? 'split' : 'unified'}
                       expandUnchanged={!hideUnchangedRegions}
@@ -1140,7 +1140,7 @@ export default function ReviewBrowser({
                     highlighterOptions={{ preferredHighlighter: 'shiki-wasm' }}
                   >
                     <StackedDiffList
-                      files={[...stagedFiles, ...unstagedFiles]}
+                      files={sortFilesAsTree([...stagedFiles, ...unstagedFiles])}
                       loadFileContents={loadUncommittedFileContents}
                       diffStyle={isSplitView ? 'split' : 'unified'}
                       expandUnchanged={!hideUnchangedRegions}
