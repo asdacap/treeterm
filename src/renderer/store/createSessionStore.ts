@@ -282,13 +282,12 @@ export function createSessionStore(
         } else {
           // Update rejected (version mismatch) — reconcile from daemon's current state
           console.warn('[session] session update rejected, expected version:', expectedVersion + 1, 'got:', result.session.version, '— reconciling')
-          store.setState({ sessionVersion: 0 })
+          store.setState({ sessionVersion: result.session.version, sessionLock: result.session.lock, lastDaemonSessionJson: JSON.stringify(result.session) })
           await store.getState().handleExternalUpdate(result.session)
         }
       }
     } catch (error) {
       console.error('[session] failed to sync session to daemon:', error)
-      store.setState({ sessionVersion: 0 })
     }
   }
 
