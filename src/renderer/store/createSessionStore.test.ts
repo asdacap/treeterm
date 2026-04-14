@@ -580,6 +580,157 @@ describe('createSessionStore', () => {
 
   })
 
+  describe('sessionVersion optimistic increment', () => {
+    it('increments sessionVersion on syncToDaemon before await', async () => {
+      vi.mocked(deps.sessionApi.update).mockResolvedValue({
+        success: true,
+        session: { id: 'session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null },
+      })
+      store.getState().addWorkspace('/test')
+      await flushPromises()
+      await store.getState().syncToDaemon('test')
+      // sessionVersion should be 1 (accepted version from daemon)
+      expect(store.getState().sessionVersion).toBe(1)
+    })
+
+    it('resets sessionVersion to 0 on rejected sync', async () => {
+      // First sync succeeds
+      vi.mocked(deps.sessionApi.update).mockResolvedValue({
+        success: true,
+        session: { id: 'session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null },
+      })
+      store.getState().addWorkspace('/test')
+      await flushPromises()
+      await store.getState().syncToDaemon('first')
+      expect(store.getState().sessionVersion).toBe(1)
+
+      // Make a state change so second sync passes dedup check
+      store.getState().addWorkspace('/test2')
+      await flushPromises()
+
+      // Second sync is rejected (version mismatch — returned version != expected + 1)
+      vi.mocked(deps.sessionApi.update).mockResolvedValue({
+        success: true,
+        session: { id: 'session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 5, lock: null },
+      })
+      await store.getState().syncToDaemon('rejected')
+      // sessionVersion resets to 0 on rejection, then handleExternalUpdate applies version 5
+      expect(store.getState().sessionVersion).toBe(5)
+    })
+
+    it('skips external update when sessionVersion is ahead (pending sync)', async () => {
+      // Simulate pending sync: sessionVersion incremented optimistically
+      store.setState({ sessionVersion: 5 })
+
+      const daemonSession = {
+        id: 'session-1',
+        workspaces: [makeWorkspace({ id: 'ws-ext', name: 'external', path: '/external' })],
+        createdAt: Date.now(),
+        lastActivity: Date.now(),
+        version: 3,  // <= sessionVersion (5)
+        lock: null,
+      }
+
+      await store.getState().handleExternalUpdate(daemonSession)
+
+      // Should NOT have applied — no workspace created
+      expect(store.getState().workspaces.has('ws-ext')).toBe(false)
+    })
+
+    it('applies external update when sessionVersion is 0 (after rejection)', async () => {
+      store.setState({ sessionVersion: 0 })
+
+      const daemonSession = {
+        id: 'session-1',
+        workspaces: [makeWorkspace({ id: 'ws-ext', name: 'external', path: '/external' })],
+        createdAt: Date.now(),
+        lastActivity: Date.now(),
+        version: 1,
+        lock: null,
+      }
+
+      await store.getState().handleExternalUpdate(daemonSession)
+
+      // Should have applied — workspace created
+      const found = Array.from(store.getState().workspaces.values()).some(
+        e => (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) && e.data.path === '/external'
+      )
+      expect(found).toBe(true)
+    })
+
+    it('applies same-version external update when content differs', async () => {
+      // First apply a session so lastDaemonSessionJson is set
+      const session1 = {
+        id: 'session-1',
+        workspaces: [makeWorkspace({ id: 'ws-1', name: 'original', path: '/original' })],
+        createdAt: Date.now(),
+        lastActivity: Date.now(),
+        version: 3,
+        lock: null,
+      }
+      await store.getState().handleExternalUpdate(session1)
+      expect(store.getState().sessionVersion).toBe(3)
+
+      // Same version, different content — should apply
+      const session2 = {
+        id: 'session-1',
+        workspaces: [makeWorkspace({ id: 'ws-2', name: 'changed', path: '/changed' })],
+        createdAt: Date.now(),
+        lastActivity: Date.now(),
+        version: 3,
+        lock: null,
+      }
+      await store.getState().handleExternalUpdate(session2)
+
+      const found = Array.from(store.getState().workspaces.values()).some(
+        e => (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) && e.data.path === '/changed'
+      )
+      expect(found).toBe(true)
+    })
+
+    it('skips same-version external update when content matches', async () => {
+      const session = {
+        id: 'session-1',
+        workspaces: [makeWorkspace({ id: 'ws-1', name: 'same', path: '/same' })],
+        createdAt: Date.now(),
+        lastActivity: Date.now(),
+        version: 3,
+        lock: null,
+      }
+      await store.getState().handleExternalUpdate(session)
+
+      // Apply again with identical content — should be skipped (no-op)
+      const spy = vi.fn()
+      store.subscribe(spy)
+      spy.mockClear()
+
+      await store.getState().handleExternalUpdate(session)
+      // isRestoring should never have been set (skipped early)
+      expect(store.getState().isRestoring).toBe(false)
+    })
+
+    it('applies external update when daemon version > sessionVersion', async () => {
+      store.setState({ sessionVersion: 3 })
+
+      const daemonSession = {
+        id: 'session-1',
+        workspaces: [makeWorkspace({ id: 'ws-ext', name: 'external', path: '/external' })],
+        createdAt: Date.now(),
+        lastActivity: Date.now(),
+        version: 5,
+        lock: null,
+      }
+
+      await store.getState().handleExternalUpdate(daemonSession)
+
+      // Should have applied — workspace created
+      const found = Array.from(store.getState().workspaces.values()).some(
+        e => (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) && e.data.path === '/external'
+      )
+      expect(found).toBe(true)
+    })
+  })
+
   describe('getDefaultAppForWorktree', () => {
     it('uses worktree settings defaultApplicationId when set', async () => {
       const app = makeFakeApp({ id: 'custom-app' })

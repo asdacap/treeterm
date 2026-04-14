@@ -263,26 +263,32 @@ export function createSessionStore(
       }
       console.log('[session] syncing to daemon, reason:', reason, 'changes:', diffWorkspaces(lastSyncedWorkspacesJson, currentJson))
 
-      const currentVersion = store.getState().sessionVersion
+      // Increment sessionVersion before the await so the existing stale check
+      // in handleExternalUpdate skips echoes while we have in-flight syncs.
+      // Send sessionVersion-1 as the expectedVersion (the real daemon version).
+      store.setState((s) => ({ sessionVersion: s.sessionVersion + 1 }))
+      const expectedVersion = store.getState().sessionVersion - 1
       const connectionId = store.getState().connection.id
-      console.log('[session] updating session via connection:', connectionId, 'expectedVersion:', currentVersion)
-      const result = await deps.sessionApi.update(connectionId, daemonWorkspaces, connectionId, currentVersion)
+      console.log('[session] updating session via connection:', connectionId, 'expectedVersion:', expectedVersion)
+      const result = await deps.sessionApi.update(connectionId, daemonWorkspaces, connectionId, expectedVersion)
       if (!result.success) {
         console.error('[session] failed to update session:', result.error)
       } else {
-        if (result.session.version === currentVersion + 1) {
+        if (result.session.version === expectedVersion + 1) {
           // Update accepted
           lastSyncedWorkspacesJson = currentJson
           store.setState({ sessionVersion: result.session.version, sessionLock: result.session.lock, lastDaemonSessionJson: JSON.stringify(result.session) })
           console.log('[session] session updated successfully, version:', result.session.version)
         } else {
           // Update rejected (version mismatch) — reconcile from daemon's current state
-          console.warn('[session] session update rejected, expected version:', currentVersion + 1, 'got:', result.session.version, '— reconciling')
+          console.warn('[session] session update rejected, expected version:', expectedVersion + 1, 'got:', result.session.version, '— reconciling')
+          store.setState({ sessionVersion: 0 })
           await store.getState().handleExternalUpdate(result.session)
         }
       }
     } catch (error) {
       console.error('[session] failed to sync session to daemon:', error)
+      store.setState({ sessionVersion: 0 })
     }
   }
 
@@ -1269,15 +1275,16 @@ export function createSessionStore(
     // eslint-disable-next-line @typescript-eslint/require-await -- interface requires Promise<void> but implementation is synchronous
     handleExternalUpdate: async (daemonSession: Session) => {
       const currentVersion = get().sessionVersion
-      if (daemonSession.version <= currentVersion) {
+      if (daemonSession.version < currentVersion) {
+        return
+      }
+      if (daemonSession.version === currentVersion) {
         const incomingJson = JSON.stringify(daemonSession)
         const lastJson = get().lastDaemonSessionJson
-        if (incomingJson !== lastJson) {
-          console.warn('[Session] Stale external update has different content!',
-            'incoming version:', daemonSession.version, 'current:', currentVersion,
-            'incoming:', incomingJson, 'last:', lastJson)
-        }
-        return
+        if (incomingJson === lastJson) return
+        console.warn('[Session] Same version but different content, applying daemon state.',
+          'version:', daemonSession.version)
+        // Fall through to apply
       }
 
       console.log('[Session] External session update received, version:', daemonSession.version, 'current:', currentVersion)
