@@ -146,8 +146,6 @@ export function createSessionStore(
   config: { sessionId: string; connection: ConnectionInfo },
   deps: SessionDeps
 ): StoreApi<SessionState> {
-  let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null
-
   // Acquire session lock. Surfaces the real error on failure instead of a generic message.
   async function acquireLock(): Promise<{ acquired: true } | { acquired: false; error: string }> {
     const lockResult = await deps.sessionApi.lock(store.getState().connection.id, 60_000)
@@ -195,8 +193,6 @@ export function createSessionStore(
     }
   }
 
-  let lastSyncedWorkspacesJson = ''
-
   async function syncSessionToDaemon(isRestoring: boolean = false): Promise<void> {
     try {
       const { workspaces, connection } = store.getState()
@@ -217,11 +213,6 @@ export function createSessionStore(
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         .map(e => { const { createdAt: _createdAt, lastActivity: _lastActivity, ...ws } = e.data; return ws })
 
-      const workspacesJson = JSON.stringify(daemonWorkspaces)
-      if (workspacesJson === lastSyncedWorkspacesJson) {
-        return
-      }
-
       console.log('[session] syncing to daemon:', daemonWorkspaces.length, 'workspaces', JSON.stringify(daemonWorkspaces))
 
       const currentVersion = store.getState().sessionVersion
@@ -233,7 +224,6 @@ export function createSessionStore(
       } else {
         if (result.session.version === currentVersion + 1) {
           // Update accepted
-          lastSyncedWorkspacesJson = workspacesJson
           store.setState({ sessionVersion: result.session.version, sessionLock: result.session.lock, lastDaemonSessionJson: JSON.stringify(result.session) })
           console.log('[session] session updated successfully, version:', result.session.version)
         } else {
@@ -245,31 +235,6 @@ export function createSessionStore(
     } catch (error) {
       console.error('[session] failed to sync session to daemon:', error)
     }
-  }
-
-  let pendingSyncSnapshot: Record<string, string | null> | null = null
-
-  function debouncedSyncToDaemon(): void {
-    const currentSnapshot = getActiveTabSnapshot()
-    if (syncDebounceTimer) {
-      clearTimeout(syncDebounceTimer)
-      console.log('[session] debounce: skipped state:', JSON.stringify(pendingSyncSnapshot), '-> new state:', JSON.stringify(currentSnapshot))
-    }
-    pendingSyncSnapshot = currentSnapshot
-    syncDebounceTimer = setTimeout(() => {
-      pendingSyncSnapshot = null
-      void syncSessionToDaemon(store.getState().isRestoring)
-    }, 100)
-  }
-
-  function getActiveTabSnapshot(): Record<string, string | null> {
-    const snapshot: Record<string, string | null> = {}
-    store.getState().workspaces.forEach((entry, id) => {
-      if (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) {
-        snapshot[id] = entry.store.getState().workspace.activeTabId
-      }
-    })
-    return snapshot
   }
 
   function makeHandleDeps(): WorkspaceStoreDeps {
@@ -285,7 +250,7 @@ export function createSessionStore(
       getSettings: deps.getSettings,
       llm: deps.llm,
       setActivityTabState: deps.setActivityTabState,
-      syncToDaemon: () => { debouncedSyncToDaemon(); },
+      syncToDaemon: () => { void syncSessionToDaemon(store.getState().isRestoring); },
       removeWorkspace: (id) => store.getState().removeWorkspace(id),
       removeWorkspaceKeepBranch: (id) => store.getState().removeWorkspaceKeepBranch(id),
       removeWorkspaceKeepBoth: (id) => store.getState().removeWorkspaceKeepBoth(id),
@@ -1135,7 +1100,7 @@ export function createSessionStore(
         }))
       }
 
-      debouncedSyncToDaemon()
+      void syncSessionToDaemon(get().isRestoring)
     },
 
     moveWorkspace: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after' | 'onto') => {
@@ -1221,7 +1186,7 @@ export function createSessionStore(
         reindexSiblings(dragParent, workspaceId)
       }
 
-      debouncedSyncToDaemon()
+      void syncSessionToDaemon(get().isRestoring)
     },
 
     syncToDaemon: async () => {
@@ -1262,7 +1227,6 @@ export function createSessionStore(
 
       console.log('[Session] External session update received, version:', daemonSession.version, 'current:', currentVersion)
 
-      lastSyncedWorkspacesJson = ''
       set({ isRestoring: true, sessionVersion: daemonSession.version, sessionLock: daemonSession.lock, lastDaemonSessionJson: JSON.stringify(daemonSession) })
       applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: false })
 
