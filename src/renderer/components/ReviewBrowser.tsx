@@ -65,6 +65,7 @@ export default function ReviewBrowser({
   // Stacked diff view state
   const [isSplitView, setIsSplitView] = useState(true)
   const [hideUnchangedRegions, setHideUnchangedRegions] = useState(true)
+  const [ignoreWhitespace, setIgnoreWhitespace] = useState(false)
   const [scrollToFile, setScrollToFile] = useState<string | null>(reviewState?.selectedFilePath ?? null)
   const [activeFile, setActiveFile] = useState<string | null>(null)
 
@@ -936,6 +937,8 @@ export default function ReviewBrowser({
                     onToggleSplit={() => { setIsSplitView(!isSplitView) }}
                     hideUnchanged={hideUnchangedRegions}
                     onToggleHideUnchanged={() => { setHideUnchangedRegions(!hideUnchangedRegions) }}
+                    ignoreWhitespace={ignoreWhitespace}
+                    onToggleIgnoreWhitespace={() => { setIgnoreWhitespace(!ignoreWhitespace) }}
                     totalComments={0}
                     viewedCount={commitDiffViewedCount}
                     totalFiles={commitDiffFiles.length}
@@ -972,6 +975,7 @@ export default function ReviewBrowser({
                         loadFileContents={loadCommitFileContents}
                         diffStyle={isSplitView ? 'split' : 'unified'}
                         expandUnchanged={!hideUnchangedRegions}
+                        ignoreWhitespace={ignoreWhitespace}
                         getStatusIcon={getStatusIcon}
                         reviews={[]}
                         onLineClick={handleLineClick}
@@ -1008,6 +1012,8 @@ export default function ReviewBrowser({
                   onToggleSplit={() => { setIsSplitView(!isSplitView) }}
                   hideUnchanged={hideUnchangedRegions}
                   onToggleHideUnchanged={() => { setHideUnchangedRegions(!hideUnchangedRegions) }}
+                  ignoreWhitespace={ignoreWhitespace}
+                  onToggleIgnoreWhitespace={() => { setIgnoreWhitespace(!ignoreWhitespace) }}
                   totalComments={reviews.length}
                   viewedCount={committedViewedCount}
                   totalFiles={diff.files.length}
@@ -1043,6 +1049,7 @@ export default function ReviewBrowser({
                       loadFileContents={loadCommittedFileContents}
                       diffStyle={isSplitView ? 'split' : 'unified'}
                       expandUnchanged={!hideUnchangedRegions}
+                      ignoreWhitespace={ignoreWhitespace}
                       getStatusIcon={getStatusIcon}
                       reviews={reviews}
                       onLineClick={handleLineClick}
@@ -1088,6 +1095,8 @@ export default function ReviewBrowser({
                   onToggleSplit={() => { setIsSplitView(!isSplitView) }}
                   hideUnchanged={hideUnchangedRegions}
                   onToggleHideUnchanged={() => { setHideUnchangedRegions(!hideUnchangedRegions) }}
+                  ignoreWhitespace={ignoreWhitespace}
+                  onToggleIgnoreWhitespace={() => { setIgnoreWhitespace(!ignoreWhitespace) }}
                   totalComments={reviews.length}
                   viewedCount={uncommittedViewedCount}
                   totalFiles={uncommitted.files.length}
@@ -1144,6 +1153,7 @@ export default function ReviewBrowser({
                       loadFileContents={loadUncommittedFileContents}
                       diffStyle={isSplitView ? 'split' : 'unified'}
                       expandUnchanged={!hideUnchangedRegions}
+                      ignoreWhitespace={ignoreWhitespace}
                       getStatusIcon={getStatusIcon}
                       reviews={reviews}
                       onLineClick={handleLineClick}

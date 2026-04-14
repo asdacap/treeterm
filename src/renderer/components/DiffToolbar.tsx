@@ -1,11 +1,13 @@
 import React from 'react'
-import { Columns2, AlignJustify, Eye, EyeOff, MessageSquare, CheckCircle2 } from 'lucide-react'
+import { Columns2, AlignJustify, Eye, EyeOff, MessageSquare, CheckCircle2, Space } from 'lucide-react'
 
 interface DiffToolbarProps {
   isSplitView: boolean
   onToggleSplit: () => void
   hideUnchanged: boolean
   onToggleHideUnchanged: () => void
+  ignoreWhitespace: boolean
+  onToggleIgnoreWhitespace: () => void
   totalComments: number
   viewedCount?: number
   totalFiles?: number
@@ -16,6 +18,8 @@ export function DiffToolbar({
   onToggleSplit,
   hideUnchanged,
   onToggleHideUnchanged,
+  ignoreWhitespace,
+  onToggleIgnoreWhitespace,
   totalComments,
   viewedCount,
   totalFiles,
@@ -45,6 +49,14 @@ export function DiffToolbar({
           title={hideUnchanged ? 'Show unchanged regions' : 'Hide unchanged regions'}
         >
           {hideUnchanged ? <EyeOff size={14} /> : <Eye size={14} />}
+        </button>
+
+        <button
+          className={`pierre-diff-btn ${ignoreWhitespace ? 'active' : ''}`}
+          onClick={onToggleIgnoreWhitespace}
+          title={ignoreWhitespace ? 'Show whitespace changes' : 'Ignore whitespace changes'}
+        >
+          <Space size={14} />
         </button>
 
         {totalComments > 0 && (
