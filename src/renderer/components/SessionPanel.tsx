@@ -659,7 +659,7 @@ function WorkspaceTreeItem({
     <div>
       <div
         className={`tree-item ${depth === 0 ? 'tree-item-root' : ''} ${isActive ? 'active' : ''} ${isFocused ? 'focused' : ''} ${dragClasses}`}
-        style={{ paddingLeft: 4 + depth * 4 }}
+        style={{ paddingLeft: 4 + depth * 8 }}
         onClick={() => { onClick(id); }}
         onContextMenu={handleContextMenu}
         title={ws?.metadata.description ? `${ws.path}\n\n${ws.metadata.description}` : ws?.path}
