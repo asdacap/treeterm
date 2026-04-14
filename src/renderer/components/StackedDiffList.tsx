@@ -20,6 +20,7 @@ interface StackedDiffListProps {
   loadFileContents: (filePath: string) => Promise<FileDiffContents>
   diffStyle: 'split' | 'unified'
   expandUnchanged: boolean
+  ignoreWhitespace: boolean
   getStatusIcon: (status: FileChangeStatus) => React.JSX.Element
   reviews: ReviewComment[]
   onLineClick: (filePath: string, lineNumber: number, side: 'original' | 'modified') => void
@@ -41,6 +42,7 @@ export function StackedDiffList({
   loadFileContents,
   diffStyle,
   expandUnchanged,
+  ignoreWhitespace,
   getStatusIcon,
   reviews,
   onLineClick,
@@ -155,6 +157,7 @@ export function StackedDiffList({
               onRequestLoad={() => { void handleRequestLoad(file.path) }}
               diffStyle={diffStyle}
               expandUnchanged={expandUnchanged}
+              ignoreWhitespace={ignoreWhitespace}
               getStatusIcon={getStatusIcon}
               comments={fileComments}
               onLineClick={(lineNumber, side) => { onLineClick(file.path, lineNumber, side) }}

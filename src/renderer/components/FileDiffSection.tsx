@@ -18,6 +18,7 @@ interface FileDiffSectionProps {
   onRequestLoad: () => void
   diffStyle: 'split' | 'unified'
   expandUnchanged: boolean
+  ignoreWhitespace: boolean
   getStatusIcon: (status: FileChangeStatus) => React.JSX.Element
   comments: ReviewComment[]
   onLineClick: (lineNumber: number, side: 'original' | 'modified') => void
@@ -40,6 +41,7 @@ export function FileDiffSection({
   onRequestLoad,
   diffStyle,
   expandUnchanged,
+  ignoreWhitespace,
   getStatusIcon,
   comments,
   onLineClick,
@@ -169,6 +171,7 @@ export function FileDiffSection({
               filePath={file.path}
               diffStyle={diffStyle}
               expandUnchanged={expandUnchanged}
+              ignoreWhitespace={ignoreWhitespace}
               comments={comments}
               onLineClick={onLineClick}
               inlineCommentInput={inlineCommentInput}

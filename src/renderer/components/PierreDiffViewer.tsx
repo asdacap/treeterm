@@ -11,6 +11,7 @@ interface PierreDiffViewerProps {
   filePath: string
   diffStyle: 'split' | 'unified'
   expandUnchanged: boolean
+  ignoreWhitespace: boolean
   comments: ReviewComment[]
   onLineClick?: (lineNumber: number, side: 'original' | 'modified') => void
   inlineCommentInput: { lineNumber: number; side: 'original' | 'modified' } | null
@@ -39,6 +40,7 @@ export function PierreDiffViewer({
   filePath,
   diffStyle,
   expandUnchanged,
+  ignoreWhitespace,
   comments,
   onLineClick,
   inlineCommentInput,
@@ -129,6 +131,7 @@ export function PierreDiffViewer({
         options={{
           diffStyle,
           expandUnchanged,
+          parseDiffOptions: { ignoreWhitespace },
           theme: 'treeterm-dark',
           themeType: 'dark',
           disableFileHeader: true,
