@@ -61,7 +61,7 @@ export interface WorkspaceStoreDeps {
   llm: LlmApi
   setActivityTabState: (tabId: string, state: ActivityState) => void
   // Session-level callbacks
-  syncToDaemon: () => void
+  syncToDaemon: (reason: string) => void
   removeWorkspace: (id: string) => Promise<void>
   removeWorkspaceKeepBranch: (id: string) => Promise<void>
   removeWorkspaceKeepBoth: (id: string) => Promise<void>
@@ -282,7 +282,7 @@ export function createWorkspaceStore(
       })
 
       console.log('[workspace] addTab: activeTabId changed to', tabId, 'workspace:', get().workspace.id)
-      deps.syncToDaemon()
+      deps.syncToDaemon('addTab')
       get().initTab(tabId)
       return tabId
     },
@@ -335,14 +335,14 @@ export function createWorkspaceStore(
         }
       })
 
-      deps.syncToDaemon()
+      deps.syncToDaemon('removeTab')
       return Promise.resolve()
     },
 
     setActiveTab: (tabId: string): void => {
       console.log('[workspace] setActiveTab: activeTabId changed to', tabId, 'workspace:', get().workspace.id)
       updateWorkspace((ws) => ({ ...ws, activeTabId: tabId }))
-      deps.syncToDaemon()
+      deps.syncToDaemon('setActiveTab')
     },
 
 
@@ -355,7 +355,7 @@ export function createWorkspaceStore(
           [tabId]: { ...ws.appStates[tabId]!, title }
         }
       }))
-      deps.syncToDaemon()
+      deps.syncToDaemon('updateTabTitle')
     },
 
     updateTabState: <T,>(tabId: string, updater: (state: T) => T): void => {
@@ -370,7 +370,7 @@ export function createWorkspaceStore(
           }
         }
       })
-      deps.syncToDaemon()
+      deps.syncToDaemon('updateTabState')
     },
 
     updateMetadata: (key: string, value: string): void => {
@@ -378,7 +378,7 @@ export function createWorkspaceStore(
         ...ws,
         metadata: { ...ws.metadata, [key]: value }
       }))
-      deps.syncToDaemon()
+      deps.syncToDaemon('updateMetadata')
     },
 
     updateSettings: (newSettings: Partial<WorktreeSettings>): void => {
@@ -386,12 +386,12 @@ export function createWorkspaceStore(
         ...ws,
         settings: { ...ws.settings, ...newSettings } as WorktreeSettings
       }))
-      deps.syncToDaemon()
+      deps.syncToDaemon('updateSettings')
     },
 
     updateStatus: (status: Workspace['status']): void => {
       updateWorkspace((ws) => ({ ...ws, status }))
-      deps.syncToDaemon()
+      deps.syncToDaemon('updateStatus')
     },
 
     promptHarness: async (text: string): Promise<boolean> => {

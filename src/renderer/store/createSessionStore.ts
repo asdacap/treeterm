@@ -90,7 +90,7 @@ export interface SessionState {
   quickForkWorkspace: (workspaceId: string) => Promise<{ success: boolean; error?: string }>
   reorderWorkspace: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after') => void
   moveWorkspace: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after' | 'onto') => void
-  syncToDaemon: () => Promise<void>
+  syncToDaemon: (reason: string) => Promise<void>
   forceUnlock: () => Promise<{ success: boolean; error?: string }>
 
   // Session lifecycle
@@ -238,9 +238,9 @@ export function createSessionStore(
 
   let lastSyncedWorkspacesJson = ''
 
-  async function syncSessionToDaemon(isRestoring: boolean = false): Promise<void> {
+  async function syncSessionToDaemon(reason: string): Promise<void> {
     try {
-      const { workspaces, connection } = store.getState()
+      const { workspaces, connection, isRestoring } = store.getState()
 
       if (connection.status !== ConnectionStatus.Connected) {
         console.log('[session] connection not yet established, skipping sync')
@@ -261,7 +261,7 @@ export function createSessionStore(
       if (currentJson === lastSyncedWorkspacesJson) {
         return
       }
-      console.log('[session] syncing changes to daemon:', diffWorkspaces(lastSyncedWorkspacesJson, currentJson))
+      console.log('[session] syncing to daemon, reason:', reason, 'changes:', diffWorkspaces(lastSyncedWorkspacesJson, currentJson))
 
       const currentVersion = store.getState().sessionVersion
       const connectionId = store.getState().connection.id
@@ -299,7 +299,7 @@ export function createSessionStore(
       getSettings: deps.getSettings,
       llm: deps.llm,
       setActivityTabState: deps.setActivityTabState,
-      syncToDaemon: () => { void syncSessionToDaemon(store.getState().isRestoring); },
+      syncToDaemon: (reason: string) => { void syncSessionToDaemon(reason); },
       removeWorkspace: (id) => store.getState().removeWorkspace(id),
       removeWorkspaceKeepBranch: (id) => store.getState().removeWorkspaceKeepBranch(id),
       removeWorkspaceKeepBoth: (id) => store.getState().removeWorkspaceKeepBoth(id),
@@ -435,7 +435,7 @@ export function createSessionStore(
         store.setState(s => ({
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: childWorkspace, store: handle })
         }))
-        await syncSessionToDaemon(store.getState().isRestoring)
+        await syncSessionToDaemon('addChildWorkspace')
       } catch (err) {
         store.setState(s => ({
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Error, name: worktreeName, error: err instanceof Error ? err.message : String(err) })
@@ -504,7 +504,7 @@ export function createSessionStore(
       handle.getState().initTab(tabId)
     }
 
-    await syncSessionToDaemon(store.getState().isRestoring)
+    await syncSessionToDaemon('addChildWorkspaceFromResult')
     return id
   }
 
@@ -553,7 +553,7 @@ export function createSessionStore(
     // Renderer cleanup + remove from map
     store.getState().onWorkspaceRemoved(id)
 
-    await syncSessionToDaemon(store.getState().isRestoring)
+    await syncSessionToDaemon('removeWorkspace')
   }
 
   // Helper: wraps removeWorkspaceInternal with loading state and session lock
@@ -803,7 +803,7 @@ export function createSessionStore(
         set(s => ({
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: workspace, store: handle })
         }))
-        void syncSessionToDaemon(get().isRestoring)
+        void syncSessionToDaemon('addWorkspace')
       }).catch((err: unknown) => {
         set(s => ({
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Error, name, error: err instanceof Error ? err.message : String(err) })
@@ -958,7 +958,7 @@ export function createSessionStore(
           gitRootPath: gitInfo.isRepo ? gitInfo.rootPath : null
         }
       }))
-      void syncSessionToDaemon(get().isRestoring).catch((e: unknown) => { console.error(e) })
+      void syncSessionToDaemon('updateGitInfo').catch((e: unknown) => { console.error(e) })
     },
 
     refreshGitInfo: async (id: string) => {
@@ -1149,7 +1149,7 @@ export function createSessionStore(
         }))
       }
 
-      void syncSessionToDaemon(get().isRestoring)
+      void syncSessionToDaemon('reorderWorkspace')
     },
 
     moveWorkspace: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after' | 'onto') => {
@@ -1235,11 +1235,11 @@ export function createSessionStore(
         reindexSiblings(dragParent, workspaceId)
       }
 
-      void syncSessionToDaemon(get().isRestoring)
+      void syncSessionToDaemon('moveWorkspace')
     },
 
-    syncToDaemon: async () => {
-      await syncSessionToDaemon(get().isRestoring)
+    syncToDaemon: async (reason: string) => {
+      await syncSessionToDaemon(reason)
     },
 
     forceUnlock: async () => {

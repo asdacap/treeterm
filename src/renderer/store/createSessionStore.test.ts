@@ -574,7 +574,7 @@ describe('createSessionStore', () => {
     it('syncs session to daemon', async () => {
       store.getState().addWorkspace('/test')
       await flushPromises()
-      await store.getState().syncToDaemon()
+      await store.getState().syncToDaemon('test')
       expect(deps.sessionApi.update).toHaveBeenCalled()
     })
 
@@ -673,7 +673,7 @@ describe('createSessionStore', () => {
       vi.mocked(deps.sessionApi.update).mockResolvedValue({ success: false, error: 'sync failed' })
       store.getState().addWorkspace('/test')
       await flushPromises()
-      await store.getState().syncToDaemon()
+      await store.getState().syncToDaemon('test')
       // Should not throw
     })
 
@@ -681,7 +681,7 @@ describe('createSessionStore', () => {
       vi.mocked(deps.sessionApi.update).mockRejectedValue(new Error('network error'))
       store.getState().addWorkspace('/test')
       await flushPromises()
-      await store.getState().syncToDaemon()
+      await store.getState().syncToDaemon('test')
       // Should not throw
     })
   })
