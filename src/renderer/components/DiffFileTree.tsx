@@ -94,6 +94,13 @@ export function getSortedFilePaths(files: (DiffFile | UncommittedFile)[]): strin
   return paths
 }
 
+export function sortFilesAsTree<T extends DiffFile | UncommittedFile>(files: T[]): T[] {
+  const sortedPaths = getSortedFilePaths(files)
+  const filesByPath = new Map(files.map(f => [f.path, f]))
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- paths come from the same files array
+  return sortedPaths.map(p => filesByPath.get(p)!)
+}
+
 function getAllDirPaths(nodes: TreeNode[]): Set<string> {
   const paths = new Set<string>()
   function walk(node: TreeNode) {
