@@ -118,12 +118,6 @@ export function FileDiffSection({
           <label
             className={`file-diff-viewed-label ${isViewed ? 'viewed' : ''}`}
             onClick={(e) => { e.stopPropagation() }}
-            onContextMenu={!isFirstFile && onMarkViewedAbove ? (e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              onMarkViewedAbove()
-            } : undefined}
-            title={!isFirstFile && onMarkViewedAbove ? 'Right-click to mark all above as viewed' : undefined}
           >
             <input
               type="checkbox"
@@ -145,7 +139,16 @@ export function FileDiffSection({
               }}
               className="file-diff-viewed-checkbox"
             />
-            Viewed
+            <span
+              onContextMenu={!isFirstFile && onMarkViewedAbove ? (e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                onMarkViewedAbove()
+              } : undefined}
+              title={!isFirstFile && onMarkViewedAbove ? 'Right-click to mark all above as viewed' : undefined}
+            >
+              Viewed
+            </span>
           </label>
         )}
       </div>
