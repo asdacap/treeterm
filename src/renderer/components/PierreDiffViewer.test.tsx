@@ -21,8 +21,8 @@ vi.mock('@pierre/diffs/react', () => ({
         data-expand-unchanged={String(options.expandUnchanged)}
         data-disable-file-header={String(options.disableFileHeader)}
       >
-        {lineAnnotations && renderAnnotation && lineAnnotations.map((a, i) => (
-          <div key={i}>{renderAnnotation(a)}</div>
+        {lineAnnotations && renderAnnotation && lineAnnotations.map((a) => (
+          <div key={`annotation-${String(a.lineNumber)}-${a.side}`}>{renderAnnotation(a)}</div>
         ))}
       </div>
     )
