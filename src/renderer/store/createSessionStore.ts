@@ -195,6 +195,8 @@ export function createSessionStore(
     }
   }
 
+  let lastSyncedWorkspacesJson = ''
+
   async function syncSessionToDaemon(isRestoring: boolean = false): Promise<void> {
     try {
       const { workspaces, connection } = store.getState()
@@ -215,6 +217,11 @@ export function createSessionStore(
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         .map(e => { const { createdAt: _createdAt, lastActivity: _lastActivity, ...ws } = e.data; return ws })
 
+      const workspacesJson = JSON.stringify(daemonWorkspaces)
+      if (workspacesJson === lastSyncedWorkspacesJson) {
+        return
+      }
+
       console.log('[session] syncing to daemon:', daemonWorkspaces.length, 'workspaces', JSON.stringify(daemonWorkspaces))
 
       const currentVersion = store.getState().sessionVersion
@@ -226,6 +233,7 @@ export function createSessionStore(
       } else {
         if (result.session.version === currentVersion + 1) {
           // Update accepted
+          lastSyncedWorkspacesJson = workspacesJson
           store.setState({ sessionVersion: result.session.version, sessionLock: result.session.lock, lastDaemonSessionJson: JSON.stringify(result.session) })
           console.log('[session] session updated successfully, version:', result.session.version)
         } else {
@@ -1254,6 +1262,7 @@ export function createSessionStore(
 
       console.log('[Session] External session update received, version:', daemonSession.version, 'current:', currentVersion)
 
+      lastSyncedWorkspacesJson = ''
       set({ isRestoring: true, sessionVersion: daemonSession.version, sessionLock: daemonSession.lock, lastDaemonSessionJson: JSON.stringify(daemonSession) })
       applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace, { restoreExisting: false })
 
