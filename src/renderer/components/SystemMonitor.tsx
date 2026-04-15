@@ -469,7 +469,7 @@ function MonitorDashboard({ metrics, cpuSamples, memorySamples, onRefresh, exec,
 
 function Gauge({ label, percent, detail }: { label: string; percent: number; detail: string }) {
   return (
-    <div className="system-monitor-gauge">
+    <div className="system-monitor-gauge" title={`${label} — ${percent.toFixed(1)}% used (${detail})`}>
       <span className="system-monitor-gauge-label">{label}</span>
       <div className="system-monitor-gauge-bar">
         <div
@@ -479,9 +479,8 @@ function Gauge({ label, percent, detail }: { label: string; percent: number; det
             backgroundColor: getUtilizationColor(percent),
           }}
         />
+        <span className="system-monitor-gauge-bar-text">{percent.toFixed(0)}%</span>
       </div>
-      <span className="system-monitor-gauge-value">{percent.toFixed(1)}%</span>
-      <span className="system-monitor-gauge-detail">{detail}</span>
     </div>
   )
 }

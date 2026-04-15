@@ -6050,6 +6050,7 @@ body,
   border-radius: 3px;
   overflow: hidden;
   min-width: 60px;
+  position: relative;
 }
 
 .system-monitor-gauge-fill {
@@ -6058,20 +6059,19 @@ body,
   transition: width 0.3s ease;
 }
 
-.system-monitor-gauge-value {
-  width: 48px;
-  text-align: right;
+.system-monitor-gauge-bar-text {
+  position: absolute;
+  top: 0;
+  right: 4px;
+  line-height: 14px;
+  font-size: 10px;
   color: var(--text-primary);
-  flex-shrink: 0;
-  font-size: 11px;
 }
 
 .system-monitor-gauge-detail {
   color: var(--text-secondary);
   font-size: 10px;
   flex-shrink: 0;
-  width: 150px;
-  text-align: right;
 }
 
 .system-monitor-cpu-graph {
