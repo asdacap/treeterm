@@ -263,6 +263,10 @@ export function createSessionStore(
       }
       console.log('[session] syncing to daemon, reason:', reason, 'changes:', diffWorkspaces(lastSyncedWorkspacesJson, currentJson))
 
+      // Apply local state before the await so concurrent calls with identical
+      // data are skipped by the JSON check above.
+      lastSyncedWorkspacesJson = currentJson
+
       // Increment sessionVersion before the await so the existing stale check
       // in handleExternalUpdate skips echoes while we have in-flight syncs.
       // Send sessionVersion-1 as the expectedVersion (the real daemon version).
@@ -276,7 +280,6 @@ export function createSessionStore(
       } else {
         if (result.session.version === expectedVersion + 1) {
           // Update accepted
-          lastSyncedWorkspacesJson = currentJson
           store.setState({ sessionVersion: result.session.version, sessionLock: result.session.lock, lastDaemonSessionJson: JSON.stringify(result.session) })
           console.log('[session] session updated successfully, version:', result.session.version)
         } else {
