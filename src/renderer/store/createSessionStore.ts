@@ -98,6 +98,20 @@ export interface SessionState {
   handleExternalUpdate: (session: Session) => Promise<void>
 }
 
+/** JSON.stringify with sorted keys so field ordering doesn't affect comparison */
+function stableStringify(value: unknown): string {
+  return JSON.stringify(value, (_key, val: unknown) => {
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      const sorted: Record<string, unknown> = {}
+      for (const k of Object.keys(val as Record<string, unknown>).sort()) {
+        sorted[k] = (val as Record<string, unknown>)[k]
+      }
+      return sorted
+    }
+    return val
+  })
+}
+
 function generateId(): string {
   return `ws-${String(Date.now())}-${Math.random().toString(36).slice(2, 9)}`
 }
@@ -297,7 +311,7 @@ export function createSessionStore(
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         .map(e => { const { createdAt: _createdAt, lastActivity: _lastActivity, ...ws } = e.data; return ws })
 
-      const currentJson = JSON.stringify(daemonWorkspaces)
+      const currentJson = stableStringify(daemonWorkspaces)
       if (currentJson === lastSyncedWorkspacesJson) {
         if (versionPreIncremented) store.setState((s) => ({ sessionVersion: s.sessionVersion - 1 }))
         return
@@ -1323,11 +1337,13 @@ export function createSessionStore(
         return
       }
       if (daemonSession.version === currentVersion) {
-        const incomingJson = JSON.stringify(daemonSession)
-        const lastJson = get().lastDaemonSessionJson
-        if (incomingJson === lastJson) return
-        console.warn('[Session] Same version but different content, applying daemon state.',
-          'version:', daemonSession.version)
+        // Compare workspaces only (strip timestamps to match lastSyncedWorkspacesJson shape)
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const incomingWorkspacesJson = stableStringify(daemonSession.workspaces.map(({ createdAt: _c, lastActivity: _l, ...ws }) => ws))
+        if (incomingWorkspacesJson === lastSyncedWorkspacesJson) return
+        console.warn('[Session] Same version but different workspace content, applying daemon state.',
+          'version:', daemonSession.version,
+          'diff:', diffWorkspaces(lastSyncedWorkspacesJson, incomingWorkspacesJson))
         // Fall through to apply
       }
 
