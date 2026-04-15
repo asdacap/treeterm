@@ -42,6 +42,7 @@ function makeDeps(overrides: Partial<GitControllerDeps> = {}): GitControllerDeps
     },
     lookupWorkspace: vi.fn().mockReturnValue(undefined),
     refreshGitInfo: vi.fn().mockResolvedValue(undefined),
+    refreshWorkspaceGitInfo: vi.fn().mockResolvedValue(undefined),
     getWorkspace: vi.fn().mockReturnValue(ws),
     initialWorkspace: ws,
     isActiveWorkspace: vi.fn().mockReturnValue(true),
@@ -138,6 +139,21 @@ describe('createGitControllerStore', () => {
 
       await store.getState().refreshDiffStatus()
       expect(store.getState().isDiffCleanFromParent).toBe(false)
+    })
+
+    it('refreshes parent git info before reading parent branch', async () => {
+      const parentWs = makeWorkspace({ id: 'parent', gitBranch: 'main' })
+      const ws = makeWorkspace({ isWorktree: true, parentId: 'parent' })
+      const deps = makeDeps({
+        initialWorkspace: ws,
+        getWorkspace: vi.fn().mockReturnValue(ws),
+        lookupWorkspace: vi.fn().mockReturnValue(parentWs),
+      })
+      const store = createGitControllerStore(deps)
+      store.getState().dispose()
+
+      await store.getState().refreshDiffStatus()
+      expect(deps.refreshWorkspaceGitInfo).toHaveBeenCalledWith('parent')
     })
 
     it('skips diff check for non-worktree workspace', async () => {

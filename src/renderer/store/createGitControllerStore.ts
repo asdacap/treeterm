@@ -7,6 +7,7 @@ export interface GitControllerDeps {
   github: GitHubApi
   lookupWorkspace: (id: string) => Workspace | undefined
   refreshGitInfo: () => Promise<void>
+  refreshWorkspaceGitInfo: (id: string) => Promise<void>
   getWorkspace: () => Workspace
   initialWorkspace: Workspace
   isActiveWorkspace: () => boolean
@@ -47,6 +48,7 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
       try {
         const ws = deps.getWorkspace()
         if (ws.isWorktree && ws.parentId) {
+          await deps.refreshWorkspaceGitInfo(ws.parentId)
           const parent = deps.lookupWorkspace(ws.parentId)
           if (parent?.gitBranch) {
             const result = await deps.git.getDiff(ws.path, parent.gitBranch)

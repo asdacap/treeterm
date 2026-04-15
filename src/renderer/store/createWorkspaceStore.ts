@@ -168,6 +168,7 @@ export function createWorkspaceStore(
     github: deps.github,
     lookupWorkspace: deps.lookupWorkspace,
     refreshGitInfo: () => deps.refreshGitInfo(id),
+    refreshWorkspaceGitInfo: (wsId: string) => deps.refreshGitInfo(wsId),
     getWorkspace: () => store.getState().workspace,
     initialWorkspace: workspace,
     isActiveWorkspace: () => deps.getActiveWorkspaceId() === id,
