@@ -237,6 +237,34 @@ export function createSessionStore(
   }
 
   let lastSyncedWorkspacesJson = ''
+  let syncInFlight = false
+  let pendingSyncReason: string | null = null
+  let pendingSyncResolve: (() => void) | null = null
+
+  function queueSyncSessionToDaemon(reason: string): Promise<void> {
+    if (syncInFlight) {
+      // Collapse multiple requests while one is in flight — only the latest reason matters
+      pendingSyncReason = reason
+      return new Promise<void>((resolve) => { pendingSyncResolve = resolve; })
+    }
+    return runSync(reason)
+  }
+
+  async function runSync(reason: string): Promise<void> {
+    syncInFlight = true
+    try {
+      await syncSessionToDaemon(reason)
+    } finally {
+      syncInFlight = false
+      if (pendingSyncReason !== null) {
+        const nextReason = pendingSyncReason
+        const nextResolve = pendingSyncResolve
+        pendingSyncReason = null
+        pendingSyncResolve = null
+        void runSync(nextReason).then(() => { nextResolve?.(); })
+      }
+    }
+  }
 
   async function syncSessionToDaemon(reason: string): Promise<void> {
     try {
@@ -307,7 +335,7 @@ export function createSessionStore(
       getSettings: deps.getSettings,
       llm: deps.llm,
       setActivityTabState: deps.setActivityTabState,
-      syncToDaemon: (reason: string) => { void syncSessionToDaemon(reason); },
+      syncToDaemon: (reason: string) => { queueSyncSessionToDaemon(reason); },
       removeWorkspace: (id) => store.getState().removeWorkspace(id),
       removeWorkspaceKeepBranch: (id) => store.getState().removeWorkspaceKeepBranch(id),
       removeWorkspaceKeepBoth: (id) => store.getState().removeWorkspaceKeepBoth(id),
@@ -443,7 +471,7 @@ export function createSessionStore(
         store.setState(s => ({
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: childWorkspace, store: handle })
         }))
-        await syncSessionToDaemon('addChildWorkspace')
+        await queueSyncSessionToDaemon('addChildWorkspace')
       } catch (err) {
         store.setState(s => ({
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Error, name: worktreeName, error: err instanceof Error ? err.message : String(err) })
@@ -512,7 +540,7 @@ export function createSessionStore(
       handle.getState().initTab(tabId)
     }
 
-    await syncSessionToDaemon('addChildWorkspaceFromResult')
+    await queueSyncSessionToDaemon('addChildWorkspaceFromResult')
     return id
   }
 
@@ -561,7 +589,7 @@ export function createSessionStore(
     // Renderer cleanup + remove from map
     store.getState().onWorkspaceRemoved(id)
 
-    await syncSessionToDaemon('removeWorkspace')
+    await queueSyncSessionToDaemon('removeWorkspace')
   }
 
   // Helper: wraps removeWorkspaceInternal with loading state and session lock
@@ -811,7 +839,7 @@ export function createSessionStore(
         set(s => ({
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: workspace, store: handle })
         }))
-        void syncSessionToDaemon('addWorkspace')
+        void queueSyncSessionToDaemon('addWorkspace')
       }).catch((err: unknown) => {
         set(s => ({
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Error, name, error: err instanceof Error ? err.message : String(err) })
@@ -966,7 +994,7 @@ export function createSessionStore(
           gitRootPath: gitInfo.isRepo ? gitInfo.rootPath : null
         }
       }))
-      void syncSessionToDaemon('updateGitInfo').catch((e: unknown) => { console.error(e) })
+      void queueSyncSessionToDaemon('updateGitInfo')
     },
 
     refreshGitInfo: async (id: string) => {
@@ -1157,7 +1185,7 @@ export function createSessionStore(
         }))
       }
 
-      void syncSessionToDaemon('reorderWorkspace')
+      void queueSyncSessionToDaemon('reorderWorkspace')
     },
 
     moveWorkspace: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after' | 'onto') => {
@@ -1243,11 +1271,11 @@ export function createSessionStore(
         reindexSiblings(dragParent, workspaceId)
       }
 
-      void syncSessionToDaemon('moveWorkspace')
+      void queueSyncSessionToDaemon('moveWorkspace')
     },
 
     syncToDaemon: async (reason: string) => {
-      await syncSessionToDaemon(reason)
+      await queueSyncSessionToDaemon(reason)
     },
 
     forceUnlock: async () => {

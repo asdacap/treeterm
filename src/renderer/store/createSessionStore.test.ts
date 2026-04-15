@@ -593,7 +593,7 @@ describe('createSessionStore', () => {
       expect(store.getState().sessionVersion).toBe(1)
     })
 
-    it('resets sessionVersion to 0 on rejected sync', async () => {
+    it('sets sessionVersion to daemon value on rejected sync', async () => {
       // First sync succeeds
       vi.mocked(deps.sessionApi.update).mockResolvedValue({
         success: true,
@@ -604,17 +604,19 @@ describe('createSessionStore', () => {
       await store.getState().syncToDaemon('first')
       expect(store.getState().sessionVersion).toBe(1)
 
-      // Make a state change so second sync passes dedup check
-      store.getState().addWorkspace('/test2')
-      await flushPromises()
-
-      // Second sync is rejected (version mismatch — returned version != expected + 1)
+      // Set up rejection mock BEFORE making state change (queued sync will use this mock)
       vi.mocked(deps.sessionApi.update).mockResolvedValue({
         success: true,
         session: { id: 'session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 5, lock: null },
       })
+
+      // Make a state change so second sync passes dedup check
+      store.getState().addWorkspace('/test2')
+      await flushPromises()
+
+      // Sync is rejected (version mismatch — returned version != expected + 1)
       await store.getState().syncToDaemon('rejected')
-      // sessionVersion resets to 0 on rejection, then handleExternalUpdate applies version 5
+      // sessionVersion set to daemon's returned version
       expect(store.getState().sessionVersion).toBe(5)
     })
 
