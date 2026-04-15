@@ -239,44 +239,56 @@ export function createSessionStore(
   let lastSyncedWorkspacesJson = ''
   let syncInFlight = false
   let pendingSyncReason: string | null = null
-  let pendingSyncResolve: (() => void) | null = null
+  let pendingSyncSettlers: { resolve: () => void; reject: (err: unknown) => void }[] = []
 
   function queueSyncSessionToDaemon(reason: string): Promise<void> {
     if (syncInFlight) {
-      // Collapse multiple requests while one is in flight — only the latest reason matters
+      if (pendingSyncReason === null) {
+        // First pending: increment sessionVersion so handleExternalUpdate
+        // skips watch echoes while waiting for the in-flight sync to finish
+        store.setState((s) => ({ sessionVersion: s.sessionVersion + 1 }))
+      }
+      // Collapse: update reason, collect settler, don't increment again
       pendingSyncReason = reason
-      return new Promise<void>((resolve) => { pendingSyncResolve = resolve; })
+      return new Promise<void>((resolve, reject) => {
+        pendingSyncSettlers.push({ resolve, reject })
+      })
     }
-    return runSync(reason)
+    return runSync(reason, false)
   }
 
-  async function runSync(reason: string): Promise<void> {
+  async function runSync(reason: string, versionPreIncremented: boolean): Promise<void> {
     syncInFlight = true
     try {
-      await syncSessionToDaemon(reason)
+      await syncSessionToDaemon(reason, versionPreIncremented)
     } finally {
       syncInFlight = false
       if (pendingSyncReason !== null) {
         const nextReason = pendingSyncReason
-        const nextResolve = pendingSyncResolve
+        const settlers = pendingSyncSettlers
         pendingSyncReason = null
-        pendingSyncResolve = null
-        void runSync(nextReason).then(() => { nextResolve?.(); })
+        pendingSyncSettlers = []
+        void runSync(nextReason, true).then(
+          () => { for (const s of settlers) s.resolve() },
+          (err: unknown) => { for (const s of settlers) s.reject(err) }
+        )
       }
     }
   }
 
-  async function syncSessionToDaemon(reason: string): Promise<void> {
+  async function syncSessionToDaemon(reason: string, versionPreIncremented: boolean): Promise<void> {
     try {
       const { workspaces, connection, isRestoring } = store.getState()
 
       if (connection.status !== ConnectionStatus.Connected) {
         console.log('[session] connection not yet established, skipping sync')
+        if (versionPreIncremented) store.setState((s) => ({ sessionVersion: s.sessionVersion - 1 }))
         return
       }
 
       if (isRestoring) {
         console.log('[session] currently restoring, skipping sync')
+        if (versionPreIncremented) store.setState((s) => ({ sessionVersion: s.sessionVersion - 1 }))
         return
       }
 
@@ -287,6 +299,7 @@ export function createSessionStore(
 
       const currentJson = JSON.stringify(daemonWorkspaces)
       if (currentJson === lastSyncedWorkspacesJson) {
+        if (versionPreIncremented) store.setState((s) => ({ sessionVersion: s.sessionVersion - 1 }))
         return
       }
       console.log('[session] syncing to daemon, reason:', reason, 'changes:', diffWorkspaces(lastSyncedWorkspacesJson, currentJson))
@@ -295,10 +308,11 @@ export function createSessionStore(
       // data are skipped by the JSON check above.
       lastSyncedWorkspacesJson = currentJson
 
-      // Increment sessionVersion before the await so the existing stale check
-      // in handleExternalUpdate skips echoes while we have in-flight syncs.
-      // Send sessionVersion-1 as the expectedVersion (the real daemon version).
-      store.setState((s) => ({ sessionVersion: s.sessionVersion + 1 }))
+      // Increment sessionVersion so handleExternalUpdate skips echoes while in flight.
+      // Skip if already pre-incremented by the queue.
+      if (!versionPreIncremented) {
+        store.setState((s) => ({ sessionVersion: s.sessionVersion + 1 }))
+      }
       const expectedVersion = store.getState().sessionVersion - 1
       const connectionId = store.getState().connection.id
       console.log('[session] updating session via connection:', connectionId, 'expectedVersion:', expectedVersion)
