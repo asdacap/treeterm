@@ -119,7 +119,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const handleSelectTab = useCallback(
     (tabId: string) => {
       if (activeHandle) {
-        activeHandle.getState().setActiveTab(tabId)
+        activeHandle.getState().setActiveTab(tabId, 'workspacePaneSelectTab')
       }
     },
     [activeHandle]

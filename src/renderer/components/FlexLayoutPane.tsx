@@ -157,7 +157,10 @@ export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPa
       return undefined // Prevent FlexLayout from handling it — store will sync
     }
     if (action.type === Actions.SELECT_TAB) {
-      setActiveTab(action.data.tabNode)
+      const tabId = action.data.tabNode as string
+      if (ws.getState().workspace.appStates[tabId]) {
+        setActiveTab(tabId, 'flexLayoutSelectTab')
+      }
     }
     return action
   }, [workspace, removeTab, setActiveTab])

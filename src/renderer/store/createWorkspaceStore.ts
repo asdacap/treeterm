@@ -82,7 +82,7 @@ export interface WorkspaceStoreState {
   addTab: <T>(applicationId: string, initialState?: Partial<T>) => string
   openOrFocusTab: <T>(applicationId: string, initialState?: Partial<T>) => string
   removeTab: (tabId: string) => Promise<void>
-  setActiveTab: (tabId: string) => void
+  setActiveTab: (tabId: string, reason: string) => void
   updateTabTitle: (tabId: string, title: string) => void
   updateTabState: <T>(tabId: string, updater: (state: T) => T) => void
 
@@ -294,7 +294,7 @@ export function createWorkspaceStore(
         ([, s]) => s.applicationId === applicationId
       )
       if (existing) {
-        get().setActiveTab(existing[0])
+        get().setActiveTab(existing[0], 'openOrFocusTab')
         return existing[0]
       }
       return get().addTab<T>(applicationId, initialState)
@@ -340,8 +340,8 @@ export function createWorkspaceStore(
       return Promise.resolve()
     },
 
-    setActiveTab: (tabId: string): void => {
-      console.log('[workspace] setActiveTab: activeTabId changed to', tabId, 'workspace:', get().workspace.id)
+    setActiveTab: (tabId: string, reason: string): void => {
+      console.log('[workspace] setActiveTab: activeTabId changed to', tabId, 'workspace:', get().workspace.id, 'reason:', reason)
       updateWorkspace((ws) => ({ ...ws, activeTabId: tabId }))
       deps.syncToDaemon('setActiveTab')
     },
@@ -417,7 +417,7 @@ export function createWorkspaceStore(
         const writer = await get().getTtyWriter(ptyId)
         writer.write(text + '\r')
       }
-      get().setActiveTab(tabId)
+      get().setActiveTab(tabId, 'promptHarness')
       return true
     },
 

@@ -179,7 +179,7 @@ describe('createWorkspaceStore', () => {
     })
     const store = createWorkspaceStore(ws, makeHandleDeps())
 
-    store.getState().setActiveTab('tab-2')
+    store.getState().setActiveTab('tab-2', 'test')
 
     expect(store.getState().workspace.activeTabId).toBe('tab-2')
   })
