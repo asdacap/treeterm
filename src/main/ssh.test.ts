@@ -304,6 +304,7 @@ describe('SSHTunnel', () => {
       const scriptArg = spawnCall[1][spawnCall[1].length - 1]
       expect(scriptArg).toContain('sha256sum')
       expect(scriptArg).toContain('TREETERM_REMOTE_HASH')
+      expect(scriptArg).toContain('TREETERM_HOME:$HOME')
 
       proc.stdout.emit('data', Buffer.from('TREETERM_ARCH:x86_64\nTREETERM_SOCKET:/tmp/daemon.sock\n'))
       proc.emit('close', 0)
@@ -355,7 +356,7 @@ describe('SSHTunnel', () => {
       bootstrapProc.stdout.emit(
         'data',
         Buffer.from(
-          'TREETERM_ARCH:x86_64\nTREETERM_REMOTE_HASH:remotehash999\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n',
+          'TREETERM_ARCH:x86_64\nTREETERM_HOME:/home/testuser\nTREETERM_REMOTE_HASH:remotehash999\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n',
         ),
       )
       bootstrapProc.emit('close', 0)
@@ -378,6 +379,32 @@ describe('SSHTunnel', () => {
       const result = await promise
       expect(result).toBe('/tmp/treeterm-1000/daemon.sock')
       expect(spawn).toHaveBeenCalledTimes(4)
+
+      // scp destination must be an absolute path (no `~/`), to survive SFTP-mode scp
+      const scpCall = vi.mocked(spawn).mock.calls[2]!
+      const scpDest = scpCall[1][scpCall[1].length - 1]
+      expect(scpDest).toBe('testuser@example.com:/home/testuser/.treeterm/treeterm-daemon')
+      expect(scpDest).not.toContain('~')
+    })
+
+    it('rejects when upload needed but TREETERM_HOME marker is missing', async () => {
+      const proc = makeMockProcess()
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
+
+      const tunnel = new SSHTunnel(makeConfig())
+
+      const promise = priv(tunnel).bootstrapRemoteDaemon()
+
+      // Bootstrap reports NEEDS_UPLOAD but omits TREETERM_HOME
+      proc.stdout.emit(
+        'data',
+        Buffer.from(
+          'TREETERM_ARCH:x86_64\nTREETERM_REMOTE_HASH:NONE\nTREETERM_SOCKET:NEEDS_UPLOAD\n',
+        ),
+      )
+      proc.emit('close', 0)
+
+      await expect(promise).rejects.toThrow('Could not detect remote home directory')
     })
 
     it('rejects with error on hash mismatch without refreshDaemon', async () => {

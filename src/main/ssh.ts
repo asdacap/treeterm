@@ -194,17 +194,25 @@ export class SSHTunnel {
   /**
    * Upload the daemon binary and start it on the remote host.
    * Returns the remote socket path.
+   *
+   * `remoteHome` must be the absolute path to the remote user's home directory.
+   * We avoid `~/` in the scp destination because scp uses SFTP by default
+   * (OpenSSH 9.0+), and the SFTP protocol does not reliably expand `~`.
    */
-  private async uploadAndStartDaemon(remoteArch: string): Promise<string> {
+  private async uploadAndStartDaemon(remoteArch: string, remoteHome: string): Promise<string> {
+    const daemonDir = `${remoteHome}/.treeterm`
+    const daemonBin = `${daemonDir}/treeterm-daemon`
+    const daemonLog = `${daemonDir}/daemon.log`
+
     this.appendBootstrapOutput(`Uploading daemon binary (remote arch: ${remoteArch})...`)
-    await this.uploadDaemon('~/.treeterm/treeterm-daemon', remoteArch)
+    await this.uploadDaemon(daemonBin, remoteArch)
 
     const startArgs = this.buildBaseSSHArgs()
     const startScript = [
-      'chmod +x ~/.treeterm/treeterm-daemon',
+      `chmod +x '${daemonBin}'`,
       'DAEMON_SOCKET="/tmp/treeterm-$(id -u)/daemon.sock"',
       'mkdir -p "/tmp/treeterm-$(id -u)"',
-      '~/.treeterm/treeterm-daemon >> ~/.treeterm/daemon.log 2>&1 &',
+      `'${daemonBin}' >> '${daemonLog}' 2>&1 &`,
       'DAEMON_PID=$!',
       'for i in $(seq 1 40); do',
       '  [ -S "$DAEMON_SOCKET" ] && break',
@@ -215,9 +223,9 @@ export class SSHTunnel {
       '  echo "TREETERM_SOCKET:$DAEMON_SOCKET"',
       'else',
       '  echo "Daemon failed to start after upload." >&2',
-      '  if [ -f ~/.treeterm/daemon.log ]; then',
+      `  if [ -f '${daemonLog}' ]; then`,
       '    echo "Last 20 lines of daemon.log:" >&2',
-      '    tail -20 ~/.treeterm/daemon.log >&2',
+      `    tail -20 '${daemonLog}' >&2`,
       '  fi',
       '  if [ -n "$DAEMON_PID" ] && ! kill -0 "$DAEMON_PID" 2>/dev/null; then',
       '    wait "$DAEMON_PID" 2>/dev/null',
@@ -249,6 +257,9 @@ export class SSHTunnel {
         '',
         '# Report system architecture for binary selection',
         'echo "TREETERM_ARCH:$(uname -m)"',
+        '',
+        '# Report absolute home directory — scp over SFTP does not reliably expand ~',
+        'echo "TREETERM_HOME:$HOME"',
         '',
         '# Check if daemon binary exists',
         'NEEDS_UPLOAD=0',
@@ -400,8 +411,17 @@ export class SSHTunnel {
               }
             }
 
+            // Upload path — now we need the absolute home directory to bypass SFTP's
+            // unreliable `~` expansion in `scp`.
+            const homeMatch = stdout.match(/TREETERM_HOME:(.+)/)
+            const remoteHome = homeMatch?.[1]?.trim()
+            if (!remoteHome) {
+              reject(new Error('Could not detect remote home directory (TREETERM_HOME not reported)'))
+              return
+            }
+
             // Upload and start daemon (binary missing, wrong arch, or hash mismatch)
-            resolve(await this.uploadAndStartDaemon(remoteArch))
+            resolve(await this.uploadAndStartDaemon(remoteArch, remoteHome))
           } catch (err) {
             reject(
               new Error(
