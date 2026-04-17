@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react'
  
-import { ChevronDown, Github, Loader2, ArrowDownToLine, RefreshCw, AlertTriangle, CircleDot, Check } from 'lucide-react'
+import { ChevronDown, Github, Loader2, ArrowDownToLine, RefreshCw, AlertTriangle, CircleDot, Check, X } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { SessionState } from '../store/createSessionStore'
@@ -188,6 +188,14 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     })
   }
 
+  // Close handler for top-level workspaces
+  const handleCloseWorkspace = useCallback(() => {
+    if (!activeHandle || !activeWorkspace) return
+    if (confirm(`Close workspace "${activeWorkspace.name}"?`)) {
+      void activeHandle.getState().remove()
+    }
+  }, [activeHandle, activeWorkspace])
+
 
   // Compute flattened workspace list for navigation
   const flattenedWorkspaceIds = (() => {
@@ -369,6 +377,16 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                       workspace={activeHandle}
                       onOpenReview={handleOpenReview}
                     />
+                  )}
+                  {!activeWorkspace.parentId && (
+                    <button
+                      className="workspace-action-btn workspace-action-btn-close"
+                      onClick={handleCloseWorkspace}
+                      title="Close workspace"
+                      aria-label="Close workspace"
+                    >
+                      <X size={14} />
+                    </button>
                   )}
                 </div>
               </div>

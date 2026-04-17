@@ -870,6 +870,17 @@ body,
   background: rgba(210, 153, 34, 0.25);
 }
 
+.workspace-action-btn-close {
+  padding: 4px 6px;
+  color: var(--text-secondary);
+}
+
+.workspace-action-btn-close:hover {
+  background: rgba(182, 35, 36, 0.2);
+  border-color: #b62324;
+  color: #cf3536;
+}
+
 .github-comment-count {
   margin-left: 4px;
   font-size: 11px;
