@@ -289,6 +289,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   async function generateTitle(): Promise<void> {
     const settings = deps.getSettings()
     if (!settings.terminalAnalyzer.model) return
+    if (!deps.getParentId()) return
     if (deps.getDisplayName() && deps.getDescription()) return
 
     const buffer = extractBuffer()

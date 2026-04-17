@@ -808,7 +808,7 @@ describe('createAnalyzerStore', () => {
       store.getState().stop()
     })
 
-    it('skips branch rename when workspace has no parent', async () => {
+    it('skips title, description and branch rename when workspace has no parent', async () => {
       const mock = makeMockTty()
       deps = makeDeps({
         openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }) }),
@@ -823,14 +823,11 @@ describe('createAnalyzerStore', () => {
 
       store.getState().onUserInput('hello\r')
 
-      await vi.waitFor(() => {
-        expect(deps.llm.generateTitle).toHaveBeenCalled()
-      })
+      await new Promise((resolve) => setTimeout(resolve, 50))
 
-      await vi.waitFor(() => {
-        expect(deps.updateMetadata).toHaveBeenCalledWith('displayName', 'Test Title', 'analyzerSetDisplayName')
-      })
-
+      expect(deps.llm.generateTitle).not.toHaveBeenCalled()
+      expect(deps.updateMetadata).not.toHaveBeenCalledWith('displayName', expect.anything(), expect.anything())
+      expect(deps.updateMetadata).not.toHaveBeenCalledWith('description', expect.anything(), expect.anything())
       expect(deps.renameBranch).not.toHaveBeenCalled()
 
       store.getState().stop()
