@@ -203,11 +203,28 @@ export function createSessionStore(
   deps: SessionDeps
 ): StoreApi<SessionState> {
   // Acquire session lock. Surfaces the real error on failure instead of a generic message.
+  // Optimistically increments sessionVersion before the RPC so watch echoes are skipped.
   async function acquireLock(): Promise<{ acquired: true } | { acquired: false; error: string }> {
+    store.setState((s) => ({ sessionVersion: s.sessionVersion + 1 }))
     const lockResult = await deps.sessionApi.lock(store.getState().connection.id, 60_000)
-    if (lockResult.success && lockResult.acquired) return { acquired: true }
+    if (lockResult.success && lockResult.acquired) {
+      store.setState({ sessionLock: lockResult.session.lock })
+      return { acquired: true }
+    }
+    store.setState((s) => ({ sessionVersion: s.sessionVersion - 1 }))
     if (!lockResult.success) return { acquired: false, error: lockResult.error }
     return { acquired: false, error: 'Session is locked by another window' }
+  }
+
+  // Release session lock. Optimistically increments sessionVersion before the RPC.
+  async function releaseLock(): Promise<void> {
+    store.setState((s) => ({ sessionVersion: s.sessionVersion + 1 }))
+    const unlockResult = await deps.sessionApi.unlock(store.getState().connection.id)
+    if (unlockResult.success) {
+      store.setState({ sessionLock: unlockResult.session.lock })
+    } else {
+      store.setState((s) => ({ sessionVersion: s.sessionVersion - 1 }))
+    }
   }
 
   function nextSortOrder(parentId: string | null): string {
@@ -363,7 +380,7 @@ export function createSessionStore(
       getSettings: deps.getSettings,
       llm: deps.llm,
       setActivityTabState: deps.setActivityTabState,
-      syncToDaemon: (reason: string) => { queueSyncSessionToDaemon(reason); },
+      syncToDaemon: (reason: string) => { void queueSyncSessionToDaemon(reason); },
       removeWorkspace: (id) => store.getState().removeWorkspace(id),
       removeWorkspaceKeepBranch: (id) => store.getState().removeWorkspaceKeepBranch(id),
       removeWorkspaceKeepBoth: (id) => store.getState().removeWorkspaceKeepBoth(id),
@@ -505,7 +522,7 @@ export function createSessionStore(
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Error, name: worktreeName, error: err instanceof Error ? err.message : String(err) })
         }))
       } finally {
-        await deps.sessionApi.unlock(store.getState().connection.id).catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
+        await releaseLock().catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
       }
     })()
 
@@ -648,7 +665,7 @@ export function createSessionStore(
         workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data, store: wsStore, error: err instanceof Error ? err.message : String(err) })
       }))
     } finally {
-      await deps.sessionApi.unlock(store.getState().connection.id).catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
+      await releaseLock().catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
     }
   }
 
@@ -933,7 +950,7 @@ export function createSessionStore(
         await addChildWorkspaceFromResult(parentId, name, worktreePath, branch, { settings, metadata })
         return { success: true }
       } finally {
-        await deps.sessionApi.unlock(store.getState().connection.id).catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
+        await releaseLock().catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
       }
     },
 
@@ -1071,7 +1088,7 @@ export function createSessionStore(
 
         return { success: true }
       } finally {
-        await deps.sessionApi.unlock(store.getState().connection.id).catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
+        await releaseLock().catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
       }
     },
 
@@ -1111,7 +1128,7 @@ export function createSessionStore(
 
         return { success: true }
       } finally {
-        await deps.sessionApi.unlock(store.getState().connection.id).catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
+        await releaseLock().catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
       }
     },
 
