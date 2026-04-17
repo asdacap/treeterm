@@ -661,7 +661,7 @@ describe('createSessionStore', () => {
     })
 
     it('applies same-version external update when content differs', async () => {
-      // First apply a session so lastDaemonSessionJson is set
+      // First apply a session so lastSyncedWorkspacesJson is set
       const session1 = {
         id: 'session-1',
         workspaces: [makeWorkspace({ id: 'ws-1', name: 'original', path: '/original' })],
