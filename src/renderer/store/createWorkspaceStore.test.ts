@@ -601,7 +601,7 @@ describe('createWorkspaceStore', () => {
     })
 
     it('writes text and sets active tab when ai harness tab has ptyId', async () => {
-      const writeFn = vi.fn<(...args: any[]) => void>()
+      const writeFn = vi.fn<(data: string) => Promise<void>>().mockResolvedValue(undefined)
       const killFn = vi.fn<() => void>()
       const ttyStore = {
         getState: () => ({ ptyId: 'pty-h', write: writeFn, resize: vi.fn<(...args: any[]) => void>(), kill: killFn }),
@@ -640,7 +640,7 @@ describe('createWorkspaceStore', () => {
 
     it('retries on first getTtyWriter failure', async () => {
       let callCount = 0
-      const writeFn = vi.fn<(...args: any[]) => void>()
+      const writeFn = vi.fn<(data: string) => Promise<void>>().mockResolvedValue(undefined)
       const ttyStore = {
         getState: () => ({ ptyId: 'pty-h', write: writeFn, resize: vi.fn<(...args: any[]) => void>(), kill: vi.fn<() => void>() }),
         setState: vi.fn<(...args: any[]) => void>(),
@@ -765,7 +765,7 @@ describe('createWorkspaceStore', () => {
   describe('getTtyWriter', () => {
     function makeTtyDeps() {
       let onEventCb: ((event: { type: string }) => void) | null = null
-      const writeFn = vi.fn<(...args: any[]) => void>()
+      const writeFn = vi.fn<(data: string) => Promise<void>>().mockResolvedValue(undefined)
       const killFn = vi.fn<() => void>()
       const ttyStore = {
         getState: () => ({ ptyId: 'pty-1', write: writeFn, resize: vi.fn<(...args: any[]) => void>(), kill: killFn }),
@@ -791,7 +791,7 @@ describe('createWorkspaceStore', () => {
       const store = createWorkspaceStore(makeWorkspace(), deps)
 
       const writer = await store.getState().getTtyWriter('pty-1')
-      writer.write('hello')
+      await writer.write('hello')
       expect(writeFn).toHaveBeenCalledWith('hello')
       writer.kill()
       expect(killFn).toHaveBeenCalled()
@@ -823,7 +823,7 @@ describe('createWorkspaceStore', () => {
 
       const writer = await store.getState().getTtyWriter('pty-1')
       getOnEvent()({ type: 'end' })
-      expect(() => { writer.write('x'); }).toThrow('disconnected')
+      expect(() => { void writer.write('x'); }).toThrow('disconnected')
     })
 
     it('throws on kill after disconnect', async () => {

@@ -131,14 +131,23 @@ impl TreeTermDaemon for DaemonService {
                 Err(_) => return,
             };
 
-            // Spawn task to handle incoming writes/resizes from client
+            // Spawn task to handle incoming writes/resizes from client.
+            // Writes are awaited (AsyncFd-based) so tonic won't pull the next
+            // PtyInput until the current write has fully landed in the PTY
+            // master — that's the HTTP/2 stream-level backpressure the client
+            // relies on. On write error, propagate via tx so the client sees
+            // the failure (otherwise the paste would silently truncate).
             let pty_mgr2 = pty_mgr.clone();
             let sid = session_id.clone();
+            let tx_write = tx.clone();
             tokio::spawn(async move {
                 while let Ok(Some(msg)) = in_stream.message().await {
                     match msg.input {
                         Some(pty_input::Input::Write(w)) => {
-                            let _ = pty_mgr2.write(&sid, &w.data).await;
+                            if let Err(e) = pty_mgr2.write(&sid, &w.data).await {
+                                let _ = tx_write.send(Err(Status::internal(e))).await;
+                                break;
+                            }
                         }
                         Some(pty_input::Input::Resize(r)) => {
                             let _ = pty_mgr2

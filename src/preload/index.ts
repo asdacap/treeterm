@@ -173,8 +173,9 @@ const preloadApi: PreloadApi = {
     list: (connectionId: string): Promise<TTYSessionInfo[]> => {
       return client.ptyList(connectionId)
     },
-    write: (id: string, data: string): void => {
-      client.ptyWrite(id, data)
+    write: async (id: string, data: string): Promise<void> => {
+      const result = await client.ptyWrite(id, data)
+      if (!result.success) throw new Error(result.error)
     },
     resize: (id: string, cols: number, rows: number): void => {
       client.ptyResize(id, cols, rows)

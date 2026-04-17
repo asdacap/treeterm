@@ -334,7 +334,7 @@ export interface TerminalApi {
   create: (connectionId: string, handle: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<IpcResult<{ sessionId: string }>>
   attach: (connectionId: string, handle: string, sessionId: string) => Promise<IpcResult>
   list: (connectionId: string) => Promise<TTYSessionInfo[]>
-  write: (handle: string, data: string) => void
+  write: (handle: string, data: string) => Promise<void>
   resize: (handle: string, cols: number, rows: number) => void
   kill: (connectionId: string, sessionId: string) => void
   onEvent: (handle: string, callback: (event: PtyEvent) => void) => () => void

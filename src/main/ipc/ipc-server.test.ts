@@ -123,6 +123,7 @@ describe('IpcServer', () => {
       ['onSshUnwatchPortForwardOutput', 'ssh:unwatchPortForwardOutput'],
       ['onClipboardReadText', 'clipboard:readText'],
       ['onExecStart', 'exec:start'],
+      ['onPtyWrite', 'pty:write'],
     ] as const)('%s registers handler on %s channel', (method, channel) => {
       const handler = vi.fn<(...args: any[]) => any>()
       // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
@@ -179,7 +180,6 @@ describe('IpcServer', () => {
     })
 
     it.each([
-      ['onPtyWrite', 'pty:write'],
       ['onPtyResize', 'pty:resize'],
       ['onPtyKill', 'pty:kill'],
       ['onClipboardWriteText', 'clipboard:writeText'],

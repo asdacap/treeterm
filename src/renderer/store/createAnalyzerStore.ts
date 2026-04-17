@@ -341,7 +341,9 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     const state = store.getState()
     if (state.aiState !== ActivityState.SafePermissionRequested || !state.autoApprove) return
     if (!ownTty) return
-    ownTty.getState().write('\r')
+    ownTty.getState().write('\r').catch((err: unknown) => {
+      console.error('[analyzer] auto-approve write failed:', err)
+    })
   }
 
   const store = createStore<AnalyzerState>()((set) => ({

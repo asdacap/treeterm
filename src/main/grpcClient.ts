@@ -57,6 +57,7 @@ export class PtyStream {
   readonly sessionId: string
   private stream: grpc.ClientDuplexStream<PtyInput, PtyOutput>
   private closed: boolean = false
+  private pendingWrites: Array<(err: Error | null) => void> = []
 
   constructor(client: TreeTermDaemonClient, handle: string, sessionId: string, onEvent: (event: PtyEvent) => void) {
     this.handle = handle
@@ -78,25 +79,50 @@ export class PtyStream {
     this.stream.on('error', (error) => {
       console.error(`[PtyStream ${this.handle}] stream error for ${sessionId}:`, error)
       this.closed = true
+      this.drainPendingWrites(error)
       onEvent({ type: 'error', message: error.message })
     })
 
     this.stream.on('end', () => {
       this.closed = true
+      this.drainPendingWrites(new Error('pty stream ended'))
       onEvent({ type: 'end' })
     })
 
     this.stream.write({ start: { sessionId } })
   }
 
-  write(data: string): void {
-    if (this.closed) return
-    try {
-      this.stream.write({ write: { data: Buffer.from(data, 'utf-8') } })
-    } catch (error) {
-      console.error(`[PtyStream ${this.handle}] failed to write:`, error)
-      this.closed = true
-    }
+  private drainPendingWrites(error: Error): void {
+    const pending = this.pendingWrites
+    this.pendingWrites = []
+    for (const cb of pending) cb(error)
+  }
+
+  write(data: string): Promise<void> {
+    if (this.closed) return Promise.reject(new Error('pty stream closed'))
+    return new Promise((resolve, reject) => {
+      // Node gRPC's ClientDuplexStream inherits Writable semantics: the
+      // callback fires once the message has been flushed to the HTTP/2
+      // transport. Under server-side backpressure (daemon awaiting a prior
+      // PTY write via AsyncFd) the peer's stream receive window stays closed
+      // and this callback is deferred until the daemon drains — which is
+      // exactly the end-to-end backpressure we rely on.
+      const onDone = (err: Error | null): void => {
+        const idx = this.pendingWrites.indexOf(onDone)
+        if (idx !== -1) this.pendingWrites.splice(idx, 1)
+        if (err) reject(err)
+        else resolve()
+      }
+      this.pendingWrites.push(onDone)
+      try {
+        this.stream.write({ write: { data: Buffer.from(data, 'utf-8') } }, onDone)
+      } catch (error) {
+        const idx = this.pendingWrites.indexOf(onDone)
+        if (idx !== -1) this.pendingWrites.splice(idx, 1)
+        this.closed = true
+        reject(error instanceof Error ? error : new Error(String(error)))
+      }
+    })
   }
 
   resize(cols: number, rows: number): void {

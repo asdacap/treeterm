@@ -367,12 +367,24 @@ export default function BaseTerminal({
       // Forward terminal input to PTY only when this tab is active.
       // Inactive tabs can't receive keystrokes so any onData during
       // replay is an auto-response (OSC 11, DA, etc.) — drop it.
+      //
+      // The write is awaited end-to-end — under PTY backpressure the daemon
+      // pauses tonic's message loop, HTTP/2 closes the client's stream-level
+      // receive window, and the Promise resolves only when the bytes have
+      // landed. xterm.js queues subsequent onData firings while the previous
+      // one is in flight, preserving order.
       inputDisposable = terminal.onData((data) => {
         const activeTab = workspace.getState().workspace.activeTabId
         if (activeTab !== null && activeTab !== tabId) return
-        if (ttyRef.current) {
-          ttyRef.current.getState().write(data)
-        }
+        const tty = ttyRef.current
+        if (!tty) return
+        tty.getState().write(data).catch((error: unknown) => {
+          console.error(`[${config.logPrefix} ${tabId}] pty write failed:`, error)
+          setOverlay({
+            message: error instanceof Error ? error.message : String(error),
+            type: 'error',
+          })
+        })
       })
     }
 
@@ -568,10 +580,18 @@ export default function BaseTerminal({
   const handlePaste = async () => {
     const text = await clipboard.readText()
     console.log(`[${config.logPrefix} ${tabId}] paste:`, { clipboardText: text || '(empty)', hasTty: !!ttyRef.current })
-    if (text && ttyRef.current) {
-      ttyRef.current.getState().write(text)
-    }
     closeContextMenu()
+    if (text && ttyRef.current) {
+      try {
+        await ttyRef.current.getState().write(text)
+      } catch (error) {
+        console.error(`[${config.logPrefix} ${tabId}] paste write failed:`, error)
+        setOverlay({
+          message: error instanceof Error ? error.message : String(error),
+          type: 'error',
+        })
+      }
+    }
   }
 
   return (

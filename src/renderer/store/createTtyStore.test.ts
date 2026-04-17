@@ -3,7 +3,7 @@ import { createTtyStore, type TtyTerminalDeps } from './createTtyStore'
 
 function makeMockTerminalDeps(): TtyTerminalDeps {
   return {
-    write: vi.fn(),
+    write: vi.fn<(handle: string, data: string) => Promise<void>>().mockResolvedValue(undefined),
     resize: vi.fn(),
     kill: vi.fn(),
   }
@@ -16,10 +16,10 @@ describe('createTtyStore', () => {
     expect(tty.getState().ptyId).toBe('pty-1')
   })
 
-  it('write delegates to terminal.write with handle', () => {
+  it('write delegates to terminal.write with handle', async () => {
     const terminal = makeMockTerminalDeps()
     const tty = createTtyStore('pty-1', 'handle-1', terminal)
-    tty.getState().write('hello')
+    await tty.getState().write('hello')
     expect(terminal.write).toHaveBeenCalledWith('handle-1', 'hello')
   })
 

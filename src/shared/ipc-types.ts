@@ -255,14 +255,19 @@ export interface IpcRequests {
     params: [connectionId: string, cwd: string, command: string, args: string[]]
     result: IpcResult<{ execId: string }>
   }
+
+  // PTY write — invoke (not send) so the renderer awaits HTTP/2 stream-level
+  // backpressure end-to-end. This is how a slow PTY consumer on macOS backs
+  // up the sender instead of silently truncating paste.
+  ptyWrite: {
+    params: [handle: string, data: string]
+    result: IpcResult
+  }
 }
 
 // === Fire-and-Forget Types (renderer sends, no response) ===
 
 export interface IpcSends {
-  ptyWrite: {
-    params: [handle: string, data: string]
-  }
   ptyResize: {
     params: [handle: string, cols: number, rows: number]
   }

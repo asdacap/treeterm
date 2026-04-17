@@ -13,7 +13,7 @@ function makeMockTty() {
 
   const ttyState: TtyState = {
     ptyId: 'pty-1',
-    write: vi.fn(),
+    write: vi.fn<(data: string) => Promise<void>>().mockResolvedValue(undefined),
     resize: vi.fn(),
     kill: vi.fn(),
   }

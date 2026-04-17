@@ -22,6 +22,11 @@ pub enum BufferEvent {
 pub struct PtySession {
     pub id: String,
     pub master_fd: RawFd,
+    /// Shared AsyncFd for the master fd. The read loop and write() both call
+    /// `.readable()` / `.writable()` on the same registration — tokio permits
+    /// concurrent readable/writable awaits on a single AsyncFd, but registering
+    /// the fd twice via `AsyncFd::new` would fail with EEXIST.
+    async_fd: Option<Arc<AsyncFd<FdWrapper>>>,
     pub child_pid: libc::pid_t,
     pub cwd: String,
     pub cols: u16,
@@ -122,6 +127,14 @@ impl PtyManager {
             libc::fcntl(master_fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
         }
 
+        // Register the non-blocking fd with tokio's I/O driver once. Both the
+        // reader loop and PtyManager::write share this registration via Arc —
+        // a second AsyncFd::new on the same fd would fail with EEXIST.
+        let async_fd = Arc::new(
+            AsyncFd::new(FdWrapper(master_fd))
+                .map_err(|e| format!("AsyncFd::new failed: {}", e))?,
+        );
+
         let (exit_tx, _) = broadcast::channel(4);
         let (resize_tx, _) = broadcast::channel(16);
 
@@ -129,6 +142,7 @@ impl PtyManager {
         let session = PtySession {
             id: id.clone(),
             master_fd,
+            async_fd: Some(Arc::clone(&async_fd)),
             child_pid,
             cwd,
             cols,
@@ -160,8 +174,9 @@ impl PtyManager {
         // Spawn background reader task
         let reader_session = Arc::clone(&session);
         let reader_id = id.clone();
+        let reader_fd = Arc::clone(&async_fd);
         let reader_handle = tokio::spawn(async move {
-            if let Err(e) = read_pty_loop(master_fd, reader_session).await {
+            if let Err(e) = read_pty_loop(reader_fd, reader_session).await {
                 tracing::debug!(session_id = %reader_id, error = %e, "pty reader ended");
             }
         });
@@ -227,10 +242,8 @@ impl PtyManager {
         Ok(events)
     }
 
-    const WRITE_CHUNK_SIZE: usize = 4096;
-
     pub async fn write(&self, session_id: &str, data: &[u8]) -> Result<(), String> {
-        let fd = {
+        let async_fd = {
             let session = {
                 let sessions = self.sessions.read().await;
                 Arc::clone(sessions
@@ -241,36 +254,53 @@ impl PtyManager {
             if session.exit_code.is_some() {
                 return Ok(());
             }
-            session.master_fd
+            match &session.async_fd {
+                Some(afd) => Arc::clone(afd),
+                None => return Err("pty master fd already released".to_string()),
+            }
         };
 
-        let data = data.to_vec();
-        let write_future = tokio::task::spawn_blocking(move || {
-            let mut offset = 0;
-            while offset < data.len() {
-                let end = (offset + Self::WRITE_CHUNK_SIZE).min(data.len());
-                let chunk = &data[offset..end];
+        let mut offset = 0;
+        while offset < data.len() {
+            let mut guard = async_fd
+                .writable()
+                .await
+                .map_err(|e| format!("writable await failed: {}", e))?;
+
+            match guard.try_io(|fd| {
+                let slice = &data[offset..];
                 let n = unsafe {
-                    libc::write(fd, chunk.as_ptr() as *const libc::c_void, chunk.len())
+                    libc::write(
+                        fd.as_raw_fd(),
+                        slice.as_ptr() as *const libc::c_void,
+                        slice.len(),
+                    )
                 };
                 if n < 0 {
-                    return Err(format!(
-                        "write failed: {}",
-                        std::io::Error::last_os_error()
-                    ));
+                    Err(std::io::Error::last_os_error())
+                } else {
+                    Ok(n as usize)
                 }
-                offset += n as usize;
+            }) {
+                Ok(Ok(n)) => offset += n,
+                Ok(Err(e)) => {
+                    // EIO on the master side means the child has closed its
+                    // slave — i.e. the process exited just before/between the
+                    // exit_code check and this write. Treat it as a benign
+                    // race: the remaining bytes have nowhere to go, so return
+                    // success (mirrors the behaviour of the early exit_code
+                    // short-circuit above, and matches how the read loop
+                    // treats EIO).
+                    if e.raw_os_error() == Some(libc::EIO) {
+                        return Ok(());
+                    }
+                    return Err(format!("write failed: {}", e));
+                }
+                // try_io observed WouldBlock — loop and re-await writability.
+                Err(_would_block) => continue,
             }
-            Ok(())
-        });
-
-        // Timeout prevents indefinite blocking pool thread consumption when
-        // the child process doesn't consume stdin (PTY slave buffer full).
-        match tokio::time::timeout(std::time::Duration::from_secs(30), write_future).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(e)) => Err(format!("spawn_blocking failed: {}", e)),
-            Err(_) => Err("write timed out: process may not be consuming input".to_string()),
         }
+        Ok(())
     }
 
     pub async fn resize(&self, session_id: &str, cols: u16, rows: u16) -> Result<(), String> {
@@ -317,6 +347,9 @@ impl PtyManager {
                 handle.abort();
                 let _ = handle.await;
             }
+            // Drop the session's AsyncFd ref so tokio deregisters before close.
+            // In-flight writes that still hold their own Arc will observe EBADF.
+            let _ = session.async_fd.take();
             let pid = session.child_pid;
             let mut exit_rx = session.exit_tx.subscribe();
             unsafe {
@@ -455,6 +488,7 @@ impl PtyManager {
                 handle.abort();
                 let _ = handle.await;
             }
+            let _ = session.async_fd.take();
             let pid = session.child_pid;
             let mut exit_rx = session.exit_tx.subscribe();
             unsafe {
@@ -540,10 +574,9 @@ impl AsRawFd for FdWrapper {
 }
 
 async fn read_pty_loop(
-    master_fd: RawFd,
+    async_fd: Arc<AsyncFd<FdWrapper>>,
     session: Arc<Mutex<PtySession>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let async_fd = AsyncFd::new(FdWrapper(master_fd))?;
     loop {
         let mut guard = async_fd.readable().await?;
         let mut buf = [0u8; 4096];
@@ -721,6 +754,37 @@ mod tests {
         let (cols, rows) = mgr.get_size(&id).await.unwrap();
         assert_eq!(cols, 100);
         assert_eq!(rows, 50);
+
+        mgr.kill(&id).await;
+    }
+
+    #[tokio::test]
+    async fn write_large_payload_completes_via_backpressure() {
+        // Regression guard for the macOS paste hang: writes larger than the
+        // PTY slave input buffer (~1KB on macOS, ~4KB on Linux) must loop on
+        // EAGAIN via AsyncFd::writable() until every byte lands. The shell
+        // echoes input back, which drains the slave buffer through the reader
+        // task — so write() completes only if the loop is correctly yielding
+        // back to the runtime.
+        let mgr = PtyManager::new();
+        let id = mgr
+            .create_pty("/tmp".into(), HashMap::new(), 80, 24, None)
+            .await
+            .unwrap();
+
+        // 64KB of printable bytes terminated by a newline — well past
+        // MAX_CANON on both platforms, so EAGAIN is exercised.
+        let mut payload = vec![b'a'; 64 * 1024];
+        payload.push(b'\n');
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            mgr.write(&id, &payload),
+        )
+        .await;
+
+        assert!(result.is_ok(), "write did not complete within 10s");
+        assert!(result.unwrap().is_ok(), "write returned an error");
 
         mgr.kill(&id).await;
     }

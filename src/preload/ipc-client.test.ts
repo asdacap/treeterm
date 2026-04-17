@@ -123,9 +123,11 @@ describe('IpcClient', () => {
   })
 
   describe('send pattern (fire-and-forget methods)', () => {
-    it('ptyWrite calls ipcRenderer.send with correct channel and args', () => {
-      client.ptyWrite('pty-123', 'hello')
-      expect(mockSend).toHaveBeenCalledWith('pty:write', 'pty-123', 'hello')
+    it('ptyWrite invokes pty:write and returns the result', async () => {
+      mockInvoke.mockResolvedValueOnce({ success: true })
+      const result = await client.ptyWrite('pty-123', 'hello')
+      expect(mockInvoke).toHaveBeenCalledWith('pty:write', 'pty-123', 'hello')
+      expect(result).toEqual({ success: true })
     })
 
     it('ptyResize calls ipcRenderer.send with correct channel and args', () => {

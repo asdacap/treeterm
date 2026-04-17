@@ -243,7 +243,7 @@ export function createWorkspaceStore(
       const writer: TtyWriter = {
         write: (data: string) => {
           if (disconnected) throw new Error(`TtyWriter for ${ptyId} is disconnected`)
-          state.write(data)
+          return state.write(data)
         },
         kill: () => {
           if (disconnected) throw new Error(`TtyWriter for ${ptyId} is disconnected`)
@@ -412,10 +412,10 @@ export function createWorkspaceStore(
 
       try {
         const writer = await get().getTtyWriter(ptyId)
-        writer.write(text + '\r')
+        await writer.write(text + '\r')
       } catch {
         const writer = await get().getTtyWriter(ptyId)
-        writer.write(text + '\r')
+        await writer.write(text + '\r')
       }
       get().setActiveTab(tabId, 'promptHarness')
       return true

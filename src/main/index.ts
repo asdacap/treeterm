@@ -305,8 +305,18 @@ server.onPtyList(async (connectionId) => {
   return client.listPtySessions()
 })
 
-server.onPtyWrite((handle, data) => {
-  ptyStreams.get(handle)?.write(data)
+server.onPtyWrite(async (handle, data) => {
+  const stream = ptyStreams.get(handle)
+  if (!stream) {
+    return { success: false, error: `pty stream ${handle} not found` }
+  }
+  try {
+    await stream.write(data)
+    return { success: true }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return { success: false, error: message }
+  }
 })
 
 server.onPtyResize((handle, cols, rows) => {

@@ -173,16 +173,62 @@ describe('GrpcDaemonClient', () => {
       expect(mockStream.write).toHaveBeenCalledWith({ start: { sessionId: 'pty-1' } })
     })
 
-    it('PtyStream.write sends write message to stream', () => {
+    it('PtyStream.write sends write message and resolves when the stream callback fires', async () => {
       const mockStream = makeMockSessionStream()
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
       mockStream.on.mockReturnValue(mockStream)
 
       const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn<(...args: any[]) => void>())
-      ptyStream.write('hello')
-      expect(mockStream.write).toHaveBeenCalledWith({
-        write: { data: Buffer.from('hello', 'utf-8') }
+
+      let capturedCb: ((err: Error | null) => void) | undefined
+      mockStream.write.mockImplementation((_msg: unknown, cb: (err: Error | null) => void) => {
+        capturedCb = cb
       })
+
+      const writePromise = ptyStream.write('hello')
+      expect(mockStream.write).toHaveBeenCalledWith(
+        { write: { data: Buffer.from('hello', 'utf-8') } },
+        expect.any(Function)
+      )
+
+      expect(capturedCb).toBeDefined()
+      capturedCb?.(null)
+      await expect(writePromise).resolves.toBeUndefined()
+    })
+
+    it('PtyStream.write rejects when the stream callback reports an error', async () => {
+      const mockStream = makeMockSessionStream()
+      mockClientInstance.ptyStream.mockReturnValue(mockStream)
+      mockStream.on.mockReturnValue(mockStream)
+
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn<(...args: any[]) => void>())
+
+      mockStream.write.mockImplementation((_msg: unknown, cb: (err: Error | null) => void) => {
+        cb(new Error('grpc write failed'))
+      })
+
+      await expect(ptyStream.write('hello')).rejects.toThrow('grpc write failed')
+    })
+
+    it('PtyStream.write rejects pending writes when the stream errors', async () => {
+      const mockStream = makeMockSessionStream()
+      mockClientInstance.ptyStream.mockReturnValue(mockStream)
+      // Capture the 'error' handler so we can simulate a stream-level error.
+      let errorHandler: ((err: Error) => void) | undefined
+      mockStream.on.mockImplementation((event: string, handler: (...args: any[]) => any) => {
+        if (event === 'error') errorHandler = handler as (err: Error) => void
+        return mockStream
+      })
+
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn<(...args: any[]) => void>())
+
+      // Write that never gets a per-message callback — the stream will error mid-flight.
+      mockStream.write.mockImplementation(() => { /* no callback, no throw */ })
+
+      const writePromise = ptyStream.write('hello')
+      expect(errorHandler).toBeDefined()
+      errorHandler?.(new Error('stream died'))
+      await expect(writePromise).rejects.toThrow('stream died')
     })
 
     it('PtyStream.resize sends resize message to stream', () => {
@@ -218,7 +264,7 @@ describe('GrpcDaemonClient', () => {
       expect(mockStream.end).toHaveBeenCalledTimes(1)
     })
 
-    it.each(['write', 'resize'] as const)('PtyStream.%s is no-op after close', (method) => {
+    it('PtyStream.write rejects after close without calling stream.write', async () => {
       const mockStream = makeMockSessionStream()
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
       mockStream.on.mockReturnValue(mockStream)
@@ -227,13 +273,24 @@ describe('GrpcDaemonClient', () => {
       ptyStream.close()
       mockStream.write.mockClear()
 
-      if (method === 'write') ptyStream.write('data')
-      else ptyStream.resize(80, 24)
-
+      await expect(ptyStream.write('data')).rejects.toThrow('pty stream closed')
       expect(mockStream.write).not.toHaveBeenCalled()
     })
 
-    it.each(['write', 'resize'] as const)('PtyStream.%s catches stream errors', (method) => {
+    it('PtyStream.resize is a no-op after close', () => {
+      const mockStream = makeMockSessionStream()
+      mockClientInstance.ptyStream.mockReturnValue(mockStream)
+      mockStream.on.mockReturnValue(mockStream)
+
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn<(...args: any[]) => void>())
+      ptyStream.close()
+      mockStream.write.mockClear()
+
+      ptyStream.resize(80, 24)
+      expect(mockStream.write).not.toHaveBeenCalled()
+    })
+
+    it('PtyStream.write rejects when stream.write throws synchronously', async () => {
       const mockStream = makeMockSessionStream()
       mockClientInstance.ptyStream.mockReturnValue(mockStream)
       mockStream.on.mockReturnValue(mockStream)
@@ -241,8 +298,18 @@ describe('GrpcDaemonClient', () => {
       const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn<(...args: any[]) => void>())
       mockStream.write.mockImplementation(() => { throw new Error('broken pipe') })
 
-      if (method === 'write') expect(() => { ptyStream.write('data'); }).not.toThrow()
-      else expect(() => { ptyStream.resize(80, 24); }).not.toThrow()
+      await expect(ptyStream.write('data')).rejects.toThrow('broken pipe')
+    })
+
+    it('PtyStream.resize swallows synchronous stream.write throws', () => {
+      const mockStream = makeMockSessionStream()
+      mockClientInstance.ptyStream.mockReturnValue(mockStream)
+      mockStream.on.mockReturnValue(mockStream)
+
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn<(...args: any[]) => void>())
+      mockStream.write.mockImplementation(() => { throw new Error('broken pipe') })
+
+      expect(() => { ptyStream.resize(80, 24); }).not.toThrow()
     })
 
     it('PtyStream receives resize events from stream via constructor callback', () => {

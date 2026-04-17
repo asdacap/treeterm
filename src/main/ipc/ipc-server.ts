@@ -134,9 +134,13 @@ export class IpcServer {
     )
   }
 
-  onPtyWrite(handler: (...args: IpcSends['ptyWrite']['params']) => void): void {
-    ipcMain.on(CHANNELS.ptyWrite, (_event: IpcMainEvent, ...args: unknown[]) =>
-      { handler(...(args as IpcSends['ptyWrite']['params'])); }
+  onPtyWrite(
+    handler: (
+      ...args: IpcRequests['ptyWrite']['params']
+    ) => IpcRequests['ptyWrite']['result'] | Promise<IpcRequests['ptyWrite']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.ptyWrite, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['ptyWrite']['params']))
     )
   }
 

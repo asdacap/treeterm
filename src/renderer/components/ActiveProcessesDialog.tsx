@@ -96,7 +96,9 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
 
       // Forward input using handle
       const onDataDisposable = term.onData((data) => {
-        terminalApi.write(handle, data)
+        terminalApi.write(handle, data).catch((err: unknown) => {
+          console.error(`[ActiveProcessesDialog] pty write failed for ${handle}:`, err)
+        })
       })
       cleanups.push(() => { onDataDisposable.dispose(); })
 

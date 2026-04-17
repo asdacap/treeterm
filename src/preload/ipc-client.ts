@@ -288,11 +288,11 @@ export class IpcClient {
     return ipcRenderer.invoke(CHANNELS.sshUnwatchPortForwardOutput, ...args)
   }
 
-  // ==================== Fire-and-Forget Methods (send pattern, no return) ====================
-
-  ptyWrite(...args: IpcSends['ptyWrite']['params']): void {
-    ipcRenderer.send(CHANNELS.ptyWrite, ...args)
+  ptyWrite(...args: IpcRequests['ptyWrite']['params']): Promise<IpcRequests['ptyWrite']['result']> {
+    return ipcRenderer.invoke(CHANNELS.ptyWrite, ...args)
   }
+
+  // ==================== Fire-and-Forget Methods (send pattern, no return) ====================
 
   ptyResize(...args: IpcSends['ptyResize']['params']): void {
     ipcRenderer.send(CHANNELS.ptyResize, ...args)
