@@ -312,9 +312,12 @@ export default function SessionPanel({
   }
 
   // Get root workspaces (those without parents) — includes loading/error entries (no parentId)
+  // Orphans (parentId references a workspace not in the store) are also treated as top-level.
   const rootWorkspaceIds = Array.from(workspaces.entries())
     .filter(([, e]) => {
-      if (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) return !e.data.parentId
+      if (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) {
+        return !e.data.parentId || !workspaces.has(e.data.parentId)
+      }
       return true // loading/error entries are always top-level
     })
     .sort(([, a], [, b]) => {
@@ -755,7 +758,9 @@ export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSess
 
   const rootWorkspaceIds = Array.from(workspaces.entries())
     .filter(([, e]) => {
-      if (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) return !e.data.parentId
+      if (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) {
+        return !e.data.parentId || !workspaces.has(e.data.parentId)
+      }
       return true
     })
     .sort(([, a], [, b]) => {
