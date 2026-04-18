@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 
 import SystemMonitor, { formatBytes, getUtilizationColor, parseMetrics, cpuHistory, pushCpuSample, memoryHistory, pushMemorySample } from './SystemMonitor'
-import type { ExecEvent } from '../../shared/ipc-types'
+import { ExecEventType, type ExecEvent } from '../../shared/ipc-types'
 
 // --- formatBytes ---
 
@@ -269,8 +269,8 @@ describe('SystemMonitor component', () => {
     await act(async () => { await new Promise(r => { setTimeout(r, 0) }) })
 
     act(() => {
-      capturedCallback!({ type: 'stdout', data: LINUX_OUTPUT })
-      capturedCallback!({ type: 'exit', exitCode: 0 })
+      capturedCallback!({ type: ExecEventType.Stdout, data: LINUX_OUTPUT })
+      capturedCallback!({ type: ExecEventType.Exit, exitCode: 0 })
     })
 
     // CPU and memory graph SVGs should be rendered
@@ -304,8 +304,8 @@ describe('SystemMonitor component', () => {
     await act(async () => { await new Promise(r => { setTimeout(r, 0) }) })
 
     act(() => {
-      capturedCallback!({ type: 'stdout', data: LINUX_OUTPUT })
-      capturedCallback!({ type: 'exit', exitCode: 0 })
+      capturedCallback!({ type: ExecEventType.Stdout, data: LINUX_OUTPUT })
+      capturedCallback!({ type: ExecEventType.Exit, exitCode: 0 })
     })
 
     const stopButtons = screen.getAllByTitle('Stop (SIGTERM)')
@@ -332,8 +332,8 @@ describe('SystemMonitor component', () => {
     await act(async () => { await new Promise(r => { setTimeout(r, 0) }) })
 
     act(() => {
-      capturedCallback!({ type: 'stdout', data: LINUX_OUTPUT })
-      capturedCallback!({ type: 'exit', exitCode: 0 })
+      capturedCallback!({ type: ExecEventType.Stdout, data: LINUX_OUTPUT })
+      capturedCallback!({ type: ExecEventType.Exit, exitCode: 0 })
     })
 
     // Data stored in module-level map

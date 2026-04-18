@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- test fixtures */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createAnalyzerStore } from './createAnalyzerStore'
 import type { AnalyzerDeps } from './createAnalyzerStore'
@@ -5,6 +6,7 @@ import { ActivityState } from '../types'
 import type { LlmApi, Settings } from '../types'
 import type { TtyState } from './createTtyStore'
 import { createStore } from 'zustand/vanilla'
+import { PtyEventType } from '../../shared/ipc-types'
 
 /** Creates a mock Tty with controllable event emission via openTtyStream callback */
 function makeMockTty() {
@@ -24,8 +26,8 @@ function makeMockTty() {
     tty,
     ttyState,
     setEventCallback: (cb: (event: PtyEvent) => void) => { eventCallback = cb },
-    emitData: (data: string) => eventCallback?.({ type: 'data', data: new TextEncoder().encode(data) }),
-    emitExit: (code: number) => eventCallback?.({ type: 'exit', exitCode: code }),
+    emitData: (data: string) => eventCallback?.({ type: PtyEventType.Data, data: new TextEncoder().encode(data) }),
+    emitExit: (code: number) => eventCallback?.({ type: PtyEventType.Exit, exitCode: code }),
   }
 }
 

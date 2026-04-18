@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- test checks Electron menu labels/roles which are external strings */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { IpcServer } from './ipc/ipc-server'
 

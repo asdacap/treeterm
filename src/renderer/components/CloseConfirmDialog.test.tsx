@@ -4,6 +4,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 
 import CloseConfirmDialog from './CloseConfirmDialog'
 import type { Workspace } from '../../shared/types'
+import { WorkspaceStatus } from '../../shared/types'
 
 function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
   return {
@@ -11,7 +12,7 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     path: '/test',
     name: 'feature-branch',
     parentId: null,
-    status: 'active',
+    status: WorkspaceStatus.Active,
     isGitRepo: true,
     gitBranch: 'feat/x',
     gitRootPath: '/test',

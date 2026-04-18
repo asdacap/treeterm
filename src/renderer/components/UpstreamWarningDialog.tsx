@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 interface UpstreamWarningDialogProps {
   behindCount: number
   workspaceName: string

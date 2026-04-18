@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import React, { useState, useCallback } from 'react'
 import type { ReactNode } from 'react'
 import { useContextMenuStore } from '../store/contextMenu'
@@ -15,7 +16,7 @@ import CreateChildDialog, { TabMode } from './CreateChildDialog'
 import OpenWorkspaceDialog from './OpenWorkspaceDialog'
 import UpstreamWarningDialog from './UpstreamWarningDialog'
 import type { ReviewState, WorktreeSettings, Workspace } from '../types'
-import { ConnectionStatus } from '../../shared/types'
+import { ConnectionStatus, ConnectionTargetType } from '../../shared/types'
 
 // Import WorkspaceIcon from TreePane
 import { WorkspaceIcon } from './TreePane'
@@ -596,11 +597,11 @@ export default function SessionPanel({
           onOpen={handleOpenWorkspaceSubmit}
           onCancel={() => { setIsOpenWorkspaceDialogOpen(false); }}
           selectFolder={selectFolder}
-          connectionKey={connection.target.type === 'remote'
+          connectionKey={connection.target.type === ConnectionTargetType.Remote
             ? `${connection.target.config.user}@${connection.target.config.host}:${String(connection.target.config.port)}`
             : 'local'}
-          isRemote={connection.target.type === 'remote'}
-          readDirectory={connection.target.type === 'remote'
+          isRemote={connection.target.type === ConnectionTargetType.Remote}
+          readDirectory={connection.target.type === ConnectionTargetType.Remote
             ? (dirPath: string) => filesystem.readDirectory(connection.id, '/', dirPath)
             : undefined}
         />

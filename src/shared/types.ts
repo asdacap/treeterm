@@ -21,9 +21,14 @@ export interface SSHConnectionConfig {
   portForwards: PortForwardSpec[]
 }
 
+export enum ConnectionTargetType {
+  Local = 'local',
+  Remote = 'remote',
+}
+
 export type ConnectionTarget =
-  | { type: 'local' }
-  | { type: 'remote'; config: SSHConnectionConfig }
+  | { type: ConnectionTargetType.Local }
+  | { type: ConnectionTargetType.Remote; config: SSHConnectionConfig }
 
 export enum ConnectionStatus {
   Disconnected = 'disconnected',
@@ -95,7 +100,7 @@ export interface Workspace {
   path: string
   name: string
   parentId: string | null
-  status: 'active' | 'merged' | 'abandoned'
+  status: WorkspaceStatus
   isGitRepo: boolean
   gitBranch: string | null
   gitRootPath: string | null
@@ -107,6 +112,12 @@ export interface Workspace {
   metadata: Record<string, string>
   createdAt: number
   lastActivity: number
+}
+
+export enum WorkspaceStatus {
+  Active = 'active',
+  Merged = 'merged',
+  Abandoned = 'abandoned',
 }
 
 export interface SessionLock {

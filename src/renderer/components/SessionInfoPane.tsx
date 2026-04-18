@@ -9,7 +9,7 @@ import { WorkspaceEntryStatus } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import { useSessionNamesStore } from '../store/sessionNames'
 import type { PortForwardConfig, PortForwardInfo } from '../types'
-import { ConnectionStatus, PortForwardStatus } from '../../shared/types'
+import { ConnectionStatus, PortForwardStatus, ConnectionTargetType } from '../../shared/types'
 import PortForwardDialog from './PortForwardDialog'
 import JsonViewer from './JsonViewer'
 import SystemMonitor from './SystemMonitor'
@@ -61,7 +61,7 @@ interface SessionInfoPaneProps {
 export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) {
   const sessionId = useStore(sessionStore, s => s.sessionId)
   const connection = useStore(sessionStore, s => s.connection)
-  const isRemote = connection.target.type === 'remote'
+  const isRemote = connection.target.type === ConnectionTargetType.Remote
   const isConnected = connection.status === ConnectionStatus.Connected
   const connectionError = (connection.status === ConnectionStatus.Error || connection.status === ConnectionStatus.Disconnected) ? connection.error : undefined
 
@@ -180,7 +180,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
   }
 
   const handleRetry = () => {
-    if (!isRemote || connection.target.type !== 'remote') return
+    if (!isRemote || connection.target.type !== ConnectionTargetType.Remote) return
     const config = connection.target.config
     // Reset connection to connecting state
     sessionStore.setState({ connection: { ...connection, status: ConnectionStatus.Connecting } })
@@ -196,7 +196,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
   }
 
   // Derive label
-  const label = isRemote && connection.target.type === 'remote'
+  const label = isRemote && connection.target.type === ConnectionTargetType.Remote
     ? (connection.target.config.label || `${connection.target.config.user}@${connection.target.config.host}`)
     : displayName || sessionId
 
@@ -313,7 +313,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
       {activeTab === TabId.Info ? (
         <div className="ssh-pane-output">
           <div className="ssh-pane-output-line">Session ID: {sessionId}</div>
-          {isRemote && connection.target.type === 'remote' ? (
+          {isRemote && connection.target.type === ConnectionTargetType.Remote ? (
             <>
               <div className="ssh-pane-output-line">Connection: SSH</div>
               <div className="ssh-pane-output-line">Host: {connection.target.config.host}</div>

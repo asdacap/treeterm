@@ -24,6 +24,7 @@ const defaultSettings: Settings = {
       id: 'claude',
       name: 'Claude',
       icon: '✦',
+      // eslint-disable-next-line custom/no-string-literal-comparison -- Node platform is external
       command: process.platform === 'darwin' ? 'claude' : 'npx @anthropic-ai/claude-code',
       isDefault: false,
       enableSandbox: false,
@@ -186,6 +187,7 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
       .filter(a => {
         // Only migrate non-built-in terminals with custom commands
         const hasCommand = a.config?.command || a.command
+        // eslint-disable-next-line custom/no-string-literal-comparison -- legacy migration from untyped settings
         const isTerminal = a.applicationId === 'terminal' || !a.applicationId
         return !a.isBuiltIn && isTerminal && hasCommand
       })
@@ -206,6 +208,7 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
       id: 'claude',
       name: 'Claude',
       icon: '✦',
+      // eslint-disable-next-line custom/no-string-literal-comparison -- Node platform is external
       command: oldClaude.command || (process.platform === 'darwin' ? 'claude' : 'npx @anthropic-ai/claude-code'),
       isDefault: oldClaude.startByDefault || false,
       enableSandbox: oldClaude.enableSandbox || false,

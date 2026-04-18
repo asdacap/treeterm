@@ -3,6 +3,7 @@ import { createGitControllerStore } from './createGitControllerStore'
 import type { GitControllerDeps } from './createGitControllerStore'
 import type { Workspace } from '../types'
 import { FileChangeStatus } from '../types'
+import { WorkspaceStatus } from '../../shared/types'
 
 function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
   return {
@@ -10,7 +11,7 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     name: 'test',
     path: '/test',
     parentId: null,
-    status: 'active',
+    status: WorkspaceStatus.Active,
     isGitRepo: true,
     gitBranch: 'feat',
     gitRootPath: '/test',

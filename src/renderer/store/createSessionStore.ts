@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
 import { humanId } from 'human-id'
@@ -6,7 +7,7 @@ import type { WorkspaceStore, WorkspaceStoreDeps } from './createWorkspaceStore'
 import { createTtyStore } from './createTtyStore'
 import type { Tty, TtyTerminalDeps } from './createTtyStore'
 import type { PtyEvent } from '../../shared/ipc-types'
-import { ConnectionStatus } from '../../shared/types'
+import { ConnectionStatus, WorkspaceStatus } from '../../shared/types'
 import type {
   Workspace, Session, AppState, GitInfo,
   ConnectionInfo, ActivityState,
@@ -154,7 +155,7 @@ export function getUnmergedSubWorkspaces(workspaces: Map<string, WorkspaceEntry>
     .filter((e): e is Extract<WorkspaceEntry, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }> =>
       e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError)
     .map(e => e.data)
-    .filter(ws => ws.isWorktree && ws.status === 'active')
+    .filter(ws => ws.isWorktree && ws.status === WorkspaceStatus.Active)
 }
 
 function deepDiff(oldVal: unknown, newVal: unknown, path: string): string[] {
@@ -493,7 +494,7 @@ export function createSessionStore(
           name: worktreeName,
           path: result.path ?? '',
           parentId,
-          status: 'active',
+          status: WorkspaceStatus.Active,
           isGitRepo: true,
           gitBranch: result.branch ?? '',
           gitRootPath: parent?.gitRootPath ?? null,
@@ -564,7 +565,7 @@ export function createSessionStore(
       name,
       path,
       parentId,
-      status: 'active',
+      status: WorkspaceStatus.Active,
       isGitRepo: true,
       gitBranch: branch,
       gitRootPath: parent?.gitRootPath ?? null,
@@ -871,7 +872,7 @@ export function createSessionStore(
           name,
           path,
           parentId: null,
-          status: 'active',
+          status: WorkspaceStatus.Active,
           isGitRepo: gitInfo.isRepo,
           gitBranch: gitInfo.isRepo ? gitInfo.branch : null,
           gitRootPath: gitInfo.isRepo ? gitInfo.rootPath : null,
@@ -1075,7 +1076,7 @@ export function createSessionStore(
 
         const entry = get().workspaces.get(id)
         if (entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError)) {
-          entry.store.getState().updateStatus('merged')
+          entry.store.getState().updateStatus(WorkspaceStatus.Merged)
         }
 
         try {

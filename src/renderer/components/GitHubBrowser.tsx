@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import { useState } from 'react'
 import { useStore } from 'zustand'
 import { RefreshCw, Loader2, ExternalLink, CheckCircle2, XCircle, Clock, AlertCircle, MessageSquare } from 'lucide-react'

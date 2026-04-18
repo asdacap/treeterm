@@ -1,6 +1,6 @@
 import { contextBridge } from 'electron'
 import type { SandboxConfig, Session, TTYSessionInfo, WorkspaceInput, Settings, SSHConnectionConfig, ConnectionInfo, PortForwardConfig, PortForwardInfo } from '../shared/types'
-import type { PtyEvent, ExecEvent } from '../shared/ipc-types'
+import { PtyEventType, ExecEventType, type PtyEvent, type ExecEvent } from '../shared/ipc-types'
 import { IpcClient } from './ipc-client'
 import type { PreloadApi, Platform } from '../renderer/types'
 
@@ -19,7 +19,7 @@ client.onPtyEvent((handle, event) => {
   if (listeners) {
     listeners.forEach((cb) => { cb(event); })
   }
-  if (event.type === 'end' || event.type === 'error') {
+  if (event.type === PtyEventType.End || event.type === PtyEventType.Error) {
     ptyEventListeners.delete(handle)
   }
 })
@@ -30,7 +30,7 @@ client.onExecEvent((execId, event) => {
   if (listeners) {
     listeners.forEach((cb) => { cb(event); })
   }
-  if (event.type === 'exit' || event.type === 'error') {
+  if (event.type === ExecEventType.Exit || event.type === ExecEventType.Error) {
     execEventListeners.delete(execId)
   }
 })

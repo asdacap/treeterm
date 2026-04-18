@@ -19,7 +19,8 @@ import type {
   ExecApi,
   FilesystemApi,
 } from '../types'
-import type { IpcResult } from '../../shared/ipc-types'
+/* eslint-disable custom/no-string-literal-comparison -- parses git porcelain output; status chars/tokens are git CLI conventions, not our domain */
+import { ExecEventType, type IpcResult } from '../../shared/ipc-types'
 import { FileChangeStatus } from '../../shared/types'
 import { resolveHomedir } from './homedir'
 
@@ -94,13 +95,13 @@ async function execGit(
     const stderr: string[] = []
 
     const unsub = exec.onEvent(execId, (event) => {
-      if (event.type === 'stdout') {
+      if (event.type === ExecEventType.Stdout) {
         stdout.push(event.data)
         options?.onProgress?.(event.data)
-      } else if (event.type === 'stderr') {
+      } else if (event.type === ExecEventType.Stderr) {
         stderr.push(event.data)
         options?.onProgress?.(event.data)
-      } else if (event.type === 'exit') {
+      } else if (event.type === ExecEventType.Exit) {
         unsub()
         resolve({ exitCode: event.exitCode, stdout: stdout.join(''), stderr: stderr.join(''), args })
       } else {

@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import React from 'react'
 import { MultiFileDiff } from '@pierre/diffs/react'
 import type { DiffLineAnnotation, OnDiffLineClickProps, AnnotationSide } from '@pierre/diffs'

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { searchDefinition } from './definitionSearch'
 import type { ExecApi } from '../types'
-import type { ExecEvent } from '../../shared/ipc-types'
+import { ExecEventType, type ExecEvent } from '../../shared/ipc-types'
 
 function createMockExecApi(opts: {
   startResult?: { success: boolean; execId?: string; error?: string }
@@ -46,7 +46,7 @@ describe('definitionSearch', () => {
       ['unknown_lang', '(function|class|def|fn|type|interface|struct|enum)\\s+mySymbol\\b'],
     ] as const)('language %s produces correct pattern', async (language, expectedPattern) => {
       const execApi = createMockExecApi({
-        events: [{ type: 'exit', exitCode: 0 }],
+        events: [{ type: ExecEventType.Exit, exitCode: 0 }],
       })
 
       await searchDefinition(execApi, 'conn-1', '/workspace', 'mySymbol', language)
@@ -62,7 +62,7 @@ describe('definitionSearch', () => {
 
   describe('getFileGlobs via searchDefinition args', () => {
     it('typescript includes *.ts and *.tsx globs', async () => {
-      const execApi = createMockExecApi({ events: [{ type: 'exit', exitCode: 0 }] })
+      const execApi = createMockExecApi({ events: [{ type: ExecEventType.Exit, exitCode: 0 }] })
       await searchDefinition(execApi, 'conn-1', '/ws', 'sym', 'typescript')
       const args = (execApi.start as ReturnType<typeof vi.fn>).mock.calls[0]![3] as string[]
       expect(args).toContain('--include=*.ts')
@@ -70,7 +70,7 @@ describe('definitionSearch', () => {
     })
 
     it('css includes css/scss/less globs', async () => {
-      const execApi = createMockExecApi({ events: [{ type: 'exit', exitCode: 0 }] })
+      const execApi = createMockExecApi({ events: [{ type: ExecEventType.Exit, exitCode: 0 }] })
       await searchDefinition(execApi, 'conn-1', '/ws', 'sym', 'css')
       const args = (execApi.start as ReturnType<typeof vi.fn>).mock.calls[0]![3] as string[]
       expect(args).toContain('--include=*.css')
@@ -79,7 +79,7 @@ describe('definitionSearch', () => {
     })
 
     it('html includes html/htm globs', async () => {
-      const execApi = createMockExecApi({ events: [{ type: 'exit', exitCode: 0 }] })
+      const execApi = createMockExecApi({ events: [{ type: ExecEventType.Exit, exitCode: 0 }] })
       await searchDefinition(execApi, 'conn-1', '/ws', 'sym', 'html')
       const args = (execApi.start as ReturnType<typeof vi.fn>).mock.calls[0]![3] as string[]
       expect(args).toContain('--include=*.html')
@@ -87,7 +87,7 @@ describe('definitionSearch', () => {
     })
 
     it('unknown language uses no include globs', async () => {
-      const execApi = createMockExecApi({ events: [{ type: 'exit', exitCode: 0 }] })
+      const execApi = createMockExecApi({ events: [{ type: ExecEventType.Exit, exitCode: 0 }] })
       await searchDefinition(execApi, 'conn-1', '/ws', 'sym', 'brainfuck')
       const args = (execApi.start as ReturnType<typeof vi.fn>).mock.calls[0]![3] as string[]
       expect(args.filter((a: string) => a.startsWith('--include='))).toHaveLength(0)
@@ -105,7 +105,7 @@ describe('definitionSearch', () => {
       ['scss', ['*.css', '*.scss', '*.less']],
       ['less', ['*.css', '*.scss', '*.less']],
     ] as const)('language %s includes correct file globs', async (language, expectedGlobs) => {
-      const execApi = createMockExecApi({ events: [{ type: 'exit', exitCode: 0 }] })
+      const execApi = createMockExecApi({ events: [{ type: ExecEventType.Exit, exitCode: 0 }] })
       await searchDefinition(execApi, 'conn-1', '/ws', 'sym', language)
       const args = (execApi.start as ReturnType<typeof vi.fn>).mock.calls[0]![3] as string[]
       for (const glob of expectedGlobs) {
@@ -118,8 +118,8 @@ describe('definitionSearch', () => {
     it('parses valid grep output lines', async () => {
       const execApi = createMockExecApi({
         events: [
-          { type: 'stdout', data: 'src/foo.ts:10:function myFunc() {\nsrc/bar.ts:20:const myConst = 1\n' },
-          { type: 'exit', exitCode: 0 },
+          { type: ExecEventType.Stdout, data: 'src/foo.ts:10:function myFunc() {\nsrc/bar.ts:20:const myConst = 1\n' },
+          { type: ExecEventType.Exit, exitCode: 0 },
         ],
       })
       const results = await searchDefinition(execApi, 'conn-1', '/ws', 'myFunc', 'typescript')
@@ -132,8 +132,8 @@ describe('definitionSearch', () => {
     it('strips ./ prefix from file paths', async () => {
       const execApi = createMockExecApi({
         events: [
-          { type: 'stdout', data: './src/foo.ts:5:class Foo {}\n' },
-          { type: 'exit', exitCode: 0 },
+          { type: ExecEventType.Stdout, data: './src/foo.ts:5:class Foo {}\n' },
+          { type: ExecEventType.Exit, exitCode: 0 },
         ],
       })
       const results = await searchDefinition(execApi, 'conn-1', '/ws', 'Foo', 'typescript')
@@ -143,8 +143,8 @@ describe('definitionSearch', () => {
     it('returns empty for no matches', async () => {
       const execApi = createMockExecApi({
         events: [
-          { type: 'stdout', data: '' },
-          { type: 'exit', exitCode: 1 },
+          { type: ExecEventType.Stdout, data: '' },
+          { type: ExecEventType.Exit, exitCode: 1 },
         ],
       })
       const results = await searchDefinition(execApi, 'conn-1', '/ws', 'nope', 'typescript')
@@ -167,7 +167,7 @@ describe('definitionSearch', () => {
 
     it('returns empty on error event', async () => {
       const execApi = createMockExecApi({
-        events: [{ type: 'error', message: 'grep crashed' }],
+        events: [{ type: ExecEventType.Error, message: 'grep crashed' }],
       })
       const results = await searchDefinition(execApi, 'conn-1', '/ws', 'sym', 'typescript')
       expect(results).toEqual([])
@@ -175,7 +175,7 @@ describe('definitionSearch', () => {
   })
 
   it('escapes special regex chars in symbol name', async () => {
-    const execApi = createMockExecApi({ events: [{ type: 'exit', exitCode: 0 }] })
+    const execApi = createMockExecApi({ events: [{ type: ExecEventType.Exit, exitCode: 0 }] })
     await searchDefinition(execApi, 'conn-1', '/ws', 'foo.bar', 'typescript')
     const args = (execApi.start as ReturnType<typeof vi.fn>).mock.calls[0]![3] as string[]
     expect(args[1]).toContain('foo\\.bar')

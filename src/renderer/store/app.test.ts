@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- test fixtures */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // Mock application renderers that depend on browser APIs (xterm)
@@ -70,7 +71,8 @@ import { useSessionNamesStore } from './sessionNames'
 import type { SessionState, SessionDeps } from './createSessionStore'
 import { WorkspaceEntryStatus } from './createSessionStore'
 import type { Workspace } from '../types'
-import { ConnectionStatus } from '../../shared/types'
+import { ConnectionStatus, ConnectionTargetType } from '../../shared/types'
+import type { ConnectionInfo } from '../../shared/types'
 
 // Mock createSessionStore and its utilities
 vi.mock('./createSessionStore', async (importOriginal) => {
@@ -123,7 +125,7 @@ const mockDeps = {
     onCloseConfirm: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
     onReady: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
     localConnect: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({
-      info: { id: 'local', target: { type: 'local' }, status: ConnectionStatus.Connected },
+      info: { id: 'local', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected },
       session: { id: 'test-session', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }
     }),
     onSshAutoConnected: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
@@ -152,7 +154,7 @@ const mockDeps = {
   runActions: { detect: vi.fn<(...args: any[]) => Promise<any[]>>().mockResolvedValue([]), run: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue(null) },
   sandbox: {},
   ssh: {
-    connect: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ id: 'test', target: { type: 'remote' }, status: ConnectionStatus.Connected }),
+    connect: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ id: 'test', target: { type: ConnectionTargetType.Remote }, status: ConnectionStatus.Connected }),
     disconnect: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
     listConnections: vi.fn<(...args: any[]) => Promise<any[]>>().mockResolvedValue([]),
     saveConnection: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
@@ -239,7 +241,7 @@ describe('useAppStore', () => {
     let mockAddWorkspace: ReturnType<typeof vi.fn>
     let mockSyncToDaemon: ReturnType<typeof vi.fn>
     let mockHandleRestore: ReturnType<typeof vi.fn>
-    const localConn = { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const }
+    const localConn: ConnectionInfo = { id: 'local', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected }
 
     beforeEach(async () => {
       mockAddWorkspace = vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('ws-new-id')
@@ -504,7 +506,7 @@ describe('useAppStore', () => {
         }],
         createdAt: 0, lastActivity: 0, version: 1, lock: null
       }
-      const localConn = { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const }
+      const localConn: ConnectionInfo = { id: 'local', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected }
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- test fixture
       vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({ info: localConn, session })
       const cleanup = await useAppStore.getState().initialize(mockDeps)
@@ -515,7 +517,7 @@ describe('useAppStore', () => {
     })
 
     it('localConnect creates store for session with no workspaces', async () => {
-      const localConn = { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const }
+      const localConn: ConnectionInfo = { id: 'local', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected }
       vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({
         info: localConn,
         session: { id: 'empty-session', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }
@@ -533,7 +535,7 @@ describe('useAppStore', () => {
       vi.mocked(createSessionStore).mockReturnValue({
         getState: vi.fn<() => any>().mockReturnValue({
           workspaces: new Map([['ws-existing', { status: WorkspaceEntryStatus.Loaded, data: { id: 'ws-existing', path: '/projects/existing', name: 'existing' }, store: {} }]]),
-          connection: { id: 'local', target: { type: 'local' }, status: ConnectionStatus.Connected },
+          connection: { id: 'local', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected },
           activeWorkspaceId: null,
           isRestoring: false,
           addWorkspace: vi.fn<(...args: any[]) => any>(),
@@ -554,7 +556,7 @@ describe('useAppStore', () => {
 
       // We need the store to exist before getInitialWorkspace resolves
       // Create a mock session store directly
-      const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', connection: { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const } }, {} as unknown as SessionDeps)
+      const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', connection: { id: 'local', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected as const } }, {} as unknown as SessionDeps)
       useAppStore.setState({
         sessionStores: new Map([['pre-session', { store: mockSessionStoreInstance }]])
       })
@@ -570,7 +572,7 @@ describe('useAppStore', () => {
       vi.mocked(createSessionStore).mockReturnValue({
         getState: vi.fn<() => any>().mockReturnValue({
           workspaces: new Map(),
-          connection: { id: 'local', target: { type: 'local' }, status: ConnectionStatus.Connected },
+          connection: { id: 'local', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected },
           activeWorkspaceId: null,
           isRestoring: false,
           addWorkspace: mockAddWorkspace,
@@ -583,7 +585,7 @@ describe('useAppStore', () => {
         subscribe: vi.fn<(...args: any[]) => any>()
       } as unknown as StoreApi<SessionState>)
 
-      const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', connection: { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const } }, {} as unknown as SessionDeps)
+      const mockSessionStoreInstance = vi.mocked(createSessionStore)({ sessionId: 'pre-session', connection: { id: 'local', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected as const } }, {} as unknown as SessionDeps)
       useAppStore.setState({
         sessionStores: new Map([['pre-session', { store: mockSessionStoreInstance }]])
       })
@@ -639,7 +641,7 @@ describe('useAppStore', () => {
       }
 
       // Pre-populate session store so onSync finds it by connection ID
-      const localConn = { id: 'local', target: { type: 'local' }, status: ConnectionStatus.Connected }
+      const localConn: ConnectionInfo = { id: 'local', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected }
       const mockStore = {
         getState: vi.fn<() => any>().mockReturnValue({ connection: localConn, handleExternalUpdate: mockHandleExternalUpdate }),
         setState: vi.fn<(...args: any[]) => void>(),
@@ -664,7 +666,7 @@ describe('useAppStore', () => {
       }
 
       // Pre-populate session store so onSync finds it by connection ID
-      const localConn = { id: 'local-2', target: { type: 'local' }, status: ConnectionStatus.Connected }
+      const localConn: ConnectionInfo = { id: 'local-2', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected }
       const mockStore = {
         getState: vi.fn<() => any>().mockReturnValue({ connection: localConn, handleExternalUpdate: mockHandleExternalUpdate }),
         setState: vi.fn<(...args: any[]) => void>(),
@@ -877,7 +879,7 @@ describe('useAppStore', () => {
 
     describe('local session via localConnect', () => {
       it('names local session LOCAL', async () => {
-        const localConn = { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const }
+        const localConn: ConnectionInfo = { id: 'local', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected }
         vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({
           info: localConn,
           session: { id: 'local-session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }
@@ -890,7 +892,7 @@ describe('useAppStore', () => {
       })
 
       it('does not overwrite existing custom name on same session', async () => {
-        const localConn = { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const }
+        const localConn: ConnectionInfo = { id: 'local', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected }
         vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({
           info: localConn,
           session: { id: 'local-session-2', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }
@@ -921,7 +923,7 @@ describe('useAppStore', () => {
       it('names session with user@host when no label', async () => {
         const connection = {
           id: 'conn-1',
-          target: { type: 'remote' as const, config: { id: 'conn-1', host: 'myserver.com', user: 'alice', port: 22, portForwards: [] } },
+          target: { type: ConnectionTargetType.Remote, config: { id: 'conn-1', host: 'myserver.com', user: 'alice', port: 22, portForwards: [] } },
           status: ConnectionStatus.Connected as const
         }
         const session = { id: 'ssh-session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }
@@ -933,7 +935,7 @@ describe('useAppStore', () => {
       it('uses label over user@host when label is set', async () => {
         const connection = {
           id: 'conn-2',
-          target: { type: 'remote' as const, config: { id: 'conn-2', host: 'myserver.com', user: 'alice', port: 22, label: 'Production', portForwards: [] } },
+          target: { type: ConnectionTargetType.Remote, config: { id: 'conn-2', host: 'myserver.com', user: 'alice', port: 22, label: 'Production', portForwards: [] } },
           status: ConnectionStatus.Connected as const
         }
         const session = { id: 'ssh-session-2', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }
@@ -953,7 +955,7 @@ describe('useAppStore', () => {
         // Now addRemoteSession should not overwrite
         const connection = {
           id: 'conn-3',
-          target: { type: 'remote' as const, config: { id: 'conn-3', host: 'myserver.com', user: 'alice', port: 22, portForwards: [] } },
+          target: { type: ConnectionTargetType.Remote, config: { id: 'conn-3', host: 'myserver.com', user: 'alice', port: 22, portForwards: [] } },
           status: ConnectionStatus.Connected as const
         }
         const session = { id: 'ssh-session-3', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }

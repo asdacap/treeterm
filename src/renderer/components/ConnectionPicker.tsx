@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import { useState, useEffect } from 'react'
 import { useAppStore } from '../store/app'
 import { ConnectionStatus } from '../../shared/types'

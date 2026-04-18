@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { ChevronDown, RefreshCw, Loader2 } from 'lucide-react'
 import { WorkerPoolContextProvider } from '@pierre/diffs/react'

@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- test fixtures compare literal tokens */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mocks = vi.hoisted(() => {

@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 /**
  * GitHub Client for Renderer Process
  *
@@ -6,6 +7,7 @@
  */
 
 import type { ExecApi, GitHubApi, GitHubPrInfoResult, SettingsApi } from '../types'
+import { ExecEventType } from '../../shared/ipc-types'
 
 // --- Helpers ---
 
@@ -27,11 +29,11 @@ async function execCommand(
     const stderr: string[] = []
 
     const unsub = exec.onEvent(execId, (event) => {
-      if (event.type === 'stdout') {
+      if (event.type === ExecEventType.Stdout) {
         stdout.push(event.data)
-      } else if (event.type === 'stderr') {
+      } else if (event.type === ExecEventType.Stderr) {
         stderr.push(event.data)
-      } else if (event.type === 'exit') {
+      } else if (event.type === ExecEventType.Exit) {
         unsub()
         resolve({ exitCode: event.exitCode, stdout: stdout.join(''), stderr: stderr.join('') })
       } else {

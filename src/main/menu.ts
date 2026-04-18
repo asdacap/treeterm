@@ -5,6 +5,7 @@ export function createApplicationMenu(
   server: IpcServer,
   onQuitAndKillDaemon?: () => void
 ): void {
+  // eslint-disable-next-line custom/no-string-literal-comparison -- Node platform is external
   const isMac = process.platform === 'darwin'
 
   const template: Electron.MenuItemConstructorOptions[] = [

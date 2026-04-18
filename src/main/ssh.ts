@@ -370,7 +370,9 @@ export class SSHTunnel {
             const socketPath = socketMatch?.[1]?.trim()
 
             // If daemon is running, verify the binary matches before using it
+            // eslint-disable-next-line custom/no-string-literal-comparison -- sentinel value from remote shell script
             if (socketPath && socketPath !== 'NEEDS_UPLOAD') {
+              // eslint-disable-next-line custom/no-string-literal-comparison -- sentinel value from remote shell script
               if (remoteHash && remoteHash !== 'NONE') {
                 const localHash = this.getLocalDaemonChecksum(remoteArch)
                 if (remoteHash === localHash) {

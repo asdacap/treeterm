@@ -4,6 +4,7 @@ import { fitTerminal } from '../utils/fitTerminal'
 import { useAppStore } from '../store/app'
 import type { TerminalApi, TTYSessionInfo, Workspace } from '../types'
 import { PtyViewerStatus } from '../types'
+import { PtyEventType } from '../../shared/ipc-types'
 
 interface ActiveProcessesDialogProps {
   workspaces: Record<string, Workspace>
@@ -75,11 +76,11 @@ function PtyViewer({ ptyId, connectionId, terminalApi }: { ptyId: string; connec
     handleRef = handle
 
     const unsubEvent = terminalApi.onEvent(handle, (event) => {
-      if (event.type === 'data') {
+      if (event.type === PtyEventType.Data) {
         term.write(event.data)
-      } else if (event.type === 'exit') {
+      } else if (event.type === PtyEventType.Exit) {
         term.write('\r\n\x1b[90m[Process exited]\x1b[0m\r\n')
-      } else if (event.type === 'resize') {
+      } else if (event.type === PtyEventType.Resize) {
         term.resize(event.cols, event.rows)
       }
     })

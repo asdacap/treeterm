@@ -5,6 +5,7 @@ import { getUnmergedSubWorkspaces, WorkspaceEntryStatus } from './createSessionS
 import type { WorkspaceEntry } from './createSessionStore'
 import type { LlmApi, Workspace, Application } from '../types'
 import { createMockExecApi } from '../../shared/mockApis'
+import { WorkspaceStatus } from '../../shared/types'
 
 interface TestComment { id: string; filePath: string; lineNumber: number; text: string; commitHash: string | null; createdAt: number; isOutdated: boolean; addressed: boolean; side: string }
 
@@ -59,7 +60,7 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     name: 'test',
     path: '/test',
     parentId: null,
-    status: 'active',
+    status: WorkspaceStatus.Active,
     isGitRepo: false,
     gitBranch: null,
     gitRootPath: null,
@@ -102,10 +103,10 @@ describe('getUnmergedSubWorkspaces', () => {
 
   it('returns only active worktree workspaces', () => {
     const workspaces = new Map<string, WorkspaceEntry>([
-      ['root', toLoaded(makeWorkspace({ id: 'root', isWorktree: false, status: 'active' }))],
-      ['child1', toLoaded(makeWorkspace({ id: 'child1', isWorktree: true, status: 'active' }))],
-      ['child2', toLoaded(makeWorkspace({ id: 'child2', isWorktree: true, status: 'merged' }))],
-      ['child3', toLoaded(makeWorkspace({ id: 'child3', isWorktree: true, status: 'active' }))],
+      ['root', toLoaded(makeWorkspace({ id: 'root', isWorktree: false, status: WorkspaceStatus.Active }))],
+      ['child1', toLoaded(makeWorkspace({ id: 'child1', isWorktree: true, status: WorkspaceStatus.Active }))],
+      ['child2', toLoaded(makeWorkspace({ id: 'child2', isWorktree: true, status: WorkspaceStatus.Merged }))],
+      ['child3', toLoaded(makeWorkspace({ id: 'child3', isWorktree: true, status: WorkspaceStatus.Active }))],
     ])
     const result = getUnmergedSubWorkspaces(workspaces)
     expect(result).toHaveLength(2)
@@ -115,7 +116,7 @@ describe('getUnmergedSubWorkspaces', () => {
 
   it('excludes non-worktree workspaces even if active', () => {
     const workspaces = new Map<string, WorkspaceEntry>([
-      ['root', toLoaded(makeWorkspace({ id: 'root', isWorktree: false, status: 'active' }))],
+      ['root', toLoaded(makeWorkspace({ id: 'root', isWorktree: false, status: WorkspaceStatus.Active }))],
     ])
     expect(getUnmergedSubWorkspaces(workspaces)).toEqual([])
   })
@@ -152,12 +153,12 @@ describe('createWorkspaceStore', () => {
   })
 
   it('updateStatus updates workspace status field', () => {
-    const ws = makeWorkspace({ id: 'ws-1', status: 'active' })
+    const ws = makeWorkspace({ id: 'ws-1', status: WorkspaceStatus.Active })
     const store = createWorkspaceStore(ws, makeHandleDeps())
 
-    store.getState().updateStatus('merged')
+    store.getState().updateStatus(WorkspaceStatus.Merged)
 
-    expect(store.getState().workspace.status).toBe('merged')
+    expect(store.getState().workspace.status).toBe(WorkspaceStatus.Merged)
   })
 
   it('updateTabTitle updates the tab title', () => {

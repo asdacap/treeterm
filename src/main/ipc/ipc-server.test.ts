@@ -18,6 +18,7 @@ vi.mock('electron', () => ({
 
 import type { BrowserWindow } from 'electron'
 import type { Session, ConnectionInfo, TTYSessionInfo, PortForwardInfo, PortForwardStatus } from '../../shared/types'
+import { PtyEventType, ExecEventType } from '../../shared/ipc-types'
 import { IpcServer } from './ipc-server'
 
 describe('IpcServer', () => {
@@ -198,16 +199,16 @@ describe('IpcServer', () => {
       const mockWindow = { isDestroyed: vi.fn(() => false), webContents: { send: mockSend, isDestroyed: vi.fn(() => false) } } as unknown as BrowserWindow
 
       const dataBytes = new TextEncoder().encode('hello-data')
-      server.ptyEventTo(mockWindow, 'pty-1', { type: 'data', data: dataBytes })
-      expect(mockSend).toHaveBeenCalledWith('pty:event', 'pty-1', { type: 'data', data: dataBytes })
+      server.ptyEventTo(mockWindow, 'pty-1', { type: PtyEventType.Data, data: dataBytes })
+      expect(mockSend).toHaveBeenCalledWith('pty:event', 'pty-1', { type: PtyEventType.Data, data: dataBytes })
     })
 
     it('ptyEventTo sends exit to specific window with correct channel and args', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
       const mockWindow = { isDestroyed: vi.fn(() => false), webContents: { send: mockSend, isDestroyed: vi.fn(() => false) } } as unknown as BrowserWindow
 
-      server.ptyEventTo(mockWindow, 'pty-1', { type: 'exit', exitCode: 0 })
-      expect(mockSend).toHaveBeenCalledWith('pty:event', 'pty-1', { type: 'exit', exitCode: 0 })
+      server.ptyEventTo(mockWindow, 'pty-1', { type: PtyEventType.Exit, exitCode: 0 })
+      expect(mockSend).toHaveBeenCalledWith('pty:event', 'pty-1', { type: PtyEventType.Exit, exitCode: 0 })
     })
 
     it('settingsOpenTo sends to specific window with correct channel', () => {
@@ -314,8 +315,8 @@ describe('IpcServer', () => {
       const mockSend = vi.fn<(...args: any[]) => void>()
       mockGetAllWindows.mockReturnValue([mockWin(mockSend)])
 
-      server.execEvent('exec-1', { type: 'stdout', data: 'output' })
-      expect(mockSend).toHaveBeenCalledWith('exec:event', 'exec-1', { type: 'stdout', data: 'output' })
+      server.execEvent('exec-1', { type: ExecEventType.Stdout, data: 'output' })
+      expect(mockSend).toHaveBeenCalledWith('exec:event', 'exec-1', { type: ExecEventType.Stdout, data: 'output' })
     })
 
     it('sshAutoConnected broadcasts to all windows', () => {

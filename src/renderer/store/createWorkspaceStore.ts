@@ -1,8 +1,10 @@
+/* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
 import type { Workspace, AppRef, AppRegistryApi, GitApi, FilesystemApi, ExecApi, RunActionsApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi, PtyEvent } from '../types'
 import type { WorktreeRegistryApi } from '../lib/worktreeRegistry'
 import { buildEntryFromWorkspace } from '../lib/worktreeRegistry'
+import { PtyEventType } from '../../shared/ipc-types'
 import { getTabs, isAiHarnessState } from '../types'
 import type { Terminal as XTerm } from '@xterm/xterm'
 import type { Tty, TtyWriter } from './createTtyStore'
@@ -243,7 +245,7 @@ export function createWorkspaceStore(
       if (cached) return cached
       let disconnected = false
       const { tty } = await deps.openTtyStream(ptyId, (event) => {
-        if (event.type === 'end' || event.type === 'error') {
+        if (event.type === PtyEventType.End || event.type === PtyEventType.Error) {
           disconnected = true
           ttyWriters.delete(ptyId)
         }

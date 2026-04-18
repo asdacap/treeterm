@@ -10,6 +10,7 @@ import { PortForwardProcess } from './portForward'
 import {
   ConnectionStatus,
   ConnectPhase,
+  ConnectionTargetType,
 } from '../shared/types'
 import type {
   SSHConnectionConfig,
@@ -138,7 +139,7 @@ class Connection {
   }
 
   addPortForward(config: PortForwardConfig): PortForwardInfo {
-    if (this.target.type !== 'remote') {
+    if (this.target.type !== ConnectionTargetType.Remote) {
       throw new Error(`Connection is not remote: ${this.id}`)
     }
 
@@ -297,7 +298,7 @@ class Connection {
     onStatusChanged()
 
     try {
-      if (this.target.type === 'local') {
+      if (this.target.type === ConnectionTargetType.Local) {
         await this.reconnectLocal()
       } else {
         await this.reconnectRemote()
@@ -340,7 +341,7 @@ class Connection {
   }
 
   private async reconnectRemote(): Promise<void> {
-    if (this.target.type !== 'remote') {
+    if (this.target.type !== ConnectionTargetType.Remote) {
       throw new Error('reconnectRemote called on non-remote connection')
     }
 
@@ -412,7 +413,7 @@ export class ConnectionManager {
     const client = new GrpcDaemonClient(this.socketPath)
     await client.connect()
 
-    const conn = new Connection(id, { type: 'local' }, client, ConnectionStatus.Connected)
+    const conn = new Connection(id, { type: ConnectionTargetType.Local }, client, ConnectionStatus.Connected)
     this.connections.set(id, conn)
 
     conn.startHeartbeatMonitor(() => {
@@ -500,7 +501,7 @@ export class ConnectionManager {
 
   private async doConnectRemote(config: SSHConnectionConfig, options?: { refreshDaemon?: boolean; allowOutdatedDaemon?: boolean }): Promise<ConnectionInfo> {
     const tunnel = new SSHTunnel(config, { refreshDaemon: options?.refreshDaemon, allowOutdatedDaemon: options?.allowOutdatedDaemon })
-    const target: ConnectionTarget = { type: 'remote', config }
+    const target: ConnectionTarget = { type: ConnectionTargetType.Remote, config }
 
     const conn = new Connection(config.id, target, null, ConnectionStatus.Connecting, tunnel)
     conn.connectPhase = ConnectPhase.Bootstrap
@@ -640,7 +641,7 @@ export class ConnectionManager {
 
   addPortForward(config: PortForwardConfig): PortForwardInfo {
     const conn = this.connections.get(config.connectionId)
-    if (!conn || conn.target.type !== 'remote') {
+    if (!conn || conn.target.type !== ConnectionTargetType.Remote) {
       throw new Error(`Connection not found or not remote: ${config.connectionId}`)
     }
     return conn.addPortForward(config)

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { parseGitHubOwnerRepo, createGitHubApi } from './githubClient'
 import type { ExecApi, SettingsApi, GitHubPrInfoResult } from '../types'
-import type { ExecEvent } from '../../shared/ipc-types'
+import { ExecEventType, type ExecEvent } from '../../shared/ipc-types'
 import type { Settings } from '../../shared/types'
 
 // ---------------------------------------------------------------------------
@@ -59,8 +59,8 @@ function createMockExec(): MockExecApi {
     _complete: (execId: string, stdout: string, exitCode = 0) => {
       const cb = eventCallbacks.get(execId)
       if (cb) {
-        if (stdout) cb({ type: 'stdout', data: stdout })
-        cb({ type: 'exit', exitCode })
+        if (stdout) cb({ type: ExecEventType.Stdout, data: stdout })
+        cb({ type: ExecEventType.Exit, exitCode })
       }
     },
   }

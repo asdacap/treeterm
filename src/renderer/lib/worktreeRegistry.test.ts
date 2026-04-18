@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { ExecApi, FilesystemApi } from '../types'
-import type { ExecEvent } from '../../shared/ipc-types'
+import { ExecEventType, type ExecEvent } from '../../shared/ipc-types'
+import { WorkspaceStatus } from '../../shared/types'
 import {
   buildEntryFromWorkspace,
   createWorktreeRegistryApi,
@@ -23,8 +24,8 @@ function createMockExec(homedir = '/home/user'): MockExecApi {
       setTimeout(() => {
         const cb = callbacks.get(execId)
         if (cb) {
-          cb({ type: 'stdout', data: homedir })
-          cb({ type: 'exit', exitCode: 0 })
+          cb({ type: ExecEventType.Stdout, data: homedir })
+          cb({ type: ExecEventType.Exit, exitCode: 0 })
         }
       })
       return Promise.resolve({ success: true, execId })
@@ -37,8 +38,8 @@ function createMockExec(homedir = '/home/user'): MockExecApi {
     _complete: (execId: string, stdout: string, exitCode = 0) => {
       const cb = callbacks.get(execId)
       if (cb) {
-        cb({ type: 'stdout', data: stdout })
-        cb({ type: 'exit', exitCode })
+        cb({ type: ExecEventType.Stdout, data: stdout })
+        cb({ type: ExecEventType.Exit, exitCode })
       }
     },
   }
@@ -192,7 +193,7 @@ describe('worktreeRegistry', () => {
         path: '/wt/x',
         name: 'x',
         parentId: null,
-        status: 'active',
+        status: WorkspaceStatus.Active,
         isGitRepo: true,
         gitBranch: 'feat/x',
         gitRootPath: '/repo',
@@ -219,7 +220,7 @@ describe('worktreeRegistry', () => {
         path: '/wt/y',
         name: 'y',
         parentId: null,
-        status: 'active',
+        status: WorkspaceStatus.Active,
         isGitRepo: true,
         gitBranch: null,
         gitRootPath: null,

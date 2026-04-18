@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import React, { useState, useEffect } from 'react'
 import type { IpcResult, DirectoryContents } from '../types'
 

@@ -20,20 +20,35 @@ import type {
   PortForwardInfo
 } from './types'
 
+export enum PtyEventType {
+  Data = 'data',
+  Exit = 'exit',
+  Resize = 'resize',
+  Error = 'error',
+  End = 'end',
+}
+
 /** Discriminated union for PTY output events (mirrors gRPC PtyOutput) */
 export type PtyEvent =
-  | { type: 'data'; data: Uint8Array }
-  | { type: 'exit'; exitCode: number; signal?: number }
-  | { type: 'resize'; cols: number; rows: number }
-  | { type: 'error'; message: string }
-  | { type: 'end' }
+  | { type: PtyEventType.Data; data: Uint8Array }
+  | { type: PtyEventType.Exit; exitCode: number; signal?: number }
+  | { type: PtyEventType.Resize; cols: number; rows: number }
+  | { type: PtyEventType.Error; message: string }
+  | { type: PtyEventType.End }
+
+export enum ExecEventType {
+  Stdout = 'stdout',
+  Stderr = 'stderr',
+  Exit = 'exit',
+  Error = 'error',
+}
 
 /** Discriminated union for exec output events (mirrors PtyEvent pattern) */
 export type ExecEvent =
-  | { type: 'stdout'; data: string }
-  | { type: 'stderr'; data: string }
-  | { type: 'exit'; exitCode: number }
-  | { type: 'error'; message: string }
+  | { type: ExecEventType.Stdout; data: string }
+  | { type: ExecEventType.Stderr; data: string }
+  | { type: ExecEventType.Exit; exitCode: number }
+  | { type: ExecEventType.Error; message: string }
 
 import type {
   DirectoryContents,

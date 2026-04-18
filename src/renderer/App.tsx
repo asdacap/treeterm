@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import { useState, useCallback } from 'react'
 import TreePane from './components/TreePane'
 import WorkspacePane from './components/WorkspacePane'

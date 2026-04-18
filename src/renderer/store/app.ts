@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import { create } from 'zustand'
 import type { StoreApi } from 'zustand'
 import { createSessionStore, WorkspaceEntryStatus } from './createSessionStore'
@@ -35,7 +36,7 @@ import { createGitHubApi } from '../lib/githubClient'
 import { createRunActionsApi } from '../lib/runActionsClient'
 import { createWorktreeRegistryApi } from '../lib/worktreeRegistry'
 import { createLlmClient } from '../lib/llmClient'
-import { ConnectionStatus } from '../../shared/types'
+import { ConnectionStatus, ConnectionTargetType } from '../../shared/types'
 
 export interface AppDeps {
   platform: Platform
@@ -418,7 +419,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       store = getOrCreateSession(storeKey, get, set, connection)
     }
     if (!useSessionNamesStore.getState().getName(storeKey)) {
-      const label = connection.target.type === 'remote'
+      const label = connection.target.type === ConnectionTargetType.Remote
         ? (connection.target.config.label || `${connection.target.config.user}@${connection.target.config.host}`)
         : storeKey
       useSessionNamesStore.getState().setName(storeKey, label)
@@ -430,7 +431,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length > 0 checked above
       const firstWs = session.workspaces[0]!
       useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: storeKey })
-    } else if (connection.target.type === 'remote') {
+    } else if (connection.target.type === ConnectionTargetType.Remote) {
       const defaultPath = `/home/${connection.target.config.user}`
       console.log(`[renderer:app] No workspaces for session=${session.id}, creating default workspace at ${defaultPath}`)
       const workspaceId = store.getState().addWorkspace(defaultPath)
@@ -441,7 +442,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   startRemoteConnect: (config: SSHConnectionConfig) => {
-    const connection: ConnectionInfo = { id: config.id, target: { type: 'remote', config }, status: ConnectionStatus.Connecting }
+    const connection: ConnectionInfo = { id: config.id, target: { type: ConnectionTargetType.Remote, config }, status: ConnectionStatus.Connecting }
     const remoteSessionId = generateSessionId()
     getOrCreateSession(remoteSessionId, get, set, connection)
     if (!useSessionNamesStore.getState().getName(remoteSessionId)) {

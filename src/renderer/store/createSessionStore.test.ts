@@ -1,8 +1,9 @@
+/* eslint-disable custom/no-string-literal-comparison -- test fixtures use string literals intentionally; domain types are already enum-backed */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createSessionStore, WorkspaceEntryStatus } from './createSessionStore'
 import type { SessionDeps, SessionState } from './createSessionStore'
 import type { LlmApi, Workspace, Application, GitInfo } from '../types'
-import { ConnectionStatus } from '../../shared/types'
+import { ConnectionStatus, ConnectionTargetType, WorkspaceStatus, type ConnectionInfo } from '../../shared/types'
 import type { StoreApi } from 'zustand'
 import { createMockExecApi } from '../../shared/mockApis'
 
@@ -108,7 +109,7 @@ function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     name: 'test',
     path: '/test',
     parentId: null,
-    status: 'active',
+    status: WorkspaceStatus.Active,
     isGitRepo: false,
     gitBranch: null,
     gitRootPath: null,
@@ -147,7 +148,7 @@ describe('createSessionStore', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     deps = makeDeps()
-    const localConn = { id: 'local', target: { type: 'local' as const }, status: ConnectionStatus.Connected as const }
+    const localConn: ConnectionInfo = { id: 'local', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected }
     store = createSessionStore({ sessionId: 'session-1', connection: localConn }, deps)
   })
 
@@ -169,7 +170,7 @@ describe('createSessionStore', () => {
     })
 
     it('preserves connection from config', () => {
-      const conn = { id: 'conn-1', target: { type: 'local' as const }, host: 'example.com', status: ConnectionStatus.Connected as const }
+      const conn: ConnectionInfo = { id: 'conn-1', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected }
       const s = createSessionStore({ sessionId: 's', connection: conn }, deps)
       expect(s.getState().connection).toEqual(conn)
     })

@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import { useState, useEffect, useCallback } from 'react'
 import type { Settings, ReasoningEffort } from '../types'
 import { useSettingsStore, defaultSettings } from '../store/settings'

@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- test fixtures */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createActivityStateDetector } from './activityStateDetector'
 

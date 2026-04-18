@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 /**
  * Keyboard health monitor — detects when Shift/Enter events stop arriving.
  * Toggle via DevTools: window.__enableKeyDiag = true

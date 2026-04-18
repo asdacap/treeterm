@@ -1,8 +1,10 @@
+/* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
 import { Terminal } from '@xterm/xterm'
 import { ActivityState } from '../types'
 import type { LlmApi, Settings, PtyEvent } from '../types'
+import { PtyEventType } from '../../shared/ipc-types'
 import type { Tty } from './createTtyStore'
 
 export interface AnalyzerDeps {
@@ -362,14 +364,14 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
       void deps.openTtyStream(ptyId, (event) => {
         switch (event.type) {
-          case 'data':
+          case PtyEventType.Data:
             terminal?.write(event.data)
             dataVersion++
             break
-          case 'exit':
+          case PtyEventType.Exit:
             store.getState().stop()
             break
-          case 'resize':
+          case PtyEventType.Resize:
             terminal?.resize(event.cols, event.rows)
             break
         }

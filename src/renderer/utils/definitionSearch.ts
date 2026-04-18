@@ -1,4 +1,6 @@
+/* eslint-disable custom/no-string-literal-comparison -- switches on Monaco language IDs which are external string constants */
 import type { ExecApi, ExecEvent } from '../types'
+import { ExecEventType } from '../../shared/ipc-types'
 
 export interface DefinitionLocation {
   filePath: string
@@ -116,12 +118,12 @@ export function searchDefinition(
       }
 
       const unsubscribe = execApi.onEvent(result.execId, (event: ExecEvent) => {
-        if (event.type === 'stdout') {
+        if (event.type === ExecEventType.Stdout) {
           stdout += event.data
-        } else if (event.type === 'exit') {
+        } else if (event.type === ExecEventType.Exit) {
           unsubscribe()
           resolve(parseGrepOutput(stdout))
-        } else if (event.type === 'error') {
+        } else if (event.type === ExecEventType.Error) {
           unsubscribe()
           resolve([])
         }

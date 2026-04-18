@@ -10,6 +10,7 @@ import { createActivityStateDetector } from '../utils/activityStateDetector'
 import type { Tty } from '../store/createTtyStore'
 import { ScrollPosition } from '../types'
 import type { CachedTerminal, TerminalAppRef, PtyEvent, SandboxConfig, TerminalState, WorkspaceStore } from '../types'
+import { PtyEventType } from '../../shared/ipc-types'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
 import '@xterm/xterm/css/xterm.css'
@@ -50,7 +51,7 @@ function handleCachedEvent(cache: CachedTerminal, event: PtyEvent): void {
 
   // Unmounted fallback: keep terminal buffer up to date
   switch (event.type) {
-    case 'data': {
+    case PtyEventType.Data: {
       cache.dataVersion++
       if (cache.stripScrollbackClear) {
         const decoder = new TextDecoder('utf-8', { fatal: false })
@@ -61,14 +62,14 @@ function handleCachedEvent(cache: CachedTerminal, event: PtyEvent): void {
       }
       break
     }
-    case 'resize':
+    case PtyEventType.Resize:
       cache.terminal.resize(event.cols, event.rows)
       break
-    case 'exit':
+    case PtyEventType.Exit:
       cache.onExitUnmounted(event.exitCode)
       break
-    case 'error':
-    case 'end':
+    case PtyEventType.Error:
+    case PtyEventType.End:
       // Store for overlay display on next mount — handled by mountedHandler when re-mounted
       break
   }
@@ -232,6 +233,7 @@ export default function BaseTerminal({
       }
 
       bufferChangeDisposable = terminal.buffer.onBufferChange((buf) => {
+        // eslint-disable-next-line custom/no-string-literal-comparison -- xterm.js buffer type is external
         setIsAlternateScreen(buf.type === 'alternate')
       })
 
@@ -255,7 +257,7 @@ export default function BaseTerminal({
       // Set mounted handler — the background subscription forwards all events here
       cache.mountedHandler = (event: PtyEvent) => {
         switch (event.type) {
-          case 'data': {
+          case PtyEventType.Data: {
             cache.dataVersion++
             setOverlay(null)
 
@@ -278,6 +280,7 @@ export default function BaseTerminal({
               terminal.write(event.data, afterWrite)
             }
 
+            // eslint-disable-next-line custom/no-string-literal-comparison -- xterm.js buffer type is external
             setIsAlternateScreen(terminal.buffer.active.type === 'alternate')
 
             if (detector) {
@@ -291,7 +294,7 @@ export default function BaseTerminal({
             }
             break
           }
-          case 'exit': {
+          case PtyEventType.Exit: {
             console.log(`[${config.logPrefix} ${tabId}] PTY exited with code:`, event.exitCode)
             if (!cancelled) {
               // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist in appStates
@@ -308,7 +311,7 @@ export default function BaseTerminal({
             }
             break
           }
-          case 'resize': {
+          case PtyEventType.Resize: {
             const shouldStayAtBottom = cache.pinnedToBottom || scrollPositionRef.current === ScrollPosition.Bottom
             const buf = terminal.buffer.active
             const scrollRatio = buf.baseY > 0 ? buf.viewportY / buf.baseY : 0
@@ -333,12 +336,12 @@ export default function BaseTerminal({
             }
             break
           }
-          case 'error': {
+          case PtyEventType.Error: {
             console.error(`[${config.logPrefix} ${tabId}] PTY stream error:`, event.message)
             setOverlay({ message: event.message, type: 'error' })
             break
           }
-          case 'end': {
+          case PtyEventType.End: {
             console.log(`[${config.logPrefix} ${tabId}] PTY stream ended`)
             setOverlay((prev) => prev ?? { message: 'Terminal disconnected', type: 'error' })
             break

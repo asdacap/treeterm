@@ -26,7 +26,7 @@ import {
   type FileEntry
 } from '../generated/treeterm'
 import { getDefaultSocketPath } from './socketPath'
-import type { PtyEvent, IpcResult } from '../shared/ipc-types'
+import { PtyEventType, type PtyEvent, type IpcResult } from '../shared/ipc-types'
 import type { FileContents } from '../renderer/types'
 import type {
   SandboxConfig,
@@ -35,6 +35,7 @@ import type {
   Session,
   AppState
 } from '../shared/types'
+import { WorkspaceStatus } from '../shared/types'
 
 // Alias for backward compat
 type CreateSessionConfig = {
@@ -68,11 +69,11 @@ export class PtyStream {
     // Set up event forwarding BEFORE sending start so no events are dropped
     this.stream.on('data', (output: PtyOutput) => {
       if (output.data) {
-        onEvent({ type: 'data', data: output.data.data })
+        onEvent({ type: PtyEventType.Data, data: output.data.data })
       } else if (output.exit) {
-        onEvent({ type: 'exit', exitCode: output.exit.exitCode, signal: output.exit.signal })
+        onEvent({ type: PtyEventType.Exit, exitCode: output.exit.exitCode, signal: output.exit.signal })
       } else if (output.resize) {
-        onEvent({ type: 'resize', cols: output.resize.cols, rows: output.resize.rows })
+        onEvent({ type: PtyEventType.Resize, cols: output.resize.cols, rows: output.resize.rows })
       }
     })
 
@@ -80,13 +81,13 @@ export class PtyStream {
       console.error(`[PtyStream ${this.handle}] stream error for ${sessionId}:`, error)
       this.closed = true
       this.drainPendingWrites(error)
-      onEvent({ type: 'error', message: error.message })
+      onEvent({ type: PtyEventType.Error, message: error.message })
     })
 
     this.stream.on('end', () => {
       this.closed = true
       this.drainPendingWrites(new Error('pty stream ended'))
-      onEvent({ type: 'end' })
+      onEvent({ type: PtyEventType.End })
     })
 
     this.stream.write({ start: { sessionId } })
@@ -665,7 +666,7 @@ export class GrpcDaemonClient {
       path: protoWorkspace.path,
       name: protoWorkspace.name,
       parentId: protoWorkspace.parentId || null,
-      status: protoWorkspace.status as 'active' | 'merged' | 'abandoned',
+      status: protoWorkspace.status as WorkspaceStatus,
       isGitRepo: protoWorkspace.isGitRepo,
       gitBranch: protoWorkspace.gitBranch || null,
       gitRootPath: protoWorkspace.gitRootPath || null,

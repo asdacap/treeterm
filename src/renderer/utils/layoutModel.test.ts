@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- test fixtures */
 import { describe, it, expect } from 'vitest'
 import { createDefaultLayoutModel, tabToFlexNode } from './layoutModel'
 import type { Tab } from '../types'

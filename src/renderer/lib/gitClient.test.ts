@@ -1,7 +1,8 @@
+/* eslint-disable custom/no-string-literal-comparison -- tests verify parsing of git porcelain characters which are external */
 import { describe, it, expect, vi } from 'vitest'
 import { createGitApi, parseStatus } from './gitClient'
 import type { ExecApi, FilesystemApi } from '../types'
-import type { ExecEvent } from '../../shared/ipc-types'
+import { ExecEventType, type ExecEvent } from '../../shared/ipc-types'
 import { FileChangeStatus } from '../../shared/types'
 
 // ---------------------------------------------------------------------------
@@ -31,21 +32,21 @@ function createMockExec(): MockExecApi {
     _complete: (execId: string, stdout: string, exitCode = 0) => {
       const cb = eventCallbacks.get(execId)
       if (cb) {
-        if (stdout) cb({ type: 'stdout', data: stdout })
-        cb({ type: 'exit', exitCode })
+        if (stdout) cb({ type: ExecEventType.Stdout, data: stdout })
+        cb({ type: ExecEventType.Exit, exitCode })
       }
     },
     _completeWithStderr: (execId: string, stderr: string, exitCode = 1) => {
       const cb = eventCallbacks.get(execId)
       if (cb) {
-        if (stderr) cb({ type: 'stderr', data: stderr })
-        cb({ type: 'exit', exitCode })
+        if (stderr) cb({ type: ExecEventType.Stderr, data: stderr })
+        cb({ type: ExecEventType.Exit, exitCode })
       }
     },
     _error: (execId: string, message: string) => {
       const cb = eventCallbacks.get(execId)
       if (cb) {
-        cb({ type: 'error', message })
+        cb({ type: ExecEventType.Error, message })
       }
     },
   }

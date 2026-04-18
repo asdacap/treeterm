@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Loader2, RefreshCw, Square, X } from 'lucide-react'
 import type { ExecApi } from '../types'
-import type { ExecEvent } from '../../shared/ipc-types'
+import { ExecEventType, type ExecEvent } from '../../shared/ipc-types'
 
 // --- Types ---
 
@@ -154,6 +154,7 @@ export function parseMetrics(stdout: string): SystemMetrics {
   let section: 'none' | 'disk' | 'proc' = 'none'
 
   for (const line of lines) {
+    /* eslint-disable custom/no-string-literal-comparison -- sentinel tokens from shell script + local state literals */
     if (line === 'DISK_START') { section = 'disk'; continue }
     if (line === 'DISK_END') { section = 'none'; continue }
     if (line === 'PROC_START') { section = 'proc'; continue }
@@ -172,6 +173,7 @@ export function parseMetrics(stdout: string): SystemMetrics {
     if (eqIdx > 0) {
       kv.set(line.substring(0, eqIdx), line.substring(eqIdx + 1))
     }
+    /* eslint-enable custom/no-string-literal-comparison */
   }
 
   // CPU
@@ -520,13 +522,13 @@ export default function SystemMonitor({ connectionId, exec }: SystemMonitorProps
         currentUnsub = exec.onEvent(result.execId, (event: ExecEvent) => {
           if (cancelled) return
           switch (event.type) {
-            case 'stdout':
+            case ExecEventType.Stdout:
               stdout += event.data
               break
-            case 'stderr':
+            case ExecEventType.Stderr:
               // Ignore stderr — commands may emit warnings
               break
-            case 'exit':
+            case ExecEventType.Exit:
               currentExecId = null
               currentUnsub = null
               if (event.exitCode === 0) {
@@ -542,7 +544,7 @@ export default function SystemMonitor({ connectionId, exec }: SystemMonitorProps
                 setState({ status: MonitorStatus.Error, error: `Command exited with code ${String(event.exitCode)}` })
               }
               break
-            case 'error':
+            case ExecEventType.Error:
               currentExecId = null
               currentUnsub = null
               setState({ status: MonitorStatus.Error, error: event.message })

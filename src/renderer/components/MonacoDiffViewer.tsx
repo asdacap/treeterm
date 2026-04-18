@@ -1,3 +1,4 @@
+/* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import { DiffEditor, DiffOnMount } from '@monaco-editor/react'
 import React, { useRef, useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'

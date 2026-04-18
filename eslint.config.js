@@ -2,6 +2,7 @@ import tseslint from 'typescript-eslint'
 import reactPlugin from 'eslint-plugin-react'
 import reactHooks from 'eslint-plugin-react-hooks'
 import noStringLiteralUnion from './eslint-rules/no-string-literal-union.js'
+import noStringLiteralComparison from './eslint-rules/no-string-literal-comparison.js'
 
 export default tseslint.config(
   {
@@ -19,11 +20,12 @@ export default tseslint.config(
       }
     },
     plugins: {
-      custom: { rules: { 'no-string-literal-union': noStringLiteralUnion } }
+      custom: { rules: { 'no-string-literal-union': noStringLiteralUnion, 'no-string-literal-comparison': noStringLiteralComparison } }
     },
     rules: {
       '@typescript-eslint/no-explicit-any': 'error',
       'custom/no-string-literal-union': 'error',
+      'custom/no-string-literal-comparison': 'error',
       'no-restricted-syntax': ['error', {
         selector: "TSTypeReference[typeName.name='Pick']",
         message: 'Pick<T, K> is banned. Pass the full type instead of narrowing with Pick.'

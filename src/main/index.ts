@@ -7,8 +7,9 @@ import { getDefaultSocketPath } from './socketPath'
 import { IpcServer } from './ipc/ipc-server'
 import { ConnectionManager } from './connectionManager'
 import type { ExecInput, ExecOutput } from '../generated/treeterm'
-import { ConnectionStatus } from '../shared/types'
+import { ConnectionStatus, ConnectionTargetType } from '../shared/types'
 import type { SSHConnectionConfig, PortForwardConfig } from '../shared/types'
+import { PtyEventType, ExecEventType } from '../shared/ipc-types'
 
 // Parse initial workspace and SSH target from command line
 let initialWorkspacePath: string | null = null
@@ -58,6 +59,7 @@ function getClientForConnection(connId: string): GrpcDaemonClient {
 const server = new IpcServer()
 
 function createLoadingWindow(): BrowserWindow {
+  // eslint-disable-next-line custom/no-string-literal-comparison -- Node env var, external
   const isTest = process.env.NODE_ENV === 'test'
 
   loadingWindow = new BrowserWindow({
@@ -119,6 +121,7 @@ function createWindow(): BrowserWindow {
   // Forward all keyboard events including Caps Lock to renderer
   window.webContents.on('before-input-event', (_event, input) => {
     // Forward Caps Lock events to renderer via IPC
+    // eslint-disable-next-line custom/no-string-literal-comparison -- Electron keyboard event codes are strings
     if (input.code === 'CapsLock' || input.key === 'CapsLock') {
       server.capsLockEventTo(window, {
         type: input.type, // 'keyDown' or 'keyUp'
@@ -140,6 +143,7 @@ function createWindow(): BrowserWindow {
   window.webContents.on('will-navigate', (event, url) => {
     const parsedUrl = new URL(url)
     if (
+      // eslint-disable-next-line custom/no-string-literal-comparison -- URL protocol is a fixed external constant
       parsedUrl.protocol === 'file:' ||
       (process.env.ELECTRON_RENDERER_URL && url.startsWith(process.env.ELECTRON_RENDERER_URL))
     ) {
@@ -150,6 +154,7 @@ function createWindow(): BrowserWindow {
   })
 
   window.webContents.setWindowOpenHandler(({ url }) => {
+    // eslint-disable-next-line custom/no-string-literal-comparison -- URL scheme is external
     if (url && url !== 'about:blank') {
       void shell.openExternal(url)
     }
@@ -263,7 +268,7 @@ server.onPtyCreate(async (event, connectionId, handle, cwd, sandbox, startupComm
       if (!event.sender.isDestroyed()) {
         event.sender.send('pty:event', handle, evt)
       }
-      if (evt.type === 'end' || evt.type === 'error') ptyStreams.delete(handle)
+      if (evt.type === PtyEventType.End || evt.type === PtyEventType.Error) ptyStreams.delete(handle)
     })
     ptyStreams.set(handle, ptyStream)
 
@@ -287,7 +292,7 @@ server.onPtyAttach(async (event, connectionId, handle, sessionId) => {
       if (!event.sender.isDestroyed()) {
         event.sender.send('pty:event', handle, evt)
       }
-      if (evt.type === 'end' || evt.type === 'error') ptyStreams.delete(handle)
+      if (evt.type === PtyEventType.End || evt.type === PtyEventType.Error) ptyStreams.delete(handle)
     })
     ptyStreams.set(handle, ptyStream)
 
@@ -504,17 +509,17 @@ server.onExecStart((connectionId, cwd, command, args) => {
 
     stream.on('data', (output: ExecOutput) => {
       if (output.stdout) {
-        server.execEvent(execId, { type: 'stdout', data: output.stdout.data.toString('utf-8') })
+        server.execEvent(execId, { type: ExecEventType.Stdout, data: output.stdout.data.toString('utf-8') })
       } else if (output.stderr) {
-        server.execEvent(execId, { type: 'stderr', data: output.stderr.data.toString('utf-8') })
+        server.execEvent(execId, { type: ExecEventType.Stderr, data: output.stderr.data.toString('utf-8') })
       } else if (output.result) {
-        server.execEvent(execId, { type: 'exit', exitCode: output.result.exitCode })
+        server.execEvent(execId, { type: ExecEventType.Exit, exitCode: output.result.exitCode })
         execStreams.delete(execId)
       }
     })
 
     stream.on('error', (error) => {
-      server.execEvent(execId, { type: 'error', message: error.message })
+      server.execEvent(execId, { type: ExecEventType.Error, message: error.message })
       execStreams.delete(execId)
     })
 
@@ -538,9 +543,11 @@ server.onExecKill((execId) => {
 
 // Sandbox IPC Handlers
 server.onSandboxIsAvailable(() => {
+  // eslint-disable-next-line custom/no-string-literal-comparison -- Node platform is external
   if (process.platform === 'darwin') {
     return true // macOS always has sandbox-exec
   }
+  // eslint-disable-next-line custom/no-string-literal-comparison -- Node platform is external
   if (process.platform === 'linux') {
     try {
       execSync('which bwrap', { stdio: 'ignore' })
@@ -923,6 +930,7 @@ void app.whenReady().then(async () => {
   console.log('[main] daemon mode enabled')
 
   // Show loading screen while connecting to daemon (skip in test mode)
+  // eslint-disable-next-line custom/no-string-literal-comparison -- Node env var, external
   if (process.env.NODE_ENV !== 'test') {
     createLoadingWindow()
   }
@@ -1040,7 +1048,7 @@ async function quitAndKillDaemon(): Promise<void> {
     try {
       console.log('[main] shutting down daemon before quit')
       // Use any connected local client to send shutdown, or create a temporary one
-      const localConns = connectionManager.listConnections().filter(c => c.target.type === 'local' && c.status === ConnectionStatus.Connected)
+      const localConns = connectionManager.listConnections().filter(c => c.target.type === ConnectionTargetType.Local && c.status === ConnectionStatus.Connected)
       if (localConns.length > 0) {
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length > 0 checked above
         await connectionManager.getClient(localConns[0]!.id).shutdownDaemon()
