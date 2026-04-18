@@ -3151,6 +3151,120 @@ body,
   color: var(--text-secondary);
 }
 
+.base-branch-selector {
+  position: relative;
+  display: inline-block;
+}
+
+.review-branch-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: monospace;
+  font-size: inherit;
+}
+
+.review-branch-selector:hover:not(:disabled) {
+  background: rgba(0, 120, 212, 0.25);
+}
+
+.review-branch-selector.overridden {
+  border-color: var(--accent);
+  font-style: italic;
+}
+
+.review-branch-selector.empty {
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+  font-style: italic;
+}
+
+.base-branch-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+  min-width: 240px;
+  max-width: 360px;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+}
+
+.base-branch-dropdown-search {
+  padding: 6px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.base-branch-dropdown-search input {
+  width: 100%;
+  padding: 4px 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.base-branch-dropdown-list {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.base-branch-dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-family: monospace;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.base-branch-dropdown-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.base-branch-dropdown-item.selected {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.base-branch-dropdown-item.reset {
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.base-branch-dropdown-loading,
+.base-branch-dropdown-empty,
+.base-branch-dropdown-error {
+  padding: 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.base-branch-dropdown-error {
+  color: #f14c4c;
+}
+
 .review-header-actions {
   display: flex;
   align-items: center;

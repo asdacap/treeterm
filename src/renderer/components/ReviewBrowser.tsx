@@ -5,7 +5,7 @@ import { WorkerPoolContextProvider } from '@pierre/diffs/react'
 import { useStore } from 'zustand'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
 import { getTabs } from '../types'
-import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, GitLogCommit, WorkspaceStore, ReviewState, ViewedFileStats } from '../types'
+import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, GitLogCommit, WorkspaceStore, WorkspaceGitApi, ReviewState, ViewedFileStats } from '../types'
 import { FileChangeStatus } from '../types'
 import { useGitApi } from '../hooks/useWorkspaceApis'
 import { CommittedDiffFileTree, UncommittedDiffFileTree, sortFilesAsTree } from './DiffFileTree'
@@ -58,6 +58,15 @@ export default function ReviewBrowser({
   // For top-level worktrees, we only show uncommitted changes (no parent to compare against)
   const hasParent = !!parentWorkspaceId
 
+  // Effective base branch for *review display* only (diff, commits list, file contents).
+  // Merge and conflict-check paths still use parentWorkspace.gitBranch directly.
+  // Normalize null → undefined so the selector prop types stay clean.
+  const defaultBaseBranch = parentWorkspace?.gitBranch ?? undefined
+  const effectiveBaseBranch = reviewState?.baseBranchOverride ?? defaultBaseBranch
+  const hasBaseBranch = !!effectiveBaseBranch
+  const isBaseOverridden = !!reviewState?.baseBranchOverride
+    && reviewState.baseBranchOverride !== defaultBaseBranch
+
   // Diff state
   const [diff, setDiff] = useState<DiffResult | null>(null)
   const [loading, setLoading] = useState(true)
@@ -79,9 +88,9 @@ export default function ReviewBrowser({
   const [uncommitted, setUncommitted] = useState<UncommittedChanges | null>(null)
   const [viewMode, setViewMode] = useState(() => {
     const saved = reviewState?.viewMode as ViewMode | undefined
-    // Top-level workspace has no committed-vs-parent diff, so fall back to Uncommitted
-    if (!hasParent && saved === ViewMode.Committed) return ViewMode.Uncommitted
-    return saved ?? (hasParent ? ViewMode.Committed : ViewMode.Uncommitted)
+    // No base branch resolved → can't show committed-vs-base diff, fall back to Uncommitted
+    if (!hasBaseBranch && saved === ViewMode.Committed) return ViewMode.Uncommitted
+    return saved ?? (hasBaseBranch ? ViewMode.Committed : ViewMode.Uncommitted)
   })
 
   // Staging state
@@ -143,13 +152,14 @@ export default function ReviewBrowser({
       await Promise.all([
         h.loadUncommittedChanges(),
         h.loadReviews(),
-        ...(hasParent ? [h.loadDiff(), h.checkConflicts()] : []),
+        ...(hasBaseBranch ? [h.loadDiff()] : []),
+        ...(hasParent ? [h.checkConflicts()] : []),
       ])
       void refreshDiffStatus()
     } finally {
       setRefreshing(false)
     }
-  }, [hasParent, refreshDiffStatus])
+  }, [hasBaseBranch, hasParent, refreshDiffStatus])
 
   // Auto-refresh when tab becomes visible (e.g., switching back from terminal)
   const wasVisibleRef = useRef<boolean | null>(null)
@@ -196,26 +206,41 @@ export default function ReviewBrowser({
   // Use stable primitives instead of object references to avoid re-running
   // on every workspace store update (tab switches, scroll persistence, etc.)
   const currentGitBranch = wsData.gitBranch
-  const parentGitBranch = parentWorkspace?.gitBranch
+
+  // Track current viewMode via ref so the branch-change effect can reload commits
+  // when the user is on the Commits tab, without adding viewMode to deps (which
+  // would re-trigger full reloads on every tab click).
+  const viewModeRef = useRef(viewMode)
+  viewModeRef.current = viewMode
 
   useEffect(() => {
     const h = helpersRef.current
     void h.loadUncommittedChanges()
     void h.loadReviews()
 
-    if (parentWorkspaceId) {
+    if (effectiveBaseBranch) {
       void h.loadDiff()
-      void h.checkConflicts()
     } else {
+      setDiff(null)
       setLoading(false)
     }
+    if (parentWorkspaceId) {
+      void h.checkConflicts()
+    }
 
-    // If commits tab was persisted, load commits on mount
-    if (initialViewMode === ViewMode.Commits) {
+    // Commits list is specific to the base branch — reset so we don't show stale rows
+    setCommits([])
+    setCommitsHasMore(false)
+    setSelectedCommit(null)
+    setCommitDiffFiles([])
+
+    // Reload commits if on the Commits tab (either persisted at mount, or
+    // currently visible when the base branch changes).
+    if (initialViewMode === ViewMode.Commits || viewModeRef.current === ViewMode.Commits) {
       void h.loadCommits()
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- initialViewMode is intentionally excluded: it captures the mount-time value and should not re-trigger the effect
-  }, [workspaceId, parentWorkspaceId, currentGitBranch, parentGitBranch])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- initialViewMode and viewModeRef are intentionally excluded: initialViewMode is mount-only; viewModeRef reads latest without re-triggering
+  }, [workspaceId, parentWorkspaceId, currentGitBranch, effectiveBaseBranch])
 
   const loadReviews = async () => {
     try {
@@ -257,14 +282,14 @@ export default function ReviewBrowser({
   }
 
   const loadDiff = async () => {
-    if (!wsData.gitBranch || !parentWorkspace?.gitBranch) return
+    if (!wsData.gitBranch || !effectiveBaseBranch) return
 
     if (!diff) {
       setLoading(true)
     }
     setError(null)
     try {
-      const result = await git.getDiff(parentWorkspace.gitBranch)
+      const result = await git.getDiff(effectiveBaseBranch)
       if (result.success) {
         setDiff(result.diff)
         reconcileViewedFiles(result.diff.files)
@@ -294,7 +319,7 @@ export default function ReviewBrowser({
     setCommitsLoading(true)
     setCommitsError(null)
     try {
-      const parentBranch = parentWorkspace?.gitBranch || null
+      const parentBranch = effectiveBaseBranch ?? null
       const result = await git.getLog(parentBranch, skip, 50)
       if (result.success) {
         setCommits(prev => skip === 0 ? result.result.commits : [...prev, ...result.result.commits])
@@ -346,11 +371,11 @@ export default function ReviewBrowser({
 
   // Load file contents callbacks for StackedDiffList
   const loadCommittedFileContents = useCallback(async (filePath: string): Promise<FileDiffContents> => {
-    if (!parentWorkspace?.gitBranch) throw new Error('No parent branch')
-    const result = await git.getFileContentsForDiff(parentWorkspace.gitBranch, filePath)
+    if (!effectiveBaseBranch) throw new Error('No base branch')
+    const result = await git.getFileContentsForDiff(effectiveBaseBranch, filePath)
     if (result.success) return result.contents
     throw new Error(result.error || 'Failed to load file diff')
-  }, [git, parentWorkspace?.gitBranch])
+  }, [git, effectiveBaseBranch])
 
   const loadUncommittedFileContents = useCallback(async (filePath: string): Promise<FileDiffContents> => {
     const file = uncommitted?.files.find(f => f.path === filePath)
@@ -690,12 +715,19 @@ export default function ReviewBrowser({
           <span className="review-workspace-name">{wsData.name}</span>
           <span className="review-branch-info">
             <span className="review-branch">{wsData.gitBranch}</span>
-            {parentWorkspace && (
-              <>
-                <span className="review-arrow">→</span>
-                <span className="review-branch">{parentWorkspace.gitBranch}</span>
-              </>
-            )}
+            <span className="review-arrow">→</span>
+            <BaseBranchSelector
+              git={git}
+              currentBase={effectiveBaseBranch}
+              defaultBase={defaultBaseBranch}
+              isOverridden={isBaseOverridden}
+              onChange={(newBase) => {
+                // Persist as undefined when the selection matches the default,
+                // so the override cleanly resets to "follow parent".
+                const override = newBase === defaultBaseBranch ? undefined : newBase
+                persistViewState({ baseBranchOverride: override })
+              }}
+            />
           </span>
         </div>
         <div className="review-header-actions">
@@ -864,7 +896,7 @@ export default function ReviewBrowser({
       )}
 
       <div className="diff-tabs">
-        {hasParent && (
+        {hasBaseBranch && (
           <button
             className={`diff-tab ${viewMode === ViewMode.Committed ? 'active' : ''}`}
             onClick={() => { setViewMode(ViewMode.Committed); persistViewState({ viewMode: ViewMode.Committed }) }}
@@ -1263,4 +1295,128 @@ function ClickOutsideDiv({ className, onClickOutside, children }: {
   }, [onClickOutside])
 
   return <div className={className} ref={ref}>{children}</div>
+}
+
+/** Lets the user pick a base branch to diff the current worktree against for review purposes.
+ *  When `currentBase` differs from `defaultBase`, `isOverridden` is true and a "Reset to default"
+ *  entry appears. Calling `onChange(defaultBase)` is equivalent to clearing the override.
+ *  Passing `onChange(undefined)` is reserved for the reset action. */
+export function BaseBranchSelector({
+  git,
+  currentBase,
+  defaultBase,
+  isOverridden,
+  onChange,
+}: {
+  git: WorkspaceGitApi
+  currentBase: string | undefined
+  defaultBase: string | undefined
+  isOverridden: boolean
+  onChange: (newBase: string | undefined) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [branches, setBranches] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+
+  const loadBranches = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const [local, remote] = await Promise.all([
+        git.listLocalBranches(),
+        git.listRemoteBranches(),
+      ])
+      const seen = new Set<string>()
+      const merged: string[] = []
+      for (const name of [...local, ...remote]) {
+        if (!seen.has(name)) {
+          seen.add(name)
+          merged.push(name)
+        }
+      }
+      setBranches(merged)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+    setLoading(false)
+  }
+
+  const handleToggle = () => {
+    if (open) {
+      setOpen(false)
+      return
+    }
+    setOpen(true)
+    if (branches.length === 0 && !loading) {
+      void loadBranches()
+    }
+  }
+
+  const filtered = search.trim()
+    ? branches.filter(b => b.toLowerCase().includes(search.toLowerCase()))
+    : branches
+
+  const buttonLabel = currentBase ?? 'Pick base branch'
+  const titleText = isOverridden && defaultBase
+    ? `Base branch override (default: ${defaultBase}). Click to change.`
+    : 'Change base branch for review'
+
+  return (
+    <div className="base-branch-selector">
+      <button
+        className={`review-branch review-branch-selector ${isOverridden ? 'overridden' : ''} ${!currentBase ? 'empty' : ''}`}
+        onClick={handleToggle}
+        title={titleText}
+      >
+        <span className="review-branch-selector-label">{buttonLabel}</span>
+        <ChevronDown size={12} />
+      </button>
+      {open && (
+        <ClickOutsideDiv className="base-branch-dropdown" onClickOutside={() => { setOpen(false) }}>
+          <div className="base-branch-dropdown-search">
+            <input
+              type="text"
+              placeholder="Filter branches..."
+              value={search}
+              onChange={(e) => { setSearch(e.target.value) }}
+              autoFocus
+            />
+          </div>
+          {loading ? (
+            <div className="base-branch-dropdown-loading">Loading branches...</div>
+          ) : error ? (
+            <div className="base-branch-dropdown-error">{error}</div>
+          ) : (
+            <div className="base-branch-dropdown-list">
+              {isOverridden && defaultBase && (
+                <button
+                  className="base-branch-dropdown-item reset"
+                  onClick={() => { onChange(undefined); setOpen(false); setSearch('') }}
+                >
+                  Reset to default ({defaultBase})
+                </button>
+              )}
+              {filtered.length === 0 ? (
+                <div className="base-branch-dropdown-empty">
+                  {search.trim() ? 'No branches match' : 'No branches found'}
+                </div>
+              ) : (
+                filtered.map(branch => (
+                  <button
+                    key={branch}
+                    className={`base-branch-dropdown-item ${branch === currentBase ? 'selected' : ''}`}
+                    onClick={() => { onChange(branch); setOpen(false); setSearch('') }}
+                  >
+                    {branch}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </ClickOutsideDiv>
+      )}
+    </div>
+  )
 }

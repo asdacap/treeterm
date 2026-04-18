@@ -143,6 +143,9 @@ export interface ReviewState {
   // parentWorkspaceId identifies the target branch for merging.
   // If undefined/null, this is a top-level worktree - review shows only uncommitted changes
   parentWorkspaceId?: string
+  // Overrides the branch used as the base for review display (diff, commits, file contents).
+  // Merge and conflict-check still target parentWorkspace.gitBranch — the override is display-only.
+  baseBranchOverride?: string
   viewMode: 'committed' | 'uncommitted' | 'commits'
   selectedFilePath?: string
   scrollTop?: number
