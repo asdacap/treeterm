@@ -77,7 +77,12 @@ export default function ReviewBrowser({
 
   // Uncommitted changes state
   const [uncommitted, setUncommitted] = useState<UncommittedChanges | null>(null)
-  const [viewMode, setViewMode] = useState((reviewState?.viewMode as ViewMode | undefined) ?? (hasParent ? ViewMode.Committed : ViewMode.Uncommitted))
+  const [viewMode, setViewMode] = useState(() => {
+    const saved = reviewState?.viewMode as ViewMode | undefined
+    // Top-level workspace has no committed-vs-parent diff, so fall back to Uncommitted
+    if (!hasParent && saved === ViewMode.Committed) return ViewMode.Uncommitted
+    return saved ?? (hasParent ? ViewMode.Committed : ViewMode.Uncommitted)
+  })
 
   // Staging state
   const [stagingInProgress, setStagingInProgress] = useState(false)
@@ -920,13 +925,10 @@ export default function ReviewBrowser({
                       </div>
                     ))}
                     {commitsHasMore && (
-                      <button
-                        className="commits-load-more"
-                        onClick={() => { void loadCommits(commits.length); }}
-                        disabled={commitsLoading}
-                      >
-                        {commitsLoading ? 'Loading...' : 'Load more'}
-                      </button>
+                      <CommitsLoadMoreSentinel
+                        loading={commitsLoading}
+                        onLoadMore={() => { void loadCommits(commits.length); }}
+                      />
                     )}
                   </div>
                 )}
@@ -1206,6 +1208,38 @@ export default function ReviewBrowser({
         </>
       )}
 
+    </div>
+  )
+}
+
+/** Sentinel that calls onLoadMore when scrolled into view. Used for infinite-scroll commit list.
+ *  Re-observes on each load cycle so it keeps firing while the sentinel stays in viewport
+ *  (e.g. when the list is shorter than the scroll container). */
+export function CommitsLoadMoreSentinel({ loading, onLoadMore }: {
+  loading: boolean
+  onLoadMore: () => void
+}) {
+  const ref = React.useRef<HTMLDivElement>(null)
+
+  React.useEffect(() => {
+    const el = ref.current
+    if (!el || loading) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0]
+        if (entry && entry.isIntersecting) {
+          onLoadMore()
+        }
+      },
+      { rootMargin: '200px' }
+    )
+    observer.observe(el)
+    return () => { observer.disconnect() }
+  }, [loading, onLoadMore])
+
+  return (
+    <div className="commits-load-more-sentinel" ref={ref}>
+      {loading ? 'Loading more commits...' : ''}
     </div>
   )
 }

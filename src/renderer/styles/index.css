@@ -2266,23 +2266,12 @@ body,
   font-size: 11px;
 }
 
-.commits-load-more {
+.commits-load-more-sentinel {
   padding: 6px 12px;
-  background: transparent;
-  border: none;
-  color: var(--accent);
-  cursor: pointer;
+  color: var(--text-secondary);
   font-size: 12px;
   text-align: center;
-}
-
-.commits-load-more:hover {
-  background: var(--bg-hover);
-}
-
-.commits-load-more:disabled {
-  color: var(--text-secondary);
-  cursor: default;
+  min-height: 12px;
 }
 
 /* Commit Section */

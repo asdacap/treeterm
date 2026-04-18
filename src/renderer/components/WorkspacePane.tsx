@@ -181,11 +181,12 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
     return result
   }
 
-  // Review handler
+  // Review handler — works for both top-level (parentId=null) and child workspaces.
+  // For top-level, parentWorkspaceId is undefined and the review shows only uncommitted changes + commits.
   const handleOpenReview = () => {
-    if (!activeHandle || !activeWorkspace?.parentId) return
+    if (!activeHandle || !activeWorkspace) return
     activeHandle.getState().openOrFocusTab<ReviewState>('review', {
-      parentWorkspaceId: activeWorkspace.parentId
+      parentWorkspaceId: activeWorkspace.parentId ?? undefined
     })
   }
 
@@ -378,6 +379,15 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                       workspace={activeHandle}
                       onOpenReview={handleOpenReview}
                     />
+                  )}
+                  {!activeWorkspace.parentId && activeWorkspace.isGitRepo && (
+                    <button
+                      className="workspace-action-btn workspace-action-btn-review"
+                      onClick={handleOpenReview}
+                      title="Review changes and commit history"
+                    >
+                      Review
+                    </button>
                   )}
                   {!activeWorkspace.parentId && (
                     <button
