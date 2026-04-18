@@ -4,7 +4,7 @@ import {
   createTerminalVariant,
 } from './renderer'
 import type { Tab, Workspace, TerminalInstance } from '../../renderer/types'
-import { createMockGitApi, createMockFilesystemApi, createMockRunActionsApi, createMockExecApi } from '../../shared/mockApis'
+import { createMockGitApi, createMockFilesystemApi, createMockRunActionsApi, createMockExecApi, createMockWorktreeRegistryApi } from '../../shared/mockApis'
 import { createStore } from 'zustand/vanilla'
 import type { WorkspaceStoreState } from '../../renderer/store/createWorkspaceStore'
 import type { GitControllerState } from '../../renderer/store/createGitControllerStore'
@@ -65,6 +65,8 @@ const mockWorkspaceStoreStateData = {
   filesystemApi: createMockFilesystemApi(),
   runActionsApi: createMockRunActionsApi(),
   execApi: createMockExecApi(),
+  worktreeRegistryApi: createMockWorktreeRegistryApi(),
+  saveRegistryEntry: vi.fn(),
   initTab: vi.fn(),
   getTabRef: vi.fn().mockReturnValue(null),
   disposeTabResources: vi.fn(),

@@ -93,6 +93,11 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
     github: {
       getPrInfo: vi.fn().mockResolvedValue({ noPr: true, createUrl: 'https://github.com/test/repo/compare/main...feat?expand=1' }),
     },
+    worktreeRegistry: {
+      list: vi.fn().mockResolvedValue([]),
+      upsert: vi.fn().mockResolvedValue(undefined),
+      remove: vi.fn().mockResolvedValue(undefined),
+    },
     ...overrides,
   }
 }

@@ -1,5 +1,6 @@
 import { vi } from 'vitest'
 import type { WorkspaceGitApi, WorkspaceFilesystemApi, ExecApi, RunActionsApi } from '../renderer/types'
+import type { WorktreeRegistryApi } from '../renderer/lib/worktreeRegistry'
 
 export function createMockGitApi(): WorkspaceGitApi {
   return {
@@ -29,4 +30,12 @@ export function createMockExecApi(): ExecApi {
 
 export function createMockRunActionsApi(): RunActionsApi {
   return { detect: vi.fn(), run: vi.fn() }
+}
+
+export function createMockWorktreeRegistryApi(): WorktreeRegistryApi {
+  return {
+    list: vi.fn<WorktreeRegistryApi['list']>().mockResolvedValue([]),
+    upsert: vi.fn<WorktreeRegistryApi['upsert']>().mockResolvedValue(undefined),
+    remove: vi.fn<WorktreeRegistryApi['remove']>().mockResolvedValue(undefined),
+  }
 }

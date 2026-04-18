@@ -2,12 +2,13 @@ import { useState, useEffect } from 'react'
 import { useStore } from 'zustand'
 import type { WorktreeInfo, BranchInfo, WorktreeSettings, WorkspaceStore } from '../types'
 import { useAppStore } from '../store/app'
-import { useGitApi } from '../hooks/useWorkspaceApis'
+import { useGitApi, useWorktreeRegistryApi } from '../hooks/useWorkspaceApis'
+import type { WorktreeRegistryApi, WorktreeRegistryEntry } from '../lib/worktreeRegistry'
 
 interface CreateChildDialogProps {
   parentWorkspace: WorkspaceStore
   onCreate: (name: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
-  onAdopt: (worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
+  onAdopt: (worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string, displayName?: string) => Promise<{ success: boolean; error?: string }>
   onCreateFromBranch: (branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
   onCreateFromRemote: (remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
   onCancel: () => void
@@ -18,6 +19,7 @@ interface CreateChildDialogProps {
 export enum TabMode {
   Create = 'create',
   Existing = 'existing',
+  Recent = 'recent',
   Branch = 'branch',
   Remote = 'remote',
 }
@@ -34,6 +36,7 @@ export default function CreateChildDialog({
 }: CreateChildDialogProps) {
   const parentWsData = useStore(parentWorkspace, s => s.workspace)
   const git = useGitApi(parentWorkspace)
+  const worktreeRegistry = useWorktreeRegistryApi(parentWorkspace)
   const [mode, setMode] = useState(initialMode ?? TabMode.Create)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -50,6 +53,9 @@ export default function CreateChildDialog({
 
   // For remote tab
   const [selectedRemoteBranch, setSelectedRemoteBranch] = useState<BranchInfo | null>(null)
+
+  // For recent tab
+  const [selectedRecent, setSelectedRecent] = useState<{ worktree: WorktreeInfo; entry: WorktreeRegistryEntry } | null>(null)
 
   // Settings section state
   const [settingsExpanded, setSettingsExpanded] = useState(false)
@@ -116,12 +122,15 @@ export default function CreateChildDialog({
     console.log('[CreateChildDialog] Adopting existing worktree:', selectedWorktree.path)
     const settings = buildSettings()
     const desc = description.trim() || undefined
+    const trimmedName = name.trim()
+    const displayName = trimmedName && trimmedName !== selectedWorktree.branch ? trimmedName : undefined
     const result = await onAdopt(
       selectedWorktree.path,
       selectedWorktree.branch,
       selectedWorktree.branch,
       settings,
-      desc
+      desc,
+      displayName
     )
     if (!result.success) {
       console.error('[CreateChildDialog] Failed to adopt worktree:', result.error)
@@ -130,6 +139,36 @@ export default function CreateChildDialog({
       setProcessingMessage('')
     } else {
       console.log('[CreateChildDialog] Successfully adopted worktree')
+    }
+  }
+
+  const handleRecentSubmit = async () => {
+    if (!selectedRecent) {
+      setError('Please select a recent workspace')
+      return
+    }
+
+    setIsProcessing(true)
+    setProcessingMessage('Opening recent workspace...')
+    setError(null)
+
+    const settings = buildSettings()
+    const desc = description.trim() || undefined
+    const trimmedName = name.trim()
+    const displayName = trimmedName && trimmedName !== selectedRecent.worktree.branch ? trimmedName : undefined
+    const result = await onAdopt(
+      selectedRecent.worktree.path,
+      selectedRecent.worktree.branch,
+      selectedRecent.worktree.branch,
+      settings,
+      desc,
+      displayName
+    )
+    if (!result.success) {
+      console.error('[CreateChildDialog] Failed to adopt recent workspace:', result.error)
+      setError(result.error || 'Failed to open recent workspace')
+      setIsProcessing(false)
+      setProcessingMessage('')
     }
   }
 
@@ -175,6 +214,8 @@ export default function CreateChildDialog({
         handleCreateSubmit()
       } else if (mode === TabMode.Existing && selectedWorktree) {
         void handleAdoptSubmit()
+      } else if (mode === TabMode.Recent && selectedRecent) {
+        void handleRecentSubmit()
       } else if (mode === TabMode.Branch && selectedBranch) {
         handleBranchSubmit()
       } else if (mode === TabMode.Remote && selectedRemoteBranch) {
@@ -209,6 +250,12 @@ export default function CreateChildDialog({
             onClick={() => { setMode(TabMode.Existing); setError(null) }}
           >
             Open Existing
+          </button>
+          <button
+            className={`create-child-tab ${mode === TabMode.Recent ? 'active' : ''}`}
+            onClick={() => { setMode(TabMode.Recent); setError(null); setSelectedRecent(null) }}
+          >
+            Recent Workspace
           </button>
           <button
             className={`create-child-tab ${mode === TabMode.Branch ? 'active' : ''}`}
@@ -251,13 +298,62 @@ export default function CreateChildDialog({
             </>
           ) : mode === TabMode.Existing ? (
             /* Open Existing Tab */
-            <ExistingWorktreesLoader
-              key={parentWsData.gitRootPath}
-              git={git}
-              openWorktreePaths={openWorktreePaths}
-              selectedWorktree={selectedWorktree}
-              onSelect={setSelectedWorktree}
-            />
+            <>
+              <div className="create-child-dialog-field">
+                <label htmlFor="workspace-name-existing">Name (optional)</label>
+                <input
+                  id="workspace-name-existing"
+                  type="text"
+                  value={name}
+                  onChange={(e) => { setName(e.target.value); }}
+                  placeholder="Leave empty to use branch name..."
+                  disabled={isProcessing}
+                />
+              </div>
+              <ExistingWorktreesLoader
+                key={parentWsData.gitRootPath}
+                git={git}
+                worktreeRegistry={worktreeRegistry}
+                openWorktreePaths={openWorktreePaths}
+                selectedWorktree={selectedWorktree}
+                onSelect={(wt, entry) => {
+                  setSelectedWorktree(wt)
+                  if (entry) {
+                    if (!name.trim() && entry.displayName) setName(entry.displayName)
+                    if (!description.trim() && entry.description) setDescription(entry.description)
+                  }
+                }}
+                onError={setError}
+              />
+            </>
+          ) : mode === TabMode.Recent ? (
+            /* Recent Workspace Tab */
+            <>
+              <div className="create-child-dialog-field">
+                <label htmlFor="workspace-name-recent">Name</label>
+                <input
+                  id="workspace-name-recent"
+                  type="text"
+                  value={name}
+                  onChange={(e) => { setName(e.target.value); }}
+                  placeholder="Workspace name..."
+                  disabled={isProcessing}
+                />
+              </div>
+              <RecentWorkspacesLoader
+                key={parentWsData.gitRootPath}
+                git={git}
+                worktreeRegistry={worktreeRegistry}
+                openWorktreePaths={openWorktreePaths}
+                selectedPath={selectedRecent?.worktree.path ?? null}
+                onSelect={(worktree, entry) => {
+                  setSelectedRecent({ worktree, entry })
+                  setName(entry.displayName ?? worktree.branch)
+                  setDescription(entry.description ?? '')
+                }}
+                onError={setError}
+              />
+            </>
           ) : mode === TabMode.Branch ? (
             /* Open Branch Tab */
             <LocalBranchesLoader
@@ -295,7 +391,7 @@ export default function CreateChildDialog({
           </div>
 
           {/* Detached checkbox - shown for create, branch, and remote tabs */}
-          {mode !== TabMode.Existing && (
+          {mode !== TabMode.Existing && mode !== TabMode.Recent && (
             <div className="create-child-detached-checkbox">
               <label>
                 <input
@@ -393,6 +489,14 @@ export default function CreateChildDialog({
             >
               {isProcessing ? 'Opening... Please wait' : 'Open'}
             </button>
+          ) : mode === TabMode.Recent ? (
+            <button
+              className="dialog-btn create"
+              onClick={() => { void handleRecentSubmit(); }}
+              disabled={isProcessing || !selectedRecent}
+            >
+              {isProcessing ? 'Opening... Please wait' : 'Open'}
+            </button>
           ) : mode === TabMode.Branch ? (
             <button
               className="dialog-btn create"
@@ -417,24 +521,37 @@ export default function CreateChildDialog({
 }
 
 /** Loads existing worktrees on mount */
-function ExistingWorktreesLoader({ git, openWorktreePaths, selectedWorktree, onSelect }: {
+function ExistingWorktreesLoader({ git, worktreeRegistry, openWorktreePaths, selectedWorktree, onSelect, onError }: {
   git: ReturnType<typeof useGitApi>
+  worktreeRegistry: WorktreeRegistryApi
   openWorktreePaths: string[]
   selectedWorktree: WorktreeInfo | null
-  onSelect: (wt: WorktreeInfo) => void
+  onSelect: (wt: WorktreeInfo, entry: WorktreeRegistryEntry | null) => void
+  onError: (msg: string) => void
 }) {
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([])
+  const [entriesByPath, setEntriesByPath] = useState<Map<string, WorktreeRegistryEntry>>(new Map())
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    void git.listWorktrees().then(result => {
-      setWorktrees(result.filter(wt => !openWorktreePaths.includes(wt.path)))
-      setLoading(false)
-    }).catch(() => {
-      setWorktrees([])
-      setLoading(false)
-    })
-  }, [git, openWorktreePaths])
+    void (async () => {
+      try {
+        const [wts, registry] = await Promise.all([
+          git.listWorktrees(),
+          worktreeRegistry.list().catch((err: unknown) => {
+            onError(`Failed to load worktree registry: ${err instanceof Error ? err.message : String(err)}`)
+            return [] as WorktreeRegistryEntry[]
+          }),
+        ])
+        setWorktrees(wts.filter(wt => !openWorktreePaths.includes(wt.path)))
+        setEntriesByPath(new Map(registry.map(e => [e.path, e])))
+      } catch {
+        setWorktrees([])
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }, [git, worktreeRegistry, openWorktreePaths, onError])
 
   return (
     <div className="create-child-existing-list">
@@ -443,16 +560,85 @@ function ExistingWorktreesLoader({ git, openWorktreePaths, selectedWorktree, onS
       ) : worktrees.length === 0 ? (
         <div className="create-child-empty">No available child worktrees found</div>
       ) : (
-        worktrees.map(wt => (
-          <div
-            key={wt.path}
-            className={`create-child-worktree-item ${selectedWorktree?.path === wt.path ? 'selected' : ''}`}
-            onClick={() => { onSelect(wt); }}
-          >
-            <span className="worktree-name">{wt.branch}</span>
-            <span className="worktree-branch">{wt.branch}</span>
-          </div>
-        ))
+        worktrees.map(wt => {
+          const entry = entriesByPath.get(wt.path) ?? null
+          const displayName = entry?.displayName ?? wt.branch
+          return (
+            <div
+              key={wt.path}
+              className={`create-child-worktree-item ${selectedWorktree?.path === wt.path ? 'selected' : ''}`}
+              onClick={() => { onSelect(wt, entry); }}
+            >
+              <span className="worktree-name">{displayName}</span>
+              <span className="worktree-branch">{wt.branch}</span>
+            </div>
+          )
+        })
+      )}
+    </div>
+  )
+}
+
+/** Loads worktrees with registry entries (intersect git worktree list with stored registry) */
+function RecentWorkspacesLoader({ git, worktreeRegistry, openWorktreePaths, selectedPath, onSelect, onError }: {
+  git: ReturnType<typeof useGitApi>
+  worktreeRegistry: WorktreeRegistryApi
+  openWorktreePaths: string[]
+  selectedPath: string | null
+  onSelect: (wt: WorktreeInfo, entry: WorktreeRegistryEntry) => void
+  onError: (msg: string) => void
+}) {
+  const [items, setItems] = useState<{ worktree: WorktreeInfo; entry: WorktreeRegistryEntry }[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const [wts, registry] = await Promise.all([
+          git.listWorktrees(),
+          worktreeRegistry.list(),
+        ])
+        const wtByPath = new Map(wts.map(w => [w.path, w]))
+        const openSet = new Set(openWorktreePaths)
+        const intersected: { worktree: WorktreeInfo; entry: WorktreeRegistryEntry }[] = []
+        for (const entry of registry) {
+          const worktree = wtByPath.get(entry.path)
+          if (!worktree) continue
+          if (openSet.has(entry.path)) continue
+          intersected.push({ worktree, entry })
+        }
+        intersected.sort((a, b) => b.entry.lastUsedAt - a.entry.lastUsedAt)
+        setItems(intersected)
+      } catch (err) {
+        onError(`Failed to load recent workspaces: ${err instanceof Error ? err.message : String(err)}`)
+        setItems([])
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }, [git, worktreeRegistry, openWorktreePaths, onError])
+
+  return (
+    <div className="create-child-existing-list">
+      {loading ? (
+        <div className="create-child-loading">Loading recent workspaces...</div>
+      ) : items.length === 0 ? (
+        <div className="create-child-empty">No recent workspaces found</div>
+      ) : (
+        items.map(({ worktree, entry }) => {
+          const displayName = entry.displayName ?? worktree.branch
+          return (
+            <div
+              key={worktree.path}
+              className={`create-child-worktree-item ${selectedPath === worktree.path ? 'selected' : ''}`}
+              onClick={() => { onSelect(worktree, entry); }}
+            >
+              <span className="worktree-name">{displayName}</span>
+              <span className="worktree-branch">{worktree.branch}</span>
+              {entry.description && <span className="worktree-branch" style={{ opacity: 0.7 }}>{entry.description}</span>}
+            </div>
+          )
+        })
       )}
     </div>
   )

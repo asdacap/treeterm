@@ -14,6 +14,7 @@ import type {
   Application, SandboxConfig, TTYSessionInfo, LlmApi, GitHubApi, RunActionsApi
 } from '../types'
 import type { SessionLock } from '../../shared/types'
+import type { WorktreeRegistryApi } from '../lib/worktreeRegistry'
 
 export enum WorkspaceEntryStatus {
   Loading = 'loading',
@@ -43,6 +44,7 @@ export interface SessionDeps {
   sessionApi: SessionApi
   terminal: TerminalApi
   github: GitHubApi
+  worktreeRegistry: WorktreeRegistryApi
   getSettings: () => Settings
   appRegistry: AppRegistryApi
   llm: LlmApi
@@ -74,7 +76,7 @@ export interface SessionState {
   onWorkspaceRemoved: (id: string) => void
   addWorkspace: (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => string
   addChildWorkspace: (parentId: string, name: string, isDetached?: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
-  adoptExistingWorktree: (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => Promise<{ success: boolean; error?: string }>
+  adoptExistingWorktree: (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string, displayName?: string) => Promise<{ success: boolean; error?: string }>
   createWorktreeFromBranch: (parentId: string, branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
   createWorktreeFromRemote: (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
   removeWorkspace: (id: string) => Promise<void>
@@ -394,6 +396,7 @@ export function createSessionStore(
         return entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data : undefined
       },
       github: deps.github,
+      worktreeRegistry: deps.worktreeRegistry,
       getActiveWorkspaceId: () => store.getState().activeWorkspaceId,
     }
   }
@@ -517,6 +520,7 @@ export function createSessionStore(
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: childWorkspace, store: handle })
         }))
         await queueSyncSessionToDaemon('addChildWorkspace')
+        void handle.getState().saveRegistryEntry()
       } catch (err) {
         store.setState(s => ({
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Error, name: worktreeName, error: err instanceof Error ? err.message : String(err) })
@@ -586,6 +590,7 @@ export function createSessionStore(
     }
 
     await queueSyncSessionToDaemon('addChildWorkspaceFromResult')
+    void handle.getState().saveRegistryEntry()
     return id
   }
 
@@ -626,6 +631,11 @@ export function createSessionStore(
           deleteBranch,
           options.onProgress
         )
+        try {
+          await deps.worktreeRegistry.remove(workspace.path)
+        } catch (err) {
+          console.error('[session] failed to remove worktree registry entry:', err)
+        }
       } else if (!options.keepBranch && !workspace.isDetached && workspace.gitBranch) {
         await deps.git.deleteBranch(workspace.gitRootPath, workspace.gitBranch, options.onProgress)
       }
@@ -927,7 +937,7 @@ export function createSessionStore(
       })
     },
 
-    adoptExistingWorktree: async (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string) => {
+    adoptExistingWorktree: async (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string, displayName?: string) => {
       const parentEntry = get().workspaces.get(parentId)
       if (!parentEntry || (parentEntry.status !== WorkspaceEntryStatus.Loaded && parentEntry.status !== WorkspaceEntryStatus.OperationError)) {
         return { success: false, error: 'Parent workspace not found' }
@@ -946,7 +956,11 @@ export function createSessionStore(
       }
 
       try {
-        const metadata: Record<string, string> = { branchIsUserDefined: 'true', ...(description ? { description } : {}) }
+        const metadata: Record<string, string> = {
+          branchIsUserDefined: 'true',
+          ...(description ? { description } : {}),
+          ...(displayName ? { displayName } : {}),
+        }
         await addChildWorkspaceFromResult(parentId, name, worktreePath, branch, { settings, metadata })
         return { success: true }
       } finally {
