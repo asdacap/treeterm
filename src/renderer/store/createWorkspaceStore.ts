@@ -1,6 +1,8 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
 import type { Workspace, AppRef, AppRegistryApi, GitApi, FilesystemApi, ExecApi, RunActionsApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi, PtyEvent } from '../types'
+import type { WorktreeRegistryApi } from '../lib/worktreeRegistry'
+import { buildEntryFromWorkspace } from '../lib/worktreeRegistry'
 import { getTabs, isAiHarnessState } from '../types'
 import type { Terminal as XTerm } from '@xterm/xterm'
 import type { Tty, TtyWriter } from './createTtyStore'
@@ -72,6 +74,7 @@ export interface WorkspaceStoreDeps {
   refreshGitInfo: (id: string) => Promise<void>
   lookupWorkspace: (id: string) => Workspace | undefined
   github: GitHubApi
+  worktreeRegistry: WorktreeRegistryApi
   getActiveWorkspaceId: () => string | null
 }
 
@@ -112,6 +115,9 @@ export interface WorkspaceStoreState {
   updateMetadata: (key: string, value: string, reason: string) => void
   updateSettings: (settings: Partial<WorktreeSettings>) => void
   updateStatus: (status: Workspace['status']) => void
+  /** Writes the workspace's displayName + description into the daemon-host-wide worktree registry.
+   *  Best-effort: logs errors, never throws. */
+  saveRegistryEntry: () => Promise<void>
 
   // Git API (workspace-scoped, created once at init)
   gitApi: WorkspaceGitApi
@@ -124,6 +130,9 @@ export interface WorkspaceStoreState {
 
   // Run Actions API (connection-bound)
   runActionsApi: RunActionsApi
+
+  // Worktree registry (connection-bound, shared across workspaces)
+  worktreeRegistryApi: WorktreeRegistryApi
 
   // Cross-cutting (delegate to session)
   refreshGitInfo: () => Promise<void>
@@ -380,6 +389,19 @@ export function createWorkspaceStore(
         metadata: { ...ws.metadata, [key]: value }
       }))
       deps.syncToDaemon(reason)
+      if (key === 'displayName' || key === 'description') {
+        void get().saveRegistryEntry()
+      }
+    },
+
+    saveRegistryEntry: async (): Promise<void> => {
+      const ws = get().workspace
+      if (!ws.isWorktree) return
+      try {
+        await deps.worktreeRegistry.upsert(buildEntryFromWorkspace(ws))
+      } catch (err) {
+        console.error('[workspace] failed to save worktree registry entry:', err)
+      }
     },
 
     updateSettings: (newSettings: Partial<WorktreeSettings>): void => {
@@ -466,6 +488,8 @@ export function createWorkspaceStore(
     execApi: deps.exec,
 
     runActionsApi: deps.runActions,
+
+    worktreeRegistryApi: deps.worktreeRegistry,
 
     // Cross-cutting operations — delegate to session
     refreshGitInfo: () => deps.refreshGitInfo(id),

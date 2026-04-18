@@ -229,7 +229,9 @@ export default function SessionPanel({
     worktreePath: string,
     branch: string,
     name: string,
-    settings?: WorktreeSettings
+    settings?: WorktreeSettings,
+    description?: string,
+    displayName?: string
   ) => {
     if (!createChildDialogParentId) return { success: false, error: 'No parent selected' }
 
@@ -238,7 +240,9 @@ export default function SessionPanel({
       worktreePath,
       branch,
       name,
-      settings
+      settings,
+      description,
+      displayName
     )
     if (result.success) {
       setExpanded((prev) => new Set([...Array.from(prev), createChildDialogParentId]))

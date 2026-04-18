@@ -144,10 +144,10 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   }
 
   // Adopt existing worktree handler
-  const handleAdoptWorktreeSubmit = async (worktreePath: string, branch: string, name: string, settings?: import('../types').WorktreeSettings, description?: string) => {
+  const handleAdoptWorktreeSubmit = async (worktreePath: string, branch: string, name: string, settings?: import('../types').WorktreeSettings, description?: string, displayName?: string) => {
     if (!activeWorkspaceId) return { success: false, error: 'No workspace selected' }
 
-    const result = await adoptExistingWorktree(activeWorkspaceId, worktreePath, branch, name, settings, description)
+    const result = await adoptExistingWorktree(activeWorkspaceId, worktreePath, branch, name, settings, description, displayName)
     if (result.success) {
       setShowCreateChildDialog(false)
     }

@@ -1,5 +1,6 @@
 import { useStore } from 'zustand'
 import type { WorkspaceStore, WorkspaceGitApi, WorkspaceFilesystemApi, ExecApi, RunActionsApi } from '../types'
+import type { WorktreeRegistryApi } from '../lib/worktreeRegistry'
 
 export function useGitApi(workspace: WorkspaceStore): WorkspaceGitApi {
   return useStore(workspace, s => s.gitApi)
@@ -15,4 +16,8 @@ export function useExecApi(workspace: WorkspaceStore): ExecApi {
 
 export function useRunActionsApi(workspace: WorkspaceStore): RunActionsApi {
   return useStore(workspace, s => s.runActionsApi)
+}
+
+export function useWorktreeRegistryApi(workspace: WorkspaceStore): WorktreeRegistryApi {
+  return useStore(workspace, s => s.worktreeRegistryApi)
 }

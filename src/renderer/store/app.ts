@@ -33,6 +33,7 @@ import { createBoundFilesystem } from '../types'
 import { createGitApi } from '../lib/gitClient'
 import { createGitHubApi } from '../lib/githubClient'
 import { createRunActionsApi } from '../lib/runActionsClient'
+import { createWorktreeRegistryApi } from '../lib/worktreeRegistry'
 import { createLlmClient } from '../lib/llmClient'
 import { ConnectionStatus } from '../../shared/types'
 
@@ -499,6 +500,7 @@ function getOrCreateSession(
   const boundGit = createGitApi(exec, boundFilesystem, connId)
   const boundGithub = createGitHubApi(exec, get().settingsApi, connId)
   const boundRunActions = createRunActionsApi(boundFilesystem, terminal, connId)
+  const boundWorktreeRegistry = createWorktreeRegistryApi(boundFilesystem, exec, connId)
   const store = createSessionStore(
     { sessionId, connection },
     {
@@ -514,6 +516,7 @@ function getOrCreateSession(
         getDefaultApp: (appId?: string) => get().getDefaultApplication(appId),
       },
       github: boundGithub,
+      worktreeRegistry: boundWorktreeRegistry,
       llm: createLlmClient(),
       setActivityTabState: (tabId, state) => { useActivityStateStore.getState().setTabState(tabId, state); },
     }
