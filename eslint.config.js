@@ -3,6 +3,7 @@ import reactPlugin from 'eslint-plugin-react'
 import reactHooks from 'eslint-plugin-react-hooks'
 import noStringLiteralUnion from './eslint-rules/no-string-literal-union.js'
 import noStringLiteralComparison from './eslint-rules/no-string-literal-comparison.js'
+import noGetStateInRender from './eslint-rules/no-get-state-in-render.js'
 
 export default tseslint.config(
   {
@@ -20,7 +21,7 @@ export default tseslint.config(
       }
     },
     plugins: {
-      custom: { rules: { 'no-string-literal-union': noStringLiteralUnion, 'no-string-literal-comparison': noStringLiteralComparison } }
+      custom: { rules: { 'no-string-literal-union': noStringLiteralUnion, 'no-string-literal-comparison': noStringLiteralComparison, 'no-get-state-in-render': noGetStateInRender } }
     },
     rules: {
       '@typescript-eslint/no-explicit-any': 'error',
@@ -80,6 +81,7 @@ export default tseslint.config(
       'react-hooks/exhaustive-deps': 'warn',
       'react-hooks/set-state-in-effect': 'error',
       'react-hooks/set-state-in-render': 'error',
+      'custom/no-get-state-in-render': 'error',
       'no-restricted-syntax': ['error', {
         selector: "MemberExpression[object.name='window']",
         message: 'Direct window access is only allowed in main.tsx. Inject dependencies via useAppStore() or function parameters instead.'

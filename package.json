@@ -35,7 +35,7 @@
     "test:daemon:coverage": "cd daemon-rs && cargo llvm-cov --lcov --output-path ../coverage/daemon-lcov.info",
     "test:all": "vitest run && npm run test:daemon && playwright test",
     "lint": "eslint src/",
-    "test:lint-rules": "node eslint-rules/no-string-literal-comparison.test.js",
+    "test:lint-rules": "node eslint-rules/no-string-literal-comparison.test.js && node eslint-rules/no-get-state-in-render.test.js",
     "daemon:stop": "pkill -f 'treeterm-daemon' || echo 'No daemon running'",
     "prepare": "husky"
   },

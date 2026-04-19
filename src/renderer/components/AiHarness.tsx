@@ -54,6 +54,7 @@ export default function AiHarness({
   stripScrollbackClear,
 }: AiHarnessProps) {
   const wsData = useStore(workspace, s => s.workspace)
+  const getTabRef = useStore(workspace, s => s.getTabRef)
   const appState = wsData.appStates[tabId]
 
   if (!appState) {
@@ -68,7 +69,7 @@ export default function AiHarness({
     return <div style={{ padding: 16, color: '#888' }}>Starting AI harness...</div>
   }
 
-  const ref = workspace.getState().getTabRef(tabId) as AiHarnessRef | null
+  const ref = getTabRef(tabId) as AiHarnessRef | null
   if (!ref?.analyzer) {
     return <div style={{ padding: 16, color: '#888' }}>Starting AI harness...</div>
   }
@@ -151,8 +152,9 @@ function AiHarnessStatusBar({ analyzer, workspace, tabId }: AiHarnessStatusBarPr
   const analyzing = useStore(analyzer, s => s.analyzing)
   const reason = useStore(analyzer, s => s.reason)
   const autoApprove = useStore(analyzer, s => s.autoApprove)
+  const getTabRef = useStore(workspace, s => s.getTabRef)
 
-  const cache = (workspace.getState().getTabRef(tabId) as TerminalAppRef | null)?.cachedTerminal
+  const cache = (getTabRef(tabId) as TerminalAppRef | null)?.cachedTerminal
   const [stripScrollback, setStripScrollback] = useState(cache?.stripScrollbackClear ?? false)
 
   const openContextMenu = useContextMenuStore((s) => s.open)

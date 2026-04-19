@@ -1,11 +1,12 @@
 /* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
-import React, { useCallback, useState } from 'react'
- 
+import React, { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+
 import { ChevronDown, Github, Loader2, ArrowDownToLine, RefreshCw, AlertTriangle, CircleDot, Check, X } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { SessionState } from '../store/createSessionStore'
 import { WorkspaceEntryStatus } from '../store/createSessionStore'
+import type { WorkspaceStoreState } from '../store/createWorkspaceStore'
 import { useAppStore } from '../store/app'
 import { useKeybindingStore } from '../store/keybinding'
 import FlexLayoutPane from './FlexLayoutPane'
@@ -25,6 +26,18 @@ interface WorkspacePaneProps {
   sessionStore: StoreApi<SessionState>
   platform: Platform
 }
+
+function useWorkspaceField<T>(
+  handle: WorkspaceStore | null,
+  selector: (s: WorkspaceStoreState) => T,
+): T | undefined {
+  const subscribe = useCallback((cb: () => void) => handle?.subscribe(cb) ?? (() => { /* noop */ }), [handle])
+  const getSnapshot = useCallback(() => (handle ? selector(handle.getState()) : undefined), [handle, selector])
+  return useSyncExternalStore(subscribe, getSnapshot)
+}
+
+const selectMetadata = (s: WorkspaceStoreState) => s.metadata
+const selectRunActionsApi = (s: WorkspaceStoreState) => s.runActionsApi
 
 export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneProps) {
   const workspaces = useStore(sessionStore, s => s.workspaces)
@@ -52,8 +65,8 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const activeEntry = activeWorkspaceId ? workspaces.get(activeWorkspaceId) ?? null : null
   const activeWorkspace = activeEntry && (activeEntry.status === WorkspaceEntryStatus.Loaded || activeEntry.status === WorkspaceEntryStatus.OperationError) ? activeEntry.data : null
   const activeHandle = activeEntry && (activeEntry.status === WorkspaceEntryStatus.Loaded || activeEntry.status === WorkspaceEntryStatus.OperationError) ? activeEntry.store : null
-  // Read metadata non-reactively — component already re-renders on workspace changes via subscription at the session level.
-  const activeMetadata = activeHandle?.getState().metadata
+  const activeMetadata = useWorkspaceField(activeHandle, selectMetadata)
+  const activeRunActionsApi = useWorkspaceField(activeHandle, selectRunActionsApi)
 
   // Dialog state
   const [showCreateChildDialog, setShowCreateChildDialog] = useState(false)
@@ -224,42 +237,42 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   // Handle legacy workspaces - migrate terminals to tabs format
   const tabs = activeWorkspace ? getTabs(activeWorkspace) : []
 
-  // Set keybinding handlers — called every render so handlers always reference latest closures.
-  // This is a synchronous Zustand setter via getState(), so it doesn't trigger re-renders.
-  useKeybindingStore.getState().setHandlers({
-    newTab: handleNewDefaultTab,
-    closeTab: () => {
-      if (activeWorkspace?.activeTabId && tabs.length > 1) {
-        handleCloseTab(activeWorkspace.activeTabId)
+  useEffect(() => {
+    useKeybindingStore.getState().setHandlers({
+      newTab: handleNewDefaultTab,
+      closeTab: () => {
+        if (activeWorkspace?.activeTabId && tabs.length > 1) {
+          handleCloseTab(activeWorkspace.activeTabId)
+        }
+      },
+      nextTab: () => {
+        if (!activeWorkspace) return
+        const currentIndex = tabs.findIndex((t) => t.id === activeWorkspace.activeTabId)
+        const newIndex = currentIndex < tabs.length - 1 ? currentIndex + 1 : 0
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- newIndex is always in bounds
+        handleSelectTab(tabs[newIndex]!.id)
+      },
+      prevTab: () => {
+        if (!activeWorkspace) return
+        const currentIndex = tabs.findIndex((t) => t.id === activeWorkspace.activeTabId)
+        const newIndex = currentIndex > 0 ? currentIndex - 1 : tabs.length - 1
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- newIndex is always in bounds
+        handleSelectTab(tabs[newIndex]!.id)
+      },
+      workspaceFocus: () => {
+        const currentIndex = activeWorkspaceId
+          ? flattenedWorkspaceIds.indexOf(activeWorkspaceId) : 0
+        enterWorkspaceFocus(flattenedWorkspaceIds, currentIndex >= 0 ? currentIndex : 0)
+      },
+      setActiveWorkspace,
+      switchToTab: (index: number) => {
+        if (!activeWorkspace) return
+        if (index < tabs.length) {
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- index is bounds-checked above
+          handleSelectTab(tabs[index]!.id)
+        }
       }
-    },
-    nextTab: () => {
-      if (!activeWorkspace) return
-      const currentIndex = tabs.findIndex((t) => t.id === activeWorkspace.activeTabId)
-      const newIndex = currentIndex < tabs.length - 1 ? currentIndex + 1 : 0
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- newIndex is always in bounds
-      handleSelectTab(tabs[newIndex]!.id)
-    },
-    prevTab: () => {
-      if (!activeWorkspace) return
-      const currentIndex = tabs.findIndex((t) => t.id === activeWorkspace.activeTabId)
-      const newIndex = currentIndex > 0 ? currentIndex - 1 : tabs.length - 1
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- newIndex is always in bounds
-      handleSelectTab(tabs[newIndex]!.id)
-    },
-    workspaceFocus: () => {
-      const currentIndex = activeWorkspaceId
-        ? flattenedWorkspaceIds.indexOf(activeWorkspaceId) : 0
-      enterWorkspaceFocus(flattenedWorkspaceIds, currentIndex >= 0 ? currentIndex : 0)
-    },
-    setActiveWorkspace,
-    switchToTab: (index: number) => {
-      if (!activeWorkspace) return
-      if (index < tabs.length) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- index is bounds-checked above
-        handleSelectTab(tabs[index]!.id)
-      }
-    }
+    })
   })
   const activeTabId = activeWorkspace?.activeTabId || tabs[0]?.id
 
@@ -360,10 +373,10 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                   {activeWorkspace.isGitRepo && activeHandle && (
                     <GitPullButton workspace={activeHandle} />
                   )}
-                  {activeHandle && (
+                  {activeHandle && activeRunActionsApi && (
                     <RunActionDropdown
                       workspacePath={activeWorkspace.path}
-                      runActions={activeHandle.getState().runActionsApi}
+                      runActions={activeRunActionsApi}
                       onRun={(ptyId, actionId) => {
                         const tabId = activeHandle.getState().addTab('terminal', { ptyId, ptyHandle: null, keepOnExit: true })
                         activeHandle.getState().updateTabTitle(tabId, actionId)

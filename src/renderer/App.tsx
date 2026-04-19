@@ -1,5 +1,7 @@
 /* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import { useState, useCallback } from 'react'
+import { useStore } from 'zustand'
+import type { StoreApi } from 'zustand'
 import TreePane from './components/TreePane'
 import WorkspacePane from './components/WorkspacePane'
 import SettingsDialog from './components/SettingsDialog'
@@ -12,11 +14,23 @@ import AppErrorFallback from './components/AppErrorFallback'
 import { useAppStore } from './store/app'
 import { useNavigationStore } from './store/navigation'
 import { WorkspaceEntryStatus } from './store/createSessionStore'
+import type { SessionState } from './store/createSessionStore'
 import { useSettingsStore } from './store/settings'
 
 // One-time migration: clear localStorage since daemon is now source of truth
 if (typeof localStorage !== 'undefined') {
   localStorage.removeItem('treeterm-workspaces')
+}
+
+function ActiveProcessesDialogContainer({ sessionStore, onClose }: { sessionStore: StoreApi<SessionState>; onClose: () => void }) {
+  const workspacesMap = useStore(sessionStore, s => s.workspaces)
+  const connectionId = useStore(sessionStore, s => s.connection.id)
+  const workspaces = Object.fromEntries(
+    Array.from(workspacesMap.entries())
+      .filter(([, e]) => e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError)
+      .map(([id, e]) => [id, (e as Extract<typeof e, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }>).data])
+  )
+  return <ActiveProcessesDialog workspaces={workspaces} connectionId={connectionId} onClose={onClose} />
 }
 
 export default function App() {
@@ -134,13 +148,8 @@ export default function App() {
             />
           )}
           {isActiveProcessesOpen && activeSessionStore && (
-            <ActiveProcessesDialog
-              workspaces={Object.fromEntries(
-                Array.from(activeSessionStore.getState().workspaces.entries())
-                  .filter(([, e]) => e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError)
-                  .map(([id, e]) => [id, (e as Extract<typeof e, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }>).data])
-              )}
-              connectionId={activeSessionStore.getState().connection.id}
+            <ActiveProcessesDialogContainer
+              sessionStore={activeSessionStore}
               onClose={() => { useAppStore.setState({ isActiveProcessesOpen: false }); }}
             />
           )}

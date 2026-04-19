@@ -15,7 +15,7 @@ import { useSessionNamesStore } from '../store/sessionNames'
 import CreateChildDialog, { TabMode } from './CreateChildDialog'
 import OpenWorkspaceDialog from './OpenWorkspaceDialog'
 import UpstreamWarningDialog from './UpstreamWarningDialog'
-import type { ReviewState, WorktreeSettings, Workspace } from '../types'
+import type { ReviewState, WorktreeSettings, Workspace, WorkspaceStore } from '../types'
 import { ConnectionStatus, ConnectionTargetType } from '../../shared/types'
 
 // Import WorkspaceIcon from TreePane
@@ -634,22 +634,27 @@ interface WorkspaceTreeItemProps {
   onDragEnd: () => void
 }
 
-function WorkspaceTreeItem({
-  id, depth, entry, isActive, isFocused, isExpanded,
+interface TreeItemViewProps extends Omit<WorkspaceTreeItemProps, 'entry'> {
+  loadStatus: WorkspaceEntryStatus.Loading | WorkspaceEntryStatus.Error | undefined
+  ws: Workspace | undefined
+  displayName: string
+  description: string | undefined
+  tabIds: string[]
+}
+
+function TreeItemView({
+  id, depth, isActive, isFocused, isExpanded,
   onToggleExpand, onClick, onQuickFork, onCreateChild, onRemove, onDismiss, onOpenSettings,
   children, renderChild,
   isDragging, dragOverPosition, onDragStart, onDragOver, onDrop, onDragEnd,
-}: WorkspaceTreeItemProps): React.JSX.Element {
+  loadStatus, ws, displayName, description, tabIds,
+}: TreeItemViewProps): React.JSX.Element {
   const openContextMenu = useContextMenuStore((s) => s.open)
   const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
   const menuPosition = useContextMenuStore((s) => s.position)
   const menuId = `ws-context-${id}`
 
-  const ws = (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data : undefined
-  const wsStoreState = (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.store.getState() : undefined
-  const displayName = ws && wsStoreState ? (wsStoreState.metadata.displayName || ws.name) : (entry as { name: string }).name
   const hasChildren = children.length > 0
-  const tabIds = wsStoreState ? Object.keys(wsStoreState.appStates) : []
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -671,7 +676,7 @@ function WorkspaceTreeItem({
         style={{ paddingLeft: 4 + depth * 8 }}
         onClick={() => { onClick(id); }}
         onContextMenu={handleContextMenu}
-        title={wsStoreState?.metadata.description ? `${ws?.path ?? ''}\n\n${wsStoreState.metadata.description}` : ws?.path}
+        title={description ? `${ws?.path ?? ''}\n\n${description}` : ws?.path}
         draggable={ws !== undefined}
         onDragStart={(e) => { e.stopPropagation(); onDragStart(id) }}
         onDragOver={(e) => { e.stopPropagation(); onDragOver(e, id) }}
@@ -692,7 +697,7 @@ function WorkspaceTreeItem({
           <span className="tree-item-expand-placeholder" />
         )}
         <span className="tree-item-icon">
-          <WorkspaceIcon tabIds={tabIds} loadStatus={entry.status === WorkspaceEntryStatus.Loading || entry.status === WorkspaceEntryStatus.Error ? entry.status : undefined} isWorktree={ws?.isWorktree ?? false} />
+          <WorkspaceIcon tabIds={tabIds} loadStatus={loadStatus} isWorktree={ws?.isWorktree ?? false} />
         </span>
         <span className="tree-item-name">
           {displayName}
@@ -740,6 +745,39 @@ function WorkspaceTreeItem({
 
       {isExpanded && children.map((child) => renderChild(child.id, depth + 1))}
     </div>
+  )
+}
+
+function LoadedWorkspaceTreeItem({
+  store, data, ...rest
+}: { store: WorkspaceStore; data: Workspace } & Omit<TreeItemViewProps, 'loadStatus' | 'ws' | 'displayName' | 'description' | 'tabIds'>): React.JSX.Element {
+  const metadata = useStore(store, s => s.metadata)
+  const appStates = useStore(store, s => s.appStates)
+  return (
+    <TreeItemView
+      ws={data}
+      displayName={metadata.displayName || data.name}
+      description={metadata.description}
+      tabIds={Object.keys(appStates)}
+      loadStatus={undefined}
+      {...rest}
+    />
+  )
+}
+
+function WorkspaceTreeItem({ entry, ...rest }: WorkspaceTreeItemProps): React.JSX.Element {
+  if (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) {
+    return <LoadedWorkspaceTreeItem store={entry.store} data={entry.data} {...rest} />
+  }
+  return (
+    <TreeItemView
+      ws={undefined}
+      displayName={entry.name}
+      description={undefined}
+      tabIds={[]}
+      loadStatus={entry.status}
+      {...rest}
+    />
   )
 }
 

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useStore } from 'zustand'
 import type { ApplicationRenderProps } from '../types'
 import type { AnalyzerHistoryEntry } from '../store/createAnalyzerStore'
 import type { AiHarnessRef } from '../../applications/aiHarness/renderer'
@@ -28,12 +29,13 @@ function bufferPreview(text: string): string {
 }
 
 export default function AnalyzerHistory({ tab, workspace }: ApplicationRenderProps) {
+  const getTabRef = useStore(workspace, s => s.getTabRef)
   const state = tab.state
   if (!isAnalyzerHistoryState(state)) {
     return <div style={{ padding: 16, color: '#f14c4c' }}>Invalid state: missing sourceTabId</div>
   }
 
-  const ref = workspace.getState().getTabRef(state.sourceTabId) as AiHarnessRef | null
+  const ref = getTabRef(state.sourceTabId) as AiHarnessRef | null
   if (!ref?.analyzer) {
     return <div style={{ padding: 16, color: '#f14c4c' }}>Analyzer not found for tab {state.sourceTabId}</div>
   }
