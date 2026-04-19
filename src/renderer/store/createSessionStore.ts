@@ -205,29 +205,35 @@ export function createSessionStore(
   config: { sessionId: string; connection: ConnectionInfo },
   deps: SessionDeps
 ): StoreApi<SessionState> {
-  // Acquire session lock. Surfaces the real error on failure instead of a generic message.
-  // Optimistically increments sessionVersion before the RPC so watch echoes are skipped.
-  async function acquireLock(): Promise<{ acquired: true } | { acquired: false; error: string }> {
-    store.setState((s) => ({ sessionVersion: s.sessionVersion + 1 }))
-    const lockResult = await deps.sessionApi.lock(store.getState().connection.id, 60_000)
-    if (lockResult.success && lockResult.acquired) {
-      store.setState({ sessionLock: lockResult.session.lock })
-      return { acquired: true }
-    }
-    store.setState((s) => ({ sessionVersion: s.sessionVersion - 1 }))
-    if (!lockResult.success) return { acquired: false, error: lockResult.error }
-    return { acquired: false, error: 'Session is locked by another window' }
+  // Acquire session lock. Serialized through the same queue as syncs so lock/unlock
+  // RPCs never race with UpdateSession on the daemon side.
+  function acquireLock(): Promise<{ acquired: true } | { acquired: false; error: string }> {
+    return enqueueOp(async () => {
+      const lockResult = await deps.sessionApi.lock(store.getState().connection.id, 60_000)
+      if (lockResult.success && lockResult.acquired) {
+        store.setState({
+          sessionVersion: lockResult.session.version,
+          sessionLock: lockResult.session.lock,
+        })
+        return { acquired: true } as const
+      }
+      if (!lockResult.success) return { acquired: false, error: lockResult.error } as const
+      return { acquired: false, error: 'Session is locked by another window' } as const
+    })
   }
 
-  // Release session lock. Optimistically increments sessionVersion before the RPC.
-  async function releaseLock(): Promise<void> {
-    store.setState((s) => ({ sessionVersion: s.sessionVersion + 1 }))
-    const unlockResult = await deps.sessionApi.unlock(store.getState().connection.id)
-    if (unlockResult.success) {
-      store.setState({ sessionLock: unlockResult.session.lock })
-    } else {
-      store.setState((s) => ({ sessionVersion: s.sessionVersion - 1 }))
-    }
+  // Release session lock. Serialized through the queue. `sessionVersion` is taken
+  // directly from the daemon's response — no optimistic increments.
+  function releaseLock(): Promise<void> {
+    return enqueueOp(async () => {
+      const unlockResult = await deps.sessionApi.unlock(store.getState().connection.id)
+      if (unlockResult.success) {
+        store.setState({
+          sessionVersion: unlockResult.session.version,
+          sessionLock: unlockResult.session.lock,
+        })
+      }
+    })
   }
 
   function nextSortOrder(parentId: string | undefined): string {
@@ -269,100 +275,139 @@ export function createSessionStore(
   }
 
   let lastSyncedWorkspacesJson = ''
-  let syncInFlight = false
-  let pendingSyncReason: string | undefined = undefined
-  let pendingSyncSettlers: { resolve: () => void; reject: (err: unknown) => void }[] = []
 
-  function queueSyncSessionToDaemon(reason: string): Promise<void> {
-    if (syncInFlight) {
-      if (pendingSyncReason ===undefined) {
-        // First pending: increment sessionVersion so handleExternalUpdate
-        // skips watch echoes while waiting for the in-flight sync to finish
-        store.setState((s) => ({ sessionVersion: s.sessionVersion + 1 }))
-      }
-      // Collapse: update reason, collect settler, don't increment again
-      pendingSyncReason = reason
+  // Single serial queue for every op that bumps the daemon's session version
+  // (UpdateSession, LockSession, UnlockSession). Ordering on the wire follows
+  // enqueue order, so no two daemon-version-bumping RPCs can race on the
+  // daemon's mutex. That removes the original ptyId/connectionId divergence
+  // bug where a racing UnlockSession caused a rejected UpdateSession to look
+  // accepted (because daemon.version coincidentally == expected + 1).
+  interface PendingSync {
+    reasons: string[]
+    settlers: { resolve: () => void; reject: (err: unknown) => void }[]
+  }
+  let queueTail: Promise<unknown> = Promise.resolve()
+  let pendingSync: PendingSync | undefined = undefined
+
+  function chain<T>(op: () => Promise<T>): Promise<T> {
+    const next = queueTail.then(op, op)
+    queueTail = next.catch(() => undefined)
+    return next
+  }
+
+  // Enqueue a sync. If the next queued op is an un-started sync, collapse into it
+  // so rapid triggers coalesce into one UpdateSession.
+  function enqueueSync(reason: string): Promise<void> {
+    if (pendingSync !== undefined) {
+      pendingSync.reasons.push(reason)
       return new Promise<void>((resolve, reject) => {
-        pendingSyncSettlers.push({ resolve, reject })
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- checked above; closure reads the captured reference
+        pendingSync!.settlers.push({ resolve, reject })
       })
     }
-    return runSync(reason, false)
+    const slot: PendingSync = { reasons: [reason], settlers: [] }
+    pendingSync = slot
+    return new Promise<void>((resolve, reject) => {
+      slot.settlers.push({ resolve, reject })
+      void chain(async () => {
+        // Freeze the collapse window: any further sync must create a new slot.
+        if (pendingSync === slot) pendingSync = undefined
+        try {
+          await performSync(slot.reasons.join(', '))
+          for (const s of slot.settlers) s.resolve()
+        } catch (err) {
+          for (const s of slot.settlers) s.reject(err)
+        }
+      })
+    })
   }
 
-  async function runSync(reason: string, versionPreIncremented: boolean): Promise<void> {
-    syncInFlight = true
-    try {
-      await syncSessionToDaemon(reason, versionPreIncremented)
-    } finally {
-      syncInFlight = false
-      if (pendingSyncReason !==undefined) {
-        const nextReason = pendingSyncReason
-        const settlers = pendingSyncSettlers
-        pendingSyncReason =undefined
-        pendingSyncSettlers = []
-        void runSync(nextReason, true).then(
-          () => { for (const s of settlers) s.resolve() },
-          (err: unknown) => { for (const s of settlers) s.reject(err) }
-        )
+  // Enqueue a non-sync op (lock/unlock). Subsequent syncs can't collapse past
+  // this boundary — they'll create a fresh slot behind it.
+  function enqueueOp<T>(op: () => Promise<T>): Promise<T> {
+    pendingSync = undefined
+    return chain(op)
+  }
+
+  function stripTimestamps(ws: Workspace): Omit<Workspace, 'createdAt' | 'lastActivity'> {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { createdAt: _c, lastActivity: _l, ...rest } = ws
+    return rest
+  }
+
+  function applyDaemonState(daemonSession: Session): void {
+    store.setState({
+      isRestoring: true,
+      sessionVersion: daemonSession.version,
+      sessionLock: daemonSession.lock,
+    })
+    applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace)
+    const incomingPaths = new Set(daemonSession.workspaces.map(ws => ws.path))
+    for (const [id, entry] of Array.from(store.getState().workspaces.entries())) {
+      if (entry.status === WorkspaceEntryStatus.Loaded && !incomingPaths.has(entry.data.path)) {
+        store.getState().onWorkspaceRemoved(id)
       }
     }
+    lastSyncedWorkspacesJson = stableStringify(daemonSession.workspaces.map(stripTimestamps))
+    store.setState({ isRestoring: false })
   }
 
-  async function syncSessionToDaemon(reason: string, versionPreIncremented: boolean): Promise<void> {
+  async function performSync(reason: string): Promise<void> {
     try {
       const { workspaces, connection, isRestoring } = store.getState()
 
       if (connection.status !== ConnectionStatus.Connected) {
         console.log('[session] connection not yet established, skipping sync')
-        if (versionPreIncremented) store.setState((s) => ({ sessionVersion: s.sessionVersion - 1 }))
         return
       }
 
       if (isRestoring) {
         console.log('[session] currently restoring, skipping sync')
-        if (versionPreIncremented) store.setState((s) => ({ sessionVersion: s.sessionVersion - 1 }))
         return
       }
 
       const daemonWorkspaces = Array.from(workspaces.values())
         .filter((e): e is Extract<WorkspaceEntry, { status: WorkspaceEntryStatus.Loaded }> => e.status === WorkspaceEntryStatus.Loaded)
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        .map(e => { const { createdAt: _createdAt, lastActivity: _lastActivity, ...ws } = e.data; return ws })
+        .map(e => stripTimestamps(e.data))
 
       const currentJson = stableStringify(daemonWorkspaces)
-      if (currentJson === lastSyncedWorkspacesJson) {
-        if (versionPreIncremented) store.setState((s) => ({ sessionVersion: s.sessionVersion - 1 }))
-        return
-      }
+      if (currentJson === lastSyncedWorkspacesJson) return
+
       console.log('[session] syncing to daemon, reason:', reason, 'changes:', diffWorkspaces(lastSyncedWorkspacesJson, currentJson))
 
-      // Apply local state before the await so concurrent calls with identical
-      // data are skipped by the JSON check above.
+      // Optimistic: treat our send as the new "known daemon state" so an echo
+      // arriving before the RPC response is recognised and skipped. Rolled
+      // back on IPC error so the next sync re-attempts.
+      const prevSyncedJson = lastSyncedWorkspacesJson
       lastSyncedWorkspacesJson = currentJson
 
-      // Increment sessionVersion so handleExternalUpdate skips echoes while in flight.
-      // Skip if already pre-incremented by the queue.
-      if (!versionPreIncremented) {
-        store.setState((s) => ({ sessionVersion: s.sessionVersion + 1 }))
-      }
-      const expectedVersion = store.getState().sessionVersion - 1
+      const expectedVersion = store.getState().sessionVersion
       const connectionId = store.getState().connection.id
       console.log('[session] updating session via connection:', connectionId, 'expectedVersion:', expectedVersion)
+
       const result = await deps.sessionApi.update(connectionId, daemonWorkspaces, connectionId, expectedVersion)
       if (!result.success) {
+        lastSyncedWorkspacesJson = prevSyncedJson
         console.error('[session] failed to update session:', result.error)
+        return
+      }
+
+      // Acceptance is version AND content. A rejection from the daemon might
+      // coincidentally return version == expected + 1 (e.g. if another op
+      // bumped it), but the workspaces it returns are the pre-reject state —
+      // so the content check catches that case and forces reconciliation.
+      const returnedJson = stableStringify(result.session.workspaces.map(stripTimestamps))
+      const accepted = result.session.version === expectedVersion + 1 && returnedJson === currentJson
+
+      if (accepted) {
+        store.setState({
+          sessionVersion: result.session.version,
+          sessionLock: result.session.lock,
+        })
+        console.log('[session] session updated successfully, version:', result.session.version)
       } else {
-        if (result.session.version === expectedVersion + 1) {
-          // Update accepted — don't set sessionVersion here, the optimistic increment
-          // already set it and a pending sync may have pre-incremented further
-          store.setState({ sessionLock: result.session.lock })
-          console.log('[session] session updated successfully, version:', result.session.version)
-        } else {
-          // Update rejected (version mismatch) — reconcile from daemon's current state
-          console.warn('[session] session update rejected, expected version:', expectedVersion + 1, 'got:', result.session.version, '— reconciling')
-          store.setState({ sessionVersion: result.session.version, sessionLock: result.session.lock })
-          await store.getState().handleExternalUpdate(result.session)
-        }
+        console.warn('[session] session update rejected, expected version:', expectedVersion + 1, 'got:', result.session.version, '— reconciling')
+        applyDaemonState(result.session)
       }
     } catch (error) {
       console.error('[session] failed to sync session to daemon:', error)
@@ -382,7 +427,7 @@ export function createSessionStore(
       getSettings: deps.getSettings,
       llm: deps.llm,
       setActivityTabState: deps.setActivityTabState,
-      syncToDaemon: (reason: string) => { void queueSyncSessionToDaemon(reason); },
+      syncToDaemon: (reason: string) => { void enqueueSync(reason); },
       removeWorkspace: (id) => store.getState().removeWorkspace(id),
       removeWorkspaceKeepBranch: (id) => store.getState().removeWorkspaceKeepBranch(id),
       removeWorkspaceKeepBoth: (id) => store.getState().removeWorkspaceKeepBoth(id),
@@ -519,7 +564,7 @@ export function createSessionStore(
         store.setState(s => ({
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: childWorkspace, store: handle })
         }))
-        await queueSyncSessionToDaemon('addChildWorkspace')
+        await enqueueSync('addChildWorkspace')
         void handle.getState().saveRegistryEntry()
       } catch (err) {
         store.setState(s => ({
@@ -589,7 +634,7 @@ export function createSessionStore(
       handle.getState().initTab(tabId)
     }
 
-    await queueSyncSessionToDaemon('addChildWorkspaceFromResult')
+    await enqueueSync('addChildWorkspaceFromResult')
     void handle.getState().saveRegistryEntry()
     return id
   }
@@ -644,7 +689,7 @@ export function createSessionStore(
     // Renderer cleanup + remove from map
     store.getState().onWorkspaceRemoved(id)
 
-    await queueSyncSessionToDaemon('removeWorkspace')
+    await enqueueSync('removeWorkspace')
   }
 
   // Helper: wraps removeWorkspaceInternal with loading state and session lock
@@ -892,7 +937,7 @@ export function createSessionStore(
         set(s => ({
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: workspace, store: handle })
         }))
-        void queueSyncSessionToDaemon('addWorkspace')
+        void enqueueSync('addWorkspace')
       }).catch((err: unknown) => {
         set(s => ({
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Error, name, error: err instanceof Error ? err.message : String(err) })
@@ -1049,7 +1094,7 @@ export function createSessionStore(
         gitBranch: gitInfo.isRepo ? gitInfo.branch : undefined,
         gitRootPath: gitInfo.isRepo ? gitInfo.rootPath : undefined
       })
-      void queueSyncSessionToDaemon('updateGitInfo')
+      void enqueueSync('updateGitInfo')
     },
 
     refreshGitInfo: async (id: string) => {
@@ -1239,7 +1284,7 @@ export function createSessionStore(
         }))
       }
 
-      void queueSyncSessionToDaemon('reorderWorkspace')
+      void enqueueSync('reorderWorkspace')
     },
 
     moveWorkspace: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after' | 'onto') => {
@@ -1322,11 +1367,11 @@ export function createSessionStore(
         reindexSiblings(dragParent, workspaceId)
       }
 
-      void queueSyncSessionToDaemon('moveWorkspace')
+      void enqueueSync('moveWorkspace')
     },
 
     syncToDaemon: async (reason: string) => {
-      await queueSyncSessionToDaemon(reason)
+      await enqueueSync(reason)
     },
 
     forceUnlock: async () => {
@@ -1356,36 +1401,18 @@ export function createSessionStore(
     // eslint-disable-next-line @typescript-eslint/require-await -- interface requires Promise<void> but implementation is synchronous
     handleExternalUpdate: async (daemonSession: Session) => {
       const currentVersion = get().sessionVersion
-      if (daemonSession.version < currentVersion) {
+      if (daemonSession.version < currentVersion) return
+
+      const incomingWorkspacesJson = stableStringify(daemonSession.workspaces.map(stripTimestamps))
+      if (incomingWorkspacesJson === lastSyncedWorkspacesJson) {
+        // Echo of what we last sent — just carry forward version/lock.
+        set({ sessionVersion: daemonSession.version, sessionLock: daemonSession.lock })
         return
       }
-      if (daemonSession.version === currentVersion) {
-        // Compare workspaces only (strip timestamps to match lastSyncedWorkspacesJson shape)
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const incomingWorkspacesJson = stableStringify(daemonSession.workspaces.map(({ createdAt: _c, lastActivity: _l, ...ws }) => ws))
-        if (incomingWorkspacesJson === lastSyncedWorkspacesJson) return
-        console.warn('[Session] Same version but different workspace content, applying daemon state.',
-          'version:', daemonSession.version,
-          'diff:', diffWorkspaces(lastSyncedWorkspacesJson, incomingWorkspacesJson))
-        // Fall through to apply
-      }
 
-      console.log('[Session] External session update received, version:', daemonSession.version, 'current:', currentVersion)
-
-      set({ isRestoring: true, sessionVersion: daemonSession.version, sessionLock: daemonSession.lock })
-      applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace)
-
-      // Remove workspaces not present in daemon session (skip non-loaded workspaces)
-      const incomingPaths = new Set(daemonSession.workspaces.map(ws => ws.path))
-      const updatedState = get()
-      for (const [id, entry] of Array.from(updatedState.workspaces.entries())) {
-        if (entry.status === WorkspaceEntryStatus.Loaded && !incomingPaths.has(entry.data.path)) {
-          get().onWorkspaceRemoved(id)
-        }
-      }
-
-      set({ isRestoring: false })
-      console.log('[Session] External session update applied, version:', daemonSession.version)
+      console.log('[Session] External session update received, version:', daemonSession.version, 'current:', currentVersion,
+        'diff:', diffWorkspaces(lastSyncedWorkspacesJson, incomingWorkspacesJson))
+      applyDaemonState(daemonSession)
     }
   }))
 
