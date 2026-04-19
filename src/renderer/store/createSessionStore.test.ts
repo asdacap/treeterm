@@ -565,8 +565,8 @@ describe('createSessionStore', () => {
 
   })
 
-  describe('sessionVersion optimistic increment', () => {
-    it('increments sessionVersion on syncToDaemon before await', async () => {
+  describe('sessionVersion reconciliation', () => {
+    it('sets sessionVersion from the daemon response after a sync', async () => {
       vi.mocked(deps.sessionApi.update).mockResolvedValue({
         success: true,
         session: makeSession(),
@@ -574,12 +574,11 @@ describe('createSessionStore', () => {
       store.getState().addWorkspace('/test')
       await flushPromises()
       await store.getState().syncToDaemon('test')
-      // sessionVersion should be 1 (accepted version from daemon)
       expect(store.getState().sessionVersion).toBe(1)
     })
 
-    it('sets sessionVersion to daemon value on rejected sync', async () => {
-      // First sync succeeds
+    it('reconciles to daemon version when UpdateSession is rejected', async () => {
+      // First sync settles sessionVersion to 1 (mock returns makeSession version=1).
       vi.mocked(deps.sessionApi.update).mockResolvedValue({
         success: true,
         session: makeSession(),
@@ -589,24 +588,18 @@ describe('createSessionStore', () => {
       await store.getState().syncToDaemon('first')
       expect(store.getState().sessionVersion).toBe(1)
 
-      // Set up rejection mock BEFORE making state change (queued sync will use this mock)
+      // Second sync: daemon reports a version jump (another client moved the session on).
       vi.mocked(deps.sessionApi.update).mockResolvedValue({
         success: true,
         session: makeSession({ version: 5 }),
       })
-
-      // Make a state change so second sync passes dedup check
       store.getState().addWorkspace('/test2')
       await flushPromises()
-
-      // Sync is rejected (version mismatch — returned version != expected + 1)
       await store.getState().syncToDaemon('rejected')
-      // sessionVersion set to daemon's returned version
       expect(store.getState().sessionVersion).toBe(5)
     })
 
-    it('skips external update when sessionVersion is ahead (pending sync)', async () => {
-      // Simulate pending sync: sessionVersion incremented optimistically
+    it('skips external updates where daemon version is behind local', async () => {
       store.setState({ sessionVersion: 5 })
 
       const daemonSession = {
@@ -614,17 +607,16 @@ describe('createSessionStore', () => {
         workspaces: [makeWorkspace({ id: 'ws-ext', name: 'external', path: '/external' })],
         createdAt: Date.now(),
         lastActivity: Date.now(),
-        version: 3,  // <= sessionVersion (5)
+        version: 3,
         lock: undefined,
       }
 
       await store.getState().handleExternalUpdate(daemonSession)
 
-      // Should NOT have applied — no workspace created
       expect(store.getState().workspaces.has('ws-ext')).toBe(false)
     })
 
-    it('applies external update when sessionVersion is 0 (after rejection)', async () => {
+    it('applies external update when daemon version is ahead of local', async () => {
       store.setState({ sessionVersion: 0 })
 
       const daemonSession = {
@@ -638,7 +630,6 @@ describe('createSessionStore', () => {
 
       await store.getState().handleExternalUpdate(daemonSession)
 
-      // Should have applied — workspace created
       const found = Array.from(store.getState().workspaces.values()).some(
         e => (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) && e.data.path === '/external'
       )
@@ -646,7 +637,6 @@ describe('createSessionStore', () => {
     })
 
     it('applies same-version external update when content differs', async () => {
-      // First apply a session so lastSyncedWorkspacesJson is set
       const session1 = {
         id: 'session-1',
         workspaces: [makeWorkspace({ id: 'ws-1', name: 'original', path: '/original' })],
@@ -658,7 +648,6 @@ describe('createSessionStore', () => {
       await store.getState().handleExternalUpdate(session1)
       expect(store.getState().sessionVersion).toBe(3)
 
-      // Same version, different content — should apply
       const session2 = {
         id: 'session-1',
         workspaces: [makeWorkspace({ id: 'ws-2', name: 'changed', path: '/changed' })],
@@ -675,7 +664,7 @@ describe('createSessionStore', () => {
       expect(found).toBe(true)
     })
 
-    it('skips same-version external update when content matches', async () => {
+    it('treats a watch event echoing the last sent state as a no-op', async () => {
       const session = {
         id: 'session-1',
         workspaces: [makeWorkspace({ id: 'ws-1', name: 'same', path: '/same' })],
@@ -686,17 +675,11 @@ describe('createSessionStore', () => {
       }
       await store.getState().handleExternalUpdate(session)
 
-      // Apply again with identical content — should be skipped (no-op)
-      const spy = vi.fn()
-      store.subscribe(spy)
-      spy.mockClear()
-
       await store.getState().handleExternalUpdate(session)
-      // isRestoring should never have been set (skipped early)
       expect(store.getState().isRestoring).toBe(false)
     })
 
-    it('applies external update when daemon version > sessionVersion', async () => {
+    it('applies external update when daemon version is strictly ahead', async () => {
       store.setState({ sessionVersion: 3 })
 
       const daemonSession = {
@@ -710,11 +693,40 @@ describe('createSessionStore', () => {
 
       await store.getState().handleExternalUpdate(daemonSession)
 
-      // Should have applied — workspace created
       const found = Array.from(store.getState().workspaces.values()).some(
         e => (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) && e.data.path === '/external'
       )
       expect(found).toBe(true)
+    })
+
+    it('serializes concurrent syncToDaemon calls — at most one UpdateSession RPC in flight', async () => {
+      // Regression test for the original ptyId/connectionId divergence bug:
+      // the old design let releaseLock's UnlockSession race with an in-flight
+      // UpdateSession, so when the daemon processed UnlockSession first the
+      // racing UpdateSession was rejected but the response coincidentally
+      // satisfied `v === expected + 1` — the client read that as accepted.
+      // With a single queue, daemon-version-bumping RPCs never overlap on the
+      // wire, so that coincidence cannot arise.
+      let active = 0
+      let maxActive = 0
+      vi.mocked(deps.sessionApi.update).mockImplementation(async () => {
+        active++
+        maxActive = Math.max(maxActive, active)
+        await new Promise(r => setTimeout(r, 5))
+        active--
+        return { success: true, session: makeSession() }
+      })
+
+      store.getState().addWorkspace('/a')
+      await flushPromises()
+
+      await Promise.all([
+        store.getState().syncToDaemon('s1'),
+        store.getState().syncToDaemon('s2'),
+        store.getState().syncToDaemon('s3'),
+      ])
+
+      expect(maxActive).toBe(1)
     })
   })
 
