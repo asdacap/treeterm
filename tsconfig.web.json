@@ -15,5 +15,5 @@
     "lib": ["DOM", "DOM.Iterable", "ESNext"],
     "types": ["vite/client"]
   },
-  "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx", "src/shared/**/*.ts", "src/applications/**/*.ts", "src/applications/**/*.tsx"]
+  "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx", "src/shared/**/*.ts", "src/applications/**/*.ts", "src/applications/**/*.tsx", "src/generated/**/*.ts"]
 }

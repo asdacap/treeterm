@@ -65,10 +65,10 @@ export interface SessionState {
 
   // Workspace collection
   workspaces: Map<string, WorkspaceEntry>
-  activeWorkspaceId: string | null
+  activeWorkspaceId: string | undefined
   isRestoring: boolean
   sessionVersion: number
-  sessionLock: SessionLock | null
+  sessionLock: SessionLock | undefined
 
   clearWorkspaceError: (id: string) => void
   dismissWorkspace: (id: string) => void
@@ -86,7 +86,7 @@ export interface SessionState {
   mergeAndRemoveWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
   mergeAndKeepWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
   closeAndCleanWorkspace: (id: string) => Promise<{ success: boolean; error?: string }>
-  setActiveWorkspace: (id: string | null) => void
+  setActiveWorkspace: (id: string | undefined) => void
   updateGitInfo: (id: string, gitInfo: GitInfo) => void
   refreshGitInfo: (id: string) => Promise<void>
   quickForkWorkspace: (workspaceId: string) => Promise<{ success: boolean; error?: string }>
@@ -160,7 +160,7 @@ export function getUnmergedSubWorkspaces(workspaces: Map<string, WorkspaceEntry>
 
 function deepDiff(oldVal: unknown, newVal: unknown, path: string): string[] {
   if (oldVal === newVal) return []
-  if (typeof oldVal !== typeof newVal || oldVal === null || newVal === null || typeof oldVal !== 'object') {
+  if (typeof oldVal !== typeof newVal || oldVal ===undefined || newVal ===undefined || typeof oldVal !== 'object') {
     return [`${path}: ${JSON.stringify(oldVal)} → ${JSON.stringify(newVal)}`]
   }
   if (Array.isArray(oldVal) || Array.isArray(newVal)) {
@@ -230,53 +230,52 @@ export function createSessionStore(
     }
   }
 
-  function nextSortOrder(parentId: string | null): string {
+  function nextSortOrder(parentId: string | undefined): string {
     const workspaces = store.getState().workspaces
     let max = -1
     for (const entry of Array.from(workspaces.values())) {
       if (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError) continue
       const ws = entry.data
-      const isMatch = parentId === null ? !ws.parentId : ws.parentId === parentId
+      const isMatch = parentId ===undefined ? !ws.parentId : ws.parentId === parentId
       if (isMatch) {
-        const order = parseInt(ws.metadata.sortOrder || '0')
+        const order = parseInt(entry.store.getState().metadata.sortOrder || '0')
         if (order > max) max = order
       }
     }
     return String(max + 1)
   }
 
-  function reindexSiblings(parentId: string | null, excludeId: string): void {
+  function reindexSiblings(parentId: string | undefined, excludeId: string): void {
     const workspaces = store.getState().workspaces
     const siblings: { id: string; entry: Extract<WorkspaceEntry, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }> }[] = []
     for (const [id, entry] of Array.from(workspaces.entries())) {
       if (id === excludeId) continue
       if (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError) continue
-      const isMatch = parentId === null ? !entry.data.parentId : entry.data.parentId === parentId
+      const isMatch = parentId ===undefined ? !entry.data.parentId : entry.data.parentId === parentId
       if (isMatch) siblings.push({ id, entry })
     }
-    siblings.sort((a, b) => parseInt(a.entry.data.metadata.sortOrder || '0') - parseInt(b.entry.data.metadata.sortOrder || '0'))
+    siblings.sort((a, b) => parseInt(a.entry.store.getState().metadata.sortOrder || '0') - parseInt(b.entry.store.getState().metadata.sortOrder || '0'))
     for (let i = 0; i < siblings.length; i++) {
       const item = siblings[i]
       if (!item) continue
       const { id, entry } = item
-      const newMetadata = { ...entry.data.metadata, sortOrder: String(i) }
-      entry.store.setState(s => ({
-        workspace: { ...s.workspace, metadata: newMetadata }
-      }))
+      const newMetadata = { ...entry.store.getState().metadata, sortOrder: String(i) }
+      const newData = { ...entry.data, metadata: newMetadata }
+      entry.store.getState().setWorkspace(newData)
       store.setState(s => ({
-        workspaces: new Map(s.workspaces).set(id, { ...entry, data: { ...entry.data, metadata: newMetadata } })
+        workspaces: new Map(s.workspaces).set(id, { ...entry, data: newData })
       }))
     }
   }
 
   let lastSyncedWorkspacesJson = ''
   let syncInFlight = false
-  let pendingSyncReason: string | null = null
+  let pendingSyncReason: string | undefined = undefined
   let pendingSyncSettlers: { resolve: () => void; reject: (err: unknown) => void }[] = []
 
   function queueSyncSessionToDaemon(reason: string): Promise<void> {
     if (syncInFlight) {
-      if (pendingSyncReason === null) {
+      if (pendingSyncReason ===undefined) {
         // First pending: increment sessionVersion so handleExternalUpdate
         // skips watch echoes while waiting for the in-flight sync to finish
         store.setState((s) => ({ sessionVersion: s.sessionVersion + 1 }))
@@ -296,10 +295,10 @@ export function createSessionStore(
       await syncSessionToDaemon(reason, versionPreIncremented)
     } finally {
       syncInFlight = false
-      if (pendingSyncReason !== null) {
+      if (pendingSyncReason !==undefined) {
         const nextReason = pendingSyncReason
         const settlers = pendingSyncSettlers
-        pendingSyncReason = null
+        pendingSyncReason =undefined
         pendingSyncSettlers = []
         void runSync(nextReason, true).then(
           () => { for (const s of settlers) s.resolve() },
@@ -402,8 +401,8 @@ export function createSessionStore(
     }
   }
 
-  function createHandleForWorkspace(workspace: Workspace): WorkspaceStore {
-    const handle = createWorkspaceStore(workspace, makeHandleDeps())
+  function createHandleForWorkspace(workspace: Workspace, initialSettings?: WorktreeSettings): WorkspaceStore {
+    const handle = createWorkspaceStore(workspace, makeHandleDeps(), initialSettings)
 
     // Keep the workspaces snapshot in sync when handle state changes
     handle.subscribe((state) => {
@@ -427,7 +426,7 @@ export function createSessionStore(
       isDetached?: boolean
       settings?: WorktreeSettings
       description?: string
-      initialBranch?: string | null
+      initialBranch?: string | undefined
       message: string
       gitOperation: (onProgress: (data: string) => void) => Promise<{ success: boolean; path?: string; branch?: string; error?: string }>
       preOperation?: () => Promise<void>
@@ -477,8 +476,9 @@ export function createSessionStore(
 
         // Build workspace data and store only on success
         const appStates: Record<string, AppState> = {}
-        let activeTabId: string | null = null
-        const defaultApp = getDefaultAppForWorktree(deps, options.settings, parent?.settings)
+        let activeTabId: string | undefined = undefined
+        const parentSettings = parentEntry && parentEntry.status === WorkspaceEntryStatus.Loaded ? parentEntry.store.getState().settings : undefined
+        const defaultApp = getDefaultAppForWorktree(deps, options.settings, parentSettings)
         if (defaultApp) {
           const tabId = generateTabId()
           appStates[tabId] = {
@@ -497,12 +497,11 @@ export function createSessionStore(
           status: WorkspaceStatus.Active,
           isGitRepo: true,
           gitBranch: result.branch ?? '',
-          gitRootPath: parent?.gitRootPath ?? null,
+          gitRootPath: parent?.gitRootPath ,
           isWorktree: true,
           isDetached: options.isDetached ?? false,
           appStates,
           activeTabId,
-          settings: options.settings ?? { defaultApplicationId: '' },
           metadata: {
             sortOrder: nextSortOrder(parentId),
             ...(options.description ? { description: options.description } : {}),
@@ -512,7 +511,7 @@ export function createSessionStore(
           lastActivity: Date.now(),
         }
 
-        const handle = createHandleForWorkspace(childWorkspace)
+        const handle = createHandleForWorkspace(childWorkspace, options.settings)
         for (const tabId of Object.keys(appStates)) {
           handle.getState().initTab(tabId)
         }
@@ -547,9 +546,10 @@ export function createSessionStore(
 
     const id = generateId()
     const appStates: Record<string, AppState> = {}
-    let activeTabId: string | null = null
+    let activeTabId: string | undefined = undefined
 
-    const defaultApp = getDefaultAppForWorktree(deps, options.settings, parent?.settings)
+    const parentSettings = parentEntry && parentEntry.status === WorkspaceEntryStatus.Loaded ? parentEntry.store.getState().settings : undefined
+    const defaultApp = getDefaultAppForWorktree(deps, options.settings, parentSettings)
     if (defaultApp) {
       const tabId = generateTabId()
       appStates[tabId] = {
@@ -568,18 +568,17 @@ export function createSessionStore(
       status: WorkspaceStatus.Active,
       isGitRepo: true,
       gitBranch: branch,
-      gitRootPath: parent?.gitRootPath ?? null,
+      gitRootPath: parent?.gitRootPath ,
       isWorktree: options.isWorktree ?? true,
       isDetached: options.isDetached ?? false,
       appStates,
       activeTabId,
-      settings: options.settings ?? { defaultApplicationId: '' },
       metadata: { sortOrder: nextSortOrder(parentId), ...(options.metadata ?? {}) },
       createdAt: Date.now(),
       lastActivity: Date.now(),
     }
 
-    const handle = createHandleForWorkspace(childWorkspace)
+    const handle = createHandleForWorkspace(childWorkspace, options.settings)
 
     store.setState((s) => ({
       workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: childWorkspace, store: handle }),
@@ -762,10 +761,10 @@ export function createSessionStore(
   const store = createStore<SessionState>()((set, get) => ({
     sessionId: config.sessionId,
     workspaces: new Map<string, WorkspaceEntry>(),
-    activeWorkspaceId: null,
+    activeWorkspaceId: undefined,
     isRestoring: false,
     sessionVersion: 0,
-    sessionLock: null,
+    sessionLock: undefined,
 
     connection: config.connection,
 
@@ -814,7 +813,7 @@ export function createSessionStore(
         remaining.delete(id)
         return {
           workspaces: remaining,
-          activeWorkspaceId: s.activeWorkspaceId === id ? null : s.activeWorkspaceId
+          activeWorkspaceId: s.activeWorkspaceId === id ? undefined : s.activeWorkspaceId
         }
       })
     },
@@ -824,7 +823,7 @@ export function createSessionStore(
       if (!entry) return
       if (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) {
         entry.store.getState().gitController.getState().dispose()
-        for (const tabId of Object.keys(entry.data.appStates)) {
+        for (const tabId of Object.keys(entry.store.getState().appStates)) {
           const ref = entry.store.getState().getTabRef(tabId)
           if (ref) ref.dispose()
         }
@@ -834,7 +833,7 @@ export function createSessionStore(
         remaining.delete(id)
         return {
           workspaces: remaining,
-          activeWorkspaceId: s.activeWorkspaceId === id ? null : s.activeWorkspaceId
+          activeWorkspaceId: s.activeWorkspaceId === id ? undefined : s.activeWorkspaceId
         }
       })
     },
@@ -852,7 +851,7 @@ export function createSessionStore(
       // Fire-and-forget: resolve git info then create workspace+handle
       void deps.git.getInfo(path).then(gitInfo => {
         const appStates: Record<string, AppState> = {}
-        let activeTabId: string | null = null
+        let activeTabId: string | undefined = undefined
 
         if (!options?.skipDefaultTabs) {
           const defaultApp = getDefaultAppForWorktree(deps, options?.settings, undefined)
@@ -871,22 +870,21 @@ export function createSessionStore(
           id,
           name,
           path,
-          parentId: null,
+          parentId: undefined,
           status: WorkspaceStatus.Active,
           isGitRepo: gitInfo.isRepo,
-          gitBranch: gitInfo.isRepo ? gitInfo.branch : null,
-          gitRootPath: gitInfo.isRepo ? gitInfo.rootPath : null,
+          gitBranch: gitInfo.isRepo ? gitInfo.branch : undefined,
+          gitRootPath: gitInfo.isRepo ? gitInfo.rootPath : undefined,
           isWorktree: false,
           isDetached: false,
           appStates,
           activeTabId,
-          settings: options?.settings ?? { defaultApplicationId: '' },
-          metadata: { sortOrder: nextSortOrder(null) },
+          metadata: { sortOrder: nextSortOrder(undefined) },
           createdAt: Date.now(),
           lastActivity: Date.now(),
         }
 
-        const handle = createHandleForWorkspace(workspace)
+        const handle = createHandleForWorkspace(workspace, options?.settings)
         for (const tabId of Object.keys(appStates)) {
           handle.getState().initTab(tabId)
         }
@@ -1032,7 +1030,7 @@ export function createSessionStore(
     removeWorkspaceKeepBoth: (id: string) =>
       removeWorkspaceWithLoading(id, { keepBranch: true, keepWorktree: true }),
 
-    setActiveWorkspace: (id: string | null) => {
+    setActiveWorkspace: (id: string | undefined) => {
       set({ activeWorkspaceId: id })
       if (id) {
         const entry = get().workspaces.get(id)
@@ -1045,14 +1043,12 @@ export function createSessionStore(
     updateGitInfo: (id: string, gitInfo: GitInfo) => {
       const entry = get().workspaces.get(id)
       if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return
-      entry.store.setState(s => ({
-        workspace: {
-          ...s.workspace,
-          isGitRepo: gitInfo.isRepo,
-          gitBranch: gitInfo.isRepo ? gitInfo.branch : null,
-          gitRootPath: gitInfo.isRepo ? gitInfo.rootPath : null
-        }
-      }))
+      entry.store.getState().setWorkspace({
+        ...entry.store.getState().workspace,
+        isGitRepo: gitInfo.isRepo,
+        gitBranch: gitInfo.isRepo ? gitInfo.branch : undefined,
+        gitRootPath: gitInfo.isRepo ? gitInfo.rootPath : undefined
+      })
       void queueSyncSessionToDaemon('updateGitInfo')
     },
 
@@ -1181,7 +1177,7 @@ export function createSessionStore(
       const existingBranches = await deps.git.listLocalBranches(ws.gitRootPath)
       const parentBranch = ws.gitBranch || ''
 
-      let name: string | null = null
+      let name: string | undefined = undefined
       for (let i = 0; i < 3; i++) {
         const candidate = humanId({ separator: '-', capitalize: false })
         const fullBranch = parentBranch ? `${parentBranch}/${candidate}` : candidate
@@ -1215,11 +1211,11 @@ export function createSessionStore(
       const siblings: { id: string; entry: Extract<WorkspaceEntry, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }> }[] = []
       for (const [id, entry] of Array.from(workspaces.entries())) {
         if (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError) continue
-        const isMatch = dragParent === null ? !entry.data.parentId : entry.data.parentId === dragParent
+        const isMatch = dragParent ===undefined ? !entry.data.parentId : entry.data.parentId === dragParent
         if (isMatch) siblings.push({ id, entry })
       }
       siblings.sort((a, b) =>
-        parseInt(a.entry.data.metadata.sortOrder || '0') - parseInt(b.entry.data.metadata.sortOrder || '0')
+        parseInt(a.entry.store.getState().metadata.sortOrder || '0') - parseInt(b.entry.store.getState().metadata.sortOrder || '0')
       )
 
       // Remove dragged, insert at target position
@@ -1234,13 +1230,12 @@ export function createSessionStore(
         const item = ordered[i]
         if (!item) continue
         const { id, entry } = item
-        const newMetadata = { ...entry.data.metadata, sortOrder: String(i) }
-        entry.store.setState(s => ({
-          workspace: { ...s.workspace, metadata: newMetadata }
-        }))
+        const newMetadata = { ...entry.store.getState().metadata, sortOrder: String(i) }
+        const newData = { ...entry.data, metadata: newMetadata }
+        entry.store.getState().setWorkspace(newData)
         // Also update the session store snapshot
         set(s => ({
-          workspaces: new Map(s.workspaces).set(id, { ...entry, data: { ...entry.data, metadata: newMetadata } })
+          workspaces: new Map(s.workspaces).set(id, { ...entry, data: newData })
         }))
       }
 
@@ -1260,7 +1255,7 @@ export function createSessionStore(
 
       // Cycle check: walk up from target to ensure dragged item is not an ancestor
       const checkAncestor = (startId: string): boolean => {
-        let current: string | null = startId
+        let current: string | undefined = startId
         while (current) {
           if (current === workspaceId) return true
           const entry = workspaces.get(current)
@@ -1275,11 +1270,9 @@ export function createSessionStore(
         if (checkAncestor(targetWorkspaceId)) return
 
         const newSortOrder = nextSortOrder(targetWorkspaceId)
-        const newData = { ...dragEntry.data, parentId: targetWorkspaceId, metadata: { ...dragEntry.data.metadata, sortOrder: newSortOrder } }
+        const newData = { ...dragEntry.data, parentId: targetWorkspaceId, metadata: { ...dragEntry.store.getState().metadata, sortOrder: newSortOrder } }
 
-        dragEntry.store.setState(s => ({
-          workspace: { ...s.workspace, parentId: targetWorkspaceId, metadata: { ...s.workspace.metadata, sortOrder: newSortOrder } }
-        }))
+        dragEntry.store.getState().setWorkspace(newData)
         set(s => ({
           workspaces: new Map(s.workspaces).set(workspaceId, { ...dragEntry, data: newData })
         }))
@@ -1301,10 +1294,10 @@ export function createSessionStore(
         const newSiblings: { id: string; entry: Extract<WorkspaceEntry, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }> }[] = []
         for (const [id, entry] of Array.from(workspaces.entries())) {
           if (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError) continue
-          const isMatch = newParentId === null ? !entry.data.parentId : entry.data.parentId === newParentId
+          const isMatch = newParentId ===undefined ? !entry.data.parentId : entry.data.parentId === newParentId
           if (isMatch && id !== workspaceId) newSiblings.push({ id, entry })
         }
-        newSiblings.sort((a, b) => parseInt(a.entry.data.metadata.sortOrder || '0') - parseInt(b.entry.data.metadata.sortOrder || '0'))
+        newSiblings.sort((a, b) => parseInt(a.entry.store.getState().metadata.sortOrder || '0') - parseInt(b.entry.store.getState().metadata.sortOrder || '0'))
 
         const targetIdx = newSiblings.findIndex(s => s.id === targetWorkspaceId)
         const insertIdx = position === 'before' ? targetIdx : targetIdx + 1
@@ -1316,14 +1309,13 @@ export function createSessionStore(
           if (!item) continue
           const { id, entry } = item
           const isTheDraggedItem = id === workspaceId
-          const newMetadata = { ...entry.data.metadata, sortOrder: String(i) }
+          const newMetadata = { ...entry.store.getState().metadata, sortOrder: String(i) }
           const parentId = isTheDraggedItem ? newParentId : entry.data.parentId
+          const newData = { ...entry.data, parentId, metadata: newMetadata }
 
-          entry.store.setState(s => ({
-            workspace: { ...s.workspace, parentId, metadata: newMetadata }
-          }))
+          entry.store.getState().setWorkspace(newData)
           set(s => ({
-            workspaces: new Map(s.workspaces).set(id, { ...entry, data: { ...entry.data, parentId, metadata: newMetadata } })
+            workspaces: new Map(s.workspaces).set(id, { ...entry, data: newData })
           }))
         }
 
@@ -1340,7 +1332,7 @@ export function createSessionStore(
     forceUnlock: async () => {
       const result = await deps.sessionApi.forceUnlock(store.getState().connection.id)
       if (!result.success) return { success: false, error: result.error }
-      set({ sessionLock: null })
+      set({ sessionLock: undefined })
       return { success: true }
     },
 
@@ -1454,14 +1446,12 @@ function restoreWorkspaceTabs(
     }
   }
 
-  const reconciledActiveTabId = daemonWorkspace.activeTabId || newTabIds[0] || null
+  const reconciledActiveTabId = daemonWorkspace.activeTabId || newTabIds[0] || undefined
   console.log('[session] restoreWorkspaceTabs: activeTabId changed to', reconciledActiveTabId, 'workspace:', daemonWorkspace.id, 'session:', store.getState().sessionId)
-  entry.store.setState({
-    workspace: {
-      ...wsState.workspace,
-      appStates: daemonWorkspace.appStates,
-      activeTabId: reconciledActiveTabId
-    }
+  entry.store.getState().setWorkspace({
+    ...wsState.workspace,
+    appStates: daemonWorkspace.appStates,
+    activeTabId: reconciledActiveTabId
   })
 
   // Only init genuinely new tabs
@@ -1482,7 +1472,7 @@ function reconstructWorkspace(
   const id = daemonWorkspace.id
   const parentId = daemonWorkspace.parentId
 
-  const reconstructedActiveTabId = daemonWorkspace.activeTabId || (Object.keys(daemonWorkspace.appStates).length > 0 ? Object.keys(daemonWorkspace.appStates)[0] ?? null : null)
+  const reconstructedActiveTabId = daemonWorkspace.activeTabId || (Object.keys(daemonWorkspace.appStates).length > 0 ? Object.keys(daemonWorkspace.appStates)[0] : undefined)
   console.log('[session] reconstructWorkspace: activeTabId set to', reconstructedActiveTabId, 'workspace:', id, 'session:', store.getState().sessionId)
   const workspace: Workspace = {
     ...daemonWorkspace,

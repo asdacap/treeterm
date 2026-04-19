@@ -4,28 +4,17 @@ import { render, screen, fireEvent } from '@testing-library/react'
 
 import CloseConfirmDialog from './CloseConfirmDialog'
 import type { Workspace } from '../../shared/types'
-import { WorkspaceStatus } from '../../shared/types'
+import { makeWorkspace as makeWorkspaceBase } from '../../shared/test-fixtures/workspace'
 
 function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
-  return {
-    id: 'ws-1',
-    path: '/test',
+  return makeWorkspaceBase({
     name: 'feature-branch',
-    parentId: null,
-    status: WorkspaceStatus.Active,
     isGitRepo: true,
     gitBranch: 'feat/x',
     gitRootPath: '/test',
     isWorktree: true,
-    isDetached: false,
-    appStates: {},
-    activeTabId: null,
-    settings: { defaultApplicationId: '' },
-    metadata: {},
-    createdAt: Date.now(),
-    lastActivity: Date.now(),
     ...overrides,
-  }
+  })
 }
 
 describe('CloseConfirmDialog', () => {
@@ -66,10 +55,10 @@ describe('CloseConfirmDialog', () => {
     expect(screen.getByText('(feat/login)')).toBeDefined()
   })
 
-  it('does not render branch when gitBranch is null', () => {
+  it('does not render branch when gitBranch is undefined', () => {
     render(
       <CloseConfirmDialog
-        unmergedWorkspaces={[makeWorkspace({ gitBranch: null })]}
+        unmergedWorkspaces={[makeWorkspace({ gitBranch: undefined })]}
         onConfirm={onConfirm}
         onCancel={onCancel}
       />

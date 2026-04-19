@@ -71,6 +71,10 @@ function createMockWorkspaceStoreStateData(overrides?: Partial<WorkspaceStoreSta
     initAnalyzer: vi.fn(),
     createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
     connectionId: 'local',
+    settings: { defaultApplicationId: '' },
+  metadata: {},
+  appStates: {},
+  setWorkspace: vi.fn<(...args: any[]) => void>(),
     gitController: mockGitControllerStore,
     ...overrides,
   } as WorkspaceStoreState

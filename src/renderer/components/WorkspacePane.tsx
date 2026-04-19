@@ -52,6 +52,8 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const activeEntry = activeWorkspaceId ? workspaces.get(activeWorkspaceId) ?? null : null
   const activeWorkspace = activeEntry && (activeEntry.status === WorkspaceEntryStatus.Loaded || activeEntry.status === WorkspaceEntryStatus.OperationError) ? activeEntry.data : null
   const activeHandle = activeEntry && (activeEntry.status === WorkspaceEntryStatus.Loaded || activeEntry.status === WorkspaceEntryStatus.OperationError) ? activeEntry.store : null
+  // Read metadata non-reactively — component already re-renders on workspace changes via subscription at the session level.
+  const activeMetadata = activeHandle?.getState().metadata
 
   // Dialog state
   const [showCreateChildDialog, setShowCreateChildDialog] = useState(false)
@@ -64,9 +66,9 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
 
   const handleStartEditName = useCallback(() => {
     if (!activeWorkspace) return
-    setEditName(activeWorkspace.metadata.displayName || activeWorkspace.name)
+    setEditName(activeMetadata?.displayName || activeWorkspace.name)
     setIsEditingName(true)
-  }, [activeWorkspace])
+  }, [activeWorkspace, activeMetadata])
 
   const handleSaveName = useCallback(() => {
     if (!activeHandle) return
@@ -79,9 +81,9 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
 
   const handleStartEditDescription = useCallback(() => {
     if (!activeWorkspace) return
-    setEditDescription(activeWorkspace.metadata.description || '')
+    setEditDescription(activeMetadata?.description || '')
     setIsEditingDescription(true)
-  }, [activeWorkspace])
+  }, [activeWorkspace, activeMetadata])
 
   const handleSaveDescription = useCallback(() => {
     if (!activeHandle) return
@@ -202,9 +204,9 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   // Compute flattened workspace list for navigation
   const flattenedWorkspaceIds = (() => {
     const result: string[] = []
-    const parentMap = new Map<string | null, string[]>()
+    const parentMap = new Map<string | undefined, string[]>()
     for (const [id, entry] of Array.from(workspaces.entries())) {
-      const parentId = (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data.parentId : null
+      const parentId = (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data.parentId : undefined
       const children = parentMap.get(parentId) ?? []
       children.push(id)
       parentMap.set(parentId, children)
@@ -214,7 +216,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
       const children = parentMap.get(wsId) ?? []
       children.forEach(traverse)
     }
-    const roots = parentMap.get(null) ?? []
+    const roots = parentMap.get(undefined) ?? []
     roots.forEach(traverse)
     return result
   })()
@@ -264,8 +266,8 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   // Prompt description: show button next to description for AI harness tabs that haven't been prompted yet
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const showPromptDescriptionButton = activeTab?.applicationId.startsWith('aiharness-')
-    && activeWorkspace?.metadata.description
-    && !activeWorkspace.metadata.descriptionPrompted
+    && activeMetadata?.description
+    && !activeMetadata.descriptionPrompted
 
   const handlePromptDescriptionDismiss = useCallback(() => {
     if (activeHandle) {
@@ -315,7 +317,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                   />
                 ) : (
                   <>
-                    <span className="workspace-title">{activeWorkspace.metadata.displayName || activeWorkspace.name}</span>
+                    <span className="workspace-title">{activeMetadata?.displayName || activeWorkspace.name}</span>
                     <button
                       className="workspace-edit-btn"
                       onClick={handleStartEditName}
@@ -428,12 +430,12 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                     placeholder="Add a description..."
                     rows={1}
                   />
-                ) : activeWorkspace.metadata.description ? (
+                ) : activeMetadata?.description ? (
                   <span className="workspace-description">
-                    {activeWorkspace.metadata.description}
+                    {activeMetadata.description}
                     {showPromptDescriptionButton && activeHandle && (
                       <PromptDescriptionButton
-                        description={activeWorkspace.metadata.description}
+                        description={activeMetadata.description}
                         workspace={activeHandle}
                         onDismiss={handlePromptDescriptionDismiss}
                       />

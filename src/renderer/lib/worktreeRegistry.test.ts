@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { ExecApi, FilesystemApi } from '../types'
 import { ExecEventType, type ExecEvent } from '../../shared/ipc-types'
-import { WorkspaceStatus } from '../../shared/types'
+import { makeWorkspace } from '../../shared/test-fixtures/workspace'
 import {
   buildEntryFromWorkspace,
   createWorktreeRegistryApi,
@@ -188,24 +188,15 @@ describe('worktreeRegistry', () => {
 
   describe('buildEntryFromWorkspace', () => {
     it('pulls metadata.displayName and metadata.description', () => {
-      const entry = buildEntryFromWorkspace({
+      const entry = buildEntryFromWorkspace(makeWorkspace({
         id: 'ws-1',
         path: '/wt/x',
         name: 'x',
-        parentId: null,
-        status: WorkspaceStatus.Active,
         isGitRepo: true,
         gitBranch: 'feat/x',
         gitRootPath: '/repo',
         isWorktree: true,
-        isDetached: false,
-        appStates: {},
-        activeTabId: null,
-        settings: { defaultApplicationId: '' },
-        metadata: { displayName: 'X custom', description: 'a desc' },
-        createdAt: 0,
-        lastActivity: 0,
-      })
+      }), { displayName: 'X custom', description: 'a desc' })
       expect(entry).toEqual({
         path: '/wt/x',
         branch: 'feat/x',
@@ -215,24 +206,13 @@ describe('worktreeRegistry', () => {
     })
 
     it('returns null for missing metadata fields', () => {
-      const entry = buildEntryFromWorkspace({
+      const entry = buildEntryFromWorkspace(makeWorkspace({
         id: 'ws-2',
         path: '/wt/y',
         name: 'y',
-        parentId: null,
-        status: WorkspaceStatus.Active,
         isGitRepo: true,
-        gitBranch: null,
-        gitRootPath: null,
         isWorktree: true,
-        isDetached: false,
-        appStates: {},
-        activeTabId: null,
-        settings: { defaultApplicationId: '' },
-        metadata: {},
-        createdAt: 0,
-        lastActivity: 0,
-      })
+      }), {})
       expect(entry).toEqual({
         path: '/wt/y',
         branch: '',

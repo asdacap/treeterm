@@ -3,28 +3,10 @@ import { createGitControllerStore } from './createGitControllerStore'
 import type { GitControllerDeps } from './createGitControllerStore'
 import type { Workspace } from '../types'
 import { FileChangeStatus } from '../types'
-import { WorkspaceStatus } from '../../shared/types'
+import { makeWorkspace as makeWorkspaceBase } from '../../shared/test-fixtures/workspace'
 
 function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
-  return {
-    id: 'ws-1',
-    name: 'test',
-    path: '/test',
-    parentId: null,
-    status: WorkspaceStatus.Active,
-    isGitRepo: true,
-    gitBranch: 'feat',
-    gitRootPath: '/test',
-    isWorktree: false,
-    isDetached: false,
-    appStates: {},
-    activeTabId: null,
-    settings: { defaultApplicationId: '' },
-    metadata: {},
-    createdAt: Date.now(),
-    lastActivity: Date.now(),
-    ...overrides,
-  }
+  return makeWorkspaceBase({ isGitRepo: true, gitBranch: 'feat', gitRootPath: '/test', ...overrides })
 }
 
 function makeDeps(overrides: Partial<GitControllerDeps> = {}): GitControllerDeps {
@@ -167,7 +149,7 @@ describe('createGitControllerStore', () => {
     })
 
     it('skips diff check when parent has no gitBranch', async () => {
-      const parentWs = makeWorkspace({ id: 'parent', gitBranch: null })
+      const parentWs = makeWorkspace({ id: 'parent', gitBranch: undefined })
       const ws = makeWorkspace({ isWorktree: true, parentId: 'parent' })
       const deps = makeDeps({
         initialWorkspace: ws,
@@ -231,7 +213,7 @@ describe('createGitControllerStore', () => {
 
     it('skips merge conflict check when workspace has no gitBranch', async () => {
       const parentWs = makeWorkspace({ id: 'parent', gitBranch: 'main' })
-      const ws = makeWorkspace({ isWorktree: true, parentId: 'parent', gitBranch: null })
+      const ws = makeWorkspace({ isWorktree: true, parentId: 'parent', gitBranch: undefined })
       const deps = makeDeps({
         initialWorkspace: ws,
         getWorkspace: vi.fn().mockReturnValue(ws),
@@ -383,7 +365,7 @@ describe('createGitControllerStore', () => {
     })
 
     it('early returns when missing gitBranch', async () => {
-      const ws = makeWorkspace({ isWorktree: true, parentId: 'parent', gitBranch: null, gitRootPath: '/root' })
+      const ws = makeWorkspace({ isWorktree: true, parentId: 'parent',  gitRootPath: '/root' })
       const deps = makeDeps({ initialWorkspace: ws, getWorkspace: vi.fn().mockReturnValue(ws) })
       const store = createGitControllerStore(deps)
       store.getState().dispose()
@@ -394,7 +376,7 @@ describe('createGitControllerStore', () => {
 
     it('early returns when parent has no gitBranch', async () => {
       const ws = makeWorkspace({ isWorktree: true, parentId: 'parent', gitBranch: 'feat', gitRootPath: '/root' })
-      const parentWs = makeWorkspace({ id: 'parent', gitBranch: null })
+      const parentWs = makeWorkspace({ id: 'parent', gitBranch: undefined })
       const deps = makeDeps({
         initialWorkspace: ws,
         getWorkspace: vi.fn().mockReturnValue(ws),
@@ -426,7 +408,7 @@ describe('createGitControllerStore', () => {
 
   describe('openGitHub', () => {
     it('returns error when missing parentId', async () => {
-      const ws = makeWorkspace({ parentId: null })
+      const ws = makeWorkspace({ parentId: undefined })
       const deps = makeDeps({ initialWorkspace: ws, getWorkspace: vi.fn().mockReturnValue(ws) })
       const store = createGitControllerStore(deps)
       store.getState().dispose()

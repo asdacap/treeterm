@@ -12,7 +12,7 @@ import { getTabs } from '../types'
 
 interface TabContentPortalsProps {
   sessionStore: StoreApi<SessionState>
-  activeWorkspaceId: string | null
+  activeWorkspaceId: string | undefined
 }
 
 /**

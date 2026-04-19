@@ -64,8 +64,8 @@ export default function SessionPanel({
   const getChildren = (parentId: string) =>
     Array.from(workspaces.values())
       .filter((e): e is Extract<typeof e, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }> => (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) && e.data.parentId === parentId)
+      .sort((a, b) => parseInt(a.store.getState().metadata.sortOrder || '0') - parseInt(b.store.getState().metadata.sortOrder || '0'))
       .map(e => e.data)
-      .sort((a, b) => parseInt(a.metadata.sortOrder || '0') - parseInt(b.metadata.sortOrder || '0'))
 
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     return new Set(
@@ -170,7 +170,7 @@ export default function SessionPanel({
         setUpstreamWarning({
           workspaceId: parentId,
           behindCount,
-          workspaceName: entry.data.metadata.displayName || entry.data.name,
+          workspaceName: entry.store.getState().metadata.displayName || entry.data.name,
           action: 'createChild'
         })
         return
@@ -188,7 +188,7 @@ export default function SessionPanel({
         setUpstreamWarning({
           workspaceId: wsId,
           behindCount,
-          workspaceName: entry.data.metadata.displayName || entry.data.name,
+          workspaceName: entry.store.getState().metadata.displayName || entry.data.name,
           action: 'quickFork'
         })
         return
@@ -326,8 +326,8 @@ export default function SessionPanel({
       return true // loading/error entries are always top-level
     })
     .sort(([, a], [, b]) => {
-      const aOrder = (a.status === WorkspaceEntryStatus.Loaded || a.status === WorkspaceEntryStatus.OperationError) ? parseInt(a.data.metadata.sortOrder || '0') : Infinity
-      const bOrder = (b.status === WorkspaceEntryStatus.Loaded || b.status === WorkspaceEntryStatus.OperationError) ? parseInt(b.data.metadata.sortOrder || '0') : Infinity
+      const aOrder = (a.status === WorkspaceEntryStatus.Loaded || a.status === WorkspaceEntryStatus.OperationError) ? parseInt(a.store.getState().metadata.sortOrder || '0') : Infinity
+      const bOrder = (b.status === WorkspaceEntryStatus.Loaded || b.status === WorkspaceEntryStatus.OperationError) ? parseInt(b.store.getState().metadata.sortOrder || '0') : Infinity
       return aOrder - bOrder
     })
     .map(([id]) => id)
@@ -367,7 +367,7 @@ export default function SessionPanel({
     } else {
       position = 'onto'
       // Cycle check: cannot drop onto own descendant
-      let current: string | null = id
+      let current: string | undefined = id
       while (current) {
         if (current === dragState.dragId) return
         const entry = workspaces.get(current)
@@ -646,9 +646,10 @@ function WorkspaceTreeItem({
   const menuId = `ws-context-${id}`
 
   const ws = (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data : undefined
-  const displayName = ws ? (ws.metadata.displayName || ws.name) : (entry as { name: string }).name
+  const wsStoreState = (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.store.getState() : undefined
+  const displayName = ws && wsStoreState ? (wsStoreState.metadata.displayName || ws.name) : (entry as { name: string }).name
   const hasChildren = children.length > 0
-  const tabIds = ws ? Object.keys(ws.appStates) : []
+  const tabIds = wsStoreState ? Object.keys(wsStoreState.appStates) : []
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -670,7 +671,7 @@ function WorkspaceTreeItem({
         style={{ paddingLeft: 4 + depth * 8 }}
         onClick={() => { onClick(id); }}
         onContextMenu={handleContextMenu}
-        title={ws?.metadata.description ? `${ws.path}\n\n${ws.metadata.description}` : ws?.path}
+        title={wsStoreState?.metadata.description ? `${ws?.path ?? ''}\n\n${wsStoreState.metadata.description}` : ws?.path}
         draggable={ws !== undefined}
         onDragStart={(e) => { e.stopPropagation(); onDragStart(id) }}
         onDragOver={(e) => { e.stopPropagation(); onDragOver(e, id) }}
@@ -758,8 +759,8 @@ export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSess
   const getChildren = (parentId: string): Workspace[] =>
     Array.from(workspaces.values())
       .filter((e): e is Extract<typeof e, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }> => (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) && e.data.parentId === parentId)
+      .sort((a, b) => parseInt(a.store.getState().metadata.sortOrder || '0') - parseInt(b.store.getState().metadata.sortOrder || '0'))
       .map(e => e.data)
-      .sort((a, b) => parseInt(a.metadata.sortOrder || '0') - parseInt(b.metadata.sortOrder || '0'))
 
   const rootWorkspaceIds = Array.from(workspaces.entries())
     .filter(([, e]) => {
@@ -769,8 +770,8 @@ export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSess
       return true
     })
     .sort(([, a], [, b]) => {
-      const aOrder = (a.status === WorkspaceEntryStatus.Loaded || a.status === WorkspaceEntryStatus.OperationError) ? parseInt(a.data.metadata.sortOrder || '0') : Infinity
-      const bOrder = (b.status === WorkspaceEntryStatus.Loaded || b.status === WorkspaceEntryStatus.OperationError) ? parseInt(b.data.metadata.sortOrder || '0') : Infinity
+      const aOrder = (a.status === WorkspaceEntryStatus.Loaded || a.status === WorkspaceEntryStatus.OperationError) ? parseInt(a.store.getState().metadata.sortOrder || '0') : Infinity
+      const bOrder = (b.status === WorkspaceEntryStatus.Loaded || b.status === WorkspaceEntryStatus.OperationError) ? parseInt(b.store.getState().metadata.sortOrder || '0') : Infinity
       return aOrder - bOrder
     })
     .map(([id]) => id)
@@ -785,8 +786,9 @@ export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSess
     if (!entry) return null
 
     const ws = (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data : undefined
-    const displayName = ws ? (ws.metadata.displayName || ws.name) : (entry as { name: string }).name
-    const tabIds = ws ? Object.keys(ws.appStates) : []
+    const wsStoreState = (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.store.getState() : undefined
+    const displayName = ws && wsStoreState ? (wsStoreState.metadata.displayName || ws.name) : (entry as { name: string }).name
+    const tabIds = wsStoreState ? Object.keys(wsStoreState.appStates) : []
     const isActive = isActiveSession && activeWorkspaceId === id
     const children = getChildren(id)
 

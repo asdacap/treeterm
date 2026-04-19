@@ -19,7 +19,7 @@ export interface KeybindingHandlers {
   prevTab?: () => void
   openSettings?: () => void
   workspaceFocus?: () => void
-  setActiveWorkspace?: (id: string | null) => void
+  setActiveWorkspace?: (id: string | undefined) => void
   switchToTab?: (index: number) => void
 }
 

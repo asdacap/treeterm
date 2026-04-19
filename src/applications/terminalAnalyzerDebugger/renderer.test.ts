@@ -34,6 +34,10 @@ const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => ({
   initTab: vi.fn(), getTabRef: vi.fn().mockReturnValue(null), disposeTabResources: vi.fn(),
   initAnalyzer: vi.fn(), createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
   connectionId: 'local', updateSettings: vi.fn(),
+  settings: { defaultApplicationId: '' },
+  metadata: {},
+  appStates: {},
+  setWorkspace: vi.fn<(...args: any[]) => void>(),
   gitApi: createMockGitApi(), filesystemApi: createMockFilesystemApi(), runActionsApi: createMockRunActionsApi(), execApi: createMockExecApi(),
   worktreeRegistryApi: createMockWorktreeRegistryApi(), saveRegistryEntry: vi.fn(),
   gitController: createStore<GitControllerState>()(() => ({

@@ -17,9 +17,9 @@ export interface AnalyzerDeps {
   openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<{ tty: Tty; scrollback?: string[]; exitCode?: number }>
   cwd: string
   renameBranch: (oldName: string, newName: string) => Promise<void>
-  getGitBranch: () => string | null
+  getGitBranch: () => string | undefined
   getBranchIsUserDefined: () => boolean
-  getParentId: () => string | null
+  getParentId: () => string | undefined
   refreshGitInfo: () => Promise<void>
   refreshDiffStatus: () => Promise<void>
 }

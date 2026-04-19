@@ -98,12 +98,12 @@ export async function removeRegistryEntry(
   await writeRegistry(fs, exec, connectionId, filtered)
 }
 
-export function buildEntryFromWorkspace(ws: Workspace): Omit<WorktreeRegistryEntry, 'lastUsedAt'> {
+export function buildEntryFromWorkspace(ws: Workspace, metadata: Record<string, string>): Omit<WorktreeRegistryEntry, 'lastUsedAt'> {
   return {
     path: ws.path,
     branch: ws.gitBranch ?? '',
-    displayName: ws.metadata.displayName ?? null,
-    description: ws.metadata.description ?? null,
+    displayName: metadata.displayName ?? null,
+    description: metadata.description ?? null,
   }
 }
 

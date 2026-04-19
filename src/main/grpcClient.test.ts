@@ -496,7 +496,7 @@ describe('GrpcDaemonClient', () => {
       expect(session.workspaces[0]!.gitBranch).toBe('main')
     })
 
-    it('convertFromProtoWorkspace handles null/undefined optional fields', async () => {
+    it('parseProtoWorkspace passes through undefined optional fields', async () => {
       const protoSession = {
         id: 'session-1',
         workspaces: [{
@@ -504,7 +504,7 @@ describe('GrpcDaemonClient', () => {
           path: '/test',
           name: 'test',
           parentId: undefined,
-            status: 'active',
+          status: 'active',
           isGitRepo: false,
           gitBranch: undefined,
           gitRootPath: undefined,
@@ -521,10 +521,10 @@ describe('GrpcDaemonClient', () => {
 
       mockClientInstance.updateSession.mockImplementation((_req: any, cb: (err: any, res: any) => void) => { cb(null, protoSession); })
       const session = await client.updateSession([])
-      expect(session.workspaces[0]!.parentId).toBeNull()
-      expect(session.workspaces[0]!.gitBranch).toBeNull()
-      expect(session.workspaces[0]!.gitRootPath).toBeNull()
-      expect(session.workspaces[0]!.activeTabId).toBeNull()
+      expect(session.workspaces[0]!.parentId).toBeUndefined()
+      expect(session.workspaces[0]!.gitBranch).toBeUndefined()
+      expect(session.workspaces[0]!.gitRootPath).toBeUndefined()
+      expect(session.workspaces[0]!.activeTabId).toBeUndefined()
     })
   })
 

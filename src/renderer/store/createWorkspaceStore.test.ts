@@ -6,6 +6,7 @@ import type { WorkspaceEntry } from './createSessionStore'
 import type { LlmApi, Workspace, Application } from '../types'
 import { createMockExecApi } from '../../shared/mockApis'
 import { WorkspaceStatus } from '../../shared/types'
+import { makeWorkspace } from '../../shared/test-fixtures/workspace'
 
 interface TestComment { id: string; filePath: string; lineNumber: number; text: string; commitHash: string | null; createdAt: number; isOutdated: boolean; addressed: boolean; side: string }
 
@@ -49,30 +50,8 @@ function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStore
       upsert: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
       remove: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
     },
-    getActiveWorkspaceId: vi.fn<() => string | null>().mockReturnValue('ws-1'),
+    getActiveWorkspaceId: vi.fn<() => string | undefined>().mockReturnValue('ws-1'),
     ...overrides,
-  }
-}
-
-function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
-  return {
-    id: 'ws-1',
-    name: 'test',
-    path: '/test',
-    parentId: null,
-    status: WorkspaceStatus.Active,
-    isGitRepo: false,
-    gitBranch: null,
-    gitRootPath: null,
-    isWorktree: false,
-    isDetached: false,
-    appStates: {},
-    activeTabId: null,
-    settings: { defaultApplicationId: '' },
-    metadata: {},
-    createdAt: Date.now(),
-    lastActivity: Date.now(),
-    ...overrides
   }
 }
 
@@ -634,7 +613,7 @@ describe('createWorkspaceStore', () => {
             },
           },
         },
-        activeTabId: null,
+        activeTabId: undefined,
       })
       const store = createWorkspaceStore(ws, deps)
 

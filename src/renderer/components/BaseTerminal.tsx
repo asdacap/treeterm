@@ -378,7 +378,7 @@ export default function BaseTerminal({
       // one is in flight, preserving order.
       inputDisposable = terminal.onData((data) => {
         const activeTab = workspace.getState().workspace.activeTabId
-        if (activeTab !== null && activeTab !== tabId) return
+        if (activeTab !== undefined && activeTab !== tabId) return
         const tty = ttyRef.current
         if (!tty) return
         tty.getState().write(data).catch((error: unknown) => {

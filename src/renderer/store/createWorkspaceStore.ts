@@ -1,7 +1,7 @@
 /* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, AppRef, AppRegistryApi, GitApi, FilesystemApi, ExecApi, RunActionsApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi, PtyEvent } from '../types'
+import type { Workspace, AppRef, AppRegistryApi, AppState, GitApi, FilesystemApi, ExecApi, RunActionsApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi, PtyEvent } from '../types'
 import type { WorktreeRegistryApi } from '../lib/worktreeRegistry'
 import { buildEntryFromWorkspace } from '../lib/worktreeRegistry'
 import { PtyEventType } from '../../shared/ipc-types'
@@ -77,11 +77,36 @@ export interface WorkspaceStoreDeps {
   lookupWorkspace: (id: string) => Workspace | undefined
   github: GitHubApi
   worktreeRegistry: WorktreeRegistryApi
-  getActiveWorkspaceId: () => string | null
+  getActiveWorkspaceId: () => string | undefined
 }
 
 export interface WorkspaceStoreState {
   workspace: Workspace
+
+  /**
+   * Parsed workspace metadata. Always mirrors `workspace.metadata` — kept in
+   * sync on every mutation path. Consumers read via this slice so that when
+   * the proto Workspace bytes representation is used directly, parsing stays
+   * a store-level concern.
+   */
+  metadata: Record<string, string>
+
+  /**
+   * Parsed per-tab app states. Always mirrors `workspace.appStates`. Same
+   * rationale as `metadata` above — access goes through this slice.
+   */
+  appStates: Record<string, AppState>
+
+  /**
+   * Renderer-only per-workspace settings. Ephemeral by design — never
+   * persisted to the daemon, resets to defaults when the store is
+   * (re)created (e.g. on session restore).
+   */
+  settings: WorktreeSettings
+
+  /** Replace the workspace data and re-sync parsed slices. Used by session
+   *  store for external (daemon) updates that bypass the mutation helpers. */
+  setWorkspace: (ws: Workspace) => void
 
   // Tab methods
   addTab: <T>(applicationId: string, initialState?: Partial<T>) => string
@@ -156,7 +181,8 @@ function generateTabId(): string {
 
 export function createWorkspaceStore(
   workspace: Workspace,
-  deps: WorkspaceStoreDeps
+  deps: WorkspaceStoreDeps,
+  initialSettings: WorktreeSettings = { defaultApplicationId: '' }
 ): WorkspaceStore {
   const id = workspace.id
 
@@ -165,7 +191,14 @@ export function createWorkspaceStore(
   let store!: WorkspaceStore
 
   function updateWorkspace(updater: (ws: Workspace) => Workspace): void {
-    store.setState((state) => ({ workspace: updater(state.workspace) }))
+    store.setState((state) => {
+      const newWs = updater(state.workspace)
+      return {
+        workspace: newWs,
+        metadata: newWs.metadata,
+        appStates: newWs.appStates,
+      }
+    })
   }
 
   // Closure-level tab ref registry (non-serialized per-tab runtime state)
@@ -186,12 +219,19 @@ export function createWorkspaceStore(
   })
 
   const reviewComments = createReviewCommentStore({
-    getMetadata: () => store.getState().workspace.metadata,
+    getMetadata: () => store.getState().metadata,
     updateMetadata: (key, value, reason) => { store.getState().updateMetadata(key, value, reason); },
   })
 
-  store = createStore<WorkspaceStoreState>()((_set, get) => ({
+  store = createStore<WorkspaceStoreState>()((set, get) => ({
     workspace,
+    metadata: workspace.metadata,
+    appStates: workspace.appStates,
+    settings: initialSettings,
+
+    setWorkspace: (ws: Workspace): void => {
+      set({ workspace: ws, metadata: ws.metadata, appStates: ws.appStates })
+    },
 
     gitController,
     reviewComments,
@@ -221,8 +261,8 @@ export function createWorkspaceStore(
       getSettings: deps.getSettings,
       llm: deps.llm,
       updateMetadata: (key, value, reason) => { get().updateMetadata(key, value, reason); },
-      getDisplayName: () => get().workspace.metadata.displayName,
-      getDescription: () => get().workspace.metadata.description,
+      getDisplayName: () => get().metadata.displayName,
+      getDescription: () => get().metadata.description,
       setActivityTabState: deps.setActivityTabState,
       openTtyStream: deps.openTtyStream,
       cwd: get().workspace.path,
@@ -231,7 +271,7 @@ export function createWorkspaceStore(
         await deps.refreshGitInfo(id)
       },
       getGitBranch: () => get().workspace.gitBranch,
-      getBranchIsUserDefined: () => get().workspace.metadata.branchIsUserDefined === 'true',
+      getBranchIsUserDefined: () => get().metadata.branchIsUserDefined === 'true',
       getParentId: () => get().workspace.parentId,
       refreshGitInfo: () => deps.refreshGitInfo(id),
       refreshDiffStatus: () => gitController.getState().refreshDiffStatus(),
@@ -336,7 +376,7 @@ export function createWorkspaceStore(
           const allIds = Object.keys(ws.appStates)
           const removedIndex = allIds.indexOf(tabId)
           const newIndex = Math.min(removedIndex, remainingIds.length - 1)
-          newActiveTabId = remainingIds[newIndex] || null
+          newActiveTabId = remainingIds[newIndex] || undefined
           console.log('[workspace] removeTab: activeTabId changed from', tabId, 'to', newActiveTabId, 'workspace:', ws.id, '(removedIndex:', removedIndex, 'newIndex:', newIndex, ')')
         }
 
@@ -400,18 +440,14 @@ export function createWorkspaceStore(
       const ws = get().workspace
       if (!ws.isWorktree) return
       try {
-        await deps.worktreeRegistry.upsert(buildEntryFromWorkspace(ws))
+        await deps.worktreeRegistry.upsert(buildEntryFromWorkspace(ws, get().metadata))
       } catch (err) {
         console.error('[workspace] failed to save worktree registry entry:', err)
       }
     },
 
     updateSettings: (newSettings: Partial<WorktreeSettings>): void => {
-      updateWorkspace((ws) => ({
-        ...ws,
-        settings: { ...ws.settings, ...newSettings } as WorktreeSettings
-      }))
-      deps.syncToDaemon('updateSettings')
+      set((s) => ({ settings: { ...s.settings, ...newSettings } }))
     },
 
     updateStatus: (status: Workspace['status']): void => {

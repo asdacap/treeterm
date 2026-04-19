@@ -10,19 +10,21 @@ const applications = new Map([
   ['hidden', { id: 'hidden', name: 'Hidden', showInNewTabMenu: false }],
 ]) as unknown as Map<string, import('../types').Application>
 
-function makeWorkspaceStore(overrides: Record<string, any> = {}) {
+function makeWorkspaceStore(overrides: { settings?: { defaultApplicationId: string }; metadata?: Record<string, string>; workspace?: Record<string, unknown> } = {}) {
   const updateMetadata = vi.fn<(...args: any[]) => void>()
   const updateSettings = vi.fn<(...args: any[]) => void>()
+  const metadata = overrides.metadata ?? { displayName: 'My Workspace', description: 'A test workspace' }
   const ws = {
     id: 'ws-1',
     name: 'test-workspace',
     path: '/test',
-    metadata: { displayName: 'My Workspace', description: 'A test workspace' },
-    settings: { defaultApplicationId: '' },
-    ...overrides,
+    metadata,
+    ...overrides.workspace,
   }
   const store = createStore<any>()(() => ({
     workspace: ws,
+    metadata,
+    settings: overrides.settings ?? { defaultApplicationId: '' },
     updateMetadata,
     updateSettings,
   }))

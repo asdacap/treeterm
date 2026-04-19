@@ -546,7 +546,7 @@ function disposeSessionForConnection(connectionId: string, get: () => AppState):
     for (const [, wsEntry] of Array.from(workspaces.entries())) {
       if (wsEntry.status === WorkspaceEntryStatus.Loaded || wsEntry.status === WorkspaceEntryStatus.OperationError) {
         wsEntry.store.getState().gitController.getState().dispose()
-        for (const tabId of Object.keys(wsEntry.data.appStates)) {
+        for (const tabId of Object.keys(wsEntry.store.getState().appStates)) {
           const ref = wsEntry.store.getState().getTabRef(tabId)
           if (ref) ref.dispose()
         }

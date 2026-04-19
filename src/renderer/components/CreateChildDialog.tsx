@@ -36,6 +36,7 @@ export default function CreateChildDialog({
   initialMode
 }: CreateChildDialogProps) {
   const parentWsData = useStore(parentWorkspace, s => s.workspace)
+  const parentDefaultAppId = useStore(parentWorkspace, s => s.settings.defaultApplicationId)
   const git = useGitApi(parentWorkspace)
   const worktreeRegistry = useWorktreeRegistryApi(parentWorkspace)
   const [mode, setMode] = useState(initialMode ?? TabMode.Create)
@@ -66,9 +67,8 @@ export default function CreateChildDialog({
   const applications = useAppStore((s) => s.applications)
 
   // Get inherited app name
-  const inheritedApp = parentWsData.settings.defaultApplicationId
-     
-    ? applications.get(parentWsData.settings.defaultApplicationId) ?? null
+  const inheritedApp = parentDefaultAppId
+    ? applications.get(parentDefaultAppId) ?? null
     : null
 
   // Get available apps

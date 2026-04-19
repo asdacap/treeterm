@@ -81,37 +81,34 @@ export interface SandboxConfig {
 }
 
 // === Daemon Session Types ===
+//
+// Derived from the proto-generated types in src/generated/treeterm.ts so that
+// there is exactly one source of truth for the workspace/session shape. The
+// only divergences are:
+//   - `metadata` bytes → `Record<string, string>` (parsed at the gRPC boundary)
+//   - `appStates[].state` bytes → `unknown` (parsed at the gRPC boundary)
+//   - `status` string → `WorkspaceStatus` enum (narrowed)
+//
+// Renderer-only per-workspace ephemeral state (e.g. `WorktreeSettings`) lives
+// on WorkspaceStore, not on this type.
 
-export interface AppState {
-  applicationId: string
-  title: string
-  state: unknown
-}
+import type {
+  Workspace as ProtoWorkspace,
+  Session as ProtoSession,
+  AppState as ProtoAppState,
+  SessionLock as ProtoSessionLock,
+} from '../generated/treeterm'
 
-// Worktree-specific settings that can be inherited from parent
+export type SessionLock = ProtoSessionLock
+
+export type AppState = Omit<ProtoAppState, 'state'> & { state: unknown }
+
+// Worktree-specific settings that can be inherited from parent.
+// Renderer-only parameter type — never serialized to the daemon.
 export interface WorktreeSettings {
-  // Default application to open when creating a new worktree
-  // Empty string means inherit from parent or use global default
+  // Default application to open when creating a new worktree.
+  // Empty string means inherit from parent or use global default.
   defaultApplicationId: string
-}
-
-export interface Workspace {
-  id: string
-  path: string
-  name: string
-  parentId: string | null
-  status: WorkspaceStatus
-  isGitRepo: boolean
-  gitBranch: string | null
-  gitRootPath: string | null
-  isWorktree: boolean
-  isDetached: boolean
-  appStates: Record<string, AppState>
-  activeTabId: string | null
-  settings: WorktreeSettings
-  metadata: Record<string, string>
-  createdAt: number
-  lastActivity: number
 }
 
 export enum WorkspaceStatus {
@@ -120,22 +117,18 @@ export enum WorkspaceStatus {
   Abandoned = 'abandoned',
 }
 
-export interface SessionLock {
-  acquiredAt: number
-  expiresAt: number
+export type Workspace = Omit<ProtoWorkspace, 'metadata' | 'appStates' | 'status'> & {
+  status: WorkspaceStatus
+  metadata: Record<string, string>
+  appStates: Record<string, AppState>
 }
 
-export interface Session {
-  id: string
+export type Session = Omit<ProtoSession, 'workspaces'> & {
   workspaces: Workspace[]
-  createdAt: number
-  lastActivity: number
-  version: number
-  lock: SessionLock | null
 }
 
-// Helper type for workspace input (without daemon-managed fields)
-export type WorkspaceInput = Omit<Workspace, 'createdAt' | 'lastActivity' | 'attachedClients'>
+// Helper type for workspace input (without daemon-managed fields).
+export type WorkspaceInput = Omit<Workspace, 'createdAt' | 'lastActivity'>
 
 // === PTY Session Types ===
 

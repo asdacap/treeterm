@@ -35,7 +35,7 @@ export default function WorkspacePickerDialog({
     const children: Map<string, Workspace[]> = new Map()
 
     for (const workspace of workspaces) {
-      if (workspace.parentId === null) {
+      if (!workspace.parentId) {
         roots.push(workspace)
       } else {
         const siblings = children.get(workspace.parentId) || []

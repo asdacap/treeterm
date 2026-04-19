@@ -2,10 +2,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createSessionStore, WorkspaceEntryStatus } from './createSessionStore'
 import type { SessionDeps, SessionState } from './createSessionStore'
-import type { LlmApi, Workspace, Application, GitInfo } from '../types'
-import { ConnectionStatus, ConnectionTargetType, WorkspaceStatus, type ConnectionInfo } from '../../shared/types'
+import type { LlmApi, Application, GitInfo } from '../types'
+import { ConnectionStatus, ConnectionTargetType, type ConnectionInfo } from '../../shared/types'
 import type { StoreApi } from 'zustand'
 import { createMockExecApi } from '../../shared/mockApis'
+import { makeWorkspace, makeSession } from '../../shared/test-fixtures/workspace'
 
 const flushPromises = () => new Promise(r => setTimeout(r, 0))
 
@@ -60,9 +61,9 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
     exec: createMockExecApi(),
     sessionApi: {
       update: vi.fn().mockResolvedValue({ success: true }),
-      lock: vi.fn().mockResolvedValue({ success: true, acquired: true, session: { id: 'session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null } }),
-      unlock: vi.fn().mockResolvedValue({ success: true, session: { id: 'session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null } }),
-      forceUnlock: vi.fn().mockResolvedValue({ success: true, session: { id: 'session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null } }),
+      lock: vi.fn().mockResolvedValue({ success: true, acquired: true, session: makeSession() }),
+      unlock: vi.fn().mockResolvedValue({ success: true, session: makeSession() }),
+      forceUnlock: vi.fn().mockResolvedValue({ success: true, session: makeSession() }),
       // Note: lock/unlock signatures no longer take holderId (daemon-generated identity via per-session gRPC connection)
       onSync: vi.fn().mockReturnValue(() => {}),
     },
@@ -99,28 +100,6 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       upsert: vi.fn().mockResolvedValue(undefined),
       remove: vi.fn().mockResolvedValue(undefined),
     },
-    ...overrides,
-  }
-}
-
-function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
-  return {
-    id: 'ws-1',
-    name: 'test',
-    path: '/test',
-    parentId: null,
-    status: WorkspaceStatus.Active,
-    isGitRepo: false,
-    gitBranch: null,
-    gitRootPath: null,
-    isWorktree: false,
-    isDetached: false,
-    appStates: {},
-    activeTabId: null,
-    settings: { defaultApplicationId: '' },
-    metadata: {},
-    createdAt: Date.now(),
-    lastActivity: Date.now(),
     ...overrides,
   }
 }
@@ -162,7 +141,7 @@ describe('createSessionStore', () => {
     })
 
     it('has null active workspace', () => {
-      expect(store.getState().activeWorkspaceId).toBeNull()
+      expect(store.getState().activeWorkspaceId).toBeUndefined()
     })
 
     it('is not restoring', () => {
@@ -230,8 +209,8 @@ describe('createSessionStore', () => {
 
     it('setActiveWorkspace updates active workspace id', () => {
       const id = store.getState().addWorkspace('/test')
-      store.getState().setActiveWorkspace(null)
-      expect(store.getState().activeWorkspaceId).toBeNull()
+      store.getState().setActiveWorkspace(undefined)
+      expect(store.getState().activeWorkspaceId).toBeUndefined()
       store.getState().setActiveWorkspace(id)
       expect(store.getState().activeWorkspaceId).toBe(id)
     })
@@ -246,7 +225,7 @@ describe('createSessionStore', () => {
 
       const triggerRefresh = vi.spyOn(entry.store.getState().gitController.getState(), 'triggerRefresh')
 
-      store.getState().setActiveWorkspace(null)
+      store.getState().setActiveWorkspace(undefined)
       store.getState().setActiveWorkspace(id)
       expect(triggerRefresh).toHaveBeenCalled()
     })
@@ -386,7 +365,7 @@ describe('createSessionStore', () => {
     it('removeWorkspace resets active workspace when removing active', async () => {
       store.getState().setActiveWorkspace(childId)
       await store.getState().removeWorkspace(childId)
-      expect(store.getState().activeWorkspaceId).toBeNull()
+      expect(store.getState().activeWorkspaceId).toBeUndefined()
     })
 
     it('onWorkspaceRemoved removes without git cleanup', () => {
@@ -590,7 +569,7 @@ describe('createSessionStore', () => {
     it('increments sessionVersion on syncToDaemon before await', async () => {
       vi.mocked(deps.sessionApi.update).mockResolvedValue({
         success: true,
-        session: { id: 'session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null },
+        session: makeSession(),
       })
       store.getState().addWorkspace('/test')
       await flushPromises()
@@ -603,7 +582,7 @@ describe('createSessionStore', () => {
       // First sync succeeds
       vi.mocked(deps.sessionApi.update).mockResolvedValue({
         success: true,
-        session: { id: 'session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null },
+        session: makeSession(),
       })
       store.getState().addWorkspace('/test')
       await flushPromises()
@@ -613,7 +592,7 @@ describe('createSessionStore', () => {
       // Set up rejection mock BEFORE making state change (queued sync will use this mock)
       vi.mocked(deps.sessionApi.update).mockResolvedValue({
         success: true,
-        session: { id: 'session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 5, lock: null },
+        session: makeSession({ version: 5 }),
       })
 
       // Make a state change so second sync passes dedup check
@@ -636,7 +615,7 @@ describe('createSessionStore', () => {
         createdAt: Date.now(),
         lastActivity: Date.now(),
         version: 3,  // <= sessionVersion (5)
-        lock: null,
+        lock: undefined,
       }
 
       await store.getState().handleExternalUpdate(daemonSession)
@@ -654,7 +633,7 @@ describe('createSessionStore', () => {
         createdAt: Date.now(),
         lastActivity: Date.now(),
         version: 1,
-        lock: null,
+        lock: undefined,
       }
 
       await store.getState().handleExternalUpdate(daemonSession)
@@ -674,7 +653,7 @@ describe('createSessionStore', () => {
         createdAt: Date.now(),
         lastActivity: Date.now(),
         version: 3,
-        lock: null,
+        lock: undefined,
       }
       await store.getState().handleExternalUpdate(session1)
       expect(store.getState().sessionVersion).toBe(3)
@@ -686,7 +665,7 @@ describe('createSessionStore', () => {
         createdAt: Date.now(),
         lastActivity: Date.now(),
         version: 3,
-        lock: null,
+        lock: undefined,
       }
       await store.getState().handleExternalUpdate(session2)
 
@@ -703,7 +682,7 @@ describe('createSessionStore', () => {
         createdAt: Date.now(),
         lastActivity: Date.now(),
         version: 3,
-        lock: null,
+        lock: undefined,
       }
       await store.getState().handleExternalUpdate(session)
 
@@ -726,7 +705,7 @@ describe('createSessionStore', () => {
         createdAt: Date.now(),
         lastActivity: Date.now(),
         version: 5,
-        lock: null,
+        lock: undefined,
       }
 
       await store.getState().handleExternalUpdate(daemonSession)
@@ -927,7 +906,8 @@ describe('createSessionStore', () => {
     function getLoadedData(id: string) {
       const entry = store.getState().workspaces.get(id)
       if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return null
-      return entry.data
+      const storeState = entry.store.getState()
+      return { ...entry.data, metadata: storeState.metadata, appStates: storeState.appStates }
     }
 
     it('no-ops when drag workspace does not exist', async () => {
@@ -948,7 +928,7 @@ describe('createSessionStore', () => {
       const id = store.getState().addWorkspace('/test')
       await flushPromises()
       store.getState().moveWorkspace(id, id, 'onto')
-      expect(getLoadedData(id)?.parentId).toBeNull()
+      expect(getLoadedData(id)?.parentId).toBeUndefined()
     })
 
     it('delegates to reorderWorkspace for same-parent before/after', async () => {
@@ -967,7 +947,7 @@ describe('createSessionStore', () => {
       const parent = store.getState().addWorkspace('/parent')
       const child = store.getState().addWorkspace('/child')
       await flushPromises()
-      expect(getLoadedData(child)?.parentId).toBeNull()
+      expect(getLoadedData(child)?.parentId).toBeUndefined()
 
       store.getState().moveWorkspace(child, parent, 'onto')
       expect(getLoadedData(child)?.parentId).toBe(parent)
@@ -1003,7 +983,7 @@ describe('createSessionStore', () => {
 
       // Try to drop parent onto its own child — should be a no-op
       store.getState().moveWorkspace(parent, child!, 'onto')
-      expect(getLoadedData(parent)?.parentId).toBeNull()
+      expect(getLoadedData(parent)?.parentId).toBeUndefined()
     })
 
     it('reindexes old siblings after reparent', async () => {
@@ -1067,7 +1047,7 @@ describe('createSessionStore', () => {
   describe('mergeAndRemoveWorkspace', () => {
     it('returns error when session lock is held by another', async () => {
       // Lock returns success but not acquired — held by another, force-unlock + retry still fails
-      vi.mocked(deps.sessionApi.lock).mockResolvedValue({ success: true, acquired: false, session: { id: 'session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null } } as never)
+      vi.mocked(deps.sessionApi.lock).mockResolvedValue({ success: true, acquired: false, session: makeSession() } as never)
 
       const id = store.getState().addWorkspace('/test')
       await flushPromises()
@@ -1161,14 +1141,7 @@ describe('createSessionStore', () => {
   describe('forceUnlock', () => {
     it('force unlocks session with existing lock', async () => {
       // Set up a lock via handleRestore
-      await store.getState().handleRestore({
-        id: 'session-1',
-        workspaces: [],
-        createdAt: 0,
-        lastActivity: 0,
-        version: 1,
-        lock: { acquiredAt: Date.now(), expiresAt: Date.now() + 60000 },
-      })
+      await store.getState().handleRestore(makeSession({ lock: { acquiredAt: Date.now(), expiresAt: Date.now() + 60000 } }))
       const result = await store.getState().forceUnlock()
       expect(result.success).toBe(true)
       expect(deps.sessionApi.forceUnlock).toHaveBeenCalled()
@@ -1183,14 +1156,7 @@ describe('createSessionStore', () => {
 
     it('handles forceUnlock failure', async () => {
       // First set up a lock so forceUnlock actually calls the API
-      await store.getState().handleRestore({
-        id: 'session-1',
-        workspaces: [],
-        createdAt: 0,
-        lastActivity: 0,
-        version: 1,
-        lock: { acquiredAt: Date.now(), expiresAt: Date.now() + 60000 },
-      })
+      await store.getState().handleRestore(makeSession({ lock: { acquiredAt: Date.now(), expiresAt: Date.now() + 60000 } }))
       vi.mocked(deps.sessionApi.forceUnlock).mockResolvedValue({ success: false, error: 'failed' } as never)
       const result = await store.getState().forceUnlock()
       expect(result.success).toBe(false)
@@ -1202,12 +1168,12 @@ describe('createSessionStore', () => {
       const daemonSession = {
         id: 'session-1',
         workspaces: [
-          makeWorkspace({ id: 'ws-restored', name: 'restored', path: '/restored', appStates: {}, activeTabId: null }),
+          makeWorkspace({ id: 'ws-restored', name: 'restored', path: '/restored', appStates: {} }),
         ],
         createdAt: Date.now(),
         lastActivity: Date.now(),
         version: 1,
-        lock: null,
+        lock: undefined,
       }
 
       await store.getState().handleRestore(daemonSession)
@@ -1233,7 +1199,7 @@ describe('createSessionStore', () => {
         createdAt: Date.now(),
         lastActivity: Date.now(),
         version: 1,
-        lock: null,
+        lock: undefined,
       }
 
       await store.getState().handleExternalUpdate(daemonSession)
@@ -1255,7 +1221,7 @@ describe('createSessionStore', () => {
         createdAt: Date.now(),
         lastActivity: Date.now(),
         version: 1,
-        lock: null,
+        lock: undefined,
       }
       await store.getState().handleRestore(daemonSession1)
       expect(store.getState().workspaces.get('ws-tabs')).toBeDefined()
@@ -1269,7 +1235,7 @@ describe('createSessionStore', () => {
         createdAt: Date.now(),
         lastActivity: Date.now(),
         version: 2,
-        lock: null,
+        lock: undefined,
       }
       await store.getState().handleRestore(daemonSession2)
 
@@ -1292,7 +1258,7 @@ describe('createSessionStore', () => {
         createdAt: Date.now(),
         lastActivity: Date.now(),
         version: 1,
-        lock: null,
+        lock: undefined,
       }
 
       await store.getState().handleRestore(daemonSession)

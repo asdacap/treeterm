@@ -363,7 +363,7 @@ export class GrpcDaemonClient {
 
     return new Promise((resolve, reject) => {
       const request: UpdateSessionRequest = {
-        workspaces: this.convertToProtoWorkspaceInputs(workspaces),
+        workspaces: this.serializeWorkspaceInputs(workspaces),
         senderId,
         expectedVersion
       }
@@ -372,7 +372,7 @@ export class GrpcDaemonClient {
         if (error) {
           reject(new Error(error.message))
         } else {
-          resolve(this.convertFromProtoSession(response))
+          resolve(this.parseProtoSession(response))
         }
       })
     })
@@ -399,7 +399,7 @@ export class GrpcDaemonClient {
         } else {
           resolve({
             acquired: response.acquired,
-            session: this.convertFromProtoSession(response.session)
+            session: this.parseProtoSession(response.session)
           })
         }
       })
@@ -417,7 +417,7 @@ export class GrpcDaemonClient {
         if (error) {
           reject(new Error(error.message))
         } else {
-          resolve(this.convertFromProtoSession(response))
+          resolve(this.parseProtoSession(response))
         }
       })
     })
@@ -434,7 +434,7 @@ export class GrpcDaemonClient {
         if (error) {
           reject(new Error(error.message))
         } else {
-          resolve(this.convertFromProtoSession(response))
+          resolve(this.parseProtoSession(response))
         }
       })
     })
@@ -468,7 +468,7 @@ export class GrpcDaemonClient {
 
     stream.on('data', (event: { session?: ProtoSession }) => {
       if (event.session) {
-        const session = this.convertFromProtoSession(event.session)
+        const session = this.parseProtoSession(event.session)
         if (isFirst) {
           isFirst = false
           console.log(`[grpcClient] watchSession initial data received: session=${session.id}, workspaces=${String(session.workspaces.length)}`)
@@ -607,7 +607,11 @@ export class GrpcDaemonClient {
 
   // Helper methods for proto conversion
 
-  private convertToProtoWorkspaceInputs(
+  /** Serialize renderer Workspace to proto by encoding parsed metadata/appStates.state
+   *  back to bytes. No field-level translation — every other field already matches
+   *  the proto shape because renderer `Workspace` is derived from `ProtoWorkspace`
+   *  via `Omit<ProtoWorkspace, ...>` (see shared/types.ts). */
+  private serializeWorkspaceInputs(
     workspaces: Omit<Workspace, 'createdAt' | 'lastActivity'>[]
   ): ProtoWorkspace[] {
     return workspaces.map(w => {
@@ -620,18 +624,8 @@ export class GrpcDaemonClient {
         }
       }
       return {
-        id: w.id,
-        path: w.path,
-        name: w.name,
-        parentId: w.parentId || undefined,
-        status: w.status,
-        isGitRepo: w.isGitRepo,
-        gitBranch: w.gitBranch || undefined,
-        gitRootPath: w.gitRootPath || undefined,
-        isWorktree: w.isWorktree,
-        isDetached: w.isDetached,
+        ...w,
         appStates: protoAppStates,
-        activeTabId: w.activeTabId || undefined,
         createdAt: 0,
         lastActivity: 0,
         metadata: Buffer.from(JSON.stringify(w.metadata), 'utf-8')
@@ -639,20 +633,18 @@ export class GrpcDaemonClient {
     })
   }
 
-  private convertFromProtoSession(protoSession: ProtoSession): Session {
+  /** Parse proto Session for the renderer — delegates to `parseProtoWorkspace`. */
+  private parseProtoSession(protoSession: ProtoSession): Session {
     return {
-      id: protoSession.id,
-      workspaces: protoSession.workspaces.map(w => this.convertFromProtoWorkspace(w)),
-      createdAt: protoSession.createdAt,
-      lastActivity: protoSession.lastActivity,
-      version: protoSession.version,
-      lock: protoSession.lock
-        ? { acquiredAt: protoSession.lock.acquiredAt, expiresAt: protoSession.lock.expiresAt }
-        : null
+      ...protoSession,
+      workspaces: protoSession.workspaces.map(w => this.parseProtoWorkspace(w)),
     }
   }
 
-  private convertFromProtoWorkspace(protoWorkspace: ProtoWorkspace): Workspace {
+  /** Parse proto Workspace for the renderer: only the bytes fields get decoded.
+   *  All other fields pass through because the renderer `Workspace` is
+   *  `Omit<ProtoWorkspace, ...> & { metadata, appStates, status }`. */
+  private parseProtoWorkspace(protoWorkspace: ProtoWorkspace): Workspace {
     const appStates: Record<string, AppState> = {}
     for (const [key, value] of Object.entries(protoWorkspace.appStates)) {
       appStates[key] = {
@@ -662,23 +654,11 @@ export class GrpcDaemonClient {
       }
     }
     return {
-      id: protoWorkspace.id,
-      path: protoWorkspace.path,
-      name: protoWorkspace.name,
-      parentId: protoWorkspace.parentId || null,
+      ...protoWorkspace,
       status: protoWorkspace.status as WorkspaceStatus,
-      isGitRepo: protoWorkspace.isGitRepo,
-      gitBranch: protoWorkspace.gitBranch || null,
-      gitRootPath: protoWorkspace.gitRootPath || null,
-      isWorktree: protoWorkspace.isWorktree,
-      isDetached: protoWorkspace.isDetached ?? false,
       appStates,
-      activeTabId: protoWorkspace.activeTabId || null,
-      settings: { defaultApplicationId: '' },
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       metadata: protoWorkspace.metadata?.length ? JSON.parse(protoWorkspace.metadata.toString('utf-8')) as Record<string, string> : {},
-      createdAt: protoWorkspace.createdAt,
-      lastActivity: protoWorkspace.lastActivity
     }
   }
 

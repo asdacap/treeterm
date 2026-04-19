@@ -71,6 +71,10 @@ const mockWorkspaceStoreStateData = {
   createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
   connectionId: 'local',
   updateSettings: vi.fn(),
+  settings: { defaultApplicationId: '' },
+  metadata: {},
+  appStates: {},
+  setWorkspace: vi.fn<(...args: any[]) => void>(),
   gitController: createStore<GitControllerState>()(() => ({
     hasUncommittedChanges: false,
     isDiffCleanFromParent: false,

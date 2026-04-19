@@ -10,12 +10,14 @@ interface WorkspaceSettingsProps {
 
 export default function WorkspaceSettings({ workspace, applications }: WorkspaceSettingsProps) {
   const ws = useStore(workspace, s => s.workspace)
+  const metadata = useStore(workspace, s => s.metadata)
+  const defaultApplicationId = useStore(workspace, s => s.settings.defaultApplicationId)
   const updateMetadata = useStore(workspace, s => s.updateMetadata)
   const updateSettings = useStore(workspace, s => s.updateSettings)
   const appList = Array.from(applications.values()).filter((app) => app.showInNewTabMenu)
 
-  const [name, setName] = useState(ws.metadata.displayName || ws.name)
-  const [description, setDescription] = useState(ws.metadata.description || '')
+  const [name, setName] = useState(metadata.displayName || ws.name)
+  const [description, setDescription] = useState(metadata.description || '')
   const [jsonExpanded, setJsonExpanded] = useState(false)
 
   const handleNameBlur = () => {
@@ -71,7 +73,7 @@ export default function WorkspaceSettings({ workspace, applications }: Workspace
         <label className="settings-label">Default Application for Children</label>
         <select
           className="settings-select"
-          value={ws.settings.defaultApplicationId}
+          value={defaultApplicationId}
           onChange={handleDefaultAppChange}
         >
           <option value="">Use Global Default</option>
