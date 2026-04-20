@@ -629,13 +629,13 @@ export function isAiHarnessState(state: unknown): state is AiHarnessState {
 }
 
 export function isReviewState(state: unknown): state is ReviewState {
-  return (
-    state !== null &&
-    typeof state === 'object' &&
-    // parentWorkspaceId is optional - if present, must be a string
-    (!('parentWorkspaceId' in state) ||
-      typeof (state as ReviewState).parentWorkspaceId === 'string')
-  )
+  if (state === null || typeof state !== 'object') return false
+  // parentWorkspaceId is optional: absent or undefined are both valid (top-level
+  // workspace); when set it must be a string. Explicit `undefined` is produced
+  // by callers that merge a tab's initialState through `{...createInitialState(),
+  // parentWorkspaceId: workspace.parentId ?? undefined}`.
+  const parentWorkspaceId = (state as ReviewState).parentWorkspaceId
+  return parentWorkspaceId === undefined || typeof parentWorkspaceId === 'string'
 }
 
 export function isEditorState(state: unknown): state is EditorState {

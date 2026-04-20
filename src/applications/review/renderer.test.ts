@@ -210,6 +210,31 @@ describe('Review Renderer', () => {
         expect(result.props.parentWorkspaceId).toBeUndefined()
       })
 
+      // Top-level workspaces open the Review tab via `addTab('review', {
+      // parentWorkspaceId: activeWorkspace.parentId ?? undefined })`, which
+      // merges to a state where the key is *present* with value `undefined`.
+      // Guard must treat that as valid or the page renders blank.
+      it('handles top-level worktree review (parentWorkspaceId: undefined)', () => {
+        const tab: Tab = {
+          id: 'tab-1',
+          applicationId: 'review',
+          title: 'Review',
+          state: {
+            viewMode: 'committed',
+            parentWorkspaceId: undefined
+          }
+        }
+
+        const result = reviewApplication.render({
+          tab,
+          workspace: mockWorkspaceStore,
+          isVisible: true,
+        }) as { props: { parentWorkspaceId: string | undefined } } | null
+
+        expect(result).not.toBeNull()
+        expect(result?.props.parentWorkspaceId).toBeUndefined()
+      })
+
       it('passes workspace correctly', () => {
         const tab: Tab = {
           id: 'tab-1',
