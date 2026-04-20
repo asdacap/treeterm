@@ -670,7 +670,7 @@ function TreeItemView({
   ].filter(Boolean).join(' ')
 
   return (
-    <div>
+    <div className="tree-subtree">
       <div
         className={`tree-item ${depth === 0 ? 'tree-item-root' : ''} ${isActive ? 'active' : ''} ${isFocused ? 'focused' : ''} ${dragClasses}`}
         style={{ paddingLeft: 4 + depth * 8 }}

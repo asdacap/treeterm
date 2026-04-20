@@ -276,6 +276,10 @@ body,
   background: var(--bg-hover);
 }
 
+.tree-subtree:has(> .tree-item:hover) .tree-item:not(.active):not(.focused) {
+  background: color-mix(in srgb, var(--bg-hover) 50%, transparent);
+}
+
 .tree-item.active {
   background: var(--bg-active);
 }
