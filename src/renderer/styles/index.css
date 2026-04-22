@@ -85,6 +85,15 @@ body,
   cursor: pointer;
   color: var(--text-secondary);
   flex-shrink: 0;
+  position: relative;
+}
+
+.collapsed-favourite-overlay {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  color: var(--accent-favourite, #f5c84a);
+  pointer-events: none;
 }
 
 .collapsed-workspace-icon:hover {
@@ -100,6 +109,31 @@ body,
 .tree-sessions-scroll {
   flex: 1;
   overflow-y: auto;
+}
+
+.favourites-panel {
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 4px;
+}
+
+.favourites-panel:not(:has(.tree-item)) {
+  display: none;
+}
+
+.favourites-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
+.favourites-list {
+  padding: 0;
 }
 
 .session-panel {
@@ -440,6 +474,13 @@ body,
 .tree-item:hover .tree-item-actions,
 .tree-item-root .tree-item-actions {
   display: flex;
+}
+
+.tree-item-favourite-icon {
+  color: var(--accent-favourite, #f5c84a);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .tree-item-action {

@@ -34,7 +34,7 @@ const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => ({
     clearReviewComments: vi.fn(), markAllReviewCommentsAddressed: vi.fn(),
   } as ReviewCommentState)),
   promptHarness: vi.fn(),
-  quickForkWorkspace: vi.fn(), updateMetadata: vi.fn(),
+  quickForkWorkspace: vi.fn(), updateMetadata: vi.fn(), deleteMetadata: vi.fn(), toggleFavourite: vi.fn(),
   updateStatus: vi.fn(), refreshGitInfo: vi.fn(),
   mergeAndRemove: vi.fn(), mergeAndKeep: vi.fn(),
   closeAndClean: vi.fn(), lookupWorkspace: vi.fn(),

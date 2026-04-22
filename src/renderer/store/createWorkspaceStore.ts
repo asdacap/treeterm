@@ -140,6 +140,8 @@ export interface WorkspaceStoreState {
   // Other per-workspace
   promptHarness: (text: string) => Promise<boolean>
   updateMetadata: (key: string, value: string, reason: string) => void
+  deleteMetadata: (key: string, reason: string) => void
+  toggleFavourite: () => void
   updateSettings: (settings: Partial<WorktreeSettings>) => void
   updateStatus: (status: Workspace['status']) => void
   /** Writes the workspace's displayName + description into the daemon-host-wide worktree registry.
@@ -433,6 +435,23 @@ export function createWorkspaceStore(
       deps.syncToDaemon(reason)
       if (key === 'displayName' || key === 'description') {
         void get().saveRegistryEntry()
+      }
+    },
+
+    deleteMetadata: (key: string, reason: string): void => {
+      updateWorkspace((ws) => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { [key]: _removed, ...rest } = ws.metadata
+        return { ...ws, metadata: rest }
+      })
+      deps.syncToDaemon(reason)
+    },
+
+    toggleFavourite: (): void => {
+      if (get().metadata.isFavourite === 'true') {
+        get().deleteMetadata('isFavourite', 'toggleFavourite')
+      } else {
+        get().updateMetadata('isFavourite', 'true', 'toggleFavourite')
       }
     },
 

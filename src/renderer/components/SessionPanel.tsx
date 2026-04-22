@@ -3,7 +3,7 @@ import React, { useState, useCallback } from 'react'
 import type { ReactNode } from 'react'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
-import { GitFork, ChevronDown, ChevronRight, Loader2, AlertCircle, LockOpen } from 'lucide-react'
+import { GitFork, ChevronDown, ChevronRight, Loader2, AlertCircle, LockOpen, Star } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { SessionState, WorkspaceEntry } from '../store/createSessionStore'
@@ -397,6 +397,13 @@ export default function SessionPanel({
     setDragState(null)
   }
 
+  const handleToggleFavourite = (workspaceId: string) => {
+    const entry = workspaces.get(workspaceId)
+    if (entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError)) {
+      entry.store.getState().toggleFavourite()
+    }
+  }
+
   const renderWorkspace = (id: string, depth: number = 0): ReactNode => {
     const entry = workspaces.get(id)
     if (!entry) return null
@@ -420,6 +427,7 @@ export default function SessionPanel({
         onRemove={(wsId) => { void handleRemove(wsId); }}
         onDismiss={dismissWorkspace}
         onOpenSettings={handleOpenSettings}
+        onToggleFavourite={handleToggleFavourite}
         children={children}
         renderChild={renderWorkspace}
         isDragging={dragState?.dragId === id}
@@ -624,6 +632,7 @@ interface WorkspaceTreeItemProps {
   onRemove: (id: string) => void
   onDismiss: (id: string) => void
   onOpenSettings: (id: string) => void
+  onToggleFavourite: (id: string) => void
   children: Workspace[]
   renderChild: (id: string, depth: number) => ReactNode
   isDragging: boolean
@@ -637,14 +646,15 @@ interface WorkspaceTreeItemProps {
 interface TreeItemViewProps extends Omit<WorkspaceTreeItemProps, 'entry'> {
   loadStatus: WorkspaceEntryStatus.Loading | WorkspaceEntryStatus.Error | undefined
   ws: Workspace | undefined
+  isFavourite: boolean
   displayName: string
   description: string | undefined
   tabIds: string[]
 }
 
 function TreeItemView({
-  id, depth, isActive, isFocused, isExpanded,
-  onToggleExpand, onClick, onQuickFork, onCreateChild, onRemove, onDismiss, onOpenSettings,
+  id, depth, isActive, isFocused, isExpanded, isFavourite,
+  onToggleExpand, onClick, onQuickFork, onCreateChild, onRemove, onDismiss, onOpenSettings, onToggleFavourite,
   children, renderChild,
   isDragging, dragOverPosition, onDragStart, onDragOver, onDrop, onDragEnd,
   loadStatus, ws, displayName, description, tabIds,
@@ -703,6 +713,7 @@ function TreeItemView({
           {displayName}
         </span>
         <span className="tree-item-actions">
+          {isFavourite && <Star size={14} fill="currentColor" className="tree-item-favourite-icon" />}
           {ws?.isGitRepo && (
             <button
               className="tree-item-action"
@@ -719,6 +730,11 @@ function TreeItemView({
         {ws && (
           <div className="context-menu-item" onClick={() => { onOpenSettings(id); }}>
             Settings
+          </div>
+        )}
+        {ws && (
+          <div className="context-menu-item" onClick={() => { onToggleFavourite(id); useContextMenuStore.getState().close(); }}>
+            {isFavourite ? 'Unmark as Favourite' : 'Mark as Favourite'}
           </div>
         )}
         {ws?.isGitRepo && (
@@ -748,11 +764,12 @@ function TreeItemView({
   )
 }
 
-function LoadedWorkspaceTreeItem({
+export function LoadedWorkspaceTreeItem({
   store, data, ...rest
-}: { store: WorkspaceStore; data: Workspace } & Omit<TreeItemViewProps, 'loadStatus' | 'ws' | 'displayName' | 'description' | 'tabIds'>): React.JSX.Element {
+}: { store: WorkspaceStore; data: Workspace } & Omit<TreeItemViewProps, 'loadStatus' | 'ws' | 'displayName' | 'description' | 'tabIds' | 'isFavourite'>): React.JSX.Element {
   const metadata = useStore(store, s => s.metadata)
   const appStates = useStore(store, s => s.appStates)
+  const isFavourite = metadata.isFavourite === 'true'
   return (
     <TreeItemView
       ws={data}
@@ -760,6 +777,7 @@ function LoadedWorkspaceTreeItem({
       description={metadata.description}
       tabIds={Object.keys(appStates)}
       loadStatus={undefined}
+      isFavourite={isFavourite}
       {...rest}
     />
   )
@@ -776,6 +794,7 @@ function WorkspaceTreeItem({ entry, ...rest }: WorkspaceTreeItemProps): React.JS
       description={undefined}
       tabIds={[]}
       loadStatus={entry.status}
+      isFavourite={false}
       {...rest}
     />
   )
@@ -830,6 +849,8 @@ export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSess
     const isActive = isActiveSession && activeWorkspaceId === id
     const children = getChildren(id)
 
+    const isFavourite = wsStoreState?.metadata.isFavourite === 'true'
+
     return (
       <div key={id}>
         <div
@@ -842,6 +863,7 @@ export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSess
             loadStatus={entry.status === WorkspaceEntryStatus.Loading || entry.status === WorkspaceEntryStatus.Error ? entry.status : undefined}
             isWorktree={ws?.isWorktree ?? false}
           />
+          {isFavourite && <Star size={10} fill="currentColor" className="collapsed-favourite-overlay" />}
         </div>
         {children.map((child) => renderIcon(child.id))}
       </div>
