@@ -38,7 +38,7 @@ const mockWorkspaceStoreStateData = {
   } as ReviewCommentState)),
   promptHarness: vi.fn(),
   quickForkWorkspace: vi.fn(),
-  updateMetadata: vi.fn(),
+  updateMetadata: vi.fn(), deleteMetadata: vi.fn(), toggleFavourite: vi.fn(),
   updateStatus: vi.fn(),
   refreshGitInfo: vi.fn(),
   mergeAndRemove: vi.fn(),

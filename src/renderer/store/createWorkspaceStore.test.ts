@@ -883,6 +883,70 @@ describe('createWorkspaceStore', () => {
     })
   })
 
+  describe('deleteMetadata', () => {
+    it('removes a key from metadata and syncs to daemon', () => {
+      const ws = makeWorkspace({ metadata: { foo: 'bar', keep: 'value' } })
+      const deps = makeHandleDeps()
+      const store = createWorkspaceStore(ws, deps)
+
+      store.getState().deleteMetadata('foo', 'test-reason')
+
+      expect(store.getState().metadata.foo).toBeUndefined()
+      expect(store.getState().metadata.keep).toBe('value')
+      expect(deps.syncToDaemon).toHaveBeenCalledWith('test-reason')
+    })
+
+    it('is a no-op when key does not exist', () => {
+      const ws = makeWorkspace({ metadata: { keep: 'value' } })
+      const deps = makeHandleDeps()
+      const store = createWorkspaceStore(ws, deps)
+
+      store.getState().deleteMetadata('nonexistent', 'reason')
+
+      expect(store.getState().metadata).toEqual({ keep: 'value' })
+      expect(deps.syncToDaemon).toHaveBeenCalledWith('reason')
+    })
+  })
+
+  describe('toggleFavourite', () => {
+    it('sets isFavourite to true when not yet set', () => {
+      const ws = makeWorkspace({ metadata: {} })
+      const deps = makeHandleDeps()
+      const store = createWorkspaceStore(ws, deps)
+
+      store.getState().toggleFavourite()
+
+      expect(store.getState().metadata.isFavourite).toBe('true')
+      expect(deps.syncToDaemon).toHaveBeenCalledWith('toggleFavourite')
+    })
+
+    it('removes isFavourite when already set to true', () => {
+      const ws = makeWorkspace({ metadata: { isFavourite: 'true' } })
+      const deps = makeHandleDeps()
+      const store = createWorkspaceStore(ws, deps)
+
+      store.getState().toggleFavourite()
+
+      expect(store.getState().metadata.isFavourite).toBeUndefined()
+      expect(deps.syncToDaemon).toHaveBeenCalledWith('toggleFavourite')
+    })
+
+    it('round-trips: set → unset → set', () => {
+      const ws = makeWorkspace({ metadata: {} })
+      const deps = makeHandleDeps()
+      const store = createWorkspaceStore(ws, deps)
+
+      store.getState().toggleFavourite()
+      expect(store.getState().metadata.isFavourite).toBe('true')
+
+      store.getState().toggleFavourite()
+      expect(store.getState().metadata.isFavourite).toBeUndefined()
+
+      store.getState().toggleFavourite()
+      expect(store.getState().metadata.isFavourite).toBe('true')
+    })
+  })
+
   // TODO: Collection-level tests (addWorkspace, addChildWorkspace, removeWorkspace,
   // adoptExistingWorktree, createWorktreeFromBranch, createWorktreeFromRemote,
   // removeWorkspaceKeep*, onWorkspaceRemoved, mergeAndRemoveWorkspace,
