@@ -144,7 +144,7 @@ describe('LoadedWorkspaceTreeItem — favourite feature', () => {
     expect(onToggleFavourite).toHaveBeenCalledWith('ws-1')
   })
 
-  it('renders star icon in actions when favourited', () => {
+  it('renders star icon when favourited', () => {
     const { store } = makeWorkspaceStore({ isFavourite: 'true' })
     const { container } = renderTreeItem(store)
 

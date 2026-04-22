@@ -4,9 +4,11 @@ import { Monitor, Loader2, AlertCircle, GitBranch, Folder, PanelLeftClose, Panel
 import { useActivityStateStore } from '../store/activityState'
 import { useAppStore } from '../store/app'
 import { ActivityState } from '../types'
-import type { ReviewState, WorkspaceStore } from '../types'
+import type { WorkspaceStore } from '../types'
 import { useSessionNamesStore } from '../store/sessionNames'
-import SessionPanel, { CollapsedSessionPanel, LoadedWorkspaceTreeItem } from './SessionPanel'
+import SessionPanel, { CollapsedSessionPanel } from './SessionPanel'
+import { useContextMenuStore } from '../store/contextMenu'
+import ContextMenu from './ContextMenu'
 import { ActivityIndicator } from './ActivityIndicator'
 import { useNavigationStore } from '../store/navigation'
 import { useStore } from 'zustand'
@@ -30,7 +32,7 @@ export function WorkspaceIcon({ tabIds, loadStatus, isWorktree }: {
   return isWorktree ? <GitBranch size={16} /> : <Folder size={16} />
 }
 
-function FavouriteRow({
+function FavouriteWorkspaceItem({
   sessionId,
   sessionStore,
   workspaceId,
@@ -44,59 +46,55 @@ function FavouriteRow({
   data: import('../types').Workspace
 }): React.JSX.Element | null {
   const isFavourite = useStore(workspaceStore, s => s.metadata.isFavourite === 'true')
+  const displayName = useStore(workspaceStore, s => s.metadata.displayName || data.name)
+  const appStates = useStore(workspaceStore, s => s.appStates)
   const { activeView, setActiveView } = useNavigationStore()
   const setActiveWorkspace = useStore(sessionStore, s => s.setActiveWorkspace)
   const activeWorkspaceId = useStore(sessionStore, s => s.activeWorkspaceId)
   const isActiveSession = activeView?.type === 'workspace' && activeView.sessionId === sessionId
   const isActive = isActiveSession && activeWorkspaceId === workspaceId
 
+  const openContextMenu = useContextMenuStore(s => s.open)
+  const activeMenuId = useContextMenuStore(s => s.activeMenuId)
+  const menuPosition = useContextMenuStore(s => s.position)
+  const menuId = `fav-context-${workspaceId}`
+
   if (!isFavourite) return null
 
-  const handleClick = (id: string) => {
-    setActiveWorkspace(id)
-    setActiveView({ type: 'workspace', workspaceId: id, sessionId })
+  const handleClick = () => {
+    setActiveWorkspace(workspaceId)
+    setActiveView({ type: 'workspace', workspaceId, sessionId })
   }
 
-  const handleRemove = (id: string) => {
-    const ws = workspaceStore.getState().workspace
-    if (ws.isWorktree && ws.parentId) {
-      setActiveWorkspace(id)
-      workspaceStore.getState().openOrFocusTab<ReviewState>('review', { parentWorkspaceId: ws.parentId })
-      return
-    }
-    const message = `Remove workspace "${ws.name}"?`
-    if (confirm(message)) {
-      void workspaceStore.getState().remove()
-    }
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    openContextMenu(menuId, e.clientX, e.clientY)
   }
 
   return (
-    <LoadedWorkspaceTreeItem
-      key={workspaceId}
-      id={workspaceId}
-      store={workspaceStore}
-      data={data}
-      depth={0}
-      isActive={isActive}
-      isFocused={false}
-      isExpanded={false}
-      onToggleExpand={() => { /* no-op: favourites list is flat */ }}
-      onClick={handleClick}
-      onQuickFork={() => { void workspaceStore.getState().quickForkWorkspace() }}
-      onCreateChild={() => { /* no-op: use session tree for branch operations */ }}
-      onRemove={handleRemove}
-      onDismiss={() => { /* no-op: unloaded workspaces don't appear as favourites */ }}
-      onOpenSettings={() => { workspaceStore.getState().addTab('workspace-settings') }}
-      onToggleFavourite={() => { workspaceStore.getState().toggleFavourite() }}
-      children={[]}
-      renderChild={() => null}
-      isDragging={false}
-      dragOverPosition={null}
-      onDragStart={() => { /* no-op */ }}
-      onDragOver={() => { /* no-op */ }}
-      onDrop={() => { /* no-op */ }}
-      onDragEnd={() => { /* no-op */ }}
-    />
+    <div className="favourite-workspace-item-wrapper">
+      <div
+        className={`tree-item${isActive ? ' active' : ''}`}
+        style={{ paddingLeft: 4 }}
+        onClick={handleClick}
+        onContextMenu={handleContextMenu}
+        title={data.path}
+      >
+        <span className="tree-item-icon">
+          <WorkspaceIcon tabIds={Object.keys(appStates)} isWorktree={data.isWorktree} />
+        </span>
+        <span className="tree-item-name">{displayName}</span>
+      </div>
+      <ContextMenu menuId={menuId} activeMenuId={activeMenuId} position={menuPosition}>
+        <div className="context-menu-item" onClick={() => { workspaceStore.getState().addTab('workspace-settings'); useContextMenuStore.getState().close() }}>
+          Settings
+        </div>
+        <div className="context-menu-item" onClick={() => { workspaceStore.getState().toggleFavourite(); useContextMenuStore.getState().close() }}>
+          Unmark as Favourite
+        </div>
+      </ContextMenu>
+    </div>
   )
 }
 
@@ -116,7 +114,7 @@ function SessionFavouriteRows({
           return null
         }
         return (
-          <FavouriteRow
+          <FavouriteWorkspaceItem
             key={workspaceId}
             sessionId={sessionId}
             sessionStore={sessionStore}

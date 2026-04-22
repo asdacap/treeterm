@@ -112,8 +112,9 @@ body,
 }
 
 .favourites-panel {
-  border-bottom: 1px solid var(--border-color);
-  padding-bottom: 4px;
+  border-bottom: 2px solid var(--border-color);
+  padding-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .favourites-panel:not(:has(.tree-item)) {
@@ -476,11 +477,17 @@ body,
   display: flex;
 }
 
-.tree-item-favourite-icon {
-  color: var(--accent-favourite, #f5c84a);
+.tree-item-favourite {
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+}
+
+.tree-item-favourite-icon {
+  color: var(--accent-favourite, #f5c84a);
 }
 
 .tree-item-action {

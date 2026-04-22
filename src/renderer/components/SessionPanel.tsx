@@ -712,8 +712,10 @@ function TreeItemView({
         <span className="tree-item-name">
           {displayName}
         </span>
-        <span className="tree-item-actions">
+        <span className="tree-item-favourite">
           {isFavourite && <Star size={14} fill="currentColor" className="tree-item-favourite-icon" />}
+        </span>
+        <span className="tree-item-actions">
           {ws?.isGitRepo && (
             <button
               className="tree-item-action"
