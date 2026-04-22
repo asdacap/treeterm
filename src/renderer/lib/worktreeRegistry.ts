@@ -112,9 +112,18 @@ export function createWorktreeRegistryApi(
   exec: ExecApi,
   connectionId: string,
 ): WorktreeRegistryApi {
+  // Serialize all registry ops through a single promise chain. The registry is a single
+  // shared JSON file and read-modify-write is not atomic — concurrent upserts race,
+  // leaving the tail of a longer prior write when a shorter write lands at offset 0.
+  let queue: Promise<unknown> = Promise.resolve()
+  const enqueue = <T>(op: () => Promise<T>): Promise<T> => {
+    const run = queue.then(op, op)
+    queue = run.then(() => undefined, () => undefined)
+    return run
+  }
   return {
-    list: () => loadRegistry(fs, exec, connectionId),
-    upsert: (entry) => upsertRegistryEntry(fs, exec, connectionId, entry),
-    remove: (path) => removeRegistryEntry(fs, exec, connectionId, path),
+    list: () => enqueue(() => loadRegistry(fs, exec, connectionId)),
+    upsert: (entry) => enqueue(() => upsertRegistryEntry(fs, exec, connectionId, entry)),
+    remove: (path) => enqueue(() => removeRegistryEntry(fs, exec, connectionId, path)),
   }
 }

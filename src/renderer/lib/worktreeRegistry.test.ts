@@ -232,5 +232,29 @@ describe('worktreeRegistry', () => {
       await api.upsert({ path: '/wt/a', branch: 'a', displayName: null, description: null })
       expect(fs.writeFile).toHaveBeenCalled()
     })
+
+    it('serializes concurrent upserts so later calls observe earlier writes', async () => {
+      // Simulate the racy read-modify-write: each loadRegistry reflects whatever the
+      // last writeFile wrote. Without serialization, two parallel upserts both read
+      // the empty baseline and the second write drops the first entry.
+      let stored: string | null = null
+      vi.mocked(fs.readFile).mockImplementation(() => {
+        if (stored === null) return Promise.resolve({ success: false, error: 'No such file' })
+        return Promise.resolve({ success: true, file: { path: 'x', content: stored, size: 0, language: 'json' } })
+      })
+      vi.mocked(fs.writeFile).mockImplementation((_dir: string, _name: string, content: string) => {
+        stored = content
+        return Promise.resolve({ success: true })
+      })
+
+      const api = createWorktreeRegistryApi(fs, exec, 'conn-1')
+      await Promise.all([
+        api.upsert({ path: '/wt/a', branch: 'a', displayName: null, description: null }),
+        api.upsert({ path: '/wt/b', branch: 'b', displayName: null, description: null }),
+      ])
+
+      const entries = await api.list()
+      expect(entries.map(e => e.path).sort()).toEqual(['/wt/a', '/wt/b'])
+    })
   })
 })
