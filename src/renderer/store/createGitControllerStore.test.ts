@@ -28,9 +28,14 @@ function makeDeps(overrides: Partial<GitControllerDeps> = {}): GitControllerDeps
     refreshWorkspaceGitInfo: vi.fn().mockResolvedValue(undefined),
     getWorkspace: vi.fn().mockReturnValue(ws),
     initialWorkspace: ws,
-    isActiveWorkspace: vi.fn().mockReturnValue(true),
     ...overrides,
   }
+}
+
+async function flushRefresh(store: ReturnType<typeof createGitControllerStore>): Promise<void> {
+  const promise = store.getState().refreshDiffStatus()
+  vi.advanceTimersByTime(300)
+  await promise
 }
 
 describe('createGitControllerStore', () => {
@@ -46,9 +51,9 @@ describe('createGitControllerStore', () => {
     it('sets gitRefreshing true then false', async () => {
       const deps = makeDeps()
       const store = createGitControllerStore(deps)
-      store.getState().dispose()
 
       const promise = store.getState().refreshDiffStatus()
+      vi.advanceTimersByTime(300)
       expect(store.getState().gitRefreshing).toBe(true)
       await promise
       expect(store.getState().gitRefreshing).toBe(false)
@@ -58,9 +63,8 @@ describe('createGitControllerStore', () => {
       const deps = makeDeps()
       vi.mocked(deps.git.hasUncommittedChanges).mockResolvedValue(true)
       const store = createGitControllerStore(deps)
-      store.getState().dispose()
 
-      await store.getState().refreshDiffStatus()
+      await flushRefresh(store)
       expect(store.getState().hasUncommittedChanges).toBe(true)
     })
 
@@ -68,9 +72,8 @@ describe('createGitControllerStore', () => {
       const deps = makeDeps()
       vi.mocked(deps.git.hasUncommittedChanges).mockRejectedValue(new Error('gone'))
       const store = createGitControllerStore(deps)
-      store.getState().dispose()
 
-      await store.getState().refreshDiffStatus()
+      await flushRefresh(store)
       expect(store.getState().hasUncommittedChanges).toBe(false)
       expect(store.getState().gitRefreshing).toBe(false)
     })
@@ -85,9 +88,8 @@ describe('createGitControllerStore', () => {
       })
       vi.mocked(deps.git.getDiff).mockResolvedValue({ success: true, diff: { files: [], totalAdditions: 0, totalDeletions: 0, baseBranch: 'main', headBranch: 'feat' } })
       const store = createGitControllerStore(deps)
-      store.getState().dispose()
 
-      await store.getState().refreshDiffStatus()
+      await flushRefresh(store)
       expect(store.getState().isDiffCleanFromParent).toBe(true)
     })
 
@@ -101,9 +103,8 @@ describe('createGitControllerStore', () => {
       })
       vi.mocked(deps.git.getDiff).mockResolvedValue({ success: true, diff: { files: [{ path: 'a.ts', status: FileChangeStatus.Modified, additions: 1, deletions: 0 }], totalAdditions: 1, totalDeletions: 0, baseBranch: 'main', headBranch: 'feat' } })
       const store = createGitControllerStore(deps)
-      store.getState().dispose()
 
-      await store.getState().refreshDiffStatus()
+      await flushRefresh(store)
       expect(store.getState().isDiffCleanFromParent).toBe(false)
     })
 
@@ -118,9 +119,8 @@ describe('createGitControllerStore', () => {
       vi.mocked(deps.git.hasUncommittedChanges).mockResolvedValue(true)
       vi.mocked(deps.git.getDiff).mockResolvedValue({ success: true, diff: { files: [], totalAdditions: 0, totalDeletions: 0, baseBranch: 'main', headBranch: 'feat' } })
       const store = createGitControllerStore(deps)
-      store.getState().dispose()
 
-      await store.getState().refreshDiffStatus()
+      await flushRefresh(store)
       expect(store.getState().isDiffCleanFromParent).toBe(false)
     })
 
@@ -133,18 +133,16 @@ describe('createGitControllerStore', () => {
         lookupWorkspace: vi.fn().mockReturnValue(parentWs),
       })
       const store = createGitControllerStore(deps)
-      store.getState().dispose()
 
-      await store.getState().refreshDiffStatus()
+      await flushRefresh(store)
       expect(deps.refreshWorkspaceGitInfo).toHaveBeenCalledWith('parent')
     })
 
     it('skips diff check for non-worktree workspace', async () => {
       const deps = makeDeps()
       const store = createGitControllerStore(deps)
-      store.getState().dispose()
 
-      await store.getState().refreshDiffStatus()
+      await flushRefresh(store)
       expect(deps.git.getDiff).not.toHaveBeenCalled()
     })
 
@@ -157,9 +155,8 @@ describe('createGitControllerStore', () => {
         lookupWorkspace: vi.fn().mockReturnValue(parentWs),
       })
       const store = createGitControllerStore(deps)
-      store.getState().dispose()
 
-      await store.getState().refreshDiffStatus()
+      await flushRefresh(store)
       expect(deps.git.getDiff).not.toHaveBeenCalled()
     })
 
@@ -173,9 +170,8 @@ describe('createGitControllerStore', () => {
       })
       vi.mocked(deps.git.getDiff).mockResolvedValue({ success: false, error: 'diff failed' })
       const store = createGitControllerStore(deps)
-      store.getState().dispose()
 
-      await store.getState().refreshDiffStatus()
+      await flushRefresh(store)
       expect(store.getState().isDiffCleanFromParent).toBe(false)
     })
 
@@ -189,9 +185,8 @@ describe('createGitControllerStore', () => {
       })
       vi.mocked(deps.git.checkMergeConflicts).mockResolvedValue({ success: true, conflicts: { hasConflicts: true, conflictedFiles: ['a.ts'], messages: ['conflict'] } })
       const store = createGitControllerStore(deps)
-      store.getState().dispose()
 
-      await store.getState().refreshDiffStatus()
+      await flushRefresh(store)
       expect(store.getState().hasConflictsWithParent).toBe(true)
     })
 
@@ -205,9 +200,8 @@ describe('createGitControllerStore', () => {
       })
       vi.mocked(deps.git.checkMergeConflicts).mockResolvedValue({ success: false, error: 'check failed' })
       const store = createGitControllerStore(deps)
-      store.getState().dispose()
 
-      await store.getState().refreshDiffStatus()
+      await flushRefresh(store)
       expect(store.getState().hasConflictsWithParent).toBe(false)
     })
 
@@ -220,10 +214,53 @@ describe('createGitControllerStore', () => {
         lookupWorkspace: vi.fn().mockReturnValue(parentWs),
       })
       const store = createGitControllerStore(deps)
+
+      await flushRefresh(store)
+      expect(deps.git.checkMergeConflicts).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('debounce', () => {
+    it('rapid calls within debounce window collapse to one daemon call', async () => {
+      const deps = makeDeps()
+      const store = createGitControllerStore(deps)
+
+      const p1 = store.getState().refreshDiffStatus()
+      const p2 = store.getState().refreshDiffStatus()
+      const p3 = store.getState().refreshDiffStatus()
+      vi.advanceTimersByTime(300)
+      await Promise.all([p1, p2, p3])
+      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
+
+      store.getState().dispose()
+    })
+
+    it('calls separated by more than 300ms each fire once', async () => {
+      const deps = makeDeps()
+      const store = createGitControllerStore(deps)
+
+      const p1 = store.getState().refreshDiffStatus()
+      vi.advanceTimersByTime(300)
+      await p1
+      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
+
+      const p2 = store.getState().refreshDiffStatus()
+      vi.advanceTimersByTime(300)
+      await p2
+      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(2)
+
+      store.getState().dispose()
+    })
+
+    it('dispose cancels a pending debounced call', () => {
+      const deps = makeDeps()
+      const store = createGitControllerStore(deps)
+
+      void store.getState().refreshDiffStatus()
       store.getState().dispose()
 
-      await store.getState().refreshDiffStatus()
-      expect(deps.git.checkMergeConflicts).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(300)
+      expect(deps.git.hasUncommittedChanges).not.toHaveBeenCalled()
     })
   })
 
@@ -477,7 +514,7 @@ describe('createGitControllerStore', () => {
       expect(deps.git.hasUncommittedChanges).not.toHaveBeenCalled()
     })
 
-    it('calls refreshDiffStatus immediately for git repo', () => {
+    it('calls refreshDiffStatus immediately on startPolling without debounce', () => {
       const deps = makeDeps()
       const store = createGitControllerStore(deps)
 
@@ -486,32 +523,16 @@ describe('createGitControllerStore', () => {
       store.getState().dispose()
     })
 
-    it('polls refreshDiffStatus every 10 seconds', () => {
+    it('dispose cancels a pending debounced refreshDiffStatus', () => {
       const deps = makeDeps()
       const store = createGitControllerStore(deps)
-
       store.getState().startPolling()
-      // Initial call
-      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
-
-      vi.advanceTimersByTime(10_000)
-      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(2)
-
-      vi.advanceTimersByTime(10_000)
-      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(3)
-
-      store.getState().dispose()
-    })
-
-    it('dispose stops polling', () => {
-      const deps = makeDeps()
-      const store = createGitControllerStore(deps)
-
-      store.getState().startPolling()
-      store.getState().dispose()
-
       vi.mocked(deps.git.hasUncommittedChanges).mockClear()
-      vi.advanceTimersByTime(30_000)
+
+      void store.getState().refreshDiffStatus()
+      store.getState().dispose()
+
+      vi.advanceTimersByTime(300)
       expect(deps.git.hasUncommittedChanges).not.toHaveBeenCalled()
     })
 
@@ -538,48 +559,17 @@ describe('createGitControllerStore', () => {
       expect(deps.github.getPrInfo).toHaveBeenCalled()
       store.getState().dispose()
     })
-
-    it('skips refreshDiffStatus on interval tick when workspace is not active', () => {
-      const deps = makeDeps({ isActiveWorkspace: vi.fn().mockReturnValue(false) })
-      const store = createGitControllerStore(deps)
-
-      store.getState().startPolling()
-      // Initial call still happens (from startGitController's void refreshDiffStatus())
-      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
-
-      vi.advanceTimersByTime(10_000)
-      // Interval tick skipped because workspace is not active
-      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
-
-      store.getState().dispose()
-    })
-
-    it('resumes refreshDiffStatus on interval tick when workspace becomes active', () => {
-      const isActive = vi.fn().mockReturnValue(false)
-      const deps = makeDeps({ isActiveWorkspace: isActive })
-      const store = createGitControllerStore(deps)
-
-      store.getState().startPolling()
-      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
-
-      vi.advanceTimersByTime(10_000)
-      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
-
-      isActive.mockReturnValue(true)
-      vi.advanceTimersByTime(10_000)
-      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(2)
-
-      store.getState().dispose()
-    })
   })
 
   describe('triggerRefresh', () => {
-    it('calls refreshDiffStatus immediately', () => {
+    it('calls refreshDiffStatus after debounce window', () => {
       const deps = makeDeps()
       const store = createGitControllerStore(deps)
       store.getState().dispose()
 
       store.getState().triggerRefresh()
+      expect(deps.git.hasUncommittedChanges).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(300)
       expect(deps.git.hasUncommittedChanges).toHaveBeenCalled()
     })
   })

@@ -50,7 +50,6 @@ function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStore
       upsert: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
       remove: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
     },
-    getActiveWorkspaceId: vi.fn<() => string | undefined>().mockReturnValue('ws-1'),
     ...overrides,
   }
 }

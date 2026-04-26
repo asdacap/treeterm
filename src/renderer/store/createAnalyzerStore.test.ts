@@ -872,6 +872,53 @@ describe('createAnalyzerStore', () => {
     })
   })
 
+  describe('git refresh on AI state change', () => {
+    it('triggers refreshGitInfo and refreshDiffStatus when state becomes Idle', async () => {
+      const store = createAnalyzerStore('tab-1', deps)
+      store.setState({ aiState: ActivityState.Working })
+      store.setState({ aiState: ActivityState.Idle })
+      await new Promise(r => setTimeout(r, 0))
+      expect(deps.refreshGitInfo).toHaveBeenCalled()
+      expect(deps.refreshDiffStatus).toHaveBeenCalled()
+    })
+
+    it('triggers refreshGitInfo and refreshDiffStatus when state becomes Completed', async () => {
+      const store = createAnalyzerStore('tab-1', deps)
+      store.setState({ aiState: ActivityState.Working })
+      store.setState({ aiState: ActivityState.Completed })
+      await new Promise(r => setTimeout(r, 0))
+      expect(deps.refreshGitInfo).toHaveBeenCalled()
+      expect(deps.refreshDiffStatus).toHaveBeenCalled()
+    })
+
+    it('does not trigger git refresh when state becomes Error', async () => {
+      const store = createAnalyzerStore('tab-1', deps)
+      store.setState({ aiState: ActivityState.Working })
+      store.setState({ aiState: ActivityState.Error })
+      await new Promise(r => setTimeout(r, 0))
+      expect(deps.refreshGitInfo).not.toHaveBeenCalled()
+      expect(deps.refreshDiffStatus).not.toHaveBeenCalled()
+    })
+
+    it('does not trigger git refresh when state becomes UserInputRequired', async () => {
+      const store = createAnalyzerStore('tab-1', deps)
+      store.setState({ aiState: ActivityState.Working })
+      store.setState({ aiState: ActivityState.UserInputRequired })
+      await new Promise(r => setTimeout(r, 0))
+      expect(deps.refreshGitInfo).not.toHaveBeenCalled()
+      expect(deps.refreshDiffStatus).not.toHaveBeenCalled()
+    })
+
+    it('does not trigger git refresh when state becomes Working', async () => {
+      const store = createAnalyzerStore('tab-1', deps)
+      store.setState({ aiState: ActivityState.Idle })
+      store.setState({ aiState: ActivityState.Working })
+      await new Promise(r => setTimeout(r, 0))
+      expect(deps.refreshGitInfo).not.toHaveBeenCalled()
+      expect(deps.refreshDiffStatus).not.toHaveBeenCalled()
+    })
+  })
+
   it('stops polling on TTY exit', async () => {
     vi.useFakeTimers()
     const mock = makeMockTty()

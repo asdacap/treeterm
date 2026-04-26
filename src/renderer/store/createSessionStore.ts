@@ -442,7 +442,6 @@ export function createSessionStore(
       },
       github: deps.github,
       worktreeRegistry: deps.worktreeRegistry,
-      getActiveWorkspaceId: () => store.getState().activeWorkspaceId,
     }
   }
 
