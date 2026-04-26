@@ -673,22 +673,28 @@ function GitStatusButton({ workspace }: GitStatusButtonProps) {
   let statusClass: string
   let title: string
 
+  let label: string
+
   if (gitRefreshing) {
     icon = <Loader2 size={14} className="spinning" />
     statusClass = ''
     title = 'Checking git status...'
+    label = 'Checking...'
   } else if (hasConflictsWithParent) {
     icon = <AlertTriangle size={14} />
     statusClass = 'workspace-action-btn-git-conflict'
     title = 'Merge conflicts with parent'
+    label = 'Conflicts'
   } else if (hasUncommittedChanges) {
     icon = <CircleDot size={14} />
     statusClass = 'workspace-action-btn-git-dirty'
     title = 'Uncommitted changes'
+    label = 'Uncommitted'
   } else {
     icon = <Check size={14} />
     statusClass = 'workspace-action-btn-git-clean'
     title = 'Working tree clean'
+    label = 'Clean'
   }
 
   return (
@@ -699,6 +705,7 @@ function GitStatusButton({ workspace }: GitStatusButtonProps) {
       title={title}
     >
       {icon}
+      <span>{label}</span>
     </button>
   )
 }
@@ -754,6 +761,15 @@ function GitHubButton({ workspace }: GitHubButtonProps) {
     title = 'Open GitHub PR'
   }
 
+  let buttonLabel: string
+  if (hasUnresolved) {
+    buttonLabel = `Address ${String(unresolvedCount)} comment${unresolvedCount === 1 ? '' : 's'}`
+  } else if (hasPr) {
+    buttonLabel = 'Open PR'
+  } else {
+    buttonLabel = 'Create PR'
+  }
+
   return (
     <button
       className={className}
@@ -763,7 +779,7 @@ function GitHubButton({ workspace }: GitHubButtonProps) {
     >
       {/* eslint-disable-next-line @typescript-eslint/no-deprecated */}
       <Github size={14} />
-      {hasUnresolved && <span className="github-comment-count">Address {String(unresolvedCount)} comment{unresolvedCount === 1 ? '' : 's'}</span>}
+      <span>{buttonLabel}</span>
     </button>
   )
 }
@@ -799,7 +815,7 @@ function GitPullButton({ workspace }: GitPullButtonProps) {
         title={`Pull ${String(behindCount)} commit${behindCount > 1 ? 's' : ''} from remote`}
       >
         {pullLoading ? <Loader2 size={14} className="spinning" /> : <ArrowDownToLine size={14} />}
-        <span className="pull-count">{String(behindCount)}</span>
+        <span>Pull <span className="pull-count">{String(behindCount)}</span></span>
       </button>
     )
   }
@@ -811,6 +827,7 @@ function GitPullButton({ workspace }: GitPullButtonProps) {
       title="Check for remote updates"
     >
       <RefreshCw size={14} />
+      <span>Sync</span>
     </button>
   )
 }

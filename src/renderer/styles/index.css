@@ -838,6 +838,7 @@ body,
   transition: background 0.15s, border-color 0.15s;
   display: flex;
   align-items: center;
+  gap: 4px;
   line-height: 14px;
 }
 
@@ -933,10 +934,6 @@ body,
   color: #cf3536;
 }
 
-.github-comment-count {
-  margin-left: 4px;
-  font-size: 11px;
-}
 
 /* Tab Bar */
 .tab-bar {
