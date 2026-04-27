@@ -29,8 +29,12 @@ export interface GitControllerState {
 export type GitController = StoreApi<GitControllerState>
 
 export function createGitControllerStore(deps: GitControllerDeps): GitController {
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null
-  let pendingResolvers: (() => void)[] = []
+  const COOLDOWN_MS = 3000
+  let inFlight = false
+  let lastRunStartTime = -Infinity
+  let cooldownTimer: ReturnType<typeof setTimeout> | null = null
+  let activeResolvers: (() => void)[] = []
+  let queuedResolvers: (() => void)[] = []
 
   async function runRefreshGit(): Promise<void> {
     store.setState({ gitRefreshing: true })
@@ -90,20 +94,44 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
       } catch { /* ignore — network/auth issues */ }
     } finally {
       store.setState({ gitRefreshing: false })
-      const resolvers = pendingResolvers
-      pendingResolvers = []
+      inFlight = false
+      const resolvers = activeResolvers
+      activeResolvers = []
       for (const resolve of resolvers) resolve()
+      if (queuedResolvers.length > 0) scheduleQueuedRun()
     }
+  }
+
+  function startRun(): void {
+    if (cooldownTimer !== null) {
+      clearTimeout(cooldownTimer)
+      cooldownTimer = null
+    }
+    lastRunStartTime = Date.now()
+    inFlight = true
+    activeResolvers = queuedResolvers
+    queuedResolvers = []
+    void runRefreshGit()
+  }
+
+  function scheduleQueuedRun(): void {
+    if (cooldownTimer !== null) return
+    const wait = Math.max(0, COOLDOWN_MS - (Date.now() - lastRunStartTime))
+    cooldownTimer = setTimeout(() => {
+      cooldownTimer = null
+      if (!inFlight && queuedResolvers.length > 0) startRun()
+    }, wait)
   }
 
   function refreshGit(): Promise<void> {
     return new Promise<void>((resolve) => {
-      pendingResolvers.push(resolve)
-      if (debounceTimer !== null) clearTimeout(debounceTimer)
-      debounceTimer = setTimeout(() => {
-        debounceTimer = null
-        void runRefreshGit()
-      }, 3000)
+      queuedResolvers.push(resolve)
+      if (inFlight) return
+      if (Date.now() - lastRunStartTime >= COOLDOWN_MS) {
+        startRun()
+      } else {
+        scheduleQueuedRun()
+      }
     })
   }
 
@@ -153,11 +181,11 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
     },
 
     dispose: (): void => {
-      if (debounceTimer !== null) {
-        clearTimeout(debounceTimer)
-        debounceTimer = null
+      if (cooldownTimer !== null) {
+        clearTimeout(cooldownTimer)
+        cooldownTimer = null
       }
-      pendingResolvers = []
+      queuedResolvers = []
     },
   }))
 

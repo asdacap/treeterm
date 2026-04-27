@@ -1,7 +1,7 @@
 /* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import React, { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 
-import { ChevronDown, Github, Loader2, ArrowDownToLine, RefreshCw, AlertTriangle, CircleDot, Check, X, ExternalLink } from 'lucide-react'
+import { ChevronDown, Github, Loader2, ArrowDownToLine, AlertTriangle, CircleDot, Check, X, ExternalLink } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { SessionState } from '../store/createSessionStore'
@@ -812,12 +812,7 @@ function GitPullButton({ workspace }: GitPullButtonProps) {
   const gitController = useStore(workspace, s => s.gitController)
   const behindCount = useStore(gitController, s => s.behindCount)
   const pullLoading = useStore(gitController, s => s.pullLoading)
-  const refreshGit = useStore(gitController, s => s.refreshGit)
   const pullFromRemote = useStore(gitController, s => s.pullFromRemote)
-
-  const handleRefresh = () => {
-    void refreshGit()
-  }
 
   const handlePull = async () => {
     const result = await pullFromRemote()
@@ -826,28 +821,17 @@ function GitPullButton({ workspace }: GitPullButtonProps) {
     }
   }
 
-  if (behindCount > 0) {
-    return (
-      <button
-        className="workspace-action-btn workspace-action-btn-pull"
-        onClick={() => { void handlePull() }}
-        disabled={pullLoading}
-        title={`Pull ${String(behindCount)} commit${behindCount > 1 ? 's' : ''} from remote`}
-      >
-        {pullLoading ? <Loader2 size={14} className="spinning" /> : <ArrowDownToLine size={14} />}
-        <span>Pull <span className="pull-count">{String(behindCount)}</span></span>
-      </button>
-    )
-  }
+  if (behindCount === 0) return null
 
   return (
     <button
-      className="workspace-action-btn"
-      onClick={handleRefresh}
-      title="Check for remote updates"
+      className="workspace-action-btn workspace-action-btn-pull"
+      onClick={() => { void handlePull() }}
+      disabled={pullLoading}
+      title={`Pull ${String(behindCount)} commit${behindCount > 1 ? 's' : ''} from remote`}
     >
-      <RefreshCw size={14} />
-      <span>Sync</span>
+      {pullLoading ? <Loader2 size={14} className="spinning" /> : <ArrowDownToLine size={14} />}
+      <span>Pull <span className="pull-count">{String(behindCount)}</span></span>
     </button>
   )
 }
