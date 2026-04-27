@@ -172,18 +172,25 @@ describe('LoadedWorkspaceTreeItem — PR number', () => {
     useContextMenuStore.getState().close()
   })
 
-  it('renders the PR number before the workspace name when prInfo is set', () => {
-    const prInfo: GitHubPrInfo = {
+  function makePrInfo(
+    state: GitHubPrInfo['state'],
+    overrides: Partial<GitHubPrInfo> = {},
+  ): GitHubPrInfo {
+    return {
       number: 1234,
       url: 'https://github.com/x/y/pull/1234',
       title: 'My PR',
-      state: 'OPEN',
+      state,
       reviews: [],
       checkRuns: [],
       unresolvedThreads: [],
       unresolvedCount: 0,
+      ...overrides,
     }
-    const { store } = makeWorkspaceStore({}, {}, prInfo)
+  }
+
+  it('renders the PR number before the workspace name when prInfo is set', () => {
+    const { store } = makeWorkspaceStore({}, {}, makePrInfo('OPEN'))
     const { container } = renderTreeItem(store)
 
     const prSpan = container.querySelector('.tree-item-pr-number')
@@ -192,11 +199,123 @@ describe('LoadedWorkspaceTreeItem — PR number', () => {
     expect(screen.getByText('My WS')).toBeDefined()
   })
 
+  it('applies the open state class for OPEN PRs', () => {
+    const { store } = makeWorkspaceStore({}, {}, makePrInfo('OPEN'))
+    const { container } = renderTreeItem(store)
+
+    const prSpan = container.querySelector('.tree-item-pr-number')
+    expect(prSpan?.classList.contains('tree-item-pr-number--open')).toBe(true)
+  })
+
+  it('applies the closed state class for CLOSED PRs', () => {
+    const { store } = makeWorkspaceStore({}, {}, makePrInfo('CLOSED'))
+    const { container } = renderTreeItem(store)
+
+    const prSpan = container.querySelector('.tree-item-pr-number')
+    expect(prSpan?.classList.contains('tree-item-pr-number--closed')).toBe(true)
+  })
+
+  it('applies the merged state class for MERGED PRs', () => {
+    const { store } = makeWorkspaceStore({}, {}, makePrInfo('MERGED'))
+    const { container } = renderTreeItem(store)
+
+    const prSpan = container.querySelector('.tree-item-pr-number')
+    expect(prSpan?.classList.contains('tree-item-pr-number--merged')).toBe(true)
+  })
+
   it('does not render the PR number element when prInfo is null', () => {
     const { store } = makeWorkspaceStore({}, {}, null)
     const { container } = renderTreeItem(store)
 
     const prSpan = container.querySelector('.tree-item-pr-number')
     expect(prSpan).toBeNull()
+  })
+
+  it('renders the CI failure icon when any check run has failed', () => {
+    const prInfo = makePrInfo('OPEN', {
+      checkRuns: [
+        { name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' },
+        { name: 'test', status: 'COMPLETED', conclusion: 'FAILURE' },
+      ],
+    })
+    const { store } = makeWorkspaceStore({}, {}, prInfo)
+    const { container } = renderTreeItem(store)
+
+    expect(container.querySelector('.tree-item-pr-signal--ci-failure')).not.toBeNull()
+  })
+
+  it('renders the CI running icon when any check is in progress and none have failed', () => {
+    const prInfo = makePrInfo('OPEN', {
+      checkRuns: [
+        { name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' },
+        { name: 'test', status: 'IN_PROGRESS', conclusion: null },
+      ],
+    })
+    const { store } = makeWorkspaceStore({}, {}, prInfo)
+    const { container } = renderTreeItem(store)
+
+    expect(container.querySelector('.tree-item-pr-signal--ci-running')).not.toBeNull()
+    expect(container.querySelector('.tree-item-pr-signal--ci-failure')).toBeNull()
+  })
+
+  it('prefers the failure icon over running when both failure and in-progress checks exist', () => {
+    const prInfo = makePrInfo('OPEN', {
+      checkRuns: [
+        { name: 'lint', status: 'IN_PROGRESS', conclusion: null },
+        { name: 'test', status: 'COMPLETED', conclusion: 'FAILURE' },
+      ],
+    })
+    const { store } = makeWorkspaceStore({}, {}, prInfo)
+    const { container } = renderTreeItem(store)
+
+    expect(container.querySelector('.tree-item-pr-signal--ci-failure')).not.toBeNull()
+    expect(container.querySelector('.tree-item-pr-signal--ci-running')).toBeNull()
+  })
+
+  it('renders the ready-to-merge icon for an open PR with passing checks, an approval, and no unresolved threads', () => {
+    const prInfo = makePrInfo('OPEN', {
+      checkRuns: [{ name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+      reviews: [{ author: 'reviewer', state: 'APPROVED' }],
+    })
+    const { store } = makeWorkspaceStore({}, {}, prInfo)
+    const { container } = renderTreeItem(store)
+
+    expect(container.querySelector('.tree-item-pr-signal--ready')).not.toBeNull()
+  })
+
+  it('does not render the ready-to-merge icon when there are unresolved threads', () => {
+    const prInfo = makePrInfo('OPEN', {
+      checkRuns: [{ name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+      reviews: [{ author: 'reviewer', state: 'APPROVED' }],
+      unresolvedCount: 2,
+    })
+    const { store } = makeWorkspaceStore({}, {}, prInfo)
+    const { container } = renderTreeItem(store)
+
+    expect(container.querySelector('.tree-item-pr-signal--ready')).toBeNull()
+  })
+
+  it('does not render the ready-to-merge icon when a review requested changes', () => {
+    const prInfo = makePrInfo('OPEN', {
+      checkRuns: [{ name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+      reviews: [
+        { author: 'a', state: 'APPROVED' },
+        { author: 'b', state: 'CHANGES_REQUESTED' },
+      ],
+    })
+    const { store } = makeWorkspaceStore({}, {}, prInfo)
+    const { container } = renderTreeItem(store)
+
+    expect(container.querySelector('.tree-item-pr-signal--ready')).toBeNull()
+  })
+
+  it('does not render any signal icon when checks pass but the PR has no approving review', () => {
+    const prInfo = makePrInfo('OPEN', {
+      checkRuns: [{ name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+    })
+    const { store } = makeWorkspaceStore({}, {}, prInfo)
+    const { container } = renderTreeItem(store)
+
+    expect(container.querySelector('.tree-item-pr-signal')).toBeNull()
   })
 })

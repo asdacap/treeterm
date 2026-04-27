@@ -391,9 +391,39 @@ body,
 
 .tree-item-pr-number {
   font-size: 12px;
+  font-weight: 600;
   color: var(--text-secondary);
   flex-shrink: 0;
   margin-right: 4px;
+}
+
+.tree-item-pr-number--open {
+  color: #238636;
+}
+
+.tree-item-pr-number--closed {
+  color: #b62324;
+}
+
+.tree-item-pr-number--merged {
+  color: #8250df;
+}
+
+.tree-item-pr-signal {
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
+.tree-item-pr-signal--ci-failure {
+  color: #b62324;
+}
+
+.tree-item-pr-signal--ci-running {
+  color: #d29922;
+}
+
+.tree-item-pr-signal--ready {
+  color: #238636;
 }
 
 .tree-item-name-input {
