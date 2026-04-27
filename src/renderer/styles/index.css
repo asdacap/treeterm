@@ -414,6 +414,10 @@ body,
   margin-right: 4px;
 }
 
+.tree-item-pr-signal--merge-conflict {
+  color: #d29922;
+}
+
 .tree-item-pr-signal--ci-failure {
   color: #b62324;
 }

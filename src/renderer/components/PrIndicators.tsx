@@ -1,12 +1,13 @@
 /* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import React from 'react'
-import { Loader2, XCircle, CheckCircle2 } from 'lucide-react'
+import { Loader2, XCircle, CheckCircle2, AlertTriangle } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { GitController } from '../store/createGitControllerStore'
 import type { GitHubPrInfo } from '../types'
 
 export enum PrSignal {
   None = 'none',
+  MergeConflict = 'merge-conflict',
   CiFailure = 'ci-failure',
   CiRunning = 'ci-running',
   ReadyToMerge = 'ready-to-merge',
@@ -20,12 +21,14 @@ export const PR_STATE_CLASS: Record<GitHubPrInfo['state'], string> = {
 
 const PR_SIGNAL_ICON: Record<PrSignal, () => React.JSX.Element | null> = {
   [PrSignal.None]: () => null,
+  [PrSignal.MergeConflict]: () => <AlertTriangle size={12} className="tree-item-pr-signal tree-item-pr-signal--merge-conflict" />,
   [PrSignal.CiFailure]: () => <XCircle size={12} className="tree-item-pr-signal tree-item-pr-signal--ci-failure" />,
   [PrSignal.CiRunning]: () => <Loader2 size={12} className="tree-item-pr-signal tree-item-pr-signal--ci-running spinning" />,
   [PrSignal.ReadyToMerge]: () => <CheckCircle2 size={12} className="tree-item-pr-signal tree-item-pr-signal--ready" />,
 }
 
-export function getPrSignal(prInfo: GitHubPrInfo | null | undefined): PrSignal {
+export function getPrSignal(prInfo: GitHubPrInfo | null | undefined, hasConflictsWithParent: boolean): PrSignal {
+  if (hasConflictsWithParent) return PrSignal.MergeConflict
   if (!prInfo) return PrSignal.None
   if (prInfo.checkRuns.some(c => c.status === 'COMPLETED' && c.conclusion === 'FAILURE')) {
     return PrSignal.CiFailure
@@ -45,7 +48,7 @@ export function getPrSignal(prInfo: GitHubPrInfo | null | undefined): PrSignal {
 export function PrIndicators({ gitController }: { gitController: GitController }): React.JSX.Element {
   const prNumber = useStore(gitController, s => s.prInfo?.number)
   const prState = useStore(gitController, s => s.prInfo?.state)
-  const prSignal = useStore(gitController, s => getPrSignal(s.prInfo))
+  const prSignal = useStore(gitController, s => getPrSignal(s.prInfo, s.hasConflictsWithParent))
   return (
     <>
       {prNumber !== undefined && (
