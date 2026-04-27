@@ -33,9 +33,7 @@ function makeDeps(overrides: Partial<GitControllerDeps> = {}): GitControllerDeps
 }
 
 async function flushRefresh(store: ReturnType<typeof createGitControllerStore>): Promise<void> {
-  const promise = store.getState().refreshGit()
-  vi.advanceTimersByTime(3000)
-  await promise
+  await store.getState().refreshGit()
 }
 
 describe('createGitControllerStore', () => {
@@ -53,7 +51,6 @@ describe('createGitControllerStore', () => {
       const store = createGitControllerStore(deps)
 
       const promise = store.getState().refreshGit()
-      vi.advanceTimersByTime(3000)
       expect(store.getState().gitRefreshing).toBe(true)
       await promise
       expect(store.getState().gitRefreshing).toBe(false)
@@ -375,46 +372,83 @@ describe('createGitControllerStore', () => {
   })
 
   describe('debounce', () => {
-    it('rapid calls within debounce window collapse to one daemon call', async () => {
+    it('first call fires immediately without waiting for any timer', () => {
+      const deps = makeDeps()
+      const store = createGitControllerStore(deps)
+
+      void store.getState().refreshGit()
+      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
+      expect(store.getState().gitRefreshing).toBe(true)
+
+      store.getState().dispose()
+    })
+
+    it('rapid calls coalesce to one immediate run plus one queued run after cooldown', async () => {
       const deps = makeDeps()
       const store = createGitControllerStore(deps)
 
       const p1 = store.getState().refreshGit()
       const p2 = store.getState().refreshGit()
       const p3 = store.getState().refreshGit()
-      vi.advanceTimersByTime(3000)
-      await Promise.all([p1, p2, p3])
+
+      await p1
       expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(3000)
+      await Promise.all([p2, p3])
+      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(2)
 
       store.getState().dispose()
     })
 
-    it('calls separated by more than 3000ms each fire once', async () => {
+    it('queued call fires once in-flight finishes and cooldown elapses', async () => {
       const deps = makeDeps()
+      let resolveFetch: ((value: boolean) => void) = () => {}
+      vi.mocked(deps.git.hasUncommittedChanges).mockImplementationOnce(() =>
+        new Promise<boolean>((resolve) => { resolveFetch = resolve }),
+      )
       const store = createGitControllerStore(deps)
 
       const p1 = store.getState().refreshGit()
-      vi.advanceTimersByTime(3000)
-      await p1
+      const p2 = store.getState().refreshGit()
+      await vi.advanceTimersByTimeAsync(3000)
       expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
 
-      const p2 = store.getState().refreshGit()
-      vi.advanceTimersByTime(3000)
+      resolveFetch(false)
+      await p1
+      await vi.runAllTimersAsync()
       await p2
       expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(2)
 
       store.getState().dispose()
     })
 
-    it('dispose cancels a pending debounced call', () => {
+    it('calls separated by more than the cooldown each fire immediately', async () => {
       const deps = makeDeps()
       const store = createGitControllerStore(deps)
+
+      await store.getState().refreshGit()
+      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(3000)
+      await store.getState().refreshGit()
+      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(2)
+
+      store.getState().dispose()
+    })
+
+    it('dispose cancels a queued cooldown call', async () => {
+      const deps = makeDeps()
+      const store = createGitControllerStore(deps)
+
+      await store.getState().refreshGit()
+      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
 
       void store.getState().refreshGit()
       store.getState().dispose()
 
-      vi.advanceTimersByTime(3000)
-      expect(deps.git.hasUncommittedChanges).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -538,15 +572,18 @@ describe('createGitControllerStore', () => {
   })
 
   describe('dispose', () => {
-    it('dispose cancels a pending debounced refreshGit', () => {
+    it('dispose cancels a queued cooldown refreshGit', async () => {
       const deps = makeDeps()
       const store = createGitControllerStore(deps)
+
+      await store.getState().refreshGit()
+      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
 
       void store.getState().refreshGit()
       store.getState().dispose()
 
-      vi.advanceTimersByTime(3000)
-      expect(deps.git.hasUncommittedChanges).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
     })
   })
 })
