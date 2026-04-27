@@ -427,10 +427,9 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   let prevAiState: ActivityState = ActivityState.Idle
   store.subscribe((state) => {
     if (state.aiState !== prevAiState) {
-      const wasWorking = prevAiState === ActivityState.Working
       prevAiState = state.aiState
       handleAutoApprove()
-      if (wasWorking) {
+      if (state.aiState === ActivityState.Idle || state.aiState === ActivityState.Completed) {
         void deps.refreshGitInfo().catch(() => {})
         void deps.refreshDiffStatus().catch(() => {})
       }

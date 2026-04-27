@@ -10,7 +10,6 @@ export interface GitControllerDeps {
   refreshWorkspaceGitInfo: (id: string) => Promise<void>
   getWorkspace: () => Workspace
   initialWorkspace: Workspace
-  isActiveWorkspace: () => boolean
 }
 
 export interface GitControllerState {
@@ -35,9 +34,10 @@ export interface GitControllerState {
 export type GitController = StoreApi<GitControllerState>
 
 export function createGitControllerStore(deps: GitControllerDeps): GitController {
-  let gitControllerInterval: ReturnType<typeof setInterval> | null = null
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  let pendingResolvers: (() => void)[] = []
 
-  async function refreshDiffStatus(): Promise<void> {
+  async function runRefreshDiffStatus(): Promise<void> {
     store.setState({ gitRefreshing: true })
     try {
       try {
@@ -71,7 +71,21 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
       } catch { /* ignore */ }
     } finally {
       store.setState({ gitRefreshing: false })
+      const resolvers = pendingResolvers
+      pendingResolvers = []
+      for (const resolve of resolvers) resolve()
     }
+  }
+
+  function refreshDiffStatus(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      pendingResolvers.push(resolve)
+      if (debounceTimer !== null) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null
+        void runRefreshDiffStatus()
+      }, 300)
+    })
   }
 
   async function refreshPrStatus(): Promise<void> {
@@ -91,16 +105,7 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
 
   function startGitController(): void {
     if (!deps.initialWorkspace.isGitRepo) return
-
-    void refreshDiffStatus()
-    gitControllerInterval = setInterval(() => { if (deps.isActiveWorkspace()) void refreshDiffStatus(); }, 10_000)
-  }
-
-  function stopGitController(): void {
-    if (gitControllerInterval) {
-      clearInterval(gitControllerInterval)
-      gitControllerInterval = null
-    }
+    void runRefreshDiffStatus()
   }
 
   const store = createStore<GitControllerState>()((set) => ({
@@ -171,7 +176,13 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
       }
     },
 
-    dispose: () => { stopGitController(); },
+    dispose: (): void => {
+      if (debounceTimer !== null) {
+        clearTimeout(debounceTimer)
+        debounceTimer = null
+      }
+      pendingResolvers = []
+    },
   }))
 
   return store
