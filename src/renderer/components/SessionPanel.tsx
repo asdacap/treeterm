@@ -3,7 +3,7 @@ import React, { useState, useCallback } from 'react'
 import type { ReactNode } from 'react'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
-import { GitFork, ChevronDown, ChevronRight, Loader2, AlertCircle, LockOpen, Star, XCircle, CheckCircle2 } from 'lucide-react'
+import { GitFork, ChevronDown, ChevronRight, Loader2, AlertCircle, LockOpen, Star } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { SessionState, WorkspaceEntry } from '../store/createSessionStore'
@@ -14,8 +14,10 @@ import { useKeybindingStore, PrefixModeState } from '../store/keybinding'
 import CreateChildDialog, { TabMode } from './CreateChildDialog'
 import OpenWorkspaceDialog from './OpenWorkspaceDialog'
 import UpstreamWarningDialog from './UpstreamWarningDialog'
-import type { GitHubPrInfo, ReviewState, WorktreeSettings, Workspace, WorkspaceStore } from '../types'
+import type { ReviewState, WorktreeSettings, Workspace, WorkspaceStore } from '../types'
+import type { GitController } from '../store/createGitControllerStore'
 import { ConnectionStatus, ConnectionTargetType } from '../../shared/types'
+import { PrIndicators } from './PrIndicators'
 
 // Import WorkspaceIcon from TreePane
 import { WorkspaceIcon } from './TreePane'
@@ -650,29 +652,7 @@ interface TreeItemViewProps extends Omit<WorkspaceTreeItemProps, 'entry'> {
   displayName: string
   description: string | undefined
   tabIds: string[]
-  prNumber: number | undefined
-  prState: GitHubPrInfo['state'] | undefined
-  prSignal: PrSignal
-}
-
-enum PrSignal {
-  None = 'none',
-  CiFailure = 'ci-failure',
-  CiRunning = 'ci-running',
-  ReadyToMerge = 'ready-to-merge',
-}
-
-const PR_STATE_CLASS: Record<GitHubPrInfo['state'], string> = {
-  OPEN: 'tree-item-pr-number--open',
-  CLOSED: 'tree-item-pr-number--closed',
-  MERGED: 'tree-item-pr-number--merged',
-}
-
-const PR_SIGNAL_ICON: Record<PrSignal, () => React.JSX.Element | null> = {
-  [PrSignal.None]: () => null,
-  [PrSignal.CiFailure]: () => <XCircle size={12} className="tree-item-pr-signal tree-item-pr-signal--ci-failure" />,
-  [PrSignal.CiRunning]: () => <Loader2 size={12} className="tree-item-pr-signal tree-item-pr-signal--ci-running spinning" />,
-  [PrSignal.ReadyToMerge]: () => <CheckCircle2 size={12} className="tree-item-pr-signal tree-item-pr-signal--ready" />,
+  gitController: GitController | undefined
 }
 
 function TreeItemView({
@@ -680,7 +660,7 @@ function TreeItemView({
   onToggleExpand, onClick, onQuickFork, onCreateChild, onRemove, onDismiss, onOpenSettings, onToggleFavourite,
   children, renderChild,
   isDragging, dragOverPosition, onDragStart, onDragOver, onDrop, onDragEnd,
-  loadStatus, ws, displayName, description, tabIds, prNumber, prState, prSignal,
+  loadStatus, ws, displayName, description, tabIds, gitController,
 }: TreeItemViewProps): React.JSX.Element {
   const openContextMenu = useContextMenuStore((s) => s.open)
   const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
@@ -732,10 +712,7 @@ function TreeItemView({
         <span className="tree-item-icon">
           <WorkspaceIcon tabIds={tabIds} loadStatus={loadStatus} isWorktree={ws?.isWorktree ?? false} />
         </span>
-        {prNumber !== undefined && (
-          <span className={`tree-item-pr-number ${prState ? PR_STATE_CLASS[prState] : ''}`}>{`#${String(prNumber)}`}</span>
-        )}
-        {PR_SIGNAL_ICON[prSignal]()}
+        {gitController && <PrIndicators gitController={gitController} />}
         <span className="tree-item-name">
           {displayName}
         </span>
@@ -795,13 +772,10 @@ function TreeItemView({
 
 export function LoadedWorkspaceTreeItem({
   store, data, ...rest
-}: { store: WorkspaceStore; data: Workspace } & Omit<TreeItemViewProps, 'loadStatus' | 'ws' | 'displayName' | 'description' | 'tabIds' | 'isFavourite' | 'prNumber' | 'prState' | 'prSignal'>): React.JSX.Element {
+}: { store: WorkspaceStore; data: Workspace } & Omit<TreeItemViewProps, 'loadStatus' | 'ws' | 'displayName' | 'description' | 'tabIds' | 'isFavourite' | 'gitController'>): React.JSX.Element {
   const metadata = useStore(store, s => s.metadata)
   const appStates = useStore(store, s => s.appStates)
   const gitController = useStore(store, s => s.gitController)
-  const prNumber = useStore(gitController, s => s.prInfo?.number)
-  const prState = useStore(gitController, s => s.prInfo?.state)
-  const prSignal = useStore(gitController, s => getPrSignal(s.prInfo))
   const isFavourite = metadata.isFavourite === 'true'
   return (
     <TreeItemView
@@ -811,29 +785,10 @@ export function LoadedWorkspaceTreeItem({
       tabIds={Object.keys(appStates)}
       loadStatus={undefined}
       isFavourite={isFavourite}
-      prNumber={prNumber}
-      prState={prState}
-      prSignal={prSignal}
+      gitController={gitController}
       {...rest}
     />
   )
-}
-
-function getPrSignal(prInfo: GitHubPrInfo | null | undefined): PrSignal {
-  if (!prInfo) return PrSignal.None
-  if (prInfo.checkRuns.some(c => c.status === 'COMPLETED' && c.conclusion === 'FAILURE')) {
-    return PrSignal.CiFailure
-  }
-  if (prInfo.checkRuns.some(c => c.status !== 'COMPLETED')) {
-    return PrSignal.CiRunning
-  }
-  if (prInfo.state !== 'OPEN') return PrSignal.None
-  const hasApproval = prInfo.reviews.some(r => r.state === 'APPROVED')
-  const hasChangesRequested = prInfo.reviews.some(r => r.state === 'CHANGES_REQUESTED')
-  if (hasApproval && !hasChangesRequested && prInfo.unresolvedCount === 0) {
-    return PrSignal.ReadyToMerge
-  }
-  return PrSignal.None
 }
 
 function WorkspaceTreeItem({ entry, ...rest }: WorkspaceTreeItemProps): React.JSX.Element {
@@ -848,9 +803,7 @@ function WorkspaceTreeItem({ entry, ...rest }: WorkspaceTreeItemProps): React.JS
       tabIds={[]}
       loadStatus={entry.status}
       isFavourite={false}
-      prNumber={undefined}
-      prState={undefined}
-      prSignal={PrSignal.None}
+      gitController={undefined}
       {...rest}
     />
   )
