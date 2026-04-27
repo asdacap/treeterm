@@ -6,6 +6,7 @@ import { useAppStore } from '../store/app'
 import { ActivityState } from '../types'
 import type { WorkspaceStore } from '../types'
 import SessionPanel, { CollapsedSessionPanel } from './SessionPanel'
+import { PrIndicators } from './PrIndicators'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
 import { ActivityIndicator } from './ActivityIndicator'
@@ -31,7 +32,7 @@ export function WorkspaceIcon({ tabIds, loadStatus, isWorktree }: {
   return isWorktree ? <GitBranch size={16} /> : <Folder size={16} />
 }
 
-function FavouriteWorkspaceItem({
+export function FavouriteWorkspaceItem({
   sessionId,
   sessionStore,
   workspaceId,
@@ -47,6 +48,7 @@ function FavouriteWorkspaceItem({
   const isFavourite = useStore(workspaceStore, s => s.metadata.isFavourite === 'true')
   const displayName = useStore(workspaceStore, s => s.metadata.displayName || data.name)
   const appStates = useStore(workspaceStore, s => s.appStates)
+  const gitController = useStore(workspaceStore, s => s.gitController)
   const { activeView, setActiveView } = useNavigationStore()
   const setActiveWorkspace = useStore(sessionStore, s => s.setActiveWorkspace)
   const activeWorkspaceId = useStore(sessionStore, s => s.activeWorkspaceId)
@@ -83,6 +85,7 @@ function FavouriteWorkspaceItem({
         <span className="tree-item-icon">
           <WorkspaceIcon tabIds={Object.keys(appStates)} isWorktree={data.isWorktree} />
         </span>
+        <PrIndicators gitController={gitController} />
         <span className="tree-item-name">{displayName}</span>
       </div>
       <ContextMenu menuId={menuId} activeMenuId={activeMenuId} position={menuPosition}>
