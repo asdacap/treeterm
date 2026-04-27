@@ -21,7 +21,7 @@ export interface AnalyzerDeps {
   getBranchIsUserDefined: () => boolean
   getParentId: () => string | undefined
   refreshGitInfo: () => Promise<void>
-  refreshDiffStatus: () => Promise<void>
+  refreshGit: () => Promise<void>
 }
 
 export interface AnalyzerHistoryEntry {
@@ -431,7 +431,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       handleAutoApprove()
       if (state.aiState === ActivityState.Idle || state.aiState === ActivityState.Completed) {
         void deps.refreshGitInfo().catch(() => {})
-        void deps.refreshDiffStatus().catch(() => {})
+        void deps.refreshGit().catch(() => {})
       }
     }
   })

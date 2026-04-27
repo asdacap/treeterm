@@ -63,7 +63,7 @@ function makeDeps(overrides?: Partial<AnalyzerDeps>): AnalyzerDeps {
     getBranchIsUserDefined: vi.fn().mockReturnValue(false),
     getParentId: vi.fn().mockReturnValue('parent-1'),
     refreshGitInfo: vi.fn().mockResolvedValue(undefined),
-    refreshDiffStatus: vi.fn().mockResolvedValue(undefined),
+    refreshGit: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }
@@ -873,22 +873,22 @@ describe('createAnalyzerStore', () => {
   })
 
   describe('git refresh on AI state change', () => {
-    it('triggers refreshGitInfo and refreshDiffStatus when state becomes Idle', async () => {
+    it('triggers refreshGitInfo and refreshGit when state becomes Idle', async () => {
       const store = createAnalyzerStore('tab-1', deps)
       store.setState({ aiState: ActivityState.Working })
       store.setState({ aiState: ActivityState.Idle })
       await new Promise(r => setTimeout(r, 0))
       expect(deps.refreshGitInfo).toHaveBeenCalled()
-      expect(deps.refreshDiffStatus).toHaveBeenCalled()
+      expect(deps.refreshGit).toHaveBeenCalled()
     })
 
-    it('triggers refreshGitInfo and refreshDiffStatus when state becomes Completed', async () => {
+    it('triggers refreshGitInfo and refreshGit when state becomes Completed', async () => {
       const store = createAnalyzerStore('tab-1', deps)
       store.setState({ aiState: ActivityState.Working })
       store.setState({ aiState: ActivityState.Completed })
       await new Promise(r => setTimeout(r, 0))
       expect(deps.refreshGitInfo).toHaveBeenCalled()
-      expect(deps.refreshDiffStatus).toHaveBeenCalled()
+      expect(deps.refreshGit).toHaveBeenCalled()
     })
 
     it('does not trigger git refresh when state becomes Error', async () => {
@@ -897,7 +897,7 @@ describe('createAnalyzerStore', () => {
       store.setState({ aiState: ActivityState.Error })
       await new Promise(r => setTimeout(r, 0))
       expect(deps.refreshGitInfo).not.toHaveBeenCalled()
-      expect(deps.refreshDiffStatus).not.toHaveBeenCalled()
+      expect(deps.refreshGit).not.toHaveBeenCalled()
     })
 
     it('does not trigger git refresh when state becomes UserInputRequired', async () => {
@@ -906,7 +906,7 @@ describe('createAnalyzerStore', () => {
       store.setState({ aiState: ActivityState.UserInputRequired })
       await new Promise(r => setTimeout(r, 0))
       expect(deps.refreshGitInfo).not.toHaveBeenCalled()
-      expect(deps.refreshDiffStatus).not.toHaveBeenCalled()
+      expect(deps.refreshGit).not.toHaveBeenCalled()
     })
 
     it('does not trigger git refresh when state becomes Working', async () => {
@@ -915,7 +915,7 @@ describe('createAnalyzerStore', () => {
       store.setState({ aiState: ActivityState.Working })
       await new Promise(r => setTimeout(r, 0))
       expect(deps.refreshGitInfo).not.toHaveBeenCalled()
-      expect(deps.refreshDiffStatus).not.toHaveBeenCalled()
+      expect(deps.refreshGit).not.toHaveBeenCalled()
     })
   })
 

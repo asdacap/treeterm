@@ -52,9 +52,9 @@ const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => ({
     hasUncommittedChanges: false, isDiffCleanFromParent: false,
     hasConflictsWithParent: false, behindCount: 0, pullLoading: false,
     gitRefreshing: false, prInfo: null,
-    refreshDiffStatus: vi.fn(), refreshRemoteStatus: vi.fn(),
-    pullFromRemote: vi.fn(), refreshPrStatus: vi.fn(),
-    openGitHub: vi.fn(), startPolling: vi.fn(), triggerRefresh: vi.fn(), dispose: vi.fn(),
+    refreshGit: vi.fn(),
+    pullFromRemote: vi.fn(),
+    openGitHub: vi.fn(), dispose: vi.fn(),
   } as GitControllerState)),
 } as WorkspaceStoreState))
 

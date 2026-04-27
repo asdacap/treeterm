@@ -33,8 +33,8 @@ function makeDeps(overrides: Partial<GitControllerDeps> = {}): GitControllerDeps
 }
 
 async function flushRefresh(store: ReturnType<typeof createGitControllerStore>): Promise<void> {
-  const promise = store.getState().refreshDiffStatus()
-  vi.advanceTimersByTime(300)
+  const promise = store.getState().refreshGit()
+  vi.advanceTimersByTime(3000)
   await promise
 }
 
@@ -47,13 +47,13 @@ describe('createGitControllerStore', () => {
     vi.useRealTimers()
   })
 
-  describe('refreshDiffStatus', () => {
+  describe('refreshGit', () => {
     it('sets gitRefreshing true then false', async () => {
       const deps = makeDeps()
       const store = createGitControllerStore(deps)
 
-      const promise = store.getState().refreshDiffStatus()
-      vi.advanceTimersByTime(300)
+      const promise = store.getState().refreshGit()
+      vi.advanceTimersByTime(3000)
       expect(store.getState().gitRefreshing).toBe(true)
       await promise
       expect(store.getState().gitRefreshing).toBe(false)
@@ -218,6 +218,160 @@ describe('createGitControllerStore', () => {
       await flushRefresh(store)
       expect(deps.git.checkMergeConflicts).not.toHaveBeenCalled()
     })
+
+    it('calls fetch then getBehindCount and sets behindCount', async () => {
+      const deps = makeDeps()
+      vi.mocked(deps.git.getBehindCount).mockResolvedValue(3)
+      const store = createGitControllerStore(deps)
+      store.getState().dispose()
+
+      const promise = store.getState().refreshGit()
+      vi.advanceTimersByTime(3000)
+      await promise
+      expect(deps.git.fetch).toHaveBeenCalledWith('/test')
+      expect(deps.git.getBehindCount).toHaveBeenCalledWith('/test')
+      expect(store.getState().behindCount).toBe(3)
+    })
+
+    it('skips fetch for non-git repo workspace', async () => {
+      const ws = makeWorkspace({ isGitRepo: false })
+      const deps = makeDeps({ initialWorkspace: ws, getWorkspace: vi.fn().mockReturnValue(ws) })
+      const store = createGitControllerStore(deps)
+      store.getState().dispose()
+
+      const promise = store.getState().refreshGit()
+      vi.advanceTimersByTime(3000)
+      await promise
+      expect(deps.git.fetch).not.toHaveBeenCalled()
+    })
+
+    it('catches fetch errors gracefully', async () => {
+      const deps = makeDeps()
+      vi.mocked(deps.git.fetch).mockRejectedValue(new Error('network'))
+      const store = createGitControllerStore(deps)
+      store.getState().dispose()
+
+      const promise = store.getState().refreshGit()
+      vi.advanceTimersByTime(3000)
+      await promise
+      expect(store.getState().behindCount).toBe(0)
+    })
+
+    it('sets prInfo when PR exists', async () => {
+      const ws = makeWorkspace({ isWorktree: true, parentId: 'parent', gitBranch: 'feat', gitRootPath: '/root' })
+      const parentWs = makeWorkspace({ id: 'parent', gitBranch: 'main' })
+      const deps = makeDeps({
+        initialWorkspace: ws,
+        getWorkspace: vi.fn().mockReturnValue(ws),
+        lookupWorkspace: vi.fn().mockReturnValue(parentWs),
+      })
+      const prInfo = { url: 'https://github.com/pr/1', title: 'PR', number: 1, state: 'OPEN' as const, reviews: [], checkRuns: [], unresolvedThreads: [], unresolvedCount: 0 }
+      vi.mocked(deps.github.getPrInfo).mockResolvedValue({ prInfo })
+      const store = createGitControllerStore(deps)
+      store.getState().dispose()
+
+      const promise = store.getState().refreshGit()
+      vi.advanceTimersByTime(3000)
+      await promise
+      expect(store.getState().prInfo).toEqual(prInfo)
+    })
+
+    it('sets prInfo to null when noPr', async () => {
+      const ws = makeWorkspace({ isWorktree: true, parentId: 'parent', gitBranch: 'feat', gitRootPath: '/root' })
+      const parentWs = makeWorkspace({ id: 'parent', gitBranch: 'main' })
+      const deps = makeDeps({
+        initialWorkspace: ws,
+        getWorkspace: vi.fn().mockReturnValue(ws),
+        lookupWorkspace: vi.fn().mockReturnValue(parentWs),
+      })
+      vi.mocked(deps.github.getPrInfo).mockResolvedValue({ noPr: true, createUrl: 'url' })
+      const store = createGitControllerStore(deps)
+      store.getState().dispose()
+
+      store.setState({ prInfo: { url: 'old' } as unknown as import('../types').GitHubPrInfo })
+      const promise = store.getState().refreshGit()
+      vi.advanceTimersByTime(3000)
+      await promise
+      expect(store.getState().prInfo).toBeNull()
+    })
+
+    it('skips getPrInfo for non-worktree', async () => {
+      const ws = makeWorkspace({ isWorktree: false })
+      const deps = makeDeps({ initialWorkspace: ws, getWorkspace: vi.fn().mockReturnValue(ws) })
+      const store = createGitControllerStore(deps)
+      store.getState().dispose()
+
+      const promise = store.getState().refreshGit()
+      vi.advanceTimersByTime(3000)
+      await promise
+      expect(deps.github.getPrInfo).not.toHaveBeenCalled()
+    })
+
+    it('skips getPrInfo when missing gitBranch', async () => {
+      const ws = makeWorkspace({ isWorktree: true, parentId: 'parent', gitRootPath: '/root' })
+      const deps = makeDeps({ initialWorkspace: ws, getWorkspace: vi.fn().mockReturnValue(ws) })
+      const store = createGitControllerStore(deps)
+      store.getState().dispose()
+
+      const promise = store.getState().refreshGit()
+      vi.advanceTimersByTime(3000)
+      await promise
+      expect(deps.github.getPrInfo).not.toHaveBeenCalled()
+    })
+
+    it('skips getPrInfo when parent has no gitBranch', async () => {
+      const ws = makeWorkspace({ isWorktree: true, parentId: 'parent', gitBranch: 'feat', gitRootPath: '/root' })
+      const parentWs = makeWorkspace({ id: 'parent', gitBranch: undefined })
+      const deps = makeDeps({
+        initialWorkspace: ws,
+        getWorkspace: vi.fn().mockReturnValue(ws),
+        lookupWorkspace: vi.fn().mockReturnValue(parentWs),
+      })
+      const store = createGitControllerStore(deps)
+      store.getState().dispose()
+
+      const promise = store.getState().refreshGit()
+      vi.advanceTimersByTime(3000)
+      await promise
+      expect(deps.github.getPrInfo).not.toHaveBeenCalled()
+    })
+
+    it('catches getPrInfo errors gracefully', async () => {
+      const ws = makeWorkspace({ isWorktree: true, parentId: 'parent', gitBranch: 'feat', gitRootPath: '/root' })
+      const parentWs = makeWorkspace({ id: 'parent', gitBranch: 'main' })
+      const deps = makeDeps({
+        initialWorkspace: ws,
+        getWorkspace: vi.fn().mockReturnValue(ws),
+        lookupWorkspace: vi.fn().mockReturnValue(parentWs),
+      })
+      vi.mocked(deps.github.getPrInfo).mockRejectedValue(new Error('auth'))
+      const store = createGitControllerStore(deps)
+      store.getState().dispose()
+
+      const promise = store.getState().refreshGit()
+      vi.advanceTimersByTime(3000)
+      await promise
+      expect(store.getState().prInfo).toBeNull()
+    })
+
+    it('fires all three side effects in a single call', async () => {
+      const ws = makeWorkspace({ isWorktree: true, parentId: 'parent', gitBranch: 'feat', gitRootPath: '/root' })
+      const parentWs = makeWorkspace({ id: 'parent', gitBranch: 'main' })
+      const deps = makeDeps({
+        initialWorkspace: ws,
+        getWorkspace: vi.fn().mockReturnValue(ws),
+        lookupWorkspace: vi.fn().mockReturnValue(parentWs),
+      })
+      const store = createGitControllerStore(deps)
+      store.getState().dispose()
+
+      const promise = store.getState().refreshGit()
+      vi.advanceTimersByTime(3000)
+      await promise
+      expect(deps.git.hasUncommittedChanges).toHaveBeenCalled()
+      expect(deps.git.fetch).toHaveBeenCalled()
+      expect(deps.github.getPrInfo).toHaveBeenCalled()
+    })
   })
 
   describe('debounce', () => {
@@ -225,27 +379,27 @@ describe('createGitControllerStore', () => {
       const deps = makeDeps()
       const store = createGitControllerStore(deps)
 
-      const p1 = store.getState().refreshDiffStatus()
-      const p2 = store.getState().refreshDiffStatus()
-      const p3 = store.getState().refreshDiffStatus()
-      vi.advanceTimersByTime(300)
+      const p1 = store.getState().refreshGit()
+      const p2 = store.getState().refreshGit()
+      const p3 = store.getState().refreshGit()
+      vi.advanceTimersByTime(3000)
       await Promise.all([p1, p2, p3])
       expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
 
       store.getState().dispose()
     })
 
-    it('calls separated by more than 300ms each fire once', async () => {
+    it('calls separated by more than 3000ms each fire once', async () => {
       const deps = makeDeps()
       const store = createGitControllerStore(deps)
 
-      const p1 = store.getState().refreshDiffStatus()
-      vi.advanceTimersByTime(300)
+      const p1 = store.getState().refreshGit()
+      vi.advanceTimersByTime(3000)
       await p1
       expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
 
-      const p2 = store.getState().refreshDiffStatus()
-      vi.advanceTimersByTime(300)
+      const p2 = store.getState().refreshGit()
+      vi.advanceTimersByTime(3000)
       await p2
       expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(2)
 
@@ -256,45 +410,11 @@ describe('createGitControllerStore', () => {
       const deps = makeDeps()
       const store = createGitControllerStore(deps)
 
-      void store.getState().refreshDiffStatus()
+      void store.getState().refreshGit()
       store.getState().dispose()
 
-      vi.advanceTimersByTime(300)
+      vi.advanceTimersByTime(3000)
       expect(deps.git.hasUncommittedChanges).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('refreshRemoteStatus', () => {
-    it('calls fetch then getBehindCount and sets behindCount', async () => {
-      const deps = makeDeps()
-      vi.mocked(deps.git.getBehindCount).mockResolvedValue(3)
-      const store = createGitControllerStore(deps)
-      store.getState().dispose()
-
-      await store.getState().refreshRemoteStatus()
-      expect(deps.git.fetch).toHaveBeenCalledWith('/test')
-      expect(deps.git.getBehindCount).toHaveBeenCalledWith('/test')
-      expect(store.getState().behindCount).toBe(3)
-    })
-
-    it('does nothing for non-git repo', async () => {
-      const ws = makeWorkspace({ isGitRepo: false })
-      const deps = makeDeps({ initialWorkspace: ws, getWorkspace: vi.fn().mockReturnValue(ws) })
-      const store = createGitControllerStore(deps)
-      store.getState().dispose()
-
-      await store.getState().refreshRemoteStatus()
-      expect(deps.git.fetch).not.toHaveBeenCalled()
-    })
-
-    it('catches fetch errors gracefully', async () => {
-      const deps = makeDeps()
-      vi.mocked(deps.git.fetch).mockRejectedValue(new Error('network'))
-      const store = createGitControllerStore(deps)
-      store.getState().dispose()
-
-      await store.getState().refreshRemoteStatus()
-      expect(store.getState().behindCount).toBe(0)
     })
   })
 
@@ -353,93 +473,6 @@ describe('createGitControllerStore', () => {
 
       const result = await store.getState().pullFromRemote()
       expect(result).toEqual({ success: false, error: 'Unknown error' })
-    })
-  })
-
-  describe('refreshPrStatus', () => {
-    it('sets prInfo when PR exists', async () => {
-      const ws = makeWorkspace({ isWorktree: true, parentId: 'parent', gitBranch: 'feat', gitRootPath: '/root' })
-      const parentWs = makeWorkspace({ id: 'parent', gitBranch: 'main' })
-      const deps = makeDeps({
-        initialWorkspace: ws,
-        getWorkspace: vi.fn().mockReturnValue(ws),
-        lookupWorkspace: vi.fn().mockReturnValue(parentWs),
-      })
-      const prInfo = { url: 'https://github.com/pr/1', title: 'PR', number: 1, state: 'OPEN' as const, reviews: [], checkRuns: [], unresolvedThreads: [], unresolvedCount: 0 }
-      vi.mocked(deps.github.getPrInfo).mockResolvedValue({ prInfo })
-      const store = createGitControllerStore(deps)
-      store.getState().dispose()
-
-      await store.getState().refreshPrStatus()
-      expect(store.getState().prInfo).toEqual(prInfo)
-    })
-
-    it('sets prInfo to null when noPr', async () => {
-      const ws = makeWorkspace({ isWorktree: true, parentId: 'parent', gitBranch: 'feat', gitRootPath: '/root' })
-      const parentWs = makeWorkspace({ id: 'parent', gitBranch: 'main' })
-      const deps = makeDeps({
-        initialWorkspace: ws,
-        getWorkspace: vi.fn().mockReturnValue(ws),
-        lookupWorkspace: vi.fn().mockReturnValue(parentWs),
-      })
-      vi.mocked(deps.github.getPrInfo).mockResolvedValue({ noPr: true, createUrl: 'url' })
-      const store = createGitControllerStore(deps)
-      store.getState().dispose()
-
-      store.setState({ prInfo: { url: 'old' } as unknown as import('../types').GitHubPrInfo })
-      await store.getState().refreshPrStatus()
-      expect(store.getState().prInfo).toBeNull()
-    })
-
-    it('early returns for non-worktree', async () => {
-      const ws = makeWorkspace({ isWorktree: false })
-      const deps = makeDeps({ initialWorkspace: ws, getWorkspace: vi.fn().mockReturnValue(ws) })
-      const store = createGitControllerStore(deps)
-      store.getState().dispose()
-
-      await store.getState().refreshPrStatus()
-      expect(deps.github.getPrInfo).not.toHaveBeenCalled()
-    })
-
-    it('early returns when missing gitBranch', async () => {
-      const ws = makeWorkspace({ isWorktree: true, parentId: 'parent',  gitRootPath: '/root' })
-      const deps = makeDeps({ initialWorkspace: ws, getWorkspace: vi.fn().mockReturnValue(ws) })
-      const store = createGitControllerStore(deps)
-      store.getState().dispose()
-
-      await store.getState().refreshPrStatus()
-      expect(deps.github.getPrInfo).not.toHaveBeenCalled()
-    })
-
-    it('early returns when parent has no gitBranch', async () => {
-      const ws = makeWorkspace({ isWorktree: true, parentId: 'parent', gitBranch: 'feat', gitRootPath: '/root' })
-      const parentWs = makeWorkspace({ id: 'parent', gitBranch: undefined })
-      const deps = makeDeps({
-        initialWorkspace: ws,
-        getWorkspace: vi.fn().mockReturnValue(ws),
-        lookupWorkspace: vi.fn().mockReturnValue(parentWs),
-      })
-      const store = createGitControllerStore(deps)
-      store.getState().dispose()
-
-      await store.getState().refreshPrStatus()
-      expect(deps.github.getPrInfo).not.toHaveBeenCalled()
-    })
-
-    it('catches errors gracefully', async () => {
-      const ws = makeWorkspace({ isWorktree: true, parentId: 'parent', gitBranch: 'feat', gitRootPath: '/root' })
-      const parentWs = makeWorkspace({ id: 'parent', gitBranch: 'main' })
-      const deps = makeDeps({
-        initialWorkspace: ws,
-        getWorkspace: vi.fn().mockReturnValue(ws),
-        lookupWorkspace: vi.fn().mockReturnValue(parentWs),
-      })
-      vi.mocked(deps.github.getPrInfo).mockRejectedValue(new Error('auth'))
-      const store = createGitControllerStore(deps)
-      store.getState().dispose()
-
-      await store.getState().refreshPrStatus()
-      expect(store.getState().prInfo).toBeNull()
     })
   })
 
@@ -504,73 +537,16 @@ describe('createGitControllerStore', () => {
     })
   })
 
-  describe('startPolling / dispose', () => {
-    it('does not start polling for non-git repo', () => {
-      const ws = makeWorkspace({ isGitRepo: false })
-      const deps = makeDeps({ initialWorkspace: ws, getWorkspace: vi.fn().mockReturnValue(ws) })
+  describe('dispose', () => {
+    it('dispose cancels a pending debounced refreshGit', () => {
+      const deps = makeDeps()
       const store = createGitControllerStore(deps)
 
-      store.getState().startPolling()
+      void store.getState().refreshGit()
+      store.getState().dispose()
+
+      vi.advanceTimersByTime(3000)
       expect(deps.git.hasUncommittedChanges).not.toHaveBeenCalled()
-    })
-
-    it('calls refreshDiffStatus immediately on startPolling without debounce', () => {
-      const deps = makeDeps()
-      const store = createGitControllerStore(deps)
-
-      store.getState().startPolling()
-      expect(deps.git.hasUncommittedChanges).toHaveBeenCalled()
-      store.getState().dispose()
-    })
-
-    it('dispose cancels a pending debounced refreshDiffStatus', () => {
-      const deps = makeDeps()
-      const store = createGitControllerStore(deps)
-      store.getState().startPolling()
-      vi.mocked(deps.git.hasUncommittedChanges).mockClear()
-
-      void store.getState().refreshDiffStatus()
-      store.getState().dispose()
-
-      vi.advanceTimersByTime(300)
-      expect(deps.git.hasUncommittedChanges).not.toHaveBeenCalled()
-    })
-
-    it('startPolling calls refreshRemoteStatus for git repos', () => {
-      const deps = makeDeps()
-      const store = createGitControllerStore(deps)
-
-      store.getState().startPolling()
-      expect(deps.git.fetch).toHaveBeenCalled()
-      store.getState().dispose()
-    })
-
-    it('startPolling calls refreshPrStatus for worktree with parent', () => {
-      const ws = makeWorkspace({ isWorktree: true, parentId: 'parent', gitBranch: 'feat', gitRootPath: '/root' })
-      const parentWs = makeWorkspace({ id: 'parent', gitBranch: 'main' })
-      const deps = makeDeps({
-        initialWorkspace: ws,
-        getWorkspace: vi.fn().mockReturnValue(ws),
-        lookupWorkspace: vi.fn().mockReturnValue(parentWs),
-      })
-      const store = createGitControllerStore(deps)
-
-      store.getState().startPolling()
-      expect(deps.github.getPrInfo).toHaveBeenCalled()
-      store.getState().dispose()
-    })
-  })
-
-  describe('triggerRefresh', () => {
-    it('calls refreshDiffStatus after debounce window', () => {
-      const deps = makeDeps()
-      const store = createGitControllerStore(deps)
-      store.getState().dispose()
-
-      store.getState().triggerRefresh()
-      expect(deps.git.hasUncommittedChanges).not.toHaveBeenCalled()
-      vi.advanceTimersByTime(300)
-      expect(deps.git.hasUncommittedChanges).toHaveBeenCalled()
     })
   })
 })

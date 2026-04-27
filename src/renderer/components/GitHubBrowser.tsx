@@ -1,5 +1,4 @@
 /* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
-import { useState } from 'react'
 import { useStore } from 'zustand'
 import { RefreshCw, Loader2, ExternalLink, CheckCircle2, XCircle, Clock, AlertCircle, MessageSquare } from 'lucide-react'
 import { useAppStore } from '../store/app'
@@ -14,17 +13,12 @@ interface GitHubBrowserProps {
 export default function GitHubBrowser({ workspace, isVisible }: GitHubBrowserProps) {
   const gitController = useStore(workspace, s => s.gitController)
   const prInfo = useStore(gitController, s => s.prInfo)
-  const refreshPrStatus = useStore(gitController, s => s.refreshPrStatus)
+  const refreshGit = useStore(gitController, s => s.refreshGit)
+  const gitRefreshing = useStore(gitController, s => s.gitRefreshing)
   const openExternal = useAppStore((s) => s.openExternal)
-  const [refreshing, setRefreshing] = useState(false)
 
-  const handleRefresh = async () => {
-    setRefreshing(true)
-    try {
-      await refreshPrStatus()
-    } finally {
-      setRefreshing(false)
-    }
+  const handleRefresh = () => {
+    void refreshGit()
   }
 
   if (!isVisible) return null
@@ -34,8 +28,8 @@ export default function GitHubBrowser({ workspace, isVisible }: GitHubBrowserPro
       <div className="github-browser">
         <div className="github-browser-empty">
           <p>No open pull request found for this branch.</p>
-          <button className="workspace-action-btn" onClick={() => { void handleRefresh(); }} disabled={refreshing}>
-            {refreshing ? <Loader2 size={14} className="spinning" /> : <RefreshCw size={14} />}
+          <button className="workspace-action-btn" onClick={handleRefresh} disabled={gitRefreshing}>
+            {gitRefreshing ? <Loader2 size={14} className="spinning" /> : <RefreshCw size={14} />}
             <span style={{ marginLeft: 4 }}>Refresh</span>
           </button>
         </div>
@@ -51,8 +45,8 @@ export default function GitHubBrowser({ workspace, isVisible }: GitHubBrowserPro
             #{String(prInfo.number)} {prInfo.title}
           </h2>
           <div className="github-browser-actions">
-            <button className="workspace-action-btn" onClick={() => { void handleRefresh(); }} disabled={refreshing} title="Refresh">
-              {refreshing ? <Loader2 size={14} className="spinning" /> : <RefreshCw size={14} />}
+            <button className="workspace-action-btn" onClick={handleRefresh} disabled={gitRefreshing} title="Refresh">
+              {gitRefreshing ? <Loader2 size={14} className="spinning" /> : <RefreshCw size={14} />}
             </button>
             <button
               className="workspace-action-btn"

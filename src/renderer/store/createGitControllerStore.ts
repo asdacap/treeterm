@@ -20,14 +20,9 @@ export interface GitControllerState {
   pullLoading: boolean
   gitRefreshing: boolean
   prInfo: GitHubPrInfo | null
-  refreshDiffStatus: () => Promise<void>
-  refreshRemoteStatus: () => Promise<void>
+  refreshGit: () => Promise<void>
   pullFromRemote: () => Promise<{ success: boolean; error?: string }>
-  refreshPrStatus: () => Promise<void>
   openGitHub: () => Promise<{ url: string; hasPr: boolean } | { error: string }>
-  triggerRefresh: () => void
-  // Called by createWorkspaceStore after the workspace store is fully initialized
-  startPolling: () => void
   dispose: () => void
 }
 
@@ -37,7 +32,7 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
   let pendingResolvers: (() => void)[] = []
 
-  async function runRefreshDiffStatus(): Promise<void> {
+  async function runRefreshGit(): Promise<void> {
     store.setState({ gitRefreshing: true })
     try {
       try {
@@ -69,6 +64,30 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
           }
         }
       } catch { /* ignore */ }
+
+      try {
+        const ws = deps.getWorkspace()
+        if (ws.isGitRepo) {
+          await deps.git.fetch(ws.path)
+          const count = await deps.git.getBehindCount(ws.path)
+          store.setState({ behindCount: count })
+        }
+      } catch { /* ignore — no remote or network issue */ }
+
+      try {
+        const ws = deps.getWorkspace()
+        if (ws.isWorktree && ws.parentId && ws.gitBranch && ws.gitRootPath) {
+          const parent = deps.lookupWorkspace(ws.parentId)
+          if (parent?.gitBranch) {
+            const result = await deps.github.getPrInfo(ws.gitRootPath, ws.gitBranch, parent.gitBranch)
+            if ('prInfo' in result) {
+              store.setState({ prInfo: result.prInfo })
+            } else if ('noPr' in result) {
+              store.setState({ prInfo: null })
+            }
+          }
+        }
+      } catch { /* ignore — network/auth issues */ }
     } finally {
       store.setState({ gitRefreshing: false })
       const resolvers = pendingResolvers
@@ -77,35 +96,15 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
     }
   }
 
-  function refreshDiffStatus(): Promise<void> {
+  function refreshGit(): Promise<void> {
     return new Promise<void>((resolve) => {
       pendingResolvers.push(resolve)
       if (debounceTimer !== null) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(() => {
         debounceTimer = null
-        void runRefreshDiffStatus()
-      }, 300)
+        void runRefreshGit()
+      }, 3000)
     })
-  }
-
-  async function refreshPrStatus(): Promise<void> {
-    const ws = deps.getWorkspace()
-    if (!ws.isWorktree || !ws.parentId || !ws.gitBranch || !ws.gitRootPath) return
-    const parent = deps.lookupWorkspace(ws.parentId)
-    if (!parent?.gitBranch) return
-    try {
-      const result = await deps.github.getPrInfo(ws.gitRootPath, ws.gitBranch, parent.gitBranch)
-      if ('prInfo' in result) {
-        store.setState({ prInfo: result.prInfo })
-      } else if ('noPr' in result) {
-        store.setState({ prInfo: null })
-      }
-    } catch { /* ignore — network/auth issues */ }
-  }
-
-  function startGitController(): void {
-    if (!deps.initialWorkspace.isGitRepo) return
-    void runRefreshDiffStatus()
   }
 
   const store = createStore<GitControllerState>()((set) => ({
@@ -117,18 +116,7 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
     gitRefreshing: false,
     prInfo: null,
 
-    refreshDiffStatus,
-    triggerRefresh: (): void => { void refreshDiffStatus(); },
-
-    refreshRemoteStatus: async () => {
-      const ws = deps.getWorkspace()
-      if (!ws.isGitRepo) return
-      try {
-        await deps.git.fetch(ws.path)
-        const count = await deps.git.getBehindCount(ws.path)
-        set({ behindCount: count })
-      } catch { /* ignore — no remote or network issue */ }
-    },
+    refreshGit,
 
     pullFromRemote: async () => {
       const ws = deps.getWorkspace()
@@ -148,8 +136,6 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
       }
     },
 
-    refreshPrStatus,
-
     openGitHub: async () => {
       const ws = deps.getWorkspace()
       if (!ws.parentId || !ws.gitBranch || !ws.gitRootPath) return { error: 'Missing workspace info' }
@@ -164,16 +150,6 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
         return { url: result.createUrl, hasPr: false }
       }
       return result
-    },
-
-    startPolling: (): void => {
-      startGitController()
-      if (deps.initialWorkspace.isGitRepo) {
-        void store.getState().refreshRemoteStatus()
-      }
-      if (deps.initialWorkspace.isWorktree && deps.initialWorkspace.parentId) {
-        void refreshPrStatus()
-      }
     },
 
     dispose: (): void => {
