@@ -389,6 +389,13 @@ body,
   flex: 1;
 }
 
+.tree-item-pr-number {
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
 .tree-item-name-input {
   font-size: 13px;
   font-family: inherit;

@@ -4,7 +4,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { createStore } from 'zustand/vanilla'
 import { LoadedWorkspaceTreeItem } from './SessionPanel'
 import type { WorkspaceStoreState } from '../store/createWorkspaceStore'
-import type { Workspace } from '../types'
+import type { GitHubPrInfo, Workspace } from '../types'
 import { ActivityState } from '../types'
 import { makeWorkspace } from '../../shared/test-fixtures/workspace'
 
@@ -41,7 +41,11 @@ vi.mock('../store/contextMenu', async () => {
   }
 })
 
-function makeWorkspaceStore(metadataOverride: Record<string, string> = {}, workspaceOverride: Partial<Workspace> = {}) {
+function makeWorkspaceStore(
+  metadataOverride: Record<string, string> = {},
+  workspaceOverride: Partial<Workspace> = {},
+  prInfo: GitHubPrInfo | null = null,
+) {
   const toggleFavourite = vi.fn()
   const store = createStore<WorkspaceStoreState>()(() => ({
     workspace: makeWorkspace(workspaceOverride) as unknown as Workspace,
@@ -65,7 +69,7 @@ function makeWorkspaceStore(metadataOverride: Record<string, string> = {}, works
     gitApi: {} as any, filesystemApi: {} as any, runActionsApi: {} as any, execApi: {} as any,
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     worktreeRegistryApi: {} as any, saveRegistryEntry: vi.fn(),
-    gitController: createStore<any>()(() => ({})),
+    gitController: createStore<{ prInfo: GitHubPrInfo | null }>()(() => ({ prInfo })),
   }) as unknown as WorkspaceStoreState)
   return { store, toggleFavourite }
 }
@@ -158,5 +162,41 @@ describe('LoadedWorkspaceTreeItem — favourite feature', () => {
 
     const favouriteIcon = container.querySelector('.tree-item-favourite-icon')
     expect(favouriteIcon).toBeNull()
+  })
+})
+
+describe('LoadedWorkspaceTreeItem — PR number', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    const { useContextMenuStore } = await import('../store/contextMenu')
+    useContextMenuStore.getState().close()
+  })
+
+  it('renders the PR number before the workspace name when prInfo is set', () => {
+    const prInfo: GitHubPrInfo = {
+      number: 1234,
+      url: 'https://github.com/x/y/pull/1234',
+      title: 'My PR',
+      state: 'OPEN',
+      reviews: [],
+      checkRuns: [],
+      unresolvedThreads: [],
+      unresolvedCount: 0,
+    }
+    const { store } = makeWorkspaceStore({}, {}, prInfo)
+    const { container } = renderTreeItem(store)
+
+    const prSpan = container.querySelector('.tree-item-pr-number')
+    expect(prSpan).not.toBeNull()
+    expect(prSpan?.textContent).toBe('#1234')
+    expect(screen.getByText('My WS')).toBeDefined()
+  })
+
+  it('does not render the PR number element when prInfo is null', () => {
+    const { store } = makeWorkspaceStore({}, {}, null)
+    const { container } = renderTreeItem(store)
+
+    const prSpan = container.querySelector('.tree-item-pr-number')
+    expect(prSpan).toBeNull()
   })
 })

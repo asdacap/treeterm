@@ -650,6 +650,7 @@ interface TreeItemViewProps extends Omit<WorkspaceTreeItemProps, 'entry'> {
   displayName: string
   description: string | undefined
   tabIds: string[]
+  prNumber: number | undefined
 }
 
 function TreeItemView({
@@ -657,7 +658,7 @@ function TreeItemView({
   onToggleExpand, onClick, onQuickFork, onCreateChild, onRemove, onDismiss, onOpenSettings, onToggleFavourite,
   children, renderChild,
   isDragging, dragOverPosition, onDragStart, onDragOver, onDrop, onDragEnd,
-  loadStatus, ws, displayName, description, tabIds,
+  loadStatus, ws, displayName, description, tabIds, prNumber,
 }: TreeItemViewProps): React.JSX.Element {
   const openContextMenu = useContextMenuStore((s) => s.open)
   const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
@@ -709,6 +710,9 @@ function TreeItemView({
         <span className="tree-item-icon">
           <WorkspaceIcon tabIds={tabIds} loadStatus={loadStatus} isWorktree={ws?.isWorktree ?? false} />
         </span>
+        {prNumber !== undefined && (
+          <span className="tree-item-pr-number">#{String(prNumber)}</span>
+        )}
         <span className="tree-item-name">
           {displayName}
         </span>
@@ -768,9 +772,11 @@ function TreeItemView({
 
 export function LoadedWorkspaceTreeItem({
   store, data, ...rest
-}: { store: WorkspaceStore; data: Workspace } & Omit<TreeItemViewProps, 'loadStatus' | 'ws' | 'displayName' | 'description' | 'tabIds' | 'isFavourite'>): React.JSX.Element {
+}: { store: WorkspaceStore; data: Workspace } & Omit<TreeItemViewProps, 'loadStatus' | 'ws' | 'displayName' | 'description' | 'tabIds' | 'isFavourite' | 'prNumber'>): React.JSX.Element {
   const metadata = useStore(store, s => s.metadata)
   const appStates = useStore(store, s => s.appStates)
+  const gitController = useStore(store, s => s.gitController)
+  const prNumber = useStore(gitController, s => s.prInfo?.number)
   const isFavourite = metadata.isFavourite === 'true'
   return (
     <TreeItemView
@@ -780,6 +786,7 @@ export function LoadedWorkspaceTreeItem({
       tabIds={Object.keys(appStates)}
       loadStatus={undefined}
       isFavourite={isFavourite}
+      prNumber={prNumber}
       {...rest}
     />
   )
@@ -797,6 +804,7 @@ function WorkspaceTreeItem({ entry, ...rest }: WorkspaceTreeItemProps): React.JS
       tabIds={[]}
       loadStatus={entry.status}
       isFavourite={false}
+      prNumber={undefined}
       {...rest}
     />
   )
