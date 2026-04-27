@@ -1079,7 +1079,7 @@ export function createSessionStore(
       if (id) {
         const entry = get().workspaces.get(id)
         if (entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError)) {
-          entry.store.getState().gitController.getState().triggerRefresh()
+          void entry.store.getState().gitController.getState().refreshGit()
         }
       }
     },
@@ -1132,12 +1132,12 @@ export function createSessionStore(
           return { success: false, error: err instanceof Error ? err.message : String(err) }
         }
 
-        // Refresh parent's remote status after merge
+        // Refresh parent's git status after merge
         const wsData = entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data : undefined
         if (wsData?.parentId) {
           const parentEntry = get().workspaces.get(wsData.parentId)
           if (parentEntry && (parentEntry.status === WorkspaceEntryStatus.Loaded || parentEntry.status === WorkspaceEntryStatus.OperationError)) {
-            void parentEntry.store.getState().gitController.getState().refreshRemoteStatus()
+            void parentEntry.store.getState().gitController.getState().refreshGit()
           }
         }
 
@@ -1166,18 +1166,18 @@ export function createSessionStore(
           }))
         }
 
-        // Refresh workspace diff status and git info
+        // Refresh workspace git status and git info
         const currentEntry = get().workspaces.get(id)
         if (currentEntry && currentEntry.status === WorkspaceEntryStatus.Loaded) {
-          void currentEntry.store.getState().gitController.getState().refreshDiffStatus()
+          void currentEntry.store.getState().gitController.getState().refreshGit()
         }
         void get().refreshGitInfo(id)
 
-        // Refresh parent's remote status after merge
+        // Refresh parent's git status after merge
         if (currentEntry && currentEntry.status === WorkspaceEntryStatus.Loaded && currentEntry.data.parentId) {
           const parentEntry = get().workspaces.get(currentEntry.data.parentId)
           if (parentEntry && (parentEntry.status === WorkspaceEntryStatus.Loaded || parentEntry.status === WorkspaceEntryStatus.OperationError)) {
-            void parentEntry.store.getState().gitController.getState().refreshRemoteStatus()
+            void parentEntry.store.getState().gitController.getState().refreshGit()
           }
         }
 

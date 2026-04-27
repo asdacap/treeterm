@@ -48,7 +48,7 @@ export default function ReviewBrowser({
   const addReviewComment = useStore(reviewCommentStore, s => s.addReviewComment)
   const deleteReviewComment = useStore(reviewCommentStore, s => s.deleteReviewComment)
   const updateOutdatedReviewComments = useStore(reviewCommentStore, s => s.updateOutdatedReviewComments)
-  const refreshDiffStatus = useStore(gitController, s => s.refreshDiffStatus)
+  const refreshGit = useStore(gitController, s => s.refreshGit)
   const git = useGitApi(workspace)
   const workspaceId = wsData.id
   const parentWorkspace = parentWorkspaceId ? lookupWorkspace(parentWorkspaceId) : undefined
@@ -155,11 +155,11 @@ export default function ReviewBrowser({
         ...(hasBaseBranch ? [h.loadDiff()] : []),
         ...(hasParent ? [h.checkConflicts()] : []),
       ])
-      void refreshDiffStatus()
+      void refreshGit()
     } finally {
       setRefreshing(false)
     }
-  }, [hasBaseBranch, hasParent, refreshDiffStatus])
+  }, [hasBaseBranch, hasParent, refreshGit])
 
   // Auto-refresh when tab becomes visible (e.g., switching back from terminal)
   const wasVisibleRef = useRef<boolean | null>(null)
@@ -402,7 +402,7 @@ export default function ReviewBrowser({
       const result = await git.stageFile(filePath)
       if (result.success) {
         await loadUncommittedChanges()
-        void refreshDiffStatus()
+        void refreshGit()
       } else {
         setStageError(result.error || `Failed to stage ${filePath}`)
       }
@@ -419,7 +419,7 @@ export default function ReviewBrowser({
       const result = await git.unstageFile(filePath)
       if (result.success) {
         await loadUncommittedChanges()
-        void refreshDiffStatus()
+        void refreshGit()
       } else {
         setStageError(result.error || `Failed to unstage ${filePath}`)
       }
@@ -436,7 +436,7 @@ export default function ReviewBrowser({
       const result = await git.stageAll()
       if (result.success) {
         await loadUncommittedChanges()
-        void refreshDiffStatus()
+        void refreshGit()
       } else {
         setStageError(result.error || 'Failed to stage all files')
       }
@@ -453,7 +453,7 @@ export default function ReviewBrowser({
       const result = await git.unstageAll()
       if (result.success) {
         await loadUncommittedChanges()
-        void refreshDiffStatus()
+        void refreshGit()
       } else {
         setStageError(result.error || 'Failed to unstage all files')
       }
@@ -478,7 +478,7 @@ export default function ReviewBrowser({
         setCommitMessage('')
         await loadUncommittedChanges()
         await loadDiff()
-        void refreshDiffStatus()
+        void refreshGit()
       } else {
         setCommitError(result.error || 'Failed to commit')
       }
@@ -568,7 +568,7 @@ export default function ReviewBrowser({
       }
       // Workspace still alive — refresh the review view
       await Promise.all([loadDiff(), loadUncommittedChanges()])
-      void refreshDiffStatus()
+      void refreshGit()
     } catch (err) {
       alert(`Merge failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }

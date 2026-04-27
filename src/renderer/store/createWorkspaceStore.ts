@@ -274,7 +274,7 @@ export function createWorkspaceStore(
       getBranchIsUserDefined: () => get().metadata.branchIsUserDefined === 'true',
       getParentId: () => get().workspace.parentId,
       refreshGitInfo: () => deps.refreshGitInfo(id),
-      refreshDiffStatus: () => gitController.getState().refreshDiffStatus(),
+      refreshGit: () => gitController.getState().refreshGit(),
     }),
 
     createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) =>
@@ -557,8 +557,6 @@ export function createWorkspaceStore(
     removeKeepBoth: () => deps.removeWorkspaceKeepBoth(id),
     lookupWorkspace: (otherId: string) => deps.lookupWorkspace(otherId),
   }))
-
-  gitController.getState().startPolling()
 
   return store
 }

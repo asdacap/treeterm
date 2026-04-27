@@ -56,15 +56,16 @@ function makePrInfo(overrides: Partial<GitHubPrInfo> = {}): GitHubPrInfo {
 }
 
 function makeStores(prInfo: GitHubPrInfo | null = null) {
-  const refreshPrStatus = vi.fn().mockResolvedValue(undefined)
+  const refreshGit = vi.fn().mockResolvedValue(undefined)
   const gitControllerStore = createStore<any>()(() => ({
     prInfo,
-    refreshPrStatus,
+    refreshGit,
+    gitRefreshing: false,
   }))
   const workspaceStore = createStore<any>()(() => ({
     gitController: gitControllerStore,
   }))
-  return { workspaceStore, gitControllerStore, refreshPrStatus }
+  return { workspaceStore, gitControllerStore, refreshGit }
 }
 
 describe('GitHubBrowser', () => {
@@ -143,8 +144,8 @@ describe('GitHubBrowser', () => {
     expect(screen.getByText('Fix this')).toBeDefined()
   })
 
-  it('refresh button calls refreshPrStatus', async () => {
-    const { workspaceStore, refreshPrStatus } = makeStores(null)
+  it('refresh button calls refreshGit', async () => {
+    const { workspaceStore, refreshGit } = makeStores(null)
     render(<GitHubBrowser workspace={workspaceStore} isVisible={true} />)
 
     const refreshBtn = screen.getByText('Refresh').closest('button')
@@ -152,7 +153,7 @@ describe('GitHubBrowser', () => {
     if (refreshBtn) fireEvent.click(refreshBtn)
 
     await waitFor(() => {
-      expect(refreshPrStatus).toHaveBeenCalledTimes(1)
+      expect(refreshGit).toHaveBeenCalledTimes(1)
     })
   })
 })

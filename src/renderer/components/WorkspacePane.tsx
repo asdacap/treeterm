@@ -663,10 +663,10 @@ function GitStatusButton({ workspace }: GitStatusButtonProps) {
   const gitRefreshing = useStore(gitController, s => s.gitRefreshing)
   const hasUncommittedChanges = useStore(gitController, s => s.hasUncommittedChanges)
   const hasConflictsWithParent = useStore(gitController, s => s.hasConflictsWithParent)
-  const refreshDiffStatus = useStore(gitController, s => s.refreshDiffStatus)
+  const refreshGit = useStore(gitController, s => s.refreshGit)
 
   const handleRefresh = () => {
-    void refreshDiffStatus()
+    void refreshGit()
   }
 
   let icon: React.ReactNode
@@ -792,11 +792,11 @@ function GitPullButton({ workspace }: GitPullButtonProps) {
   const gitController = useStore(workspace, s => s.gitController)
   const behindCount = useStore(gitController, s => s.behindCount)
   const pullLoading = useStore(gitController, s => s.pullLoading)
-  const refreshRemoteStatus = useStore(gitController, s => s.refreshRemoteStatus)
+  const refreshGit = useStore(gitController, s => s.refreshGit)
   const pullFromRemote = useStore(gitController, s => s.pullFromRemote)
 
   const handleRefresh = () => {
-    void refreshRemoteStatus()
+    void refreshGit()
   }
 
   const handlePull = async () => {

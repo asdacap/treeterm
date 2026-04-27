@@ -223,11 +223,11 @@ describe('createSessionStore', () => {
       expect(entry?.status).toBe(WorkspaceEntryStatus.Loaded)
       if (entry?.status !== WorkspaceEntryStatus.Loaded) return
 
-      const triggerRefresh = vi.spyOn(entry.store.getState().gitController.getState(), 'triggerRefresh')
+      const refreshGit = vi.spyOn(entry.store.getState().gitController.getState(), 'refreshGit')
 
       store.getState().setActiveWorkspace(undefined)
       store.getState().setActiveWorkspace(id)
-      expect(triggerRefresh).toHaveBeenCalled()
+      expect(refreshGit).toHaveBeenCalled()
     })
   })
 
