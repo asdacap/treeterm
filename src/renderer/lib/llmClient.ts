@@ -76,7 +76,7 @@ async function completeChatCall(
   return response.choices[0]?.message.content ?? ''
 }
 
-const ANALYZER_CACHE_SIZE = 10
+const ANALYZER_CACHE_SIZE = 1024
 
 export function createLlmClient(): LlmApi {
   // Analyzer cache
