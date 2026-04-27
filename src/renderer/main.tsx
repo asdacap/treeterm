@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import './monaco-config' // Configure Monaco before any components use it
 import { useAppStore } from './store/app'
+import { useSessionNamesStore } from './store/sessionNames'
 import App from './App'
 import '@aptre/flex-layout/style/dark.css'
 import './styles/index.css'
@@ -36,6 +37,7 @@ window.electron.app.onReady(() => {
     getViewportSize: () => ({ width: window.innerWidth, height: window.innerHeight }),
     keyEventTarget: window,
     isKeyDiagEnabled: () => !!window.__enableKeyDiag,
+    sessionNamesStore: useSessionNamesStore,
   })
 
   const rootEl = document.getElementById('root')

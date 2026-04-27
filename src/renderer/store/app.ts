@@ -10,7 +10,7 @@ import type { KeyEventTarget } from './keybinding'
 import { initKeyboardHealthMonitor } from '../utils/keyboardHealthMonitor'
 import { useNavigationStore } from './navigation'
 import { useActivityStateStore } from './activityState'
-import { useSessionNamesStore } from './sessionNames'
+import type { SessionNamesState } from './sessionNames'
 import { createTerminalApplication, createTerminalVariant } from '../../applications/terminal/renderer'
 import { filesystemApplication } from '../../applications/filesystem/renderer'
 import { createAiHarnessVariant } from '../../applications/aiHarness/renderer'
@@ -58,6 +58,7 @@ export interface AppDeps {
   getViewportSize: () => { width: number; height: number }
   keyEventTarget: KeyEventTarget
   isKeyDiagEnabled: () => boolean
+  sessionNamesStore: StoreApi<SessionNamesState>
 }
 
 interface AppState extends AppDeps {
@@ -119,6 +120,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   getViewportSize: UNINITIALIZED,
   keyEventTarget: UNINITIALIZED,
   isKeyDiagEnabled: UNINITIALIZED,
+  sessionNamesStore: UNINITIALIZED,
 
   windowUuid: null,
   isSettingsOpen: false,
@@ -285,8 +287,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
         console.log('[App] Local connection established, session:', session.id)
         const localSessionId = generateSessionId()
         const sessionStore = getOrCreateSession(localSessionId, get, set, info)
-        if (!useSessionNamesStore.getState().getName(localSessionId)) {
-          useSessionNamesStore.getState().setName(localSessionId, 'LOCAL')
+        if (!get().sessionNamesStore.getState().getName(localSessionId)) {
+          get().sessionNamesStore.getState().setName(localSessionId, 'LOCAL')
         }
         if (session.workspaces.length > 0) {
           void sessionStore.getState().handleRestore(session)
@@ -315,13 +317,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
       console.log('[App] Connection reconnected:', connection.id, 'session:', session.id)
       // Preserve session name before disposing old session
       const oldSession = findSessionByConnectionId(get, connection.id)
-      const oldName = oldSession ? useSessionNamesStore.getState().getName(oldSession.key) : undefined
+      const oldName = oldSession ? get().sessionNamesStore.getState().getName(oldSession.key) : undefined
       // Dispose old session and recreate fresh
       disposeSessionForConnection(connection.id, get)
       const reconnSessionId = generateSessionId()
       const newStore = getOrCreateSession(reconnSessionId, get, set, connection)
       if (oldName) {
-        useSessionNamesStore.getState().setName(reconnSessionId, oldName)
+        get().sessionNamesStore.getState().setName(reconnSessionId, oldName)
       }
       if (session.workspaces.length > 0) {
         void newStore.getState().handleRestore(session)
@@ -420,11 +422,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
       storeKey = generateSessionId()
       store = getOrCreateSession(storeKey, get, set, connection)
     }
-    if (!useSessionNamesStore.getState().getName(storeKey)) {
+    if (!get().sessionNamesStore.getState().getName(storeKey)) {
       const label = connection.target.type === ConnectionTargetType.Remote
         ? (connection.target.config.label || `${connection.target.config.user}@${connection.target.config.host}`)
         : storeKey
-      useSessionNamesStore.getState().setName(storeKey, label)
+      get().sessionNamesStore.getState().setName(storeKey, label)
     }
     console.log(`[renderer:app] Session store created/retrieved for session=${session.id}, storeKey=${storeKey}`)
     if (session.workspaces.length > 0) {
@@ -447,8 +449,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const connection: ConnectionInfo = { id: config.id, target: { type: ConnectionTargetType.Remote, config }, status: ConnectionStatus.Connecting }
     const remoteSessionId = generateSessionId()
     getOrCreateSession(remoteSessionId, get, set, connection)
-    if (!useSessionNamesStore.getState().getName(remoteSessionId)) {
-      useSessionNamesStore.getState().setName(remoteSessionId, config.label || `${config.user}@${config.host}`)
+    if (!get().sessionNamesStore.getState().getName(remoteSessionId)) {
+      get().sessionNamesStore.getState().setName(remoteSessionId, config.label || `${config.user}@${config.host}`)
     }
     useNavigationStore.getState().setActiveView({ type: 'session', sessionId: remoteSessionId })
   },

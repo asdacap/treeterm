@@ -11,7 +11,6 @@ import { WorkspaceEntryStatus } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import { useNavigationStore } from '../store/navigation'
 import { useKeybindingStore, PrefixModeState } from '../store/keybinding'
-import { useSessionNamesStore } from '../store/sessionNames'
 import CreateChildDialog, { TabMode } from './CreateChildDialog'
 import OpenWorkspaceDialog from './OpenWorkspaceDialog'
 import UpstreamWarningDialog from './UpstreamWarningDialog'
@@ -90,9 +89,10 @@ export default function SessionPanel({
   } | null>(null)
 
   // Session name editing
-  const displayName = useSessionNamesStore(s => s.names.get(sessionId)?.name)
-  const setSessionName = useSessionNamesStore(s => s.setName)
-  const removeSessionName = useSessionNamesStore(s => s.removeName)
+  const sessionNamesStore = useAppStore(s => s.sessionNamesStore)
+  const displayName = useStore(sessionNamesStore, s => s.names.get(sessionId)?.name)
+  const setSessionName = useStore(sessionNamesStore, s => s.setName)
+  const removeSessionName = useStore(sessionNamesStore, s => s.removeName)
   const [isEditingName, setIsEditingName] = useState(false)
   const [editName, setEditName] = useState('')
 

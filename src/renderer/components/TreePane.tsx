@@ -5,7 +5,6 @@ import { useActivityStateStore } from '../store/activityState'
 import { useAppStore } from '../store/app'
 import { ActivityState } from '../types'
 import type { WorkspaceStore } from '../types'
-import { useSessionNamesStore } from '../store/sessionNames'
 import SessionPanel, { CollapsedSessionPanel } from './SessionPanel'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
@@ -166,8 +165,9 @@ interface TreePaneProps {
 export default function TreePane({ selectFolder, isCollapsed, onToggleCollapse }: TreePaneProps): React.JSX.Element {
   const sessionStores = useAppStore(s => s.sessionStores)
   const rawSessionIds = Array.from(sessionStores.keys())
-  const getSortedIds = useSessionNamesStore(s => s.getSortedIds)
-  const reorderSession = useSessionNamesStore(s => s.reorderSession)
+  const sessionNamesStore = useAppStore(s => s.sessionNamesStore)
+  const getSortedIds = useStore(sessionNamesStore, s => s.getSortedIds)
+  const reorderSession = useStore(sessionNamesStore, s => s.reorderSession)
   const sessionIds = getSortedIds(rawSessionIds)
 
   // Session drag-and-drop state

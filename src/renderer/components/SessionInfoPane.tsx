@@ -7,7 +7,6 @@ import { Loader2 } from 'lucide-react'
 import type { SessionState } from '../store/createSessionStore'
 import { WorkspaceEntryStatus } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
-import { useSessionNamesStore } from '../store/sessionNames'
 import type { PortForwardConfig, PortForwardInfo } from '../types'
 import { ConnectionStatus, PortForwardStatus, ConnectionTargetType } from '../../shared/types'
 import PortForwardDialog from './PortForwardDialog'
@@ -68,7 +67,8 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
   const ssh = useAppStore(s => s.ssh)
   const exec = useAppStore(s => s.exec)
   const disconnectSession = useAppStore(s => s.disconnectSession)
-  const displayName = useSessionNamesStore(s => s.names.get(sessionId)?.name ?? sessionId)
+  const sessionNamesStore = useAppStore(s => s.sessionNamesStore)
+  const displayName = useStore(sessionNamesStore, s => s.names.get(sessionId)?.name ?? sessionId)
 
   const [activeTab, setActiveTab] = useState(isRemote ? TabId.Ssh : TabId.Info)
   const [sshSubTab, setSshSubTab] = useState(SshSubTab.Bootstrap)

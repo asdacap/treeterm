@@ -8,7 +8,7 @@ interface SessionNameEntry {
   sortOrder: number
 }
 
-interface SessionNamesState {
+export interface SessionNamesState {
   names: Map<string, SessionNameEntry>
   setName: (sessionId: string, name: string) => void
   removeName: (sessionId: string) => void
