@@ -1,7 +1,7 @@
 /* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import React, { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 
-import { ChevronDown, Github, Loader2, ArrowDownToLine, RefreshCw, AlertTriangle, CircleDot, Check, X } from 'lucide-react'
+import { ChevronDown, Github, Loader2, ArrowDownToLine, RefreshCw, AlertTriangle, CircleDot, Check, X, ExternalLink } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import type { SessionState } from '../store/createSessionStore'
@@ -726,11 +726,7 @@ function GitHubButton({ workspace }: GitHubButtonProps) {
   const unresolvedCount = prInfo?.unresolvedCount ?? 0
   const hasUnresolved = unresolvedCount > 0
 
-  const handleClick = async () => {
-    if (hasUnresolved) {
-      openOrFocusTab('github')
-      return
-    }
+  const openInBrowser = async () => {
     setLoading(true)
     try {
       const result = await openGitHub()
@@ -747,18 +743,26 @@ function GitHubButton({ workspace }: GitHubButtonProps) {
     }
   }
 
-  let className = 'workspace-action-btn'
-  if (hasUnresolved) {
-    className += ' workspace-action-btn-github-comments'
-  } else if (hasPr) {
-    className += ' workspace-action-btn-github'
+  const handleMainClick = async () => {
+    if (hasUnresolved) {
+      openOrFocusTab('github')
+      return
+    }
+    await openInBrowser()
   }
 
-  let title = 'Create GitHub PR'
+  let stateClass = ''
   if (hasUnresolved) {
-    title = `Address ${String(unresolvedCount)} comment${unresolvedCount === 1 ? '' : 's'}`
+    stateClass = ' workspace-action-btn-github-comments'
   } else if (hasPr) {
-    title = 'Open GitHub PR'
+    stateClass = ' workspace-action-btn-github'
+  }
+
+  let mainTitle = 'Create GitHub PR'
+  if (hasUnresolved) {
+    mainTitle = `Address ${String(unresolvedCount)} comment${unresolvedCount === 1 ? '' : 's'}`
+  } else if (hasPr) {
+    mainTitle = 'Open GitHub PR'
   }
 
   let buttonLabel: string
@@ -770,17 +774,33 @@ function GitHubButton({ workspace }: GitHubButtonProps) {
     buttonLabel = 'Create PR'
   }
 
+  let browserTitle = 'Open create PR page in browser'
+  if (hasPr) {
+    browserTitle = 'Open GitHub PR in browser'
+  }
+
   return (
-    <button
-      className={className}
-      onClick={() => { void handleClick() }}
-      disabled={loading}
-      title={title}
-    >
-      {/* eslint-disable-next-line @typescript-eslint/no-deprecated */}
-      <Github size={14} />
-      <span>{buttonLabel}</span>
-    </button>
+    <div className="github-button-group">
+      <button
+        className={`workspace-action-btn github-main-btn${stateClass}`}
+        onClick={() => { void handleMainClick() }}
+        disabled={loading}
+        title={mainTitle}
+      >
+        {/* eslint-disable-next-line @typescript-eslint/no-deprecated */}
+        <Github size={14} />
+        <span>{buttonLabel}</span>
+      </button>
+      <button
+        className={`workspace-action-btn github-browser-btn${stateClass}`}
+        onClick={() => { void openInBrowser() }}
+        disabled={loading}
+        title={browserTitle}
+        aria-label={browserTitle}
+      >
+        <ExternalLink size={14} />
+      </button>
+    </div>
   )
 }
 
