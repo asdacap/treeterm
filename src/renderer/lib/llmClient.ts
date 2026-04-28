@@ -76,12 +76,14 @@ async function completeChatCall(
   return response.choices[0]?.message.content ?? ''
 }
 
-const ANALYZER_CACHE_SIZE = 1024
+export const ANALYZER_CACHE_SIZE = 1024
+
+// Global analyzer cache — shared across all LLM client instances.
+// Must outlive individual sessions so that disconnect/reconnect or opening
+// debug clients does not re-query terminal buffers we have already analyzed.
+const globalAnalyzerCache: { buffer: string; result: { state: string; reason: string } }[] = []
 
 export function createLlmClient(): LlmApi {
-  // Analyzer cache
-  const analyzerCache: { buffer: string; result: { state: string; reason: string } }[] = []
-
   // Active streams for cancellation
   const activeStreams = new Map<string, AbortController>()
 
@@ -132,7 +134,7 @@ export function createLlmClient(): LlmApi {
     },
 
     analyzeTerminal: async (buffer, cwd, settings) => {
-      const cached = analyzerCache.find((entry) => entry.buffer === buffer)
+      const cached = globalAnalyzerCache.find((entry) => entry.buffer === buffer)
       if (cached) {
         return { ...cached.result, cached: true }
       }
@@ -154,9 +156,9 @@ export function createLlmClient(): LlmApi {
         })
         const parsed = parseLlmJson(response)
         const result = { state: parsed.state as string, reason: parsed.reason as string }
-        analyzerCache.push({ buffer, result })
-        if (analyzerCache.length > ANALYZER_CACHE_SIZE) {
-          analyzerCache.shift()
+        globalAnalyzerCache.push({ buffer, result })
+        if (globalAnalyzerCache.length > ANALYZER_CACHE_SIZE) {
+          globalAnalyzerCache.shift()
         }
         return { ...result, systemPrompt }
       } catch (error) {
@@ -166,7 +168,7 @@ export function createLlmClient(): LlmApi {
 
     // eslint-disable-next-line @typescript-eslint/require-await
     clearAnalyzerCache: async () => {
-      analyzerCache.length = 0
+      globalAnalyzerCache.length = 0
     },
 
     generateTitle: async (buffer, settings) => {

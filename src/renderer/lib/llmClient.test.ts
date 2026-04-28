@@ -34,7 +34,7 @@ vi.mock('openai', () => {
 })
 
 import { APIError } from 'openai'
-import { parseLlmJson, formatLlmError, createLlmClient } from './llmClient'
+import { parseLlmJson, formatLlmError, createLlmClient, ANALYZER_CACHE_SIZE } from './llmClient'
 
 // ---------------------------------------------------------------------------
 // parseLlmJson
@@ -188,8 +188,9 @@ const analyzerSettings = {
 }
 
 describe('createLlmClient analyzeTerminal (completeChatCall)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks()
+    await createLlmClient().clearAnalyzerCache()
   })
 
   it('returns content from completion', async () => {
@@ -340,8 +341,9 @@ describe('createLlmClient event subscriptions', () => {
 // ---------------------------------------------------------------------------
 
 describe('createLlmClient analyzeTerminal cache', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks()
+    await createLlmClient().clearAnalyzerCache()
   })
 
   it('cache hit returns cached result with cached: true', async () => {
@@ -364,7 +366,40 @@ describe('createLlmClient analyzeTerminal cache', () => {
     expect(mockCreate).toHaveBeenCalledTimes(1)
   })
 
-  it('cache evicts oldest entry when full (LRU, size 10)', async () => {
+  it('cache is shared across client instances (survives reconnects)', async () => {
+    mockCreate.mockResolvedValue({
+      choices: [{ message: { content: '{"state":"idle","reason":"waiting"}' } }],
+    })
+
+    // Simulate a session: create client, analyze, then "disconnect" by dropping the client.
+    const firstClient = createLlmClient()
+    await firstClient.analyzeTerminal('$ shared-buffer', '/home/user', analyzerSettings)
+    expect(mockCreate).toHaveBeenCalledTimes(1)
+
+    // Reconnect: a fresh client instance must reuse the prior cache.
+    const secondClient = createLlmClient()
+    const result = await secondClient.analyzeTerminal('$ shared-buffer', '/home/user', analyzerSettings)
+    expect(result).toEqual(expect.objectContaining({ cached: true }))
+    expect(mockCreate).toHaveBeenCalledTimes(1)
+  })
+
+  it('clearAnalyzerCache on one client clears the global cache', async () => {
+    mockCreate.mockResolvedValue({
+      choices: [{ message: { content: '{"state":"idle","reason":"waiting"}' } }],
+    })
+
+    const firstClient = createLlmClient()
+    await firstClient.analyzeTerminal('$ buf', '/home/user', analyzerSettings)
+    expect(mockCreate).toHaveBeenCalledTimes(1)
+
+    // Clearing via a different client must wipe the shared cache.
+    await createLlmClient().clearAnalyzerCache()
+
+    await firstClient.analyzeTerminal('$ buf', '/home/user', analyzerSettings)
+    expect(mockCreate).toHaveBeenCalledTimes(2)
+  })
+
+  it('cache evicts oldest entry when full (FIFO)', async () => {
     let callCount = 0
     mockCreate.mockImplementation(() => {
       callCount++
@@ -375,22 +410,23 @@ describe('createLlmClient analyzeTerminal cache', () => {
 
     const client = createLlmClient()
 
-    // Fill the cache with 10 entries
-    for (let i = 0; i < 10; i++) {
+    // Fill the cache to capacity.
+    for (let i = 0; i < ANALYZER_CACHE_SIZE; i++) {
       await client.analyzeTerminal(`buffer-${String(i)}`, '/home/user', analyzerSettings)
     }
-    expect(callCount).toBe(10)
+    expect(callCount).toBe(ANALYZER_CACHE_SIZE)
 
-    // Add one more to trigger eviction (oldest = buffer-0)
-    await client.analyzeTerminal('buffer-10', '/home/user', analyzerSettings)
-    expect(callCount).toBe(11)
+    // One more entry triggers eviction of the oldest (buffer-0).
+    await client.analyzeTerminal(`buffer-${String(ANALYZER_CACHE_SIZE)}`, '/home/user', analyzerSettings)
+    expect(callCount).toBe(ANALYZER_CACHE_SIZE + 1)
 
-    // buffer-0 should have been evicted — requesting it again should cause a new API call
+    // buffer-0 was evicted — requesting it again should re-query.
+    // (Re-querying then re-inserts buffer-0, evicting the next-oldest entry.)
     await client.analyzeTerminal('buffer-0', '/home/user', analyzerSettings)
-    expect(callCount).toBe(12)
+    expect(callCount).toBe(ANALYZER_CACHE_SIZE + 2)
 
-    // buffer-2 should still be cached (only buffer-0 and buffer-1 were evicted)
-    await client.analyzeTerminal('buffer-2', '/home/user', analyzerSettings)
-    expect(callCount).toBe(12) // no new call
+    // A buffer comfortably in the middle of the cache should still be present.
+    await client.analyzeTerminal(`buffer-${String(Math.floor(ANALYZER_CACHE_SIZE / 2))}`, '/home/user', analyzerSettings)
+    expect(callCount).toBe(ANALYZER_CACHE_SIZE + 2)
   })
 })
