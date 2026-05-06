@@ -141,6 +141,53 @@ describe('createGitHubApi', () => {
     expect(result).toEqual({ noPr: true, createUrl: 'https://github.com/owner/repo/compare/main...feature?expand=1' })
   })
 
+  it('queries with state=all so merged PRs are still discovered', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify([]), { status: 200 })
+    )
+    const api = createGitHubApi(exec, settings, 'local')
+    const promise = api.getPrInfo('/repo', 'feature', 'main')
+
+    await vi.waitFor(() => { expect(exec.start).toHaveBeenCalledTimes(1) })
+    exec._complete('exec-1', 'ghp_token123\n')
+    await vi.waitFor(() => { expect(exec.start).toHaveBeenCalledTimes(2) })
+    exec._complete('exec-2', 'git@github.com:owner/repo.git\n')
+
+    await promise
+    const url = fetchSpy.mock.calls[0]![0] as string
+    expect(url).toContain('state=all')
+    expect(url).not.toContain('state=open')
+  })
+
+  it('reports MERGED state when GraphQL returns a merged PR', async () => {
+    const api = createGitHubApi(exec, settings, 'local')
+    const promise = api.getPrInfo('/repo', 'feature', 'main')
+
+    await vi.waitFor(() => { expect(exec.start).toHaveBeenCalledTimes(1) })
+    exec._complete('exec-1', 'ghp_token123\n')
+    await vi.waitFor(() => { expect(exec.start).toHaveBeenCalledTimes(2) })
+    exec._complete('exec-2', 'git@github.com:owner/repo.git\n')
+
+    const graphqlData = {
+      data: { repository: { pullRequest: {
+        state: 'MERGED',
+        reviewThreads: { nodes: [] },
+        latestReviews: { nodes: [] },
+        commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [] } } } }] },
+      } } }
+    }
+
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ number: 7, title: 'Merged PR' }]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(graphqlData), { status: 200 }))
+
+    const result = await promise
+    expect(result).toHaveProperty('prInfo')
+    const { prInfo } = result as Extract<GitHubPrInfoResult, { prInfo: unknown }>
+    expect(prInfo.state).toBe('MERGED')
+    expect(prInfo.number).toBe(7)
+  })
+
   it('returns full prInfo on happy path with GraphQL', async () => {
     const api = createGitHubApi(exec, settings, 'local')
     const promise = api.getPrInfo('/repo', 'feature', 'main')

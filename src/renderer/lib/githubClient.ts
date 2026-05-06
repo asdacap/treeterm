@@ -86,9 +86,11 @@ export function createGitHubApi(
         if (!parsed) return { error: `Could not parse GitHub owner/repo from remote URL: ${remoteUrl}` }
         const { owner, repo } = parsed
 
-        // Search for existing PR via REST
+        // Search for existing PR via REST. Include closed/merged PRs so the
+        // indicator can reflect a merged state — `state=open` would miss them
+        // entirely and clear the indicator after merge.
         const prResponse = await fetch(
-          `https://api.github.com/repos/${owner}/${repo}/pulls?head=${owner}:${head}&base=${base}&state=open`,
+          `https://api.github.com/repos/${owner}/${repo}/pulls?head=${owner}:${head}&base=${base}&state=all`,
           { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } }
         )
         if (!prResponse.ok) {
