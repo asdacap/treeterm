@@ -23,6 +23,11 @@ import type {
 import { ExecEventType, type IpcResult } from '../../shared/ipc-types'
 import { FileChangeStatus } from '../../shared/types'
 import { resolveHomedir } from './homedir'
+import { withTimeout } from './withTimeout'
+
+// Backstop only — the daemon enforces a 30s exec timeout, so this fires only if the result event
+// is never delivered to the renderer.
+const GIT_EXEC_TIMEOUT_MS = 35000
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -90,11 +95,12 @@ async function execGit(
   if (!startResult.success) throw new Error(startResult.error)
   const { execId } = startResult
 
-  return new Promise((resolve, reject) => {
+  let unsub: () => void = () => undefined
+  return withTimeout(new Promise<ExecResult>((resolve, reject) => {
     const stdout: string[] = []
     const stderr: string[] = []
 
-    const unsub = exec.onEvent(execId, (event) => {
+    unsub = exec.onEvent(execId, (event) => {
       if (event.type === ExecEventType.Stdout) {
         stdout.push(event.data)
         options?.onProgress?.(event.data)
@@ -109,7 +115,7 @@ async function execGit(
         reject(new Error(event.message))
       }
     })
-  })
+  }), GIT_EXEC_TIMEOUT_MS, `git ${args.join(' ')}`, () => { unsub(); })
 }
 
 export function parseStatus(output: string): GitStatusEntry[] {

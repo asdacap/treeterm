@@ -28,6 +28,7 @@
     "src/renderer/store/createWorkspaceStore.ts",
     "src/renderer/store/createSessionStore.ts",
     "src/renderer/lib/worktreeRegistry.ts",
-    "src/renderer/lib/homedir.ts"
+    "src/renderer/lib/homedir.ts",
+    "src/renderer/lib/withTimeout.ts"
   ]
 }

@@ -1,15 +1,21 @@
 import type { ExecApi } from '../types'
 import { ExecEventType } from '../../shared/ipc-types'
+import { withTimeout } from './withTimeout'
+
+// Backstop only — the daemon enforces a 30s exec timeout, so this fires only if the result event
+// is never delivered to the renderer.
+const HOMEDIR_TIMEOUT_MS = 35000
 
 export async function resolveHomedir(exec: ExecApi, connectionId: string): Promise<string> {
   const startResult = await exec.start(connectionId, '/', 'sh', ['-c', 'echo $HOME'])
   if (!startResult.success) throw new Error(startResult.error)
   const { execId } = startResult
 
-  return new Promise((resolve, reject) => {
+  let unsub: () => void = () => undefined
+  return withTimeout(new Promise<string>((resolve, reject) => {
     const stdout: string[] = []
 
-    const unsub = exec.onEvent(execId, (event) => {
+    unsub = exec.onEvent(execId, (event) => {
       if (event.type === ExecEventType.Stdout) {
         stdout.push(event.data)
       } else if (event.type === ExecEventType.Exit) {
@@ -22,5 +28,5 @@ export async function resolveHomedir(exec: ExecApi, connectionId: string): Promi
         reject(new Error(event.message))
       }
     })
-  })
+  }), HOMEDIR_TIMEOUT_MS, 'resolveHomedir', () => { unsub(); })
 }

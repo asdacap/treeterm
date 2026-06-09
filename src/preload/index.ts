@@ -2,37 +2,29 @@ import { contextBridge } from 'electron'
 import type { SandboxConfig, Session, TTYSessionInfo, WorkspaceInput, Settings, SSHConnectionConfig, ConnectionInfo, PortForwardConfig, PortForwardInfo } from '../shared/types'
 import { PtyEventType, ExecEventType, type PtyEvent, type ExecEvent } from '../shared/ipc-types'
 import { IpcClient } from './ipc-client'
+import { createEventDispatcher } from './eventDispatcher'
 import type { PreloadApi, Platform } from '../renderer/types'
 
 type PtyEventCallback = (event: PtyEvent) => void
-const ptyEventListeners = new Map<string, PtyEventCallback[]>()
-
 type ExecEventCallback = (event: ExecEvent) => void
-const execEventListeners = new Map<string, ExecEventCallback[]>()
+
+// Dispatchers buffer events that arrive before a listener subscribes — a fast command can have its
+// terminal event broadcast before the `start` reply resolves and `onEvent` registers. See
+// ./eventDispatcher.ts.
+const ptyDispatch = createEventDispatcher<PtyEvent>()
+const execDispatch = createEventDispatcher<ExecEvent>()
 
 // Initialize IPC client
 const client = new IpcClient()
 
 // Listen for pty events from main process (unified stream)
 client.onPtyEvent((handle, event) => {
-  const listeners = ptyEventListeners.get(handle)
-  if (listeners) {
-    listeners.forEach((cb) => { cb(event); })
-  }
-  if (event.type === PtyEventType.End || event.type === PtyEventType.Error) {
-    ptyEventListeners.delete(handle)
-  }
+  ptyDispatch.dispatch(handle, event, (e) => e.type === PtyEventType.End || e.type === PtyEventType.Error)
 })
 
 // Listen for exec events from main process
 client.onExecEvent((execId, event) => {
-  const listeners = execEventListeners.get(execId)
-  if (listeners) {
-    listeners.forEach((cb) => { cb(event); })
-  }
-  if (event.type === ExecEventType.Exit || event.type === ExecEventType.Error) {
-    execEventListeners.delete(execId)
-  }
+  execDispatch.dispatch(execId, event, (e) => e.type === ExecEventType.Exit || e.type === ExecEventType.Error)
 })
 
 type SettingsOpenCallback = () => void
@@ -184,18 +176,7 @@ const preloadApi: PreloadApi = {
       client.ptyKill(connectionId, id)
     },
     onEvent: (id: string, callback: PtyEventCallback): (() => void) => {
-      if (!ptyEventListeners.has(id)) {
-        ptyEventListeners.set(id, [])
-      }
-      ptyEventListeners.get(id)?.push(callback)
-
-      return () => {
-        const listeners = ptyEventListeners.get(id)
-        if (listeners) {
-          const index = listeners.indexOf(callback)
-          if (index > -1) listeners.splice(index, 1)
-        }
-      }
+      return ptyDispatch.subscribe(id, callback)
     },
     onActiveProcessesOpen: (callback: ActiveProcessesOpenCallback): (() => void) => {
       activeProcessesOpenListeners.push(callback)
@@ -253,18 +234,7 @@ const preloadApi: PreloadApi = {
       client.execKill(execId)
     },
     onEvent: (execId: string, callback: ExecEventCallback): (() => void) => {
-      if (!execEventListeners.has(execId)) {
-        execEventListeners.set(execId, [])
-      }
-      execEventListeners.get(execId)?.push(callback)
-
-      return () => {
-        const listeners = execEventListeners.get(execId)
-        if (listeners) {
-          const index = listeners.indexOf(callback)
-          if (index > -1) listeners.splice(index, 1)
-        }
-      }
+      return execDispatch.subscribe(execId, callback)
     }
   },
   sandbox: {
