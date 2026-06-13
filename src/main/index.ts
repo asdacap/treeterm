@@ -9,7 +9,7 @@ import { ConnectionManager } from './connectionManager'
 import type { ExecInput, ExecOutput } from '../generated/treeterm'
 import { ConnectionStatus, ConnectionTargetType } from '../shared/types'
 import type { SSHConnectionConfig, PortForwardConfig } from '../shared/types'
-import { PtyEventType, ExecEventType } from '../shared/ipc-types'
+import { PtyEventType, ExecEventType, type ExecEvent } from '../shared/ipc-types'
 
 // Parse initial workspace and SSH target from command line
 let initialWorkspacePath: string | null = null
@@ -506,12 +506,22 @@ server.onFsSearchFiles((connectionId, workspacePath, query) => {
 })
 
 // Exec IPC Handlers
-server.onExecStart((connectionId, cwd, command, args) => {
+
+// Send an exec event to the window that started the exec — same pattern as pty:event.
+// Broadcasting to all windows would make every other window buffer foreign exec output forever.
+function sendExecEvent(sender: Electron.WebContents, execId: string, event: ExecEvent): void {
+  if (!sender.isDestroyed()) {
+    sender.send('exec:event', execId, event)
+  }
+}
+
+server.onExecStart((event, connectionId, cwd, command, args) => {
   try {
     const client = getClientForConnection(connectionId)
     const execId = randomUUID()
     const stream = client.execStream()
     execStreams.set(execId, stream)
+    const sender = event.sender
 
     const startInput: ExecInput = {
       start: { cwd, command, args, env: {}, timeoutMs: 30000 }
@@ -521,17 +531,17 @@ server.onExecStart((connectionId, cwd, command, args) => {
 
     stream.on('data', (output: ExecOutput) => {
       if (output.stdout) {
-        server.execEvent(execId, { type: ExecEventType.Stdout, data: output.stdout.data.toString('utf-8') })
+        sendExecEvent(sender, execId, { type: ExecEventType.Stdout, data: output.stdout.data.toString('utf-8') })
       } else if (output.stderr) {
-        server.execEvent(execId, { type: ExecEventType.Stderr, data: output.stderr.data.toString('utf-8') })
+        sendExecEvent(sender, execId, { type: ExecEventType.Stderr, data: output.stderr.data.toString('utf-8') })
       } else if (output.result) {
-        server.execEvent(execId, { type: ExecEventType.Exit, exitCode: output.result.exitCode })
+        sendExecEvent(sender, execId, { type: ExecEventType.Exit, exitCode: output.result.exitCode })
         execStreams.delete(execId)
       }
     })
 
     stream.on('error', (error) => {
-      server.execEvent(execId, { type: ExecEventType.Error, message: error.message })
+      sendExecEvent(sender, execId, { type: ExecEventType.Error, message: error.message })
       execStreams.delete(execId)
     })
 
