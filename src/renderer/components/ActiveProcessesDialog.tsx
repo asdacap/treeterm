@@ -153,13 +153,16 @@ export default function ActiveProcessesDialog({ workspaces, connectionId, onClos
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   useEffect(() => {
+    let cancelled = false
     void terminalApi.list(connectionId).then(list => {
+      if (cancelled) return
       setSessions(list)
       // Clear selection if selected PTY no longer exists
       if (selectedId && !list.find((s) => s.id === selectedId)) {
         setSelectedId(null)
       }
     })
+    return () => { cancelled = true }
   }, [terminalApi, connectionId, selectedId])
 
   const handleStop = useCallback(async () => {
