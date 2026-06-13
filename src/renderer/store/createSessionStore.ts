@@ -253,10 +253,16 @@ export function createSessionStore(
   // ref-list (membership) sync below.
   interface WorkspaceSyncState {
     // sha256 of the body we believe the daemon currently holds ('' = absent/unknown).
-    // Used both as the CAS guard for the next write and to suppress our own echo.
+    // Used as the CAS guard for the next write.
     lastSeenSha: string
     // Last body we serialized and wrote, to skip redundant writes.
     lastWrittenJson: string
+    // Bodies we have written but not yet seen echoed back by the watch. The watch event
+    // for our own write can arrive before writeFile resolves (so before lastSeenSha
+    // advances), so we record each body up front — synchronously, before the write — and
+    // match the echo by content. Without this we re-apply our own write, rebuilding the
+    // workspace object graph and tearing down the just-mounted terminal tab.
+    pendingSelfWrites: Set<string>
     // Active file-watch handle (undefined until the watch is opened).
     unsubscribe?: () => void
     // Per-workspace serial write queue + coalesce flag.
@@ -268,7 +274,7 @@ export function createSessionStore(
   function getOrCreateSync(id: string): WorkspaceSyncState {
     let s = wsSync.get(id)
     if (!s) {
-      s = { lastSeenSha: '', lastWrittenJson: '', unsubscribe: undefined, tail: Promise.resolve(), pending: false }
+      s = { lastSeenSha: '', lastWrittenJson: '', pendingSelfWrites: new Set(), unsubscribe: undefined, tail: Promise.resolve(), pending: false }
       wsSync.set(id, s)
     }
     return s
@@ -309,7 +315,14 @@ export function createSessionStore(
     if (!sync) return // unsubscribed (workspace removed)
 
     if (event.type === FileWatchEventType.Present) {
-      if (event.sha256 === sync.lastSeenSha) return // echo of our own write
+      // Echo of one of our own writes. The watch event can arrive before writeFile()
+      // resolves (so before lastSeenSha advances), so match by content too: re-applying
+      // our own write would needlessly rebuild the workspace and tear down a just-mounted
+      // terminal. Consume the pending body and treat it as now-current.
+      if (sync.pendingSelfWrites.delete(event.content) || event.sha256 === sync.lastSeenSha) {
+        sync.lastSeenSha = event.sha256
+        return
+      }
       sync.lastSeenSha = event.sha256
       let workspace: Workspace
       try {
@@ -342,16 +355,29 @@ export function createSessionStore(
     const json = stableStringify(toWorkspaceFile(entry.data))
     if (json === sync.lastWrittenJson) return
 
+    // Record the body before writing: the daemon can emit the watch echo before
+    // writeFile() resolves, and onFileEvent must already know to suppress it by content.
+    sync.pendingSelfWrites.add(json)
+    // Backstop: if a write's echo is ever coalesced away by the watcher and never
+    // observed, its body would linger. Bound the set; entries are consumed in order.
+    if (sync.pendingSelfWrites.size > 32) {
+      sync.pendingSelfWrites.delete(sync.pendingSelfWrites.values().next().value as string)
+    }
+
     const result = await deps.filesystem.writeFile(workspaceDataDir, `${id}.json`, json, sync.lastSeenSha)
     if (result.success) {
       sync.lastWrittenJson = json
       sync.lastSeenSha = await sha256Hex(json)
-    } else if ('conflict' in result) {
-      // Another writer won. The watch has (or will) deliver the winning body and
-      // onFileEvent reconciles — do not clobber it.
-      console.warn('[session] workspace content write conflict, reconciling via watch:', id)
     } else {
-      setWorkspaceFileError(id, `Failed to save workspace: ${result.error}`)
+      // The write did not land, so its body will never echo — stop suppressing it.
+      sync.pendingSelfWrites.delete(json)
+      if ('conflict' in result) {
+        // Another writer won. The watch has (or will) deliver the winning body and
+        // onFileEvent reconciles — do not clobber it.
+        console.warn('[session] workspace content write conflict, reconciling via watch:', id)
+      } else {
+        setWorkspaceFileError(id, `Failed to save workspace: ${result.error}`)
+      }
     }
   }
 

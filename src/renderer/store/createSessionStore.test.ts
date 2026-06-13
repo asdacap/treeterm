@@ -9,6 +9,7 @@ import { createMockExecApi } from '../../shared/mockApis'
 import { makeWorkspace, makeSession } from '../../shared/test-fixtures/workspace'
 import { FileWatchEventType, type FileWatchEvent } from '../../shared/ipc-types'
 import { toWorkspaceFile, type Workspace } from '../../shared/workspaceFile'
+import { sha256Hex } from '../lib/sha256'
 
 const flushPromises = () => new Promise(r => setTimeout(r, 0))
 
@@ -1215,6 +1216,54 @@ describe('createSessionStore', () => {
       const wsState = (entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).store.getState().workspace
       expect(wsState.appStates['tab-2']).toBeDefined()
       expect(wsState.appStates['tab-1']).toBeUndefined()
+    })
+
+    it('suppresses the watch echo of our own write that arrives before lastSeenSha advances', async () => {
+      const ws = makeWorkspace({ id: 'ws-echo', name: 'echo', path: '/echo', appStates: { 'tab-1': { applicationId: 'terminal', title: 'Terminal', state: {} } }, activeTabId: 'tab-1' })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
+      emitFilePresent(ws)
+      const entry = store.getState().workspaces.get('ws-echo')!
+      expect(entry.status).toBe(WorkspaceEntryStatus.Loaded)
+      const handle = (entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).store
+
+      // Simulate the daemon emitting the watch echo *during* writeFile, before it
+      // resolves: lastSeenSha has not advanced yet, so the body is suppressed only by
+      // content match against the pending-write set. Without the fix this re-applies our
+      // own body, replacing the workspace object and tearing down a just-mounted terminal.
+      let echoFired = false
+      vi.mocked(deps.filesystem.writeFile).mockImplementation(async (_wp: string, filePath: string, content: string) => {
+        const cb = fileWatchCallbacks.get(filePath)
+        if (cb) { echoFired = true; cb({ type: FileWatchEventType.Present, content, sha256: await sha256Hex(content) }) }
+        return { success: true }
+      })
+
+      handle.getState().updateMetadata('displayName', 'Renamed', 'test')
+      const refAfterMutation = handle.getState().workspace
+      // Several flushes: the echo is emitted from inside the writeFile mock after an
+      // async sha256 (crypto.subtle) hop, so it lands across a few microtask turns.
+      for (let i = 0; i < 5; i++) await flushPromises()
+      expect(deps.filesystem.writeFile).toHaveBeenCalled()
+      expect(echoFired).toBe(true)
+
+      // Echo suppressed: applyWorkspaceFile never ran, so the object reference is intact.
+      expect(handle.getState().workspace).toBe(refAfterMutation)
+      expect(handle.getState().workspace.metadata.displayName).toBe('Renamed')
+    })
+
+    it('still applies a genuine external edit whose content we never wrote', async () => {
+      const ws = makeWorkspace({ id: 'ws-ext', name: 'ext', path: '/ext', appStates: { 'tab-1': { applicationId: 'terminal', title: 'Terminal', state: {} } }, activeTabId: 'tab-1' })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
+      emitFilePresent(ws)
+      const entry = store.getState().workspaces.get('ws-ext')!
+      expect(entry.status).toBe(WorkspaceEntryStatus.Loaded)
+      const handle = (entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).store
+
+      // Another window edits the file: content we never wrote ourselves.
+      const edited = makeWorkspace({ id: 'ws-ext', name: 'ext', path: '/ext', appStates: { 'tab-2': { applicationId: 'terminal', title: 'External', state: {} } }, activeTabId: 'tab-2' })
+      emitFilePresent(edited, 'sha-external-never-written')
+
+      expect(handle.getState().workspace.appStates['tab-2']).toBeDefined()
+      expect(handle.getState().workspace.appStates['tab-1']).toBeUndefined()
     })
 
     it('reconstructs child workspaces with parent relationship from their files', async () => {
