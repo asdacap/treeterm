@@ -18,24 +18,31 @@ import {
   type ExecOutput,
   type UpdateSessionRequest,
   type Session as ProtoSession,
-  type Workspace as ProtoWorkspace,
   type SessionWatchRequest,
+  type WatchFileRequest,
+  type FileWatchEvent as ProtoFileWatchEvent,
+  type FileSignalEvent as ProtoFileSignalEvent,
   type LockSessionRequest,
   type LockSessionResponse,
   type DirectoryContents,
   type FileEntry
 } from '../generated/treeterm'
 import { getDefaultSocketPath } from './socketPath'
-import { PtyEventType, type PtyEvent, type IpcResult, type FsWriteFileResult } from '../shared/ipc-types'
+import {
+  PtyEventType,
+  FileWatchEventType,
+  type PtyEvent,
+  type IpcResult,
+  type FsWriteFileResult,
+  type FileWatchEvent
+} from '../shared/ipc-types'
 import type { FileContents } from '../renderer/types'
 import type {
   SandboxConfig,
   TTYSessionInfo,
-  Workspace,
-  Session,
-  AppState
+  WorkspaceRef,
+  Session
 } from '../shared/types'
-import { WorkspaceStatus } from '../shared/types'
 
 // Alias for backward compat
 type CreateSessionConfig = {
@@ -352,7 +359,7 @@ export class GrpcDaemonClient {
   }
 
   async updateSession(
-    workspaces: Omit<Workspace, 'createdAt' | 'lastActivity'>[],
+    workspaceRefs: WorkspaceRef[],
     senderId?: string,
     expectedVersion?: number
   ): Promise<Session> {
@@ -363,7 +370,7 @@ export class GrpcDaemonClient {
 
     return new Promise((resolve, reject) => {
       const request: UpdateSessionRequest = {
-        workspaces: this.serializeWorkspaceInputs(workspaces),
+        workspaceRefs,
         senderId,
         expectedVersion
       }
@@ -372,7 +379,7 @@ export class GrpcDaemonClient {
         if (error) {
           reject(new Error(error.message))
         } else {
-          resolve(this.parseProtoSession(response))
+          resolve(response)
         }
       })
     })
@@ -399,7 +406,7 @@ export class GrpcDaemonClient {
         } else {
           resolve({
             acquired: response.acquired,
-            session: this.parseProtoSession(response.session)
+            session: response.session
           })
         }
       })
@@ -417,7 +424,7 @@ export class GrpcDaemonClient {
         if (error) {
           reject(new Error(error.message))
         } else {
-          resolve(this.parseProtoSession(response))
+          resolve(response)
         }
       })
     })
@@ -434,7 +441,7 @@ export class GrpcDaemonClient {
         if (error) {
           reject(new Error(error.message))
         } else {
-          resolve(this.parseProtoSession(response))
+          resolve(response)
         }
       })
     })
@@ -468,13 +475,13 @@ export class GrpcDaemonClient {
 
     stream.on('data', (event: { session?: ProtoSession }) => {
       if (event.session) {
-        const session = this.parseProtoSession(event.session)
+        const session = event.session
         if (isFirst) {
           isFirst = false
-          console.log(`[grpcClient] watchSession initial data received: session=${session.id}, workspaces=${String(session.workspaces.length)}`)
+          console.log(`[grpcClient] watchSession initial data received: session=${session.id}, workspaceRefs=${String(session.workspaceRefs.length)}`)
           resolveInitial(session)
         } else {
-          console.log(`[grpcClient] watchSession update received: session=${session.id}, workspaces=${String(session.workspaces.length)}`)
+          console.log(`[grpcClient] watchSession update received: session=${session.id}, workspaceRefs=${String(session.workspaceRefs.length)}`)
           onUpdate(session)
         }
       }
@@ -497,6 +504,78 @@ export class GrpcDaemonClient {
         stream.cancel()
       }
     }
+  }
+
+  /** Watch a file's content. The first event is the current state. Maps the proto
+   *  oneof to the shared `FileWatchEvent` discriminated union. */
+  watchFile(
+    watcherId: string,
+    workspacePath: string,
+    filePath: string,
+    onEvent: (event: FileWatchEvent) => void,
+    onError?: (error: Error) => void
+  ): { unsubscribe: () => void } {
+    if (!this.client) {
+      console.error('[grpcDaemonClient] cannot watch file: not connected')
+      if (onError) onError(new Error('Not connected to daemon'))
+      return { unsubscribe: () => {} }
+    }
+
+    const request: WatchFileRequest = { watcherId, workspacePath, filePath }
+    const stream = this.client.watchFile(request)
+
+    stream.on('data', (event: ProtoFileWatchEvent) => {
+      if (event.present) {
+        onEvent({
+          type: FileWatchEventType.Present,
+          content: event.present.content.toString('utf-8'),
+          sha256: event.present.sha256
+        })
+      } else if (event.absent) {
+        onEvent({ type: FileWatchEventType.Absent })
+      }
+    })
+
+    stream.on('error', (error: Error) => {
+      // gRPC reports stream cancellation as an error — suppress it (intentional unsubscribe).
+      if ((error as grpc.ServiceError).code === grpc.status.CANCELLED) return
+      console.error('[grpcClient] watchFile stream error:', error)
+      onEvent({ type: FileWatchEventType.Error, message: error.message })
+      if (onError) onError(error)
+    })
+
+    return { unsubscribe: () => { stream.cancel() } }
+  }
+
+  /** Signal-only file watch (sha256, no content). Exposed for future use cases;
+   *  the daemon serves it via a distinct RPC so no daemon change is needed later. */
+  watchFileSignal(
+    watcherId: string,
+    workspacePath: string,
+    filePath: string,
+    onEvent: (event: { present: boolean; sha256?: string }) => void,
+    onError?: (error: Error) => void
+  ): { unsubscribe: () => void } {
+    if (!this.client) {
+      if (onError) onError(new Error('Not connected to daemon'))
+      return { unsubscribe: () => {} }
+    }
+
+    const request: WatchFileRequest = { watcherId, workspacePath, filePath }
+    const stream = this.client.watchFileSignal(request)
+
+    stream.on('data', (event: ProtoFileSignalEvent) => {
+      if (event.present) onEvent({ present: true, sha256: event.present.sha256 })
+      else if (event.absent) onEvent({ present: false })
+    })
+
+    stream.on('error', (error: Error) => {
+      if ((error as grpc.ServiceError).code === grpc.status.CANCELLED) return
+      console.error('[grpcClient] watchFileSignal stream error:', error)
+      if (onError) onError(error)
+    })
+
+    return { unsubscribe: () => { stream.cancel() } }
   }
 
   // Exec Stream - Execute shell commands with streaming I/O
@@ -588,6 +667,18 @@ export class GrpcDaemonClient {
     })
   }
 
+  async deleteFile(workspacePath: string, filePath: string): Promise<IpcResult> {
+    if (!this.client) throw new Error('Not connected to daemon')
+    const client = this.client
+    return new Promise((resolve, reject) => {
+      client.deleteFile({ workspacePath, filePath }, (error, response) => {
+        if (error) reject(new Error(error.message))
+        else if (response.success) resolve({ success: true })
+        else resolve({ success: false, error: response.error ?? 'delete failed' })
+      })
+    })
+  }
+
   async searchFiles(workspacePath: string, query: string): Promise<IpcResult<{ entries: FileEntry[] }>> {
     if (!this.client) throw new Error('Not connected to daemon')
     const client = this.client
@@ -605,63 +696,6 @@ export class GrpcDaemonClient {
       this.client = null
     }
     this.connected = false
-  }
-
-  // Helper methods for proto conversion
-
-  /** Serialize renderer Workspace to proto by encoding parsed metadata/appStates.state
-   *  back to bytes. No field-level translation — every other field already matches
-   *  the proto shape because renderer `Workspace` is derived from `ProtoWorkspace`
-   *  via `Omit<ProtoWorkspace, ...>` (see shared/types.ts). */
-  private serializeWorkspaceInputs(
-    workspaces: Omit<Workspace, 'createdAt' | 'lastActivity'>[]
-  ): ProtoWorkspace[] {
-    return workspaces.map(w => {
-      const protoAppStates: { [key: string]: { applicationId: string; title: string; state: Buffer } } = {}
-      for (const [key, s] of Object.entries(w.appStates)) {
-        protoAppStates[key] = {
-          applicationId: s.applicationId,
-          title: s.title,
-          state: Buffer.from(JSON.stringify(s.state), 'utf-8')
-        }
-      }
-      return {
-        ...w,
-        appStates: protoAppStates,
-        createdAt: 0,
-        lastActivity: 0,
-        metadata: Buffer.from(JSON.stringify(w.metadata), 'utf-8')
-      }
-    })
-  }
-
-  /** Parse proto Session for the renderer — delegates to `parseProtoWorkspace`. */
-  private parseProtoSession(protoSession: ProtoSession): Session {
-    return {
-      ...protoSession,
-      workspaces: protoSession.workspaces.map(w => this.parseProtoWorkspace(w)),
-    }
-  }
-
-  /** Parse proto Workspace for the renderer: only the bytes fields get decoded.
-   *  All other fields pass through because the renderer `Workspace` is
-   *  `Omit<ProtoWorkspace, ...> & { metadata, appStates, status }`. */
-  private parseProtoWorkspace(protoWorkspace: ProtoWorkspace): Workspace {
-    const appStates: Record<string, AppState> = {}
-    for (const [key, value] of Object.entries(protoWorkspace.appStates)) {
-      appStates[key] = {
-        applicationId: value.applicationId,
-        title: value.title,
-        state: JSON.parse(value.state.toString('utf-8')) as unknown
-      }
-    }
-    return {
-      ...protoWorkspace,
-      status: protoWorkspace.status as WorkspaceStatus,
-      appStates,
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      metadata: protoWorkspace.metadata?.length ? JSON.parse(protoWorkspace.metadata.toString('utf-8')) as Record<string, string> : {},
-    }
   }
 
   private spawnDaemon(): void {

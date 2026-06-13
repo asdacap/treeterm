@@ -58,6 +58,8 @@ function createMockFilesystem(overrides?: Partial<FilesystemApi>): FilesystemApi
     readFile: vi.fn().mockResolvedValue({ success: false, error: 'not found' }),
     writeFile: vi.fn(),
     searchFiles: vi.fn(),
+    deleteFile: vi.fn(),
+    watchFile: vi.fn(() => ({ unsubscribe: vi.fn() })),
     ...overrides,
   }
 }

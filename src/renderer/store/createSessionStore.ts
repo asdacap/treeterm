@@ -6,15 +6,16 @@ import { createWorkspaceStore } from './createWorkspaceStore'
 import type { WorkspaceStore, WorkspaceStoreDeps } from './createWorkspaceStore'
 import { createTtyStore } from './createTtyStore'
 import type { Tty, TtyTerminalDeps } from './createTtyStore'
-import type { PtyEvent } from '../../shared/ipc-types'
+import { FileWatchEventType, type PtyEvent, type FileWatchEvent } from '../../shared/ipc-types'
 import { ConnectionStatus, WorkspaceStatus } from '../../shared/types'
 import type {
-  Workspace, Session, AppState, GitInfo,
+  Workspace, Session, AppState, GitInfo, WorkspaceRef,
   ConnectionInfo, ActivityState,
   TerminalApi, GitApi, FilesystemApi, ExecApi, SessionApi, Settings, WorktreeSettings,
   Application, SandboxConfig, TTYSessionInfo, LlmApi, GitHubApi, RunActionsApi
 } from '../types'
 import type { SessionLock } from '../../shared/types'
+import { parseWorkspaceFile, toWorkspaceFile } from '../../shared/workspaceFile'
 import type { WorktreeRegistryApi } from '../lib/worktreeRegistry'
 
 export enum WorkspaceEntryStatus {
@@ -69,6 +70,9 @@ export interface SessionState {
   isRestoring: boolean
   sessionVersion: number
   sessionLock: SessionLock | undefined
+  /** Daemon-advertised directory holding the per-workspace JSON files. Empty
+   *  until the first SessionWatch event arrives; writes are guarded on it. */
+  workspaceDataDir: string
 
   clearWorkspaceError: (id: string) => void
   dismissWorkspace: (id: string) => void
@@ -158,47 +162,13 @@ export function getUnmergedSubWorkspaces(workspaces: Map<string, WorkspaceEntry>
     .filter(ws => ws.isWorktree && ws.status === WorkspaceStatus.Active)
 }
 
-function deepDiff(oldVal: unknown, newVal: unknown, path: string): string[] {
-  if (oldVal === newVal) return []
-  if (typeof oldVal !== typeof newVal || oldVal ===undefined || newVal ===undefined || typeof oldVal !== 'object') {
-    return [`${path}: ${JSON.stringify(oldVal)} → ${JSON.stringify(newVal)}`]
-  }
-  if (Array.isArray(oldVal) || Array.isArray(newVal)) {
-    if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
-      return [`${path}: ${JSON.stringify(oldVal)} → ${JSON.stringify(newVal)}`]
-    }
-    return []
-  }
-  const allKeys = Array.from(new Set([...Object.keys(oldVal as Record<string, unknown>), ...Object.keys(newVal as Record<string, unknown>)]))
-  const changes: string[] = []
-  for (const key of allKeys) {
-    changes.push(...deepDiff((oldVal as Record<string, unknown>)[key], (newVal as Record<string, unknown>)[key], `${path}.${key}`))
-  }
-  return changes
-}
-
-function diffWorkspaces(oldJson: string, newJson: string): string {
-  if (!oldJson) return '(initial sync)'
-  const oldArr = JSON.parse(oldJson) as Array<Record<string, unknown> & { path: string }>
-  const newArr = JSON.parse(newJson) as Array<Record<string, unknown> & { path: string }>
-  const changes: string[] = []
-
-  const oldByPath = Object.fromEntries(oldArr.map(w => [w.path, w]))
-  const newByPath = Object.fromEntries(newArr.map(w => [w.path, w]))
-
-  for (const path of Object.keys(newByPath)) {
-    if (!(path in oldByPath)) changes.push(`added workspace: ${path}`)
-  }
-  for (const path of Object.keys(oldByPath)) {
-    if (!(path in newByPath)) changes.push(`removed workspace: ${path}`)
-  }
-  for (const path of Object.keys(newByPath)) {
-    const oldWs = oldByPath[path]
-    const newWs = newByPath[path]
-    if (!oldWs || !newWs) continue
-    changes.push(...deepDiff(oldWs, newWs, path))
-  }
-  return changes.length > 0 ? changes.join(', ') : '(no changes)'
+/** Lowercase-hex SHA-256 of a string's UTF-8 bytes. Matches the daemon's
+ *  `sha256_hex`, so a locally-computed hash can be compared against a watch
+ *  event's sha to recognise (and suppress) the echo of our own write. */
+async function sha256Hex(text: string): Promise<string> {
+  const bytes = new TextEncoder().encode(text)
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
 export function createSessionStore(
@@ -274,7 +244,151 @@ export function createSessionStore(
     }
   }
 
-  let lastSyncedWorkspacesJson = ''
+  // The ref list (membership) we last sent to / received from the daemon, as a
+  // stable JSON string. Used to suppress echoes and skip no-op ref syncs.
+  let lastSyncedRefsJson = ''
+
+  // Per-workspace content-sync bookkeeping. The JSON body of each workspace is
+  // written via CAS WriteFile and observed via WatchFile, independently of the
+  // ref-list (membership) sync below.
+  interface WorkspaceSyncState {
+    // sha256 of the body we believe the daemon currently holds ('' = absent/unknown).
+    // Used both as the CAS guard for the next write and to suppress our own echo.
+    lastSeenSha: string
+    // Last body we serialized and wrote, to skip redundant writes.
+    lastWrittenJson: string
+    // Active file-watch handle (undefined until the watch is opened).
+    unsubscribe?: () => void
+    // Per-workspace serial write queue + coalesce flag.
+    tail: Promise<unknown>
+    pending: boolean
+  }
+  const wsSync = new Map<string, WorkspaceSyncState>()
+
+  function getOrCreateSync(id: string): WorkspaceSyncState {
+    let s = wsSync.get(id)
+    if (!s) {
+      s = { lastSeenSha: '', lastWrittenJson: '', unsubscribe: undefined, tail: Promise.resolve(), pending: false }
+      wsSync.set(id, s)
+    }
+    return s
+  }
+
+  // Open a content watch for a workspace's JSON file (idempotent). The first event
+  // is the current state; subsequent events reconcile external edits.
+  function ensureWatch(id: string, path: string): void {
+    const sync = getOrCreateSync(id)
+    if (sync.unsubscribe) return
+    const dataDir = store.getState().workspaceDataDir
+    if (!dataDir) return
+    const handle = deps.filesystem.watchFile(
+      dataDir,
+      `${id}.json`,
+      (event) => { onFileEvent(id, path, event) }
+    )
+    sync.unsubscribe = handle.unsubscribe
+  }
+
+  function setWorkspaceFileError(id: string, error: string): void {
+    const entry = store.getState().workspaces.get(id)
+    if (!entry) return
+    if (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) {
+      store.setState(s => ({
+        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: entry.data, store: entry.store, error })
+      }))
+    } else {
+      store.setState(s => ({
+        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Error, name: entry.status === WorkspaceEntryStatus.Loading ? entry.name : id, error })
+      }))
+    }
+  }
+
+  // Apply a workspace body received from a file-watch event into the store.
+  function onFileEvent(id: string, path: string, event: FileWatchEvent): void {
+    const sync = wsSync.get(id)
+    if (!sync) return // unsubscribed (workspace removed)
+
+    if (event.type === FileWatchEventType.Present) {
+      if (event.sha256 === sync.lastSeenSha) return // echo of our own write
+      sync.lastSeenSha = event.sha256
+      let workspace: Workspace
+      try {
+        workspace = parseWorkspaceFile(id, path, event.content)
+      } catch (err) {
+        setWorkspaceFileError(id, `Invalid workspace file: ${err instanceof Error ? err.message : String(err)}`)
+        return
+      }
+      applyWorkspaceFile(store, workspace, createHandleForWorkspace)
+    } else if (event.type === FileWatchEventType.Absent) {
+      // The file backing a known ref is gone. Surface loudly — membership removal
+      // goes through ref-list reconciliation, not the content watch.
+      setWorkspaceFileError(id, 'Workspace file is missing')
+    } else {
+      setWorkspaceFileError(id, event.message)
+    }
+  }
+
+  // Write a workspace's current body to its JSON file via CAS. Coalesced and
+  // serialized per workspace id (see enqueueContentSync).
+  async function writeWorkspaceContent(id: string): Promise<void> {
+    const { workspaces, connection, workspaceDataDir } = store.getState()
+    if (connection.status !== ConnectionStatus.Connected) return
+    if (!workspaceDataDir) return
+    const entry = workspaces.get(id)
+    if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return
+    const sync = wsSync.get(id)
+    if (!sync) return
+
+    const json = stableStringify(toWorkspaceFile(entry.data))
+    if (json === sync.lastWrittenJson) return
+
+    const result = await deps.filesystem.writeFile(workspaceDataDir, `${id}.json`, json, sync.lastSeenSha)
+    if (result.success) {
+      sync.lastWrittenJson = json
+      sync.lastSeenSha = await sha256Hex(json)
+    } else if ('conflict' in result) {
+      // Another writer won. The watch has (or will) deliver the winning body and
+      // onFileEvent reconciles — do not clobber it.
+      console.warn('[session] workspace content write conflict, reconciling via watch:', id)
+    } else {
+      setWorkspaceFileError(id, `Failed to save workspace: ${result.error}`)
+    }
+  }
+
+  // Enqueue a content write for a workspace. Coalesces rapid mutations: if a write
+  // is already queued (not yet started), it will pick up the latest state.
+  function enqueueContentSync(id: string): void {
+    const sync = getOrCreateSync(id)
+    if (sync.pending) return
+    sync.pending = true
+    const run = async (): Promise<void> => {
+      sync.pending = false
+      await writeWorkspaceContent(id)
+    }
+    sync.tail = sync.tail.then(run, run)
+  }
+
+  // Enqueue a content write for every loaded workspace. Used after multi-workspace
+  // mutations (reorder/move) that touch several siblings' sortOrder/parentId. Each
+  // write is skipped if the body is unchanged, so over-enqueuing is cheap.
+  function syncAllContent(): void {
+    for (const [id, entry] of Array.from(store.getState().workspaces.entries())) {
+      if (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) {
+        enqueueContentSync(id)
+      }
+    }
+  }
+
+  // Write the initial JSON file for a newly-created workspace, then open its watch.
+  // Writing first (CAS expected_sha256 '' → must-not-exist) means any other window
+  // that later sees the published ref finds the file already present. The watch is
+  // opened only after the write so its first (Present) event matches lastSeenSha
+  // and is suppressed rather than racing an Absent read against the pending write.
+  async function createWorkspaceFile(id: string, path: string): Promise<void> {
+    getOrCreateSync(id)
+    await writeWorkspaceContent(id)
+    ensureWatch(id, path)
+  }
 
   // Single serial queue for every op that bumps the daemon's session version
   // (UpdateSession, LockSession, UnlockSession). Ordering on the wire follows
@@ -313,7 +427,7 @@ export function createSessionStore(
         // Freeze the collapse window: any further sync must create a new slot.
         if (pendingSync === slot) pendingSync = undefined
         try {
-          await performSync(slot.reasons.join(', '))
+          await syncRefs(slot.reasons.join(', '))
           for (const s of slot.settlers) s.resolve()
         } catch (err) {
           for (const s of slot.settlers) s.reject(err)
@@ -329,92 +443,96 @@ export function createSessionStore(
     return chain(op)
   }
 
-  function stripTimestamps(ws: Workspace): Omit<Workspace, 'createdAt' | 'lastActivity'> {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { createdAt: _c, lastActivity: _l, ...rest } = ws
-    return rest
+  // Build the current ref list (membership) from loaded workspaces.
+  function currentRefs(): WorkspaceRef[] {
+    return Array.from(store.getState().workspaces.values())
+      .filter((e): e is Extract<WorkspaceEntry, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }> =>
+        e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError)
+      .map(e => ({ id: e.data.id, path: e.data.path }))
   }
 
-  function applyDaemonState(daemonSession: Session): void {
-    store.setState({
-      isRestoring: true,
-      sessionVersion: daemonSession.version,
-      sessionLock: daemonSession.lock,
-    })
-    applySessionWorkspaces(store, daemonSession.workspaces, createHandleForWorkspace)
-    const incomingPaths = new Set(daemonSession.workspaces.map(ws => ws.path))
+  // Reconcile the local workspace set against the daemon's ref list: open watches
+  // and create placeholders for new refs, remove loaded entries no longer present.
+  function reconcileRefs(refs: WorkspaceRef[]): void {
+    store.setState({ isRestoring: true })
+    const incomingIds = new Set(refs.map(r => r.id))
+
+    for (const ref of refs) {
+      ensureWatch(ref.id, ref.path)
+      const entry = store.getState().workspaces.get(ref.id)
+      if (!entry) {
+        // Placeholder until the file watch delivers the body.
+        store.setState(s => ({
+          workspaces: new Map(s.workspaces).set(ref.id, {
+            status: WorkspaceEntryStatus.Loading, name: getNameFromPath(ref.path), message: 'Loading workspace...', output: []
+          })
+        }))
+      }
+    }
+
     for (const [id, entry] of Array.from(store.getState().workspaces.entries())) {
-      if (entry.status === WorkspaceEntryStatus.Loaded && !incomingPaths.has(entry.data.path)) {
+      if (incomingIds.has(id)) continue
+      if (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) {
         store.getState().onWorkspaceRemoved(id)
       }
     }
-    lastSyncedWorkspacesJson = stableStringify(daemonSession.workspaces.map(stripTimestamps))
     store.setState({ isRestoring: false })
   }
 
-  async function performSync(reason: string): Promise<void> {
+  // Push the current ref list (membership) to the daemon. Goes through the serial
+  // queue so it can't race lock/unlock. Content bodies sync separately.
+  async function syncRefs(reason: string): Promise<void> {
     try {
-      const { workspaces, connection, isRestoring } = store.getState()
-
+      const { connection } = store.getState()
       if (connection.status !== ConnectionStatus.Connected) {
-        console.log('[session] connection not yet established, skipping sync')
+        console.log('[session] connection not yet established, skipping ref sync')
         return
       }
 
-      if (isRestoring) {
-        console.log('[session] currently restoring, skipping sync')
-        return
-      }
+      const refs = currentRefs()
+      const currentJson = stableStringify(refs)
+      if (currentJson === lastSyncedRefsJson) return
 
-      const daemonWorkspaces = Array.from(workspaces.values())
-        .filter((e): e is Extract<WorkspaceEntry, { status: WorkspaceEntryStatus.Loaded }> => e.status === WorkspaceEntryStatus.Loaded)
-        .map(e => stripTimestamps(e.data))
+      console.log('[session] syncing workspace refs to daemon, reason:', reason)
 
-      const currentJson = stableStringify(daemonWorkspaces)
-      if (currentJson === lastSyncedWorkspacesJson) return
-
-      console.log('[session] syncing to daemon, reason:', reason, 'changes:', diffWorkspaces(lastSyncedWorkspacesJson, currentJson))
-
-      // Optimistic: treat our send as the new "known daemon state" so an echo
-      // arriving before the RPC response is recognised and skipped. Rolled
-      // back on IPC error so the next sync re-attempts.
-      const prevSyncedJson = lastSyncedWorkspacesJson
-      lastSyncedWorkspacesJson = currentJson
+      // Optimistic: treat our send as the new known ref state so the echo is skipped.
+      const prevSyncedJson = lastSyncedRefsJson
+      lastSyncedRefsJson = currentJson
 
       const expectedVersion = store.getState().sessionVersion
-      const connectionId = store.getState().connection.id
-      console.log('[session] updating session via connection:', connectionId, 'expectedVersion:', expectedVersion)
-
-      const result = await deps.sessionApi.update(connectionId, daemonWorkspaces, connectionId, expectedVersion)
+      const connectionId = connection.id
+      const result = await deps.sessionApi.update(connectionId, refs, connectionId, expectedVersion)
       if (!result.success) {
-        lastSyncedWorkspacesJson = prevSyncedJson
-        console.error('[session] failed to update session:', result.error)
+        lastSyncedRefsJson = prevSyncedJson
+        console.error('[session] failed to update session refs:', result.error)
         return
       }
 
-      // Acceptance is version AND content. A rejection from the daemon might
-      // coincidentally return version == expected + 1 (e.g. if another op
-      // bumped it), but the workspaces it returns are the pre-reject state —
-      // so the content check catches that case and forces reconciliation.
-      const returnedJson = stableStringify(result.session.workspaces.map(stripTimestamps))
+      const returnedJson = stableStringify(result.session.workspaceRefs)
       const accepted = result.session.version === expectedVersion + 1 && returnedJson === currentJson
 
       if (accepted) {
         store.setState({
           sessionVersion: result.session.version,
           sessionLock: result.session.lock,
+          workspaceDataDir: result.session.workspaceDataDir,
         })
-        console.log('[session] session updated successfully, version:', result.session.version)
       } else {
-        console.warn('[session] session update rejected, expected version:', expectedVersion + 1, 'got:', result.session.version, '— reconciling')
-        applyDaemonState(result.session)
+        console.warn('[session] ref update rejected, expected version:', expectedVersion + 1, 'got:', result.session.version, '— reconciling')
+        store.setState({
+          sessionVersion: result.session.version,
+          sessionLock: result.session.lock,
+          workspaceDataDir: result.session.workspaceDataDir,
+        })
+        lastSyncedRefsJson = stableStringify(result.session.workspaceRefs)
+        reconcileRefs(result.session.workspaceRefs)
       }
     } catch (error) {
-      console.error('[session] failed to sync session to daemon:', error)
+      console.error('[session] failed to sync refs to daemon:', error)
     }
   }
 
-  function makeHandleDeps(): WorkspaceStoreDeps {
+  function makeHandleDeps(workspaceId: string): WorkspaceStoreDeps {
     return {
       appRegistry: deps.appRegistry,
       openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => store.getState().openTtyStream(ptyId, onEvent),
@@ -427,7 +545,8 @@ export function createSessionStore(
       getSettings: deps.getSettings,
       llm: deps.llm,
       setActivityTabState: deps.setActivityTabState,
-      syncToDaemon: (reason: string) => { void enqueueSync(reason); },
+      // Workspace mutations persist that workspace's JSON body (not the ref list).
+      syncToDaemon: () => { enqueueContentSync(workspaceId); },
       removeWorkspace: (id) => store.getState().removeWorkspace(id),
       removeWorkspaceKeepBranch: (id) => store.getState().removeWorkspaceKeepBranch(id),
       removeWorkspaceKeepBoth: (id) => store.getState().removeWorkspaceKeepBoth(id),
@@ -446,7 +565,7 @@ export function createSessionStore(
   }
 
   function createHandleForWorkspace(workspace: Workspace, initialSettings?: WorktreeSettings): WorkspaceStore {
-    const handle = createWorkspaceStore(workspace, makeHandleDeps(), initialSettings)
+    const handle = createWorkspaceStore(workspace, makeHandleDeps(workspace.id), initialSettings)
 
     // Keep the workspaces snapshot in sync when handle state changes
     handle.subscribe((state) => {
@@ -563,6 +682,7 @@ export function createSessionStore(
         store.setState(s => ({
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: childWorkspace, store: handle })
         }))
+        await createWorkspaceFile(id, childWorkspace.path)
         await enqueueSync('addChildWorkspace')
         void handle.getState().saveRegistryEntry()
       } catch (err) {
@@ -633,6 +753,7 @@ export function createSessionStore(
       handle.getState().initTab(tabId)
     }
 
+    await createWorkspaceFile(id, childWorkspace.path)
     await enqueueSync('addChildWorkspaceFromResult')
     void handle.getState().saveRegistryEntry()
     return id
@@ -685,10 +806,20 @@ export function createSessionStore(
       }
     }
 
-    // Renderer cleanup + remove from map
+    // Renderer cleanup + remove from map (also unsubscribes the file watch)
     store.getState().onWorkspaceRemoved(id)
 
+    // Publish the new ref list (without this workspace), then delete its JSON file.
+    // Membership is the source of truth; the file delete is cleanup after.
     await enqueueSync('removeWorkspace')
+
+    const dataDir = store.getState().workspaceDataDir
+    if (dataDir) {
+      const result = await deps.filesystem.deleteFile(dataDir, `${id}.json`)
+      if (!result.success) {
+        console.error('[session] failed to delete workspace file:', id, result.error)
+      }
+    }
   }
 
   // Helper: wraps removeWorkspaceInternal with loading state and session lock
@@ -809,6 +940,7 @@ export function createSessionStore(
     isRestoring: false,
     sessionVersion: 0,
     sessionLock: undefined,
+    workspaceDataDir: '',
 
     connection: config.connection,
 
@@ -865,6 +997,10 @@ export function createSessionStore(
     onWorkspaceRemoved: (id: string): void => {
       const entry = get().workspaces.get(id)
       if (!entry) return
+      // Stop watching this workspace's file and forget its sync bookkeeping.
+      const sync = wsSync.get(id)
+      if (sync?.unsubscribe) sync.unsubscribe()
+      wsSync.delete(id)
       if (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) {
         entry.store.getState().gitController.getState().dispose()
         for (const tabId of Object.keys(entry.store.getState().appStates)) {
@@ -893,7 +1029,7 @@ export function createSessionStore(
       }))
 
       // Fire-and-forget: resolve git info then create workspace+handle
-      void deps.git.getInfo(path).then(gitInfo => {
+      void deps.git.getInfo(path).then(async gitInfo => {
         const appStates: Record<string, AppState> = {}
         let activeTabId: string | undefined = undefined
 
@@ -936,6 +1072,7 @@ export function createSessionStore(
         set(s => ({
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: workspace, store: handle })
         }))
+        await createWorkspaceFile(id, workspace.path)
         void enqueueSync('addWorkspace')
       }).catch((err: unknown) => {
         set(s => ({
@@ -1093,7 +1230,7 @@ export function createSessionStore(
         gitBranch: gitInfo.isRepo ? gitInfo.branch : undefined,
         gitRootPath: gitInfo.isRepo ? gitInfo.rootPath : undefined
       })
-      void enqueueSync('updateGitInfo')
+      enqueueContentSync(id)
     },
 
     refreshGitInfo: async (id: string) => {
@@ -1283,7 +1420,7 @@ export function createSessionStore(
         }))
       }
 
-      void enqueueSync('reorderWorkspace')
+      syncAllContent()
     },
 
     moveWorkspace: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after' | 'onto') => {
@@ -1366,7 +1503,7 @@ export function createSessionStore(
         reindexSiblings(dragParent, workspaceId)
       }
 
-      void enqueueSync('moveWorkspace')
+      syncAllContent()
     },
 
     syncToDaemon: async (reason: string) => {
@@ -1381,18 +1518,15 @@ export function createSessionStore(
     },
 
     handleRestore: async (daemonSession: Session) => {
-      console.log('[Session] Restoring session', daemonSession.id, 'with', daemonSession.workspaces.length, 'workspaces, version:', daemonSession.version)
+      console.log('[Session] Restoring session', daemonSession.id, 'with', daemonSession.workspaceRefs.length, 'refs, version:', daemonSession.version)
       await get().handleExternalUpdate(daemonSession)
 
-      // Set active workspace to the first root workspace
-      const firstRoot = daemonSession.workspaces.find(w => !w.parentId)
-      if (firstRoot) {
-        const existing = Array.from(get().workspaces.entries()).find(
-          ([, entry]) => (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) && entry.data.path === firstRoot.path
-        )
-        if (existing) {
-          get().setActiveWorkspace(existing[0])
-        }
+      // Activate the first ref. Parent/child structure lives in the (not-yet-loaded)
+      // file bodies, so target the first ref by position; its entry may still be
+      // Loading until its file event arrives — navigation by id still works.
+      const firstRef = daemonSession.workspaceRefs[0]
+      if (firstRef && get().workspaces.has(firstRef.id)) {
+        get().setActiveWorkspace(firstRef.id)
       }
       console.log('[Session] Session restore complete, workspace count:', get().workspaces.size)
     },
@@ -1402,121 +1536,88 @@ export function createSessionStore(
       const currentVersion = get().sessionVersion
       if (daemonSession.version < currentVersion) return
 
-      const incomingWorkspacesJson = stableStringify(daemonSession.workspaces.map(stripTimestamps))
-      if (incomingWorkspacesJson === lastSyncedWorkspacesJson) {
-        // Echo of what we last sent — just carry forward version/lock.
-        set({ sessionVersion: daemonSession.version, sessionLock: daemonSession.lock })
+      // Always carry forward version/lock/dataDir.
+      set({
+        sessionVersion: daemonSession.version,
+        sessionLock: daemonSession.lock,
+        workspaceDataDir: daemonSession.workspaceDataDir,
+      })
+
+      const incomingRefsJson = stableStringify(daemonSession.workspaceRefs)
+      if (incomingRefsJson === lastSyncedRefsJson) {
+        // Membership unchanged (a content echo or lock-only change). Workspace
+        // bodies arrive via their own file watches — nothing to reconcile here.
         return
       }
+      lastSyncedRefsJson = incomingRefsJson
 
-      console.log('[Session] External session update received, version:', daemonSession.version, 'current:', currentVersion,
-        'diff:', diffWorkspaces(lastSyncedWorkspacesJson, incomingWorkspacesJson))
-      applyDaemonState(daemonSession)
+      console.log('[Session] External ref update received, version:', daemonSession.version, 'refs:', daemonSession.workspaceRefs.length)
+      reconcileRefs(daemonSession.workspaceRefs)
     }
   }))
 
   return store
 }
 
-// Helper: find existing loaded workspace by path
-function findLoadedByPath(
+// Apply a workspace body (from a file-watch event) into the session store. Updates
+// the handle in place when the workspace already exists, else reconstructs it.
+function applyWorkspaceFile(
   store: StoreApi<SessionState>,
-  path: string
-): { id: string } | undefined {
-  for (const [id, entry] of Array.from(store.getState().workspaces.entries())) {
-    if ((entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) && entry.data.path === path) {
-      return { id }
-    }
-  }
-  return undefined
-}
-
-// Helper: apply daemon workspaces to the session store
-function applySessionWorkspaces(
-  store: StoreApi<SessionState>,
-  daemonWorkspaces: Workspace[],
+  workspace: Workspace,
   createHandleForWorkspace: (ws: Workspace) => WorkspaceStore
 ): void {
-  const rootWorkspaces = daemonWorkspaces.filter(w => !w.parentId)
-  const childWorkspaces = daemonWorkspaces.filter(w => w.parentId)
+  const entry = store.getState().workspaces.get(workspace.id)
 
-  for (const daemonWorkspace of [...rootWorkspaces, ...childWorkspaces]) {
-    const existing = findLoadedByPath(store, daemonWorkspace.path)
+  if (entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError)) {
+    const wsState = entry.store.getState()
+    const oldTabIds = Object.keys(wsState.workspace.appStates)
+    const newTabIds = Object.keys(workspace.appStates)
+    const newTabIdSet = new Set(newTabIds)
 
-    if (existing) {
-      restoreWorkspaceTabs(store, existing.id, daemonWorkspace)
-    } else {
-      reconstructWorkspace(store, daemonWorkspace, createHandleForWorkspace)
+    // Dispose resources for tabs removed externally
+    for (const tabId of oldTabIds) {
+      if (!newTabIdSet.has(tabId)) {
+        wsState.disposeTabResources(tabId)
+      }
     }
+
+    const reconciledActiveTabId = workspace.activeTabId || newTabIds[0] || undefined
+    entry.store.getState().setWorkspace({ ...workspace, activeTabId: reconciledActiveTabId })
+
+    // Only init genuinely new tabs
+    const oldTabIdSet = new Set(oldTabIds)
+    for (const tabId of newTabIds) {
+      if (!oldTabIdSet.has(tabId)) {
+        entry.store.getState().initTab(tabId)
+      }
+    }
+    return
   }
+
+  reconstructWorkspace(store, workspace, createHandleForWorkspace)
 }
 
-// Helper: restore workspace tabs by updating the handle's workspace state
-function restoreWorkspaceTabs(
-  store: StoreApi<SessionState>,
-  workspaceId: string,
-  daemonWorkspace: Workspace
-): void {
-  const entry = store.getState().workspaces.get(workspaceId)
-  if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return
-
-  const wsState = entry.store.getState()
-  const oldTabIds = Object.keys(wsState.workspace.appStates)
-  const newTabIds = Object.keys(daemonWorkspace.appStates)
-  const newTabIdSet = new Set(newTabIds)
-
-  // Dispose resources for tabs removed externally
-  for (const tabId of oldTabIds) {
-    if (!newTabIdSet.has(tabId)) {
-      wsState.disposeTabResources(tabId)
-    }
-  }
-
-  const reconciledActiveTabId = daemonWorkspace.activeTabId || newTabIds[0] || undefined
-  console.log('[session] restoreWorkspaceTabs: activeTabId changed to', reconciledActiveTabId, 'workspace:', daemonWorkspace.id, 'session:', store.getState().sessionId)
-  entry.store.getState().setWorkspace({
-    ...wsState.workspace,
-    appStates: daemonWorkspace.appStates,
-    activeTabId: reconciledActiveTabId
-  })
-
-  // Only init genuinely new tabs
-  const oldTabIdSet = new Set(oldTabIds)
-  for (const tabId of newTabIds) {
-    if (!oldTabIdSet.has(tabId)) {
-      entry.store.getState().initTab(tabId)
-    }
-  }
-}
-
-// Helper: reconstruct workspace preserving daemon IDs
+// Helper: reconstruct a workspace from its file body, preserving its id.
 function reconstructWorkspace(
   store: StoreApi<SessionState>,
-  daemonWorkspace: Workspace,
+  fileWorkspace: Workspace,
   createHandleForWorkspace: (ws: Workspace) => WorkspaceStore
 ): string {
-  const id = daemonWorkspace.id
-  const parentId = daemonWorkspace.parentId
-
-  const reconstructedActiveTabId = daemonWorkspace.activeTabId || (Object.keys(daemonWorkspace.appStates).length > 0 ? Object.keys(daemonWorkspace.appStates)[0] : undefined)
-  console.log('[session] reconstructWorkspace: activeTabId set to', reconstructedActiveTabId, 'workspace:', id, 'session:', store.getState().sessionId)
-  const workspace: Workspace = {
-    ...daemonWorkspace,
-    id,
-    activeTabId: reconstructedActiveTabId
-  }
+  const id = fileWorkspace.id
+  const reconstructedActiveTabId = fileWorkspace.activeTabId || (Object.keys(fileWorkspace.appStates).length > 0 ? Object.keys(fileWorkspace.appStates)[0] : undefined)
+  const workspace: Workspace = { ...fileWorkspace, activeTabId: reconstructedActiveTabId }
 
   const handle = createHandleForWorkspace(workspace)
 
   store.setState((s) => ({
     workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: workspace, store: handle }),
-    activeWorkspaceId: id
+    activeWorkspaceId: s.activeWorkspaceId ?? id
   }))
 
-  for (const tabId of Object.keys(daemonWorkspace.appStates)) {
+  for (const tabId of Object.keys(fileWorkspace.appStates)) {
     handle.getState().initTab(tabId)
   }
 
-  console.log('[Session] Reconstructed workspace:', daemonWorkspace.name, 'parentId:', parentId)
+  console.log('[Session] Reconstructed workspace:', fileWorkspace.name, 'parentId:', fileWorkspace.parentId)
   return id
 }

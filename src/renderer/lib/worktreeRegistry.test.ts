@@ -52,6 +52,8 @@ function createMockFs(): FilesystemApi {
     readFile: vi.fn(),
     writeFile: vi.fn(),
     searchFiles: vi.fn(),
+    deleteFile: vi.fn(),
+    watchFile: vi.fn(() => ({ unsubscribe: vi.fn() })),
   }
 }
 

@@ -18,7 +18,10 @@ const mocks = vi.hoisted(() => {
     readDirectory: vi.fn<(...args: any[]) => any>(),
     readFile: vi.fn<(...args: any[]) => any>(),
     writeFile: vi.fn<(...args: any[]) => any>(),
+    deleteFile: vi.fn<(...args: any[]) => any>(),
     searchFiles: vi.fn<(...args: any[]) => any>(),
+    watchFile: vi.fn<(...args: any[]) => any>(),
+    watchFileSignal: vi.fn<(...args: any[]) => any>(),
     close: vi.fn<() => void>()
   }
   return { mockClientInstance }
@@ -35,7 +38,8 @@ vi.mock('@grpc/grpc-js', () => {
     Metadata: MockMetadata,
     status: {
       NOT_FOUND: 5,
-      INTERNAL: 13
+      INTERNAL: 13,
+      CANCELLED: 1
     }
   }
 })
@@ -67,6 +71,7 @@ vi.mock('./socketPath', () => ({
 }))
 
 import { GrpcDaemonClient } from './grpcClient'
+import { FileWatchEventType, type FileWatchEvent } from '../shared/ipc-types'
 
 const { mockClientInstance } = mocks
 
@@ -452,79 +457,67 @@ describe('GrpcDaemonClient', () => {
     })
   })
 
-  describe('proto conversion', () => {
+  describe('session refs', () => {
     beforeEach(async () => {
       connectClient()
       await client.connect()
     })
 
-    it('convertFromProtoSession correctly maps fields including tab state JSON parse', async () => {
+    it('updateSession passes workspace refs through and returns the daemon session', async () => {
       const protoSession = {
         id: 'session-1',
-        workspaces: [{
-          id: 'ws-1',
-          path: '/test',
-          name: 'test',
-          parentId: 'parent-1',
-          status: 'active',
-          isGitRepo: true,
-          gitBranch: 'main',
-          gitRootPath: '/test',
-          isWorktree: true,
-          isDetached: false,
-          appStates: {
-            'tab-1': {
-              applicationId: 'terminal',
-              title: 'Terminal',
-              state: Buffer.from(JSON.stringify({ ptyId: 'pty-1' }), 'utf-8')
-            }
-          },
-          activeTabId: 'tab-1',
-          metadata: Buffer.from('{}'),
-          createdAt: 1000,
-          lastActivity: 2000
-        }],
+        workspaceRefs: [{ id: 'ws-1', path: '/test' }],
+        workspaceDataDir: '/home/user/.treeterm/workspaces',
         createdAt: 1000,
-        lastActivity: 2000
+        lastActivity: 2000,
+        version: 3
       }
 
-      mockClientInstance.updateSession.mockImplementation((_req: any, cb: (err: any, res: any) => void) => { cb(null, protoSession); })
-      const session = await client.updateSession([])
-      expect(session).not.toBeNull()
-      expect(session.workspaces[0]!.appStates['tab-1']!.state).toEqual({ ptyId: 'pty-1' })
-      expect(session.workspaces[0]!.parentId).toBe('parent-1')
-      expect(session.workspaces[0]!.gitBranch).toBe('main')
+      let captured: { workspaceRefs: unknown; senderId: unknown; expectedVersion: unknown } | undefined
+      mockClientInstance.updateSession.mockImplementation((req: typeof captured, cb: (err: unknown, res: unknown) => void) => { captured = req; cb(null, protoSession); })
+
+      const session = await client.updateSession([{ id: 'ws-1', path: '/test' }], 'sender', 2)
+
+      expect(captured?.workspaceRefs).toEqual([{ id: 'ws-1', path: '/test' }])
+      expect(captured?.senderId).toBe('sender')
+      expect(captured?.expectedVersion).toBe(2)
+      expect(session.workspaceRefs).toEqual([{ id: 'ws-1', path: '/test' }])
+      expect(session.workspaceDataDir).toBe('/home/user/.treeterm/workspaces')
+      expect(session.version).toBe(3)
+    })
+  })
+
+  describe('watchFile', () => {
+    beforeEach(async () => {
+      connectClient()
+      await client.connect()
     })
 
-    it('parseProtoWorkspace passes through undefined optional fields', async () => {
-      const protoSession = {
-        id: 'session-1',
-        workspaces: [{
-          id: 'ws-1',
-          path: '/test',
-          name: 'test',
-          parentId: undefined,
-          status: 'active',
-          isGitRepo: false,
-          gitBranch: undefined,
-          gitRootPath: undefined,
-          isWorktree: false,
-          isDetached: false,
-          appStates: {},
-          activeTabId: undefined,
-          createdAt: 1000,
-          lastActivity: 2000
-        }],
-        createdAt: 1000,
-        lastActivity: 2000
-      }
+    it('maps present/absent proto events to the shared FileWatchEvent union', () => {
+      const events: FileWatchEvent[] = []
+      const stream = { on: vi.fn<(...args: unknown[]) => void>(), cancel: vi.fn<() => void>() }
+      mockClientInstance.watchFile.mockReturnValue(stream)
 
-      mockClientInstance.updateSession.mockImplementation((_req: any, cb: (err: any, res: any) => void) => { cb(null, protoSession); })
-      const session = await client.updateSession([])
-      expect(session.workspaces[0]!.parentId).toBeUndefined()
-      expect(session.workspaces[0]!.gitBranch).toBeUndefined()
-      expect(session.workspaces[0]!.gitRootPath).toBeUndefined()
-      expect(session.workspaces[0]!.activeTabId).toBeUndefined()
+      client.watchFile('w1', '/ws', 'a.json', (e) => events.push(e))
+
+      const dataCall = stream.on.mock.calls.find((c) => c[0] === 'data')!
+      const dataHandler = dataCall[1] as (event: unknown) => void
+      dataHandler({ present: { content: Buffer.from('hello', 'utf-8'), sha256: 'abc' } })
+      dataHandler({ absent: {} })
+
+      expect(events).toEqual([
+        { type: FileWatchEventType.Present, content: 'hello', sha256: 'abc' },
+        { type: FileWatchEventType.Absent }
+      ])
+    })
+
+    it('unsubscribe cancels the stream', () => {
+      const stream = { on: vi.fn<(...args: unknown[]) => void>(), cancel: vi.fn<() => void>() }
+      mockClientInstance.watchFile.mockReturnValue(stream)
+
+      const { unsubscribe } = client.watchFile('w1', '/ws', 'a.json', () => {})
+      unsubscribe()
+      expect(stream.cancel).toHaveBeenCalled()
     })
   })
 
@@ -655,7 +648,7 @@ describe('GrpcDaemonClient', () => {
       const onUpdate = vi.fn<(...args: any[]) => void>()
       const result = client.watchSession('listener-1', onUpdate)
 
-      const mockProto = { id: 'session-1', workspaces: [], createdAt: 1000, lastActivity: 2000 }
+      const mockProto = { id: 'session-1', workspaceRefs: [], workspaceDataDir: '', createdAt: 1000, lastActivity: 2000 }
       handlers['data']!({ session: mockProto })
 
       const session = await result.initial
@@ -675,7 +668,7 @@ describe('GrpcDaemonClient', () => {
       const onUpdate = vi.fn<(...args: any[]) => void>()
       const result = client.watchSession('listener-1', onUpdate)
 
-      const mockProto = { id: 'session-1', workspaces: [], createdAt: 1000, lastActivity: 2000 }
+      const mockProto = { id: 'session-1', workspaceRefs: [], workspaceDataDir: '', createdAt: 1000, lastActivity: 2000 }
       handlers['data']!({ session: mockProto }) // first = initial
       await result.initial
 
@@ -697,7 +690,7 @@ describe('GrpcDaemonClient', () => {
       const onError = vi.fn<(err: Error) => void>()
       const result = client.watchSession('listener-1', onUpdate, onError)
 
-      const mockProto = { id: 'session-1', workspaces: [], createdAt: 1000, lastActivity: 2000 }
+      const mockProto = { id: 'session-1', workspaceRefs: [], workspaceDataDir: '', createdAt: 1000, lastActivity: 2000 }
       handlers['data']!({ session: mockProto })
       await result.initial
 

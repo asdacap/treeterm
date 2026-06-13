@@ -7,8 +7,29 @@ import { ConnectionStatus, ConnectionTargetType, type ConnectionInfo } from '../
 import type { StoreApi } from 'zustand'
 import { createMockExecApi } from '../../shared/mockApis'
 import { makeWorkspace, makeSession } from '../../shared/test-fixtures/workspace'
+import { FileWatchEventType, type FileWatchEvent } from '../../shared/ipc-types'
+import { toWorkspaceFile, type Workspace } from '../../shared/workspaceFile'
 
 const flushPromises = () => new Promise(r => setTimeout(r, 0))
+
+// Captures the onEvent callback for each watched workspace file so tests can
+// drive file-watch events (the daemon's WatchFile stream is mocked).
+const fileWatchCallbacks = new Map<string, (e: FileWatchEvent) => void>()
+
+// Build a daemon Session carrying only the membership refs for these workspaces.
+function sessionWithRefs(workspaces: Workspace[], version = 1): ReturnType<typeof makeSession> {
+  return makeSession({
+    workspaceRefs: workspaces.map(w => ({ id: w.id, path: w.path })),
+    version,
+  })
+}
+
+// Emit a Present file-watch event delivering a workspace body.
+function emitFilePresent(ws: Workspace, sha?: string): void {
+  const cb = fileWatchCallbacks.get(`${ws.id}.json`)
+  if (!cb) throw new Error(`no file watch registered for ${ws.id}`)
+  cb({ type: FileWatchEventType.Present, content: JSON.stringify(toWorkspaceFile(ws)), sha256: sha ?? `sha-${ws.id}-${String(Math.random())}` })
+}
 
 function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
   return {
@@ -52,7 +73,12 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       readDirectory: vi.fn().mockResolvedValue({ success: true }),
       readFile: vi.fn().mockResolvedValue({ success: true }),
       writeFile: vi.fn().mockResolvedValue({ success: true }),
+      deleteFile: vi.fn().mockResolvedValue({ success: true }),
       searchFiles: vi.fn().mockResolvedValue({ success: true }),
+      watchFile: vi.fn((_workspacePath: string, filePath: string, onEvent: (e: FileWatchEvent) => void) => {
+        fileWatchCallbacks.set(filePath, onEvent)
+        return { unsubscribe: () => { fileWatchCallbacks.delete(filePath) } }
+      }),
     },
     runActions: {
       detect: vi.fn().mockResolvedValue([]),
@@ -60,7 +86,9 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
     },
     exec: createMockExecApi(),
     sessionApi: {
-      update: vi.fn().mockResolvedValue({ success: true }),
+      // Echo the sent refs back at version+1 so the accept path is exercised by default.
+      update: vi.fn().mockImplementation((_sid: string, refs: { id: string; path: string }[], _sender?: string, expectedVersion?: number) =>
+        Promise.resolve({ success: true, session: makeSession({ workspaceRefs: refs, version: (expectedVersion ?? 0) + 1 }) })),
       lock: vi.fn().mockResolvedValue({ success: true, acquired: true, session: makeSession() }),
       unlock: vi.fn().mockResolvedValue({ success: true, session: makeSession() }),
       forceUnlock: vi.fn().mockResolvedValue({ success: true, session: makeSession() }),
@@ -126,9 +154,13 @@ describe('createSessionStore', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    fileWatchCallbacks.clear()
     deps = makeDeps()
     const localConn: ConnectionInfo = { id: 'local', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected }
     store = createSessionStore({ sessionId: 'session-1', connection: localConn }, deps)
+    // The daemon advertises this via SessionWatch; set it directly for tests that
+    // exercise create/remove without first replaying a session event.
+    store.setState({ workspaceDataDir: '/test/.treeterm/workspaces' })
   })
 
   describe('initial state', () => {
@@ -602,16 +634,8 @@ describe('createSessionStore', () => {
     it('skips external updates where daemon version is behind local', async () => {
       store.setState({ sessionVersion: 5 })
 
-      const daemonSession = {
-        id: 'session-1',
-        workspaces: [makeWorkspace({ id: 'ws-ext', name: 'external', path: '/external' })],
-        createdAt: Date.now(),
-        lastActivity: Date.now(),
-        version: 3,
-        lock: undefined,
-      }
-
-      await store.getState().handleExternalUpdate(daemonSession)
+      const ext = makeWorkspace({ id: 'ws-ext', name: 'external', path: '/external' })
+      await store.getState().handleExternalUpdate(sessionWithRefs([ext], 3))
 
       expect(store.getState().workspaces.has('ws-ext')).toBe(false)
     })
@@ -619,16 +643,10 @@ describe('createSessionStore', () => {
     it('applies external update when daemon version is ahead of local', async () => {
       store.setState({ sessionVersion: 0 })
 
-      const daemonSession = {
-        id: 'session-1',
-        workspaces: [makeWorkspace({ id: 'ws-ext', name: 'external', path: '/external' })],
-        createdAt: Date.now(),
-        lastActivity: Date.now(),
-        version: 1,
-        lock: undefined,
-      }
-
-      await store.getState().handleExternalUpdate(daemonSession)
+      const ext = makeWorkspace({ id: 'ws-ext', name: 'external', path: '/external' })
+      await store.getState().handleExternalUpdate(sessionWithRefs([ext], 1))
+      // The ref creates a Loading placeholder; the file watch delivers the body.
+      emitFilePresent(ext)
 
       const found = Array.from(store.getState().workspaces.values()).some(
         e => (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) && e.data.path === '/external'
@@ -636,45 +654,27 @@ describe('createSessionStore', () => {
       expect(found).toBe(true)
     })
 
-    it('applies same-version external update when content differs', async () => {
-      const session1 = {
-        id: 'session-1',
-        workspaces: [makeWorkspace({ id: 'ws-1', name: 'original', path: '/original' })],
-        createdAt: Date.now(),
-        lastActivity: Date.now(),
-        version: 3,
-        lock: undefined,
-      }
-      await store.getState().handleExternalUpdate(session1)
+    it('applies same-version external update when membership differs', async () => {
+      const ws1 = makeWorkspace({ id: 'ws-1', name: 'original', path: '/original' })
+      await store.getState().handleExternalUpdate(sessionWithRefs([ws1], 3))
+      emitFilePresent(ws1)
       expect(store.getState().sessionVersion).toBe(3)
 
-      const session2 = {
-        id: 'session-1',
-        workspaces: [makeWorkspace({ id: 'ws-2', name: 'changed', path: '/changed' })],
-        createdAt: Date.now(),
-        lastActivity: Date.now(),
-        version: 3,
-        lock: undefined,
-      }
-      await store.getState().handleExternalUpdate(session2)
+      const ws2 = makeWorkspace({ id: 'ws-2', name: 'changed', path: '/changed' })
+      await store.getState().handleExternalUpdate(sessionWithRefs([ws2], 3))
+      emitFilePresent(ws2)
 
       const found = Array.from(store.getState().workspaces.values()).some(
         e => (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) && e.data.path === '/changed'
       )
       expect(found).toBe(true)
+      expect(store.getState().workspaces.has('ws-1')).toBe(false)
     })
 
-    it('treats a watch event echoing the last sent state as a no-op', async () => {
-      const session = {
-        id: 'session-1',
-        workspaces: [makeWorkspace({ id: 'ws-1', name: 'same', path: '/same' })],
-        createdAt: Date.now(),
-        lastActivity: Date.now(),
-        version: 3,
-        lock: undefined,
-      }
+    it('treats an unchanged ref list as a no-op', async () => {
+      const ws = makeWorkspace({ id: 'ws-1', name: 'same', path: '/same' })
+      const session = sessionWithRefs([ws], 3)
       await store.getState().handleExternalUpdate(session)
-
       await store.getState().handleExternalUpdate(session)
       expect(store.getState().isRestoring).toBe(false)
     })
@@ -682,16 +682,9 @@ describe('createSessionStore', () => {
     it('applies external update when daemon version is strictly ahead', async () => {
       store.setState({ sessionVersion: 3 })
 
-      const daemonSession = {
-        id: 'session-1',
-        workspaces: [makeWorkspace({ id: 'ws-ext', name: 'external', path: '/external' })],
-        createdAt: Date.now(),
-        lastActivity: Date.now(),
-        version: 5,
-        lock: undefined,
-      }
-
-      await store.getState().handleExternalUpdate(daemonSession)
+      const ext = makeWorkspace({ id: 'ws-ext', name: 'external', path: '/external' })
+      await store.getState().handleExternalUpdate(sessionWithRefs([ext], 5))
+      emitFilePresent(ext)
 
       const found = Array.from(store.getState().workspaces.values()).some(
         e => (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) && e.data.path === '/external'
@@ -1176,110 +1169,96 @@ describe('createSessionStore', () => {
   })
 
   describe('session restore', () => {
-    it('handleRestore restores workspaces from daemon session', async () => {
-      const daemonSession = {
-        id: 'session-1',
-        workspaces: [
-          makeWorkspace({ id: 'ws-restored', name: 'restored', path: '/restored', appStates: {} }),
-        ],
-        createdAt: Date.now(),
-        lastActivity: Date.now(),
-        version: 1,
-        lock: undefined,
-      }
+    it('handleRestore creates a placeholder per ref, then loads each from its file', async () => {
+      const ws = makeWorkspace({ id: 'ws-restored', name: 'restored', path: '/restored', appStates: {} })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
 
-      await store.getState().handleRestore(daemonSession)
+      // Placeholder exists immediately (Loading); body arrives via the watch.
+      expect(store.getState().workspaces.get('ws-restored')).toBeDefined()
+      emitFilePresent(ws)
 
       const entry = store.getState().workspaces.get('ws-restored')!
-      expect(entry).toBeDefined()
       expect(entry.status).toBe(WorkspaceEntryStatus.Loaded)
       expect((entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).data.name).toBe('restored')
       expect(store.getState().isRestoring).toBe(false)
     })
 
-    it('handleExternalUpdate applies external changes', async () => {
-      // First add a workspace
+    it('handleExternalUpdate removes refs gone from the daemon and adds new ones', async () => {
       store.getState().addWorkspace('/existing')
       await flushPromises()
       const existingId = Array.from(store.getState().workspaces.keys())[0]
 
-      const daemonSession = {
-        id: 'session-1',
-        workspaces: [
-          makeWorkspace({ id: 'ws-new', name: 'new-workspace', path: '/new' }),
-        ],
-        createdAt: Date.now(),
-        lastActivity: Date.now(),
-        version: 1,
-        lock: undefined,
-      }
+      const ws = makeWorkspace({ id: 'ws-new', name: 'new-workspace', path: '/new' })
+      await store.getState().handleExternalUpdate(sessionWithRefs([ws], 2))
 
-      await store.getState().handleExternalUpdate(daemonSession)
-
-      // Old workspace should be removed (not in daemon session)
+      // Old workspace (not in the new ref list) is removed.
       expect(store.getState().workspaces.get(existingId!)).toBeUndefined()
-      // New workspace should be added
+      // New ref placeholder is present and loads from its file.
       expect(store.getState().workspaces.get('ws-new')).toBeDefined()
+      emitFilePresent(ws)
+      expect(store.getState().workspaces.get('ws-new')!.status).toBe(WorkspaceEntryStatus.Loaded)
       expect(store.getState().isRestoring).toBe(false)
     })
 
-    it('handleRestore with tab changes — removes old tabs and adds new tabs', async () => {
-      // First restore with tab1
-      const daemonSession1 = {
-        id: 'session-1',
-        workspaces: [
-          makeWorkspace({ id: 'ws-tabs', name: 'tabs-test', path: '/tabs', appStates: { 'tab-1': { applicationId: 'terminal', title: 'Terminal', state: {} } }, activeTabId: 'tab-1' }),
-        ],
-        createdAt: Date.now(),
-        lastActivity: Date.now(),
-        version: 1,
-        lock: undefined,
-      }
-      await store.getState().handleRestore(daemonSession1)
-      expect(store.getState().workspaces.get('ws-tabs')).toBeDefined()
+    it('applies a content file event — removes old tabs and adds new tabs', async () => {
+      const withTab1 = makeWorkspace({ id: 'ws-tabs', name: 'tabs-test', path: '/tabs', appStates: { 'tab-1': { applicationId: 'terminal', title: 'Terminal', state: {} } }, activeTabId: 'tab-1' })
+      await store.getState().handleRestore(sessionWithRefs([withTab1], 1))
+      emitFilePresent(withTab1)
+      expect(store.getState().workspaces.get('ws-tabs')!.status).toBe(WorkspaceEntryStatus.Loaded)
 
-      // Second restore with different tabs — restoreWorkspaceTabs should dispose tab-1, init tab-2
-      const daemonSession2 = {
-        id: 'session-1',
-        workspaces: [
-          makeWorkspace({ id: 'ws-tabs', name: 'tabs-test', path: '/tabs', appStates: { 'tab-2': { applicationId: 'terminal', title: 'New Tab', state: {} } }, activeTabId: 'tab-2' }),
-        ],
-        createdAt: Date.now(),
-        lastActivity: Date.now(),
-        version: 2,
-        lock: undefined,
-      }
-      await store.getState().handleRestore(daemonSession2)
+      // A later content edit (same ref) arrives purely via the file watch.
+      const withTab2 = makeWorkspace({ id: 'ws-tabs', name: 'tabs-test', path: '/tabs', appStates: { 'tab-2': { applicationId: 'terminal', title: 'New Tab', state: {} } }, activeTabId: 'tab-2' })
+      emitFilePresent(withTab2)
 
       const entry = store.getState().workspaces.get('ws-tabs')!
       expect(entry.status).toBe(WorkspaceEntryStatus.Loaded)
-      // restoreWorkspaceTabs updates the workspace store, not the session entry data
-      const wsStore = (entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).store
-      const wsState = wsStore.getState().workspace
+      const wsState = (entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).store.getState().workspace
       expect(wsState.appStates['tab-2']).toBeDefined()
       expect(wsState.appStates['tab-1']).toBeUndefined()
     })
 
-    it('handleRestore restores child workspaces with parent relationship', async () => {
-      const daemonSession = {
-        id: 'session-1',
-        workspaces: [
-          makeWorkspace({ id: 'ws-parent', name: 'parent', path: '/parent' }),
-          makeWorkspace({ id: 'ws-child', name: 'child', path: '/child', parentId: 'ws-parent', isWorktree: true }),
-        ],
-        createdAt: Date.now(),
-        lastActivity: Date.now(),
-        version: 1,
-        lock: undefined,
-      }
+    it('reconstructs child workspaces with parent relationship from their files', async () => {
+      const parent = makeWorkspace({ id: 'ws-parent', name: 'parent', path: '/parent' })
+      const child = makeWorkspace({ id: 'ws-child', name: 'child', path: '/child', parentId: 'ws-parent', isWorktree: true })
+      await store.getState().handleRestore(sessionWithRefs([parent, child], 1))
+      emitFilePresent(parent)
+      emitFilePresent(child)
 
-      await store.getState().handleRestore(daemonSession)
-
-      expect(store.getState().workspaces.get('ws-parent')).toBeDefined()
-      expect(store.getState().workspaces.get('ws-child')).toBeDefined()
+      expect(store.getState().workspaces.get('ws-parent')!.status).toBe(WorkspaceEntryStatus.Loaded)
       const childEntry = store.getState().workspaces.get('ws-child')!
       expect(childEntry.status).toBe(WorkspaceEntryStatus.Loaded)
       expect((childEntry as Extract<typeof childEntry, { status: WorkspaceEntryStatus.Loaded }>).data.parentId).toBe('ws-parent')
+    })
+
+    it('surfaces an invalid workspace file as an error entry', async () => {
+      const ws = makeWorkspace({ id: 'ws-bad', name: 'bad', path: '/bad' })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
+      const cb = fileWatchCallbacks.get('ws-bad.json')!
+      cb({ type: FileWatchEventType.Present, content: '{ not valid json', sha256: 'badsha' })
+
+      expect(store.getState().workspaces.get('ws-bad')!.status).toBe(WorkspaceEntryStatus.Error)
+    })
+
+    it('writes the JSON body and publishes a ref when creating a workspace', async () => {
+      store.getState().addWorkspace('/created')
+      await flushPromises()
+
+      // The JSON file is written (CAS must-not-exist) and the ref list is published.
+      expect(deps.filesystem.writeFile).toHaveBeenCalled()
+      const writeArgs = vi.mocked(deps.filesystem.writeFile).mock.calls[0]!
+      expect(writeArgs[3]).toBe('') // expectedSha256 '' → must-not-exist
+      expect(deps.sessionApi.update).toHaveBeenCalled()
+    })
+
+    it('deletes the JSON file when a workspace is removed', async () => {
+      store.getState().addWorkspace('/doomed')
+      await flushPromises()
+      const id = Array.from(store.getState().workspaces.keys())[0]!
+
+      await store.getState().removeWorkspace(id)
+      await flushPromises()
+
+      expect(deps.filesystem.deleteFile).toHaveBeenCalledWith('/test/.treeterm/workspaces', `${id}.json`)
     })
   })
 })

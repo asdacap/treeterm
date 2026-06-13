@@ -36,38 +36,16 @@ export interface SandboxConfig {
   allowedPaths: string[];
 }
 
-export interface AppState {
-  applicationId: string;
-  title: string;
-  /** JSON-encoded arbitrary state */
-  state: Buffer;
-}
-
-export interface Workspace {
-  path: string;
-  name: string;
-  parentId?:
-    | string
-    | undefined;
-  /** 'active' | 'merged' | 'abandoned' */
-  status: string;
-  isGitRepo: boolean;
-  gitBranch?: string | undefined;
-  gitRootPath?: string | undefined;
-  isWorktree: boolean;
-  isDetached?: boolean | undefined;
-  appStates: { [key: string]: AppState };
-  activeTabId?: string | undefined;
-  createdAt: number;
-  lastActivity: number;
+/**
+ * Membership entry for the in-process workspace list. The workspace body
+ * (name, status, git info, app states, metadata, ...) lives in a JSON file at
+ * <workspace_data_dir>/<id>.json — opaque to the daemon, schema owned by the client.
+ */
+export interface WorkspaceRef {
+  /** Client-generated, also the JSON filename stem */
   id: string;
-  /** JSON-encoded arbitrary dictionary */
-  metadata: Buffer;
-}
-
-export interface Workspace_AppStatesEntry {
-  key: string;
-  value?: AppState | undefined;
+  /** Workspace/worktree directory path */
+  path: string;
 }
 
 export interface SessionLock {
@@ -77,12 +55,18 @@ export interface SessionLock {
 
 export interface Session {
   id: string;
-  workspaces: Workspace[];
   createdAt: number;
   lastActivity: number;
   /** Monotonically increasing version, incremented on every update */
   version: number;
   lock?: SessionLock | undefined;
+  workspaceRefs: WorkspaceRef[];
+  /**
+   * Daemon-resolved absolute directory holding the per-workspace JSON files
+   * (e.g. /home/user/.treeterm/workspaces). Clients use this as the
+   * workspace_path scope for ReadFile/WriteFile/WatchFile/DeleteFile on them.
+   */
+  workspaceDataDir: string;
 }
 
 export interface PtySessionInfo {
@@ -203,14 +187,13 @@ export interface ExecResult {
 }
 
 export interface UpdateSessionRequest {
-  /** Field 1 (session_id) removed — daemon has exactly one session */
-  workspaces: Workspace[];
   /** Window UUID to exclude from broadcast */
   senderId?:
     | string
     | undefined;
   /** Optimistic lock: must match current version for update to apply */
   expectedVersion?: number | undefined;
+  workspaceRefs: WorkspaceRef[];
 }
 
 export interface SessionWatchRequest {
@@ -291,6 +274,48 @@ export interface FileWriteData {
 }
 
 export interface FileWriteEnd {
+}
+
+export interface WatchFileRequest {
+  /** Scoping root, same semantics as ReadFile */
+  workspacePath: string;
+  filePath: string;
+  /** Client-generated UUID (required) */
+  watcherId: string;
+}
+
+export interface FilePresent {
+  content: Buffer;
+  /** Lowercase-hex SHA-256 of content, usable as expected_sha256 in WriteFile */
+  sha256: string;
+}
+
+export interface FileAbsent {
+}
+
+/** The first event on the stream is always the current state. */
+export interface FileWatchEvent {
+  present?: FilePresent | undefined;
+  absent?: FileAbsent | undefined;
+}
+
+export interface FileSignalPresent {
+  sha256: string;
+}
+
+export interface FileSignalEvent {
+  present?: FileSignalPresent | undefined;
+  absent?: FileAbsent | undefined;
+}
+
+export interface DeleteFileRequest {
+  workspacePath: string;
+  filePath: string;
+}
+
+export interface DeleteFileResponse {
+  success: boolean;
+  error?: string | undefined;
 }
 
 export interface FileEntry {
@@ -508,507 +533,42 @@ export const SandboxConfig: MessageFns<SandboxConfig> = {
   },
 };
 
-function createBaseAppState(): AppState {
-  return { applicationId: "", title: "", state: Buffer.alloc(0) };
+function createBaseWorkspaceRef(): WorkspaceRef {
+  return { id: "", path: "" };
 }
 
-export const AppState: MessageFns<AppState> = {
-  encode(message: AppState, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.applicationId !== "") {
-      writer.uint32(10).string(message.applicationId);
-    }
-    if (message.title !== "") {
-      writer.uint32(18).string(message.title);
-    }
-    if (message.state.length !== 0) {
-      writer.uint32(26).bytes(message.state);
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): AppState {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseAppState();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.applicationId = reader.string();
-          continue;
-        }
-        case 2: {
-          if (tag !== 18) {
-            break;
-          }
-
-          message.title = reader.string();
-          continue;
-        }
-        case 3: {
-          if (tag !== 26) {
-            break;
-          }
-
-          message.state = Buffer.from(reader.bytes());
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): AppState {
-    return {
-      applicationId: isSet(object.applicationId)
-        ? globalThis.String(object.applicationId)
-        : isSet(object.application_id)
-        ? globalThis.String(object.application_id)
-        : "",
-      title: isSet(object.title) ? globalThis.String(object.title) : "",
-      state: isSet(object.state) ? Buffer.from(bytesFromBase64(object.state)) : Buffer.alloc(0),
-    };
-  },
-
-  toJSON(message: AppState): unknown {
-    const obj: any = {};
-    if (message.applicationId !== "") {
-      obj.applicationId = message.applicationId;
-    }
-    if (message.title !== "") {
-      obj.title = message.title;
-    }
-    if (message.state.length !== 0) {
-      obj.state = base64FromBytes(message.state);
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<AppState>, I>>(base?: I): AppState {
-    return AppState.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<AppState>, I>>(object: I): AppState {
-    const message = createBaseAppState();
-    message.applicationId = object.applicationId ?? "";
-    message.title = object.title ?? "";
-    message.state = object.state ?? Buffer.alloc(0);
-    return message;
-  },
-};
-
-function createBaseWorkspace(): Workspace {
-  return {
-    path: "",
-    name: "",
-    parentId: undefined,
-    status: "",
-    isGitRepo: false,
-    gitBranch: undefined,
-    gitRootPath: undefined,
-    isWorktree: false,
-    isDetached: undefined,
-    appStates: {},
-    activeTabId: undefined,
-    createdAt: 0,
-    lastActivity: 0,
-    id: "",
-    metadata: Buffer.alloc(0),
-  };
-}
-
-export const Workspace: MessageFns<Workspace> = {
-  encode(message: Workspace, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.path !== "") {
-      writer.uint32(10).string(message.path);
-    }
-    if (message.name !== "") {
-      writer.uint32(18).string(message.name);
-    }
-    if (message.parentId !== undefined) {
-      writer.uint32(26).string(message.parentId);
-    }
-    if (message.status !== "") {
-      writer.uint32(34).string(message.status);
-    }
-    if (message.isGitRepo !== false) {
-      writer.uint32(40).bool(message.isGitRepo);
-    }
-    if (message.gitBranch !== undefined) {
-      writer.uint32(50).string(message.gitBranch);
-    }
-    if (message.gitRootPath !== undefined) {
-      writer.uint32(58).string(message.gitRootPath);
-    }
-    if (message.isWorktree !== false) {
-      writer.uint32(64).bool(message.isWorktree);
-    }
-    if (message.isDetached !== undefined) {
-      writer.uint32(72).bool(message.isDetached);
-    }
-    globalThis.Object.entries(message.appStates).forEach(([key, value]: [string, AppState]) => {
-      Workspace_AppStatesEntry.encode({ key: key as any, value }, writer.uint32(82).fork()).join();
-    });
-    if (message.activeTabId !== undefined) {
-      writer.uint32(90).string(message.activeTabId);
-    }
-    if (message.createdAt !== 0) {
-      writer.uint32(96).int64(message.createdAt);
-    }
-    if (message.lastActivity !== 0) {
-      writer.uint32(104).int64(message.lastActivity);
-    }
+export const WorkspaceRef: MessageFns<WorkspaceRef> = {
+  encode(message: WorkspaceRef, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.id !== "") {
-      writer.uint32(122).string(message.id);
+      writer.uint32(10).string(message.id);
     }
-    if (message.metadata.length !== 0) {
-      writer.uint32(138).bytes(message.metadata);
+    if (message.path !== "") {
+      writer.uint32(18).string(message.path);
     }
     return writer;
   },
 
-  decode(input: BinaryReader | Uint8Array, length?: number): Workspace {
+  decode(input: BinaryReader | Uint8Array, length?: number): WorkspaceRef {
     const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
     const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseWorkspace();
+    const message = createBaseWorkspaceRef();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 1: {
           if (tag !== 10) {
-            break;
-          }
-
-          message.path = reader.string();
-          continue;
-        }
-        case 2: {
-          if (tag !== 18) {
-            break;
-          }
-
-          message.name = reader.string();
-          continue;
-        }
-        case 3: {
-          if (tag !== 26) {
-            break;
-          }
-
-          message.parentId = reader.string();
-          continue;
-        }
-        case 4: {
-          if (tag !== 34) {
-            break;
-          }
-
-          message.status = reader.string();
-          continue;
-        }
-        case 5: {
-          if (tag !== 40) {
-            break;
-          }
-
-          message.isGitRepo = reader.bool();
-          continue;
-        }
-        case 6: {
-          if (tag !== 50) {
-            break;
-          }
-
-          message.gitBranch = reader.string();
-          continue;
-        }
-        case 7: {
-          if (tag !== 58) {
-            break;
-          }
-
-          message.gitRootPath = reader.string();
-          continue;
-        }
-        case 8: {
-          if (tag !== 64) {
-            break;
-          }
-
-          message.isWorktree = reader.bool();
-          continue;
-        }
-        case 9: {
-          if (tag !== 72) {
-            break;
-          }
-
-          message.isDetached = reader.bool();
-          continue;
-        }
-        case 10: {
-          if (tag !== 82) {
-            break;
-          }
-
-          const entry10 = Workspace_AppStatesEntry.decode(reader, reader.uint32());
-          if (entry10.value !== undefined) {
-            message.appStates[entry10.key] = entry10.value;
-          }
-          continue;
-        }
-        case 11: {
-          if (tag !== 90) {
-            break;
-          }
-
-          message.activeTabId = reader.string();
-          continue;
-        }
-        case 12: {
-          if (tag !== 96) {
-            break;
-          }
-
-          message.createdAt = longToNumber(reader.int64());
-          continue;
-        }
-        case 13: {
-          if (tag !== 104) {
-            break;
-          }
-
-          message.lastActivity = longToNumber(reader.int64());
-          continue;
-        }
-        case 15: {
-          if (tag !== 122) {
             break;
           }
 
           message.id = reader.string();
           continue;
         }
-        case 17: {
-          if (tag !== 138) {
-            break;
-          }
-
-          message.metadata = Buffer.from(reader.bytes());
-          continue;
-        }
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skip(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): Workspace {
-    return {
-      path: isSet(object.path) ? globalThis.String(object.path) : "",
-      name: isSet(object.name) ? globalThis.String(object.name) : "",
-      parentId: isSet(object.parentId)
-        ? globalThis.String(object.parentId)
-        : isSet(object.parent_id)
-        ? globalThis.String(object.parent_id)
-        : undefined,
-      status: isSet(object.status) ? globalThis.String(object.status) : "",
-      isGitRepo: isSet(object.isGitRepo)
-        ? globalThis.Boolean(object.isGitRepo)
-        : isSet(object.is_git_repo)
-        ? globalThis.Boolean(object.is_git_repo)
-        : false,
-      gitBranch: isSet(object.gitBranch)
-        ? globalThis.String(object.gitBranch)
-        : isSet(object.git_branch)
-        ? globalThis.String(object.git_branch)
-        : undefined,
-      gitRootPath: isSet(object.gitRootPath)
-        ? globalThis.String(object.gitRootPath)
-        : isSet(object.git_root_path)
-        ? globalThis.String(object.git_root_path)
-        : undefined,
-      isWorktree: isSet(object.isWorktree)
-        ? globalThis.Boolean(object.isWorktree)
-        : isSet(object.is_worktree)
-        ? globalThis.Boolean(object.is_worktree)
-        : false,
-      isDetached: isSet(object.isDetached)
-        ? globalThis.Boolean(object.isDetached)
-        : isSet(object.is_detached)
-        ? globalThis.Boolean(object.is_detached)
-        : undefined,
-      appStates: isObject(object.appStates)
-        ? (globalThis.Object.entries(object.appStates) as [string, any][]).reduce(
-          (acc: { [key: string]: AppState }, [key, value]: [string, any]) => {
-            acc[key] = AppState.fromJSON(value);
-            return acc;
-          },
-          {},
-        )
-        : isObject(object.app_states)
-        ? (globalThis.Object.entries(object.app_states) as [string, any][]).reduce(
-          (acc: { [key: string]: AppState }, [key, value]: [string, any]) => {
-            acc[key] = AppState.fromJSON(value);
-            return acc;
-          },
-          {},
-        )
-        : {},
-      activeTabId: isSet(object.activeTabId)
-        ? globalThis.String(object.activeTabId)
-        : isSet(object.active_tab_id)
-        ? globalThis.String(object.active_tab_id)
-        : undefined,
-      createdAt: isSet(object.createdAt)
-        ? globalThis.Number(object.createdAt)
-        : isSet(object.created_at)
-        ? globalThis.Number(object.created_at)
-        : 0,
-      lastActivity: isSet(object.lastActivity)
-        ? globalThis.Number(object.lastActivity)
-        : isSet(object.last_activity)
-        ? globalThis.Number(object.last_activity)
-        : 0,
-      id: isSet(object.id) ? globalThis.String(object.id) : "",
-      metadata: isSet(object.metadata) ? Buffer.from(bytesFromBase64(object.metadata)) : Buffer.alloc(0),
-    };
-  },
-
-  toJSON(message: Workspace): unknown {
-    const obj: any = {};
-    if (message.path !== "") {
-      obj.path = message.path;
-    }
-    if (message.name !== "") {
-      obj.name = message.name;
-    }
-    if (message.parentId !== undefined) {
-      obj.parentId = message.parentId;
-    }
-    if (message.status !== "") {
-      obj.status = message.status;
-    }
-    if (message.isGitRepo !== false) {
-      obj.isGitRepo = message.isGitRepo;
-    }
-    if (message.gitBranch !== undefined) {
-      obj.gitBranch = message.gitBranch;
-    }
-    if (message.gitRootPath !== undefined) {
-      obj.gitRootPath = message.gitRootPath;
-    }
-    if (message.isWorktree !== false) {
-      obj.isWorktree = message.isWorktree;
-    }
-    if (message.isDetached !== undefined) {
-      obj.isDetached = message.isDetached;
-    }
-    if (message.appStates) {
-      const entries = globalThis.Object.entries(message.appStates) as [string, AppState][];
-      if (entries.length > 0) {
-        obj.appStates = {};
-        entries.forEach(([k, v]) => {
-          obj.appStates[k] = AppState.toJSON(v);
-        });
-      }
-    }
-    if (message.activeTabId !== undefined) {
-      obj.activeTabId = message.activeTabId;
-    }
-    if (message.createdAt !== 0) {
-      obj.createdAt = Math.round(message.createdAt);
-    }
-    if (message.lastActivity !== 0) {
-      obj.lastActivity = Math.round(message.lastActivity);
-    }
-    if (message.id !== "") {
-      obj.id = message.id;
-    }
-    if (message.metadata.length !== 0) {
-      obj.metadata = base64FromBytes(message.metadata);
-    }
-    return obj;
-  },
-
-  create<I extends Exact<DeepPartial<Workspace>, I>>(base?: I): Workspace {
-    return Workspace.fromPartial(base ?? ({} as any));
-  },
-  fromPartial<I extends Exact<DeepPartial<Workspace>, I>>(object: I): Workspace {
-    const message = createBaseWorkspace();
-    message.path = object.path ?? "";
-    message.name = object.name ?? "";
-    message.parentId = object.parentId ?? undefined;
-    message.status = object.status ?? "";
-    message.isGitRepo = object.isGitRepo ?? false;
-    message.gitBranch = object.gitBranch ?? undefined;
-    message.gitRootPath = object.gitRootPath ?? undefined;
-    message.isWorktree = object.isWorktree ?? false;
-    message.isDetached = object.isDetached ?? undefined;
-    message.appStates = (globalThis.Object.entries(object.appStates ?? {}) as [string, AppState][]).reduce(
-      (acc: { [key: string]: AppState }, [key, value]: [string, AppState]) => {
-        if (value !== undefined) {
-          acc[key] = AppState.fromPartial(value);
-        }
-        return acc;
-      },
-      {},
-    );
-    message.activeTabId = object.activeTabId ?? undefined;
-    message.createdAt = object.createdAt ?? 0;
-    message.lastActivity = object.lastActivity ?? 0;
-    message.id = object.id ?? "";
-    message.metadata = object.metadata ?? Buffer.alloc(0);
-    return message;
-  },
-};
-
-function createBaseWorkspace_AppStatesEntry(): Workspace_AppStatesEntry {
-  return { key: "", value: undefined };
-}
-
-export const Workspace_AppStatesEntry: MessageFns<Workspace_AppStatesEntry> = {
-  encode(message: Workspace_AppStatesEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.key !== "") {
-      writer.uint32(10).string(message.key);
-    }
-    if (message.value !== undefined) {
-      AppState.encode(message.value, writer.uint32(18).fork()).join();
-    }
-    return writer;
-  },
-
-  decode(input: BinaryReader | Uint8Array, length?: number): Workspace_AppStatesEntry {
-    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
-    const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseWorkspace_AppStatesEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1: {
-          if (tag !== 10) {
-            break;
-          }
-
-          message.key = reader.string();
-          continue;
-        }
         case 2: {
           if (tag !== 18) {
             break;
           }
 
-          message.value = AppState.decode(reader, reader.uint32());
+          message.path = reader.string();
           continue;
         }
       }
@@ -1020,33 +580,31 @@ export const Workspace_AppStatesEntry: MessageFns<Workspace_AppStatesEntry> = {
     return message;
   },
 
-  fromJSON(object: any): Workspace_AppStatesEntry {
+  fromJSON(object: any): WorkspaceRef {
     return {
-      key: isSet(object.key) ? globalThis.String(object.key) : "",
-      value: isSet(object.value) ? AppState.fromJSON(object.value) : undefined,
+      id: isSet(object.id) ? globalThis.String(object.id) : "",
+      path: isSet(object.path) ? globalThis.String(object.path) : "",
     };
   },
 
-  toJSON(message: Workspace_AppStatesEntry): unknown {
+  toJSON(message: WorkspaceRef): unknown {
     const obj: any = {};
-    if (message.key !== "") {
-      obj.key = message.key;
+    if (message.id !== "") {
+      obj.id = message.id;
     }
-    if (message.value !== undefined) {
-      obj.value = AppState.toJSON(message.value);
+    if (message.path !== "") {
+      obj.path = message.path;
     }
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<Workspace_AppStatesEntry>, I>>(base?: I): Workspace_AppStatesEntry {
-    return Workspace_AppStatesEntry.fromPartial(base ?? ({} as any));
+  create<I extends Exact<DeepPartial<WorkspaceRef>, I>>(base?: I): WorkspaceRef {
+    return WorkspaceRef.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<Workspace_AppStatesEntry>, I>>(object: I): Workspace_AppStatesEntry {
-    const message = createBaseWorkspace_AppStatesEntry();
-    message.key = object.key ?? "";
-    message.value = (object.value !== undefined && object.value !== null)
-      ? AppState.fromPartial(object.value)
-      : undefined;
+  fromPartial<I extends Exact<DeepPartial<WorkspaceRef>, I>>(object: I): WorkspaceRef {
+    const message = createBaseWorkspaceRef();
+    message.id = object.id ?? "";
+    message.path = object.path ?? "";
     return message;
   },
 };
@@ -1136,16 +694,21 @@ export const SessionLock: MessageFns<SessionLock> = {
 };
 
 function createBaseSession(): Session {
-  return { id: "", workspaces: [], createdAt: 0, lastActivity: 0, version: 0, lock: undefined };
+  return {
+    id: "",
+    createdAt: 0,
+    lastActivity: 0,
+    version: 0,
+    lock: undefined,
+    workspaceRefs: [],
+    workspaceDataDir: "",
+  };
 }
 
 export const Session: MessageFns<Session> = {
   encode(message: Session, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.id !== "") {
       writer.uint32(10).string(message.id);
-    }
-    for (const v of message.workspaces) {
-      Workspace.encode(v!, writer.uint32(18).fork()).join();
     }
     if (message.createdAt !== 0) {
       writer.uint32(24).int64(message.createdAt);
@@ -1158,6 +721,12 @@ export const Session: MessageFns<Session> = {
     }
     if (message.lock !== undefined) {
       SessionLock.encode(message.lock, writer.uint32(50).fork()).join();
+    }
+    for (const v of message.workspaceRefs) {
+      WorkspaceRef.encode(v!, writer.uint32(58).fork()).join();
+    }
+    if (message.workspaceDataDir !== "") {
+      writer.uint32(66).string(message.workspaceDataDir);
     }
     return writer;
   },
@@ -1175,14 +744,6 @@ export const Session: MessageFns<Session> = {
           }
 
           message.id = reader.string();
-          continue;
-        }
-        case 2: {
-          if (tag !== 18) {
-            break;
-          }
-
-          message.workspaces.push(Workspace.decode(reader, reader.uint32()));
           continue;
         }
         case 3: {
@@ -1217,6 +778,22 @@ export const Session: MessageFns<Session> = {
           message.lock = SessionLock.decode(reader, reader.uint32());
           continue;
         }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.workspaceRefs.push(WorkspaceRef.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.workspaceDataDir = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1229,9 +806,6 @@ export const Session: MessageFns<Session> = {
   fromJSON(object: any): Session {
     return {
       id: isSet(object.id) ? globalThis.String(object.id) : "",
-      workspaces: globalThis.Array.isArray(object?.workspaces)
-        ? object.workspaces.map((e: any) => Workspace.fromJSON(e))
-        : [],
       createdAt: isSet(object.createdAt)
         ? globalThis.Number(object.createdAt)
         : isSet(object.created_at)
@@ -1244,6 +818,16 @@ export const Session: MessageFns<Session> = {
         : 0,
       version: isSet(object.version) ? globalThis.Number(object.version) : 0,
       lock: isSet(object.lock) ? SessionLock.fromJSON(object.lock) : undefined,
+      workspaceRefs: globalThis.Array.isArray(object?.workspaceRefs)
+        ? object.workspaceRefs.map((e: any) => WorkspaceRef.fromJSON(e))
+        : globalThis.Array.isArray(object?.workspace_refs)
+        ? object.workspace_refs.map((e: any) => WorkspaceRef.fromJSON(e))
+        : [],
+      workspaceDataDir: isSet(object.workspaceDataDir)
+        ? globalThis.String(object.workspaceDataDir)
+        : isSet(object.workspace_data_dir)
+        ? globalThis.String(object.workspace_data_dir)
+        : "",
     };
   },
 
@@ -1251,9 +835,6 @@ export const Session: MessageFns<Session> = {
     const obj: any = {};
     if (message.id !== "") {
       obj.id = message.id;
-    }
-    if (message.workspaces?.length) {
-      obj.workspaces = message.workspaces.map((e) => Workspace.toJSON(e));
     }
     if (message.createdAt !== 0) {
       obj.createdAt = Math.round(message.createdAt);
@@ -1267,6 +848,12 @@ export const Session: MessageFns<Session> = {
     if (message.lock !== undefined) {
       obj.lock = SessionLock.toJSON(message.lock);
     }
+    if (message.workspaceRefs?.length) {
+      obj.workspaceRefs = message.workspaceRefs.map((e) => WorkspaceRef.toJSON(e));
+    }
+    if (message.workspaceDataDir !== "") {
+      obj.workspaceDataDir = message.workspaceDataDir;
+    }
     return obj;
   },
 
@@ -1276,13 +863,14 @@ export const Session: MessageFns<Session> = {
   fromPartial<I extends Exact<DeepPartial<Session>, I>>(object: I): Session {
     const message = createBaseSession();
     message.id = object.id ?? "";
-    message.workspaces = object.workspaces?.map((e) => Workspace.fromPartial(e)) || [];
     message.createdAt = object.createdAt ?? 0;
     message.lastActivity = object.lastActivity ?? 0;
     message.version = object.version ?? 0;
     message.lock = (object.lock !== undefined && object.lock !== null)
       ? SessionLock.fromPartial(object.lock)
       : undefined;
+    message.workspaceRefs = object.workspaceRefs?.map((e) => WorkspaceRef.fromPartial(e)) || [];
+    message.workspaceDataDir = object.workspaceDataDir ?? "";
     return message;
   },
 };
@@ -3078,19 +2666,19 @@ export const ExecResult: MessageFns<ExecResult> = {
 };
 
 function createBaseUpdateSessionRequest(): UpdateSessionRequest {
-  return { workspaces: [], senderId: undefined, expectedVersion: undefined };
+  return { senderId: undefined, expectedVersion: undefined, workspaceRefs: [] };
 }
 
 export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
   encode(message: UpdateSessionRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    for (const v of message.workspaces) {
-      Workspace.encode(v!, writer.uint32(18).fork()).join();
-    }
     if (message.senderId !== undefined) {
       writer.uint32(26).string(message.senderId);
     }
     if (message.expectedVersion !== undefined) {
       writer.uint32(32).uint64(message.expectedVersion);
+    }
+    for (const v of message.workspaceRefs) {
+      WorkspaceRef.encode(v!, writer.uint32(42).fork()).join();
     }
     return writer;
   },
@@ -3102,14 +2690,6 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
-        case 2: {
-          if (tag !== 18) {
-            break;
-          }
-
-          message.workspaces.push(Workspace.decode(reader, reader.uint32()));
-          continue;
-        }
         case 3: {
           if (tag !== 26) {
             break;
@@ -3126,6 +2706,14 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
           message.expectedVersion = longToNumber(reader.uint64());
           continue;
         }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.workspaceRefs.push(WorkspaceRef.decode(reader, reader.uint32()));
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -3137,9 +2725,6 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
 
   fromJSON(object: any): UpdateSessionRequest {
     return {
-      workspaces: globalThis.Array.isArray(object?.workspaces)
-        ? object.workspaces.map((e: any) => Workspace.fromJSON(e))
-        : [],
       senderId: isSet(object.senderId)
         ? globalThis.String(object.senderId)
         : isSet(object.sender_id)
@@ -3150,19 +2735,24 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
         : isSet(object.expected_version)
         ? globalThis.Number(object.expected_version)
         : undefined,
+      workspaceRefs: globalThis.Array.isArray(object?.workspaceRefs)
+        ? object.workspaceRefs.map((e: any) => WorkspaceRef.fromJSON(e))
+        : globalThis.Array.isArray(object?.workspace_refs)
+        ? object.workspace_refs.map((e: any) => WorkspaceRef.fromJSON(e))
+        : [],
     };
   },
 
   toJSON(message: UpdateSessionRequest): unknown {
     const obj: any = {};
-    if (message.workspaces?.length) {
-      obj.workspaces = message.workspaces.map((e) => Workspace.toJSON(e));
-    }
     if (message.senderId !== undefined) {
       obj.senderId = message.senderId;
     }
     if (message.expectedVersion !== undefined) {
       obj.expectedVersion = Math.round(message.expectedVersion);
+    }
+    if (message.workspaceRefs?.length) {
+      obj.workspaceRefs = message.workspaceRefs.map((e) => WorkspaceRef.toJSON(e));
     }
     return obj;
   },
@@ -3172,9 +2762,9 @@ export const UpdateSessionRequest: MessageFns<UpdateSessionRequest> = {
   },
   fromPartial<I extends Exact<DeepPartial<UpdateSessionRequest>, I>>(object: I): UpdateSessionRequest {
     const message = createBaseUpdateSessionRequest();
-    message.workspaces = object.workspaces?.map((e) => Workspace.fromPartial(e)) || [];
     message.senderId = object.senderId ?? undefined;
     message.expectedVersion = object.expectedVersion ?? undefined;
+    message.workspaceRefs = object.workspaceRefs?.map((e) => WorkspaceRef.fromPartial(e)) || [];
     return message;
   },
 };
@@ -4172,6 +3762,607 @@ export const FileWriteEnd: MessageFns<FileWriteEnd> = {
   },
   fromPartial<I extends Exact<DeepPartial<FileWriteEnd>, I>>(_: I): FileWriteEnd {
     const message = createBaseFileWriteEnd();
+    return message;
+  },
+};
+
+function createBaseWatchFileRequest(): WatchFileRequest {
+  return { workspacePath: "", filePath: "", watcherId: "" };
+}
+
+export const WatchFileRequest: MessageFns<WatchFileRequest> = {
+  encode(message: WatchFileRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.workspacePath !== "") {
+      writer.uint32(10).string(message.workspacePath);
+    }
+    if (message.filePath !== "") {
+      writer.uint32(18).string(message.filePath);
+    }
+    if (message.watcherId !== "") {
+      writer.uint32(26).string(message.watcherId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): WatchFileRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseWatchFileRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.workspacePath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.filePath = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.watcherId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): WatchFileRequest {
+    return {
+      workspacePath: isSet(object.workspacePath)
+        ? globalThis.String(object.workspacePath)
+        : isSet(object.workspace_path)
+        ? globalThis.String(object.workspace_path)
+        : "",
+      filePath: isSet(object.filePath)
+        ? globalThis.String(object.filePath)
+        : isSet(object.file_path)
+        ? globalThis.String(object.file_path)
+        : "",
+      watcherId: isSet(object.watcherId)
+        ? globalThis.String(object.watcherId)
+        : isSet(object.watcher_id)
+        ? globalThis.String(object.watcher_id)
+        : "",
+    };
+  },
+
+  toJSON(message: WatchFileRequest): unknown {
+    const obj: any = {};
+    if (message.workspacePath !== "") {
+      obj.workspacePath = message.workspacePath;
+    }
+    if (message.filePath !== "") {
+      obj.filePath = message.filePath;
+    }
+    if (message.watcherId !== "") {
+      obj.watcherId = message.watcherId;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<WatchFileRequest>, I>>(base?: I): WatchFileRequest {
+    return WatchFileRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<WatchFileRequest>, I>>(object: I): WatchFileRequest {
+    const message = createBaseWatchFileRequest();
+    message.workspacePath = object.workspacePath ?? "";
+    message.filePath = object.filePath ?? "";
+    message.watcherId = object.watcherId ?? "";
+    return message;
+  },
+};
+
+function createBaseFilePresent(): FilePresent {
+  return { content: Buffer.alloc(0), sha256: "" };
+}
+
+export const FilePresent: MessageFns<FilePresent> = {
+  encode(message: FilePresent, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.content.length !== 0) {
+      writer.uint32(10).bytes(message.content);
+    }
+    if (message.sha256 !== "") {
+      writer.uint32(18).string(message.sha256);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FilePresent {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFilePresent();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.content = Buffer.from(reader.bytes());
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.sha256 = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FilePresent {
+    return {
+      content: isSet(object.content) ? Buffer.from(bytesFromBase64(object.content)) : Buffer.alloc(0),
+      sha256: isSet(object.sha256) ? globalThis.String(object.sha256) : "",
+    };
+  },
+
+  toJSON(message: FilePresent): unknown {
+    const obj: any = {};
+    if (message.content.length !== 0) {
+      obj.content = base64FromBytes(message.content);
+    }
+    if (message.sha256 !== "") {
+      obj.sha256 = message.sha256;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FilePresent>, I>>(base?: I): FilePresent {
+    return FilePresent.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FilePresent>, I>>(object: I): FilePresent {
+    const message = createBaseFilePresent();
+    message.content = object.content ?? Buffer.alloc(0);
+    message.sha256 = object.sha256 ?? "";
+    return message;
+  },
+};
+
+function createBaseFileAbsent(): FileAbsent {
+  return {};
+}
+
+export const FileAbsent: MessageFns<FileAbsent> = {
+  encode(_: FileAbsent, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FileAbsent {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFileAbsent();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(_: any): FileAbsent {
+    return {};
+  },
+
+  toJSON(_: FileAbsent): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FileAbsent>, I>>(base?: I): FileAbsent {
+    return FileAbsent.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FileAbsent>, I>>(_: I): FileAbsent {
+    const message = createBaseFileAbsent();
+    return message;
+  },
+};
+
+function createBaseFileWatchEvent(): FileWatchEvent {
+  return { present: undefined, absent: undefined };
+}
+
+export const FileWatchEvent: MessageFns<FileWatchEvent> = {
+  encode(message: FileWatchEvent, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.present !== undefined) {
+      FilePresent.encode(message.present, writer.uint32(10).fork()).join();
+    }
+    if (message.absent !== undefined) {
+      FileAbsent.encode(message.absent, writer.uint32(18).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FileWatchEvent {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFileWatchEvent();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.present = FilePresent.decode(reader, reader.uint32());
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.absent = FileAbsent.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FileWatchEvent {
+    return {
+      present: isSet(object.present) ? FilePresent.fromJSON(object.present) : undefined,
+      absent: isSet(object.absent) ? FileAbsent.fromJSON(object.absent) : undefined,
+    };
+  },
+
+  toJSON(message: FileWatchEvent): unknown {
+    const obj: any = {};
+    if (message.present !== undefined) {
+      obj.present = FilePresent.toJSON(message.present);
+    }
+    if (message.absent !== undefined) {
+      obj.absent = FileAbsent.toJSON(message.absent);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FileWatchEvent>, I>>(base?: I): FileWatchEvent {
+    return FileWatchEvent.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FileWatchEvent>, I>>(object: I): FileWatchEvent {
+    const message = createBaseFileWatchEvent();
+    message.present = (object.present !== undefined && object.present !== null)
+      ? FilePresent.fromPartial(object.present)
+      : undefined;
+    message.absent = (object.absent !== undefined && object.absent !== null)
+      ? FileAbsent.fromPartial(object.absent)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseFileSignalPresent(): FileSignalPresent {
+  return { sha256: "" };
+}
+
+export const FileSignalPresent: MessageFns<FileSignalPresent> = {
+  encode(message: FileSignalPresent, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sha256 !== "") {
+      writer.uint32(10).string(message.sha256);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FileSignalPresent {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFileSignalPresent();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sha256 = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FileSignalPresent {
+    return { sha256: isSet(object.sha256) ? globalThis.String(object.sha256) : "" };
+  },
+
+  toJSON(message: FileSignalPresent): unknown {
+    const obj: any = {};
+    if (message.sha256 !== "") {
+      obj.sha256 = message.sha256;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FileSignalPresent>, I>>(base?: I): FileSignalPresent {
+    return FileSignalPresent.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FileSignalPresent>, I>>(object: I): FileSignalPresent {
+    const message = createBaseFileSignalPresent();
+    message.sha256 = object.sha256 ?? "";
+    return message;
+  },
+};
+
+function createBaseFileSignalEvent(): FileSignalEvent {
+  return { present: undefined, absent: undefined };
+}
+
+export const FileSignalEvent: MessageFns<FileSignalEvent> = {
+  encode(message: FileSignalEvent, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.present !== undefined) {
+      FileSignalPresent.encode(message.present, writer.uint32(10).fork()).join();
+    }
+    if (message.absent !== undefined) {
+      FileAbsent.encode(message.absent, writer.uint32(18).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): FileSignalEvent {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseFileSignalEvent();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.present = FileSignalPresent.decode(reader, reader.uint32());
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.absent = FileAbsent.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): FileSignalEvent {
+    return {
+      present: isSet(object.present) ? FileSignalPresent.fromJSON(object.present) : undefined,
+      absent: isSet(object.absent) ? FileAbsent.fromJSON(object.absent) : undefined,
+    };
+  },
+
+  toJSON(message: FileSignalEvent): unknown {
+    const obj: any = {};
+    if (message.present !== undefined) {
+      obj.present = FileSignalPresent.toJSON(message.present);
+    }
+    if (message.absent !== undefined) {
+      obj.absent = FileAbsent.toJSON(message.absent);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FileSignalEvent>, I>>(base?: I): FileSignalEvent {
+    return FileSignalEvent.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<FileSignalEvent>, I>>(object: I): FileSignalEvent {
+    const message = createBaseFileSignalEvent();
+    message.present = (object.present !== undefined && object.present !== null)
+      ? FileSignalPresent.fromPartial(object.present)
+      : undefined;
+    message.absent = (object.absent !== undefined && object.absent !== null)
+      ? FileAbsent.fromPartial(object.absent)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseDeleteFileRequest(): DeleteFileRequest {
+  return { workspacePath: "", filePath: "" };
+}
+
+export const DeleteFileRequest: MessageFns<DeleteFileRequest> = {
+  encode(message: DeleteFileRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.workspacePath !== "") {
+      writer.uint32(10).string(message.workspacePath);
+    }
+    if (message.filePath !== "") {
+      writer.uint32(18).string(message.filePath);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): DeleteFileRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDeleteFileRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.workspacePath = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.filePath = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DeleteFileRequest {
+    return {
+      workspacePath: isSet(object.workspacePath)
+        ? globalThis.String(object.workspacePath)
+        : isSet(object.workspace_path)
+        ? globalThis.String(object.workspace_path)
+        : "",
+      filePath: isSet(object.filePath)
+        ? globalThis.String(object.filePath)
+        : isSet(object.file_path)
+        ? globalThis.String(object.file_path)
+        : "",
+    };
+  },
+
+  toJSON(message: DeleteFileRequest): unknown {
+    const obj: any = {};
+    if (message.workspacePath !== "") {
+      obj.workspacePath = message.workspacePath;
+    }
+    if (message.filePath !== "") {
+      obj.filePath = message.filePath;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DeleteFileRequest>, I>>(base?: I): DeleteFileRequest {
+    return DeleteFileRequest.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<DeleteFileRequest>, I>>(object: I): DeleteFileRequest {
+    const message = createBaseDeleteFileRequest();
+    message.workspacePath = object.workspacePath ?? "";
+    message.filePath = object.filePath ?? "";
+    return message;
+  },
+};
+
+function createBaseDeleteFileResponse(): DeleteFileResponse {
+  return { success: false, error: undefined };
+}
+
+export const DeleteFileResponse: MessageFns<DeleteFileResponse> = {
+  encode(message: DeleteFileResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.success !== false) {
+      writer.uint32(8).bool(message.success);
+    }
+    if (message.error !== undefined) {
+      writer.uint32(18).string(message.error);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): DeleteFileResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDeleteFileResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.success = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.error = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DeleteFileResponse {
+    return {
+      success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
+      error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+    };
+  },
+
+  toJSON(message: DeleteFileResponse): unknown {
+    const obj: any = {};
+    if (message.success !== false) {
+      obj.success = message.success;
+    }
+    if (message.error !== undefined) {
+      obj.error = message.error;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DeleteFileResponse>, I>>(base?: I): DeleteFileResponse {
+    return DeleteFileResponse.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<DeleteFileResponse>, I>>(object: I): DeleteFileResponse {
+    const message = createBaseDeleteFileResponse();
+    message.success = object.success ?? false;
+    message.error = object.error ?? undefined;
     return message;
   },
 };
@@ -5375,6 +5566,15 @@ export const TreeTermDaemonService = {
     responseSerialize: (value: WriteFileResponse): Buffer => Buffer.from(WriteFileResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): WriteFileResponse => WriteFileResponse.decode(value),
   },
+  deleteFile: {
+    path: "/treeterm.TreeTermDaemon/DeleteFile" as const,
+    requestStream: false as const,
+    responseStream: false as const,
+    requestSerialize: (value: DeleteFileRequest): Buffer => Buffer.from(DeleteFileRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): DeleteFileRequest => DeleteFileRequest.decode(value),
+    responseSerialize: (value: DeleteFileResponse): Buffer => Buffer.from(DeleteFileResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): DeleteFileResponse => DeleteFileResponse.decode(value),
+  },
   searchFiles: {
     path: "/treeterm.TreeTermDaemon/SearchFiles" as const,
     requestStream: false as const,
@@ -5383,6 +5583,29 @@ export const TreeTermDaemonService = {
     requestDeserialize: (value: Buffer): SearchFilesRequest => SearchFilesRequest.decode(value),
     responseSerialize: (value: SearchFilesResponse): Buffer => Buffer.from(SearchFilesResponse.encode(value).finish()),
     responseDeserialize: (value: Buffer): SearchFilesResponse => SearchFilesResponse.decode(value),
+  },
+  /**
+   * File Watching (server-streaming; first event is the current state).
+   * Change detection: OS-native watch + polling re-read + WriteFile/DeleteFile
+   * RPC interception, deduped by content SHA-256.
+   */
+  watchFile: {
+    path: "/treeterm.TreeTermDaemon/WatchFile" as const,
+    requestStream: false as const,
+    responseStream: true as const,
+    requestSerialize: (value: WatchFileRequest): Buffer => Buffer.from(WatchFileRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): WatchFileRequest => WatchFileRequest.decode(value),
+    responseSerialize: (value: FileWatchEvent): Buffer => Buffer.from(FileWatchEvent.encode(value).finish()),
+    responseDeserialize: (value: Buffer): FileWatchEvent => FileWatchEvent.decode(value),
+  },
+  watchFileSignal: {
+    path: "/treeterm.TreeTermDaemon/WatchFileSignal" as const,
+    requestStream: false as const,
+    responseStream: true as const,
+    requestSerialize: (value: WatchFileRequest): Buffer => Buffer.from(WatchFileRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): WatchFileRequest => WatchFileRequest.decode(value),
+    responseSerialize: (value: FileSignalEvent): Buffer => Buffer.from(FileSignalEvent.encode(value).finish()),
+    responseDeserialize: (value: Buffer): FileSignalEvent => FileSignalEvent.decode(value),
   },
 } as const;
 
@@ -5413,7 +5636,15 @@ export interface TreeTermDaemonServer extends UntypedServiceImplementation {
   readDirectory: handleUnaryCall<ReadDirectoryRequest, ReadDirectoryResponse>;
   readFile: handleServerStreamingCall<ReadFileRequest, FileReadChunk>;
   writeFile: handleClientStreamingCall<FileWriteChunk, WriteFileResponse>;
+  deleteFile: handleUnaryCall<DeleteFileRequest, DeleteFileResponse>;
   searchFiles: handleUnaryCall<SearchFilesRequest, SearchFilesResponse>;
+  /**
+   * File Watching (server-streaming; first event is the current state).
+   * Change detection: OS-native watch + polling re-read + WriteFile/DeleteFile
+   * RPC interception, deduped by content SHA-256.
+   */
+  watchFile: handleServerStreamingCall<WatchFileRequest, FileWatchEvent>;
+  watchFileSignal: handleServerStreamingCall<WatchFileRequest, FileSignalEvent>;
 }
 
 export interface TreeTermDaemonClient extends Client {
@@ -5592,6 +5823,21 @@ export interface TreeTermDaemonClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: WriteFileResponse) => void,
   ): ClientWritableStream<FileWriteChunk>;
+  deleteFile(
+    request: DeleteFileRequest,
+    callback: (error: ServiceError | null, response: DeleteFileResponse) => void,
+  ): ClientUnaryCall;
+  deleteFile(
+    request: DeleteFileRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: DeleteFileResponse) => void,
+  ): ClientUnaryCall;
+  deleteFile(
+    request: DeleteFileRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: DeleteFileResponse) => void,
+  ): ClientUnaryCall;
   searchFiles(
     request: SearchFilesRequest,
     callback: (error: ServiceError | null, response: SearchFilesResponse) => void,
@@ -5607,6 +5853,23 @@ export interface TreeTermDaemonClient extends Client {
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: SearchFilesResponse) => void,
   ): ClientUnaryCall;
+  /**
+   * File Watching (server-streaming; first event is the current state).
+   * Change detection: OS-native watch + polling re-read + WriteFile/DeleteFile
+   * RPC interception, deduped by content SHA-256.
+   */
+  watchFile(request: WatchFileRequest, options?: Partial<CallOptions>): ClientReadableStream<FileWatchEvent>;
+  watchFile(
+    request: WatchFileRequest,
+    metadata?: Metadata,
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<FileWatchEvent>;
+  watchFileSignal(request: WatchFileRequest, options?: Partial<CallOptions>): ClientReadableStream<FileSignalEvent>;
+  watchFileSignal(
+    request: WatchFileRequest,
+    metadata?: Metadata,
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<FileSignalEvent>;
 }
 
 export const TreeTermDaemonClient = makeGenericClientConstructor(

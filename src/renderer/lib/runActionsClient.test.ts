@@ -226,6 +226,8 @@ function createMockFilesystem(files: Record<string, string>): FilesystemApi {
     }),
     writeFile: vi.fn(),
     searchFiles: vi.fn(),
+    deleteFile: vi.fn(),
+    watchFile: vi.fn(() => ({ unsubscribe: vi.fn() })),
   }
 }
 
@@ -272,6 +274,8 @@ describe('createRunActionsApi', () => {
       readFile: vi.fn().mockRejectedValue(new Error('read error')),
       writeFile: vi.fn(),
       searchFiles: vi.fn(),
+    deleteFile: vi.fn(),
+    watchFile: vi.fn(() => ({ unsubscribe: vi.fn() })),
     }
     const terminal = createMockTerminal()
     const api = createRunActionsApi(filesystem, terminal, 'local')

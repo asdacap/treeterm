@@ -82,26 +82,28 @@ export interface SandboxConfig {
 
 // === Daemon Session Types ===
 //
-// Derived from the proto-generated types in src/generated/treeterm.ts so that
-// there is exactly one source of truth for the workspace/session shape. The
-// only divergences are:
-//   - `metadata` bytes → `Record<string, string>` (parsed at the gRPC boundary)
-//   - `appStates[].state` bytes → `unknown` (parsed at the gRPC boundary)
-//   - `status` string → `WorkspaceStatus` enum (narrowed)
+// The daemon holds only the workspace *membership* list — `WorkspaceRef`s of
+// `{ id, path }` — plus `workspaceDataDir`, the absolute directory where each
+// workspace's JSON body lives. `Session` is therefore a direct pass-through of
+// the proto type. The workspace body shape (`Workspace`, `AppState`,
+// `WorkspaceStatus`) is owned by `./workspaceFile` and re-exported here so the
+// many existing `import { Workspace } from '../shared/types'` sites keep working.
 //
 // Renderer-only per-workspace ephemeral state (e.g. `WorktreeSettings`) lives
-// on WorkspaceStore, not on this type.
+// on WorkspaceStore, not on these types.
 
 import type {
-  Workspace as ProtoWorkspace,
   Session as ProtoSession,
-  AppState as ProtoAppState,
+  WorkspaceRef as ProtoWorkspaceRef,
   SessionLock as ProtoSessionLock,
 } from '../generated/treeterm'
 
-export type SessionLock = ProtoSessionLock
+export type { AppState, Workspace } from './workspaceFile'
+export { WorkspaceStatus } from './workspaceFile'
 
-export type AppState = Omit<ProtoAppState, 'state'> & { state: unknown }
+export type SessionLock = ProtoSessionLock
+export type WorkspaceRef = ProtoWorkspaceRef
+export type Session = ProtoSession
 
 // Worktree-specific settings that can be inherited from parent.
 // Renderer-only parameter type — never serialized to the daemon.
@@ -110,25 +112,6 @@ export interface WorktreeSettings {
   // Empty string means inherit from parent or use global default.
   defaultApplicationId: string
 }
-
-export enum WorkspaceStatus {
-  Active = 'active',
-  Merged = 'merged',
-  Abandoned = 'abandoned',
-}
-
-export type Workspace = Omit<ProtoWorkspace, 'metadata' | 'appStates' | 'status'> & {
-  status: WorkspaceStatus
-  metadata: Record<string, string>
-  appStates: Record<string, AppState>
-}
-
-export type Session = Omit<ProtoSession, 'workspaces'> & {
-  workspaces: Workspace[]
-}
-
-// Helper type for workspace input (without daemon-managed fields).
-export type WorkspaceInput = Omit<Workspace, 'createdAt' | 'lastActivity'>
 
 // === PTY Session Types ===
 

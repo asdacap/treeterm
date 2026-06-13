@@ -1,6 +1,7 @@
 import { contextBridge } from 'electron'
-import type { SandboxConfig, Session, TTYSessionInfo, WorkspaceInput, Settings, SSHConnectionConfig, ConnectionInfo, PortForwardConfig, PortForwardInfo } from '../shared/types'
-import { PtyEventType, ExecEventType, type PtyEvent, type ExecEvent, type IpcResult } from '../shared/ipc-types'
+import { randomUUID } from 'crypto'
+import type { SandboxConfig, Session, TTYSessionInfo, WorkspaceRef, Settings, SSHConnectionConfig, ConnectionInfo, PortForwardConfig, PortForwardInfo } from '../shared/types'
+import { PtyEventType, ExecEventType, FileWatchEventType, type PtyEvent, type ExecEvent, type FileWatchEvent, type IpcResult } from '../shared/ipc-types'
 import { IpcClient } from './ipc-client'
 import { createEventDispatcher } from './eventDispatcher'
 import type { PreloadApi, Platform } from '../renderer/types'
@@ -13,6 +14,9 @@ type ExecEventCallback = (event: ExecEvent) => void
 // ./eventDispatcher.ts.
 const ptyDispatch = createEventDispatcher<PtyEvent>()
 const execDispatch = createEventDispatcher<ExecEvent>()
+// File watches are long-lived (no terminal event): a re-subscribe after reconnect
+// reuses the same watchId, so the listener must persist past any Error event.
+const fsWatchDispatch = createEventDispatcher<FileWatchEvent>()
 
 // Initialize IPC client
 const client = new IpcClient()
@@ -25,6 +29,11 @@ client.onPtyEvent((handle, event) => {
 // Listen for exec events from main process
 client.onExecEvent((execId, event) => {
   execDispatch.dispatch(execId, event, (e) => e.type === ExecEventType.Exit || e.type === ExecEventType.Error)
+})
+
+// Listen for file watch events from main process
+client.onFsWatchFileEvent((watchId, event) => {
+  fsWatchDispatch.dispatch(watchId, event, () => false)
 })
 
 type SettingsOpenCallback = () => void
@@ -225,8 +234,28 @@ const preloadApi: PreloadApi = {
     writeFile: (connectionId: string, workspacePath: string, filePath: string, content: string, expectedSha256?: string) => {
       return client.fsWriteFile(connectionId, workspacePath, filePath, content, expectedSha256)
     },
+    deleteFile: (connectionId: string, workspacePath: string, filePath: string) => {
+      return client.fsDeleteFile(connectionId, workspacePath, filePath)
+    },
     searchFiles: (connectionId: string, workspacePath: string, query: string) => {
       return client.fsSearchFiles(connectionId, workspacePath, query)
+    },
+    watchFile: (connectionId: string, workspacePath: string, filePath: string, onEvent: (event: FileWatchEvent) => void) => {
+      // Subscribe the dispatcher before invoking so events that race the invoke
+      // reply are buffered, not lost (same pattern as pty/exec).
+      const watchId = randomUUID()
+      const unsubscribeDispatch = fsWatchDispatch.subscribe(watchId, onEvent)
+      void client.fsWatchFile(connectionId, watchId, workspacePath, filePath).then((result) => {
+        if (!result.success) onEvent({ type: FileWatchEventType.Error, message: result.error })
+      }).catch((err: unknown) => {
+        onEvent({ type: FileWatchEventType.Error, message: err instanceof Error ? err.message : String(err) })
+      })
+      return {
+        unsubscribe: () => {
+          unsubscribeDispatch()
+          client.fsUnwatchFile(watchId)
+        }
+      }
     }
   },
   exec: {
@@ -323,8 +352,8 @@ const preloadApi: PreloadApi = {
     },
   },
   session: {
-    update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number) => {
-      return client.sessionUpdate(sessionId, workspaces, senderUuid, expectedVersion)
+    update: (sessionId: string, workspaceRefs: WorkspaceRef[], senderUuid?: string, expectedVersion?: number) => {
+      return client.sessionUpdate(sessionId, workspaceRefs, senderUuid, expectedVersion)
     },
     lock: (sessionId: string, ttlMs?: number) => {
       return client.sessionLock(sessionId, ttlMs)

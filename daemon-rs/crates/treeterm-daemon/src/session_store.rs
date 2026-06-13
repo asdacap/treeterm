@@ -22,10 +22,6 @@ fn generate_session_id() -> String {
     format!("session-{}-{}", now_millis(), random_hex_7())
 }
 
-fn generate_workspace_id() -> String {
-    format!("ws-{}-{}", now_millis(), random_hex_7())
-}
-
 /// Internal lock state — tracks the daemon-generated connection ID of the holder.
 /// Never exposed via proto; only timestamps are visible to clients.
 struct InternalLock {
@@ -66,11 +62,14 @@ impl SessionStore {
         let now = now_millis();
         let session = Session {
             id: generate_session_id(),
-            workspaces: vec![],
             created_at: now,
             last_activity: now,
             version: 1,
             lock: None,
+            workspace_refs: vec![],
+            workspace_data_dir: crate::paths::workspaces_dir()
+                .to_string_lossy()
+                .into_owned(),
         };
         tracing::info!(session_id = %session.id, "session created");
         Self {
@@ -95,7 +94,10 @@ impl SessionStore {
         session
     }
 
-    /// Update the session's workspaces. Returns `(session, accepted)`.
+    /// Update the session's workspace ref list. Returns `(session, accepted)`.
+    ///
+    /// The list is stored verbatim — workspace bodies live in JSON files the daemon
+    /// never interprets.
     ///
     /// Lock enforcement: if session is locked by another connection, the update is rejected.
     /// If the sender's connection holds the lock, the `expected_version` check is skipped (holder always wins).
@@ -103,7 +105,7 @@ impl SessionStore {
     /// the update is rejected and the current session is returned unchanged.
     pub async fn update_session(
         &self,
-        workspaces: Vec<Workspace>,
+        workspace_refs: Vec<WorkspaceRef>,
         expected_version: Option<u64>,
         sender_id: &str,
         connection_id: &str,
@@ -150,34 +152,13 @@ impl SessionStore {
             }
         }
 
-        let old_workspaces = &inner.session.workspaces;
-        let full_workspaces = workspaces
-            .into_iter()
-            .map(|mut ws| {
-                let prev = old_workspaces
-                    .iter()
-                    .find(|w| (!ws.id.is_empty() && w.id == ws.id) || w.path == ws.path);
-                if ws.id.is_empty() {
-                    ws.id = prev.map(|p| p.id.clone()).unwrap_or_else(generate_workspace_id);
-                }
-                ws.created_at = prev.map(|p| p.created_at).unwrap_or(now);
-                ws.last_activity = now;
-                ws
-            })
-            .collect();
+        inner.session.workspace_refs = workspace_refs;
+        inner.session.last_activity = now;
+        inner.session.version += 1;
+        inner.session.lock = inner.lock.as_ref().map(InternalLock::to_proto);
 
-        let updated = Session {
-            id: inner.session.id.clone(),
-            workspaces: full_workspaces,
-            created_at: inner.session.created_at,
-            last_activity: now,
-            version: inner.session.version + 1,
-            lock: inner.lock.as_ref().map(InternalLock::to_proto),
-        };
-
-        tracing::info!(version = updated.version, "session updated");
-        inner.session = updated.clone();
-        (updated, true)
+        tracing::info!(version = inner.session.version, "session updated");
+        (inner.session.clone(), true)
     }
 
     /// Acquire a session lock. Returns `(acquired, session)`.
@@ -387,7 +368,8 @@ mod tests {
         assert!(session.id.starts_with("session-"));
         assert_eq!(session.version, 1);
         assert!(session.created_at > 0);
-        assert_eq!(session.workspaces.len(), 0);
+        assert_eq!(session.workspace_refs.len(), 0);
+        assert!(session.workspace_data_dir.ends_with(".treeterm/workspaces"));
         assert!(session.lock.is_none());
     }
 
@@ -419,52 +401,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_preserves_existing_workspace_by_id() {
+    async fn update_stores_refs_verbatim() {
         let store = SessionStore::new();
-        let ws = Workspace {
-            id: "ws-1".into(),
-            path: "/a".into(),
-            ..Default::default()
-        };
-        store.update_session(vec![ws], None, "window-a", "conn-a").await;
-        let session = store.session().await;
-        let original_created_at = session.workspaces[0].created_at;
+        let refs = vec![
+            WorkspaceRef { id: "ws-1".into(), path: "/a".into() },
+            WorkspaceRef { id: "ws-2".into(), path: "/b".into() },
+        ];
 
-        let updated_ws = Workspace {
-            id: "ws-1".into(),
-            path: "/a-updated".into(),
-            ..Default::default()
-        };
-        let (updated, _) = store
-            .update_session(vec![updated_ws], None, "window-a", "conn-a")
+        let (updated, accepted) = store
+            .update_session(refs.clone(), None, "window-a", "conn-a")
             .await;
+        assert!(accepted);
+        assert_eq!(updated.workspace_refs, refs);
 
-        assert_eq!(updated.workspaces[0].id, "ws-1");
-        assert_eq!(updated.workspaces[0].created_at, original_created_at);
-    }
-
-    #[tokio::test]
-    async fn update_matches_workspace_by_path_when_id_empty() {
-        let store = SessionStore::new();
-        let ws = Workspace {
-            id: "ws-original".into(),
-            path: "/same-path".into(),
-            ..Default::default()
-        };
-        store.update_session(vec![ws], None, "window-a", "conn-a").await;
-
-        // Update with empty id but same path
-        let updated_ws = Workspace {
-            id: String::new(),
-            path: "/same-path".into(),
-            ..Default::default()
-        };
+        // Replacing the list stores the new list verbatim — no merging with the old one.
+        let new_refs = vec![WorkspaceRef { id: "ws-2".into(), path: "/b-moved".into() }];
         let (updated, _) = store
-            .update_session(vec![updated_ws], None, "window-a", "conn-a")
+            .update_session(new_refs.clone(), None, "window-a", "conn-a")
             .await;
-
-        // Should reuse the original workspace id
-        assert_eq!(updated.workspaces[0].id, "ws-original");
+        assert_eq!(updated.workspace_refs, new_refs);
     }
 
     #[tokio::test]

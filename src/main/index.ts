@@ -48,6 +48,17 @@ const ptyStreams = new Map<string, PtyStream>()
 const execStreams = createExecStreamRegistry<ReturnType<GrpcDaemonClient['execStream']>, Electron.WebContents>()
 // Session watch unsubscribers per connectionId, so reconnect can re-establish watches
 const sessionWatchUnsubs = new Map<string, { uuid: string; unsubscribe: () => void }[]>()
+// Active file watches keyed by the renderer-generated watchId. Main stays
+// window-agnostic — the watchId is the synthetic key and the sender identifies
+// which window receives events (same philosophy as ptyStreams).
+interface FileWatchEntry {
+  connectionId: string
+  workspacePath: string
+  filePath: string
+  sender: Electron.WebContents
+  unsubscribe: () => void
+}
+const fileWatches = new Map<string, FileWatchEntry>()
 // Track previous connection status per connectionId for detecting reconnect transitions
 const previousConnectionStatuses = new Map<string, ConnectionStatus>()
 
@@ -232,7 +243,7 @@ function reestablishSessionWatches(connectionId: string, client: GrpcDaemonClien
     const watch = client.watchSession(entry.uuid, (updatedSession) => {
       console.log(`[main] session sync received after reconnect for uuid ${entry.uuid}`, {
         sessionId: updatedSession.id,
-        workspaces: updatedSession.workspaces.map(ws => ({ path: ws.path, metadata: ws.metadata })),
+        workspaceRefs: updatedSession.workspaceRefs,
       })
       server.sessionSync(connectionId, updatedSession)
     })
@@ -256,6 +267,31 @@ function reestablishSessionWatches(connectionId: string, client: GrpcDaemonClien
   }
 
   sessionWatchUnsubs.set(connectionId, newEntries)
+}
+
+// Helper: re-open file watches for a connection after reconnect. The dead streams
+// are cancelled and replaced; each re-opened stream's first event is the current
+// state, which self-heals any change missed while disconnected.
+function reestablishFileWatches(connectionId: string, client: GrpcDaemonClient): void {
+  for (const [watchId, entry] of Array.from(fileWatches.entries())) {
+    if (entry.connectionId !== connectionId) continue
+    if (entry.sender.isDestroyed()) {
+      entry.unsubscribe()
+      fileWatches.delete(watchId)
+      continue
+    }
+    entry.unsubscribe()
+    const sender = entry.sender
+    const watch = client.watchFile(watchId, entry.workspacePath, entry.filePath, (event) => {
+      if (sender.isDestroyed()) {
+        const current = fileWatches.get(watchId)
+        if (current) { current.unsubscribe(); fileWatches.delete(watchId) }
+        return
+      }
+      sender.send('fs:watchFileEvent', watchId, event)
+    })
+    fileWatches.set(watchId, { ...entry, unsubscribe: watch.unsubscribe })
+  }
 }
 
 // IPC Handlers
@@ -378,10 +414,10 @@ function getSessionClient(connectionId: string): GrpcDaemonClient {
   return client
 }
 
-server.onSessionUpdate(async (connectionId, workspaces, senderUuid, expectedVersion) => {
+server.onSessionUpdate(async (connectionId, workspaceRefs, senderUuid, expectedVersion) => {
   try {
     const client = getSessionClient(connectionId)
-    const result = await client.updateSession(workspaces, senderUuid, expectedVersion)
+    const result = await client.updateSession(workspaceRefs, senderUuid, expectedVersion)
     return { success: true, session: result }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -503,8 +539,41 @@ server.onFsWriteFile((connectionId, workspacePath, filePath, content, expectedSh
   return getClientForConnection(connectionId).writeFile(workspacePath, filePath, content, expectedSha256)
 })
 
+server.onFsDeleteFile((connectionId, workspacePath, filePath) => {
+  return getClientForConnection(connectionId).deleteFile(workspacePath, filePath)
+})
+
 server.onFsSearchFiles((connectionId, workspacePath, query) => {
   return getClientForConnection(connectionId).searchFiles(workspacePath, query)
+})
+
+server.onFsWatchFile((event, connectionId, watchId, workspacePath, filePath) => {
+  const sender = event.sender
+  try {
+    const client = getClientForConnection(connectionId)
+    const watch = client.watchFile(watchId, workspacePath, filePath, (watchEvent) => {
+      if (sender.isDestroyed()) {
+        const current = fileWatches.get(watchId)
+        if (current) { current.unsubscribe(); fileWatches.delete(watchId) }
+        return
+      }
+      sender.send('fs:watchFileEvent', watchId, watchEvent)
+    })
+    fileWatches.set(watchId, { connectionId, workspacePath, filePath, sender, unsubscribe: watch.unsubscribe })
+    return { success: true }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[main] failed to watch file:', message)
+    return { success: false, error: message }
+  }
+})
+
+server.onFsUnwatchFile((watchId) => {
+  const entry = fileWatches.get(watchId)
+  if (entry) {
+    entry.unsubscribe()
+    fileWatches.delete(watchId)
+  }
 })
 
 // Exec IPC Handlers
@@ -668,7 +737,7 @@ server.onLocalConnect(async (windowUuid) => {
   const watch = client.watchSession(connectionId, (updatedSession) => {
     console.log('[main] session sync received for connection', connectionId, {
       sessionId: updatedSession.id,
-      workspaces: updatedSession.workspaces.map(ws => ({ path: ws.path, metadata: ws.metadata })),
+      workspaceRefs: updatedSession.workspaceRefs,
     })
     server.sessionSync(connectionId, updatedSession)
   })
@@ -697,14 +766,14 @@ server.onSshConnect(async (config, options) => {
       console.log(`[main:ssh] Starting session watch for remote daemon`)
       const watchUuid = randomUUID()
       const remoteWatch = remoteClient.watchSession(watchUuid, (updatedSession) => {
-        console.log(`[main:ssh] Session sync update received for session=${updatedSession.id}, workspaces=${String(updatedSession.workspaces.length)}`)
+        console.log(`[main:ssh] Session sync update received for session=${updatedSession.id}, workspaceRefs=${String(updatedSession.workspaceRefs.length)}`)
         server.sessionSync(config.id, updatedSession)
       })
       // Register for reconnect re-establishment
       registerSessionWatch(config.id, watchUuid, remoteWatch.unsubscribe)
 
       const session = await remoteWatch.initial
-      console.log(`[main:ssh] Initial session loaded: id=${session.id}, workspaces=${String(session.workspaces.length)}`)
+      console.log(`[main:ssh] Initial session loaded: id=${session.id}, workspaceRefs=${String(session.workspaceRefs.length)}`)
       await createSessionClient(config.id, remoteClient.socketPath)
 
       // Auto-start saved port forwards
@@ -1009,6 +1078,7 @@ void app.whenReady().then(async () => {
         if (!connectionManager) throw new Error('ConnectionManager not initialized')
         const client = connectionManager.getClient(info.id)
         reestablishSessionWatches(info.id, client)
+        reestablishFileWatches(info.id, client)
       } catch (error) {
         console.error(`[main] failed to re-establish session watches after reconnect:`, error)
       }

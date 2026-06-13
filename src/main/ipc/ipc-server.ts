@@ -17,7 +17,9 @@ const CHANNELS = {
   fsReadDirectory: 'fs:readDirectory',
   fsReadFile: 'fs:readFile',
   fsWriteFile: 'fs:writeFile',
+  fsDeleteFile: 'fs:deleteFile',
   fsSearchFiles: 'fs:searchFiles',
+  fsWatchFile: 'fs:watchFile',
   ptyCreateSession: 'pty:createSession',
   sessionUpdate: 'session:update',
   sessionLock: 'session:lock',
@@ -65,10 +67,14 @@ const CHANNELS = {
   execKill: 'exec:kill',
   execEvent: 'exec:event',
 
+  // File watch events
+  fsWatchFileEvent: 'fs:watchFileEvent',
+
   // Send channels
   ptyWrite: 'pty:write',
   ptyResize: 'pty:resize',
   ptyKill: 'pty:kill',
+  fsUnwatchFile: 'fs:unwatchFile',
   appCloseConfirmed: 'app:close-confirmed',
   appCloseCancelled: 'app:close-cancelled',
   // Event channels
@@ -210,6 +216,16 @@ export class IpcServer {
     )
   }
 
+  onFsDeleteFile(
+    handler: (
+      ...args: IpcRequests['fsDeleteFile']['params']
+    ) => IpcRequests['fsDeleteFile']['result'] | Promise<IpcRequests['fsDeleteFile']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.fsDeleteFile, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['fsDeleteFile']['params']))
+    )
+  }
+
   onFsSearchFiles(
     handler: (
       ...args: IpcRequests['fsSearchFiles']['params']
@@ -217,6 +233,25 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.fsSearchFiles, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['fsSearchFiles']['params']))
+    )
+  }
+
+  // File watch: handler gets the electron event so it can scope events to the
+  // subscribing window (same pattern as exec — never broadcast watch events).
+  onFsWatchFile(
+    handler: (
+      event: IpcMainInvokeEvent,
+      ...args: IpcRequests['fsWatchFile']['params']
+    ) => IpcRequests['fsWatchFile']['result'] | Promise<IpcRequests['fsWatchFile']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.fsWatchFile, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(event, ...(args as IpcRequests['fsWatchFile']['params']))
+    )
+  }
+
+  onFsUnwatchFile(handler: (...args: IpcSends['fsUnwatchFile']['params']) => void): void {
+    ipcMain.on(CHANNELS.fsUnwatchFile, (_event: IpcMainEvent, ...args: unknown[]) =>
+      { handler(...(args as IpcSends['fsUnwatchFile']['params'])); }
     )
   }
 

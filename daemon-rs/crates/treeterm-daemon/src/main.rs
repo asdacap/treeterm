@@ -1,7 +1,9 @@
 pub mod connection_id;
 mod exec_manager;
+pub mod file_watcher;
 pub mod filesystem;
 mod grpc_server;
+pub mod paths;
 pub mod pty_manager;
 pub mod session_store;
 mod socket_path;
@@ -9,7 +11,6 @@ mod socket_path;
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
 use std::process;
 
 use tokio::net::UnixListener;
@@ -17,12 +18,7 @@ use tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::Server;
 use treeterm_proto::treeterm::tree_term_daemon_server::TreeTermDaemonServer;
 
-fn data_dir() -> PathBuf {
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/tmp"))
-        .join(".treeterm")
-}
+use paths::data_dir;
 
 fn check_already_running(data_dir: &std::path::Path) -> bool {
     let pid_path = data_dir.join("daemon.pid");
@@ -63,6 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let data = data_dir();
     fs::create_dir_all(&data)?;
+    fs::create_dir_all(paths::workspaces_dir())?;
 
     if check_already_running(&data) {
         tracing::info!("daemon already running, exiting");
@@ -87,7 +84,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let session_store = session_store::SessionStore::new();
     session_store.start_heartbeat();
 
-    let svc = grpc_server::DaemonService::new(session_store.clone());
+    let file_watcher = file_watcher::FileWatcher::new(std::time::Duration::from_secs(2));
+
+    let svc = grpc_server::DaemonService::new(session_store.clone(), file_watcher);
 
     let ss = session_store.clone();
     let shutdown = async move {

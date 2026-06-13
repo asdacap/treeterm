@@ -9,6 +9,7 @@ use treeterm_proto::treeterm::tree_term_daemon_server::TreeTermDaemon;
 
 use crate::connection_id::ConnectionId;
 use crate::exec_manager;
+use crate::file_watcher::FileWatcher;
 use crate::filesystem;
 use crate::pty_manager::BufferEvent;
 use crate::session_store::SessionStore;
@@ -22,11 +23,12 @@ fn connection_id<T>(req: &Request<T>) -> Result<String, Status> {
 
 pub struct DaemonService {
     session_store: SessionStore,
+    file_watcher: FileWatcher,
 }
 
 impl DaemonService {
-    pub fn new(session_store: SessionStore) -> Self {
-        Self { session_store }
+    pub fn new(session_store: SessionStore, file_watcher: FileWatcher) -> Self {
+        Self { session_store, file_watcher }
     }
 }
 
@@ -235,7 +237,7 @@ impl TreeTermDaemon for DaemonService {
 
         let (session, accepted) = self
             .session_store
-            .update_session(r.workspaces, r.expected_version, &sender_id, &conn_id)
+            .update_session(r.workspace_refs, r.expected_version, &sender_id, &conn_id)
             .await;
 
         // Only broadcast to other watchers if the update was accepted
@@ -431,7 +433,32 @@ impl TreeTermDaemon for DaemonService {
             }
         }
 
-        let result = filesystem::write_file_streaming(Path::new(&workspace_path), &file_path, chunks, expected_sha256).await;
+        let result = filesystem::write_file_streaming(Path::new(&workspace_path), &file_path, &chunks, expected_sha256).await;
+
+        // Intercept: tell watchers about our own write directly. This is what makes
+        // same-daemon updates instant on NFS, where inotify never fires.
+        if result.success {
+            self.file_watcher
+                .notify_written(&filesystem::resolve_target(Path::new(&workspace_path), &file_path), &chunks)
+                .await;
+        }
+
+        Ok(Response::new(result))
+    }
+
+    async fn delete_file(
+        &self,
+        req: Request<DeleteFileRequest>,
+    ) -> Result<Response<DeleteFileResponse>, Status> {
+        let r = req.into_inner();
+        let result = filesystem::delete_file(Path::new(&r.workspace_path), &r.file_path).await;
+
+        if result.success {
+            self.file_watcher
+                .notify_deleted(&filesystem::resolve_target(Path::new(&r.workspace_path), &r.file_path))
+                .await;
+        }
+
         Ok(Response::new(result))
     }
 
@@ -442,5 +469,45 @@ impl TreeTermDaemon for DaemonService {
         let r = req.into_inner();
         let result = filesystem::search_files(Path::new(&r.workspace_path), &r.query).await;
         Ok(Response::new(result))
+    }
+
+    // ---- File Watching ----
+
+    type WatchFileStream = ReceiverStream<Result<FileWatchEvent, Status>>;
+
+    async fn watch_file(
+        &self,
+        req: Request<WatchFileRequest>,
+    ) -> Result<Response<Self::WatchFileStream>, Status> {
+        let r = req.into_inner();
+        if r.watcher_id.is_empty() {
+            return Err(Status::invalid_argument("watcherId is required"));
+        }
+
+        let (tx, rx) = mpsc::channel(64);
+        self.file_watcher
+            .subscribe_content(Path::new(&r.workspace_path), &r.file_path, r.watcher_id, tx)
+            .await?;
+
+        Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
+    type WatchFileSignalStream = ReceiverStream<Result<FileSignalEvent, Status>>;
+
+    async fn watch_file_signal(
+        &self,
+        req: Request<WatchFileRequest>,
+    ) -> Result<Response<Self::WatchFileSignalStream>, Status> {
+        let r = req.into_inner();
+        if r.watcher_id.is_empty() {
+            return Err(Status::invalid_argument("watcherId is required"));
+        }
+
+        let (tx, rx) = mpsc::channel(64);
+        self.file_watcher
+            .subscribe_signal(Path::new(&r.workspace_path), &r.file_path, r.watcher_id, tx)
+            .await?;
+
+        Ok(Response::new(ReceiverStream::new(rx)))
     }
 }

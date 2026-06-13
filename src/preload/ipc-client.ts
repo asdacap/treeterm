@@ -17,7 +17,11 @@ const CHANNELS = {
   fsReadDirectory: 'fs:readDirectory',
   fsReadFile: 'fs:readFile',
   fsWriteFile: 'fs:writeFile',
+  fsDeleteFile: 'fs:deleteFile',
   fsSearchFiles: 'fs:searchFiles',
+  fsWatchFile: 'fs:watchFile',
+  fsUnwatchFile: 'fs:unwatchFile',
+  fsWatchFileEvent: 'fs:watchFileEvent',
   ptyCreateSession: 'pty:createSession',
   sessionUpdate: 'session:update',
   sessionLock: 'session:lock',
@@ -129,8 +133,16 @@ export class IpcClient {
     return ipcRenderer.invoke(CHANNELS.fsWriteFile, ...args)
   }
 
+  fsDeleteFile(...args: IpcRequests['fsDeleteFile']['params']): Promise<IpcRequests['fsDeleteFile']['result']> {
+    return ipcRenderer.invoke(CHANNELS.fsDeleteFile, ...args)
+  }
+
   fsSearchFiles(...args: IpcRequests['fsSearchFiles']['params']): Promise<IpcRequests['fsSearchFiles']['result']> {
     return ipcRenderer.invoke(CHANNELS.fsSearchFiles, ...args)
+  }
+
+  fsWatchFile(...args: IpcRequests['fsWatchFile']['params']): Promise<IpcRequests['fsWatchFile']['result']> {
+    return ipcRenderer.invoke(CHANNELS.fsWatchFile, ...args)
   }
 
   // PTY create session (no stream)
@@ -339,6 +351,10 @@ export class IpcClient {
     ipcRenderer.send(CHANNELS.execKill, ...args)
   }
 
+  fsUnwatchFile(...args: IpcSends['fsUnwatchFile']['params']): void {
+    ipcRenderer.send(CHANNELS.fsUnwatchFile, ...args)
+  }
+
   // ==================== Event Listeners (on pattern, returns unsubscribe function) ====================
 
   onPtyEvent(callback: (...args: IpcEvents['ptyEvent']['params']) => void): () => void {
@@ -455,5 +471,12 @@ export class IpcClient {
       { callback(...(args as IpcEvents['execEvent']['params'])); }
     ipcRenderer.on(CHANNELS.execEvent, handler)
     return () => ipcRenderer.removeListener(CHANNELS.execEvent, handler)
+  }
+
+  onFsWatchFileEvent(callback: (...args: IpcEvents['fsWatchFileEvent']['params']) => void): () => void {
+    const handler = (_event: IpcRendererEvent, ...args: unknown[]) =>
+      { callback(...(args as IpcEvents['fsWatchFileEvent']['params'])); }
+    ipcRenderer.on(CHANNELS.fsWatchFileEvent, handler)
+    return () => ipcRenderer.removeListener(CHANNELS.fsWatchFileEvent, handler)
   }
 }

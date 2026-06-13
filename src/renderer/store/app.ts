@@ -294,11 +294,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
         if (!get().sessionNamesStore.getState().getName(localSessionId)) {
           get().sessionNamesStore.getState().setName(localSessionId, 'LOCAL')
         }
-        if (session.workspaces.length > 0) {
+        if (session.workspaceRefs.length > 0) {
           void sessionStore.getState().handleRestore(session)
           // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length > 0 checked above
-          const firstWs = session.workspaces[0]!
-          useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: localSessionId })
+          const firstRef = session.workspaceRefs[0]!
+          useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstRef.id, sessionId: localSessionId })
         }
       } catch (error) {
         console.error('[App] Failed to establish local connection:', error)
@@ -306,7 +306,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     }
 
     const unsubSync = sessionApi.onSync((connectionId, session) => {
-      console.log(`[App] Received session:sync from connection ${connectionId} with ${String(session.workspaces.length)} workspaces for session ${session.id}`)
+      console.log(`[App] Received session:sync from connection ${connectionId} with ${String(session.workspaceRefs.length)} refs for session ${session.id}`)
       const found = findSessionByConnectionId(get, connectionId)
       if (!found) return
       void found.entry.store.getState().handleExternalUpdate(session)
@@ -329,11 +329,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
       if (oldName) {
         get().sessionNamesStore.getState().setName(reconnSessionId, oldName)
       }
-      if (session.workspaces.length > 0) {
+      if (session.workspaceRefs.length > 0) {
         void newStore.getState().handleRestore(session)
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length > 0 checked above
-        const firstWs = session.workspaces[0]!
-        useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: reconnSessionId })
+        const firstRef = session.workspaceRefs[0]!
+        useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstRef.id, sessionId: reconnSessionId })
       }
     })
 
@@ -411,7 +411,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   addRemoteSession: async (session: Session, connection: ConnectionInfo) => {
-    console.log(`[renderer:app] addRemoteSession called: session=${session.id}, connection=${connection.id}, status=${connection.status}, workspaces=${String(session.workspaces.length)}`)
+    console.log(`[renderer:app] addRemoteSession called: session=${session.id}, connection=${connection.id}, status=${connection.status}, refs=${String(session.workspaceRefs.length)}`)
     // Find existing store (created eagerly in startRemoteConnect) by connection ID
     const existing = findSessionByConnectionId(get, connection.id)
     let store: StoreApi<SessionState>
@@ -433,12 +433,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
       get().sessionNamesStore.getState().setName(storeKey, label)
     }
     console.log(`[renderer:app] Session store created/retrieved for session=${session.id}, storeKey=${storeKey}`)
-    if (session.workspaces.length > 0) {
-      console.log(`[renderer:app] Restoring ${String(session.workspaces.length)} workspaces for session=${session.id}`)
+    if (session.workspaceRefs.length > 0) {
+      console.log(`[renderer:app] Restoring ${String(session.workspaceRefs.length)} refs for session=${session.id}`)
       await store.getState().handleRestore(session)
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length > 0 checked above
-      const firstWs = session.workspaces[0]!
-      useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstWs.id, sessionId: storeKey })
+      const firstRef = session.workspaceRefs[0]!
+      useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstRef.id, sessionId: storeKey })
     } else if (connection.target.type === ConnectionTargetType.Remote) {
       const defaultPath = `/home/${connection.target.config.user}`
       console.log(`[renderer:app] No workspaces for session=${session.id}, creating default workspace at ${defaultPath}`)

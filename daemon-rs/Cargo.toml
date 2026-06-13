@@ -24,6 +24,7 @@ tower = "0.5"
 uuid = { version = "1", features = ["v4"] }
 vt100 = "0.15"
 sha2 = "0.10"
+notify = "8"
 
 [profile.release]
 lto = true

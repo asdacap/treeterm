@@ -11,8 +11,8 @@ import type {
   AppState,
   Workspace,
   Session,
+  WorkspaceRef,
   TTYSessionInfo,
-  WorkspaceInput,
   TerminalInstance,
   AiHarnessInstance,
   CustomRunnerInstance,
@@ -28,16 +28,16 @@ import type {
   ReasoningEffort
 } from '../../shared/types'
 export { FileChangeStatus }
-import type { PtyEvent, ExecEvent, IpcResult, FsWriteFileResult } from '../../shared/ipc-types'
-export type { PtyEvent, ExecEvent, IpcResult, FsWriteFileResult }
+import type { PtyEvent, ExecEvent, IpcResult, FsWriteFileResult, FileWatchEvent } from '../../shared/ipc-types'
+export type { PtyEvent, ExecEvent, IpcResult, FsWriteFileResult, FileWatchEvent }
 
 export type {
   SandboxConfig,
   AppState,
   Workspace,
   Session,
+  WorkspaceRef,
   TTYSessionInfo,
-  WorkspaceInput,
   TerminalInstance,
   AiHarnessInstance,
   CustomRunnerInstance,
@@ -238,7 +238,11 @@ export interface FilesystemApi {
   readDirectory: (workspacePath: string, dirPath: string) => Promise<IpcResult<{ contents: DirectoryContents }>>
   readFile: (workspacePath: string, filePath: string) => Promise<IpcResult<{ file: FileContents }>>
   writeFile: (workspacePath: string, filePath: string, content: string, expectedSha256?: string) => Promise<FsWriteFileResult>
+  deleteFile: (workspacePath: string, filePath: string) => Promise<IpcResult>
   searchFiles: (workspacePath: string, query: string) => Promise<IpcResult<{ entries: FileEntry[] }>>
+  /** Subscribe to a file's content. The first event is the current state; the
+   *  returned `unsubscribe` cancels the daemon stream. */
+  watchFile: (workspacePath: string, filePath: string, onEvent: (event: FileWatchEvent) => void) => { unsubscribe: () => void }
 }
 
 /** Workspace-scoped FilesystemApi with path pre-bound */
@@ -579,7 +583,7 @@ export interface SSHApi {
 }
 
 export interface SessionApi {
-  update: (sessionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number) => Promise<IpcResult<{ session: Session }>>
+  update: (sessionId: string, workspaceRefs: WorkspaceRef[], senderUuid?: string, expectedVersion?: number) => Promise<IpcResult<{ session: Session }>>
   lock: (sessionId: string, ttlMs?: number) => Promise<IpcResult<{ acquired: boolean; session: Session }>>
   unlock: (sessionId: string) => Promise<IpcResult<{ session: Session }>>
   forceUnlock: (sessionId: string) => Promise<IpcResult<{ session: Session }>>

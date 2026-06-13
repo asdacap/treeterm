@@ -275,7 +275,7 @@ describe('useAppStore', () => {
     it('restores root + child workspaces with parent-child links', async () => {
       const session: any = {
         id: 'session-1',
-        workspaces: [
+        workspaceRefs: [
           {
             id: 'root-ws',
             path: '/projects/root',
@@ -308,7 +308,7 @@ describe('useAppStore', () => {
     it('child workspace restored even when parent not in state', async () => {
       const session: any = {
         id: 'session-2',
-        workspaces: [
+        workspaceRefs: [
           {
             id: 'orphan-child',
             path: '/projects/orphan',
@@ -332,7 +332,7 @@ describe('useAppStore', () => {
     it('PTY IDs preserved as-is without sessionMap validation', async () => {
       const session: any = {
         id: 'session-3',
-        workspaces: [
+        workspaceRefs: [
           {
             id: 'ws-1',
             path: '/projects/test',
@@ -360,7 +360,7 @@ describe('useAppStore', () => {
     it('child without parentId still restored', async () => {
       const session: any = {
         id: 'session-4',
-        workspaces: [
+        workspaceRefs: [
           {
             id: 'child-no-parent',
             path: '/projects/no-parent',
@@ -384,7 +384,7 @@ describe('useAppStore', () => {
     it('syncToDaemon is not called after restore', async () => {
       const session: any = {
         id: 'session-5',
-        workspaces: [
+        workspaceRefs: [
           {
             id: 'ws-1',
             path: '/projects/test',
@@ -503,7 +503,7 @@ describe('useAppStore', () => {
 
       const session: any = {
         id: 'session-ready',
-        workspaces: [{
+        workspaceRefs: [{
           id: 'ws-1', path: '/test', name: 'test',
            appStates: {}, activeTabId: null
         }],
@@ -523,7 +523,7 @@ describe('useAppStore', () => {
       const localConn: ConnectionInfo = { id: 'local', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected }
       vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({
         info: localConn,
-        session: { id: 'empty-session', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }
+        session: { id: 'empty-session', workspaceRefs: [], workspaceDataDir: "", createdAt: 0, lastActivity: 0, version: 1 }
       })
       const cleanup = await useAppStore.getState().initialize(mockDeps)
 
@@ -637,7 +637,7 @@ describe('useAppStore', () => {
     it('syncs new workspaces from daemon for known session', () => {
       const session: any = {
         id: 'sync-session',
-        workspaces: [{
+        workspaceRefs: [{
           id: 'ws-new', path: '/new', name: 'new',
            appStates: {}, activeTabId: null
         }]
@@ -665,7 +665,7 @@ describe('useAppStore', () => {
     it('delegates external update handling to session store', () => {
       const session: any = {
         id: 'sync-session-2',
-        workspaces: [] // No workspaces — removal handled inside session store
+        workspaceRefs: [] // No workspaces — removal handled inside session store
       }
 
       // Pre-populate session store so onSync finds it by connection ID
@@ -690,7 +690,7 @@ describe('useAppStore', () => {
     it('ignores onSync for unknown connection', () => {
       const session: any = {
         id: 'unknown-session',
-        workspaces: [{ id: 'ws-1', path: '/test', name: 'test' }]
+        workspaceRefs: [{ id: 'ws-1', path: '/test', name: 'test' }]
       }
 
       // Trigger onSync with a connectionId that doesn't match any session store
@@ -702,7 +702,7 @@ describe('useAppStore', () => {
     })
 
     it('routes onSync to correct session by connection ID', () => {
-      const session: any = { id: 'sync-session-3', workspaces: [] }
+      const session: any = { id: 'sync-session-3', workspaceRefs: [] }
 
       // Pre-populate session store with remote connection
       const remoteMockUpdate = vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined)
@@ -893,7 +893,7 @@ describe('useAppStore', () => {
         const localConn: ConnectionInfo = { id: 'local', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected }
         vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({
           info: localConn,
-          session: { id: 'local-session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }
+          session: { id: 'local-session-1', workspaceRefs: [], workspaceDataDir: "", createdAt: 0, lastActivity: 0, version: 1 }
         })
         const cleanup = await useAppStore.getState().initialize(mockDeps)
         // Session name is keyed by the store key (random ID), find it
@@ -906,7 +906,7 @@ describe('useAppStore', () => {
         const localConn: ConnectionInfo = { id: 'local', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected }
         vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({
           info: localConn,
-          session: { id: 'local-session-2', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }
+          session: { id: 'local-session-2', workspaceRefs: [], workspaceDataDir: "", createdAt: 0, lastActivity: 0, version: 1 }
         })
         const cleanup = await useAppStore.getState().initialize(mockDeps)
         const storeKey = Array.from(useAppStore.getState().sessionStores.keys())[0]!
@@ -937,7 +937,7 @@ describe('useAppStore', () => {
           target: { type: ConnectionTargetType.Remote, config: { id: 'conn-1', host: 'myserver.com', user: 'alice', port: 22, portForwards: [] } },
           status: ConnectionStatus.Connected as const
         }
-        const session = { id: 'ssh-session-1', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }
+        const session = { id: 'ssh-session-1', workspaceRefs: [], workspaceDataDir: "", createdAt: 0, lastActivity: 0, version: 1 }
         await useAppStore.getState().addRemoteSession(session, connection)
         const storeKey = findStoreKeyByConnectionId('conn-1')!
         expect(useSessionNamesStore.getState().getName(storeKey)).toBe('alice@myserver.com')
@@ -949,7 +949,7 @@ describe('useAppStore', () => {
           target: { type: ConnectionTargetType.Remote, config: { id: 'conn-2', host: 'myserver.com', user: 'alice', port: 22, label: 'Production', portForwards: [] } },
           status: ConnectionStatus.Connected as const
         }
-        const session = { id: 'ssh-session-2', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }
+        const session = { id: 'ssh-session-2', workspaceRefs: [], workspaceDataDir: "", createdAt: 0, lastActivity: 0, version: 1 }
         await useAppStore.getState().addRemoteSession(session, connection)
         const storeKey = findStoreKeyByConnectionId('conn-2')!
         expect(useSessionNamesStore.getState().getName(storeKey)).toBe('Production')
@@ -969,7 +969,7 @@ describe('useAppStore', () => {
           target: { type: ConnectionTargetType.Remote, config: { id: 'conn-3', host: 'myserver.com', user: 'alice', port: 22, portForwards: [] } },
           status: ConnectionStatus.Connected as const
         }
-        const session = { id: 'ssh-session-3', workspaces: [], createdAt: 0, lastActivity: 0, version: 1 }
+        const session = { id: 'ssh-session-3', workspaceRefs: [], workspaceDataDir: "", createdAt: 0, lastActivity: 0, version: 1 }
         await useAppStore.getState().addRemoteSession(session, connection)
         expect(useSessionNamesStore.getState().getName(storeKey)).toBe('My Server')
       })

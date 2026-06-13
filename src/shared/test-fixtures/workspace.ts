@@ -1,4 +1,4 @@
-import type { Workspace, Session, SessionLock } from '../types'
+import type { Workspace, Session, SessionLock, WorkspaceRef } from '../types'
 import { WorkspaceStatus } from '../types'
 
 export function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
@@ -17,10 +17,19 @@ export function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
   }
 }
 
+export function makeWorkspaceRef(overrides: Partial<WorkspaceRef> = {}): WorkspaceRef {
+  return {
+    id: 'ws-1',
+    path: '/test',
+    ...overrides,
+  }
+}
+
 export function makeSession(overrides: Partial<Session> = {}): Session {
   return {
     id: 'session-1',
-    workspaces: [],
+    workspaceRefs: [],
+    workspaceDataDir: '/test/.treeterm/workspaces',
     createdAt: 0,
     lastActivity: 0,
     version: 1,

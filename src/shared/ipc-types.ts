@@ -19,12 +19,28 @@ import type {
   Settings,
   Session,
   TTYSessionInfo,
-  WorkspaceInput,
+  WorkspaceRef,
   SSHConnectionConfig,
   ConnectionInfo,
   PortForwardConfig,
   PortForwardInfo
 } from './types'
+
+export enum FileWatchEventType {
+  Present = 'present',
+  Absent = 'absent',
+  Error = 'error',
+}
+
+/**
+ * A file-watch event (mirrors the daemon's content-streaming WatchFile RPC).
+ * The first event on a watch is always the current state. `Error` carries a
+ * stream failure so the renderer can surface it and re-subscribe.
+ */
+export type FileWatchEvent =
+  | { type: FileWatchEventType.Present; content: string; sha256: string }
+  | { type: FileWatchEventType.Absent }
+  | { type: FileWatchEventType.Error; message: string }
 
 export enum PtyEventType {
   Data = 'data',
@@ -102,14 +118,24 @@ export interface IpcRequests {
     params: [connectionId: string, workspacePath: string, filePath: string, content: string, expectedSha256?: string]
     result: FsWriteFileResult
   }
+  fsDeleteFile: {
+    params: [connectionId: string, workspacePath: string, filePath: string]
+    result: IpcResult
+  }
   fsSearchFiles: {
     params: [connectionId: string, workspacePath: string, query: string]
     result: IpcResult<{ entries: FileEntry[] }>
   }
+  // File watching. `watchId` is renderer-generated and identifies the subscription;
+  // events arrive on the `fsWatchFileEvent` channel scoped to that id.
+  fsWatchFile: {
+    params: [connectionId: string, watchId: string, workspacePath: string, filePath: string]
+    result: IpcResult
+  }
 
   // Session operations (keyed by connectionId — the renderer passes connection.id to identify which daemon session)
   sessionUpdate: {
-    params: [connectionId: string, workspaces: WorkspaceInput[], senderUuid?: string, expectedVersion?: number]
+    params: [connectionId: string, workspaceRefs: WorkspaceRef[], senderUuid?: string, expectedVersion?: number]
     result: IpcResult<{ session: Session }>
   }
   sessionLock: {
@@ -315,6 +341,9 @@ export interface IpcSends {
   execKill: {
     params: [execId: string]
   }
+  fsUnwatchFile: {
+    params: [watchId: string]
+  }
 }
 
 // === Event Types (server emits, client listens) ===
@@ -370,6 +399,9 @@ export interface IpcEvents {
   }
   execEvent: {
     params: [execId: string, event: ExecEvent]
+  }
+  fsWatchFileEvent: {
+    params: [watchId: string, event: FileWatchEvent]
   }
 }
 
