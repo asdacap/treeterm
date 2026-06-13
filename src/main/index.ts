@@ -449,6 +449,18 @@ server.onDialogSelectFolder(async () => {
   return selectedPath
 })
 
+server.onDialogSelectFile(async () => {
+  const focusedWindow = BrowserWindow.getFocusedWindow()
+  if (!focusedWindow) return null
+  const result = await dialog.showOpenDialog(focusedWindow, {
+    properties: ['openFile']
+  })
+  if (result.canceled || result.filePaths.length === 0) {
+    return null
+  }
+  return result.filePaths[0] ?? null
+})
+
 server.onDialogGetRecentDirectories(() => {
   const settings = loadSettings()
   return settings.recentDirectories
@@ -847,6 +859,19 @@ server.onSshUnwatchConnectionStatus(async (connectionId) => {
 
 // Port forward IPC handlers
 const pfStatusWatchUnsubs = new Map<string, () => void>()
+
+server.onSshUploadFile(async (connectionId, localPath, remotePath) => {
+  const tunnel = connectionManager?.getSSHTunnel(connectionId)
+  if (!tunnel) {
+    return { success: false, error: 'Connection is not a connected remote SSH session' }
+  }
+  try {
+    await tunnel.uploadFile(localPath, remotePath)
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) }
+  }
+})
 
 server.onSshAddPortForward((config) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')

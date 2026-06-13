@@ -31,6 +31,7 @@ window.electron.app.onReady(() => {
     appApi: e.app,
     daemon: e.daemon,
     selectFolder: e.selectFolder,
+    selectFile: e.selectFile,
     getWindowUuid: e.getWindowUuid,
     getInitialWorkspace: e.getInitialWorkspace,
     openExternal: (url: string) => { window.open(url, '_blank') },

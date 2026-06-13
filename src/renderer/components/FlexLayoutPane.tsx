@@ -8,10 +8,11 @@ import type { WorkspaceStore } from '../store/createWorkspaceStore'
 import { useAppStore } from '../store/app'
 import { createDefaultLayoutModel, tabToFlexNode } from '../utils/layoutModel'
 import { TabActivityIndicator } from './TabActivityIndicator'
-import { getTabs } from '../types'
+import { getTabs, isAppAvailableForConnection } from '../types'
 
 interface FlexLayoutPaneProps {
   workspace: WorkspaceStore
+  isRemote: boolean
   onNewTab: (applicationId: string) => void
 }
 
@@ -35,14 +36,16 @@ function buildModel(ws: WorkspaceStore, getApplication: (id: string) => ReturnTy
   return Model.fromJson(json)
 }
 
-export default function FlexLayoutPane({ workspace: ws, onNewTab }: FlexLayoutPaneProps) {
+export default function FlexLayoutPane({ workspace: ws, isRemote, onNewTab }: FlexLayoutPaneProps) {
   const workspace = useStore(ws, s => s.workspace)
   const removeTab = useStore(ws, s => s.removeTab)
   const setActiveTab = useStore(ws, s => s.setActiveTab)
   const updateMetadata = useStore(ws, s => s.updateMetadata)
   const applications = useAppStore((s) => s.applications)
   const getApplication = useCallback((id: string) => applications.get(id), [applications])
-  const menuApplications = Array.from(applications.values()).filter((app) => app.showInNewTabMenu)
+  const menuApplications = Array.from(applications.values()).filter((app) =>
+    app.showInNewTabMenu && isAppAvailableForConnection(app, isRemote)
+  )
 
   const activeTabId = workspace.activeTabId ?? null
 

@@ -16,7 +16,8 @@ import KeybindingOverlay from './KeybindingOverlay'
 import { ErrorBoundary } from './ErrorBoundary'
 import WorkspaceErrorFallback from './WorkspaceErrorFallback'
 import type { ReviewState, Platform, WorkspaceStore } from '../types'
-import { getTabs } from '../types'
+import { getTabs, isAppAvailableForConnection } from '../types'
+import { ConnectionTargetType } from '../../shared/types'
 import { PromptDescriptionButton } from './PromptDescriptionButton'
 import RunActionDropdown from './RunActionDropdown'
 import ContextMenu from './ContextMenu'
@@ -53,7 +54,10 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const enterWorkspaceFocus = useKeybindingStore(s => s.enterWorkspaceFocus)
   const applications = useAppStore((s) => s.applications)
   const clipboard = useAppStore((s) => s.clipboard)
-  const menuApplications = Array.from(applications.values()).filter((app) => app.showInNewTabMenu)
+  const isRemote = useStore(sessionStore, s => s.connection.target.type === ConnectionTargetType.Remote)
+  const menuApplications = Array.from(applications.values()).filter((app) =>
+    app.showInNewTabMenu && isAppAvailableForConnection(app, isRemote)
+  )
   const openContextMenu = useContextMenuStore((s) => s.open)
   const closeContextMenu = useContextMenuStore((s) => s.close)
   const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
@@ -508,6 +512,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
               <div key={wsId} style={{ display: isActive ? 'contents' : 'none', height: '100%', width: '100%' }}>
                 <FlexLayoutPane
                   workspace={entry.store}
+                  isRemote={isRemote}
                   onNewTab={(applicationId: string) => {
                     if (applicationId === 'review') {
                       entry.store.getState().addTab('review', {

@@ -22,6 +22,7 @@ import { chatApplication } from '../../applications/chat/renderer'
 import { systemPromptDebuggerApplication } from '../../applications/terminalAnalyzerDebugger/renderer'
 import { analyzerHistoryApplication } from '../../applications/analyzerHistory/renderer'
 import { ttyListApplication } from '../../applications/ttyList/renderer'
+import { sshUploadApplication } from '../../applications/sshUpload/renderer'
 import { workspaceSettingsApplication } from '../../applications/workspaceSettings/renderer'
 import { githubApplication } from '../../applications/github/renderer'
 import type {
@@ -52,6 +53,7 @@ export interface AppDeps {
   ssh: SSHApi
   clipboard: ClipboardApi
   selectFolder: () => Promise<string | null>
+  selectFile: () => Promise<string | null>
   getWindowUuid: () => Promise<string>
   getInitialWorkspace: () => Promise<string | null>
   openExternal: (url: string) => void
@@ -114,6 +116,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   ssh: UNINITIALIZED,
   clipboard: UNINITIALIZED,
   selectFolder: UNINITIALIZED,
+  selectFile: UNINITIALIZED,
   getWindowUuid: UNINITIALIZED,
   getInitialWorkspace: UNINITIALIZED,
   openExternal: UNINITIALIZED,
@@ -187,6 +190,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     get().registerApplication(workspaceSettingsApplication)
     get().registerApplication(githubApplication)
     get().registerApplication(ttyListApplication)
+    get().registerApplication(sshUploadApplication)
   },
 
   registerTerminalVariants: (instances: TerminalInstance[]) => {

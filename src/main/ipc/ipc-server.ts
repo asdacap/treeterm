@@ -25,6 +25,7 @@ const CHANNELS = {
   sessionForceUnlock: 'session:forceUnlock',
   daemonShutdown: 'daemon:shutdown',
   dialogSelectFolder: 'dialog:selectFolder',
+  dialogSelectFile: 'dialog:selectFile',
   dialogGetRecentDirectories: 'dialog:getRecentDirectories',
   sandboxIsAvailable: 'sandbox:isAvailable',
   appGetInitialWorkspace: 'app:getInitialWorkspace',
@@ -53,6 +54,7 @@ const CHANNELS = {
   sshListPortForwards: 'ssh:listPortForwards',
   sshWatchPortForwardOutput: 'ssh:watchPortForwardOutput',
   sshUnwatchPortForwardOutput: 'ssh:unwatchPortForwardOutput',
+  sshUploadFile: 'ssh:uploadFile',
 
   // Clipboard operations
   clipboardReadText: 'clipboard:readText',
@@ -288,6 +290,16 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.dialogSelectFolder, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['dialogSelectFolder']['params']))
+    )
+  }
+
+  onDialogSelectFile(
+    handler: (
+      ...args: IpcRequests['dialogSelectFile']['params']
+    ) => IpcRequests['dialogSelectFile']['result'] | Promise<IpcRequests['dialogSelectFile']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.dialogSelectFile, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['dialogSelectFile']['params']))
     )
   }
 
@@ -565,6 +577,16 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.sshUnwatchPortForwardOutput, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['sshUnwatchPortForwardOutput']['params']))
+    )
+  }
+
+  onSshUploadFile(
+    handler: (
+      ...args: IpcRequests['sshUploadFile']['params']
+    ) => IpcRequests['sshUploadFile']['result'] | Promise<IpcRequests['sshUploadFile']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshUploadFile, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshUploadFile']['params']))
     )
   }
 

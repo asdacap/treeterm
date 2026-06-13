@@ -130,6 +130,10 @@ export interface IpcRequests {
     params: []
     result: string | null
   }
+  dialogSelectFile: {
+    params: []
+    result: string | null
+  }
   dialogGetRecentDirectories: {
     params: []
     result: string[]
@@ -257,6 +261,10 @@ export interface IpcRequests {
   sshUnwatchPortForwardOutput: {
     params: [portForwardId: string]
     result: undefined
+  }
+  sshUploadFile: {
+    params: [connectionId: string, localPath: string, remotePath: string]
+    result: IpcResult
   }
 
   // Clipboard operations

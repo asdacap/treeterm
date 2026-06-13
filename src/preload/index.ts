@@ -1,6 +1,6 @@
 import { contextBridge } from 'electron'
 import type { SandboxConfig, Session, TTYSessionInfo, WorkspaceInput, Settings, SSHConnectionConfig, ConnectionInfo, PortForwardConfig, PortForwardInfo } from '../shared/types'
-import { PtyEventType, ExecEventType, type PtyEvent, type ExecEvent } from '../shared/ipc-types'
+import { PtyEventType, ExecEventType, type PtyEvent, type ExecEvent, type IpcResult } from '../shared/ipc-types'
 import { IpcClient } from './ipc-client'
 import { createEventDispatcher } from './eventDispatcher'
 import type { PreloadApi, Platform } from '../renderer/types'
@@ -191,6 +191,9 @@ const preloadApi: PreloadApi = {
   },
   selectFolder: (): Promise<string | null> => {
     return client.dialogSelectFolder()
+  },
+  selectFile: (): Promise<string | null> => {
+    return client.dialogSelectFile()
   },
   getRecentDirectories: (): Promise<string[]> => {
     return client.dialogGetRecentDirectories()
@@ -476,6 +479,9 @@ const preloadApi: PreloadApi = {
           client.sshUnwatchPortForwardOutput(portForwardId).catch(() => {})
         }
       }
+    },
+    uploadFile: (connectionId: string, localPath: string, remotePath: string): Promise<IpcResult> => {
+      return client.sshUploadFile(connectionId, localPath, remotePath)
     }
   }
 }

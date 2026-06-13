@@ -71,6 +71,7 @@ import { useSessionNamesStore } from './sessionNames'
 import type { SessionState, SessionDeps } from './createSessionStore'
 import { WorkspaceEntryStatus } from './createSessionStore'
 import type { Workspace } from '../types'
+import { AppAvailability } from '../types'
 import { ConnectionStatus, ConnectionTargetType } from '../../shared/types'
 import type { ConnectionInfo } from '../../shared/types'
 import { makeSession } from '../../shared/test-fixtures/workspace'
@@ -820,6 +821,14 @@ describe('useAppStore', () => {
       expect(apps.get('review')).toBeDefined()
       expect(apps.get('editor')).toBeDefined()
       expect(apps.get('comments')).toBeDefined()
+      cleanup()
+    })
+
+    it('registers the ssh-upload app as remote-only', async () => {
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
+      const sshUpload = useAppStore.getState().applications.get('ssh-upload')
+      expect(sshUpload).toBeDefined()
+      expect(sshUpload?.availability).toBe(AppAvailability.RemoteOnly)
       cleanup()
     })
 
