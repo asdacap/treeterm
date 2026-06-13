@@ -76,10 +76,18 @@ function makeWorkspaceStore(
 
 function renderTreeItem(
   store: ReturnType<typeof makeWorkspaceStore>['store'],
-  props: Partial<{ isActive: boolean; onToggleFavourite: (id: string) => void }> = {}
+  props: Partial<{
+    isActive: boolean
+    onToggleFavourite: (id: string) => void
+    onRefreshTitle: (id: string) => void
+    onRefreshBranch: (id: string) => void
+    dataOverride: Partial<Workspace>
+  }> = {}
 ) {
   const onToggleFavourite = props.onToggleFavourite ?? vi.fn()
-  const ws = makeWorkspace({ name: 'my-branch', isGitRepo: false, isWorktree: false })
+  const onRefreshTitle = props.onRefreshTitle ?? vi.fn()
+  const onRefreshBranch = props.onRefreshBranch ?? vi.fn()
+  const ws = makeWorkspace({ name: 'my-branch', isGitRepo: false, isWorktree: false, ...props.dataOverride })
   return render(
     <LoadedWorkspaceTreeItem
       id="ws-1"
@@ -97,6 +105,8 @@ function renderTreeItem(
       onDismiss={vi.fn()}
       onOpenSettings={vi.fn()}
       onToggleFavourite={onToggleFavourite}
+      onRefreshTitle={onRefreshTitle}
+      onRefreshBranch={onRefreshBranch}
       children={[]}
       renderChild={() => null}
       isDragging={false}
@@ -162,6 +172,62 @@ describe('LoadedWorkspaceTreeItem — favourite feature', () => {
 
     const favouriteIcon = container.querySelector('.tree-item-favourite-icon')
     expect(favouriteIcon).toBeNull()
+  })
+})
+
+describe('LoadedWorkspaceTreeItem — refresh title/branch', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    const { useContextMenuStore } = await import('../store/contextMenu')
+    useContextMenuStore.getState().close()
+  })
+
+  const worktreeData = { name: 'my-branch', isWorktree: true, parentId: 'parent-1' }
+
+  it('shows refresh menu items for a worktree with a parent', () => {
+    const { store } = makeWorkspaceStore({})
+    renderTreeItem(store, { dataOverride: worktreeData })
+
+    const row = screen.getByText('My WS').closest('.tree-item') as HTMLElement
+    fireEvent.contextMenu(row)
+
+    expect(screen.getByText('Refresh Title & Description')).toBeDefined()
+    expect(screen.getByText('Refresh Branch Name')).toBeDefined()
+  })
+
+  it('hides refresh menu items for a non-worktree workspace', () => {
+    const { store } = makeWorkspaceStore({})
+    renderTreeItem(store, { dataOverride: { isWorktree: false } })
+
+    const row = screen.getByText('My WS').closest('.tree-item') as HTMLElement
+    fireEvent.contextMenu(row)
+
+    expect(screen.queryByText('Refresh Title & Description')).toBeNull()
+    expect(screen.queryByText('Refresh Branch Name')).toBeNull()
+  })
+
+  it('calls onRefreshTitle when "Refresh Title & Description" is clicked', () => {
+    const onRefreshTitle = vi.fn()
+    const { store } = makeWorkspaceStore({})
+    renderTreeItem(store, { dataOverride: worktreeData, onRefreshTitle })
+
+    const row = screen.getByText('My WS').closest('.tree-item') as HTMLElement
+    fireEvent.contextMenu(row)
+    fireEvent.click(screen.getByText('Refresh Title & Description'))
+
+    expect(onRefreshTitle).toHaveBeenCalledWith('ws-1')
+  })
+
+  it('calls onRefreshBranch when "Refresh Branch Name" is clicked', () => {
+    const onRefreshBranch = vi.fn()
+    const { store } = makeWorkspaceStore({})
+    renderTreeItem(store, { dataOverride: worktreeData, onRefreshBranch })
+
+    const row = screen.getByText('My WS').closest('.tree-item') as HTMLElement
+    fireEvent.contextMenu(row)
+    fireEvent.click(screen.getByText('Refresh Branch Name'))
+
+    expect(onRefreshBranch).toHaveBeenCalledWith('ws-1')
   })
 })
 

@@ -406,6 +406,22 @@ export default function SessionPanel({
     }
   }
 
+  const handleRefreshTitle = (workspaceId: string) => {
+    closeContextMenu()
+    const entry = workspaces.get(workspaceId)
+    if (entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError)) {
+      void entry.store.getState().refreshTitleAndDescription()
+    }
+  }
+
+  const handleRefreshBranch = (workspaceId: string) => {
+    closeContextMenu()
+    const entry = workspaces.get(workspaceId)
+    if (entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError)) {
+      void entry.store.getState().refreshBranchName()
+    }
+  }
+
   const renderWorkspace = (id: string, depth: number = 0): ReactNode => {
     const entry = workspaces.get(id)
     if (!entry) return null
@@ -430,6 +446,8 @@ export default function SessionPanel({
         onDismiss={dismissWorkspace}
         onOpenSettings={handleOpenSettings}
         onToggleFavourite={handleToggleFavourite}
+        onRefreshTitle={handleRefreshTitle}
+        onRefreshBranch={handleRefreshBranch}
         children={children}
         renderChild={renderWorkspace}
         isDragging={dragState?.dragId === id}
@@ -635,6 +653,8 @@ interface WorkspaceTreeItemProps {
   onDismiss: (id: string) => void
   onOpenSettings: (id: string) => void
   onToggleFavourite: (id: string) => void
+  onRefreshTitle: (id: string) => void
+  onRefreshBranch: (id: string) => void
   children: Workspace[]
   renderChild: (id: string, depth: number) => ReactNode
   isDragging: boolean
@@ -658,6 +678,7 @@ interface TreeItemViewProps extends Omit<WorkspaceTreeItemProps, 'entry'> {
 function TreeItemView({
   id, depth, isActive, isFocused, isExpanded, isFavourite,
   onToggleExpand, onClick, onQuickFork, onCreateChild, onRemove, onDismiss, onOpenSettings, onToggleFavourite,
+  onRefreshTitle, onRefreshBranch,
   children, renderChild,
   isDragging, dragOverPosition, onDragStart, onDragOver, onDrop, onDragEnd,
   loadStatus, ws, displayName, description, tabIds, gitController,
@@ -741,6 +762,16 @@ function TreeItemView({
         {ws && (
           <div className="context-menu-item" onClick={() => { onToggleFavourite(id); useContextMenuStore.getState().close(); }}>
             {isFavourite ? 'Unmark as Favourite' : 'Mark as Favourite'}
+          </div>
+        )}
+        {ws?.isWorktree && ws.parentId && (
+          <div className="context-menu-item" onClick={() => { onRefreshTitle(id); }}>
+            Refresh Title &amp; Description
+          </div>
+        )}
+        {ws?.isWorktree && ws.parentId && (
+          <div className="context-menu-item" onClick={() => { onRefreshBranch(id); }}>
+            Refresh Branch Name
           </div>
         )}
         {ws?.isGitRepo && (

@@ -141,6 +141,12 @@ export interface WorkspaceStoreState {
   updateMetadata: (key: string, value: string, reason: string) => void
   deleteMetadata: (key: string, reason: string) => void
   toggleFavourite: () => void
+  /** Re-consult the LLM (via the active AI Harness tab's analyzer) and overwrite the
+   *  workspace's display name + description. No-op if no AI Harness tab is available. */
+  refreshTitleAndDescription: () => Promise<void>
+  /** Re-consult the LLM (via the active AI Harness tab's analyzer) and rename the git
+   *  branch, marking it user-defined. No-op if no AI Harness tab is available. */
+  refreshBranchName: () => Promise<void>
   updateSettings: (settings: Partial<WorktreeSettings>) => void
   updateStatus: (status: Workspace['status']) => void
   /** Writes the workspace's displayName + description into the daemon-host-wide worktree registry.
@@ -204,6 +210,26 @@ export function createWorkspaceStore(
 
   // Closure-level tab ref registry (non-serialized per-tab runtime state)
   const tabRefs = new Map<string, AppRef>()
+
+  // Locate the analyzer for the workspace's active AI Harness tab (falling back to the
+  // first loaded AI Harness tab). Returns null when no AI Harness tab is loaded. Used by
+  // the on-demand title/branch refresh actions, which need a terminal buffer to analyze.
+  function findAiHarnessAnalyzer(): Analyzer | null {
+    const ws = store.getState().workspace
+    const isAiHarness = (tabId: string): boolean =>
+      ws.appStates[tabId]?.applicationId.startsWith('aiharness-') ?? false
+    const activeId = ws.activeTabId
+    const orderedIds = activeId && isAiHarness(activeId)
+      ? [activeId, ...Object.keys(ws.appStates).filter((tabId) => tabId !== activeId && isAiHarness(tabId))]
+      : Object.keys(ws.appStates).filter(isAiHarness)
+    for (const tabId of orderedIds) {
+      const ref = tabRefs.get(tabId)
+      if (ref && 'analyzer' in ref) {
+        return (ref as { analyzer: Analyzer }).analyzer
+      }
+    }
+    return null
+  }
 
   // Write-only PTY handles, cached per workspace (separate stream from terminal events)
   const ttyWriters = new Map<string, TtyWriter>()
@@ -451,6 +477,24 @@ export function createWorkspaceStore(
       } else {
         get().updateMetadata('isFavourite', 'true', 'toggleFavourite')
       }
+    },
+
+    refreshTitleAndDescription: async (): Promise<void> => {
+      const analyzer = findAiHarnessAnalyzer()
+      if (!analyzer) {
+        console.warn('[workspace] refreshTitleAndDescription: no AI Harness tab available')
+        return
+      }
+      await analyzer.getState().refreshTitleAndDescription()
+    },
+
+    refreshBranchName: async (): Promise<void> => {
+      const analyzer = findAiHarnessAnalyzer()
+      if (!analyzer) {
+        console.warn('[workspace] refreshBranchName: no AI Harness tab available')
+        return
+      }
+      await analyzer.getState().refreshBranchName()
     },
 
     saveRegistryEntry: async (): Promise<void> => {

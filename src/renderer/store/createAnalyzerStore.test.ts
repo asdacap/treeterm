@@ -577,6 +577,75 @@ describe('createAnalyzerStore', () => {
     })
   })
 
+  describe('manual refresh', () => {
+    async function startedStore(overrides?: Partial<AnalyzerDeps>) {
+      const mock = makeMockTty()
+      deps = makeDeps({
+        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: ['$ echo hi\r\nhi\r\n$ '], exitCode: undefined }) }),
+        ...overrides,
+      })
+      const store = createAnalyzerStore('tab-1', deps)
+      store.getState().start('pty-1')
+      await vi.waitFor(() => {
+        expect(store.getState().getBufferText()).not.toBeNull()
+      })
+      return store
+    }
+
+    it('refreshTitleAndDescription overwrites display name and description even when already set', async () => {
+      const store = await startedStore({
+        getDisplayName: vi.fn().mockReturnValue('Existing Title'),
+        getDescription: vi.fn().mockReturnValue('Existing Description'),
+      })
+
+      await store.getState().refreshTitleAndDescription()
+
+      expect(deps.llm.generateTitle).toHaveBeenCalled()
+      expect(deps.updateMetadata).toHaveBeenCalledWith('displayName', 'Test Title', 'manualRefreshTitle')
+      expect(deps.updateMetadata).toHaveBeenCalledWith('description', 'Test Description', 'manualRefreshDescription')
+      store.getState().stop()
+    })
+
+    it('refreshTitleAndDescription no-ops when there is no buffer', async () => {
+      deps = makeDeps()
+      const store = createAnalyzerStore('tab-1', deps)
+
+      await store.getState().refreshTitleAndDescription()
+
+      expect(deps.llm.generateTitle).not.toHaveBeenCalled()
+      expect(deps.updateMetadata).not.toHaveBeenCalled()
+    })
+
+    it('refreshBranchName renames the branch and marks it user-defined even when already user-defined', async () => {
+      const store = await startedStore({
+        getBranchIsUserDefined: vi.fn().mockReturnValue(true),
+      })
+
+      await store.getState().refreshBranchName()
+
+      expect(deps.renameBranch).toHaveBeenCalledWith('old-branch', 'test-title')
+      expect(deps.updateMetadata).toHaveBeenCalledWith('branchIsUserDefined', 'true', 'manualRefreshBranch')
+      // Branch-only refresh must not touch the display name / description
+      expect(deps.updateMetadata).not.toHaveBeenCalledWith('displayName', expect.anything(), expect.anything())
+      store.getState().stop()
+    })
+
+    it('refreshBranchName does not rename when the suggested branch name is invalid', async () => {
+      const store = await startedStore({
+        llm: {
+          analyzeTerminal: vi.fn().mockResolvedValue({ state: 'idle', reason: '' }),
+          generateTitle: vi.fn().mockResolvedValue({ title: 'Test Title', description: 'd', branchName: 'Invalid Name!' }),
+        } as unknown as LlmApi,
+      })
+
+      await store.getState().refreshBranchName()
+
+      expect(deps.renameBranch).not.toHaveBeenCalled()
+      expect(deps.updateMetadata).not.toHaveBeenCalledWith('branchIsUserDefined', 'true', 'manualRefreshBranch')
+      store.getState().stop()
+    })
+  })
+
   describe('auto-approve', () => {
     it('auto-approves safe permission requests via own TTY', async () => {
       const mock = makeMockTty()
