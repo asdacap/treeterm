@@ -259,18 +259,11 @@ impl TreeTermDaemon for DaemonService {
             return Err(Status::invalid_argument("listenerId is required"));
         }
 
-        // Send initial session state
-        let session = self.session_store.session().await;
-
+        // Snapshot + register atomically so no update can land between the initial
+        // state and the subscription (it would otherwise be lost until the heartbeat).
         let (tx, rx) = mpsc::channel(64);
-        let initial_event = SessionWatchEvent {
-            session: Some(session),
-            sender_id: String::new(),
-        };
-        let _ = tx.send(Ok(initial_event)).await;
-
         self.session_store
-            .add_watcher(r.listener_id, tx)
+            .add_watcher_with_initial(r.listener_id, tx)
             .await;
 
         Ok(Response::new(ReceiverStream::new(rx)))

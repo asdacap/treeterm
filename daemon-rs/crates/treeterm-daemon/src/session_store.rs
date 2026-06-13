@@ -293,6 +293,27 @@ impl SessionStore {
         });
     }
 
+    /// Atomically snapshot the current session and register the watcher under one lock,
+    /// queueing the snapshot as the watcher's first event. Snapshotting and registering
+    /// separately would lose any update that lands in between.
+    pub async fn add_watcher_with_initial(
+        &self,
+        listener_id: String,
+        tx: mpsc::Sender<Result<SessionWatchEvent, tonic::Status>>,
+    ) {
+        let mut inner = self.inner.lock().await;
+        let mut session = inner.session.clone();
+        session.lock = inner.lock.as_ref().map(InternalLock::to_proto);
+        let initial = SessionWatchEvent {
+            session: Some(session),
+            sender_id: String::new(),
+        };
+        // The channel is freshly created by the caller, so Full is impossible; a Closed
+        // receiver just means the client vanished — broadcast cleanup purges it later.
+        let _ = tx.try_send(Ok(initial));
+        inner.watchers.push(SessionWatcher { listener_id, tx });
+    }
+
     pub async fn remove_watcher(&self, listener_id: &str) {
         self.inner
             .lock()
@@ -477,6 +498,25 @@ mod tests {
 
         store.broadcast_update(&session, "other").await;
         assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn add_watcher_with_initial_sends_snapshot_then_updates_in_order() {
+        let store = SessionStore::new();
+        let (tx, mut rx) = mpsc::channel(16);
+
+        store.add_watcher_with_initial("w".into(), tx).await;
+
+        // The initial snapshot is already queued at registration time.
+        let first = rx.try_recv().unwrap().unwrap();
+        assert!(first.session.is_some());
+        assert_eq!(first.sender_id, "");
+
+        // A subsequent broadcast is delivered after the snapshot, never before.
+        let session = store.session().await;
+        store.broadcast_update(&session, "other").await;
+        let second = rx.try_recv().unwrap().unwrap();
+        assert_eq!(second.sender_id, "other");
     }
 
     #[tokio::test]
