@@ -548,7 +548,13 @@ server.onExecStart((event, connectionId, cwd, command, args) => {
     })
 
     stream.on('end', () => {
-      execStreams.delete(execId)
+      // The result path deletes the entry before 'end' fires, so a still-present entry
+      // means the daemon closed the stream without ever sending a result (e.g. daemon
+      // restart). Surface that as an error instead of leaving the renderer waiting.
+      if (execStreams.has(execId)) {
+        sendExecEvent(sender, execId, { type: ExecEventType.Error, message: 'exec stream ended without result' })
+        execStreams.delete(execId)
+      }
     })
 
     return { success: true, execId }
