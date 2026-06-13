@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { ExecApi, FilesystemApi } from '../types'
 import { ExecEventType, type ExecEvent } from '../../shared/ipc-types'
 import { makeWorkspace } from '../../shared/test-fixtures/workspace'
+import { sha256Hex } from './sha256'
 import {
   buildEntryFromWorkspace,
   createWorktreeRegistryApi,
@@ -183,6 +184,65 @@ describe('worktreeRegistry', () => {
 
       await removeRegistryEntry(fs, exec, 'conn-1', '/wt/a')
       expect(fs.writeFile).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('compare-and-swap', () => {
+    it('passes empty expected hash when the file is missing', async () => {
+      vi.mocked(fs.readFile).mockResolvedValue({ success: false, error: 'No such file' })
+      vi.mocked(fs.writeFile).mockResolvedValue({ success: true })
+
+      await upsertRegistryEntry(fs, exec, 'conn-1', { path: '/wt/a', branch: 'a', displayName: null, description: null })
+
+      expect(vi.mocked(fs.writeFile).mock.calls[0]![3]).toBe('')
+    })
+
+    it('passes the sha256 of the content that was read', async () => {
+      const content = JSON.stringify({ version: 1, entries: [] })
+      vi.mocked(fs.readFile).mockResolvedValue({
+        success: true,
+        file: { path: 'x', content, size: 0, language: 'json' },
+      })
+      vi.mocked(fs.writeFile).mockResolvedValue({ success: true })
+
+      await upsertRegistryEntry(fs, exec, 'conn-1', { path: '/wt/a', branch: 'a', displayName: null, description: null })
+
+      expect(vi.mocked(fs.writeFile).mock.calls[0]![3]).toBe(await sha256Hex(content))
+    })
+
+    it('retries the read-modify-write on conflict and succeeds', async () => {
+      // First read: empty registry. Second read (after conflict): another window added /wt/b.
+      vi.mocked(fs.readFile)
+        .mockResolvedValueOnce({ success: false, error: 'No such file' })
+        .mockResolvedValueOnce({
+          success: true,
+          file: {
+            path: 'x',
+            content: JSON.stringify({ version: 1, entries: [{ path: '/wt/b', branch: 'b', displayName: null, description: null, lastUsedAt: 1 }] }),
+            size: 0,
+            language: 'json',
+          },
+        })
+      vi.mocked(fs.writeFile)
+        .mockResolvedValueOnce({ success: false, error: 'write conflict: file changed since read', conflict: true })
+        .mockResolvedValueOnce({ success: true })
+
+      await upsertRegistryEntry(fs, exec, 'conn-1', { path: '/wt/a', branch: 'a', displayName: null, description: null })
+
+      expect(fs.writeFile).toHaveBeenCalledTimes(2)
+      // The retry re-applied the mutation on top of the OTHER window's entry — nothing lost.
+      const written = JSON.parse(vi.mocked(fs.writeFile).mock.calls[1]![2]) as { entries: { path: string }[] }
+      expect(written.entries.map(e => e.path).sort()).toEqual(['/wt/a', '/wt/b'])
+    })
+
+    it('fails loudly after exhausting conflict retries', async () => {
+      vi.mocked(fs.readFile).mockResolvedValue({ success: false, error: 'No such file' })
+      vi.mocked(fs.writeFile).mockResolvedValue({ success: false, error: 'conflict', conflict: true })
+
+      await expect(upsertRegistryEntry(fs, exec, 'conn-1', {
+        path: '/wt/a', branch: 'a', displayName: null, description: null,
+      })).rejects.toThrow('after 5 attempts')
+      expect(fs.writeFile).toHaveBeenCalledTimes(5)
     })
   })
 

@@ -19,7 +19,12 @@ interface BufferedEvents<E> {
   events: E[]
   /** True once a terminal (Exit/Error/End) event has been buffered for this id. */
   terminated: boolean
+  /** Evicts the buffer if no listener ever subscribes — otherwise it would leak forever. */
+  evictionTimer: ReturnType<typeof setTimeout>
 }
+
+/** How long a buffered id may wait for a subscriber before its events are evicted. */
+export const BUFFER_EVICTION_MS = 60_000
 
 export function createEventDispatcher<E>(): EventDispatcher<E> {
   const listeners = new Map<string, ((e: E) => void)[]>()
@@ -39,7 +44,11 @@ export function createEventDispatcher<E>(): EventDispatcher<E> {
         buffered.events.push(event)
         if (isTerminal(event)) buffered.terminated = true
       } else {
-        buffer.set(id, { events: [event], terminated: isTerminal(event) })
+        buffer.set(id, {
+          events: [event],
+          terminated: isTerminal(event),
+          evictionTimer: setTimeout(() => { buffer.delete(id); }, BUFFER_EVICTION_MS),
+        })
       }
     },
 
@@ -51,6 +60,7 @@ export function createEventDispatcher<E>(): EventDispatcher<E> {
       // Flush events that arrived before this listener registered.
       const buffered = buffer.get(id)
       if (buffered) {
+        clearTimeout(buffered.evictionTimer)
         buffer.delete(id)
         for (const event of buffered.events) cb(event)
         // Mirror the live path: once the terminal event has been delivered, drop the listener set.

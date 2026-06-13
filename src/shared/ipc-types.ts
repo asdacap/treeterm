@@ -8,6 +8,12 @@ export type IpcOk<T = Record<never, never>> = { success: true } & T
 export type IpcErr = { success: false; error: string }
 export type IpcResult<T = Record<never, never>> = IpcOk<T> | IpcErr
 
+/**
+ * WriteFile result. `conflict: true` marks a compare-and-swap mismatch (the file changed
+ * since it was read) — the caller should re-read, re-apply its change, and retry.
+ */
+export type FsWriteFileResult = IpcResult | { success: false; error: string; conflict: true }
+
 import type {
   SandboxConfig,
   Settings,
@@ -93,8 +99,8 @@ export interface IpcRequests {
     result: IpcResult<{ file: FileContents }>
   }
   fsWriteFile: {
-    params: [connectionId: string, workspacePath: string, filePath: string, content: string]
-    result: IpcResult
+    params: [connectionId: string, workspacePath: string, filePath: string, content: string, expectedSha256?: string]
+    result: FsWriteFileResult
   }
   fsSearchFiles: {
     params: [connectionId: string, workspacePath: string, query: string]

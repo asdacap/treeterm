@@ -250,6 +250,9 @@ message FileWriteChunk {
 message FileWriteHeader {
   string workspace_path = 1;
   string file_path = 2;
+  // Compare-and-swap guard. Unset: unconditional write. Empty string: the file
+  // must not exist. Otherwise: lowercase-hex SHA-256 the current file bytes must match.
+  optional string expected_sha256 = 3;
 }
 
 message FileWriteData {
@@ -325,6 +328,9 @@ message WriteFileRequest {
 message WriteFileResponse {
   bool success = 1;
   optional string error = 2;
+  // True when the write was rejected because expected_sha256 did not match —
+  // the caller should re-read, re-apply its change, and retry.
+  bool conflict = 3;
 }
 
 // ============================================

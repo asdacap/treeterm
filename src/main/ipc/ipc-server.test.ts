@@ -18,7 +18,7 @@ vi.mock('electron', () => ({
 
 import type { BrowserWindow } from 'electron'
 import type { Session, ConnectionInfo, TTYSessionInfo, PortForwardInfo, PortForwardStatus } from '../../shared/types'
-import { PtyEventType, ExecEventType } from '../../shared/ipc-types'
+import { PtyEventType } from '../../shared/ipc-types'
 import { IpcServer } from './ipc-server'
 
 describe('IpcServer', () => {
@@ -154,6 +154,7 @@ describe('IpcServer', () => {
     it.each([
       ['onPtyCreate', 'pty:create'],
       ['onPtyAttach', 'pty:attach'],
+      ['onExecStart', 'exec:start'],
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     ] as const)('%s wrapper forwards event and args to handler', async (method, _channel) => {
       const handler = vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('result')
@@ -309,14 +310,6 @@ describe('IpcServer', () => {
     it('broadcasts to no windows when none exist', () => {
       mockGetAllWindows.mockReturnValue([])
       expect(() => { server.daemonSessions([]) }).not.toThrow()
-    })
-
-    it('execEvent broadcasts to all windows', () => {
-      const mockSend = vi.fn<(...args: any[]) => void>()
-      mockGetAllWindows.mockReturnValue([mockWin(mockSend)])
-
-      server.execEvent('exec-1', { type: ExecEventType.Stdout, data: 'output' })
-      expect(mockSend).toHaveBeenCalledWith('exec:event', 'exec-1', { type: ExecEventType.Stdout, data: 'output' })
     })
 
     it('sshAutoConnected broadcasts to all windows', () => {

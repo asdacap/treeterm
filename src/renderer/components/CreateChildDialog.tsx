@@ -534,34 +534,43 @@ function ExistingWorktreesLoader({ git, worktreeRegistry, openWorktreePaths, sel
   const [entriesByPath, setEntriesByPath] = useState<Map<string, WorktreeRegistryEntry>>(new Map())
   const [loading, setLoading] = useState(true)
 
+  // Fetch is keyed on the stable apis only — openWorktreePaths is a fresh array every parent
+  // render, so depending on it would refetch per render and let stale responses land out of
+  // order. Filtering by it happens at render time instead.
   useEffect(() => {
-    void (async () => {
+    let cancelled = false
+    const load = async (): Promise<void> => {
       try {
         const [wts, registry] = await Promise.all([
           git.listWorktrees(),
           worktreeRegistry.list().catch((err: unknown) => {
-            onError(`Failed to load worktree registry: ${err instanceof Error ? err.message : String(err)}`)
+            if (!cancelled) onError(`Failed to load worktree registry: ${err instanceof Error ? err.message : String(err)}`)
             return [] as WorktreeRegistryEntry[]
           }),
         ])
-        setWorktrees(wts.filter(wt => !openWorktreePaths.includes(wt.path)))
+        if (cancelled) return
+        setWorktrees(wts)
         setEntriesByPath(new Map(registry.map(e => [e.path, e])))
       } catch {
-        setWorktrees([])
+        if (!cancelled) setWorktrees([])
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
-    })()
-  }, [git, worktreeRegistry, openWorktreePaths, onError])
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [git, worktreeRegistry, onError])
+
+  const visibleWorktrees = worktrees.filter(wt => !openWorktreePaths.includes(wt.path))
 
   return (
     <div className="create-child-existing-list">
       {loading ? (
         <div className="create-child-loading">Loading worktrees...</div>
-      ) : worktrees.length === 0 ? (
+      ) : visibleWorktrees.length === 0 ? (
         <div className="create-child-empty">No available child worktrees found</div>
       ) : (
-        worktrees.map(wt => {
+        visibleWorktrees.map(wt => {
           const entry = entriesByPath.get(wt.path) ?? null
           const displayName = entry?.displayName ?? wt.branch
           return (
@@ -592,41 +601,49 @@ function RecentWorkspacesLoader({ git, worktreeRegistry, openWorktreePaths, sele
   const [items, setItems] = useState<{ worktree: WorktreeInfo; entry: WorktreeRegistryEntry }[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Fetch is keyed on the stable apis only; the already-open filter (openWorktreePaths is a
+  // fresh array each parent render) is applied at render time. See ExistingWorktreesLoader.
   useEffect(() => {
-    void (async () => {
+    let cancelled = false
+    const load = async (): Promise<void> => {
       try {
         const [wts, registry] = await Promise.all([
           git.listWorktrees(),
           worktreeRegistry.list(),
         ])
+        if (cancelled) return
         const wtByPath = new Map(wts.map(w => [w.path, w]))
-        const openSet = new Set(openWorktreePaths)
         const intersected: { worktree: WorktreeInfo; entry: WorktreeRegistryEntry }[] = []
         for (const entry of registry) {
           const worktree = wtByPath.get(entry.path)
           if (!worktree) continue
-          if (openSet.has(entry.path)) continue
           intersected.push({ worktree, entry })
         }
         intersected.sort((a, b) => b.entry.lastUsedAt - a.entry.lastUsedAt)
         setItems(intersected)
       } catch (err) {
+        if (cancelled) return
         onError(`Failed to load recent workspaces: ${err instanceof Error ? err.message : String(err)}`)
         setItems([])
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
-    })()
-  }, [git, worktreeRegistry, openWorktreePaths, onError])
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [git, worktreeRegistry, onError])
+
+  const openSet = new Set(openWorktreePaths)
+  const visibleItems = items.filter(({ entry }) => !openSet.has(entry.path))
 
   return (
     <div className="create-child-existing-list">
       {loading ? (
         <div className="create-child-loading">Loading recent workspaces...</div>
-      ) : items.length === 0 ? (
+      ) : visibleItems.length === 0 ? (
         <div className="create-child-empty">No recent workspaces found</div>
       ) : (
-        items.map(({ worktree, entry }) => {
+        visibleItems.map(({ worktree, entry }) => {
           const displayName = entry.displayName ?? worktree.branch
           return (
             <div
@@ -658,17 +675,21 @@ function LocalBranchesLoader({ git, isProcessing, selectedBranch, onSelect, onEr
   const [search, setSearch] = useState('')
 
   useEffect(() => {
+    let cancelled = false
     void Promise.all([
       git.listLocalBranches(),
       git.getBranchesInWorktrees()
     ]).then(([allBranches, branchesInWorktrees]) => {
+      if (cancelled) return
       setBranches(allBranches.map(name => ({ name, isInWorktree: branchesInWorktrees.includes(name) })))
       setLoading(false)
     }).catch((error: unknown) => {
+      if (cancelled) return
       setBranches([])
       setLoading(false)
       onError(`Failed to load branches: ${error instanceof Error ? error.message : 'Unknown error'}`)
     })
+    return () => { cancelled = true }
   }, [git, onError])
 
   const filtered = !search.trim() ? branches : branches.filter(b => b.name.toLowerCase().includes(search.toLowerCase()))
@@ -714,11 +735,13 @@ function RemoteBranchesLoader({ git, isProcessing, selectedBranch, onSelect, onE
   const [search, setSearch] = useState('')
 
   useEffect(() => {
+    let cancelled = false
     void Promise.all([
       git.listRemoteBranches(),
       git.getBranchesInWorktrees(),
       git.listLocalBranches()
     ]).then(([remoteBranchNames, branchesInWorktrees, localBranches]) => {
+      if (cancelled) return
       setBranches(remoteBranchNames.map(name => {
         const localName = name.split('/').slice(1).join('/')
         return {
@@ -728,10 +751,12 @@ function RemoteBranchesLoader({ git, isProcessing, selectedBranch, onSelect, onE
       }))
       setLoading(false)
     }).catch((error: unknown) => {
+      if (cancelled) return
       setBranches([])
       setLoading(false)
       onError(`Failed to load remote branches: ${error instanceof Error ? error.message : 'Unknown error'}`)
     })
+    return () => { cancelled = true }
   }, [git, onError])
 
   const filtered = !search.trim() ? branches : branches.filter(b => b.name.toLowerCase().includes(search.toLowerCase()))

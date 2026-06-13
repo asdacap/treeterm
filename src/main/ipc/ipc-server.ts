@@ -615,11 +615,12 @@ export class IpcServer {
   // Exec handlers
   onExecStart(
     handler: (
+      event: IpcMainInvokeEvent,
       ...args: IpcRequests['execStart']['params']
     ) => IpcRequests['execStart']['result'] | Promise<IpcRequests['execStart']['result']>
   ): void {
-    ipcMain.handle(CHANNELS.execStart, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
-      handler(...(args as IpcRequests['execStart']['params']))
+    ipcMain.handle(CHANNELS.execStart, (event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(event, ...(args as IpcRequests['execStart']['params']))
     )
   }
 
@@ -699,9 +700,5 @@ export class IpcServer {
 
   sshPortForwardOutput(...args: IpcEvents['sshPortForwardOutput']['params']): void {
     this.broadcast(CHANNELS.sshPortForwardOutput, ...args)
-  }
-
-  execEvent(...args: IpcEvents['execEvent']['params']): void {
-    this.broadcast(CHANNELS.execEvent, ...args)
   }
 }

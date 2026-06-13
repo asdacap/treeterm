@@ -48,6 +48,8 @@ const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => ({
     pullFromRemote: vi.fn(),
     openGitHub: vi.fn(), dispose: vi.fn(),
   } as GitControllerState)),
+  refreshTitleAndDescription: vi.fn(),
+  refreshBranchName: vi.fn(),
 } as WorkspaceStoreState))
 
 describe('AnalyzerHistory Renderer', () => {

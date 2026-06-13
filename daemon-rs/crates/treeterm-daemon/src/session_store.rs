@@ -293,6 +293,27 @@ impl SessionStore {
         });
     }
 
+    /// Atomically snapshot the current session and register the watcher under one lock,
+    /// queueing the snapshot as the watcher's first event. Snapshotting and registering
+    /// separately would lose any update that lands in between.
+    pub async fn add_watcher_with_initial(
+        &self,
+        listener_id: String,
+        tx: mpsc::Sender<Result<SessionWatchEvent, tonic::Status>>,
+    ) {
+        let mut inner = self.inner.lock().await;
+        let mut session = inner.session.clone();
+        session.lock = inner.lock.as_ref().map(InternalLock::to_proto);
+        let initial = SessionWatchEvent {
+            session: Some(session),
+            sender_id: String::new(),
+        };
+        // The channel is freshly created by the caller, so Full is impossible; a Closed
+        // receiver just means the client vanished — broadcast cleanup purges it later.
+        let _ = tx.try_send(Ok(initial));
+        inner.watchers.push(SessionWatcher { listener_id, tx });
+    }
+
     pub async fn remove_watcher(&self, listener_id: &str) {
         self.inner
             .lock()
@@ -312,12 +333,19 @@ impl SessionStore {
             sender_id: sender_id.to_string(),
         };
 
-        // Send to all watchers except the sender; remove those with closed channels
+        // Send to all watchers except the sender; remove those with closed channels.
+        // A Full channel only means the receiver is momentarily slow — keep the watcher
+        // (the 15s heartbeat re-converges it once it drains). Dropping it here would
+        // permanently and silently disconnect that window from session sync.
         inner.watchers.retain(|w| {
             if w.listener_id == sender_id {
                 return true; // keep but don't send
             }
-            w.tx.try_send(Ok(event.clone())).is_ok()
+            match w.tx.try_send(Ok(event.clone())) {
+                Ok(()) => true,
+                Err(mpsc::error::TrySendError::Full(_)) => true,
+                Err(mpsc::error::TrySendError::Closed(_)) => false,
+            }
         });
     }
 
@@ -470,6 +498,63 @@ mod tests {
 
         store.broadcast_update(&session, "other").await;
         assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn add_watcher_with_initial_sends_snapshot_then_updates_in_order() {
+        let store = SessionStore::new();
+        let (tx, mut rx) = mpsc::channel(16);
+
+        store.add_watcher_with_initial("w".into(), tx).await;
+
+        // The initial snapshot is already queued at registration time.
+        let first = rx.try_recv().unwrap().unwrap();
+        assert!(first.session.is_some());
+        assert_eq!(first.sender_id, "");
+
+        // A subsequent broadcast is delivered after the snapshot, never before.
+        let session = store.session().await;
+        store.broadcast_update(&session, "other").await;
+        let second = rx.try_recv().unwrap().unwrap();
+        assert_eq!(second.sender_id, "other");
+    }
+
+    #[tokio::test]
+    async fn broadcast_keeps_watcher_when_channel_full() {
+        let store = SessionStore::new();
+        let session = store.session().await;
+
+        // Capacity-1 channel: the first broadcast fills it, the second hits Full.
+        let (tx, mut rx) = mpsc::channel(1);
+        store.add_watcher("slow".into(), tx).await;
+
+        store.broadcast_update(&session, "other").await; // fills the channel
+        store.broadcast_update(&session, "other").await; // Full — must NOT drop the watcher
+
+        // Drain, then broadcast again: a retained watcher receives it.
+        assert!(rx.try_recv().is_ok());
+        store.broadcast_update(&session, "other").await;
+        assert!(rx.try_recv().is_ok());
+    }
+
+    #[tokio::test]
+    async fn broadcast_removes_watcher_when_channel_closed() {
+        let store = SessionStore::new();
+        let session = store.session().await;
+
+        let (tx, rx) = mpsc::channel(16);
+        store.add_watcher("gone".into(), tx).await;
+        drop(rx);
+
+        store.broadcast_update(&session, "other").await;
+
+        // The closed watcher was removed: a fresh watcher still receives broadcasts
+        // and the dead one no longer occupies the list.
+        let (tx2, mut rx2) = mpsc::channel(16);
+        store.add_watcher("alive".into(), tx2).await;
+        store.broadcast_update(&session, "other").await;
+        assert!(rx2.try_recv().is_ok());
+        assert_eq!(store.inner.lock().await.watchers.len(), 1);
     }
 
     #[tokio::test]

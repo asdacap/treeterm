@@ -9,7 +9,8 @@ import { ConnectionManager } from './connectionManager'
 import type { ExecInput, ExecOutput } from '../generated/treeterm'
 import { ConnectionStatus, ConnectionTargetType } from '../shared/types'
 import type { SSHConnectionConfig, PortForwardConfig } from '../shared/types'
-import { PtyEventType, ExecEventType } from '../shared/ipc-types'
+import { PtyEventType, ExecEventType, type ExecEvent } from '../shared/ipc-types'
+import { createExecStreamRegistry } from './execStreamRegistry'
 
 // Parse initial workspace and SSH target from command line
 let initialWorkspacePath: string | null = null
@@ -42,8 +43,9 @@ async function createSessionClient(connectionId: string, socketPath: string): Pr
 }
 // Simple object storage — each entry is an independent terminal's stream.
 const ptyStreams = new Map<string, PtyStream>()
-// Active exec streams keyed by execId for streaming output and kill support.
-const execStreams = new Map<string, ReturnType<GrpcDaemonClient['execStream']>>()
+// Active exec streams keyed by execId for streaming output, kill support, and
+// settling in-flight execs when their connection drops.
+const execStreams = createExecStreamRegistry<ReturnType<GrpcDaemonClient['execStream']>, Electron.WebContents>()
 // Session watch unsubscribers per connectionId, so reconnect can re-establish watches
 const sessionWatchUnsubs = new Map<string, { uuid: string; unsubscribe: () => void }[]>()
 // Track previous connection status per connectionId for detecting reconnect transitions
@@ -497,8 +499,8 @@ server.onFsReadFile((connectionId, workspacePath, filePath) => {
   return getClientForConnection(connectionId).readFile(workspacePath, filePath)
 })
 
-server.onFsWriteFile((connectionId, workspacePath, filePath, content) => {
-  return getClientForConnection(connectionId).writeFile(workspacePath, filePath, content)
+server.onFsWriteFile((connectionId, workspacePath, filePath, content, expectedSha256) => {
+  return getClientForConnection(connectionId).writeFile(workspacePath, filePath, content, expectedSha256)
 })
 
 server.onFsSearchFiles((connectionId, workspacePath, query) => {
@@ -506,12 +508,22 @@ server.onFsSearchFiles((connectionId, workspacePath, query) => {
 })
 
 // Exec IPC Handlers
-server.onExecStart((connectionId, cwd, command, args) => {
+
+// Send an exec event to the window that started the exec — same pattern as pty:event.
+// Broadcasting to all windows would make every other window buffer foreign exec output forever.
+function sendExecEvent(sender: Electron.WebContents, execId: string, event: ExecEvent): void {
+  if (!sender.isDestroyed()) {
+    sender.send('exec:event', execId, event)
+  }
+}
+
+server.onExecStart((event, connectionId, cwd, command, args) => {
   try {
     const client = getClientForConnection(connectionId)
     const execId = randomUUID()
     const stream = client.execStream()
-    execStreams.set(execId, stream)
+    const sender = event.sender
+    execStreams.add(execId, { stream, sender, connectionId })
 
     const startInput: ExecInput = {
       start: { cwd, command, args, env: {}, timeoutMs: 30000 }
@@ -521,22 +533,28 @@ server.onExecStart((connectionId, cwd, command, args) => {
 
     stream.on('data', (output: ExecOutput) => {
       if (output.stdout) {
-        server.execEvent(execId, { type: ExecEventType.Stdout, data: output.stdout.data.toString('utf-8') })
+        sendExecEvent(sender, execId, { type: ExecEventType.Stdout, data: output.stdout.data.toString('utf-8') })
       } else if (output.stderr) {
-        server.execEvent(execId, { type: ExecEventType.Stderr, data: output.stderr.data.toString('utf-8') })
+        sendExecEvent(sender, execId, { type: ExecEventType.Stderr, data: output.stderr.data.toString('utf-8') })
       } else if (output.result) {
-        server.execEvent(execId, { type: ExecEventType.Exit, exitCode: output.result.exitCode })
+        sendExecEvent(sender, execId, { type: ExecEventType.Exit, exitCode: output.result.exitCode })
         execStreams.delete(execId)
       }
     })
 
     stream.on('error', (error) => {
-      server.execEvent(execId, { type: ExecEventType.Error, message: error.message })
+      sendExecEvent(sender, execId, { type: ExecEventType.Error, message: error.message })
       execStreams.delete(execId)
     })
 
     stream.on('end', () => {
-      execStreams.delete(execId)
+      // The result path deletes the entry before 'end' fires, so a still-present entry
+      // means the daemon closed the stream without ever sending a result (e.g. daemon
+      // restart). Surface that as an error instead of leaving the renderer waiting.
+      if (execStreams.has(execId)) {
+        sendExecEvent(sender, execId, { type: ExecEventType.Error, message: 'exec stream ended without result' })
+        execStreams.delete(execId)
+      }
     })
 
     return { success: true, execId }
@@ -546,9 +564,9 @@ server.onExecStart((connectionId, cwd, command, args) => {
 })
 
 server.onExecKill((execId) => {
-  const stream = execStreams.get(execId)
-  if (stream) {
-    stream.cancel()
+  const entry = execStreams.get(execId)
+  if (entry) {
+    entry.stream.cancel()
     execStreams.delete(execId)
   }
 })
@@ -976,6 +994,13 @@ void app.whenReady().then(async () => {
     previousConnectionStatuses.set(info.id, info.status)
 
     server.sshConnectionStatus(info)
+
+    // The connection is known broken: settle every in-flight exec on it now. Their
+    // gRPC streams are about to be orphaned by the client swap and may never emit
+    // another event — without this the renderer promises would wait forever.
+    if (info.status === ConnectionStatus.Reconnecting && prevStatus !== ConnectionStatus.Reconnecting) {
+      execStreams.failAllForConnection(info.id, sendExecEvent)
+    }
 
     // On reconnect success: re-establish session watch and notify renderer
     if (info.status === ConnectionStatus.Connected && prevStatus === ConnectionStatus.Reconnecting) {

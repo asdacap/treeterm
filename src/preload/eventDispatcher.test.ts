@@ -1,6 +1,6 @@
 /* eslint-disable custom/no-string-literal-comparison -- synthetic test event type, not a domain enum */
-import { describe, it, expect, vi } from 'vitest'
-import { createEventDispatcher } from './eventDispatcher'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { createEventDispatcher, BUFFER_EVICTION_MS } from './eventDispatcher'
 
 interface TestEvent {
   type: 'data' | 'end'
@@ -113,5 +113,37 @@ describe('createEventDispatcher', () => {
     const unsub = dispatcher.subscribe('id1', () => undefined)
     unsub()
     expect(() => { unsub(); }).not.toThrow()
+  })
+
+  describe('buffer eviction', () => {
+    beforeEach(() => { vi.useFakeTimers() })
+    afterEach(() => { vi.useRealTimers() })
+
+    it('evicts a buffer that never gets a subscriber after the TTL', () => {
+      const dispatcher = createEventDispatcher<TestEvent>()
+      dispatcher.dispatch('id1', { type: 'data', value: 'orphan' }, isTerminal)
+
+      vi.advanceTimersByTime(BUFFER_EVICTION_MS)
+
+      // A late subscriber gets nothing — the buffer was evicted.
+      const received: TestEvent[] = []
+      dispatcher.subscribe('id1', (e) => received.push(e))
+      expect(received).toEqual([])
+    })
+
+    it('subscribing before the TTL cancels eviction and flushes the buffer', () => {
+      const dispatcher = createEventDispatcher<TestEvent>()
+      dispatcher.dispatch('id1', { type: 'data', value: 'kept' }, isTerminal)
+
+      vi.advanceTimersByTime(BUFFER_EVICTION_MS - 1)
+      const received: TestEvent[] = []
+      dispatcher.subscribe('id1', (e) => received.push(e))
+      expect(received).toEqual([{ type: 'data', value: 'kept' }])
+
+      // Advancing past the original deadline must not affect live delivery.
+      vi.advanceTimersByTime(BUFFER_EVICTION_MS)
+      dispatcher.dispatch('id1', { type: 'data', value: 'live' }, isTerminal)
+      expect(received).toEqual([{ type: 'data', value: 'kept' }, { type: 'data', value: 'live' }])
+    })
   })
 })

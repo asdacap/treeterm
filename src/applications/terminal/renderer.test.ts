@@ -95,6 +95,8 @@ const mockWorkspaceStoreStateData = {
    
     dispose: vi.fn(),
   } as GitControllerState)),
+  refreshTitleAndDescription: vi.fn(),
+  refreshBranchName: vi.fn(),
 } as WorkspaceStoreState
 
 const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => mockWorkspaceStoreStateData)
