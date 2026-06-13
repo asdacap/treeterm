@@ -54,6 +54,13 @@ export default tseslint.config(
     }
   },
   {
+    // Two preload restrictions, kept in one rule because flat-config's
+    // `no-restricted-imports` overrides (does not merge) across blocks:
+    //   1. ipcRenderer is only allowed in ipc-client.ts (this block excludes it).
+    //   2. Node builtins are banned everywhere — the preload runs in Electron's
+    //      sandbox, where `require` only resolves a tiny whitelist
+    //      (electron/events/timers/url). Importing e.g. `crypto` builds fine and
+    //      passes Node-based unit tests, but throws "module not found" at runtime.
     files: ['src/preload/**/*.ts'],
     ignores: ['src/preload/ipc-client.ts', 'src/preload/ipc-client.test.ts'],
     rules: {
@@ -62,6 +69,23 @@ export default tseslint.config(
           name: 'electron',
           importNames: ['ipcRenderer'],
           message: 'ipcRenderer is only allowed in ipc-client.ts. Use IpcClient methods instead.'
+        }],
+        patterns: [{
+          regex: '^(node:)?(assert|async_hooks|buffer|child_process|cluster|console|constants|crypto|dgram|diagnostics_channel|dns|domain|fs|http|http2|https|inspector|module|net|os|path|perf_hooks|process|punycode|querystring|readline|repl|stream|string_decoder|sys|tls|trace_events|tty|v8|vm|wasi|worker_threads|zlib)$',
+          message: 'Node builtins are not available in the sandboxed preload (only electron/events/timers/url resolve). Use a web-platform API instead, e.g. globalThis.crypto.randomUUID() rather than crypto.'
+        }]
+      }]
+    }
+  },
+  {
+    // ipc-client.ts is exempt from the ipcRenderer ban but is still sandboxed,
+    // so it keeps the Node-builtin ban. Test files run in Node and are exempt.
+    files: ['src/preload/ipc-client.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          regex: '^(node:)?(assert|async_hooks|buffer|child_process|cluster|console|constants|crypto|dgram|diagnostics_channel|dns|domain|fs|http|http2|https|inspector|module|net|os|path|perf_hooks|process|punycode|querystring|readline|repl|stream|string_decoder|sys|tls|trace_events|tty|v8|vm|wasi|worker_threads|zlib)$',
+          message: 'Node builtins are not available in the sandboxed preload (only electron/events/timers/url resolve). Use a web-platform API instead, e.g. globalThis.crypto.randomUUID() rather than crypto.'
         }]
       }]
     }

@@ -1,5 +1,4 @@
 import { contextBridge } from 'electron'
-import { randomUUID } from 'crypto'
 import type { SandboxConfig, Session, TTYSessionInfo, WorkspaceRef, Settings, SSHConnectionConfig, ConnectionInfo, PortForwardConfig, PortForwardInfo } from '../shared/types'
 import { PtyEventType, ExecEventType, FileWatchEventType, type PtyEvent, type ExecEvent, type FileWatchEvent, type IpcResult } from '../shared/ipc-types'
 import { IpcClient } from './ipc-client'
@@ -243,7 +242,7 @@ const preloadApi: PreloadApi = {
     watchFile: (connectionId: string, workspacePath: string, filePath: string, onEvent: (event: FileWatchEvent) => void) => {
       // Subscribe the dispatcher before invoking so events that race the invoke
       // reply are buffered, not lost (same pattern as pty/exec).
-      const watchId = randomUUID()
+      const watchId = globalThis.crypto.randomUUID()
       const unsubscribeDispatch = fsWatchDispatch.subscribe(watchId, onEvent)
       void client.fsWatchFile(connectionId, watchId, workspacePath, filePath).then((result) => {
         if (!result.success) onEvent({ type: FileWatchEventType.Error, message: result.error })
