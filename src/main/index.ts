@@ -10,6 +10,7 @@ import type { ExecInput, ExecOutput } from '../generated/treeterm'
 import { ConnectionStatus, ConnectionTargetType } from '../shared/types'
 import type { SSHConnectionConfig, PortForwardConfig } from '../shared/types'
 import { PtyEventType, ExecEventType, type ExecEvent } from '../shared/ipc-types'
+import { createExecStreamRegistry } from './execStreamRegistry'
 
 // Parse initial workspace and SSH target from command line
 let initialWorkspacePath: string | null = null
@@ -42,8 +43,9 @@ async function createSessionClient(connectionId: string, socketPath: string): Pr
 }
 // Simple object storage — each entry is an independent terminal's stream.
 const ptyStreams = new Map<string, PtyStream>()
-// Active exec streams keyed by execId for streaming output and kill support.
-const execStreams = new Map<string, ReturnType<GrpcDaemonClient['execStream']>>()
+// Active exec streams keyed by execId for streaming output, kill support, and
+// settling in-flight execs when their connection drops.
+const execStreams = createExecStreamRegistry<ReturnType<GrpcDaemonClient['execStream']>, Electron.WebContents>()
 // Session watch unsubscribers per connectionId, so reconnect can re-establish watches
 const sessionWatchUnsubs = new Map<string, { uuid: string; unsubscribe: () => void }[]>()
 // Track previous connection status per connectionId for detecting reconnect transitions
@@ -520,8 +522,8 @@ server.onExecStart((event, connectionId, cwd, command, args) => {
     const client = getClientForConnection(connectionId)
     const execId = randomUUID()
     const stream = client.execStream()
-    execStreams.set(execId, stream)
     const sender = event.sender
+    execStreams.add(execId, { stream, sender, connectionId })
 
     const startInput: ExecInput = {
       start: { cwd, command, args, env: {}, timeoutMs: 30000 }
@@ -556,9 +558,9 @@ server.onExecStart((event, connectionId, cwd, command, args) => {
 })
 
 server.onExecKill((execId) => {
-  const stream = execStreams.get(execId)
-  if (stream) {
-    stream.cancel()
+  const entry = execStreams.get(execId)
+  if (entry) {
+    entry.stream.cancel()
     execStreams.delete(execId)
   }
 })
@@ -986,6 +988,13 @@ void app.whenReady().then(async () => {
     previousConnectionStatuses.set(info.id, info.status)
 
     server.sshConnectionStatus(info)
+
+    // The connection is known broken: settle every in-flight exec on it now. Their
+    // gRPC streams are about to be orphaned by the client swap and may never emit
+    // another event — without this the renderer promises would wait forever.
+    if (info.status === ConnectionStatus.Reconnecting && prevStatus !== ConnectionStatus.Reconnecting) {
+      execStreams.failAllForConnection(info.id, sendExecEvent)
+    }
 
     // On reconnect success: re-establish session watch and notify renderer
     if (info.status === ConnectionStatus.Connected && prevStatus === ConnectionStatus.Reconnecting) {
