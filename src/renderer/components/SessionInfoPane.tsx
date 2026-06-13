@@ -12,6 +12,7 @@ import { ConnectionStatus, PortForwardStatus, ConnectionTargetType } from '../..
 import PortForwardDialog from './PortForwardDialog'
 import JsonViewer from './JsonViewer'
 import SystemMonitor from './SystemMonitor'
+import SshUploadPane from './SshUploadPane'
 
 enum TabId {
   Info = 'info',
@@ -25,6 +26,7 @@ enum SshSubTab {
   Daemon = 'daemon',
   Portforwards = 'portforwards',
   Monitor = 'monitor',
+  Upload = 'upload',
 }
 
 interface OutputLine {
@@ -209,7 +211,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
 
   // SSH sub-tabs: Bootstrap + Tunnel + Daemon always, Port Forwards when connected
   const sshSubTabs: { id: SshSubTab; label: string }[] = isConnected
-    ? [{ id: SshSubTab.Bootstrap, label: 'Bootstrap' }, { id: SshSubTab.Tunnel, label: 'Tunnel' }, { id: SshSubTab.Daemon, label: 'Daemon' }, { id: SshSubTab.Portforwards, label: 'Port Forwards' }, { id: SshSubTab.Monitor, label: 'Monitor' }]
+    ? [{ id: SshSubTab.Bootstrap, label: 'Bootstrap' }, { id: SshSubTab.Tunnel, label: 'Tunnel' }, { id: SshSubTab.Daemon, label: 'Daemon' }, { id: SshSubTab.Portforwards, label: 'Port Forwards' }, { id: SshSubTab.Monitor, label: 'Monitor' }, { id: SshSubTab.Upload, label: 'Upload' }]
     : [{ id: SshSubTab.Bootstrap, label: 'Bootstrap' }, { id: SshSubTab.Tunnel, label: 'Tunnel' }, { id: SshSubTab.Daemon, label: 'Daemon' }]
 
   const sessionData = {
@@ -367,6 +369,8 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
         </div>
       ) : sshSubTab === SshSubTab.Monitor ? (
         <SystemMonitor connectionId={connection.id} exec={exec} />
+      ) : sshSubTab === SshSubTab.Upload ? (
+        <SshUploadPane connectionId={connection.id} />
       ) : (
         <div className="ssh-pane-output">
           {portForwards.length === 0 ? (

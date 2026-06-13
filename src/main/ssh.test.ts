@@ -523,6 +523,68 @@ describe('SSHTunnel', () => {
     })
   })
 
+  describe('uploadFile', () => {
+    it('builds scp args with standard options and absolute destination', async () => {
+      const proc = makeMockProcess()
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
+
+      const tunnel = new SSHTunnel(makeConfig())
+      const promise = tunnel.uploadFile('/local/file.txt', '/remote/dir/file.txt')
+      proc.emit('close', 0)
+      await promise
+
+      const call = vi.mocked(spawn).mock.calls[0]!
+      expect(call[0]).toBe('scp')
+      const args = call[1]
+      expect(args).toContain('StrictHostKeyChecking=accept-new')
+      expect(args).toContain('BatchMode=yes')
+      // scp uses -P (capital) for the port
+      expect(args).toContain('-P')
+      expect(args).toContain('22')
+      expect(args).not.toContain('-i')
+      expect(args[args.length - 2]).toBe('/local/file.txt')
+      expect(args[args.length - 1]).toBe('testuser@example.com:/remote/dir/file.txt')
+    })
+
+    it('includes identity file when configured', async () => {
+      const proc = makeMockProcess()
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
+
+      const tunnel = new SSHTunnel(makeConfig({ identityFile: '/home/user/.ssh/id_rsa', port: 2222 }))
+      const promise = tunnel.uploadFile('/local/file.txt', '/remote/file.txt')
+      proc.emit('close', 0)
+      await promise
+
+      const args = vi.mocked(spawn).mock.calls[0]![1]
+      expect(args).toContain('-i')
+      expect(args).toContain('/home/user/.ssh/id_rsa')
+      expect(args).toContain('2222')
+    })
+
+    it('rejects with stderr on non-zero exit', async () => {
+      const proc = makeMockProcess()
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
+
+      const tunnel = new SSHTunnel(makeConfig())
+      const promise = tunnel.uploadFile('/local/file.txt', '/remote/file.txt')
+      proc.stderr.emit('data', Buffer.from('Permission denied'))
+      proc.emit('close', 1)
+
+      await expect(promise).rejects.toThrow('scp failed (exit 1): Permission denied')
+    })
+
+    it('rejects on spawn error', async () => {
+      const proc = makeMockProcess()
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
+
+      const tunnel = new SSHTunnel(makeConfig())
+      const promise = tunnel.uploadFile('/local/file.txt', '/remote/file.txt')
+      proc.emit('error', new Error('spawn ENOENT'))
+
+      await expect(promise).rejects.toThrow('scp spawn error: spawn ENOENT')
+    })
+  })
+
   describe('waitForSocket', () => {
     it('resolves immediately when socket exists', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true)

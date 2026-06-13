@@ -90,6 +90,22 @@ export interface AppRef {
   dispose: () => void
 }
 
+// Controls which connection types an application is available for in the new-tab menu.
+export enum AppAvailability {
+  // Available on every session (default when `availability` is omitted).
+  Always = 'always',
+  // Only available when the session's connection is a remote/SSH connection.
+  RemoteOnly = 'remote-only',
+}
+
+/** Whether an application should be offered for a session given its connection type. */
+export function isAppAvailableForConnection(
+  app: { availability?: AppAvailability },
+  isRemote: boolean,
+): boolean {
+  return app.availability !== AppAvailability.RemoteOnly || isRemote
+}
+
 // Application - code-defined, registered at runtime
 export interface Application<TState = unknown, TRef extends AppRef = AppRef> {
   id: string
@@ -104,6 +120,8 @@ export interface Application<TState = unknown, TRef extends AppRef = AppRef> {
   displayStyle: 'block' | 'flex'
   // Whether this app creates tabs automatically in new workspaces
   isDefault: boolean
+  // Which connection types this app is offered for. Omitted ≡ AppAvailability.Always.
+  availability?: AppAvailability
   // Optional: Applications can report their activity state
   getActivityState?: (tab: Tab) => ActivityState
 }
@@ -557,6 +575,7 @@ export interface SSHApi {
   listPortForwards: (connectionId: string) => Promise<PortForwardInfo[]>
   onPortForwardStatus: (callback: (info: PortForwardInfo) => void) => () => void
   watchPortForwardOutput: (portForwardId: string, cb: (line: string) => void) => Promise<{ scrollback: string[]; unsubscribe: () => void }>
+  uploadFile: (connectionId: string, localPath: string, remotePath: string) => Promise<IpcResult>
 }
 
 export interface SessionApi {
@@ -585,6 +604,7 @@ export type PreloadApi = {
   platform: Platform
   terminal: TerminalApi
   selectFolder: () => Promise<string | null>
+  selectFile: () => Promise<string | null>
   getRecentDirectories: () => Promise<string[]>
   settings: SettingsApi
   filesystem: RawFilesystemApi

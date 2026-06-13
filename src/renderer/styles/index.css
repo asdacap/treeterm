@@ -6074,6 +6074,51 @@ body,
   border-top: 1px solid var(--border-color);
 }
 
+.ssh-upload-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ssh-upload-target {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ssh-upload-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ssh-upload-label {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ssh-upload-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.ssh-upload-row .remote-dir-path-input {
+  flex: 1;
+}
+
+.ssh-upload-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.ssh-upload-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  word-break: break-all;
+}
+
 .ssh-pane-section-header:first-child {
   border-top: none;
   padding-top: 4px;

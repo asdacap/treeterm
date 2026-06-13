@@ -162,7 +162,17 @@ export class SSHTunnel {
    */
   private async uploadDaemon(remotePath: string, remoteArch: string): Promise<void> {
     const localPath = this.getDaemonBinaryPath(remoteArch)
+    this.appendBootstrapOutput(`Uploading daemon binary to ${remotePath}...`)
+    await this.uploadFile(localPath, remotePath)
+    this.appendBootstrapOutput(`Upload complete`)
+  }
 
+  /**
+   * Upload an arbitrary local file to an absolute path on the remote host via scp.
+   * `remotePath` must be absolute — scp over SFTP (OpenSSH 9.0+) does not reliably
+   * expand `~`. Note scp uses `-P` (capital) for the port, unlike ssh's `-p`.
+   */
+  async uploadFile(localPath: string, remotePath: string): Promise<void> {
     const scpArgs = [
       '-o', 'StrictHostKeyChecking=accept-new',
       '-o', 'BatchMode=yes',
@@ -173,8 +183,6 @@ export class SSHTunnel {
     }
     scpArgs.push(localPath, `${this.config.user}@${this.config.host}:${remotePath}`)
 
-    this.appendBootstrapOutput(`Uploading daemon binary to ${remotePath}...`)
-
     return new Promise<void>((resolve, reject) => {
       const proc = spawn('scp', scpArgs, { stdio: ['pipe', 'pipe', 'pipe'] })
       let stderr = ''
@@ -183,7 +191,6 @@ export class SSHTunnel {
         if (code !== 0) {
           reject(new Error(`scp failed (exit ${String(code)}): ${stderr}`))
         } else {
-          this.appendBootstrapOutput(`Upload complete`)
           resolve()
         }
       })
