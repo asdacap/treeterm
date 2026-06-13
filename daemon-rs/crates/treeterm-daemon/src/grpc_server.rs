@@ -420,6 +420,7 @@ impl TreeTermDaemon for DaemonService {
         let mut stream = req.into_inner();
         let mut workspace_path = String::new();
         let mut file_path = String::new();
+        let mut expected_sha256: Option<String> = None;
         let mut chunks: Vec<u8> = Vec::new();
 
         while let Some(msg) = stream.message().await.map_err(|e| Status::internal(e.to_string()))? {
@@ -427,6 +428,7 @@ impl TreeTermDaemon for DaemonService {
                 Some(file_write_chunk::Chunk::Header(h)) => {
                     workspace_path = h.workspace_path;
                     file_path = h.file_path;
+                    expected_sha256 = h.expected_sha256;
                 }
                 Some(file_write_chunk::Chunk::Data(d)) => {
                     chunks.extend(d.data);
@@ -436,7 +438,7 @@ impl TreeTermDaemon for DaemonService {
             }
         }
 
-        let result = filesystem::write_file_streaming(Path::new(&workspace_path), &file_path, chunks).await;
+        let result = filesystem::write_file_streaming(Path::new(&workspace_path), &file_path, chunks, expected_sha256).await;
         Ok(Response::new(result))
     }
 

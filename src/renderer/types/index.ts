@@ -28,8 +28,8 @@ import type {
   ReasoningEffort
 } from '../../shared/types'
 export { FileChangeStatus }
-import type { PtyEvent, ExecEvent, IpcResult } from '../../shared/ipc-types'
-export type { PtyEvent, ExecEvent, IpcResult }
+import type { PtyEvent, ExecEvent, IpcResult, FsWriteFileResult } from '../../shared/ipc-types'
+export type { PtyEvent, ExecEvent, IpcResult, FsWriteFileResult }
 
 export type {
   SandboxConfig,
@@ -237,7 +237,7 @@ export interface FileContents {
 export interface FilesystemApi {
   readDirectory: (workspacePath: string, dirPath: string) => Promise<IpcResult<{ contents: DirectoryContents }>>
   readFile: (workspacePath: string, filePath: string) => Promise<IpcResult<{ file: FileContents }>>
-  writeFile: (workspacePath: string, filePath: string, content: string) => Promise<IpcResult>
+  writeFile: (workspacePath: string, filePath: string, content: string, expectedSha256?: string) => Promise<FsWriteFileResult>
   searchFiles: (workspacePath: string, query: string) => Promise<IpcResult<{ entries: FileEntry[] }>>
 }
 
@@ -245,7 +245,7 @@ export interface FilesystemApi {
 export interface WorkspaceFilesystemApi {
   readDirectory: (dirPath: string) => Promise<IpcResult<{ contents: DirectoryContents }>>
   readFile: (filePath: string) => Promise<IpcResult<{ file: FileContents }>>
-  writeFile: (filePath: string, content: string) => Promise<IpcResult>
+  writeFile: (filePath: string, content: string, expectedSha256?: string) => Promise<FsWriteFileResult>
   searchFiles: (query: string) => Promise<IpcResult<{ entries: FileEntry[] }>>
 }
 

@@ -23,6 +23,7 @@ rand = "0.9"
 tower = "0.5"
 uuid = { version = "1", features = ["v4"] }
 vt100 = "0.15"
+sha2 = "0.10"
 
 [profile.release]
 lto = true

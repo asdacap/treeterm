@@ -1,8 +1,24 @@
+use sha2::{Digest, Sha256};
 use std::path::Path;
+use std::sync::OnceLock;
 use tokio::fs;
+use tokio::sync::Mutex;
 use treeterm_proto::treeterm::*;
 
 const MAX_FILE_SIZE: u64 = 1024 * 1024; // 1MB
+
+/// Serializes all writes so the compare-and-swap check and the rename are atomic
+/// with respect to other writers going through this daemon.
+fn write_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
+}
 
 /// Security: Ensure path is within workspace (resolves symlinks to prevent escape)
 pub async fn is_path_within_workspace(workspace_path: &Path, target_path: &Path) -> bool {
@@ -144,22 +160,67 @@ pub async fn read_file_streaming(workspace_path: &Path, file_path: &str) -> Resu
     Ok((header, content))
 }
 
-pub async fn write_file_streaming(workspace_path: &Path, file_path: &str, content: Vec<u8>) -> WriteFileResponse {
+/// `expected_sha256` is a compare-and-swap guard: `None` writes unconditionally,
+/// `Some("")` requires the file to not exist, otherwise the lowercase-hex SHA-256
+/// of the current file bytes must match or the write is rejected with `conflict`.
+pub async fn write_file_streaming(
+    workspace_path: &Path,
+    file_path: &str,
+    content: Vec<u8>,
+    expected_sha256: Option<String>,
+) -> WriteFileResponse {
     let resolved = workspace_path.join(file_path);
 
     if !is_path_within_workspace(workspace_path, &resolved).await {
-        return WriteFileResponse { success: false, error: Some("Access denied: Path outside workspace".into()) };
+        return WriteFileResponse { success: false, error: Some("Access denied: Path outside workspace".into()), conflict: false };
     }
 
     if let Some(parent) = resolved.parent() {
         if let Err(e) = fs::create_dir_all(parent).await {
-            return WriteFileResponse { success: false, error: Some(e.to_string()) };
+            return WriteFileResponse { success: false, error: Some(e.to_string()), conflict: false };
         }
     }
 
-    match fs::write(&resolved, &content).await {
-        Ok(_) => WriteFileResponse { success: true, error: None },
-        Err(e) => WriteFileResponse { success: false, error: Some(e.to_string()) },
+    // Hold the write lock across CAS check + write so concurrent writers serialize.
+    let _guard = write_lock().lock().await;
+
+    if let Some(expected) = expected_sha256 {
+        let current = match fs::read(&resolved).await {
+            Ok(bytes) => Some(bytes),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return WriteFileResponse { success: false, error: Some(e.to_string()), conflict: false },
+        };
+        let matches = match (&current, expected.as_str()) {
+            (None, "") => true,
+            (Some(bytes), exp) if !exp.is_empty() => sha256_hex(bytes) == exp,
+            _ => false,
+        };
+        if !matches {
+            return WriteFileResponse {
+                success: false,
+                error: Some("write conflict: file changed since read".into()),
+                conflict: true,
+            };
+        }
+    }
+
+    // Atomic write: temp file in the same directory, then rename over the target,
+    // so a concurrent reader never observes a torn/partial file.
+    let tmp_name = format!(
+        ".{}.tmp-{}",
+        resolved.file_name().and_then(|n| n.to_str()).unwrap_or("file"),
+        uuid::Uuid::new_v4()
+    );
+    let tmp_path = resolved.with_file_name(tmp_name);
+    if let Err(e) = fs::write(&tmp_path, &content).await {
+        return WriteFileResponse { success: false, error: Some(e.to_string()), conflict: false };
+    }
+    match fs::rename(&tmp_path, &resolved).await {
+        Ok(_) => WriteFileResponse { success: true, error: None, conflict: false },
+        Err(e) => {
+            let _ = fs::remove_file(&tmp_path).await;
+            WriteFileResponse { success: false, error: Some(e.to_string()), conflict: false }
+        }
     }
 }
 
@@ -388,7 +449,7 @@ mod tests {
     async fn write_file_streaming_creates_file() {
         let tmp = TempDir::new().unwrap();
         let ws = tmp.path().canonicalize().unwrap();
-        let resp = write_file_streaming(&ws, "new.txt", b"hello".to_vec()).await;
+        let resp = write_file_streaming(&ws, "new.txt", b"hello".to_vec(), None).await;
         assert!(resp.success);
 
         let content = fs::read_to_string(ws.join("new.txt")).await.unwrap();
@@ -399,7 +460,7 @@ mod tests {
     async fn write_file_streaming_creates_parent_dirs() {
         let tmp = TempDir::new().unwrap();
         let ws = tmp.path().canonicalize().unwrap();
-        let resp = write_file_streaming(&ws, "a/b/c.txt", b"nested".to_vec()).await;
+        let resp = write_file_streaming(&ws, "a/b/c.txt", b"nested".to_vec(), None).await;
         assert!(resp.success);
 
         let content = fs::read_to_string(ws.join("a/b/c.txt")).await.unwrap();
@@ -412,9 +473,77 @@ mod tests {
         let tmp2 = TempDir::new().unwrap();
         let target = tmp2.path().join("evil.txt");
 
-        let resp = write_file_streaming(tmp1.path(), target.to_str().unwrap(), b"hack".to_vec()).await;
+        let resp = write_file_streaming(tmp1.path(), target.to_str().unwrap(), b"hack".to_vec(), None).await;
         assert!(!resp.success);
         assert!(resp.error.unwrap().contains("Access denied"));
+    }
+
+    #[tokio::test]
+    async fn write_file_cas_matching_hash_succeeds() {
+        let tmp = TempDir::new().unwrap();
+        let ws = tmp.path().canonicalize().unwrap();
+        fs::write(ws.join("f.txt"), b"old").await.unwrap();
+
+        let expected = sha256_hex(b"old");
+        let resp = write_file_streaming(&ws, "f.txt", b"new".to_vec(), Some(expected)).await;
+        assert!(resp.success);
+        assert!(!resp.conflict);
+        assert_eq!(fs::read_to_string(ws.join("f.txt")).await.unwrap(), "new");
+    }
+
+    #[tokio::test]
+    async fn write_file_cas_mismatched_hash_conflicts() {
+        let tmp = TempDir::new().unwrap();
+        let ws = tmp.path().canonicalize().unwrap();
+        fs::write(ws.join("f.txt"), b"changed by someone else").await.unwrap();
+
+        let stale = sha256_hex(b"old");
+        let resp = write_file_streaming(&ws, "f.txt", b"new".to_vec(), Some(stale)).await;
+        assert!(!resp.success);
+        assert!(resp.conflict);
+        // The file is untouched on conflict.
+        assert_eq!(fs::read_to_string(ws.join("f.txt")).await.unwrap(), "changed by someone else");
+    }
+
+    #[tokio::test]
+    async fn write_file_cas_empty_expected_requires_absent() {
+        let tmp = TempDir::new().unwrap();
+        let ws = tmp.path().canonicalize().unwrap();
+
+        // Absent → create succeeds.
+        let resp = write_file_streaming(&ws, "f.txt", b"first".to_vec(), Some(String::new())).await;
+        assert!(resp.success);
+
+        // Present → conflict.
+        let resp = write_file_streaming(&ws, "f.txt", b"second".to_vec(), Some(String::new())).await;
+        assert!(!resp.success);
+        assert!(resp.conflict);
+        assert_eq!(fs::read_to_string(ws.join("f.txt")).await.unwrap(), "first");
+    }
+
+    #[tokio::test]
+    async fn write_file_cas_expected_content_but_file_missing_conflicts() {
+        let tmp = TempDir::new().unwrap();
+        let ws = tmp.path().canonicalize().unwrap();
+
+        let resp = write_file_streaming(&ws, "gone.txt", b"new".to_vec(), Some(sha256_hex(b"old"))).await;
+        assert!(!resp.success);
+        assert!(resp.conflict);
+    }
+
+    #[tokio::test]
+    async fn write_file_leaves_no_temp_files() {
+        let tmp = TempDir::new().unwrap();
+        let ws = tmp.path().canonicalize().unwrap();
+        let resp = write_file_streaming(&ws, "f.txt", b"data".to_vec(), None).await;
+        assert!(resp.success);
+
+        let mut entries = fs::read_dir(&ws).await.unwrap();
+        let mut names = Vec::new();
+        while let Some(e) = entries.next_entry().await.unwrap() {
+            names.push(e.file_name().to_string_lossy().into_owned());
+        }
+        assert_eq!(names, vec!["f.txt"]);
     }
 
     // -- search_files --

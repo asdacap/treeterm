@@ -742,7 +742,14 @@ describe('createWorkspaceStore', () => {
       const deps = makeFsDeps()
       const store = createWorkspaceStore(makeWorkspace({ path: '/repo' }), deps)
       await store.getState().filesystemApi.writeFile('f.ts', 'code')
-      expect(deps.filesystem.writeFile).toHaveBeenCalledWith('/repo', 'f.ts', 'code')
+      expect(deps.filesystem.writeFile).toHaveBeenCalledWith('/repo', 'f.ts', 'code', undefined)
+    })
+
+    it('writeFile forwards the expected sha256 for compare-and-swap', async () => {
+      const deps = makeFsDeps()
+      const store = createWorkspaceStore(makeWorkspace({ path: '/repo' }), deps)
+      await store.getState().filesystemApi.writeFile('f.ts', 'code', 'abc123')
+      expect(deps.filesystem.writeFile).toHaveBeenCalledWith('/repo', 'f.ts', 'code', 'abc123')
     })
   })
 

@@ -580,7 +580,7 @@ export function createWorkspaceStore(
     filesystemApi: {
       readDirectory: (dirPath) => deps.filesystem.readDirectory(workspace.path, dirPath),
       readFile: (filePath) => deps.filesystem.readFile(workspace.path, filePath),
-      writeFile: (filePath, content) => deps.filesystem.writeFile(workspace.path, filePath, content),
+      writeFile: (filePath, content, expectedSha256) => deps.filesystem.writeFile(workspace.path, filePath, content, expectedSha256),
       searchFiles: (query) => deps.filesystem.searchFiles(workspace.path, query),
     },
 

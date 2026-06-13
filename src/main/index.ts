@@ -497,8 +497,8 @@ server.onFsReadFile((connectionId, workspacePath, filePath) => {
   return getClientForConnection(connectionId).readFile(workspacePath, filePath)
 })
 
-server.onFsWriteFile((connectionId, workspacePath, filePath, content) => {
-  return getClientForConnection(connectionId).writeFile(workspacePath, filePath, content)
+server.onFsWriteFile((connectionId, workspacePath, filePath, content, expectedSha256) => {
+  return getClientForConnection(connectionId).writeFile(workspacePath, filePath, content, expectedSha256)
 })
 
 server.onFsSearchFiles((connectionId, workspacePath, query) => {

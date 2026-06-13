@@ -279,6 +279,11 @@ export interface FileWriteChunk {
 export interface FileWriteHeader {
   workspacePath: string;
   filePath: string;
+  /**
+   * Compare-and-swap guard. Unset: unconditional write. Empty string: the file
+   * must not exist. Otherwise: lowercase-hex SHA-256 the current file bytes must match.
+   */
+  expectedSha256?: string | undefined;
 }
 
 export interface FileWriteData {
@@ -350,7 +355,14 @@ export interface WriteFileRequest {
 
 export interface WriteFileResponse {
   success: boolean;
-  error?: string | undefined;
+  error?:
+    | string
+    | undefined;
+  /**
+   * True when the write was rejected because expected_sha256 did not match —
+   * the caller should re-read, re-apply its change, and retry.
+   */
+  conflict: boolean;
 }
 
 function createBaseEmpty(): Empty {
@@ -3960,7 +3972,7 @@ export const FileWriteChunk: MessageFns<FileWriteChunk> = {
 };
 
 function createBaseFileWriteHeader(): FileWriteHeader {
-  return { workspacePath: "", filePath: "" };
+  return { workspacePath: "", filePath: "", expectedSha256: undefined };
 }
 
 export const FileWriteHeader: MessageFns<FileWriteHeader> = {
@@ -3970,6 +3982,9 @@ export const FileWriteHeader: MessageFns<FileWriteHeader> = {
     }
     if (message.filePath !== "") {
       writer.uint32(18).string(message.filePath);
+    }
+    if (message.expectedSha256 !== undefined) {
+      writer.uint32(26).string(message.expectedSha256);
     }
     return writer;
   },
@@ -3997,6 +4012,14 @@ export const FileWriteHeader: MessageFns<FileWriteHeader> = {
           message.filePath = reader.string();
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.expectedSha256 = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -4018,6 +4041,11 @@ export const FileWriteHeader: MessageFns<FileWriteHeader> = {
         : isSet(object.file_path)
         ? globalThis.String(object.file_path)
         : "",
+      expectedSha256: isSet(object.expectedSha256)
+        ? globalThis.String(object.expectedSha256)
+        : isSet(object.expected_sha256)
+        ? globalThis.String(object.expected_sha256)
+        : undefined,
     };
   },
 
@@ -4029,6 +4057,9 @@ export const FileWriteHeader: MessageFns<FileWriteHeader> = {
     if (message.filePath !== "") {
       obj.filePath = message.filePath;
     }
+    if (message.expectedSha256 !== undefined) {
+      obj.expectedSha256 = message.expectedSha256;
+    }
     return obj;
   },
 
@@ -4039,6 +4070,7 @@ export const FileWriteHeader: MessageFns<FileWriteHeader> = {
     const message = createBaseFileWriteHeader();
     message.workspacePath = object.workspacePath ?? "";
     message.filePath = object.filePath ?? "";
+    message.expectedSha256 = object.expectedSha256 ?? undefined;
     return message;
   },
 };
@@ -5109,7 +5141,7 @@ export const WriteFileRequest: MessageFns<WriteFileRequest> = {
 };
 
 function createBaseWriteFileResponse(): WriteFileResponse {
-  return { success: false, error: undefined };
+  return { success: false, error: undefined, conflict: false };
 }
 
 export const WriteFileResponse: MessageFns<WriteFileResponse> = {
@@ -5119,6 +5151,9 @@ export const WriteFileResponse: MessageFns<WriteFileResponse> = {
     }
     if (message.error !== undefined) {
       writer.uint32(18).string(message.error);
+    }
+    if (message.conflict !== false) {
+      writer.uint32(24).bool(message.conflict);
     }
     return writer;
   },
@@ -5146,6 +5181,14 @@ export const WriteFileResponse: MessageFns<WriteFileResponse> = {
           message.error = reader.string();
           continue;
         }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.conflict = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -5159,6 +5202,7 @@ export const WriteFileResponse: MessageFns<WriteFileResponse> = {
     return {
       success: isSet(object.success) ? globalThis.Boolean(object.success) : false,
       error: isSet(object.error) ? globalThis.String(object.error) : undefined,
+      conflict: isSet(object.conflict) ? globalThis.Boolean(object.conflict) : false,
     };
   },
 
@@ -5170,6 +5214,9 @@ export const WriteFileResponse: MessageFns<WriteFileResponse> = {
     if (message.error !== undefined) {
       obj.error = message.error;
     }
+    if (message.conflict !== false) {
+      obj.conflict = message.conflict;
+    }
     return obj;
   },
 
@@ -5180,6 +5227,7 @@ export const WriteFileResponse: MessageFns<WriteFileResponse> = {
     const message = createBaseWriteFileResponse();
     message.success = object.success ?? false;
     message.error = object.error ?? undefined;
+    message.conflict = object.conflict ?? false;
     return message;
   },
 };

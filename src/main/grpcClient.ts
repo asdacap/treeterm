@@ -26,7 +26,7 @@ import {
   type FileEntry
 } from '../generated/treeterm'
 import { getDefaultSocketPath } from './socketPath'
-import { PtyEventType, type PtyEvent, type IpcResult } from '../shared/ipc-types'
+import { PtyEventType, type PtyEvent, type IpcResult, type FsWriteFileResult } from '../shared/ipc-types'
 import type { FileContents } from '../renderer/types'
 import type {
   SandboxConfig,
@@ -560,18 +560,20 @@ export class GrpcDaemonClient {
     })
   }
 
-  async writeFile(workspacePath: string, filePath: string, content: string): Promise<IpcResult> {
+  async writeFile(workspacePath: string, filePath: string, content: string, expectedSha256?: string): Promise<FsWriteFileResult> {
     if (!this.client) throw new Error('Not connected to daemon')
     const client = this.client
 
     return new Promise((resolve, reject) => {
       const stream = client.writeFile((error, response) => {
-        if (error) reject(new Error(error.message))
-        else resolve(response as IpcResult)
+        if (error) { reject(new Error(error.message)); return }
+        if (response.success) resolve({ success: true })
+        else if (response.conflict) resolve({ success: false, error: response.error ?? 'write conflict', conflict: true })
+        else resolve({ success: false, error: response.error ?? 'write failed' })
       })
 
       // Send header first
-      stream.write({ header: { workspacePath, filePath } })
+      stream.write({ header: { workspacePath, filePath, expectedSha256 } })
 
       // Stream content in 64KB chunks
       const chunkSize = 64 * 1024
