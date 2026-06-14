@@ -8,7 +8,7 @@ import type { StoreApi } from 'zustand'
 import { createMockExecApi } from '../../shared/mockApis'
 import { makeWorkspace, makeSession } from '../../shared/test-fixtures/workspace'
 import { FileWatchEventType, type FileWatchEvent } from '../../shared/ipc-types'
-import { toWorkspaceFile, type Workspace } from '../../shared/workspaceFile'
+import { toStoredWorkspaceFile, type Workspace } from '../../shared/workspaceFile'
 import { sha256Hex } from '../lib/sha256'
 
 const flushPromises = () => new Promise(r => setTimeout(r, 0))
@@ -25,11 +25,13 @@ function sessionWithRefs(workspaces: Workspace[], version = 1): ReturnType<typeo
   })
 }
 
-// Emit a Present file-watch event delivering a workspace body.
-function emitFilePresent(ws: Workspace, sha?: string): void {
+// Emit a Present file-watch event delivering a workspace body. The on-disk envelope
+// carries a parentHash; tests that don't care pass '' and an arbitrary sha (the store
+// dedups by sha, not by re-hashing the delivered content).
+function emitFilePresent(ws: Workspace, sha?: string, parentHash = ''): void {
   const cb = fileWatchCallbacks.get(`${ws.id}.json`)
   if (!cb) throw new Error(`no file watch registered for ${ws.id}`)
-  cb({ type: FileWatchEventType.Present, content: JSON.stringify(toWorkspaceFile(ws)), sha256: sha ?? `sha-${ws.id}-${String(Math.random())}` })
+  cb({ type: FileWatchEventType.Present, content: JSON.stringify(toStoredWorkspaceFile(ws, parentHash)), sha256: sha ?? `sha-${ws.id}-${String(Math.random())}` })
 }
 
 function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
@@ -1228,8 +1230,9 @@ describe('createSessionStore', () => {
 
       // Simulate the daemon emitting the watch echo *during* writeFile, before it
       // resolves: lastSeenSha has not advanced yet, so the body is suppressed only by
-      // content match against the pending-write set. Without the fix this re-applies our
-      // own body, replacing the workspace object and tearing down a just-mounted terminal.
+      // sha match against the recent-hashes ring (recorded up front, before the write).
+      // Without the fix this re-applies our own body, replacing the workspace object and
+      // tearing down a just-mounted terminal.
       let echoFired = false
       vi.mocked(deps.filesystem.writeFile).mockImplementation(async (_wp: string, filePath: string, content: string) => {
         const cb = fileWatchCallbacks.get(filePath)
@@ -1264,6 +1267,86 @@ describe('createSessionStore', () => {
 
       expect(handle.getState().workspace.appStates['tab-2']).toBeDefined()
       expect(handle.getState().workspace.appStates['tab-1']).toBeUndefined()
+    })
+
+    // Capture every body the store writes, in order.
+    function captureWrites(): string[] {
+      const writes: string[] = []
+      vi.mocked(deps.filesystem.writeFile).mockImplementation((_wp: string, _fp: string, content: string) => {
+        writes.push(content)
+        return Promise.resolve({ success: true })
+      })
+      return writes
+    }
+
+    // Resolve a restored workspace's loaded store handle (fails loudly if not loaded).
+    function loadedHandle(id: string) {
+      const entry = store.getState().workspaces.get(id)!
+      expect(entry.status).toBe(WorkspaceEntryStatus.Loaded)
+      return (entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).store
+    }
+
+    it('chains each write\'s parentHash to the previous body\'s sha', async () => {
+      const ws = makeWorkspace({ id: 'ws-chain', name: 'chain', path: '/chain' })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
+      emitFilePresent(ws, 'sha-initial')
+      const handle = loadedHandle('ws-chain')
+
+      const writes = captureWrites()
+      handle.getState().updateMetadata('note', 'one', 'test')
+      for (let i = 0; i < 5; i++) await flushPromises()
+      handle.getState().updateMetadata('note', 'two', 'test')
+      for (let i = 0; i < 5; i++) await flushPromises()
+
+      expect(writes.length).toBeGreaterThanOrEqual(2)
+      // First write supersedes the body delivered by the watch (sha-initial).
+      expect((JSON.parse(writes[0]!) as { parentHash: string }).parentHash).toBe('sha-initial')
+      // Second write's parent is the first body's own sha — the chain links forward.
+      expect((JSON.parse(writes[1]!) as { parentHash: string }).parentHash).toBe(await sha256Hex(writes[0]!))
+    })
+
+    it('produces a distinct sha even when the logical content reverts to an earlier state', async () => {
+      const ws = makeWorkspace({ id: 'ws-revert', name: 'revert', path: '/revert' })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
+      emitFilePresent(ws, 'sha-initial')
+      const handle = loadedHandle('ws-revert')
+
+      const writes = captureWrites()
+      // Set a metadata key, then delete it — the logical body returns to its initial
+      // state, but the chained parentHash makes each written body hash to a new value.
+      handle.getState().updateMetadata('note', 'temp', 'test')
+      for (let i = 0; i < 5; i++) await flushPromises()
+      handle.getState().deleteMetadata('note', 'test')
+      for (let i = 0; i < 5; i++) await flushPromises()
+
+      expect(writes.length).toBeGreaterThanOrEqual(2)
+      const shas = await Promise.all(writes.map(w => sha256Hex(w)))
+      expect(new Set(shas).size).toBe(shas.length) // all distinct — no repeats
+    })
+
+    it('suppresses an echo of an older self-write still within the 32-hash ring', async () => {
+      const ws = makeWorkspace({ id: 'ws-ring', name: 'ring', path: '/ring' })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
+      emitFilePresent(ws, 'sha-initial')
+      const handle = loadedHandle('ws-ring')
+
+      // Make several writes; capture the body + sha of an early one.
+      const writes = captureWrites()
+      for (let n = 0; n < 5; n++) {
+        handle.getState().updateMetadata('note', `v${String(n)}`, 'test')
+        for (let i = 0; i < 5; i++) await flushPromises()
+      }
+      const earlyBody = writes[0]!
+      const earlySha = await sha256Hex(earlyBody)
+      const refBefore = handle.getState().workspace
+
+      // A late, out-of-order echo of that early write arrives. Its sha is still in the
+      // ring, so it must be suppressed (no re-apply, object reference preserved).
+      const cb = fileWatchCallbacks.get('ws-ring.json')!
+      cb({ type: FileWatchEventType.Present, content: earlyBody, sha256: earlySha })
+      for (let i = 0; i < 3; i++) await flushPromises()
+
+      expect(handle.getState().workspace).toBe(refBefore)
     })
 
     it('reconstructs child workspaces with parent relationship from their files', async () => {

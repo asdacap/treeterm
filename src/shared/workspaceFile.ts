@@ -42,25 +42,42 @@ export const WorkspaceFileSchema = z.object({
   lastActivity: z.number(),
 })
 
-/** The body persisted to the JSON file (everything except the ref's id/path). */
+/** The logical body the store mutates (everything except the ref's id/path). */
 export type WorkspaceFile = z.infer<typeof WorkspaceFileSchema>
+
+/** The envelope actually persisted to disk: the logical body plus `parentHash`,
+ *  the sha256 of the body this write supersedes (`''` for the first version).
+ *  Chaining the parent's hash into every body makes successive bodies hash to
+ *  distinct values even when their logical content reverts to an earlier state —
+ *  the hash sequence never repeats, which lets the writer dedup watch echoes by
+ *  sha alone. `parentHash` is write-time bookkeeping, not mutable state, so it is
+ *  stripped on read (it equals the writer's last-seen sha and is recalculable). */
+export const StoredWorkspaceFileSchema = WorkspaceFileSchema.extend({
+  parentHash: z.string(),
+})
+
+export type StoredWorkspaceFile = z.infer<typeof StoredWorkspaceFileSchema>
 
 /** A workspace as the renderer uses it: the file body joined with its ref. */
 export type Workspace = WorkspaceFile & { id: string; path: string }
 
-/** Serialize a workspace to its JSON file body, dropping the ref-only fields. */
-export function toWorkspaceFile(workspace: Workspace): WorkspaceFile {
+/** Build the on-disk envelope for a workspace, dropping the ref-only fields and
+ *  chaining in the parent body's hash. The caller stringifies it (with stable key
+ *  ordering) before writing. */
+export function toStoredWorkspaceFile(workspace: Workspace, parentHash: string): StoredWorkspaceFile {
   const file: Partial<Workspace> = { ...workspace }
   delete file.id
   delete file.path
-  return file as WorkspaceFile
+  return { ...(file as WorkspaceFile), parentHash }
 }
 
-/** Parse and validate a JSON file body, joining the ref's id/path back on.
+/** Parse and validate a JSON file body, joining the ref's id/path back on and
+ *  dropping `parentHash` (bookkeeping, not store state).
  *  Throws on invalid JSON or schema mismatch (fail loudly — the caller surfaces
  *  the workspace as an error rather than guessing). */
 export function parseWorkspaceFile(id: string, path: string, content: string): Workspace {
   const parsed: unknown = JSON.parse(content)
-  const file = WorkspaceFileSchema.parse(parsed)
-  return { ...file, id, path }
+  const file: Partial<StoredWorkspaceFile> = { ...StoredWorkspaceFileSchema.parse(parsed) }
+  delete file.parentHash
+  return { ...(file as WorkspaceFile), id, path }
 }

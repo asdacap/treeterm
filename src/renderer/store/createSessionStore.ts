@@ -15,7 +15,7 @@ import type {
   Application, SandboxConfig, TTYSessionInfo, LlmApi, GitHubApi, RunActionsApi
 } from '../types'
 import type { SessionLock } from '../../shared/types'
-import { parseWorkspaceFile, toWorkspaceFile } from '../../shared/workspaceFile'
+import { parseWorkspaceFile, toStoredWorkspaceFile } from '../../shared/workspaceFile'
 import type { WorktreeRegistryApi } from '../lib/worktreeRegistry'
 
 export enum WorkspaceEntryStatus {
@@ -251,18 +251,26 @@ export function createSessionStore(
   // Per-workspace content-sync bookkeeping. The JSON body of each workspace is
   // written via CAS WriteFile and observed via WatchFile, independently of the
   // ref-list (membership) sync below.
+  //
+  // How many recent self-write hashes to retain for echo suppression. A backstop
+  // bound: if a write's echo is ever coalesced away by the watcher and never
+  // observed, its hash would otherwise linger forever.
+  const RECENT_HASHES_MAX = 32
   interface WorkspaceSyncState {
     // sha256 of the body we believe the daemon currently holds ('' = absent/unknown).
-    // Used as the CAS guard for the next write.
+    // Used as the CAS guard for, and chained as the parentHash of, the next write.
     lastSeenSha: string
     // Last body we serialized and wrote, to skip redundant writes.
     lastWrittenJson: string
-    // Bodies we have written but not yet seen echoed back by the watch. The watch event
-    // for our own write can arrive before writeFile resolves (so before lastSeenSha
-    // advances), so we record each body up front — synchronously, before the write — and
-    // match the echo by content. Without this we re-apply our own write, rebuilding the
-    // workspace object graph and tearing down the just-mounted terminal tab.
-    pendingSelfWrites: Set<string>
+    // sha256s of the recent bodies we have written or applied, newest last. The watch
+    // event for our own write can arrive before writeFile resolves (so before lastSeenSha
+    // advances), so we record each body's hash up front — synchronously, before the write.
+    // parentHash chaining makes every body's hash distinct (even when its logical content
+    // reverts), so matching an echo by sha against this ring reliably tells our own writes
+    // apart from a genuine external edit. Without it we re-apply our own write, rebuilding
+    // the workspace object graph and tearing down the just-mounted terminal tab. Bounded to
+    // RECENT_HASHES_MAX, oldest evicted first.
+    recentHashes: string[]
     // Active file-watch handle (undefined until the watch is opened).
     unsubscribe?: () => void
     // Per-workspace serial write queue + coalesce flag.
@@ -274,10 +282,17 @@ export function createSessionStore(
   function getOrCreateSync(id: string): WorkspaceSyncState {
     let s = wsSync.get(id)
     if (!s) {
-      s = { lastSeenSha: '', lastWrittenJson: '', pendingSelfWrites: new Set(), unsubscribe: undefined, tail: Promise.resolve(), pending: false }
+      s = { lastSeenSha: '', lastWrittenJson: '', recentHashes: [], unsubscribe: undefined, tail: Promise.resolve(), pending: false }
       wsSync.set(id, s)
     }
     return s
+  }
+
+  // Remember a body's sha as one of ours, bounding the ring (oldest evicted first).
+  function rememberHash(sync: WorkspaceSyncState, sha: string): void {
+    if (sync.recentHashes.includes(sha)) return
+    sync.recentHashes.push(sha)
+    if (sync.recentHashes.length > RECENT_HASHES_MAX) sync.recentHashes.shift()
   }
 
   // Open a content watch for a workspace's JSON file (idempotent). The first event
@@ -316,10 +331,11 @@ export function createSessionStore(
 
     if (event.type === FileWatchEventType.Present) {
       // Echo of one of our own writes. The watch event can arrive before writeFile()
-      // resolves (so before lastSeenSha advances), so match by content too: re-applying
-      // our own write would needlessly rebuild the workspace and tear down a just-mounted
-      // terminal. Consume the pending body and treat it as now-current.
-      if (sync.pendingSelfWrites.delete(event.content) || event.sha256 === sync.lastSeenSha) {
+      // resolves (so before lastSeenSha advances), so we matched against the ring of
+      // hashes we recorded up front. parentHash chaining guarantees each body's hash is
+      // distinct, so a sha hit means we wrote it: re-applying it would needlessly rebuild
+      // the workspace and tear down a just-mounted terminal.
+      if (sync.recentHashes.includes(event.sha256)) {
         sync.lastSeenSha = event.sha256
         return
       }
@@ -331,6 +347,9 @@ export function createSessionStore(
         setWorkspaceFileError(id, `Invalid workspace file: ${err instanceof Error ? err.message : String(err)}`)
         return
       }
+      // A genuine external edit is now the current body; record it so its own later echo
+      // (or a redundant re-read) is recognized rather than re-applied.
+      rememberHash(sync, event.sha256)
       applyWorkspaceFile(store, workspace, createHandleForWorkspace)
     } else if (event.type === FileWatchEventType.Absent) {
       // The file backing a known ref is gone. Surface loudly — membership removal
@@ -352,25 +371,23 @@ export function createSessionStore(
     const sync = wsSync.get(id)
     if (!sync) return
 
-    const json = stableStringify(toWorkspaceFile(entry.data))
+    // Chain the parent's hash into the body so its own hash is distinct even if the
+    // logical content reverts to an earlier state (parentHash == the CAS guard sha).
+    const json = stableStringify(toStoredWorkspaceFile(entry.data, sync.lastSeenSha))
     if (json === sync.lastWrittenJson) return
 
-    // Record the body before writing: the daemon can emit the watch echo before
-    // writeFile() resolves, and onFileEvent must already know to suppress it by content.
-    sync.pendingSelfWrites.add(json)
-    // Backstop: if a write's echo is ever coalesced away by the watcher and never
-    // observed, its body would linger. Bound the set; entries are consumed in order.
-    if (sync.pendingSelfWrites.size > 32) {
-      sync.pendingSelfWrites.delete(sync.pendingSelfWrites.values().next().value as string)
-    }
+    // Record the hash before writing: the daemon can emit the watch echo before
+    // writeFile() resolves, and onFileEvent must already know to suppress it by sha.
+    const newSha = await sha256Hex(json)
+    rememberHash(sync, newSha)
 
     const result = await deps.filesystem.writeFile(workspaceDataDir, `${id}.json`, json, sync.lastSeenSha)
     if (result.success) {
       sync.lastWrittenJson = json
-      sync.lastSeenSha = await sha256Hex(json)
+      sync.lastSeenSha = newSha
     } else {
-      // The write did not land, so its body will never echo — stop suppressing it.
-      sync.pendingSelfWrites.delete(json)
+      // The write did not land; its hash stays in the bounded ring and ages out
+      // harmlessly (its echo will never arrive).
       if ('conflict' in result) {
         // Another writer won. The watch has (or will) deliver the winning body and
         // onFileEvent reconciles — do not clobber it.
