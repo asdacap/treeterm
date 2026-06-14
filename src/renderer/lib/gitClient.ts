@@ -76,6 +76,7 @@ export interface GitApi {
   pull: (repoPath: string) => Promise<IpcResult>
   getBehindCount: (repoPath: string) => Promise<number>
   getRemoteUrl: (repoPath: string) => Promise<IpcResult<{ url: string }>>
+  isAncestor: (repoPath: string, ancestorRef: string, descendantRef: string) => Promise<boolean>
 }
 
 // ---------------------------------------------------------------------------
@@ -1024,6 +1025,13 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }
+    },
+
+    // ----- isAncestor -----
+    async isAncestor(repoPath: string, ancestorRef: string, descendantRef: string): Promise<boolean> {
+      // exit 0 = ancestor, exit 1 = not ancestor, other codes (bad ref) also treated as not ancestor.
+      const result = await git(repoPath, ['merge-base', '--is-ancestor', ancestorRef, descendantRef])
+      return result.exitCode === 0
     },
   }
 }

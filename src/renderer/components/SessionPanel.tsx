@@ -13,6 +13,7 @@ import { useNavigationStore } from '../store/navigation'
 import { useKeybindingStore, PrefixModeState } from '../store/keybinding'
 import CreateChildDialog, { TabMode } from './CreateChildDialog'
 import OpenWorkspaceDialog from './OpenWorkspaceDialog'
+import AutoOpenWorktreesDialog from './AutoOpenWorktreesDialog'
 import UpstreamWarningDialog from './UpstreamWarningDialog'
 import type { ReviewState, WorktreeSettings, Workspace, WorkspaceStore } from '../types'
 import type { GitController } from '../store/createGitControllerStore'
@@ -40,6 +41,7 @@ export default function SessionPanel({
   const addWorkspace = useStore(sessionStore, s => s.addWorkspace)
   const addChildWorkspace = useStore(sessionStore, s => s.addChildWorkspace)
   const adoptExistingWorktree = useStore(sessionStore, s => s.adoptExistingWorktree)
+  const autoOpenWorktrees = useStore(sessionStore, s => s.autoOpenWorktrees)
   const createWorktreeFromBranch = useStore(sessionStore, s => s.createWorktreeFromBranch)
   const createWorktreeFromRemote = useStore(sessionStore, s => s.createWorktreeFromRemote)
   const quickForkWorkspace = useStore(sessionStore, s => s.quickForkWorkspace)
@@ -75,6 +77,7 @@ export default function SessionPanel({
     )
   })
   const [createChildDialogParentId, setCreateChildDialogParentId] = useState<string | null>(null)
+  const [autoOpenDialogRootId, setAutoOpenDialogRootId] = useState<string | null>(null)
   const [isOpenWorkspaceDialogOpen, setIsOpenWorkspaceDialogOpen] = useState(false)
   const [upstreamWarning, setUpstreamWarning] = useState<{
     workspaceId: string
@@ -181,6 +184,11 @@ export default function SessionPanel({
     setCreateChildDialogParentId(parentId)
   }
 
+
+  const handleAutoOpenWorktrees = (rootId: string) => {
+    closeContextMenu()
+    setAutoOpenDialogRootId(rootId)
+  }
 
   const handleQuickFork = async (wsId: string) => {
     const entry = workspaces.get(wsId)
@@ -341,6 +349,13 @@ export default function SessionPanel({
     ? createChildDialogParentEntry.store
     : null
 
+  // Get auto-open dialog root handle
+  const autoOpenDialogRootEntry = autoOpenDialogRootId ? workspaces.get(autoOpenDialogRootId) : undefined
+  const autoOpenDialogRootHandle = autoOpenDialogRootEntry &&
+    (autoOpenDialogRootEntry.status === WorkspaceEntryStatus.Loaded || autoOpenDialogRootEntry.status === WorkspaceEntryStatus.OperationError)
+    ? autoOpenDialogRootEntry.store
+    : null
+
   const handleWorkspaceClick = (id: string) => {
     setActiveWorkspace(id)
     setActiveView({ type: 'workspace', workspaceId: id, sessionId })
@@ -442,6 +457,7 @@ export default function SessionPanel({
         onClick={handleWorkspaceClick}
         onQuickFork={(wsId) => { void handleQuickFork(wsId); }}
         onCreateChild={handleCreateChild}
+        onAutoOpenWorktrees={handleAutoOpenWorktrees}
         onRemove={(wsId) => { void handleRemove(wsId); }}
         onDismiss={dismissWorkspace}
         onOpenSettings={handleOpenSettings}
@@ -619,6 +635,20 @@ export default function SessionPanel({
         />
       )}
 
+      {/* Auto Open All Recent Worktrees Dialog */}
+      {autoOpenDialogRootHandle && autoOpenDialogRootId && (
+        <AutoOpenWorktreesDialog
+          rootWorkspace={autoOpenDialogRootHandle}
+          openWorktreePaths={openWorktreePaths}
+          onConfirm={async (items) => {
+            const result = await autoOpenWorktrees(autoOpenDialogRootId, items)
+            if (result.success) setAutoOpenDialogRootId(null)
+            return result
+          }}
+          onCancel={() => { setAutoOpenDialogRootId(null); }}
+        />
+      )}
+
       {/* Open Workspace Dialog */}
       {isOpenWorkspaceDialogOpen && (
         <OpenWorkspaceDialog
@@ -649,6 +679,7 @@ interface WorkspaceTreeItemProps {
   onClick: (id: string) => void
   onQuickFork: (id: string) => void
   onCreateChild: (id: string) => void
+  onAutoOpenWorktrees: (id: string) => void
   onRemove: (id: string) => void
   onDismiss: (id: string) => void
   onOpenSettings: (id: string) => void
@@ -677,7 +708,7 @@ interface TreeItemViewProps extends Omit<WorkspaceTreeItemProps, 'entry'> {
 
 function TreeItemView({
   id, depth, isActive, isFocused, isExpanded, isFavourite,
-  onToggleExpand, onClick, onQuickFork, onCreateChild, onRemove, onDismiss, onOpenSettings, onToggleFavourite,
+  onToggleExpand, onClick, onQuickFork, onCreateChild, onAutoOpenWorktrees, onRemove, onDismiss, onOpenSettings, onToggleFavourite,
   onRefreshTitle, onRefreshBranch,
   children, renderChild,
   isDragging, dragOverPosition, onDragStart, onDragOver, onDrop, onDragEnd,
@@ -777,6 +808,11 @@ function TreeItemView({
         {ws?.isGitRepo && (
           <div className="context-menu-item" onClick={() => { onCreateChild(id); }}>
             Open Existing Branch
+          </div>
+        )}
+        {ws && !ws.isWorktree && ws.isGitRepo && (
+          <div className="context-menu-item" onClick={() => { onAutoOpenWorktrees(id); }}>
+            Auto Open All Recent Worktrees
           </div>
         )}
         {ws?.isWorktree && ws.parentId && (

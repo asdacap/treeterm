@@ -402,6 +402,7 @@ export interface GitApi {
   pull: (repoPath: string) => Promise<IpcResult>
   getBehindCount: (repoPath: string) => Promise<number>
   getRemoteUrl: (repoPath: string) => Promise<IpcResult<{ url: string }>>
+  isAncestor: (repoPath: string, ancestorRef: string, descendantRef: string) => Promise<boolean>
 }
 
 export interface GitHubReviewThread {
@@ -506,6 +507,7 @@ export interface WorkspaceGitApi {
   fetch: () => Promise<IpcResult>
   pull: () => Promise<IpcResult>
   getBehindCount: () => Promise<number>
+  isAncestor: (ancestorRef: string, descendantRef: string) => Promise<boolean>
 }
 
 export interface SettingsApi {

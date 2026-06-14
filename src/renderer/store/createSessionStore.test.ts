@@ -69,6 +69,7 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       fetch: vi.fn(),
       pull: vi.fn(),
       getBehindCount: vi.fn(),
+      isAncestor: vi.fn().mockResolvedValue(false),
     },
     filesystem: {
       readDirectory: vi.fn().mockResolvedValue({ success: true }),
@@ -330,6 +331,54 @@ describe('createSessionStore', () => {
       // Second adopt of same path
       const result = await store.getState().adoptExistingWorktree(parentId, '/repo/.worktrees/dup', 'branch', 'dup')
       expect(result).toEqual({ success: false, error: 'This worktree is already open' })
+    })
+
+    it('autoOpenWorktrees loads a batch under the root, nesting by parentPath', async () => {
+      const result = await store.getState().autoOpenWorktrees(parentId, [
+        { path: '/repo/.worktrees/feat', branch: 'feat', name: 'feat', parentPath: null },
+        { path: '/repo/.worktrees/sub', branch: 'sub', name: 'sub', parentPath: '/repo/.worktrees/feat' },
+      ])
+      expect(result).toEqual({ success: true })
+
+      const workspaces = store.getState().workspaces
+      const byPath = new Map(
+        Array.from(workspaces.values())
+          .filter((e): e is Extract<typeof e, { status: WorkspaceEntryStatus.Loaded }> => e.status === WorkspaceEntryStatus.Loaded)
+          .map(e => [e.data.path, e.data])
+      )
+      const feat = byPath.get('/repo/.worktrees/feat')
+      const sub = byPath.get('/repo/.worktrees/sub')
+      expect(feat?.parentId).toBe(parentId)
+      // child nests under the newly-created feat workspace, not the root
+      expect(sub?.parentId).toBe(feat?.id)
+    })
+
+    it('autoOpenWorktrees skips already-open worktrees', async () => {
+      await store.getState().adoptExistingWorktree(parentId, '/repo/.worktrees/dup', 'dup', 'dup')
+      const before = store.getState().workspaces.size
+      const result = await store.getState().autoOpenWorktrees(parentId, [
+        { path: '/repo/.worktrees/dup', branch: 'dup', name: 'dup', parentPath: null },
+        { path: '/repo/.worktrees/fresh', branch: 'fresh', name: 'fresh', parentPath: null },
+      ])
+      expect(result).toEqual({ success: true })
+      // only the fresh worktree was added; dup was skipped
+      expect(store.getState().workspaces.size).toBe(before + 1)
+    })
+
+    it('autoOpenWorktrees falls back to root for an item with an unknown parent', async () => {
+      const result = await store.getState().autoOpenWorktrees(parentId, [
+        { path: '/repo/.worktrees/orphan', branch: 'orphan', name: 'orphan', parentPath: '/repo/.worktrees/missing' },
+      ])
+      expect(result).toEqual({ success: true })
+      const orphan = Array.from(store.getState().workspaces.values())
+        .filter((e): e is Extract<typeof e, { status: WorkspaceEntryStatus.Loaded }> => e.status === WorkspaceEntryStatus.Loaded)
+        .find(e => e.data.path === '/repo/.worktrees/orphan')
+      expect(orphan?.data.parentId).toBe(parentId)
+    })
+
+    it('autoOpenWorktrees fails when root workspace not found', async () => {
+      const result = await store.getState().autoOpenWorktrees('nonexistent', [])
+      expect(result).toEqual({ success: false, error: 'Root workspace not found' })
     })
 
     it('createWorktreeFromBranch creates child from branch', async () => {

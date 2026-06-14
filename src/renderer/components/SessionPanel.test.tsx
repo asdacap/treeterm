@@ -101,6 +101,7 @@ function renderTreeItem(
       onClick={vi.fn()}
       onQuickFork={vi.fn()}
       onCreateChild={vi.fn()}
+      onAutoOpenWorktrees={vi.fn()}
       onRemove={vi.fn()}
       onDismiss={vi.fn()}
       onOpenSettings={vi.fn()}
