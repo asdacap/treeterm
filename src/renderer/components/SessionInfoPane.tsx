@@ -13,11 +13,13 @@ import PortForwardDialog from './PortForwardDialog'
 import JsonViewer from './JsonViewer'
 import SystemMonitor from './SystemMonitor'
 import SshUploadPane from './SshUploadPane'
+import SessionTtyList from './SessionTtyList'
 
 enum TabId {
   Info = 'info',
   Ssh = 'ssh',
   Json = 'json',
+  Tty = 'tty',
 }
 
 enum SshSubTab {
@@ -202,12 +204,12 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
     ? (connection.target.config.label || `${connection.target.config.user}@${connection.target.config.host}`)
     : displayName || sessionId
 
-  // Tabs: Info + SSH (if remote) + JSON (if connected)
+  // Tabs: Info + SSH (if remote) + JSON/TTYs (when the connection is usable)
   const tabs: { id: TabId; label: string }[] = isRemote
     ? isConnected
-      ? [{ id: TabId.Info, label: 'Info' }, { id: TabId.Ssh, label: 'SSH' }, { id: TabId.Json, label: 'JSON' }]
+      ? [{ id: TabId.Info, label: 'Info' }, { id: TabId.Ssh, label: 'SSH' }, { id: TabId.Json, label: 'JSON' }, { id: TabId.Tty, label: 'TTYs' }]
       : [{ id: TabId.Info, label: 'Info' }, { id: TabId.Ssh, label: 'SSH' }]
-    : [{ id: TabId.Info, label: 'Info' }, { id: TabId.Json, label: 'JSON' }]
+    : [{ id: TabId.Info, label: 'Info' }, { id: TabId.Json, label: 'JSON' }, { id: TabId.Tty, label: 'TTYs' }]
 
   // SSH sub-tabs: Bootstrap + Tunnel + Daemon always, Port Forwards when connected
   const sshSubTabs: { id: SshSubTab; label: string }[] = isConnected
@@ -337,6 +339,8 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
         <div className="ssh-pane-output">
           <JsonViewer data={sessionData} />
         </div>
+      ) : activeTab === TabId.Tty ? (
+        <SessionTtyList sessionStore={sessionStore} />
       ) : sshSubTab === SshSubTab.Bootstrap ? (
         <div className="ssh-pane-output" ref={scrollRef}>
           {bootstrapOutput.length === 0 ? (
