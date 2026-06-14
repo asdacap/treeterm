@@ -566,7 +566,8 @@ export function createSessionStore(
       }
 
       const returnedJson = stableStringify(result.session.workspaceRefs)
-      const accepted = result.session.version === expectedVersion + 1 && returnedJson === currentJson
+      const versionOk = result.session.version === expectedVersion + 1
+      const accepted = versionOk && returnedJson === currentJson
 
       if (accepted) {
         store.setState({
@@ -575,7 +576,10 @@ export function createSessionStore(
           workspaceDataDir: result.session.workspaceDataDir,
         })
       } else {
-        console.warn('[session] ref update rejected, expected version:', expectedVersion + 1, 'got:', result.session.version, '— reconciling')
+        const reason = versionOk
+          ? 'refs changed under us (content mismatch)'
+          : `version mismatch, expected ${expectedVersion + 1} got ${result.session.version}`
+        console.warn('[session] ref update rejected —', reason, '— reconciling')
         store.setState({
           sessionVersion: result.session.version,
           sessionLock: result.session.lock,
