@@ -53,6 +53,17 @@ export interface SessionDeps {
   setActivityTabState: (tabId: string, state: ActivityState) => void
 }
 
+/** One worktree to load in an {@link SessionState.autoOpenWorktrees} batch. */
+export interface AutoOpenWorktreeItem {
+  path: string
+  branch: string
+  name: string
+  /** Parent worktree path, or `null` to attach under the root workspace. */
+  parentPath: string | null
+  displayName?: string
+  description?: string
+}
+
 export interface SessionState {
   sessionId: string
 
@@ -82,6 +93,9 @@ export interface SessionState {
   addWorkspace: (path: string, options?: { skipDefaultTabs?: boolean; settings?: WorktreeSettings }) => string
   addChildWorkspace: (parentId: string, name: string, isDetached?: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
   adoptExistingWorktree: (parentId: string, worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string, displayName?: string) => Promise<{ success: boolean; error?: string }>
+  /** Batch-adopt multiple worktrees, preserving the detected parent/child hierarchy.
+   *  Already-open worktrees are skipped. */
+  autoOpenWorktrees: (rootWorkspaceId: string, items: AutoOpenWorktreeItem[]) => Promise<{ success: boolean; error?: string }>
   createWorktreeFromBranch: (parentId: string, branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
   createWorktreeFromRemote: (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
   removeWorkspace: (id: string) => Promise<void>
@@ -1168,6 +1182,73 @@ export function createSessionStore(
           ...(displayName ? { displayName } : {}),
         }
         await addChildWorkspaceFromResult(parentId, name, worktreePath, branch, { settings, metadata })
+        return { success: true }
+      } finally {
+        await releaseLock().catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
+      }
+    },
+
+    autoOpenWorktrees: async (rootWorkspaceId: string, items: AutoOpenWorktreeItem[]) => {
+      const rootEntry = get().workspaces.get(rootWorkspaceId)
+      if (!rootEntry || (rootEntry.status !== WorkspaceEntryStatus.Loaded && rootEntry.status !== WorkspaceEntryStatus.OperationError)) {
+        return { success: false, error: 'Root workspace not found' }
+      }
+      const rootPath = rootEntry.data.path
+
+      const lockStatus = await acquireLock()
+      if (!lockStatus.acquired) {
+        return { success: false, error: lockStatus.error }
+      }
+
+      try {
+        // Seed path → id with every currently-open workspace so children of an already-open
+        // worktree attach correctly, and children of newly-created ones can resolve as we go.
+        const pathToId = new Map<string, string>()
+        for (const e of Array.from(get().workspaces.values())) {
+          if (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) {
+            pathToId.set(e.data.path, e.data.id)
+          }
+        }
+
+        // Topologically order: an item can be created once its parent (root, an open
+        // workspace, or an earlier item) is known. Items with a missing/cyclic parent are
+        // appended last and fall back to the root anchor at creation time.
+        const knownPaths = new Set<string>(pathToId.keys())
+        knownPaths.add(rootPath)
+        const ordered: AutoOpenWorktreeItem[] = []
+        const remaining = [...items]
+        let progressed = true
+        while (remaining.length > 0 && progressed) {
+          progressed = false
+          for (let i = remaining.length - 1; i >= 0; i--) {
+            const it = remaining[i]
+            if (!it) continue
+            if (it.parentPath === null || knownPaths.has(it.parentPath)) {
+              ordered.push(it)
+              knownPaths.add(it.path)
+              remaining.splice(i, 1)
+              progressed = true
+            }
+          }
+        }
+        for (const it of remaining) ordered.push(it)
+
+        for (const it of ordered) {
+          const alreadyOpen = Array.from(get().workspaces.values()).some(
+            e => (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) && e.data.path === it.path
+          )
+          if (alreadyOpen) continue
+
+          const parentId = (it.parentPath ? pathToId.get(it.parentPath) : undefined) ?? rootWorkspaceId
+          const metadata: Record<string, string> = {
+            branchIsUserDefined: 'true',
+            ...(it.displayName ? { displayName: it.displayName } : {}),
+            ...(it.description ? { description: it.description } : {}),
+          }
+          const newId = await addChildWorkspaceFromResult(parentId, it.name, it.path, it.branch, { metadata })
+          pathToId.set(it.path, newId)
+        }
+
         return { success: true }
       } finally {
         await releaseLock().catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })

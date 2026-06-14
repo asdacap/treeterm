@@ -575,6 +575,7 @@ export function createWorkspaceStore(
       fetch: () => deps.git.fetch(workspace.path),
       pull: () => deps.git.pull(workspace.path),
       getBehindCount: () => deps.git.getBehindCount(workspace.path),
+      isAncestor: (ancestorRef, descendantRef) => deps.git.isAncestor(workspace.path, ancestorRef, descendantRef),
     },
 
     filesystemApi: {

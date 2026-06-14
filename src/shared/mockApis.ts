@@ -15,6 +15,7 @@ export function createMockGitApi(): WorkspaceGitApi {
     getFileContentsForDiff: vi.fn(), getUncommittedFileContentsForDiff: vi.fn(),
     getHeadCommitHash: vi.fn(), getLog: vi.fn(), getCommitDiff: vi.fn(),
     getCommitFileDiff: vi.fn(), fetch: vi.fn(), pull: vi.fn(), getBehindCount: vi.fn(),
+    isAncestor: vi.fn(),
   }
 }
 
