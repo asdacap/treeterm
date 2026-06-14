@@ -532,6 +532,22 @@ describe('useAppStore', () => {
       cleanup()
     })
 
+    it('localConnect seeds version from an empty (0-ref) daemon session', async () => {
+      // A persisted daemon session can have 0 refs yet a version > 0. The renderer
+      // must still seed that version (via handleRestore) so the first ref sync uses
+      // the correct expectedVersion — otherwise the first workspace open is rejected.
+      const session: any = { id: 'empty-session', workspaceRefs: [], workspaceDataDir: "", createdAt: 0, lastActivity: 0, version: 9 }
+      const localConn: ConnectionInfo = { id: 'local', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected }
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- test fixture
+      vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({ info: localConn, session })
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
+
+      const entry = Array.from(useAppStore.getState().sessionStores.values()).find(e => e.store.getState().connection.id === 'local')
+      if (!entry) throw new Error('expected a local session store')
+      expect(entry.store.getState().handleRestore).toHaveBeenCalledWith(session)
+      cleanup()
+    })
+
     it('initial workspace activates existing workspace', async () => {
       const mockSetActiveWorkspace = vi.fn<(...args: any[]) => void>()
       const { createSessionStore } = await import('./createSessionStore')

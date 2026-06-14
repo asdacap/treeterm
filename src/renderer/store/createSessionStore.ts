@@ -578,7 +578,7 @@ export function createSessionStore(
       } else {
         const reason = versionOk
           ? 'refs changed under us (content mismatch)'
-          : `version mismatch, expected ${expectedVersion + 1} got ${result.session.version}`
+          : `version mismatch, expected ${String(expectedVersion + 1)} got ${String(result.session.version)}`
         console.warn('[session] ref update rejected —', reason, '— reconciling')
         store.setState({
           sessionVersion: result.session.version,

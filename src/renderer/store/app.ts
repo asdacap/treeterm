@@ -294,8 +294,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
         if (!get().sessionNamesStore.getState().getName(localSessionId)) {
           get().sessionNamesStore.getState().setName(localSessionId, 'LOCAL')
         }
+        // Seed version/lock/dataDir from the daemon for every session — even an
+        // empty one. A daemon session persists across restarts and keeps bumping
+        // its version, so it can have 0 refs yet a version > 0. Without seeding,
+        // the renderer stays at version 0 and the first ref sync is rejected on a
+        // version mismatch (the "first open always fails" symptom).
+        void sessionStore.getState().handleRestore(session)
         if (session.workspaceRefs.length > 0) {
-          void sessionStore.getState().handleRestore(session)
           // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length > 0 checked above
           const firstRef = session.workspaceRefs[0]!
           useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstRef.id, sessionId: localSessionId })
@@ -329,8 +334,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
       if (oldName) {
         get().sessionNamesStore.getState().setName(reconnSessionId, oldName)
       }
+      // Seed version/lock/dataDir even for an empty session (see localConnect).
+      void newStore.getState().handleRestore(session)
       if (session.workspaceRefs.length > 0) {
-        void newStore.getState().handleRestore(session)
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length > 0 checked above
         const firstRef = session.workspaceRefs[0]!
         useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstRef.id, sessionId: reconnSessionId })
