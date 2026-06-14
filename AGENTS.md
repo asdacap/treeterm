@@ -95,6 +95,7 @@ Never silently swallow errors or return empty/default values on failure. Throw e
 ### Reactivity
 - A lot the time we will an actively changing resource such as the worktree.
 - Usually, there is two rpc, getResource and watchResoure. When this happen, remove getResource and just make watchResource return initial value as first event.
+- Be aware that rpc may emit change event before the write RPC returns. This caused multiple issue in the past.
 
 ### Interactivity
 - ANY async calls should show a loading screen to the user. Even if its very quick, its not necessarily the case in all condition.
