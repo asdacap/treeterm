@@ -112,6 +112,21 @@ export function filterFilesByDir<T extends DiffFile | UncommittedFile>(
   return files.filter((f) => f.path === dir || f.path.startsWith(dir + '/'))
 }
 
+// Sum additions and deletions for every file under a node's subtree.
+function getNodeStats(node: TreeNode): { additions: number; deletions: number } {
+  if (node.file !== null) {
+    return { additions: node.file.additions, deletions: node.file.deletions }
+  }
+  let additions = 0
+  let deletions = 0
+  for (const child of node.children) {
+    const childStats = getNodeStats(child)
+    additions += childStats.additions
+    deletions += childStats.deletions
+  }
+  return { additions, deletions }
+}
+
 function getAllDirPaths(nodes: TreeNode[]): Set<string> {
   const paths = new Set<string>()
   function walk(node: TreeNode) {
@@ -185,6 +200,7 @@ export function CommittedDiffFileTree({
 
     const isExpanded = expandedDirs.has(node.path)
     const menuId = `diff-dir-${node.path}`
+    const dirStats = getNodeStats(node)
     return (
       <div key={node.path}>
         <div
@@ -199,6 +215,10 @@ export function CommittedDiffFileTree({
         >
           <span className="diff-tree-chevron">{isExpanded ? '\u25BC' : '\u25B6'}</span>
           <span className="diff-tree-dir-name">{node.name}</span>
+          <span className="diff-file-stats">
+            <span className="additions">+{dirStats.additions}</span>
+            <span className="deletions">-{dirStats.deletions}</span>
+          </span>
         </div>
         <ContextMenu menuId={menuId} activeMenuId={activeMenuId} position={menuPosition}>
           <div
@@ -289,6 +309,7 @@ export function UncommittedDiffFileTree({
 
     const isExpanded = expandedDirs.has(node.path)
     const menuId = `diff-dir-${node.path}`
+    const dirStats = getNodeStats(node)
     return (
       <div key={node.path}>
         <div
@@ -303,6 +324,10 @@ export function UncommittedDiffFileTree({
         >
           <span className="diff-tree-chevron">{isExpanded ? '\u25BC' : '\u25B6'}</span>
           <span className="diff-tree-dir-name">{node.name}</span>
+          <span className="diff-file-stats">
+            <span className="additions">+{dirStats.additions}</span>
+            <span className="deletions">-{dirStats.deletions}</span>
+          </span>
         </div>
         <ContextMenu menuId={menuId} activeMenuId={activeMenuId} position={menuPosition}>
           <div

@@ -157,7 +157,7 @@ describe('CommittedDiffFileTree', () => {
   })
 
   it('renders additions and deletions stats', () => {
-    const files = [makeDiffFile({ additions: 7, deletions: 3 })]
+    const files = [makeDiffFile({ path: 'app.ts', additions: 7, deletions: 3 })]
     render(
       <CommittedDiffFileTree
         files={files}
@@ -226,6 +226,25 @@ describe('CommittedDiffFileTree', () => {
     // Both files should be visible (dir is expanded)
     expect(screen.getByText('a.ts')).toBeDefined()
     expect(screen.getByText('b.ts')).toBeDefined()
+  })
+
+  it('sums additions and deletions per directory', () => {
+    const files = [
+      makeDiffFile({ path: 'src/a.ts', additions: 3, deletions: 1 }),
+      makeDiffFile({ path: 'src/b.ts', additions: 4, deletions: 2 }),
+    ]
+    const { container } = render(
+      <CommittedDiffFileTree
+        files={files}
+        selectedFile={null}
+        onSelectFile={onSelectFile}
+        getStatusIcon={getStatusIcon}
+      />
+    )
+    const dirStats = container.querySelector('.diff-tree-dir .diff-file-stats')
+    if (!dirStats) throw new Error('expected directory stats')
+    expect(dirStats.querySelector('.additions')?.textContent).toBe('+7')
+    expect(dirStats.querySelector('.deletions')?.textContent).toBe('-3')
   })
 
   it('collapses a directory when its header is clicked', () => {
@@ -324,6 +343,28 @@ describe('UncommittedDiffFileTree', () => {
       />
     )
     expect(screen.getByText<HTMLButtonElement>('Stage').disabled).toBe(true)
+  })
+
+  it('sums additions and deletions per directory', () => {
+    const files = [
+      makeUncommittedFile({ path: 'src/a.ts', additions: 3, deletions: 1 }),
+      makeUncommittedFile({ path: 'src/b.ts', additions: 4, deletions: 2 }),
+    ]
+    const { container } = render(
+      <UncommittedDiffFileTree
+        files={files}
+        selectedFile={null}
+        onSelectFile={onSelectFile}
+        getStatusIcon={getStatusIcon}
+        onAction={onAction}
+        actionLabel="Stage"
+        stagingInProgress={false}
+      />
+    )
+    const dirStats = container.querySelector('.diff-tree-dir .diff-file-stats')
+    if (!dirStats) throw new Error('expected directory stats')
+    expect(dirStats.querySelector('.additions')?.textContent).toBe('+7')
+    expect(dirStats.querySelector('.deletions')?.textContent).toBe('-3')
   })
 
   it('action button click does not trigger onSelectFile', () => {
