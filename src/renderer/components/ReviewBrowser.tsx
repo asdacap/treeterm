@@ -8,7 +8,7 @@ import { getTabs } from '../types'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, GitLogCommit, WorkspaceStore, WorkspaceGitApi, ReviewState, ViewedFileStats } from '../types'
 import { FileChangeStatus } from '../types'
 import { useGitApi } from '../hooks/useWorkspaceApis'
-import { CommittedDiffFileTree, UncommittedDiffFileTree, sortFilesAsTree } from './DiffFileTree'
+import { CommittedDiffFileTree, UncommittedDiffFileTree, sortFilesAsTree, filterFilesByDir } from './DiffFileTree'
 import { StackedDiffList } from './StackedDiffList'
 import { DiffToolbar } from './DiffToolbar'
 import { createDiffsWorker } from '../pierre-diffs-config'
@@ -78,6 +78,9 @@ export default function ReviewBrowser({
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(false)
   const [scrollToFile, setScrollToFile] = useState<string | null>(reviewState?.selectedFilePath ?? null)
   const [activeFile, setActiveFile] = useState<string | null>(null)
+
+  // Directory filter — narrows both panes to a folder; transient (in-memory only)
+  const [dirFilter, setDirFilter] = useState<string | null>(null)
 
   // Viewed files state — maps file path to diff stats at time of marking viewed
   const [viewedFiles, setViewedFiles] = useState<Record<string, ViewedFileStats>>(
@@ -617,6 +620,8 @@ export default function ReviewBrowser({
 
   const stagedFiles = uncommitted?.files.filter((f) => f.staged) || []
   const unstagedFiles = uncommitted?.files.filter((f) => !f.staged) || []
+  const filteredStagedFiles = filterFilesByDir(stagedFiles, dirFilter)
+  const filteredUnstagedFiles = filterFilesByDir(unstagedFiles, dirFilter)
   const hasUncommitted = uncommitted && uncommitted.files.length > 0
   const hasCommittedChanges = diff && diff.files.length > 0
   const hasConflicts = conflictInfo?.hasConflicts || false
@@ -977,6 +982,8 @@ export default function ReviewBrowser({
                     totalComments={0}
                     viewedCount={commitDiffViewedCount}
                     totalFiles={commitDiffFiles.length}
+                    dirFilter={dirFilter}
+                    onClearDirFilter={() => { setDirFilter(null) }}
                   />
                   <div
                     className="diff-content"
@@ -989,11 +996,12 @@ export default function ReviewBrowser({
                         <div className="diff-loading">Loading...</div>
                       ) : (
                         <CommittedDiffFileTree
-                          files={commitDiffFiles}
+                          files={filterFilesByDir(commitDiffFiles, dirFilter)}
                           selectedFile={activeFile}
                           onSelectFile={(path) => { setScrollToFile(path) }}
                           getStatusIcon={getStatusIcon}
                           viewedFiles={viewedFilePaths}
+                          onFilterDir={setDirFilter}
                         />
                       )}
                     </div>
@@ -1006,7 +1014,7 @@ export default function ReviewBrowser({
                       highlighterOptions={{ preferredHighlighter: 'shiki-wasm' }}
                     >
                       <StackedDiffList
-                        files={sortFilesAsTree(commitDiffFiles)}
+                        files={sortFilesAsTree(filterFilesByDir(commitDiffFiles, dirFilter))}
                         loadFileContents={loadCommitFileContents}
                         diffStyle={isSplitView ? 'split' : 'unified'}
                         expandUnchanged={!hideUnchangedRegions}
@@ -1052,6 +1060,8 @@ export default function ReviewBrowser({
                   totalComments={reviews.length}
                   viewedCount={committedViewedCount}
                   totalFiles={diff.files.length}
+                  dirFilter={dirFilter}
+                  onClearDirFilter={() => { setDirFilter(null) }}
                 />
 
                 <div
@@ -1062,11 +1072,12 @@ export default function ReviewBrowser({
                 >
                   <div className="diff-file-list" style={{ width: fileListWidth }}>
                     <CommittedDiffFileTree
-                      files={diff.files}
+                      files={filterFilesByDir(diff.files, dirFilter)}
                       selectedFile={activeFile}
                       onSelectFile={(path) => { setScrollToFile(path); persistViewState({ selectedFilePath: path }) }}
                       getStatusIcon={getStatusIcon}
                       viewedFiles={viewedFilePaths}
+                      onFilterDir={setDirFilter}
                     />
                   </div>
 
@@ -1080,7 +1091,7 @@ export default function ReviewBrowser({
                     highlighterOptions={{ preferredHighlighter: 'shiki-wasm' }}
                   >
                     <StackedDiffList
-                      files={sortFilesAsTree(diff.files)}
+                      files={sortFilesAsTree(filterFilesByDir(diff.files, dirFilter))}
                       loadFileContents={loadCommittedFileContents}
                       diffStyle={isSplitView ? 'split' : 'unified'}
                       expandUnchanged={!hideUnchangedRegions}
@@ -1135,6 +1146,8 @@ export default function ReviewBrowser({
                   totalComments={reviews.length}
                   viewedCount={uncommittedViewedCount}
                   totalFiles={uncommitted.files.length}
+                  dirFilter={dirFilter}
+                  onClearDirFilter={() => { setDirFilter(null) }}
                 />
 
                 <div
@@ -1144,31 +1157,33 @@ export default function ReviewBrowser({
                   onMouseLeave={handleResizeMouseUp}
                 >
                   <div className="diff-file-list" style={{ width: fileListWidth }}>
-                    {stagedFiles.length > 0 && (
+                    {filteredStagedFiles.length > 0 && (
                       <>
                         <div className="diff-file-section">Staged</div>
                         <UncommittedDiffFileTree
-                          files={stagedFiles}
+                          files={filteredStagedFiles}
                           selectedFile={null}
                           onSelectFile={(file) => { setScrollToFile(file.path) }}
                           getStatusIcon={getStatusIcon}
                           onAction={(path) => { void handleUnstageFile(path); }}
                           actionLabel="Unstage"
                           stagingInProgress={stagingInProgress}
+                          onFilterDir={setDirFilter}
                         />
                       </>
                     )}
-                    {unstagedFiles.length > 0 && (
+                    {filteredUnstagedFiles.length > 0 && (
                       <>
                         <div className="diff-file-section">Unstaged</div>
                         <UncommittedDiffFileTree
-                          files={unstagedFiles}
+                          files={filteredUnstagedFiles}
                           selectedFile={null}
                           onSelectFile={(file) => { setScrollToFile(file.path) }}
                           getStatusIcon={getStatusIcon}
                           onAction={(path) => { void handleStageFile(path); }}
                           actionLabel="Stage"
                           stagingInProgress={stagingInProgress}
+                          onFilterDir={setDirFilter}
                         />
                       </>
                     )}
@@ -1184,7 +1199,7 @@ export default function ReviewBrowser({
                     highlighterOptions={{ preferredHighlighter: 'shiki-wasm' }}
                   >
                     <StackedDiffList
-                      files={sortFilesAsTree([...stagedFiles, ...unstagedFiles])}
+                      files={sortFilesAsTree([...filteredStagedFiles, ...filteredUnstagedFiles])}
                       loadFileContents={loadUncommittedFileContents}
                       diffStyle={isSplitView ? 'split' : 'unified'}
                       expandUnchanged={!hideUnchangedRegions}

@@ -34,6 +34,27 @@ vi.mock('@pierre/diffs', () => ({}))
 vi.mock('../pierre-diffs-config', () => ({
   createDiffsWorker: () => ({} as Worker),
 }))
+// DiffFileTree pulls in the context-menu store (→ app store → monaco) transitively;
+// mock it so this lightweight suite stays free of the editor stack.
+vi.mock('../store/contextMenu', async () => {
+  const { create } = await import('zustand')
+  const store = create<{
+    activeMenuId: string | null
+    position: { x: number; y: number }
+    open: (menuId: string, x: number, y: number) => void
+    close: () => void
+  }>()((set) => ({
+    activeMenuId: null,
+    position: { x: 0, y: 0 },
+    open: (menuId, x, y) => { set({ activeMenuId: menuId, position: { x, y } }); },
+    close: () => { set({ activeMenuId: null }); },
+  }))
+  return {
+    useContextMenuStore: store,
+    handleClickOutside: vi.fn(),
+    installClickListener: vi.fn(),
+  }
+})
 
 import { CommitsLoadMoreSentinel, BaseBranchSelector } from './ReviewBrowser'
 

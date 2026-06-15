@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import { Check } from 'lucide-react'
 import type { DiffFile, UncommittedFile } from '../types'
+import { useContextMenuStore } from '../store/contextMenu'
+import ContextMenu from './ContextMenu'
 
 interface TreeNode {
   name: string
@@ -101,6 +103,15 @@ export function sortFilesAsTree<T extends DiffFile | UncommittedFile>(files: T[]
   return sortedPaths.map(p => filesByPath.get(p)!)
 }
 
+// Narrow a flat file list to the files under (or equal to) a directory path.
+export function filterFilesByDir<T extends DiffFile | UncommittedFile>(
+  files: T[],
+  dir: string | null
+): T[] {
+  if (!dir) return files
+  return files.filter((f) => f.path === dir || f.path.startsWith(dir + '/'))
+}
+
 function getAllDirPaths(nodes: TreeNode[]): Set<string> {
   const paths = new Set<string>()
   function walk(node: TreeNode) {
@@ -120,6 +131,7 @@ interface CommittedTreeProps {
   onSelectFile: (path: string) => void
   getStatusIcon: (status: DiffFile['status']) => React.JSX.Element
   viewedFiles?: Set<string>
+  onFilterDir?: (path: string) => void
 }
 
 export function CommittedDiffFileTree({
@@ -128,9 +140,13 @@ export function CommittedDiffFileTree({
   onSelectFile,
   getStatusIcon,
   viewedFiles,
+  onFilterDir,
 }: CommittedTreeProps): React.JSX.Element {
   const tree = buildTree(files)
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => getAllDirPaths(tree))
+  const openContextMenu = useContextMenuStore((s) => s.open)
+  const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
+  const menuPosition = useContextMenuStore((s) => s.position)
 
   const toggleDir = (path: string) => {
     setExpandedDirs((prev) => {
@@ -168,16 +184,30 @@ export function CommittedDiffFileTree({
     }
 
     const isExpanded = expandedDirs.has(node.path)
+    const menuId = `diff-dir-${node.path}`
     return (
       <div key={node.path}>
         <div
           className="diff-tree-dir"
           style={{ paddingLeft: `${String(depth * 16 + 12)}px` }}
           onClick={() => { toggleDir(node.path); }}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            openContextMenu(menuId, e.clientX, e.clientY)
+          }}
         >
           <span className="diff-tree-chevron">{isExpanded ? '\u25BC' : '\u25B6'}</span>
           <span className="diff-tree-dir-name">{node.name}</span>
         </div>
+        <ContextMenu menuId={menuId} activeMenuId={activeMenuId} position={menuPosition}>
+          <div
+            className="context-menu-item"
+            onClick={() => { onFilterDir?.(node.path); useContextMenuStore.getState().close() }}
+          >
+            Filter to this folder
+          </div>
+        </ContextMenu>
         {isExpanded && node.children.map((child) => renderNode(child, depth + 1))}
       </div>
     )
@@ -195,6 +225,7 @@ interface UncommittedTreeProps {
   onAction: (path: string) => void
   actionLabel: string
   stagingInProgress: boolean
+  onFilterDir?: (path: string) => void
 }
 
 export function UncommittedDiffFileTree({
@@ -205,9 +236,13 @@ export function UncommittedDiffFileTree({
   onAction,
   actionLabel,
   stagingInProgress,
+  onFilterDir,
 }: UncommittedTreeProps): React.JSX.Element {
   const tree = buildTree(files)
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => getAllDirPaths(tree))
+  const openContextMenu = useContextMenuStore((s) => s.open)
+  const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
+  const menuPosition = useContextMenuStore((s) => s.position)
 
   const toggleDir = (path: string) => {
     setExpandedDirs((prev) => {
@@ -253,16 +288,30 @@ export function UncommittedDiffFileTree({
     }
 
     const isExpanded = expandedDirs.has(node.path)
+    const menuId = `diff-dir-${node.path}`
     return (
       <div key={node.path}>
         <div
           className="diff-tree-dir"
           style={{ paddingLeft: `${String(depth * 16 + 12)}px` }}
           onClick={() => { toggleDir(node.path); }}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            openContextMenu(menuId, e.clientX, e.clientY)
+          }}
         >
           <span className="diff-tree-chevron">{isExpanded ? '\u25BC' : '\u25B6'}</span>
           <span className="diff-tree-dir-name">{node.name}</span>
         </div>
+        <ContextMenu menuId={menuId} activeMenuId={activeMenuId} position={menuPosition}>
+          <div
+            className="context-menu-item"
+            onClick={() => { onFilterDir?.(node.path); useContextMenuStore.getState().close() }}
+          >
+            Filter to this folder
+          </div>
+        </ContextMenu>
         {isExpanded && node.children.map((child) => renderNode(child, depth + 1))}
       </div>
     )

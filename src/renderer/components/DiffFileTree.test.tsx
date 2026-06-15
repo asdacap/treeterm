@@ -2,9 +2,29 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 
-import { getSortedFilePaths, sortFilesAsTree, CommittedDiffFileTree, UncommittedDiffFileTree } from './DiffFileTree'
+import { getSortedFilePaths, sortFilesAsTree, filterFilesByDir, CommittedDiffFileTree, UncommittedDiffFileTree } from './DiffFileTree'
 import type { DiffFile, UncommittedFile } from '../types'
 import { FileChangeStatus } from '../types'
+
+vi.mock('../store/contextMenu', async () => {
+  const { create } = await import('zustand')
+  const store = create<{
+    activeMenuId: string | null
+    position: { x: number; y: number }
+    open: (menuId: string, x: number, y: number) => void
+    close: () => void
+  }>()((set) => ({
+    activeMenuId: null,
+    position: { x: 0, y: 0 },
+    open: (menuId, x, y) => { set({ activeMenuId: menuId, position: { x, y } }); },
+    close: () => { set({ activeMenuId: null }); },
+  }))
+  return {
+    useContextMenuStore: store,
+    handleClickOutside: vi.fn(),
+    installClickListener: vi.fn(),
+  }
+})
 
 function makeDiffFile(overrides: Partial<DiffFile> = {}): DiffFile {
   return {
@@ -90,6 +110,28 @@ describe('sortFilesAsTree', () => {
 
   it('returns empty array for empty input', () => {
     expect(sortFilesAsTree([])).toEqual([])
+  })
+})
+
+describe('filterFilesByDir', () => {
+  it('returns all files when dir is null', () => {
+    const files = [makeDiffFile({ path: 'a.ts' }), makeDiffFile({ path: 'src/b.ts' })]
+    expect(filterFilesByDir(files, null)).toBe(files)
+  })
+
+  it('keeps only files under the given directory', () => {
+    const files = [
+      makeDiffFile({ path: 'src/app.ts' }),
+      makeDiffFile({ path: 'src/util/x.ts' }),
+      makeDiffFile({ path: 'docs/readme.md' }),
+    ]
+    expect(filterFilesByDir(files, 'src').map(f => f.path)).toEqual(['src/app.ts', 'src/util/x.ts'])
+    expect(filterFilesByDir(files, 'src/util').map(f => f.path)).toEqual(['src/util/x.ts'])
+  })
+
+  it('does not match directories that share a name prefix', () => {
+    const files = [makeDiffFile({ path: 'src/a.ts' }), makeDiffFile({ path: 'src-gen/b.ts' })]
+    expect(filterFilesByDir(files, 'src').map(f => f.path)).toEqual(['src/a.ts'])
   })
 })
 
@@ -363,5 +405,28 @@ describe('CommittedDiffFileTree viewedFiles', () => {
       />
     )
     expect(container.querySelector('.diff-file-viewed-icon')).toBeNull()
+  })
+
+  it('filters to a directory via the right-click context menu', () => {
+    const onFilterDir = vi.fn()
+    const files = [makeDiffFile({ path: 'src/a.ts' }), makeDiffFile({ path: 'src/b.ts' })]
+    const { container } = render(
+      <CommittedDiffFileTree
+        files={files}
+        selectedFile={null}
+        onSelectFile={onSelectFile}
+        getStatusIcon={getStatusIcon}
+        onFilterDir={onFilterDir}
+      />
+    )
+    // No menu item visible until the directory row is right-clicked
+    expect(screen.queryByText('Filter to this folder')).toBeNull()
+
+    const dir = container.querySelector('.diff-tree-dir')
+    if (!dir) throw new Error('expected a directory row')
+    fireEvent.contextMenu(dir)
+
+    fireEvent.click(screen.getByText('Filter to this folder'))
+    expect(onFilterDir).toHaveBeenCalledWith('src')
   })
 })

@@ -7200,6 +7200,45 @@ body,
 .diff-toolbar-viewed-progress {
   display: flex;
   align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Directory filter chip */
+.diff-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 320px;
+  padding: 2px 4px 2px 8px;
+  font-size: 11px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+}
+
+.diff-filter-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-filter-chip-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.diff-filter-chip-clear:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .diff-toolbar-viewed-count {

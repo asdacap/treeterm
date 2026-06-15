@@ -1,5 +1,5 @@
 import React from 'react'
-import { Columns2, AlignJustify, Eye, EyeOff, MessageSquare, CheckCircle2, Space } from 'lucide-react'
+import { Columns2, AlignJustify, Eye, EyeOff, MessageSquare, CheckCircle2, Space, Filter, X } from 'lucide-react'
 
 interface DiffToolbarProps {
   isSplitView: boolean
@@ -11,6 +11,8 @@ interface DiffToolbarProps {
   totalComments: number
   viewedCount?: number
   totalFiles?: number
+  dirFilter?: string | null
+  onClearDirFilter?: () => void
 }
 
 export function DiffToolbar({
@@ -23,6 +25,8 @@ export function DiffToolbar({
   totalComments,
   viewedCount,
   totalFiles,
+  dirFilter,
+  onClearDirFilter,
 }: DiffToolbarProps): React.JSX.Element {
   return (
     <div className="diff-toolbar-global">
@@ -31,6 +35,19 @@ export function DiffToolbar({
           <span className="diff-toolbar-viewed-count" title={`${String(viewedCount ?? 0)} of ${String(totalFiles)} files viewed`}>
             <CheckCircle2 size={14} />
             {viewedCount ?? 0}/{totalFiles} files viewed
+          </span>
+        )}
+        {dirFilter && (
+          <span className="diff-filter-chip" title={`Filtered to ${dirFilter}`}>
+            <Filter size={12} />
+            <span className="diff-filter-chip-label">{dirFilter}</span>
+            <button
+              className="diff-filter-chip-clear"
+              onClick={onClearDirFilter}
+              title="Clear directory filter"
+            >
+              <X size={12} />
+            </button>
           </span>
         )}
       </div>
