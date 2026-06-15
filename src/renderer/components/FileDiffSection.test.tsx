@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, act } from '@testing-library/react'
 import React from 'react'
 
 // Mock IntersectionObserver
@@ -148,7 +148,17 @@ describe('FileDiffSection', () => {
       )
     }
     expect(onRequestLoad).toHaveBeenCalledTimes(1)
-    expect(mockDisconnect).toHaveBeenCalled()
+  })
+
+  it('keeps the observer connected after load (continuous, not one-shot)', () => {
+    render(<FileDiffSection {...defaultProps} onRequestLoad={vi.fn()} />)
+    if (intersectionCallback) {
+      intersectionCallback(
+        [{ isIntersecting: true } as IntersectionObserverEntry],
+        {} as IntersectionObserver
+      )
+    }
+    expect(mockDisconnect).not.toHaveBeenCalled()
   })
 
   it('does not call onRequestLoad when not intersecting', () => {
@@ -448,6 +458,76 @@ describe('FileDiffSection', () => {
 
   it('renders a normal-sized diff directly without the guard', () => {
     render(<FileDiffSection {...defaultProps} contents={makeContents()} />)
+    expect(screen.getByTestId('multi-file-diff')).toBeDefined()
+    expect(screen.queryByText('Load anyway')).toBeNull()
+  })
+
+  function fireIntersect(isIntersecting: boolean): void {
+    act(() => {
+      intersectionCallback?.(
+        [{ isIntersecting } as IntersectionObserverEntry],
+        {} as IntersectionObserver
+      )
+    })
+  }
+
+  it('unmounts the heavy viewer when the section scrolls off-screen', () => {
+    const { container } = render(<FileDiffSection {...defaultProps} contents={makeContents()} />)
+    expect(screen.getByTestId('multi-file-diff')).toBeDefined()
+
+    fireIntersect(false)
+
+    expect(screen.queryByTestId('multi-file-diff')).toBeNull()
+    expect(container.querySelector('.file-diff-offscreen-placeholder')).not.toBeNull()
+  })
+
+  it('remounts the heavy viewer when the section scrolls back into view', () => {
+    render(<FileDiffSection {...defaultProps} contents={makeContents()} />)
+    fireIntersect(false)
+    expect(screen.queryByTestId('multi-file-diff')).toBeNull()
+
+    fireIntersect(true)
+    expect(screen.getByTestId('multi-file-diff')).toBeDefined()
+  })
+
+  it('pins the spacer to the measured body height when unmounting', () => {
+    const { container } = render(<FileDiffSection {...defaultProps} contents={makeContents()} />)
+    const body = container.querySelector('.file-diff-body') as HTMLElement
+    vi.spyOn(body, 'getBoundingClientRect').mockReturnValue({
+      height: 500, width: 100, top: 0, left: 0, bottom: 500, right: 100, x: 0, y: 0, toJSON: () => {},
+    })
+
+    fireIntersect(false)
+
+    const placeholder = container.querySelector('.file-diff-offscreen-placeholder') as HTMLElement
+    expect(placeholder.style.height).toBe('500px')
+  })
+
+  it('ignores a zero/sub-floor measured height (keeps the default floor)', () => {
+    const { container } = render(<FileDiffSection {...defaultProps} contents={makeContents()} />)
+    const body = container.querySelector('.file-diff-body') as HTMLElement
+    vi.spyOn(body, 'getBoundingClientRect').mockReturnValue({
+      height: 0, width: 100, top: 0, left: 0, bottom: 0, right: 100, x: 0, y: 0, toJSON: () => {},
+    })
+
+    fireIntersect(false)
+
+    const placeholder = container.querySelector('.file-diff-offscreen-placeholder') as HTMLElement
+    expect(placeholder.style.height).toBe('40px')
+  })
+
+  it('keeps the size-guard "Load anyway" choice across unmount and remount', () => {
+    const hugeContents = makeContents({ modifiedContent: 'line\n'.repeat(20001) })
+    render(<FileDiffSection {...defaultProps} contents={hugeContents} />)
+
+    fireEvent.click(screen.getByText('Load anyway'))
+    expect(screen.getByTestId('multi-file-diff')).toBeDefined()
+
+    fireIntersect(false)
+    expect(screen.queryByTestId('multi-file-diff')).toBeNull()
+
+    fireIntersect(true)
+    // Viewer comes straight back; the guard is not shown again.
     expect(screen.getByTestId('multi-file-diff')).toBeDefined()
     expect(screen.queryByText('Load anyway')).toBeNull()
   })

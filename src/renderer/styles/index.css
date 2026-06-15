@@ -7393,6 +7393,10 @@ body,
   font-style: italic;
 }
 
+.file-diff-offscreen-placeholder {
+  width: 100%;
+}
+
 .file-diff-too-large {
   display: flex;
   flex-direction: column;
