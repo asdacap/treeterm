@@ -415,4 +415,40 @@ describe('FileDiffSection', () => {
     fireEvent.contextMenu(screen.getByText('Viewed'))
     expect(screen.getByTestId('multi-file-diff')).toBeDefined()
   })
+
+  it('guards a diff with too many lines instead of rendering it', () => {
+    const hugeContents = makeContents({
+      modifiedContent: 'line\n'.repeat(20001),
+    })
+    render(<FileDiffSection {...defaultProps} contents={hugeContents} />)
+    // Heavy viewer must not be mounted
+    expect(screen.queryByTestId('multi-file-diff')).toBeNull()
+    expect(screen.getByText('Load anyway')).toBeDefined()
+  })
+
+  it('guards a diff that is too many bytes even on a single line', () => {
+    const hugeContents = makeContents({
+      modifiedContent: 'x'.repeat(2 * 1024 * 1024 + 1),
+    })
+    render(<FileDiffSection {...defaultProps} contents={hugeContents} />)
+    expect(screen.queryByTestId('multi-file-diff')).toBeNull()
+    expect(screen.getByText('Load anyway')).toBeDefined()
+  })
+
+  it('renders the heavy viewer after clicking "Load anyway"', () => {
+    const hugeContents = makeContents({
+      modifiedContent: 'line\n'.repeat(20001),
+    })
+    render(<FileDiffSection {...defaultProps} contents={hugeContents} />)
+    expect(screen.queryByTestId('multi-file-diff')).toBeNull()
+
+    fireEvent.click(screen.getByText('Load anyway'))
+    expect(screen.getByTestId('multi-file-diff')).toBeDefined()
+  })
+
+  it('renders a normal-sized diff directly without the guard', () => {
+    render(<FileDiffSection {...defaultProps} contents={makeContents()} />)
+    expect(screen.getByTestId('multi-file-diff')).toBeDefined()
+    expect(screen.queryByText('Load anyway')).toBeNull()
+  })
 })
