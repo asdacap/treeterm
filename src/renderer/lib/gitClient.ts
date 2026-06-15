@@ -251,6 +251,19 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
     }
   }
 
+  // Resolve the MAIN worktree root for a repo, even when `dirPath` is itself a
+  // linked worktree. `git rev-parse --show-toplevel` returns the linked
+  // worktree's own path, which would anchor new worktrees inside a child
+  // workspace instead of at the repo root. The first entry of
+  // `git worktree list --porcelain` is always the main worktree.
+  async function resolveRepoRoot(dirPath: string): Promise<string | null> {
+    const result = await git(dirPath, ['worktree', 'list', '--porcelain'])
+    if (result.exitCode !== 0) return null
+    const line = result.stdout.split('\n').find((l) => l.startsWith('worktree '))
+    if (!line) return null
+    return line.slice('worktree '.length).trim() || null
+  }
+
   async function resolveWorktreePath(rootPath: string, worktreeName: string): Promise<string> {
     if (await isWorktreesDirInGitignore(rootPath)) {
       return `${rootPath}/.worktrees/${worktreeName}`
@@ -271,15 +284,16 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
         const result = await git(dirPath, ['rev-parse', '--is-inside-work-tree'])
         if (result.exitCode !== 0) return { isRepo: false }
 
-        const [branchResult, rootResult] = await Promise.all([
+        const [branchResult, repoRoot, topLevelResult] = await Promise.all([
           git(dirPath, ['rev-parse', '--abbrev-ref', 'HEAD']),
+          resolveRepoRoot(dirPath),
           git(dirPath, ['rev-parse', '--show-toplevel']),
         ])
 
         return {
           isRepo: true,
           branch: branchResult.stdout.trim() || 'HEAD',
-          rootPath: rootResult.stdout.trim() || dirPath,
+          rootPath: repoRoot || topLevelResult.stdout.trim() || dirPath,
         }
       } catch (error) {
         console.warn('[git] getGitInfo failed, treating as non-repo:', error)
@@ -295,11 +309,12 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
       onProgress?: (data: string) => void,
     ): Promise<WorktreeResult> {
       try {
-        const rootResult = await git(repoPath, ['rev-parse', '--show-toplevel'])
-        if (rootResult.exitCode !== 0) {
-          return { success: false, error: interpretError(rootResult).message }
+        // Resolve to the MAIN worktree root so forking a child workspace creates
+        // the new worktree at the repo root, not nested inside the child.
+        const rootPath = await resolveRepoRoot(repoPath)
+        if (!rootPath) {
+          return { success: false, error: 'Failed to resolve repository root' }
         }
-        const rootPath = rootResult.stdout.trim()
 
         const worktreePath = await resolveWorktreePath(rootPath, name)
         const branchName = name
@@ -414,11 +429,12 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
       onProgress?: (data: string) => void,
     ): Promise<WorktreeResult> {
       try {
-        const rootResult = await git(repoPath, ['rev-parse', '--show-toplevel'])
-        if (rootResult.exitCode !== 0) {
-          return { success: false, error: interpretError(rootResult).message }
+        // Resolve to the MAIN worktree root so forking a child workspace creates
+        // the new worktree at the repo root, not nested inside the child.
+        const rootPath = await resolveRepoRoot(repoPath)
+        if (!rootPath) {
+          return { success: false, error: 'Failed to resolve repository root' }
         }
-        const rootPath = rootResult.stdout.trim()
 
         const worktreePath = await resolveWorktreePath(rootPath, worktreeName)
 
@@ -443,11 +459,12 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
       try {
         const branchName = remoteBranch.replace(/^[^/]+\//, '')
 
-        const rootResult = await git(repoPath, ['rev-parse', '--show-toplevel'])
-        if (rootResult.exitCode !== 0) {
-          return { success: false, error: interpretError(rootResult).message }
+        // Resolve to the MAIN worktree root so forking a child workspace creates
+        // the new worktree at the repo root, not nested inside the child.
+        const rootPath = await resolveRepoRoot(repoPath)
+        if (!rootPath) {
+          return { success: false, error: 'Failed to resolve repository root' }
         }
-        const rootPath = rootResult.stdout.trim()
 
         const worktreePath = await resolveWorktreePath(rootPath, worktreeName)
 

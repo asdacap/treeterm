@@ -1484,13 +1484,14 @@ export function createSessionStore(
       }
 
       const existingBranches = await deps.git.listLocalBranches(ws.gitRootPath)
-      const parentBranch = ws.gitBranch || ''
 
+      // The fork creates a flat branch named after the candidate (see
+      // createWorktree), so dedup against the candidate itself — not a
+      // `parentBranch/candidate` form that is never actually created.
       let name: string | undefined = undefined
       for (let i = 0; i < 3; i++) {
         const candidate = humanId({ separator: '-', capitalize: false })
-        const fullBranch = parentBranch ? `${parentBranch}/${candidate}` : candidate
-        if (!existingBranches.includes(fullBranch)) {
+        if (!existingBranches.includes(candidate)) {
           name = candidate
           break
         }

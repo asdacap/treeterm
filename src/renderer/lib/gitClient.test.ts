@@ -454,6 +454,7 @@ describe('createGitApi', () => {
       autoComplete(exec, [
         { stdout: 'true' },    // is-inside-work-tree
         { stdout: 'main' },    // abbrev-ref HEAD (parallel)
+        { stdout: 'worktree /repo\n' }, // worktree list --porcelain (resolveRepoRoot, parallel)
         { stdout: '/repo' },   // show-toplevel (parallel)
       ])
 
@@ -1170,7 +1171,7 @@ describe('createGitApi', () => {
       const exec = createMockExec()
       const fs = createMockFilesystem()
       autoComplete(exec, [
-        { stdout: '/repo' },   // rev-parse --show-toplevel
+        { stdout: 'worktree /repo\n' }, // worktree list --porcelain (resolveRepoRoot)
         { stdout: '' },        // check-ignore .worktrees (exit 0 = ignored)
         { stdout: '' },        // worktree add
       ])
@@ -1189,7 +1190,7 @@ describe('createGitApi', () => {
       const exec = createMockExec()
       const fs = createMockFilesystem()
       autoComplete(exec, [
-        { stdout: '/repo' },                       // rev-parse
+        { stdout: 'worktree /repo\n' },            // worktree list --porcelain (resolveRepoRoot)
         { stderr: '.worktrees is not ignored', exitCode: 1 }, // check-ignore (exit 1 = not ignored)
         { stdout: '/home/user' },                  // resolveHomedir (echo $HOME)
         { stdout: '' },                            // worktree add
@@ -1209,7 +1210,7 @@ describe('createGitApi', () => {
       const exec = createMockExec()
       const fs = createMockFilesystem()
       autoComplete(exec, [
-        { stdout: '/repo' },
+        { stdout: 'worktree /repo\n' }, // worktree list --porcelain (resolveRepoRoot)
         { stdout: '' },        // gitignored
         { stdout: '' },        // worktree add
       ])
@@ -1237,7 +1238,7 @@ describe('createGitApi', () => {
       const exec = createMockExec()
       const fs = createMockFilesystem()
       autoComplete(exec, [
-        { stdout: '/repo' },   // rev-parse
+        { stdout: 'worktree /repo\n' }, // worktree list --porcelain (resolveRepoRoot)
         { stdout: '' },        // check-ignore
         { stdout: '' },        // worktree add
       ])
@@ -1257,7 +1258,7 @@ describe('createGitApi', () => {
       const exec = createMockExec()
       const fs = createMockFilesystem()
       autoComplete(exec, [
-        { stdout: '/repo' },   // rev-parse
+        { stdout: 'worktree /repo\n' }, // worktree list --porcelain (resolveRepoRoot)
         { stdout: '' },        // check-ignore
         { stdout: '' },        // worktree add
       ])
@@ -1542,7 +1543,7 @@ describe('createGitApi', () => {
       const exec = createMockExec()
       const fs = createMockFilesystem()
       autoComplete(exec, [
-        { stdout: '/repo' },   // rev-parse
+        { stdout: 'worktree /repo\n' }, // worktree list --porcelain (resolveRepoRoot)
         { stdout: '' },        // check-ignore
         { stderr: 'already exists', exitCode: 1 }, // worktree add fails
       ])
@@ -1584,7 +1585,7 @@ describe('createGitApi', () => {
       const exec = createMockExec()
       const fs = createMockFilesystem()
       autoComplete(exec, [
-        { stdout: '/repo' },   // rev-parse
+        { stdout: 'worktree /repo\n' }, // worktree list --porcelain (resolveRepoRoot)
         { stdout: '' },        // check-ignore
         { stderr: 'already exists', exitCode: 1 }, // worktree add fails
       ])
@@ -2130,14 +2131,14 @@ describe('createGitApi', () => {
     it('catches thrown errors from worktree add', async () => {
       const exec = createMockExec()
       const fs = createMockFilesystem()
-      // rev-parse succeeds, check-ignore succeeds, but worktree add throws
+      // worktree list succeeds, check-ignore succeeds, but worktree add throws
       let callCount = 0
       vi.mocked(exec.start).mockImplementation(() => {
         callCount++
         if (callCount === 3) return Promise.reject(new Error('disk full'))
         const execId = `exec-${String(callCount)}`
         setTimeout(() => {
-          if (callCount === 1) exec._complete(execId, '/repo')
+          if (callCount === 1) exec._complete(execId, 'worktree /repo\n')
           if (callCount === 2) exec._complete(execId, '')
         })
         return Promise.resolve({ success: true, execId })
