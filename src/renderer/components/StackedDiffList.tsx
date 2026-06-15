@@ -99,9 +99,9 @@ export function StackedDiffList({
     return () => { observer.disconnect() }
   }, [files, onActiveFileChange])
 
-  const handleRequestLoad = useCallback(async (filePath: string) => {
+  const handleRequestLoad = useCallback(async (filePath: string, force = false) => {
     const existing = loadStates.get(filePath)
-    if (existing?.contents || existing?.loading) return
+    if (!force && (existing?.contents || existing?.loading)) return
 
     setLoadStates(prev => {
       const next = new Map(prev)
@@ -155,6 +155,7 @@ export function StackedDiffList({
               loading={state?.loading ?? false}
               error={state?.error ?? null}
               onRequestLoad={() => { void handleRequestLoad(file.path) }}
+              onRefresh={() => { void handleRequestLoad(file.path, true) }}
               diffStyle={diffStyle}
               expandUnchanged={expandUnchanged}
               ignoreWhitespace={ignoreWhitespace}

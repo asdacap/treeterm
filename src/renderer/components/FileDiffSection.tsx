@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Loader2, RefreshCw } from 'lucide-react'
 import type { DiffFile, UncommittedFile, FileDiffContents, ReviewComment } from '../types'
 import { FileChangeStatus } from '../types'
 import { PierreDiffViewer } from './PierreDiffViewer'
@@ -51,6 +51,7 @@ interface FileDiffSectionProps {
   loading: boolean
   error: string | null
   onRequestLoad: () => void
+  onRefresh?: () => void
   diffStyle: 'split' | 'unified'
   expandUnchanged: boolean
   ignoreWhitespace: boolean
@@ -74,6 +75,7 @@ export function FileDiffSection({
   loading,
   error,
   onRequestLoad,
+  onRefresh,
   diffStyle,
   expandUnchanged,
   ignoreWhitespace,
@@ -188,6 +190,16 @@ export function FileDiffSection({
             disabled={stagingAction.disabled}
           >
             {stagingAction.label}
+          </button>
+        )}
+        {onRefresh && (
+          <button
+            className="file-diff-refresh-btn"
+            onClick={(e) => { e.stopPropagation(); onRefresh() }}
+            disabled={loading}
+            title="Refresh this file's diff"
+          >
+            <RefreshCw size={12} className={loading ? 'spinning' : ''} />
           </button>
         )}
         {onToggleViewed && (

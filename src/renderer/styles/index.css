@@ -7347,6 +7347,29 @@ body,
   cursor: default;
 }
 
+.file-diff-refresh-btn {
+  display: flex;
+  align-items: center;
+  padding: 2px 6px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.file-diff-refresh-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.file-diff-refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .file-diff-viewed-label {
   display: flex;
   align-items: center;
