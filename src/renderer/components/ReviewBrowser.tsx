@@ -640,6 +640,23 @@ export default function ReviewBrowser({
     setScrollToFile(null)
   }, [])
 
+  // Jump to the next/previous file that hasn't been marked viewed yet.
+  // `files` must be in the same display order as the StackedDiffList so the
+  // scroll target matches what the user sees.
+  const navigateUnviewed = useCallback(
+    (files: (DiffFile | UncommittedFile)[], direction: 'next' | 'prev') => {
+      const paths = files.map((f) => f.path)
+      if (paths.length === 0) return
+      const currentIdx = activeFile ? paths.indexOf(activeFile) : -1
+      const candidates = direction === 'next'
+        ? paths.slice(currentIdx + 1)
+        : paths.slice(0, currentIdx === -1 ? paths.length : currentIdx).reverse()
+      const target = candidates.find((p) => !(p in viewedFiles))
+      if (target !== undefined) setScrollToFile(target)
+    },
+    [activeFile, viewedFiles]
+  )
+
   const handleToggleViewed = useCallback((file: DiffFile | UncommittedFile) => {
     setViewedFiles(prev => {
       let next: Record<string, ViewedFileStats>
@@ -1062,6 +1079,9 @@ export default function ReviewBrowser({
                   totalFiles={diff.files.length}
                   dirFilter={dirFilter}
                   onClearDirFilter={() => { setDirFilter(null) }}
+                  onPrevUnviewed={() => { navigateUnviewed(sortFilesAsTree(filterFilesByDir(diff.files, dirFilter)), 'prev') }}
+                  onNextUnviewed={() => { navigateUnviewed(sortFilesAsTree(filterFilesByDir(diff.files, dirFilter)), 'next') }}
+                  hasUnviewed={committedViewedCount < diff.files.length}
                 />
 
                 <div
@@ -1148,6 +1168,9 @@ export default function ReviewBrowser({
                   totalFiles={uncommitted.files.length}
                   dirFilter={dirFilter}
                   onClearDirFilter={() => { setDirFilter(null) }}
+                  onPrevUnviewed={() => { navigateUnviewed(sortFilesAsTree([...filteredStagedFiles, ...filteredUnstagedFiles]), 'prev') }}
+                  onNextUnviewed={() => { navigateUnviewed(sortFilesAsTree([...filteredStagedFiles, ...filteredUnstagedFiles]), 'next') }}
+                  hasUnviewed={uncommittedViewedCount < uncommitted.files.length}
                 />
 
                 <div

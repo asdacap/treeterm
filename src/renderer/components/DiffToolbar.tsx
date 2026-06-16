@@ -1,5 +1,5 @@
 import React from 'react'
-import { Columns2, AlignJustify, Eye, EyeOff, MessageSquare, CheckCircle2, Space, Filter, X } from 'lucide-react'
+import { Columns2, AlignJustify, Eye, EyeOff, MessageSquare, CheckCircle2, Space, Filter, X, ChevronUp, ChevronDown } from 'lucide-react'
 
 interface DiffToolbarProps {
   isSplitView: boolean
@@ -13,6 +13,9 @@ interface DiffToolbarProps {
   totalFiles?: number
   dirFilter?: string | null
   onClearDirFilter?: () => void
+  onPrevUnviewed?: () => void
+  onNextUnviewed?: () => void
+  hasUnviewed?: boolean
 }
 
 export function DiffToolbar({
@@ -27,6 +30,9 @@ export function DiffToolbar({
   totalFiles,
   dirFilter,
   onClearDirFilter,
+  onPrevUnviewed,
+  onNextUnviewed,
+  hasUnviewed,
 }: DiffToolbarProps): React.JSX.Element {
   return (
     <div className="diff-toolbar-global">
@@ -52,6 +58,28 @@ export function DiffToolbar({
         )}
       </div>
       <div className="diff-toolbar-controls">
+        {onPrevUnviewed && (
+          <button
+            className="pierre-diff-btn"
+            onClick={onPrevUnviewed}
+            disabled={!hasUnviewed}
+            title="Previous unviewed file"
+          >
+            <ChevronUp size={14} />
+          </button>
+        )}
+
+        {onNextUnviewed && (
+          <button
+            className="pierre-diff-btn"
+            onClick={onNextUnviewed}
+            disabled={!hasUnviewed}
+            title="Next unviewed file"
+          >
+            <ChevronDown size={14} />
+          </button>
+        )}
+
         <button
           className={`pierre-diff-btn ${isSplitView ? 'active' : ''}`}
           onClick={onToggleSplit}

@@ -77,4 +77,39 @@ describe('DiffToolbar', () => {
     render(<DiffToolbar {...defaultProps} />)
     expect(screen.queryByTitle(/files viewed/)).toBeNull()
   })
+
+  it('does not render unviewed navigation buttons without handlers', () => {
+    render(<DiffToolbar {...defaultProps} />)
+    expect(screen.queryByTitle('Next unviewed file')).toBeNull()
+    expect(screen.queryByTitle('Previous unviewed file')).toBeNull()
+  })
+
+  it('renders unviewed navigation buttons when handlers provided', () => {
+    render(<DiffToolbar {...defaultProps} onPrevUnviewed={vi.fn()} onNextUnviewed={vi.fn()} hasUnviewed={true} />)
+    expect(screen.getByTitle('Previous unviewed file')).toBeDefined()
+    expect(screen.getByTitle('Next unviewed file')).toBeDefined()
+  })
+
+  it('calls onNextUnviewed on click', () => {
+    const onNextUnviewed = vi.fn()
+    render(<DiffToolbar {...defaultProps} onNextUnviewed={onNextUnviewed} hasUnviewed={true} />)
+    fireEvent.click(screen.getByTitle('Next unviewed file'))
+    expect(onNextUnviewed).toHaveBeenCalledTimes(1)
+  })
+
+  it('calls onPrevUnviewed on click', () => {
+    const onPrevUnviewed = vi.fn()
+    render(<DiffToolbar {...defaultProps} onPrevUnviewed={onPrevUnviewed} hasUnviewed={true} />)
+    fireEvent.click(screen.getByTitle('Previous unviewed file'))
+    expect(onPrevUnviewed).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables navigation buttons when no unviewed files remain', () => {
+    const onNextUnviewed = vi.fn()
+    render(<DiffToolbar {...defaultProps} onPrevUnviewed={vi.fn()} onNextUnviewed={onNextUnviewed} hasUnviewed={false} />)
+    const nextBtn = screen.getByTitle('Next unviewed file')
+    expect(nextBtn.hasAttribute('disabled')).toBe(true)
+    fireEvent.click(nextBtn)
+    expect(onNextUnviewed).not.toHaveBeenCalled()
+  })
 })
