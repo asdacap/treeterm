@@ -166,7 +166,7 @@ export default function FlexLayoutPane({ workspace: ws, isRemote, onNewTab }: Fl
       }
     }
     return action
-  }, [workspace, removeTab, setActiveTab])
+  }, [workspace, removeTab, setActiveTab, ws])
 
   // Serialize model changes to metadata
   const handleModelChange = useCallback((m: Model) => {
