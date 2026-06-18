@@ -233,7 +233,9 @@ describe('BaseBranchSelector', () => {
     })
     const input = container.querySelector('.base-branch-dropdown-search input')!
     fireEvent.change(input, { target: { value: 'feature' } })
-    const visible = Array.from(container.querySelectorAll('.base-branch-dropdown-item')).map(n => n.textContent)
+    const visible = Array.from(
+      container.querySelectorAll('.base-branch-dropdown-item:not(.custom-ref):not(.reset)')
+    ).map(n => n.textContent)
     expect(visible).toEqual(['feature-a', 'feature-b'])
   })
 
@@ -318,6 +320,76 @@ describe('BaseBranchSelector', () => {
       expect(container.querySelector('.base-branch-dropdown-error')).not.toBeNull()
     })
     expect(container.querySelector('.base-branch-dropdown-error')!.textContent).toContain('git: command failed')
+  })
+
+  it('offers the typed text as a custom commit/ref and calls onChange with it', async () => {
+    const git = makeGitApiStub({
+      listLocalBranches: vi.fn().mockResolvedValue(['main', 'feature-a']),
+      listRemoteBranches: vi.fn().mockResolvedValue([]),
+    })
+    const onChange = vi.fn()
+    const { container } = render(
+      <BaseBranchSelector
+        git={git}
+        currentBase="main"
+        defaultBase="main"
+        isOverridden={false}
+        onChange={onChange}
+      />
+    )
+    fireEvent.click(container.querySelector('.review-branch-selector')!)
+    await waitFor(() => {
+      expect(container.querySelectorAll('.base-branch-dropdown-item').length).toBeGreaterThan(0)
+    })
+    const input = container.querySelector('.base-branch-dropdown-search input')!
+    fireEvent.change(input, { target: { value: 'a1b2c3d' } })
+    const custom = container.querySelector('.base-branch-dropdown-item.custom-ref')!
+    expect(custom).not.toBeNull()
+    expect(custom.textContent).toContain('a1b2c3d')
+    fireEvent.click(custom)
+    expect(onChange).toHaveBeenCalledWith('a1b2c3d')
+    expect(container.querySelector('.base-branch-dropdown')).toBeNull()
+  })
+
+  it('does not offer a custom ref when the typed text exactly names a branch', async () => {
+    const git = makeGitApiStub({
+      listLocalBranches: vi.fn().mockResolvedValue(['main', 'feature-a']),
+      listRemoteBranches: vi.fn().mockResolvedValue([]),
+    })
+    const { container } = render(
+      <BaseBranchSelector
+        git={git}
+        currentBase="main"
+        defaultBase="main"
+        isOverridden={false}
+        onChange={vi.fn()}
+      />
+    )
+    fireEvent.click(container.querySelector('.review-branch-selector')!)
+    await waitFor(() => {
+      expect(container.querySelectorAll('.base-branch-dropdown-item').length).toBeGreaterThan(0)
+    })
+    const input = container.querySelector('.base-branch-dropdown-search input')!
+    fireEvent.change(input, { target: { value: 'feature-a' } })
+    expect(container.querySelector('.base-branch-dropdown-item.custom-ref')).toBeNull()
+  })
+
+  it('truncates a long commit-hash base in the button label while keeping it in the tooltip', () => {
+    const git = makeGitApiStub()
+    const fullHash = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0'
+    const { container } = render(
+      <BaseBranchSelector
+        git={git}
+        currentBase={fullHash}
+        defaultBase="main"
+        isOverridden={true}
+        onChange={vi.fn()}
+      />
+    )
+    const label = container.querySelector('.review-branch-selector-label')!
+    expect(label.textContent).toBe('a1b2c3d4e5f6…')
+    const button = container.querySelector('.review-branch-selector')!
+    expect(button.getAttribute('title')).toContain(fullHash)
   })
 
   it('does not refetch branches on subsequent opens', async () => {

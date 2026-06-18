@@ -1392,14 +1392,25 @@ export function BaseBranchSelector({
     }
   }
 
-  const filtered = search.trim()
-    ? branches.filter(b => b.toLowerCase().includes(search.toLowerCase()))
+  const trimmedSearch = search.trim()
+  const filtered = trimmedSearch
+    ? branches.filter(b => b.toLowerCase().includes(trimmedSearch.toLowerCase()))
     : branches
 
-  const buttonLabel = currentBase ?? 'Pick base branch'
+  // Allow comparing against an arbitrary revision (commit hash, tag, or any ref),
+  // not just a known branch. Offer the typed text as a custom base when it doesn't
+  // already name a branch. Validation is lazy — an invalid ref fails loudly when the
+  // diff is loaded.
+  const matchesKnownBranch = branches.some(b => b === trimmedSearch)
+  const showCustomRef = trimmedSearch.length > 0 && !matchesKnownBranch
+
+  // Commit hashes are long; show a compact label while keeping the full value in the tooltip.
+  const buttonLabel = currentBase
+    ? (currentBase.length > 20 ? `${currentBase.slice(0, 12)}…` : currentBase)
+    : 'Pick base branch'
   const titleText = isOverridden && defaultBase
-    ? `Base branch override (default: ${defaultBase}). Click to change.`
-    : 'Change base branch for review'
+    ? `Base override: ${currentBase ?? ''} (default: ${defaultBase}). Click to change.`
+    : 'Change base branch or commit for review'
 
   return (
     <div className="base-branch-selector">
@@ -1416,7 +1427,7 @@ export function BaseBranchSelector({
           <div className="base-branch-dropdown-search">
             <input
               type="text"
-              placeholder="Filter branches..."
+              placeholder="Filter branches or paste a commit..."
               value={search}
               onChange={(e) => { setSearch(e.target.value) }}
               autoFocus
@@ -1436,9 +1447,18 @@ export function BaseBranchSelector({
                   Reset to default ({defaultBase})
                 </button>
               )}
+              {showCustomRef && (
+                <button
+                  className="base-branch-dropdown-item custom-ref"
+                  onClick={() => { onChange(trimmedSearch); setOpen(false); setSearch('') }}
+                  title={`Compare against ${trimmedSearch}`}
+                >
+                  Compare against commit/ref: <code>{trimmedSearch}</code>
+                </button>
+              )}
               {filtered.length === 0 ? (
                 <div className="base-branch-dropdown-empty">
-                  {search.trim() ? 'No branches match' : 'No branches found'}
+                  {trimmedSearch ? 'No branches match' : 'No branches found'}
                 </div>
               ) : (
                 filtered.map(branch => (

@@ -3357,6 +3357,15 @@ body,
   font-style: italic;
 }
 
+.base-branch-dropdown-item.custom-ref {
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.base-branch-dropdown-item.custom-ref code {
+  color: var(--accent);
+}
+
 .base-branch-dropdown-loading,
 .base-branch-dropdown-empty,
 .base-branch-dropdown-error {
