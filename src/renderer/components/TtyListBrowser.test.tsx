@@ -193,6 +193,49 @@ describe('TtyListBrowser', () => {
     expect(mockTerminalApi.kill).toHaveBeenCalledWith('local', 'pty-existing-1')
   })
 
+  it('kills every orphan TTY in the workspace when Kill all orphans is clicked', async () => {
+    const now = Date.now()
+    const sessions: TTYSessionInfo[] = [
+      { id: 'pty-orphan-1', cwd: '/test', cols: 80, rows: 24, createdAt: now, lastActivity: now },
+      { id: 'pty-orphan-2', cwd: '/test', cols: 80, rows: 24, createdAt: now, lastActivity: now },
+      { id: 'pty-live-1', cwd: '/test', cols: 80, rows: 24, createdAt: now, lastActivity: now },
+      { id: 'pty-other-orphan', cwd: '/other', cols: 80, rows: 24, createdAt: now, lastActivity: now },
+    ]
+    vi.mocked(mockTerminalApi.list).mockResolvedValue(sessions)
+    mockSessionStores.set('s1', mockSessionEntry('local', ['pty-live-1']))
+    render(
+      <TtyListBrowser tab={sampleTab} workspace={makeWorkspaceStore(vi.fn())} isVisible />
+    )
+    await waitFor(() => {
+      expect(screen.getByText('Kill all orphans (2)')).toBeDefined()
+    })
+    fireEvent.click(screen.getByText('Kill all orphans (2)'))
+    expect(mockTerminalApi.kill).toHaveBeenCalledWith('local', 'pty-orphan-1')
+    expect(mockTerminalApi.kill).toHaveBeenCalledWith('local', 'pty-orphan-2')
+    expect(mockTerminalApi.kill).not.toHaveBeenCalledWith('local', 'pty-live-1')
+    expect(mockTerminalApi.kill).not.toHaveBeenCalledWith('local', 'pty-other-orphan')
+    expect(mockTerminalApi.kill).toHaveBeenCalledTimes(2)
+  })
+
+  it('disables Kill all orphans when there are no orphans', async () => {
+    const now = Date.now()
+    const sessions: TTYSessionInfo[] = [
+      { id: 'pty-live-1', cwd: '/test', cols: 80, rows: 24, createdAt: now, lastActivity: now },
+    ]
+    vi.mocked(mockTerminalApi.list).mockResolvedValue(sessions)
+    mockSessionStores.set('s1', mockSessionEntry('local', ['pty-live-1']))
+    render(
+      <TtyListBrowser tab={sampleTab} workspace={makeWorkspaceStore(vi.fn())} isVisible />
+    )
+    await waitFor(() => {
+      expect(screen.getByText('pty-live')).toBeDefined()
+    })
+    const btn = screen.getByText('Kill all orphans')
+    expect(btn.hasAttribute('disabled')).toBe(true)
+    fireEvent.click(btn)
+    expect(mockTerminalApi.kill).not.toHaveBeenCalled()
+  })
+
   it('shows an error message when list() rejects', async () => {
     vi.mocked(mockTerminalApi.list).mockRejectedValue(new Error('boom'))
     const addTab = vi.fn()

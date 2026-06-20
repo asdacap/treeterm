@@ -5794,9 +5794,17 @@ body,
   white-space: nowrap;
 }
 
+.tty-list-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .tty-list-refresh-btn,
 .tty-list-open-btn,
-.tty-list-kill-btn {
+.tty-list-kill-btn,
+.tty-list-kill-orphans-btn {
   background: var(--bg-active);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
@@ -5810,6 +5818,19 @@ body,
   background: var(--color-danger, #e74c3c);
   color: #fff;
   border-color: transparent;
+}
+
+.tty-list-kill-orphans-btn {
+  border-color: var(--color-warning, #d08770);
+  color: var(--color-warning, #d08770);
+  white-space: nowrap;
+}
+
+.tty-list-kill-orphans-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  border-color: var(--border-color);
+  color: var(--text-secondary);
 }
 
 .tty-list-rows {

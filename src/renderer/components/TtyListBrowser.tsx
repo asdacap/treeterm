@@ -163,11 +163,38 @@ export default function TtyListBrowser({ workspace }: ApplicationRenderProps) {
     [terminalApi, connectionId, refresh]
   )
 
+  const killAllOrphans = useCallback(() => {
+    if (loadState.status !== LoadStatus.Ready) return
+    const orphanSessions = loadState.sessions.filter(
+      (s) => s.cwd === workspacePath && !loadState.referencedPtyIds.has(s.id)
+    )
+    for (const orphan of orphanSessions) {
+      terminalApi.kill(connectionId, orphan.id)
+    }
+    refresh()
+  }, [loadState, workspacePath, terminalApi, connectionId, refresh])
+
+  const orphanCount =
+    loadState.status === LoadStatus.Ready
+      ? loadState.sessions.filter(
+          (s) => s.cwd === workspacePath && !loadState.referencedPtyIds.has(s.id)
+        ).length
+      : 0
+
   return (
     <div className="tty-list-browser">
       <div className="tty-list-toolbar">
         <h3 className="tty-list-title">TTY sessions for {workspacePath}</h3>
-        <button className="tty-list-refresh-btn" onClick={refresh}>Refresh</button>
+        <div className="tty-list-toolbar-actions">
+          <button
+            className="tty-list-kill-orphans-btn"
+            onClick={killAllOrphans}
+            disabled={orphanCount === 0}
+          >
+            Kill all orphans{orphanCount > 0 ? ` (${String(orphanCount)})` : ''}
+          </button>
+          <button className="tty-list-refresh-btn" onClick={refresh}>Refresh</button>
+        </div>
       </div>
       {renderBody(loadState, workspacePath, openInTerminal, killSession)}
     </div>
