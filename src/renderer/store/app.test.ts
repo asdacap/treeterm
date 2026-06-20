@@ -75,6 +75,7 @@ import { AppAvailability } from '../types'
 import { ConnectionStatus, ConnectionTargetType } from '../../shared/types'
 import type { ConnectionInfo } from '../../shared/types'
 import { makeSession } from '../../shared/test-fixtures/workspace'
+import { resolveHomedir } from '../lib/homedir'
 
 // Mock createSessionStore and its utilities
 vi.mock('./createSessionStore', async (importOriginal) => {
@@ -115,6 +116,10 @@ vi.mock('./settings', () => ({
       init: vi.fn<(...args: any[]) => void>()
     })
   }
+}))
+
+vi.mock('../lib/homedir', () => ({
+  resolveHomedir: vi.fn<(...args: any[]) => Promise<string>>()
 }))
 
 // Mock deps for initialize
@@ -936,6 +941,7 @@ describe('useAppStore', () => {
 
     describe('SSH session via addRemoteSession', () => {
       beforeEach(async () => {
+        vi.mocked(resolveHomedir).mockResolvedValue('/home/default')
         const cleanup = await useAppStore.getState().initialize(mockDeps)
         cleanup()
       })
@@ -969,6 +975,37 @@ describe('useAppStore', () => {
         await useAppStore.getState().addRemoteSession(session, connection)
         const storeKey = findStoreKeyByConnectionId('conn-2')!
         expect(useSessionNamesStore.getState().getName(storeKey)).toBe('Production')
+      })
+
+      it('opens resolved remote home directory as workspace when session has no workspaces', async () => {
+        vi.mocked(resolveHomedir).mockResolvedValue('/root')
+        const connection = {
+          id: 'conn-home',
+          target: { type: ConnectionTargetType.Remote, config: { id: 'conn-home', host: 'myserver.com', user: 'root', port: 22, portForwards: [] } },
+          status: ConnectionStatus.Connected as const
+        }
+        const session = { id: 'ssh-session-home', workspaceRefs: [], workspaceDataDir: "", createdAt: 0, lastActivity: 0, version: 1 }
+        await useAppStore.getState().addRemoteSession(session, connection)
+        const storeKey = findStoreKeyByConnectionId('conn-home')!
+        const store = useAppStore.getState().sessionStores.get(storeKey)!.store
+        expect(vi.mocked(resolveHomedir).mock.calls[0]![1]).toBe('conn-home')
+        expect(store.getState().addWorkspace).toHaveBeenCalledWith('/root')
+        const nav = useNavigationStore.getState().activeView
+        expect(nav?.type === 'workspace' && nav.sessionId).toBe(storeKey)
+      })
+
+      it('falls back to /home/<user> when remote home resolution fails', async () => {
+        vi.mocked(resolveHomedir).mockRejectedValue(new Error('timeout'))
+        const connection = {
+          id: 'conn-fallback',
+          target: { type: ConnectionTargetType.Remote, config: { id: 'conn-fallback', host: 'myserver.com', user: 'alice', port: 22, portForwards: [] } },
+          status: ConnectionStatus.Connected as const
+        }
+        const session = { id: 'ssh-session-fallback', workspaceRefs: [], workspaceDataDir: "", createdAt: 0, lastActivity: 0, version: 1 }
+        await useAppStore.getState().addRemoteSession(session, connection)
+        const storeKey = findStoreKeyByConnectionId('conn-fallback')!
+        const store = useAppStore.getState().sessionStores.get(storeKey)!.store
+        expect(store.getState().addWorkspace).toHaveBeenCalledWith('/home/alice')
       })
 
       it('does not overwrite existing custom name set via startRemoteConnect', async () => {
