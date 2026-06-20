@@ -71,7 +71,7 @@ const mockWorkspaceStoreStateData = {
   getTabRef: vi.fn().mockReturnValue(null),
   disposeTabResources: vi.fn(),
   initAnalyzer: vi.fn(),
-  createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
+  createTty: vi.fn().mockResolvedValue('pty-1'), ensureTtyForTab: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
   connectionId: 'local',
   updateSettings: vi.fn(),
   settings: { defaultApplicationId: '' },
@@ -179,14 +179,14 @@ describe('Terminal Renderer', () => {
         expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
       })
 
-      it('creates PTY and updates tab state when ptyId is null', async () => {
+      it('obtains the PTY via ensureTtyForTab and updates tab state on resolve', async () => {
         let resolveTty!: (value: string) => void
         const ttyPromise = new Promise<string>((resolve) => { resolveTty = resolve })
-        const mockCreateTty = vi.fn().mockReturnValue(ttyPromise)
+        const mockEnsureTty = vi.fn().mockReturnValue(ttyPromise)
         const mockUpdateTabState = vi.fn()
         const store = createStore<WorkspaceStoreState>()(() => ({
           ...mockWorkspaceStoreStateData,
-          createTty: mockCreateTty,
+          ensureTtyForTab: mockEnsureTty,
           updateTabState: mockUpdateTabState,
         }))
 
@@ -200,12 +200,13 @@ describe('Terminal Renderer', () => {
 
         app.onWorkspaceLoad(tab, store)
 
-        expect(mockCreateTty).toHaveBeenCalledWith('/test', undefined, undefined)
+        // Per-tab idempotent creation is delegated to the store, keyed by tab id.
+        expect(mockEnsureTty).toHaveBeenCalledWith('tab-1', '/test', undefined, undefined)
         expect(mockUpdateTabState).not.toHaveBeenCalled()
 
         resolveTty('pty-new')
         await ttyPromise
-        // Flush the .then() microtask scheduled by createTty().then(...)
+        // Flush the .then() microtask scheduled by ensureTtyForTab().then(...)
         await new Promise(resolve => setTimeout(resolve, 0))
 
         expect(mockUpdateTabState).toHaveBeenCalledWith('tab-1', expect.any(Function))
@@ -221,7 +222,7 @@ describe('Terminal Renderer', () => {
         })
       })
 
-      it('does not call createTty when ptyId already exists', () => {
+      it('delegates to ensureTtyForTab even when a ptyId already exists (so it is memoized)', () => {
         const app = createTerminalApplication(mockDeps)
         const tab: Tab = {
           id: 'tab-1',
@@ -232,6 +233,7 @@ describe('Terminal Renderer', () => {
 
         app.onWorkspaceLoad(tab, mockWorkspaceStore)
 
+        expect(mockWorkspaceStoreStateData.ensureTtyForTab).toHaveBeenCalledWith('tab-1', '/test', undefined, undefined)
         expect(mockWorkspaceStoreStateData.createTty).not.toHaveBeenCalled()
       })
 

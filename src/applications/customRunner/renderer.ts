@@ -24,16 +24,14 @@ export function createCustomRunnerVariant(instance: CustomRunnerInstance, deps: 
     onWorkspaceLoad: (tab: Tab, workspaceStore: WorkspaceStore): TerminalAppRef => {
       const ws = workspaceStore.getState()
       const state = tab.state as TerminalState
-      if (!state.ptyId) {
-        const resolvedCommand = resolveTemplate(instance.commandTemplate, ws.workspace.path)
-        void ws.createTty(ws.workspace.path, undefined, resolvedCommand).then((ptyId) => {
-          workspaceStore.getState().updateTabState<TerminalState>(tab.id, (s) => ({
-            ...s,
-            ptyId,
-            connectionId: ws.connectionId,
-          }))
-        })
-      }
+      const resolvedCommand = resolveTemplate(instance.commandTemplate, ws.workspace.path)
+      void ws.ensureTtyForTab(tab.id, ws.workspace.path, undefined, resolvedCommand).then((ptyId) => {
+        workspaceStore.getState().updateTabState<TerminalState>(tab.id, (s) => ({
+          ...s,
+          ptyId,
+          connectionId: ws.connectionId,
+        }))
+      })
       const ref: TerminalAppRef = {
         cachedTerminal: null,
         disposeCachedTerminal() {

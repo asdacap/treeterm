@@ -58,7 +58,7 @@ const mockWorkspaceStoreStateData = {
   getTabRef: vi.fn().mockReturnValue(null),
   disposeTabResources: vi.fn(),
   initAnalyzer: vi.fn(),
-  createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
+  createTty: vi.fn().mockResolvedValue('pty-1'), ensureTtyForTab: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
   connectionId: 'local',
   updateSettings: vi.fn(),
   settings: { defaultApplicationId: '' },
@@ -171,7 +171,7 @@ describe('AI Harness Renderer', () => {
       const mockAnalyzerState = { start: vi.fn(), stop: vi.fn(), getHistory: vi.fn<() => unknown[]>().mockReturnValue([]) }
       const mockAnalyzer: Record<string, unknown> = { getState: vi.fn().mockReturnValue(mockAnalyzerState), setState: vi.fn(), subscribe: vi.fn() }
 
-      it('starts analyzer directly when tab has existing ptyId (restore path)', () => {
+      it('adopts existing ptyId via ensureTtyForTab and starts analyzer (restore path)', async () => {
         const mockAnalyzerState = { start: vi.fn(), stop: vi.fn(), getHistory: vi.fn().mockReturnValue([]) }
         const mockAnalyzer = { getState: vi.fn().mockReturnValue(mockAnalyzerState), setState: vi.fn(), subscribe: vi.fn() }
 
@@ -189,9 +189,12 @@ describe('AI Harness Renderer', () => {
         const store = createStore<WorkspaceStoreState>()(() => ({
           ...mockWorkspaceStoreStateData,
           initAnalyzer: vi.fn().mockReturnValue(mockAnalyzer),
+          // The store adopts the existing ptyId (no new PTY created).
+          ensureTtyForTab: vi.fn().mockResolvedValue('pty-existing'),
         }))
 
         app.onWorkspaceLoad(tab, store)
+        await new Promise(resolve => setTimeout(resolve, 0))
 
         expect(mockAnalyzerState.start).toHaveBeenCalledWith('pty-existing')
         expect(mockWorkspaceStoreStateData.createTty).not.toHaveBeenCalled()
@@ -214,12 +217,12 @@ describe('AI Harness Renderer', () => {
 
         let resolveTty!: (value: string) => void
         const ttyPromise = new Promise<string>((resolve) => { resolveTty = resolve })
-        const mockCreateTty = vi.fn().mockReturnValue(ttyPromise)
+        const mockEnsureTty = vi.fn().mockReturnValue(ttyPromise)
         const mockUpdateTabState = vi.fn()
         const store = createStore<WorkspaceStoreState>()(() => ({
           ...mockWorkspaceStoreStateData,
           initAnalyzer: vi.fn().mockReturnValue(mockAnalyzer),
-          createTty: mockCreateTty,
+          ensureTtyForTab: mockEnsureTty,
           updateTabState: mockUpdateTabState,
         }))
 
@@ -229,7 +232,8 @@ describe('AI Harness Renderer', () => {
         await ttyPromise
         await new Promise(resolve => setTimeout(resolve, 0))
 
-        expect(mockCreateTty).toHaveBeenCalledWith(
+        expect(mockEnsureTty).toHaveBeenCalledWith(
+          'tab-1',
           '/test',
           { enabled: true, allowNetwork: false, allowedPaths: [] },
           'claude'

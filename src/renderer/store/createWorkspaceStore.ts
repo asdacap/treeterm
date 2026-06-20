@@ -129,6 +129,14 @@ export interface WorkspaceStoreState {
 
   // PTY creation (delegated from session)
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
+  /**
+   * Idempotent per-tab PTY creation. Returns the same PTY for a given tab across
+   * repeated calls, so the dispose/re-init churn that file-watch reconciliation can
+   * trigger (a stale incoming body resets `state.ptyId` to null and re-runs
+   * `onWorkspaceLoad`) never spawns a duplicate/orphan PTY. Adopts an existing
+   * `state.ptyId` when one is already present. Cleared on genuine tab removal.
+   */
+  ensureTtyForTab: (tabId: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
   // Write-only PTY access (cached per workspace, separate stream from terminal events)
   getTtyWriter: (ptyId: string) => Promise<TtyWriter>
   connectionId: string
@@ -234,6 +242,12 @@ export function createWorkspaceStore(
   // Write-only PTY handles, cached per workspace (separate stream from terminal events)
   const ttyWriters = new Map<string, TtyWriter>()
 
+  // Memoized per-tab PTY creation (tabId -> the PTY this window owns for the tab).
+  // Survives the dispose/re-init churn of file-watch reconciliation so a tab never
+  // spawns more than one PTY. Holds the in-flight promise so concurrent inits in the
+  // same tick coalesce. See ensureTtyForTab.
+  const tabTtys = new Map<string, Promise<string>>()
+
   const gitController = createGitControllerStore({
     git: deps.git,
     github: deps.github,
@@ -305,6 +319,27 @@ export function createWorkspaceStore(
 
     createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) =>
       deps.createTty(cwd, sandbox, startupCommand),
+
+    ensureTtyForTab: (tabId: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string): Promise<string> => {
+      const existing = tabTtys.get(tabId)
+      if (existing) return existing
+      // Adopt a PTY already recorded in the tab state (restored from the workspace
+      // file) instead of creating a new one.
+      const restored = (get().workspace.appStates[tabId]?.state as { ptyId?: string | null } | undefined)?.ptyId
+      if (restored) {
+        const adopted = Promise.resolve(restored)
+        tabTtys.set(tabId, adopted)
+        return adopted
+      }
+      // On failure, drop the memo so a later re-init can retry rather than replaying
+      // the rejection forever.
+      const promise = deps.createTty(cwd, sandbox, startupCommand).catch((err: unknown) => {
+        if (tabTtys.get(tabId) === promise) tabTtys.delete(tabId)
+        throw err
+      })
+      tabTtys.set(tabId, promise)
+      return promise
+    },
 
     getTtyWriter: async (ptyId: string): Promise<TtyWriter> => {
       const cached = ttyWriters.get(ptyId)
@@ -391,6 +426,9 @@ export function createWorkspaceStore(
       // User explicitly closing tab — kill daemon-side resources first
       get().getTabRef(tabId)?.close()
       get().disposeTabResources(tabId)
+      // Genuine removal: drop the per-tab PTY memo (disposeTabResources must NOT, as it
+      // also runs during transient reconciliation churn — that is what we guard against).
+      tabTtys.delete(tabId)
 
       updateWorkspace((ws) => {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars

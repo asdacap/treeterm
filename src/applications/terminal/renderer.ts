@@ -13,15 +13,13 @@ function makeTerminalOnWorkspaceLoad(
     const ws = workspaceStore.getState()
     const state = tab.state as TerminalState
 
-    if (!state.ptyId) {
-      void ws.createTty(ws.workspace.path, undefined, startupCommand).then((ptyId) => {
-        workspaceStore.getState().updateTabState<TerminalState>(tab.id, (s) => ({
-          ...s,
-          ptyId,
-          connectionId: ws.connectionId,
-        }))
-      })
-    }
+    void ws.ensureTtyForTab(tab.id, ws.workspace.path, undefined, startupCommand).then((ptyId) => {
+      workspaceStore.getState().updateTabState<TerminalState>(tab.id, (s) => ({
+        ...s,
+        ptyId,
+        connectionId: ws.connectionId,
+      }))
+    })
 
     const ref: TerminalAppRef = {
       cachedTerminal: null,

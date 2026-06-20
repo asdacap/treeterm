@@ -68,7 +68,7 @@ const mockWorkspaceStoreStateData = {
   getTabRef: vi.fn().mockReturnValue(null),
   disposeTabResources: vi.fn(),
   initAnalyzer: vi.fn(),
-  createTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
+  createTty: vi.fn().mockResolvedValue('pty-1'), ensureTtyForTab: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
   connectionId: 'local',
   updateSettings: vi.fn(),
   settings: { defaultApplicationId: '' },
@@ -163,7 +163,7 @@ describe('createCustomRunnerVariant', () => {
   })
 
   describe('onWorkspaceLoad', () => {
-    it('calls createTty with resolved command when ptyId is null', async () => {
+    it('calls ensureTtyForTab with resolved command when ptyId is null', async () => {
       const variant = createCustomRunnerVariant(mockInstance, mockDeps)
       const tab: Tab = {
         id: 'tab-1',
@@ -175,7 +175,8 @@ describe('createCustomRunnerVariant', () => {
       variant.onWorkspaceLoad(tab, mockWorkspaceStore)
 
       await vi.waitFor(() => {
-        expect(mockWorkspaceStoreStateData.createTty).toHaveBeenCalledWith(
+        expect(mockWorkspaceStoreStateData.ensureTtyForTab).toHaveBeenCalledWith(
+          'tab-1',
           '/test/project',
           undefined,
           'rider /test/project'
@@ -183,7 +184,7 @@ describe('createCustomRunnerVariant', () => {
       })
     })
 
-    it('does not call createTty when ptyId already exists', () => {
+    it('delegates to ensureTtyForTab even when a ptyId already exists (so it is memoized)', () => {
       const variant = createCustomRunnerVariant(mockInstance, mockDeps)
       const tab: Tab = {
         id: 'tab-1',
@@ -194,17 +195,18 @@ describe('createCustomRunnerVariant', () => {
 
       variant.onWorkspaceLoad(tab, mockWorkspaceStore)
 
+      expect(mockWorkspaceStoreStateData.ensureTtyForTab).toHaveBeenCalledWith('tab-1', '/test/project', undefined, 'rider /test/project')
       expect(mockWorkspaceStoreStateData.createTty).not.toHaveBeenCalled()
     })
 
-    it('updates tab state after createTty resolves', async () => {
+    it('updates tab state after ensureTtyForTab resolves', async () => {
       let resolveTty!: (value: string) => void
       const ttyPromise = new Promise<string>((resolve) => { resolveTty = resolve })
-      const mockCreateTty = vi.fn().mockReturnValue(ttyPromise)
+      const mockEnsureTty = vi.fn().mockReturnValue(ttyPromise)
       const mockUpdateTabState = vi.fn()
       const store = createStore<WorkspaceStoreState>()(() => ({
         ...mockWorkspaceStoreStateData,
-        createTty: mockCreateTty,
+        ensureTtyForTab: mockEnsureTty,
         updateTabState: mockUpdateTabState,
       }))
 
@@ -222,7 +224,7 @@ describe('createCustomRunnerVariant', () => {
       await ttyPromise
       await new Promise(resolve => setTimeout(resolve, 0))
 
-      expect(mockCreateTty).toHaveBeenCalledWith('/test/project', undefined, 'rider /test/project')
+      expect(mockEnsureTty).toHaveBeenCalledWith('tab-1', '/test/project', undefined, 'rider /test/project')
       expect(mockUpdateTabState).toHaveBeenCalledWith('tab-1', expect.any(Function))
 
       const updater = mockUpdateTabState.mock.calls[0]![1] as (prev: Record<string, unknown>) => Record<string, unknown>
