@@ -34,6 +34,7 @@ import type {
 } from '../types'
 import { createBoundFilesystem } from '../types'
 import { createGitApi } from '../lib/gitClient'
+import { resolveHomedir } from '../lib/homedir'
 import { createGitHubApi } from '../lib/githubClient'
 import { createRunActionsApi } from '../lib/runActionsClient'
 import { createWorktreeRegistryApi } from '../lib/worktreeRegistry'
@@ -446,7 +447,14 @@ export const useAppStore = create<AppState>()((set, get) => ({
       const firstRef = session.workspaceRefs[0]!
       useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstRef.id, sessionId: storeKey })
     } else if (connection.target.type === ConnectionTargetType.Remote) {
-      const defaultPath = `/home/${connection.target.config.user}`
+      const fallbackPath = `/home/${connection.target.config.user}`
+      let defaultPath: string
+      try {
+        defaultPath = await resolveHomedir(get().exec, connection.id)
+      } catch (err) {
+        console.warn(`[renderer:app] Failed to resolve remote home for session=${session.id}, falling back to ${fallbackPath}:`, err)
+        defaultPath = fallbackPath
+      }
       console.log(`[renderer:app] No workspaces for session=${session.id}, creating default workspace at ${defaultPath}`)
       const workspaceId = store.getState().addWorkspace(defaultPath)
       useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId, sessionId: storeKey })
