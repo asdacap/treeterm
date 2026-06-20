@@ -19,10 +19,31 @@ const mockTerminalApi: TerminalApi = {
   createSession: vi.fn(),
 } as unknown as TerminalApi
 
-vi.mock('../store/app', () => ({
-  useAppStore: <T,>(selector: (s: { terminal: TerminalApi }) => T): T =>
-    selector({ terminal: mockTerminalApi }),
-}))
+// Mutable set of session stores the component reads via useAppStore.getState() to
+// figure out which TTYs are referenced by a tab. Tests push entries before render.
+const mockSessionStores = new Map<string, { store: { getState: () => unknown } }>()
+
+vi.mock('../store/app', () => {
+  const useAppStore = <T,>(selector: (s: { terminal: TerminalApi }) => T): T =>
+    selector({ terminal: mockTerminalApi })
+  useAppStore.getState = (): { sessionStores: typeof mockSessionStores } => ({ sessionStores: mockSessionStores })
+  return { useAppStore }
+})
+
+// Build a session store entry exposing the appStates the component scans.
+function mockSessionEntry(connectionId: string, ptyIds: (string | null)[]): { store: { getState: () => unknown } } {
+  const appStates = Object.fromEntries(
+    ptyIds.map((ptyId, i) => [`tab-${String(i)}`, { applicationId: 'terminal', title: 'T', state: { ptyId } }])
+  )
+  return {
+    store: {
+      getState: () => ({
+        connection: { id: connectionId },
+        workspaces: new Map([['ws-1', { status: 'loaded', data: { appStates } }]]),
+      }),
+    },
+  }
+}
 
 function makeWorkspaceStore(addTab: WorkspaceStoreState['addTab'], path = '/test'): ApplicationRenderProps['workspace'] {
   return createStore<WorkspaceStoreState>()(() => ({
@@ -39,6 +60,7 @@ const sampleTab = { id: 'tab-1', applicationId: 'tty-list', title: 'TTYs', state
 describe('TtyListBrowser', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockSessionStores.clear()
   })
 
   it('shows loading state immediately', () => {
@@ -80,6 +102,63 @@ describe('TtyListBrowser', () => {
     })
     expect(screen.getByText('120×30')).toBeDefined()
     expect(screen.queryByText('pty-othe')).toBeNull()
+  })
+
+  it('flags a TTY that no tab references as an orphan', async () => {
+    const now = Date.now()
+    const sessions: TTYSessionInfo[] = [
+      { id: 'pty-orphan-1', cwd: '/test', cols: 80, rows: 24, createdAt: now, lastActivity: now },
+    ]
+    vi.mocked(mockTerminalApi.list).mockResolvedValue(sessions)
+    mockSessionStores.set('s1', mockSessionEntry('local', ['pty-other']))
+    render(
+      <TtyListBrowser tab={sampleTab} workspace={makeWorkspaceStore(vi.fn())} isVisible />
+    )
+    await waitFor(() => {
+      expect(screen.getByText('pty-orph')).toBeDefined()
+    })
+    expect(screen.getByText('orphan')).toBeDefined()
+  })
+
+  it('does not flag a TTY referenced by a terminal tab', async () => {
+    const now = Date.now()
+    const sessions: TTYSessionInfo[] = [
+      { id: 'pty-live-1', cwd: '/test', cols: 80, rows: 24, createdAt: now, lastActivity: now },
+    ]
+    vi.mocked(mockTerminalApi.list).mockResolvedValue(sessions)
+    mockSessionStores.set('s1', mockSessionEntry('local', ['pty-live-1']))
+    render(
+      <TtyListBrowser tab={sampleTab} workspace={makeWorkspaceStore(vi.fn())} isVisible />
+    )
+    await waitFor(() => {
+      expect(screen.getByText('pty-live')).toBeDefined()
+    })
+    expect(screen.queryByText('orphan')).toBeNull()
+  })
+
+  it('does not flag a TTY referenced by an aiharness tab', async () => {
+    const now = Date.now()
+    const sessions: TTYSessionInfo[] = [
+      { id: 'pty-harness-1', cwd: '/test', cols: 80, rows: 24, createdAt: now, lastActivity: now },
+    ]
+    vi.mocked(mockTerminalApi.list).mockResolvedValue(sessions)
+    // aiharness tab state is a TerminalState with a ptyId — same shape isTerminalState matches.
+    const entry = mockSessionEntry('local', [])
+    entry.store.getState = () => ({
+      connection: { id: 'local' },
+      workspaces: new Map([['ws-1', {
+        status: 'loaded',
+        data: { appStates: { 'tab-0': { applicationId: 'aiharness-claude', title: 'AI', state: { ptyId: 'pty-harness-1', sandbox: {} } } } },
+      }]]),
+    })
+    mockSessionStores.set('s1', entry)
+    render(
+      <TtyListBrowser tab={sampleTab} workspace={makeWorkspaceStore(vi.fn())} isVisible />
+    )
+    await waitFor(() => {
+      expect(screen.getByText('pty-harn')).toBeDefined()
+    })
+    expect(screen.queryByText('orphan')).toBeNull()
   })
 
   it('opens an existing TTY in a new terminal tab on click', async () => {

@@ -5838,6 +5838,18 @@ body,
   margin-bottom: 4px;
 }
 
+.tty-list-row-orphan {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: var(--font-sans, sans-serif);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-warning, #d08770);
+  border: 1px solid var(--color-warning, #d08770);
+}
+
 .tty-list-row-meta {
   display: flex;
   gap: 12px;

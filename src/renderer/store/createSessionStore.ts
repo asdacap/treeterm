@@ -1011,6 +1011,7 @@ export function createSessionStore(
       if (!result.success) {
         throw new Error(result.error || 'Failed to create PTY')
       }
+      console.log('[Session] tty started', { ptyId: result.sessionId, connectionId, cwd, startupCommand: startupCommand ?? null })
       return result.sessionId
     },
 

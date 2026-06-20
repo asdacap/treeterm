@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useStore } from 'zustand'
 import { useAppStore } from '../store/app'
+import { WorkspaceEntryStatus } from '../store/createSessionStore'
+import { isTerminalState } from '../types'
 import type { ApplicationRenderProps, TTYSessionInfo, TerminalState } from '../types'
 
 enum LoadStatus {
@@ -12,7 +14,7 @@ enum LoadStatus {
 
 type LoadState =
   | { status: LoadStatus.Loading }
-  | { status: LoadStatus.Ready; sessions: TTYSessionInfo[] }
+  | { status: LoadStatus.Ready; sessions: TTYSessionInfo[]; referencedPtyIds: Set<string> }
   | { status: LoadStatus.Error; message: string }
 
 type LoadStateRenderers = {
@@ -22,6 +24,25 @@ type LoadStateRenderers = {
     onOpen: (s: TTYSessionInfo) => void,
     onKill: (s: TTYSessionInfo) => void
   ) => ReactNode
+}
+
+// Collect every ptyId currently referenced by a tab on this connection, so the
+// list can flag daemon TTYs that no tab owns (orphans left behind by reconnects).
+function collectReferencedPtyIds(connectionId: string): Set<string> {
+  const referenced = new Set<string>()
+  for (const entry of Array.from(useAppStore.getState().sessionStores.values())) {
+    const sessionState = entry.store.getState()
+    if (sessionState.connection.id !== connectionId) continue
+    for (const wsEntry of Array.from(sessionState.workspaces.values())) {
+      if (wsEntry.status !== WorkspaceEntryStatus.Loaded && wsEntry.status !== WorkspaceEntryStatus.OperationError) continue
+      for (const appState of Object.values(wsEntry.data.appStates)) {
+        if (isTerminalState(appState.state) && appState.state.ptyId !== null) {
+          referenced.add(appState.state.ptyId)
+        }
+      }
+    }
+  }
+  return referenced
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -52,10 +73,15 @@ const BODY_RENDERERS: LoadStateRenderers = {
     }
     return (
       <div className="tty-list-rows">
-        {filtered.map((session) => (
+        {filtered.map((session) => {
+          const isOrphan = !state.referencedPtyIds.has(session.id)
+          return (
           <div key={session.id} className="tty-list-row">
             <div className="tty-list-row-info">
-              <div className="tty-list-row-id">{session.id.slice(0, 8)}</div>
+              <div className="tty-list-row-id">
+                {session.id.slice(0, 8)}
+                {isOrphan && <span className="tty-list-row-orphan" title="No tab references this TTY">orphan</span>}
+              </div>
               <div className="tty-list-row-meta">
                 <span>{String(session.cols)}×{String(session.rows)}</span>
                 <span>created {formatRelativeTime(session.createdAt)}</span>
@@ -67,7 +93,8 @@ const BODY_RENDERERS: LoadStateRenderers = {
               <button className="tty-list-kill-btn" onClick={() => { onKill(session); }}>Kill</button>
             </div>
           </div>
-        ))}
+          )
+        })}
       </div>
     )
   },
@@ -103,7 +130,7 @@ export default function TtyListBrowser({ workspace }: ApplicationRenderProps) {
       .list(connectionId)
       .then((sessions) => {
         if (cancelled) return
-        setLoadState({ status: LoadStatus.Ready, sessions })
+        setLoadState({ status: LoadStatus.Ready, sessions, referencedPtyIds: collectReferencedPtyIds(connectionId) })
       })
       .catch((err: unknown) => {
         if (cancelled) return
