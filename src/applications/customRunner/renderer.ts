@@ -17,21 +17,25 @@ export function createCustomRunnerVariant(instance: CustomRunnerInstance, deps: 
 
     createInitialState: () => ({
       ptyId: null,
-      ptyHandle: null,
+      ptyHandle: crypto.randomUUID(),
       keepOnExit: false
     }),
 
     onWorkspaceLoad: (tab: Tab, workspaceStore: WorkspaceStore): TerminalAppRef => {
       const ws = workspaceStore.getState()
       const state = tab.state as TerminalState
-      const resolvedCommand = resolveTemplate(instance.commandTemplate, ws.workspace.path)
-      void ws.ensureTtyForTab(tab.id, ws.workspace.path, undefined, resolvedCommand).then((ptyId) => {
-        workspaceStore.getState().updateTabState<TerminalState>(tab.id, (s) => ({
-          ...s,
-          ptyId,
-          connectionId: ws.connectionId,
-        }))
-      })
+      if (!state.ptyId) {
+        const resolvedCommand = resolveTemplate(instance.commandTemplate, ws.workspace.path)
+        const handle = state.ptyHandle ?? crypto.randomUUID()
+        void ws.ensureTty(handle, ws.workspace.path, undefined, resolvedCommand).then((ptyId) => {
+          workspaceStore.getState().updateTabState<TerminalState>(tab.id, (s) => ({
+            ...s,
+            ptyId,
+            ptyHandle: handle,
+            connectionId: ws.connectionId,
+          }))
+        })
+      }
       const ref: TerminalAppRef = {
         cachedTerminal: null,
         disposeCachedTerminal() {

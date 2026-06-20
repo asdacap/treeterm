@@ -13,13 +13,19 @@ function makeTerminalOnWorkspaceLoad(
     const ws = workspaceStore.getState()
     const state = tab.state as TerminalState
 
-    void ws.ensureTtyForTab(tab.id, ws.workspace.path, undefined, startupCommand).then((ptyId) => {
-      workspaceStore.getState().updateTabState<TerminalState>(tab.id, (s) => ({
-        ...s,
-        ptyId,
-        connectionId: ws.connectionId,
-      }))
-    })
+    if (!state.ptyId) {
+      // ptyHandle is the PTY's stable identity, minted once at tab creation. Keying
+      // creation by it makes the dispose/re-init churn of reconciliation idempotent.
+      const handle = state.ptyHandle ?? crypto.randomUUID()
+      void ws.ensureTty(handle, ws.workspace.path, undefined, startupCommand).then((ptyId) => {
+        workspaceStore.getState().updateTabState<TerminalState>(tab.id, (s) => ({
+          ...s,
+          ptyId,
+          ptyHandle: handle,
+          connectionId: ws.connectionId,
+        }))
+      })
+    }
 
     const ref: TerminalAppRef = {
       cachedTerminal: null,
@@ -56,7 +62,7 @@ export function createTerminalApplication(deps: TerminalDeps): Application<Termi
 
     createInitialState: () => ({
       ptyId: null,
-      ptyHandle: null,
+      ptyHandle: crypto.randomUUID(),
       keepOnExit: false
     }),
 
@@ -87,7 +93,7 @@ export function createTerminalVariant(instance: TerminalInstance, deps: Terminal
 
     createInitialState: () => ({
       ptyId: null,
-      ptyHandle: null,
+      ptyHandle: crypto.randomUUID(),
       keepOnExit: false
     }),
 

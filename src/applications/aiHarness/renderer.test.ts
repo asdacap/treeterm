@@ -58,7 +58,7 @@ const mockWorkspaceStoreStateData = {
   getTabRef: vi.fn().mockReturnValue(null),
   disposeTabResources: vi.fn(),
   initAnalyzer: vi.fn(),
-  createTty: vi.fn().mockResolvedValue('pty-1'), ensureTtyForTab: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
+  createTty: vi.fn().mockResolvedValue('pty-1'), ensureTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
   connectionId: 'local',
   updateSettings: vi.fn(),
   settings: { defaultApplicationId: '' },
@@ -136,7 +136,7 @@ describe('AI Harness Renderer', () => {
 
         expect(state).toEqual({
           ptyId: null,
-          ptyHandle: null,
+          ptyHandle: expect.any(String) as unknown,
           keepOnExit: false,
           sandbox: {
             enabled: true,
@@ -171,7 +171,7 @@ describe('AI Harness Renderer', () => {
       const mockAnalyzerState = { start: vi.fn(), stop: vi.fn(), getHistory: vi.fn<() => unknown[]>().mockReturnValue([]) }
       const mockAnalyzer: Record<string, unknown> = { getState: vi.fn().mockReturnValue(mockAnalyzerState), setState: vi.fn(), subscribe: vi.fn() }
 
-      it('adopts existing ptyId via ensureTtyForTab and starts analyzer (restore path)', async () => {
+      it('starts analyzer directly with existing ptyId without creating a PTY (restore path)', () => {
         const mockAnalyzerState = { start: vi.fn(), stop: vi.fn(), getHistory: vi.fn().mockReturnValue([]) }
         const mockAnalyzer = { getState: vi.fn().mockReturnValue(mockAnalyzerState), setState: vi.fn(), subscribe: vi.fn() }
 
@@ -182,6 +182,7 @@ describe('AI Harness Renderer', () => {
           title: 'Claude',
           state: {
             ptyId: 'pty-existing',
+            ptyHandle: 'handle-1',
             sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] }
           }
         }
@@ -189,18 +190,16 @@ describe('AI Harness Renderer', () => {
         const store = createStore<WorkspaceStoreState>()(() => ({
           ...mockWorkspaceStoreStateData,
           initAnalyzer: vi.fn().mockReturnValue(mockAnalyzer),
-          // The store adopts the existing ptyId (no new PTY created).
-          ensureTtyForTab: vi.fn().mockResolvedValue('pty-existing'),
         }))
 
         app.onWorkspaceLoad(tab, store)
-        await new Promise(resolve => setTimeout(resolve, 0))
 
         expect(mockAnalyzerState.start).toHaveBeenCalledWith('pty-existing')
+        expect(mockWorkspaceStoreStateData.ensureTty).not.toHaveBeenCalled()
         expect(mockWorkspaceStoreStateData.createTty).not.toHaveBeenCalled()
       })
 
-      it('creates PTY and starts analyzer for new tab (no ptyId)', async () => {
+      it('creates PTY via ensureTty (keyed by handle) and starts analyzer for new tab (no ptyId)', async () => {
         const mockAnalyzerState = { start: vi.fn(), stop: vi.fn(), getHistory: vi.fn().mockReturnValue([]) }
         const mockAnalyzer = { getState: vi.fn().mockReturnValue(mockAnalyzerState), setState: vi.fn(), subscribe: vi.fn() }
 
@@ -211,6 +210,7 @@ describe('AI Harness Renderer', () => {
           title: 'Claude',
           state: {
             ptyId: null,
+            ptyHandle: 'handle-1',
             sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] }
           }
         }
@@ -222,7 +222,7 @@ describe('AI Harness Renderer', () => {
         const store = createStore<WorkspaceStoreState>()(() => ({
           ...mockWorkspaceStoreStateData,
           initAnalyzer: vi.fn().mockReturnValue(mockAnalyzer),
-          ensureTtyForTab: mockEnsureTty,
+          ensureTty: mockEnsureTty,
           updateTabState: mockUpdateTabState,
         }))
 
@@ -233,7 +233,7 @@ describe('AI Harness Renderer', () => {
         await new Promise(resolve => setTimeout(resolve, 0))
 
         expect(mockEnsureTty).toHaveBeenCalledWith(
-          'tab-1',
+          'handle-1',
           '/test',
           { enabled: true, allowNetwork: false, allowedPaths: [] },
           'claude'
@@ -242,9 +242,10 @@ describe('AI Harness Renderer', () => {
         expect(mockAnalyzerState.start).toHaveBeenCalledWith('pty-new')
 
         const updater = mockUpdateTabState.mock.calls[0]![1] as (prev: Record<string, unknown>) => Record<string, unknown>
-        const updated = updater({ ptyId: null, sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] } })
+        const updated = updater({ ptyId: null, ptyHandle: 'handle-1', sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] } })
         expect(updated).toEqual({
           ptyId: 'pty-new',
+          ptyHandle: 'handle-1',
           sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] },
           connectionId: 'local',
         })

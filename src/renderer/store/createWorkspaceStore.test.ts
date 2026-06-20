@@ -223,7 +223,7 @@ describe('createWorkspaceStore', () => {
 
   })
 
-  describe('ensureTtyForTab', () => {
+  describe('ensureTty', () => {
     // createTty stub that hands out a distinct id per call, so a duplicate creation
     // is observable as a different returned ptyId / a second call count.
     function makeTtyDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStoreDeps {
@@ -235,32 +235,33 @@ describe('createWorkspaceStore', () => {
       return makeHandleDeps({ createTty, ...overrides })
     }
 
-    function wsWithTab(ptyId: string | null): Workspace {
+    // A tab carrying a stable per-PTY handle in its state.
+    function wsWithHandleTab(ptyHandle: string, ptyId: string | null): Workspace {
       return makeWorkspace({
         id: 'ws-1',
-        appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: { ptyId } } },
+        appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: { ptyId, ptyHandle } } },
       })
     }
 
-    it('creates a PTY once and returns the same one on repeated calls', async () => {
+    it('creates a PTY once and returns the same one for repeated calls with the same handle', async () => {
       const deps = makeTtyDeps()
-      const store = createWorkspaceStore(wsWithTab(null), deps)
+      const store = createWorkspaceStore(makeWorkspace({ id: 'ws-1' }), deps)
 
-      const first = await store.getState().ensureTtyForTab('tab-1', '/test')
-      const second = await store.getState().ensureTtyForTab('tab-1', '/test')
+      const first = await store.getState().ensureTty('h-1', '/test')
+      const second = await store.getState().ensureTty('h-1', '/test')
 
       expect(first).toBe('pty-1')
       expect(second).toBe('pty-1')
       expect(deps.createTty).toHaveBeenCalledTimes(1)
     })
 
-    it('coalesces concurrent calls in the same tick into a single PTY', async () => {
+    it('coalesces concurrent calls with the same handle into a single PTY', async () => {
       const deps = makeTtyDeps()
-      const store = createWorkspaceStore(wsWithTab(null), deps)
+      const store = createWorkspaceStore(makeWorkspace({ id: 'ws-1' }), deps)
 
       const [a, b] = await Promise.all([
-        store.getState().ensureTtyForTab('tab-1', '/test'),
-        store.getState().ensureTtyForTab('tab-1', '/test'),
+        store.getState().ensureTty('h-1', '/test'),
+        store.getState().ensureTty('h-1', '/test'),
       ])
 
       expect(a).toBe('pty-1')
@@ -268,37 +269,40 @@ describe('createWorkspaceStore', () => {
       expect(deps.createTty).toHaveBeenCalledTimes(1)
     })
 
-    it('adopts an existing state.ptyId without creating a new PTY', async () => {
+    // Identity is per-PTY (handle), not per-tab: a tab is free to back several PTYs.
+    it('creates a distinct PTY for each distinct handle', async () => {
       const deps = makeTtyDeps()
-      const store = createWorkspaceStore(wsWithTab('pty-restored'), deps)
+      const store = createWorkspaceStore(makeWorkspace({ id: 'ws-1' }), deps)
 
-      const ptyId = await store.getState().ensureTtyForTab('tab-1', '/test')
+      const a = await store.getState().ensureTty('h-1', '/test')
+      const b = await store.getState().ensureTty('h-2', '/test')
 
-      expect(ptyId).toBe('pty-restored')
-      expect(deps.createTty).not.toHaveBeenCalled()
+      expect(a).toBe('pty-1')
+      expect(b).toBe('pty-2')
+      expect(deps.createTty).toHaveBeenCalledTimes(2)
     })
 
     // The reported bug: a stale file-watch body disposes the tab's resources and resets
-    // its ptyId to null, re-running onWorkspaceLoad. ensureTtyForTab must return the
-    // already-created PTY instead of spawning a duplicate (orphan).
+    // its ptyId to null, re-running onWorkspaceLoad. Because the handle is stable across
+    // that clobber, ensureTty returns the already-created PTY instead of an orphan.
     it('does not create a second PTY after reconciliation disposes the tab and nulls ptyId', async () => {
       const deps = makeTtyDeps()
-      const store = createWorkspaceStore(wsWithTab(null), deps)
+      const store = createWorkspaceStore(wsWithHandleTab('h-1', null), deps)
 
-      const first = await store.getState().ensureTtyForTab('tab-1', '/test')
+      const first = await store.getState().ensureTty('h-1', '/test')
 
-      // Simulate file-watch reconciliation churn.
+      // Simulate file-watch reconciliation churn (ptyId clobbered to null, handle kept).
       store.getState().disposeTabResources('tab-1')
-      store.getState().setWorkspace(wsWithTab(null))
+      store.getState().setWorkspace(wsWithHandleTab('h-1', null))
 
-      const second = await store.getState().ensureTtyForTab('tab-1', '/test')
+      const second = await store.getState().ensureTty('h-1', '/test')
 
       expect(first).toBe('pty-1')
       expect(second).toBe('pty-1')
       expect(deps.createTty).toHaveBeenCalledTimes(1)
     })
 
-    it('clears the memo on removeTab so a fresh PTY is created afterwards', async () => {
+    it('clears the memo for the tab handle on removeTab so a fresh PTY is created later', async () => {
       const app = makeFakeApp({ canClose: true })
       const deps = makeTtyDeps({
         appRegistry: {
@@ -306,14 +310,12 @@ describe('createWorkspaceStore', () => {
           getDefaultApp: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
         },
       })
-      const store = createWorkspaceStore(wsWithTab(null), deps)
+      const store = createWorkspaceStore(wsWithHandleTab('h-1', null), deps)
 
-      const first = await store.getState().ensureTtyForTab('tab-1', '/test')
+      const first = await store.getState().ensureTty('h-1', '/test')
       await store.getState().removeTab('tab-1')
 
-      // A new tab later reuses the id (re-added externally); the memo must not block it.
-      store.getState().setWorkspace(wsWithTab(null))
-      const second = await store.getState().ensureTtyForTab('tab-1', '/test')
+      const second = await store.getState().ensureTty('h-1', '/test')
 
       expect(first).toBe('pty-1')
       expect(second).toBe('pty-2')
@@ -326,10 +328,10 @@ describe('createWorkspaceStore', () => {
         attempt += 1
         return attempt === 1 ? Promise.reject(new Error('boom')) : Promise.resolve('pty-ok')
       })
-      const store = createWorkspaceStore(wsWithTab(null), makeHandleDeps({ createTty }))
+      const store = createWorkspaceStore(makeWorkspace({ id: 'ws-1' }), makeHandleDeps({ createTty }))
 
-      await expect(store.getState().ensureTtyForTab('tab-1', '/test')).rejects.toThrow('boom')
-      const retry = await store.getState().ensureTtyForTab('tab-1', '/test')
+      await expect(store.getState().ensureTty('h-1', '/test')).rejects.toThrow('boom')
+      const retry = await store.getState().ensureTty('h-1', '/test')
 
       expect(retry).toBe('pty-ok')
       expect(createTty).toHaveBeenCalledTimes(2)

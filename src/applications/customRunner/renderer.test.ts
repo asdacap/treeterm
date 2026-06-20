@@ -68,7 +68,7 @@ const mockWorkspaceStoreStateData = {
   getTabRef: vi.fn().mockReturnValue(null),
   disposeTabResources: vi.fn(),
   initAnalyzer: vi.fn(),
-  createTty: vi.fn().mockResolvedValue('pty-1'), ensureTtyForTab: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
+  createTty: vi.fn().mockResolvedValue('pty-1'), ensureTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
   connectionId: 'local',
   updateSettings: vi.fn(),
   settings: { defaultApplicationId: '' },
@@ -158,25 +158,25 @@ describe('createCustomRunnerVariant', () => {
       const variant = createCustomRunnerVariant(mockInstance, mockDeps)
       const state = variant.createInitialState()
 
-      expect(state).toEqual({ ptyId: null, ptyHandle: null, keepOnExit: false })
+      expect(state).toEqual({ ptyId: null, ptyHandle: expect.any(String) as unknown, keepOnExit: false })
     })
   })
 
   describe('onWorkspaceLoad', () => {
-    it('calls ensureTtyForTab with resolved command when ptyId is null', async () => {
+    it('calls ensureTty with the stable handle and resolved command when ptyId is null', async () => {
       const variant = createCustomRunnerVariant(mockInstance, mockDeps)
       const tab: Tab = {
         id: 'tab-1',
         applicationId: 'customrunner-rider',
         title: 'Rider',
-        state: { ptyId: null }
+        state: { ptyId: null, ptyHandle: 'handle-1' }
       }
 
       variant.onWorkspaceLoad(tab, mockWorkspaceStore)
 
       await vi.waitFor(() => {
-        expect(mockWorkspaceStoreStateData.ensureTtyForTab).toHaveBeenCalledWith(
-          'tab-1',
+        expect(mockWorkspaceStoreStateData.ensureTty).toHaveBeenCalledWith(
+          'handle-1',
           '/test/project',
           undefined,
           'rider /test/project'
@@ -184,29 +184,29 @@ describe('createCustomRunnerVariant', () => {
       })
     })
 
-    it('delegates to ensureTtyForTab even when a ptyId already exists (so it is memoized)', () => {
+    it('does not create a PTY when a ptyId already exists', () => {
       const variant = createCustomRunnerVariant(mockInstance, mockDeps)
       const tab: Tab = {
         id: 'tab-1',
         applicationId: 'customrunner-rider',
         title: 'Rider',
-        state: { ptyId: 'existing-pty' }
+        state: { ptyId: 'existing-pty', ptyHandle: 'handle-1' }
       }
 
       variant.onWorkspaceLoad(tab, mockWorkspaceStore)
 
-      expect(mockWorkspaceStoreStateData.ensureTtyForTab).toHaveBeenCalledWith('tab-1', '/test/project', undefined, 'rider /test/project')
+      expect(mockWorkspaceStoreStateData.ensureTty).not.toHaveBeenCalled()
       expect(mockWorkspaceStoreStateData.createTty).not.toHaveBeenCalled()
     })
 
-    it('updates tab state after ensureTtyForTab resolves', async () => {
+    it('updates tab state after ensureTty resolves', async () => {
       let resolveTty!: (value: string) => void
       const ttyPromise = new Promise<string>((resolve) => { resolveTty = resolve })
       const mockEnsureTty = vi.fn().mockReturnValue(ttyPromise)
       const mockUpdateTabState = vi.fn()
       const store = createStore<WorkspaceStoreState>()(() => ({
         ...mockWorkspaceStoreStateData,
-        ensureTtyForTab: mockEnsureTty,
+        ensureTty: mockEnsureTty,
         updateTabState: mockUpdateTabState,
       }))
 
@@ -215,7 +215,7 @@ describe('createCustomRunnerVariant', () => {
         id: 'tab-1',
         applicationId: 'customrunner-rider',
         title: 'Rider',
-        state: { ptyId: null }
+        state: { ptyId: null, ptyHandle: 'handle-1' }
       }
 
       variant.onWorkspaceLoad(tab, store)
@@ -224,14 +224,14 @@ describe('createCustomRunnerVariant', () => {
       await ttyPromise
       await new Promise(resolve => setTimeout(resolve, 0))
 
-      expect(mockEnsureTty).toHaveBeenCalledWith('tab-1', '/test/project', undefined, 'rider /test/project')
+      expect(mockEnsureTty).toHaveBeenCalledWith('handle-1', '/test/project', undefined, 'rider /test/project')
       expect(mockUpdateTabState).toHaveBeenCalledWith('tab-1', expect.any(Function))
 
       const updater = mockUpdateTabState.mock.calls[0]![1] as (prev: Record<string, unknown>) => Record<string, unknown>
-      const updated = updater({ ptyId: null, ptyHandle: null, keepOnExit: false })
+      const updated = updater({ ptyId: null, ptyHandle: 'handle-1', keepOnExit: false })
       expect(updated).toEqual({
         ptyId: 'pty-new',
-        ptyHandle: null,
+        ptyHandle: 'handle-1',
         keepOnExit: false,
         connectionId: 'local',
       })

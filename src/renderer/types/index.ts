@@ -135,7 +135,7 @@ export interface ApplicationRenderProps {
 // Type-specific state interfaces (for internal use within applications)
 export interface TerminalState {
   ptyId: string | null       // daemon sessionId — persisted for reconnection
-  ptyHandle: string | null   // ephemeral stream handle — used for write/resize/onData/onExit
+  ptyHandle: string | null   // stable per-PTY identity, minted once at tab creation; keys idempotent PTY creation so reconciliation churn can't duplicate it
   connectionId?: string      // which connection this PTY belongs to — used for routing kill
   keepOnExit: boolean
 }

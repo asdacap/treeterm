@@ -71,7 +71,7 @@ const mockWorkspaceStoreStateData = {
   getTabRef: vi.fn().mockReturnValue(null),
   disposeTabResources: vi.fn(),
   initAnalyzer: vi.fn(),
-  createTty: vi.fn().mockResolvedValue('pty-1'), ensureTtyForTab: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
+  createTty: vi.fn().mockResolvedValue('pty-1'), ensureTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
   connectionId: 'local',
   updateSettings: vi.fn(),
   settings: { defaultApplicationId: '' },
@@ -128,7 +128,7 @@ describe('Terminal Renderer', () => {
         const app = createTerminalApplication(mockDeps)
         const state = app.createInitialState()
 
-        expect(state).toEqual({ ptyId: null, ptyHandle: null, keepOnExit: false })
+        expect(state).toEqual({ ptyId: null, ptyHandle: expect.any(String) as unknown, keepOnExit: false })
       })
     })
 
@@ -179,14 +179,14 @@ describe('Terminal Renderer', () => {
         expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
       })
 
-      it('obtains the PTY via ensureTtyForTab and updates tab state on resolve', async () => {
+      it('creates the PTY via ensureTty keyed by the stable handle and updates tab state on resolve', async () => {
         let resolveTty!: (value: string) => void
         const ttyPromise = new Promise<string>((resolve) => { resolveTty = resolve })
         const mockEnsureTty = vi.fn().mockReturnValue(ttyPromise)
         const mockUpdateTabState = vi.fn()
         const store = createStore<WorkspaceStoreState>()(() => ({
           ...mockWorkspaceStoreStateData,
-          ensureTtyForTab: mockEnsureTty,
+          ensureTty: mockEnsureTty,
           updateTabState: mockUpdateTabState,
         }))
 
@@ -195,45 +195,45 @@ describe('Terminal Renderer', () => {
           id: 'tab-1',
           applicationId: 'terminal',
           title: 'Terminal',
-          state: { ptyId: null }
+          state: { ptyId: null, ptyHandle: 'handle-1' }
         }
 
         app.onWorkspaceLoad(tab, store)
 
-        // Per-tab idempotent creation is delegated to the store, keyed by tab id.
-        expect(mockEnsureTty).toHaveBeenCalledWith('tab-1', '/test', undefined, undefined)
+        // Creation is keyed by the PTY's stable handle, not the tab id.
+        expect(mockEnsureTty).toHaveBeenCalledWith('handle-1', '/test', undefined, undefined)
         expect(mockUpdateTabState).not.toHaveBeenCalled()
 
         resolveTty('pty-new')
         await ttyPromise
-        // Flush the .then() microtask scheduled by ensureTtyForTab().then(...)
+        // Flush the .then() microtask scheduled by ensureTty().then(...)
         await new Promise(resolve => setTimeout(resolve, 0))
 
         expect(mockUpdateTabState).toHaveBeenCalledWith('tab-1', expect.any(Function))
 
-        // Verify the state updater function produces correct state
+        // Verify the state updater function produces correct state (handle persisted)
         const updater = mockUpdateTabState.mock.calls[0]![1] as (prev: Record<string, unknown>) => Record<string, unknown>
-        const updated = updater({ ptyId: null, ptyHandle: null, keepOnExit: false })
+        const updated = updater({ ptyId: null, ptyHandle: 'handle-1', keepOnExit: false })
         expect(updated).toEqual({
           ptyId: 'pty-new',
-          ptyHandle: null,
+          ptyHandle: 'handle-1',
           keepOnExit: false,
           connectionId: 'local',
         })
       })
 
-      it('delegates to ensureTtyForTab even when a ptyId already exists (so it is memoized)', () => {
+      it('does not create a PTY when a ptyId already exists', () => {
         const app = createTerminalApplication(mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal',
           title: 'Terminal',
-          state: { ptyId: 'existing-pty' }
+          state: { ptyId: 'existing-pty', ptyHandle: 'handle-1' }
         }
 
         app.onWorkspaceLoad(tab, mockWorkspaceStore)
 
-        expect(mockWorkspaceStoreStateData.ensureTtyForTab).toHaveBeenCalledWith('tab-1', '/test', undefined, undefined)
+        expect(mockWorkspaceStoreStateData.ensureTty).not.toHaveBeenCalled()
         expect(mockWorkspaceStoreStateData.createTty).not.toHaveBeenCalled()
       })
 
@@ -293,7 +293,7 @@ describe('Terminal Renderer', () => {
     it('can create initial state', () => {
       const app = createTerminalApplication(mockDeps)
       const state = app.createInitialState()
-      expect(state).toEqual({ ptyId: null, ptyHandle: null, keepOnExit: false })
+      expect(state).toEqual({ ptyId: null, ptyHandle: expect.any(String) as unknown, keepOnExit: false })
     })
 
     it('can render Terminal component', () => {
@@ -375,7 +375,7 @@ describe('Terminal Renderer', () => {
         const variant = createTerminalVariant(mockInstance, mockDeps)
         const state = variant.createInitialState()
 
-        expect(state).toEqual({ ptyId: null, ptyHandle: null, keepOnExit: false })
+        expect(state).toEqual({ ptyId: null, ptyHandle: expect.any(String) as unknown, keepOnExit: false })
       })
     })
 

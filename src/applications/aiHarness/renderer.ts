@@ -19,7 +19,7 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
 
     createInitialState: () => ({
       ptyId: null,
-      ptyHandle: null,
+      ptyHandle: crypto.randomUUID(),
       keepOnExit: false,
       sandbox: {
         enabled: instance.enableSandbox,
@@ -34,20 +34,25 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
       const state = tab.state as AiHarnessState
       const analyzer = ws.initAnalyzer(tab.id)
 
-      // Idempotently obtain the PTY for this tab (adopts an existing one on restore,
-      // creates one for a new tab), then start the analyzer. Routing the restore path
-      // through ensureTtyForTab too registers the PTY in the memo, so the dispose/re-init
-      // churn of file-watch reconciliation cannot spawn a duplicate.
-      void ws.ensureTtyForTab(tab.id, ws.workspace.path, state.sandbox, instance.command).then((ptyId) => {
-        workspaceStore.getState().updateTabState<AiHarnessState>(tab.id, (s) => ({
-          ...s,
-          ptyId,
-          connectionId: ws.connectionId,
-        }))
+      if (state.ptyId) {
+        // Restore: PTY already exists, just start analyzer
         // Pre-cache writer so promptHarness doesn't open a second stream
-        void ws.getTtyWriter(ptyId)
-        analyzer.getState().start(ptyId)
-      })
+        void ws.getTtyWriter(state.ptyId)
+        analyzer.getState().start(state.ptyId)
+      } else {
+        // New tab: create PTY (keyed by the stable per-PTY handle so reconciliation
+        // churn can't duplicate it) then start analyzer
+        const handle = state.ptyHandle ?? crypto.randomUUID()
+        void ws.ensureTty(handle, ws.workspace.path, state.sandbox, instance.command).then((ptyId) => {
+          workspaceStore.getState().updateTabState<AiHarnessState>(tab.id, (s) => ({
+            ...s,
+            ptyId,
+            ptyHandle: handle,
+            connectionId: ws.connectionId,
+          }))
+          analyzer.getState().start(ptyId)
+        })
+      }
 
       const ref: AiHarnessRef = {
         analyzer,
