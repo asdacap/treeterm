@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { ChevronDown, ChevronRight, Loader2, RefreshCw } from 'lucide-react'
 import type { DiffFile, UncommittedFile, FileDiffContents, ReviewComment } from '../types'
 import { FileChangeStatus } from '../types'
@@ -104,6 +104,13 @@ export function FileDiffSection({
   // while off-screen so the scroll position doesn't jump. Floored at MIN_BODY_HEIGHT.
   const [placeholderHeight, setPlaceholderHeight] = useState(MIN_BODY_HEIGHT)
 
+  // One-shot scroll request captured when this file is checked off (marked viewed).
+  // Holds the clicked header's offset from the scroll container's top (where the
+  // cursor is). Applied in a layout effect AFTER the collapse removes the body, so we
+  // read the settled post-collapse layout and land the next file's header at this
+  // offset. null = no scroll pending.
+  const [pendingScrollAnchor, setPendingScrollAnchor] = useState<number | null>(null)
+
   // Auto-collapse when isViewed transitions false→true (React previous-value-in-state pattern)
   const [prevIsViewed, setPrevIsViewed] = useState(isViewed ?? false)
   if (isViewed !== undefined && isViewed !== prevIsViewed) {
@@ -160,6 +167,25 @@ export function FileDiffSection({
     return () => { observer.disconnect() }
   }, [])
 
+  // Apply the pending "mark viewed" scroll. This layout effect runs after the commit
+  // that collapsed this file (removing its body of height H), so the next file's
+  // wrapper sits at its final post-collapse position. We compute that position in
+  // content space and set scrollTop to an ABSOLUTE value — so the H-removal that
+  // shoved content up cannot accumulate into an overshoot, and a scroll-anchoring
+  // nudge between commit and effect washes out (contentOffset is invariant to scrollTop).
+  useLayoutEffect(() => {
+    if (pendingScrollAnchor === null) return
+    const nextWrapper = sectionRef.current?.parentElement?.nextElementSibling
+    const scrollParent = sectionRef.current?.closest('.stacked-diff-list')
+    if (nextWrapper && scrollParent) {
+      const sp = scrollParent as HTMLElement
+      const contentOffset =
+        nextWrapper.getBoundingClientRect().top - sp.getBoundingClientRect().top + sp.scrollTop
+      sp.scrollTop = contentOffset - pendingScrollAnchor
+    }
+    setPendingScrollAnchor(null)
+  }, [pendingScrollAnchor])
+
   return (
     <div className="file-diff-section" ref={sectionRef} data-file-path={file.path}>
       <div
@@ -210,26 +236,20 @@ export function FileDiffSection({
             <input
               type="checkbox"
               checked={isViewed ?? false}
-              onChange={(e) => {
+              onChange={() => {
                 if (!isViewed && !collapsed) {
-                  const headerEl = (e.target as HTMLElement).closest('.file-diff-header')
-                  // Capture the clicked (sticky) header's position now — this is where the
-                  // cursor is. After the file collapses we bring the next file's header here,
-                  // so its "Viewed" checkbox (same column) lands under the cursor for rapid
-                  // sequential checking. Because the sticky header is pinned at the viewport
-                  // top while scrolled into the file, this also lands at the next file's
-                  // start with no overshoot, regardless of how far in we'd scrolled.
-                  const anchorTop = headerEl?.getBoundingClientRect().top ?? 0
-                  const nextHeader = sectionRef.current
-                    ?.parentElement?.nextElementSibling
-                    ?.querySelector('.file-diff-header')
-                  if (headerEl && nextHeader) {
-                    requestAnimationFrame(() => {
-                      const scrollParent = headerEl.closest('.stacked-diff-list')
-                      if (scrollParent) {
-                        scrollParent.scrollTop += nextHeader.getBoundingClientRect().top - anchorTop
-                      }
-                    })
+                  // Capture where the clicked (sticky) header sits relative to the scroll
+                  // container's top — this is where the cursor is. The layout effect then
+                  // brings the next file's header to this same offset once the collapse
+                  // settles, so its "Viewed" checkbox (same column) lands under the cursor
+                  // for rapid sequential checking. When pinned at the top (scrolled deep
+                  // into the file) this offset is ~0, landing at the next file's start.
+                  const headerEl = sectionRef.current?.querySelector('.file-diff-header')
+                  const scrollParent = sectionRef.current?.closest('.stacked-diff-list')
+                  if (headerEl && scrollParent) {
+                    setPendingScrollAnchor(
+                      headerEl.getBoundingClientRect().top - scrollParent.getBoundingClientRect().top
+                    )
                   }
                 }
                 onToggleViewed()

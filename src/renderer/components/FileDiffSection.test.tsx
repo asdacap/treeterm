@@ -287,25 +287,23 @@ describe('FileDiffSection', () => {
     expect(screen.queryByTestId('multi-file-diff')).toBeNull()
   })
 
-  it('scrolls next file\'s header to the clicked header\'s position when marking expanded file as viewed', () => {
-    const onToggleViewed = vi.fn()
-    const rafCallbacks: FrameRequestCallback[] = []
-    const originalRaf = globalThis.requestAnimationFrame
-    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => { rafCallbacks.push(cb); return 0 }) as typeof requestAnimationFrame
-
-    // Mirror the production DOM: each section lives in its own wrapper div inside
-    // the scroll container, so parentElement.nextElementSibling reaches the next file.
-    const { container } = render(
+  // Stateful harness mirroring the parent: toggling "Viewed" flips isViewed→true so
+  // the checked file actually collapses (its body unmounts), letting us assert that
+  // the scroll correction runs against the POST-collapse layout — the ordering the
+  // single-rAF approach got wrong (it overshot to the next-next file).
+  function ViewedHarness({ onToggle }: { onToggle?: () => void }) {
+    const [viewed, setViewed] = React.useState(false)
+    return (
       <div className="stacked-diff-list">
-        <div>
+        <div className="wrap-a">
           <FileDiffSection
             {...defaultProps}
             contents={makeContents()}
-            isViewed={false}
-            onToggleViewed={onToggleViewed}
+            isViewed={viewed}
+            onToggleViewed={() => { onToggle?.(); setViewed(true) }}
           />
         </div>
-        <div>
+        <div className="wrap-b">
           <FileDiffSection
             {...defaultProps}
             file={makeDiffFile({ path: 'src/other.ts' })}
@@ -316,89 +314,131 @@ describe('FileDiffSection', () => {
         </div>
       </div>
     )
+  }
+
+  function mockRectTop(el: HTMLElement, top: number): void {
+    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
+      height: 36, width: 100, top, left: 0, bottom: top + 36, right: 100, x: 0, y: top, toJSON: () => {},
+    })
+  }
+
+  it('scrolls the next file to the cursor anchor AFTER the checked file collapses', () => {
+    const onToggle = vi.fn()
+    const { container } = render(<ViewedHarness onToggle={onToggle} />)
 
     const scrollContainer = container.querySelector('.stacked-diff-list') as HTMLElement
-    const headers = container.querySelectorAll('.file-diff-header')
-    const clickedHeader = headers[0] as HTMLElement
-    const nextHeader = headers[1] as HTMLElement
+    const clickedHeader = container.querySelector('.wrap-a .file-diff-header') as HTMLElement
+    const nextWrapper = container.querySelector('.wrap-b') as HTMLElement
 
-    // Clicked (sticky) header is pinned at the viewport top; the next file's header
-    // sits 200px below after the collapse.
-    vi.spyOn(clickedHeader, 'getBoundingClientRect').mockReturnValue({
-      height: 36, width: 100, top: 0, left: 0, bottom: 36, right: 100, x: 0, y: 0, toJSON: () => {},
-    })
-    vi.spyOn(nextHeader, 'getBoundingClientRect').mockReturnValue({
-      height: 36, width: 100, top: 200, left: 0, bottom: 236, right: 100, x: 0, y: 200, toJSON: () => {},
-    })
+    // Scroll container top is the reference frame; clicked header is pinned at it
+    // (anchor offset 0, i.e. scrolled deep into the file). After the collapse, the
+    // next wrapper sits 800px below the container top.
+    mockRectTop(scrollContainer, 0)
+    mockRectTop(clickedHeader, 0)
+    mockRectTop(nextWrapper, 800)
+    // Deep scroll: a large scrollTop the old relative `+=` would have compounded into
+    // an overshoot. The absolute target ignores it: contentOffset = 800 - 0 + 5000.
+    Object.defineProperty(scrollContainer, 'scrollTop', { value: 5000, writable: true })
+
+    // Body present before the click.
+    expect(screen.getAllByTestId('multi-file-diff')).toHaveLength(2)
+
+    const checkbox = container.querySelector('.wrap-a .file-diff-viewed-checkbox') as HTMLInputElement
+    fireEvent.click(checkbox)
+
+    expect(onToggle).toHaveBeenCalledTimes(1)
+    // Collapse committed: the checked file's body is gone (only the next file's remains),
+    // proving the layout effect ran after the collapse.
+    expect(screen.getAllByTestId('multi-file-diff')).toHaveLength(1)
+    // Absolute target = nextWrapper contentOffset (800 - 0 + 5000) - anchor (0).
+    expect(scrollContainer.scrollTop).toBe(5800)
+  })
+
+  it('does not scroll when unchecking viewed', () => {
+    const onToggleViewed = vi.fn()
+    const { container } = render(
+      <div className="stacked-diff-list">
+        <div>
+          <FileDiffSection
+            {...defaultProps}
+            contents={makeContents()}
+            isViewed={true}
+            onToggleViewed={onToggleViewed}
+          />
+        </div>
+        <div><FileDiffSection {...defaultProps} file={makeDiffFile({ path: 'src/other.ts' })} contents={makeContents()} /></div>
+      </div>
+    )
+
+    const scrollContainer = container.querySelector('.stacked-diff-list') as HTMLElement
     Object.defineProperty(scrollContainer, 'scrollTop', { value: 100, writable: true })
 
     const checkbox = container.querySelector('.file-diff-viewed-checkbox') as HTMLInputElement
     fireEvent.click(checkbox)
 
     expect(onToggleViewed).toHaveBeenCalledTimes(1)
-    expect(rafCallbacks).toHaveLength(1)
-
-    // Execute the rAF callback: scroll by (nextHeader.top - anchorTop) = 200 - 0.
-    rafCallbacks[0]!(0)
-    expect(scrollContainer.scrollTop).toBe(300)
-
-    globalThis.requestAnimationFrame = originalRaf
-  })
-
-  it('does not scroll when unchecking viewed', () => {
-    const onToggleViewed = vi.fn()
-    const rafCallbacks: FrameRequestCallback[] = []
-    const originalRaf = globalThis.requestAnimationFrame
-    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => { rafCallbacks.push(cb); return 0 }) as typeof requestAnimationFrame
-
-    const { container } = render(
-      <div className="stacked-diff-list">
-        <FileDiffSection
-          {...defaultProps}
-          contents={makeContents()}
-          isViewed={true}
-          onToggleViewed={onToggleViewed}
-        />
-      </div>
-    )
-
-    const checkbox = container.querySelector('.file-diff-viewed-checkbox') as HTMLInputElement
-    fireEvent.click(checkbox)
-
-    expect(onToggleViewed).toHaveBeenCalledTimes(1)
-    expect(rafCallbacks).toHaveLength(0)
-
-    globalThis.requestAnimationFrame = originalRaf
+    expect(scrollContainer.scrollTop).toBe(100)
   })
 
   it('does not scroll when marking already-collapsed file as viewed', () => {
     const onToggleViewed = vi.fn()
-    const rafCallbacks: FrameRequestCallback[] = []
-    const originalRaf = globalThis.requestAnimationFrame
-    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => { rafCallbacks.push(cb); return 0 }) as typeof requestAnimationFrame
-
     const { container } = render(
       <div className="stacked-diff-list">
-        <FileDiffSection
-          {...defaultProps}
-          contents={makeContents()}
-          isViewed={false}
-          onToggleViewed={onToggleViewed}
-        />
+        <div>
+          <FileDiffSection
+            {...defaultProps}
+            contents={makeContents()}
+            isViewed={false}
+            onToggleViewed={onToggleViewed}
+          />
+        </div>
+        <div><FileDiffSection {...defaultProps} file={makeDiffFile({ path: 'src/other.ts' })} contents={makeContents()} /></div>
       </div>
     )
 
+    const scrollContainer = container.querySelector('.stacked-diff-list') as HTMLElement
+    Object.defineProperty(scrollContainer, 'scrollTop', { value: 100, writable: true })
+
     // Manually collapse first
     fireEvent.click(screen.getByText('src/app.ts'))
-    expect(screen.queryByTestId('multi-file-diff')).toBeNull()
+    expect(screen.queryAllByTestId('multi-file-diff')).toHaveLength(1)
 
     const checkbox = container.querySelector('.file-diff-viewed-checkbox') as HTMLInputElement
     fireEvent.click(checkbox)
 
     expect(onToggleViewed).toHaveBeenCalledTimes(1)
-    expect(rafCallbacks).toHaveLength(0)
+    expect(scrollContainer.scrollTop).toBe(100)
+  })
 
-    globalThis.requestAnimationFrame = originalRaf
+  it('does not scroll when checking the last file (no next sibling)', () => {
+    const onToggle = vi.fn()
+    function LastFileHarness() {
+      const [viewed, setViewed] = React.useState(false)
+      return (
+        <div className="stacked-diff-list">
+          <div className="wrap-a">
+            <FileDiffSection
+              {...defaultProps}
+              contents={makeContents()}
+              isViewed={viewed}
+              onToggleViewed={() => { onToggle(); setViewed(true) }}
+            />
+          </div>
+        </div>
+      )
+    }
+    const { container } = render(<LastFileHarness />)
+
+    const scrollContainer = container.querySelector('.stacked-diff-list') as HTMLElement
+    Object.defineProperty(scrollContainer, 'scrollTop', { value: 100, writable: true })
+
+    const checkbox = container.querySelector('.file-diff-viewed-checkbox') as HTMLInputElement
+    fireEvent.click(checkbox)
+
+    expect(onToggle).toHaveBeenCalledTimes(1)
+    // Collapsed, but there is no next file to scroll to.
+    expect(screen.queryByTestId('multi-file-diff')).toBeNull()
+    expect(scrollContainer.scrollTop).toBe(100)
   })
 
   it('calls onMarkViewedAbove on right-click of viewed label when not first file', () => {
