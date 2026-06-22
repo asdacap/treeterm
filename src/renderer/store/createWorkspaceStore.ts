@@ -1,7 +1,7 @@
 /* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, AppRef, AppRegistryApi, AppState, GitApi, FilesystemApi, ExecApi, RunActionsApi, WorkspaceGitApi, WorkspaceFilesystemApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi, PtyEvent } from '../types'
+import type { Workspace, AppRef, AppRegistryApi, AppState, GitApi, FilesystemApi, ExecApi, RunActionsApi, WorkspaceGitApi, WorkspaceFilesystemApi, WorkspaceGitHubApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi, PtyEvent } from '../types'
 import type { WorktreeRegistryApi } from '../lib/worktreeRegistry'
 import { buildEntryFromWorkspace } from '../lib/worktreeRegistry'
 import { PtyEventType } from '../../shared/ipc-types'
@@ -167,6 +167,9 @@ export interface WorkspaceStoreState {
 
   // Filesystem API (workspace-scoped, created once at init)
   filesystemApi: WorkspaceFilesystemApi
+
+  // GitHub API (workspace-scoped, created once at init)
+  gitHubApi: WorkspaceGitHubApi
 
   // Exec API (connection-bound)
   execApi: ExecApi
@@ -616,6 +619,10 @@ export function createWorkspaceStore(
       readFile: (filePath) => deps.filesystem.readFile(workspace.path, filePath),
       writeFile: (filePath, content, expectedSha256) => deps.filesystem.writeFile(workspace.path, filePath, content, expectedSha256),
       searchFiles: (query) => deps.filesystem.searchFiles(workspace.path, query),
+    },
+
+    gitHubApi: {
+      listOpenPrs: () => deps.github.listOpenPrs(workspace.path),
     },
 
     execApi: deps.exec,

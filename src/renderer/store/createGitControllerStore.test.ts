@@ -22,6 +22,7 @@ function makeDeps(overrides: Partial<GitControllerDeps> = {}): GitControllerDeps
     } as unknown as GitControllerDeps['git'],
     github: {
       getPrInfo: vi.fn().mockResolvedValue({ noPr: true, createUrl: 'https://github.com/test/repo/compare/main...feat?expand=1' }),
+      listOpenPrs: vi.fn().mockResolvedValue({ prs: [] }),
       postReviewComments: vi.fn().mockResolvedValue({ posted: 0, failed: [] }),
     },
     lookupWorkspace: vi.fn().mockReturnValue(undefined),

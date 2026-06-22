@@ -6,7 +6,7 @@
  * the renderer using ExecApi and fetch instead of going through IPC to main.
  */
 
-import type { ExecApi, GitHubApi, GitHubPostCommentsResult, GitHubPrInfoResult, ReviewComment, SettingsApi } from '../types'
+import type { ExecApi, GitHubApi, GitHubPostCommentsResult, GitHubPrInfoResult, GitHubPrListResult, ReviewComment, SettingsApi } from '../types'
 import { ExecEventType } from '../../shared/ipc-types'
 
 // --- Helpers ---
@@ -275,6 +275,40 @@ export function createGitHubApi(
         } catch {
           // GraphQL failed — graceful degradation
           return { prInfo: { number: pr.number, url: prUrl, title: pr.title, state: 'OPEN' as const, reviews: [], checkRuns: [], unresolvedThreads: [], unresolvedCount: 0 } }
+        }
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : 'Unknown error' }
+      }
+    },
+
+    listOpenPrs: async (repoPath: string): Promise<GitHubPrListResult> => {
+      try {
+        const resolved = await resolveTokenAndRepo(exec, settingsApi, connectionId, repoPath)
+        if ('error' in resolved) return { error: resolved.error }
+        const { token, owner, repo } = resolved
+
+        const response = await fetch(
+          `https://api.github.com/repos/${owner}/${repo}/pulls?state=open&per_page=100&sort=updated&direction=desc`,
+          { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } }
+        )
+        if (!response.ok) {
+          return { error: `GitHub API error: ${String(response.status)} ${response.statusText}` }
+        }
+        const prs = await response.json() as Array<{
+          number: number
+          title: string
+          user: { login: string } | null
+          head: { ref: string; repo: { full_name: string } | null }
+        }>
+
+        return {
+          prs: prs.map(pr => ({
+            number: pr.number,
+            title: pr.title,
+            author: pr.user?.login ?? '',
+            headRefName: pr.head.ref,
+            isCrossRepo: pr.head.repo?.full_name !== `${owner}/${repo}`,
+          })),
         }
       } catch (error) {
         return { error: error instanceof Error ? error.message : 'Unknown error' }

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { analyzerHistoryApplication } from './renderer'
 import type { Tab, Workspace } from '../../renderer/types'
-import { createMockGitApi, createMockFilesystemApi, createMockRunActionsApi, createMockExecApi, createMockWorktreeRegistryApi } from '../../shared/mockApis'
+import { createMockGitApi, createMockGitHubApi, createMockFilesystemApi, createMockRunActionsApi, createMockExecApi, createMockWorktreeRegistryApi } from '../../shared/mockApis'
 import { createStore } from 'zustand/vanilla'
 import type { WorkspaceStoreState } from '../../renderer/store/createWorkspaceStore'
 import type { GitControllerState } from '../../renderer/store/createGitControllerStore'
@@ -38,7 +38,7 @@ const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => ({
   metadata: {},
   appStates: {},
   setWorkspace: vi.fn<(...args: any[]) => void>(),
-  gitApi: createMockGitApi(), filesystemApi: createMockFilesystemApi(), runActionsApi: createMockRunActionsApi(), execApi: createMockExecApi(),
+  gitApi: createMockGitApi(), gitHubApi: createMockGitHubApi(), filesystemApi: createMockFilesystemApi(), runActionsApi: createMockRunActionsApi(), execApi: createMockExecApi(),
   worktreeRegistryApi: createMockWorktreeRegistryApi(), saveRegistryEntry: vi.fn(),
   gitController: createStore<GitControllerState>()(() => ({
     hasUncommittedChanges: false, isDiffCleanFromParent: false,

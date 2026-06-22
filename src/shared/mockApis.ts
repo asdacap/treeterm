@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import type { WorkspaceGitApi, WorkspaceFilesystemApi, ExecApi, RunActionsApi } from '../renderer/types'
+import type { WorkspaceGitApi, WorkspaceFilesystemApi, WorkspaceGitHubApi, ExecApi, RunActionsApi } from '../renderer/types'
 import type { WorktreeRegistryApi } from '../renderer/lib/worktreeRegistry'
 
 export function createMockGitApi(): WorkspaceGitApi {
@@ -16,6 +16,12 @@ export function createMockGitApi(): WorkspaceGitApi {
     getHeadCommitHash: vi.fn(), getLog: vi.fn(), getCommitDiff: vi.fn(),
     getCommitFileDiff: vi.fn(), fetch: vi.fn(), pull: vi.fn(), getBehindCount: vi.fn(),
     isAncestor: vi.fn(),
+  }
+}
+
+export function createMockGitHubApi(): WorkspaceGitHubApi {
+  return {
+    listOpenPrs: vi.fn<WorkspaceGitHubApi['listOpenPrs']>().mockResolvedValue({ prs: [] }),
   }
 }
 

@@ -1,28 +1,30 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { createStore } from 'zustand/vanilla'
 import CreateChildDialog, { TabMode } from './CreateChildDialog'
 import type { WorkspaceStoreState } from '../store/createWorkspaceStore'
 import type { WorkspaceStore } from '../types'
 import { makeWorkspace } from '../../shared/test-fixtures/workspace'
-import { createMockGitApi, createMockWorktreeRegistryApi } from '../../shared/mockApis'
+import { createMockGitApi, createMockGitHubApi, createMockWorktreeRegistryApi } from '../../shared/mockApis'
 
 vi.mock('../store/app', () => ({
   useAppStore: vi.fn((selector: (s: { applications: Map<string, unknown> }) => unknown) =>
     selector({ applications: new Map() })),
 }))
 
-function makeParentStore(): { store: WorkspaceStore; gitApi: ReturnType<typeof createMockGitApi>; registry: ReturnType<typeof createMockWorktreeRegistryApi> } {
+function makeParentStore(): { store: WorkspaceStore; gitApi: ReturnType<typeof createMockGitApi>; github: ReturnType<typeof createMockGitHubApi>; registry: ReturnType<typeof createMockWorktreeRegistryApi> } {
   const gitApi = createMockGitApi()
+  const github = createMockGitHubApi()
   const registry = createMockWorktreeRegistryApi()
   const store = createStore<WorkspaceStoreState>()(() => ({
     workspace: makeWorkspace({ id: 'ws-1', path: '/repo', isGitRepo: true, gitRootPath: '/repo' }),
     settings: { defaultApplicationId: '' },
     gitApi,
+    gitHubApi: github,
     worktreeRegistryApi: registry,
   } as WorkspaceStoreState))
-  return { store, gitApi, registry }
+  return { store, gitApi, github, registry }
 }
 
 function renderDialog(store: WorkspaceStore, openWorktreePaths: string[], initialMode: TabMode) {
@@ -33,6 +35,7 @@ function renderDialog(store: WorkspaceStore, openWorktreePaths: string[], initia
       onAdopt={vi.fn()}
       onCreateFromBranch={vi.fn()}
       onCreateFromRemote={vi.fn()}
+      onCreateFromPr={vi.fn()}
       onCancel={vi.fn()}
       openWorktreePaths={openWorktreePaths}
       initialMode={initialMode}
@@ -74,6 +77,7 @@ describe('CreateChildDialog loaders', () => {
         onAdopt={vi.fn()}
         onCreateFromBranch={vi.fn()}
         onCreateFromRemote={vi.fn()}
+        onCreateFromPr={vi.fn()}
         onCancel={vi.fn()}
         openWorktreePaths={['/wt/a']}
         initialMode={TabMode.Existing}
@@ -107,6 +111,89 @@ describe('CreateChildDialog loaders', () => {
     // Sorted most-recently-used first: Beta (2) before Alpha (1).
     const names = screen.getAllByText(/Alpha|Beta/).map(el => el.textContent)
     expect(names).toEqual(['Beta', 'Alpha'])
+  })
+
+  it('PR tab lists open PRs and opening one passes head branch + title (not description)', async () => {
+    const { store, github } = makeParentStore()
+    vi.mocked(github.listOpenPrs).mockResolvedValue({
+      prs: [
+        { number: 12, title: 'Add login flow', author: 'alice', headRefName: 'feat/login', isCrossRepo: false },
+        { number: 7, title: 'Fork change', author: 'bob', headRefName: 'patch-1', isCrossRepo: true },
+      ],
+    })
+    const onCreateFromPr = vi.fn<(...args: any[]) => any>().mockReturnValue({ success: true })
+
+    render(
+      <CreateChildDialog
+        parentWorkspace={store}
+        onCreate={vi.fn()}
+        onAdopt={vi.fn()}
+        onCreateFromBranch={vi.fn()}
+        onCreateFromRemote={vi.fn()}
+        onCreateFromPr={onCreateFromPr}
+        onCancel={vi.fn()}
+        openWorktreePaths={[]}
+        initialMode={TabMode.Pr}
+      />
+    )
+
+    const sameRepoPr = await screen.findByText('#12 Add login flow')
+    // Fork PR is shown but disabled (cannot be opened directly)
+    expect(screen.getByText('#7 Fork change')).toBeTruthy()
+    expect(screen.getByText('Fork')).toBeTruthy()
+
+    fireEvent.click(sameRepoPr)
+    fireEvent.click(screen.getByText('Open'))
+
+    expect(onCreateFromPr).toHaveBeenCalledWith('feat/login', 'Add login flow', false, undefined)
+  })
+
+  it('PR tab does not open a fork PR when clicked', async () => {
+    const { store, github } = makeParentStore()
+    vi.mocked(github.listOpenPrs).mockResolvedValue({
+      prs: [{ number: 7, title: 'Fork change', author: 'bob', headRefName: 'patch-1', isCrossRepo: true }],
+    })
+    const onCreateFromPr = vi.fn<(...args: any[]) => any>().mockReturnValue({ success: true })
+
+    render(
+      <CreateChildDialog
+        parentWorkspace={store}
+        onCreate={vi.fn()}
+        onAdopt={vi.fn()}
+        onCreateFromBranch={vi.fn()}
+        onCreateFromRemote={vi.fn()}
+        onCreateFromPr={onCreateFromPr}
+        onCancel={vi.fn()}
+        openWorktreePaths={[]}
+        initialMode={TabMode.Pr}
+      />
+    )
+
+    const forkPr = await screen.findByText('#7 Fork change')
+    fireEvent.click(forkPr)
+    fireEvent.click(screen.getByText('Open'))
+    expect(onCreateFromPr).not.toHaveBeenCalled()
+  })
+
+  it('PR tab surfaces a load error', async () => {
+    const { store, github } = makeParentStore()
+    vi.mocked(github.listOpenPrs).mockResolvedValue({ error: 'No GitHub PAT configured.' })
+
+    render(
+      <CreateChildDialog
+        parentWorkspace={store}
+        onCreate={vi.fn()}
+        onAdopt={vi.fn()}
+        onCreateFromBranch={vi.fn()}
+        onCreateFromRemote={vi.fn()}
+        onCreateFromPr={vi.fn()}
+        onCancel={vi.fn()}
+        openWorktreePaths={[]}
+        initialMode={TabMode.Pr}
+      />
+    )
+
+    await waitFor(() => { expect(screen.getByText(/Failed to load pull requests: No GitHub PAT configured\./)).toBeTruthy() })
   })
 
   it('a fetch resolving after unmount does not update state', async () => {

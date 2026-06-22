@@ -441,14 +441,33 @@ export type GitHubPostCommentsResult =
   | { posted: number; failed: { id: string; error: string }[] }
   | { error: string }
 
+/** Summary of an open pull request, used to open a workspace from a PR */
+export interface GitHubPrListItem {
+  number: number
+  title: string
+  author: string
+  /** Branch name of the PR head (e.g. "feature/foo") */
+  headRefName: string
+  /** True when the head branch lives on a fork rather than the origin repo */
+  isCrossRepo: boolean
+}
+
+export type GitHubPrListResult = { prs: GitHubPrListItem[] } | { error: string }
+
 export interface GitHubApi {
   getPrInfo: (repoPath: string, head: string, base: string) => Promise<GitHubPrInfoResult>
+  listOpenPrs: (repoPath: string) => Promise<GitHubPrListResult>
   postReviewComments: (
     repoPath: string,
     head: string,
     base: string,
     comments: ReviewComment[],
   ) => Promise<GitHubPostCommentsResult>
+}
+
+/** Workspace-scoped GitHub API with repo path pre-bound */
+export interface WorkspaceGitHubApi {
+  listOpenPrs: () => Promise<GitHubPrListResult>
 }
 
 /** Prepend connectionId to a function's parameter list */

@@ -47,6 +47,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const adoptExistingWorktree = useStore(sessionStore, s => s.adoptExistingWorktree)
   const createWorktreeFromBranch = useStore(sessionStore, s => s.createWorktreeFromBranch)
   const createWorktreeFromRemote = useStore(sessionStore, s => s.createWorktreeFromRemote)
+  const createWorktreeFromPr = useStore(sessionStore, s => s.createWorktreeFromPr)
   const setActiveWorkspace = useStore(sessionStore, s => s.setActiveWorkspace)
   const clearWorkspaceError = useStore(sessionStore, s => s.clearWorkspaceError)
   const dismissWorkspace = useStore(sessionStore, s => s.dismissWorkspace)
@@ -194,6 +195,17 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
 
     const result = createWorktreeFromRemote(activeWorkspaceId, remoteBranch, isDetached, settings, description)
     console.log('[WorkspacePane] handleCreateFromRemoteSubmit result:', result)
+    if (result.success) {
+      setShowCreateChildDialog(false)
+    }
+    return result
+  }
+
+  // Create worktree from an open PR handler
+  const handleCreateFromPrSubmit = (headRefName: string, title: string, isDetached: boolean, settings?: import('../types').WorktreeSettings) => {
+    if (!activeWorkspaceId) return { success: false, error: 'No workspace selected' }
+
+    const result = createWorktreeFromPr(activeWorkspaceId, headRefName, title, isDetached, settings)
     if (result.success) {
       setShowCreateChildDialog(false)
     }
@@ -540,6 +552,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
             onAdopt={handleAdoptWorktreeSubmit}
             onCreateFromBranch={handleCreateFromBranchSubmit}
             onCreateFromRemote={handleCreateFromRemoteSubmit}
+            onCreateFromPr={handleCreateFromPrSubmit}
             onCancel={() => { setShowCreateChildDialog(false); }}
             openWorktreePaths={openWorktreePaths}
           />

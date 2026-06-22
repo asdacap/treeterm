@@ -126,6 +126,7 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
     setActivityTabState: vi.fn(),
     github: {
       getPrInfo: vi.fn().mockResolvedValue({ noPr: true, createUrl: 'https://github.com/test/repo/compare/main...feat?expand=1' }),
+      listOpenPrs: vi.fn().mockResolvedValue({ prs: [] }),
       postReviewComments: vi.fn().mockResolvedValue({ posted: 0, failed: [] }),
     },
     worktreeRegistry: {
@@ -408,6 +409,32 @@ describe('createSessionStore', () => {
 
     it('createWorktreeFromRemote fails for non-existent parent', () => {
       const result = store.getState().createWorktreeFromRemote('bad', 'origin/feat', false)
+      expect(result).toEqual({ success: false, error: 'Parent workspace not found' })
+    })
+
+    it('createWorktreeFromPr fetches, creates from PR head, and sets PR title as displayName', async () => {
+      vi.mocked(deps.git.createWorktreeFromRemote).mockResolvedValue({ success: true, path: '/repo/.worktrees/login', branch: 'feat/login' })
+
+      const result = store.getState().createWorktreeFromPr(parentId, 'feat/login', 'Add login flow', false)
+      expect(result).toEqual({ success: true })
+      await flushPromises()
+
+      expect(deps.git.fetch).toHaveBeenCalledWith('/repo')
+      expect(deps.git.createWorktreeFromRemote).toHaveBeenCalledWith('/repo', 'origin/feat/login', 'login', expect.any(Function))
+
+      const child = Array.from(store.getState().workspaces.values()).find(
+        e => (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) && e.data.parentId === parentId
+      )
+      expect(child?.status).toBe(WorkspaceEntryStatus.Loaded)
+      if (child?.status === WorkspaceEntryStatus.Loaded) {
+        expect(child.store.getState().metadata.displayName).toBe('Add login flow')
+        // The PR body is never written as the description.
+        expect(child.store.getState().metadata.description).toBeUndefined()
+      }
+    })
+
+    it('createWorktreeFromPr fails for non-existent parent', () => {
+      const result = store.getState().createWorktreeFromPr('bad', 'feat', 'Title', false)
       expect(result).toEqual({ success: false, error: 'Parent workspace not found' })
     })
   })

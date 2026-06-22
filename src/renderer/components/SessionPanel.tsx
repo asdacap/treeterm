@@ -44,6 +44,7 @@ export default function SessionPanel({
   const autoOpenWorktrees = useStore(sessionStore, s => s.autoOpenWorktrees)
   const createWorktreeFromBranch = useStore(sessionStore, s => s.createWorktreeFromBranch)
   const createWorktreeFromRemote = useStore(sessionStore, s => s.createWorktreeFromRemote)
+  const createWorktreeFromPr = useStore(sessionStore, s => s.createWorktreeFromPr)
   const quickForkWorkspace = useStore(sessionStore, s => s.quickForkWorkspace)
   const setActiveWorkspace = useStore(sessionStore, s => s.setActiveWorkspace)
   const moveWorkspace = useStore(sessionStore, s => s.moveWorkspace)
@@ -277,6 +278,17 @@ export default function SessionPanel({
     if (!createChildDialogParentId) return { success: false, error: 'No parent selected' }
 
     const result = createWorktreeFromRemote(createChildDialogParentId, remoteBranch, isDetached, settings)
+    if (result.success) {
+      setExpanded((prev) => new Set([...Array.from(prev), createChildDialogParentId]))
+      setCreateChildDialogParentId(null)
+    }
+    return result
+  }
+
+  const handleCreateFromPrSubmit = (headRefName: string, title: string, isDetached: boolean, settings?: WorktreeSettings) => {
+    if (!createChildDialogParentId) return { success: false, error: 'No parent selected' }
+
+    const result = createWorktreeFromPr(createChildDialogParentId, headRefName, title, isDetached, settings)
     if (result.success) {
       setExpanded((prev) => new Set([...Array.from(prev), createChildDialogParentId]))
       setCreateChildDialogParentId(null)
@@ -629,6 +641,7 @@ export default function SessionPanel({
           onAdopt={handleAdoptWorktreeSubmit}
           onCreateFromBranch={handleCreateFromBranchSubmit}
           onCreateFromRemote={handleCreateFromRemoteSubmit}
+          onCreateFromPr={handleCreateFromPrSubmit}
           onCancel={() => { setCreateChildDialogParentId(null); }}
           openWorktreePaths={openWorktreePaths}
           initialMode={TabMode.Branch}

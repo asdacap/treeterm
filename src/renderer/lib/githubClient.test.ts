@@ -411,4 +411,47 @@ describe('createGitHubApi', () => {
     expect(exec.start).not.toHaveBeenCalled()
     expect(fetchSpy).not.toHaveBeenCalled()
   })
+
+  // -------------------------------------------------------------------------
+  // listOpenPrs
+  // -------------------------------------------------------------------------
+
+  it('listOpenPrs maps open PRs and flags fork PRs as cross-repo', async () => {
+    const api = createGitHubApi(exec, settings, 'local')
+    const promise = api.listOpenPrs('/repo')
+    await resolveTokenAndRemote()
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify([
+      { number: 12, title: 'Add login', user: { login: 'alice' }, head: { ref: 'feat/login', repo: { full_name: 'owner/repo' } } },
+      { number: 7, title: 'Fork patch', user: { login: 'bob' }, head: { ref: 'patch-1', repo: { full_name: 'bob/repo' } } },
+    ]), { status: 200 }))
+
+    const result = await promise
+    expect(result).toEqual({
+      prs: [
+        { number: 12, title: 'Add login', author: 'alice', headRefName: 'feat/login', isCrossRepo: false },
+        { number: 7, title: 'Fork patch', author: 'bob', headRefName: 'patch-1', isCrossRepo: true },
+      ],
+    })
+    const url = fetchSpy.mock.calls[0]![0] as string
+    expect(url).toContain('state=open')
+  })
+
+  it('listOpenPrs returns error on non-ok response', async () => {
+    const api = createGitHubApi(exec, settings, 'local')
+    const promise = api.listOpenPrs('/repo')
+    await resolveTokenAndRemote()
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('', { status: 403, statusText: 'Forbidden' }))
+
+    const result = await promise
+    expect(result).toEqual({ error: 'GitHub API error: 403 Forbidden' })
+  })
+
+  it('listOpenPrs propagates token resolution errors', async () => {
+    settings = createMockSettings({ autodetectViaGh: false, pat: '' })
+    const api = createGitHubApi(exec, settings, 'local')
+    const result = await api.listOpenPrs('/repo')
+    expect(result).toEqual({ error: 'No GitHub PAT configured. Set one in Settings > GitHub.' })
+  })
 })

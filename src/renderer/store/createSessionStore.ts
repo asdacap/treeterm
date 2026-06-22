@@ -98,6 +98,8 @@ export interface SessionState {
   autoOpenWorktrees: (rootWorkspaceId: string, items: AutoOpenWorktreeItem[]) => Promise<{ success: boolean; error?: string }>
   createWorktreeFromBranch: (parentId: string, branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
   createWorktreeFromRemote: (parentId: string, remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
+  /** Open a workspace from an open PR: fetch, create a worktree from the PR head branch, and set the PR title as the workspace title. */
+  createWorktreeFromPr: (parentId: string, headRefName: string, title: string, isDetached: boolean, settings?: WorktreeSettings) => { success: boolean; error?: string }
   removeWorkspace: (id: string) => Promise<void>
   removeWorkspaceKeepBranch: (id: string) => Promise<void>
   removeWorkspaceKeepBoth: (id: string) => Promise<void>
@@ -650,6 +652,7 @@ export function createSessionStore(
       isDetached?: boolean
       settings?: WorktreeSettings
       description?: string
+      displayName?: string
       initialBranch?: string | undefined
       message: string
       gitOperation: (onProgress: (data: string) => void) => Promise<{ success: boolean; path?: string; branch?: string; error?: string }>
@@ -729,6 +732,7 @@ export function createSessionStore(
           metadata: {
             sortOrder: nextSortOrder(parentId),
             ...(options.description ? { description: options.description } : {}),
+            ...(options.displayName ? { displayName: options.displayName } : {}),
             ...(options.initialBranch ? { branchIsUserDefined: 'true' } : {}),
           },
           createdAt: Date.now(),
@@ -1324,6 +1328,40 @@ export function createSessionStore(
         message: 'Creating worktree from remote...',
         gitOperation: (onProgress) => deps.git.createWorktreeFromRemote(
           parent.gitRootPath ?? '',
+          remoteBranch,
+          worktreeName,
+          onProgress
+        ),
+      })
+    },
+
+    createWorktreeFromPr: (parentId: string, headRefName: string, title: string, isDetached: boolean, settings?: WorktreeSettings) => {
+      console.log('[session] createWorktreeFromPr called:', { parentId, headRefName, title, isDetached })
+      const parentEntry = get().workspaces.get(parentId)
+      const parent = parentEntry && (parentEntry.status === WorkspaceEntryStatus.Loaded || parentEntry.status === WorkspaceEntryStatus.OperationError) ? parentEntry.data : undefined
+
+      if (!parent) {
+        return { success: false, error: 'Parent workspace not found' }
+      }
+
+      if (!parent.isGitRepo || !parent.gitRootPath) {
+        return { success: false, error: 'Parent workspace is not a git repository' }
+      }
+
+      const gitRootPath = parent.gitRootPath
+      const remoteBranch = `origin/${headRefName}`
+      const worktreeName = headRefName.split('/').pop() || headRefName
+      return createChildWithLoading(parentId, worktreeName, {
+        isDetached, settings,
+        // The PR title becomes the workspace title (displayName); the PR body is
+        // intentionally not used as the description since it can be very long.
+        displayName: title,
+        initialBranch: remoteBranch,
+        message: 'Creating worktree from pull request...',
+        // Fetch first so the PR head exists as a remote-tracking ref locally.
+        preOperation: async () => { await deps.git.fetch(gitRootPath) },
+        gitOperation: (onProgress) => deps.git.createWorktreeFromRemote(
+          gitRootPath,
           remoteBranch,
           worktreeName,
           onProgress

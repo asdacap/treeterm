@@ -1,9 +1,10 @@
 /* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import { useState, useEffect } from 'react'
 import { useStore } from 'zustand'
-import type { WorktreeInfo, BranchInfo, WorktreeSettings, WorkspaceStore } from '../types'
+import type { WorktreeInfo, BranchInfo, WorktreeSettings, WorkspaceStore, GitHubPrListItem } from '../types'
 import { useAppStore } from '../store/app'
-import { useGitApi, useWorktreeRegistryApi } from '../hooks/useWorkspaceApis'
+import { useGitApi, useGitHubApi, useWorktreeRegistryApi } from '../hooks/useWorkspaceApis'
+import type { WorkspaceGitHubApi } from '../types'
 import type { WorktreeRegistryApi, WorktreeRegistryEntry } from '../lib/worktreeRegistry'
 
 interface CreateChildDialogProps {
@@ -12,6 +13,7 @@ interface CreateChildDialogProps {
   onAdopt: (worktreePath: string, branch: string, name: string, settings?: WorktreeSettings, description?: string, displayName?: string) => Promise<{ success: boolean; error?: string }>
   onCreateFromBranch: (branch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
   onCreateFromRemote: (remoteBranch: string, isDetached: boolean, settings?: WorktreeSettings, description?: string) => { success: boolean; error?: string }
+  onCreateFromPr: (headRefName: string, title: string, isDetached: boolean, settings?: WorktreeSettings) => { success: boolean; error?: string }
   onCancel: () => void
   openWorktreePaths: string[]
   initialMode?: TabMode
@@ -23,6 +25,7 @@ export enum TabMode {
   Recent = 'recent',
   Branch = 'branch',
   Remote = 'remote',
+  Pr = 'pr',
 }
 
 export default function CreateChildDialog({
@@ -31,6 +34,7 @@ export default function CreateChildDialog({
   onAdopt,
   onCreateFromBranch,
   onCreateFromRemote,
+  onCreateFromPr,
   onCancel,
   openWorktreePaths,
   initialMode
@@ -38,6 +42,7 @@ export default function CreateChildDialog({
   const parentWsData = useStore(parentWorkspace, s => s.workspace)
   const parentDefaultAppId = useStore(parentWorkspace, s => s.settings.defaultApplicationId)
   const git = useGitApi(parentWorkspace)
+  const github = useGitHubApi(parentWorkspace)
   const worktreeRegistry = useWorktreeRegistryApi(parentWorkspace)
   const [mode, setMode] = useState(initialMode ?? TabMode.Create)
   const [name, setName] = useState('')
@@ -55,6 +60,9 @@ export default function CreateChildDialog({
 
   // For remote tab
   const [selectedRemoteBranch, setSelectedRemoteBranch] = useState<BranchInfo | null>(null)
+
+  // For PR tab
+  const [selectedPr, setSelectedPr] = useState<GitHubPrListItem | null>(null)
 
   // For recent tab
   const [selectedRecent, setSelectedRecent] = useState<{ worktree: WorktreeInfo; entry: WorktreeRegistryEntry } | null>(null)
@@ -209,6 +217,23 @@ export default function CreateChildDialog({
     }
   }
 
+  const handlePrSubmit = () => {
+    if (!selectedPr) {
+      setError('Please select a pull request')
+      return
+    }
+
+    setError(null)
+
+    console.log('[CreateChildDialog] Creating worktree from PR:', selectedPr.number, selectedPr.headRefName)
+    const settings = buildSettings()
+    const result = onCreateFromPr(selectedPr.headRefName, selectedPr.title, isDetached, settings)
+    if (!result.success) {
+      console.error('[CreateChildDialog] Failed to create worktree from PR:', result.error)
+      setError(result.error || 'Failed to create worktree from pull request')
+    }
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !isProcessing) {
       if (mode === TabMode.Create) {
@@ -221,6 +246,8 @@ export default function CreateChildDialog({
         handleBranchSubmit()
       } else if (mode === TabMode.Remote && selectedRemoteBranch) {
         handleRemoteSubmit()
+      } else if (mode === TabMode.Pr && selectedPr) {
+        handlePrSubmit()
       }
     }
     if (e.key === 'Escape') {
@@ -269,6 +296,12 @@ export default function CreateChildDialog({
             onClick={() => { setMode(TabMode.Remote); setError(null); setSelectedRemoteBranch(null) }}
           >
             Open Remote
+          </button>
+          <button
+            className={`create-child-tab ${mode === TabMode.Pr ? 'active' : ''}`}
+            onClick={() => { setMode(TabMode.Pr); setError(null); setSelectedPr(null) }}
+          >
+            Open PR
           </button>
         </div>
 
@@ -365,7 +398,7 @@ export default function CreateChildDialog({
               onSelect={setSelectedBranch}
               onError={setError}
             />
-          ) : (
+          ) : mode === TabMode.Remote ? (
             /* Open Remote Tab */
             <RemoteBranchesLoader
               key={parentWsData.gitRootPath}
@@ -375,23 +408,35 @@ export default function CreateChildDialog({
               onSelect={setSelectedRemoteBranch}
               onError={setError}
             />
+          ) : (
+            /* Open PR Tab */
+            <PullRequestsLoader
+              key={parentWsData.gitRootPath}
+              github={github}
+              isProcessing={isProcessing}
+              selectedPr={selectedPr}
+              onSelect={setSelectedPr}
+              onError={setError}
+            />
           )}
 
-          {/* Description */}
-          <div className="create-child-dialog-field">
-            <label htmlFor="workspace-description">Description</label>
-            <textarea
-              id="workspace-description"
-              value={description}
-              onChange={(e) => { setDescription(e.target.value); }}
-              placeholder="Optional description..."
-              disabled={isProcessing}
-              rows={2}
-              className="create-child-description"
-            />
-          </div>
+          {/* Description — the PR tab derives the title from the PR itself and ignores description */}
+          {mode !== TabMode.Pr && (
+            <div className="create-child-dialog-field">
+              <label htmlFor="workspace-description">Description</label>
+              <textarea
+                id="workspace-description"
+                value={description}
+                onChange={(e) => { setDescription(e.target.value); }}
+                placeholder="Optional description..."
+                disabled={isProcessing}
+                rows={2}
+                className="create-child-description"
+              />
+            </div>
+          )}
 
-          {/* Detached checkbox - shown for create, branch, and remote tabs */}
+          {/* Detached checkbox - shown for create, branch, remote, and PR tabs */}
           {mode !== TabMode.Existing && mode !== TabMode.Recent && (
             <div className="create-child-detached-checkbox">
               <label>
@@ -506,11 +551,19 @@ export default function CreateChildDialog({
             >
               {isProcessing ? 'Opening... Please wait' : 'Open'}
             </button>
-          ) : (
+          ) : mode === TabMode.Remote ? (
             <button
               className="dialog-btn create"
               onClick={handleRemoteSubmit}
               disabled={isProcessing || !selectedRemoteBranch}
+            >
+              {isProcessing ? 'Opening... Please wait' : 'Open'}
+            </button>
+          ) : (
+            <button
+              className="dialog-btn create"
+              onClick={handlePrSubmit}
+              disabled={isProcessing || !selectedPr}
             >
               {isProcessing ? 'Opening... Please wait' : 'Open'}
             </button>
@@ -781,6 +834,75 @@ function RemoteBranchesLoader({ git, isProcessing, selectedBranch, onSelect, onE
             >
               <span className="worktree-name">{branch.name}</span>
               {branch.isInWorktree && <span className="worktree-badge">In Worktree</span>}
+            </div>
+          ))
+        )}
+      </div>
+    </>
+  )
+}
+
+/** Loads open pull requests on mount */
+function PullRequestsLoader({ github, isProcessing, selectedPr, onSelect, onError }: {
+  github: WorkspaceGitHubApi
+  isProcessing: boolean
+  selectedPr: GitHubPrListItem | null
+  onSelect: (pr: GitHubPrListItem) => void
+  onError: (msg: string) => void
+}) {
+  const [prs, setPrs] = useState<GitHubPrListItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    void github.listOpenPrs().then((result) => {
+      if (cancelled) return
+      if ('error' in result) {
+        setPrs([])
+        setLoading(false)
+        onError(`Failed to load pull requests: ${result.error}`)
+        return
+      }
+      setPrs(result.prs)
+      setLoading(false)
+    }).catch((error: unknown) => {
+      if (cancelled) return
+      setPrs([])
+      setLoading(false)
+      onError(`Failed to load pull requests: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    })
+    return () => { cancelled = true }
+  }, [github, onError])
+
+  const query = search.trim().toLowerCase()
+  const filtered = !query ? prs : prs.filter(pr =>
+    pr.title.toLowerCase().includes(query) ||
+    pr.headRefName.toLowerCase().includes(query) ||
+    String(pr.number).includes(query)
+  )
+
+  return (
+    <>
+      <div className="create-child-search-field">
+        <input type="text" value={search} onChange={(e) => { setSearch(e.target.value); }} placeholder="Search pull requests..." disabled={isProcessing} />
+      </div>
+      <div className="create-child-existing-list">
+        {loading ? (
+          <div className="create-child-loading">Loading pull requests...</div>
+        ) : filtered.length === 0 ? (
+          <div className="create-child-empty">{search.trim() ? 'No pull requests match your search' : 'No open pull requests found'}</div>
+        ) : (
+          filtered.map(pr => (
+            <div
+              key={pr.number}
+              className={`create-child-worktree-item ${selectedPr?.number === pr.number ? 'selected' : ''} ${pr.isCrossRepo ? 'disabled' : ''}`}
+              onClick={() => { if (!pr.isCrossRepo) onSelect(pr) }}
+              title={pr.isCrossRepo ? 'PR is from a fork — open it manually instead' : undefined}
+            >
+              <span className="worktree-name">#{pr.number} {pr.title}</span>
+              <span className="worktree-branch">{pr.headRefName}{pr.author ? ` · ${pr.author}` : ''}</span>
+              {pr.isCrossRepo && <span className="worktree-badge">Fork</span>}
             </div>
           ))
         )}
