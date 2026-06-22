@@ -1,12 +1,15 @@
 import type { ReviewComment } from '../types'
 
-export function generateReviewPrompt(comments: ReviewComment[]): string {
-  const unaddressed = comments.filter(c => !c.addressed)
-  if (unaddressed.length === 0) return ''
+/**
+ * Format a markdown prompt for the given comments, regardless of their
+ * addressed/prompted state. Used for re-prompting a single comment.
+ */
+export function buildPromptForComments(comments: ReviewComment[]): string {
+  if (comments.length === 0) return ''
 
   // Group by filePath
   const grouped = new Map<string, ReviewComment[]>()
-  for (const comment of unaddressed) {
+  for (const comment of comments) {
     const existing = grouped.get(comment.filePath) || []
     existing.push(comment)
     grouped.set(comment.filePath, existing)
@@ -24,4 +27,8 @@ export function generateReviewPrompt(comments: ReviewComment[]): string {
   }
 
   return lines.join('\n')
+}
+
+export function generateReviewPrompt(comments: ReviewComment[]): string {
+  return buildPromptForComments(comments.filter(c => !c.addressed))
 }

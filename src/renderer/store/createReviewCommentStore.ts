@@ -14,7 +14,7 @@ export interface ReviewCommentState {
   toggleReviewCommentAddressed: (commentId: string) => void
   updateOutdatedReviewComments: (currentCommitHash: string) => void
   clearReviewComments: () => void
-  markAllReviewCommentsAddressed: () => void
+  markReviewCommentsAddressed: (ids: string[]) => void
 }
 
 export type ReviewCommentStore = StoreApi<ReviewCommentState>
@@ -80,10 +80,12 @@ export function createReviewCommentStore(deps: ReviewCommentDeps): ReviewComment
       deps.updateMetadata('reviewComments', serializeReviewComments([]), 'clearReviewComments')
     },
 
-    markAllReviewCommentsAddressed: (): void => {
+    markReviewCommentsAddressed: (ids: string[]): void => {
+      if (ids.length === 0) return
+      const idSet = new Set(ids)
       const comments = parseReviewComments(deps.getMetadata())
-      const updated = comments.map(c => c.addressed ? c : { ...c, addressed: true })
-      deps.updateMetadata('reviewComments', serializeReviewComments(updated), 'markAllReviewCommentsAddressed')
+      const updated = comments.map(c => (idSet.has(c.id) && !c.addressed ? { ...c, addressed: true } : c))
+      deps.updateMetadata('reviewComments', serializeReviewComments(updated), 'markReviewCommentsAddressed')
     },
   }))
 }

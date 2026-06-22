@@ -6,7 +6,7 @@
  * the renderer using ExecApi and fetch instead of going through IPC to main.
  */
 
-import type { ExecApi, GitHubApi, GitHubPrInfoResult, SettingsApi } from '../types'
+import type { ExecApi, GitHubApi, GitHubPostCommentsResult, GitHubPrInfoResult, ReviewComment, SettingsApi } from '../types'
 import { ExecEventType } from '../../shared/ipc-types'
 
 // --- Helpers ---
@@ -54,6 +54,39 @@ export function parseGitHubOwnerRepo(remoteUrl: string): { owner: string; repo: 
   return null
 }
 
+type TokenAndRepo = { token: string; owner: string; repo: string }
+
+async function resolveTokenAndRepo(
+  exec: ExecApi,
+  settingsApi: SettingsApi,
+  connectionId: string,
+  repoPath: string,
+): Promise<TokenAndRepo | { error: string }> {
+  // Get GitHub token
+  const settings = await settingsApi.load()
+  let token: string
+  if (settings.github.autodetectViaGh) {
+    const result = await execCommand(exec, connectionId, repoPath, 'gh', ['auth', 'token'])
+    if (result.exitCode !== 0) {
+      return { error: 'Failed to get token from gh CLI. Is gh installed and authenticated?' }
+    }
+    token = result.stdout.trim()
+  } else {
+    token = settings.github.pat || ''
+    if (!token) return { error: 'No GitHub PAT configured. Set one in Settings > GitHub.' }
+  }
+
+  // Get remote URL and parse owner/repo
+  const remoteResult = await execCommand(exec, connectionId, repoPath, 'git', ['remote', 'get-url', 'origin'])
+  if (remoteResult.exitCode !== 0) {
+    return { error: `Failed to get remote URL: ${remoteResult.stderr}` }
+  }
+  const remoteUrl = remoteResult.stdout.trim()
+  const parsed = parseGitHubOwnerRepo(remoteUrl)
+  if (!parsed) return { error: `Could not parse GitHub owner/repo from remote URL: ${remoteUrl}` }
+  return { token, owner: parsed.owner, repo: parsed.repo }
+}
+
 export function createGitHubApi(
   exec: ExecApi,
   settingsApi: SettingsApi,
@@ -62,29 +95,9 @@ export function createGitHubApi(
   return {
     getPrInfo: async (repoPath: string, head: string, base: string): Promise<GitHubPrInfoResult> => {
       try {
-        // Get GitHub token
-        const settings = await settingsApi.load()
-        let token: string
-        if (settings.github.autodetectViaGh) {
-          const result = await execCommand(exec, connectionId, repoPath, 'gh', ['auth', 'token'])
-          if (result.exitCode !== 0) {
-            return { error: 'Failed to get token from gh CLI. Is gh installed and authenticated?' }
-          }
-          token = result.stdout.trim()
-        } else {
-          token = settings.github.pat || ''
-          if (!token) return { error: 'No GitHub PAT configured. Set one in Settings > GitHub.' }
-        }
-
-        // Get remote URL and parse owner/repo
-        const remoteResult = await execCommand(exec, connectionId, repoPath, 'git', ['remote', 'get-url', 'origin'])
-        if (remoteResult.exitCode !== 0) {
-          return { error: `Failed to get remote URL: ${remoteResult.stderr}` }
-        }
-        const remoteUrl = remoteResult.stdout.trim()
-        const parsed = parseGitHubOwnerRepo(remoteUrl)
-        if (!parsed) return { error: `Could not parse GitHub owner/repo from remote URL: ${remoteUrl}` }
-        const { owner, repo } = parsed
+        const resolved = await resolveTokenAndRepo(exec, settingsApi, connectionId, repoPath)
+        if ('error' in resolved) return { error: resolved.error }
+        const { token, owner, repo } = resolved
 
         // Search for existing PR via REST. Include closed/merged PRs so the
         // indicator can reflect a merged state — `state=open` would miss them
@@ -266,6 +279,68 @@ export function createGitHubApi(
       } catch (error) {
         return { error: error instanceof Error ? error.message : 'Unknown error' }
       }
-    }
+    },
+
+    postReviewComments: async (
+      repoPath: string,
+      head: string,
+      base: string,
+      comments: ReviewComment[],
+    ): Promise<GitHubPostCommentsResult> => {
+      if (comments.length === 0) return { posted: 0, failed: [] }
+      try {
+        const resolved = await resolveTokenAndRepo(exec, settingsApi, connectionId, repoPath)
+        if ('error' in resolved) return { error: resolved.error }
+        const { token, owner, repo } = resolved
+
+        // Find the open PR for this branch and its head commit SHA — inline
+        // review comments must be anchored to a commit in the PR.
+        const prResponse = await fetch(
+          `https://api.github.com/repos/${owner}/${repo}/pulls?head=${owner}:${head}&base=${base}&state=all`,
+          { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } }
+        )
+        if (!prResponse.ok) {
+          return { error: `GitHub API error: ${String(prResponse.status)} ${prResponse.statusText}` }
+        }
+        const prs = await prResponse.json() as Array<{ number: number; head: { sha: string } }>
+        if (prs.length === 0) return { error: 'No open PR found for this branch' }
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length checked above
+        const pr = prs[0]!
+        const commitId = pr.head.sha
+
+        let posted = 0
+        const failed: { id: string; error: string }[] = []
+        for (const comment of comments) {
+          const side = comment.side === 'modified' ? 'RIGHT' : 'LEFT'
+          const res = await fetch(
+            `https://api.github.com/repos/${owner}/${repo}/pulls/${String(pr.number)}/comments`,
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: 'application/vnd.github+json',
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                body: comment.text,
+                commit_id: commitId,
+                path: comment.filePath,
+                line: comment.lineNumber,
+                side,
+              }),
+            }
+          )
+          if (res.ok) {
+            posted += 1
+          } else {
+            failed.push({ id: comment.id, error: `${String(res.status)} ${res.statusText}` })
+          }
+        }
+
+        return { posted, failed }
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : 'Unknown error' }
+      }
+    },
   }
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { parseGitHubOwnerRepo, createGitHubApi } from './githubClient'
-import type { ExecApi, SettingsApi, GitHubPrInfoResult } from '../types'
+import type { ExecApi, SettingsApi, GitHubPrInfoResult, ReviewComment } from '../types'
 import { ExecEventType, type ExecEvent } from '../../shared/ipc-types'
 import type { Settings } from '../../shared/types'
 
@@ -328,5 +328,87 @@ describe('createGitHubApi', () => {
     const result = await api.getPrInfo('/repo', 'feature', 'main')
     expect(result).toHaveProperty('error')
     expect((result as { error: string }).error).toBe('exec failed')
+  })
+
+  // -------------------------------------------------------------------------
+  // postReviewComments
+  // -------------------------------------------------------------------------
+
+  function makeComment(overrides: Partial<ReviewComment> = {}): ReviewComment {
+    return {
+      id: 'c1', filePath: 'src/a.ts', lineNumber: 10, text: 'fix this',
+      commitHash: null, createdAt: 1, isOutdated: false, addressed: false,
+      side: 'modified', ...overrides,
+    }
+  }
+
+  async function resolveTokenAndRemote(): Promise<void> {
+    await vi.waitFor(() => { expect(exec.start).toHaveBeenCalledTimes(1) })
+    exec._complete('exec-1', 'ghp_token123\n')
+    await vi.waitFor(() => { expect(exec.start).toHaveBeenCalledTimes(2) })
+    exec._complete('exec-2', 'git@github.com:owner/repo.git\n')
+  }
+
+  it('postReviewComments posts each comment, maps side, anchors to head sha', async () => {
+    const api = createGitHubApi(exec, settings, 'local')
+    const comments = [
+      makeComment({ id: 'c1', side: 'modified' }),
+      makeComment({ id: 'c2', side: 'original', filePath: 'src/b.ts', lineNumber: 5 }),
+    ]
+    const promise = api.postReviewComments('/repo', 'feature', 'main', comments)
+    await resolveTokenAndRemote()
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ number: 42, head: { sha: 'sha123' } }]), { status: 200 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 201 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 201 }))
+
+    const result = await promise
+    expect(result).toEqual({ posted: 2, failed: [] })
+
+    type PostedBody = { side: string; commit_id: string; path: string; line: number }
+    const firstBody = JSON.parse((fetchSpy.mock.calls[1]![1] as RequestInit).body as string) as PostedBody
+    expect(firstBody.side).toBe('RIGHT')
+    expect(firstBody.commit_id).toBe('sha123')
+    expect(firstBody.path).toBe('src/a.ts')
+    expect(firstBody.line).toBe(10)
+    const secondBody = JSON.parse((fetchSpy.mock.calls[2]![1] as RequestInit).body as string) as PostedBody
+    expect(secondBody.side).toBe('LEFT')
+  })
+
+  it('postReviewComments records per-comment failures without aborting', async () => {
+    const api = createGitHubApi(exec, settings, 'local')
+    const comments = [makeComment({ id: 'c1' }), makeComment({ id: 'c2' })]
+    const promise = api.postReviewComments('/repo', 'feature', 'main', comments)
+    await resolveTokenAndRemote()
+
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ number: 42, head: { sha: 'sha123' } }]), { status: 200 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 201 }))
+      .mockResolvedValueOnce(new Response('', { status: 422, statusText: 'Unprocessable Entity' }))
+
+    const result = await promise
+    expect(result).toEqual({ posted: 1, failed: [{ id: 'c2', error: '422 Unprocessable Entity' }] })
+  })
+
+  it('postReviewComments returns error when no PR exists', async () => {
+    const api = createGitHubApi(exec, settings, 'local')
+    const promise = api.postReviewComments('/repo', 'feature', 'main', [makeComment()])
+    await resolveTokenAndRemote()
+
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }))
+
+    const result = await promise
+    expect(result).toEqual({ error: 'No open PR found for this branch' })
+  })
+
+  it('postReviewComments returns posted:0 for empty comment list without hitting the API', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const api = createGitHubApi(exec, settings, 'local')
+    const result = await api.postReviewComments('/repo', 'feature', 'main', [])
+    expect(result).toEqual({ posted: 0, failed: [] })
+    expect(exec.start).not.toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 })

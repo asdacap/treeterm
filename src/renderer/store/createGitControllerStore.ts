@@ -1,6 +1,6 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { GitApi, GitHubApi, GitHubPrInfo, Workspace } from '../types'
+import type { GitApi, GitHubApi, GitHubPostCommentsResult, GitHubPrInfo, ReviewComment, Workspace } from '../types'
 
 export interface GitControllerDeps {
   git: GitApi
@@ -23,6 +23,7 @@ export interface GitControllerState {
   refreshGit: () => Promise<void>
   pullFromRemote: () => Promise<{ success: boolean; error?: string }>
   openGitHub: () => Promise<{ url: string; hasPr: boolean } | { error: string }>
+  pushReviewCommentsToGitHub: (comments: ReviewComment[]) => Promise<GitHubPostCommentsResult>
   dispose: () => void
 }
 
@@ -178,6 +179,15 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
         return { url: result.createUrl, hasPr: false }
       }
       return result
+    },
+
+    pushReviewCommentsToGitHub: async (comments: ReviewComment[]): Promise<GitHubPostCommentsResult> => {
+      if (comments.length === 0) return { posted: 0, failed: [] }
+      const ws = deps.getWorkspace()
+      if (!ws.parentId || !ws.gitBranch || !ws.gitRootPath) return { error: 'Missing workspace info' }
+      const parent = deps.lookupWorkspace(ws.parentId)
+      if (!parent?.gitBranch) return { error: 'Parent branch not found' }
+      return deps.github.postReviewComments(ws.gitRootPath, ws.gitBranch, parent.gitBranch, comments)
     },
 
     dispose: (): void => {

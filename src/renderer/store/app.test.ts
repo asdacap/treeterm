@@ -154,7 +154,7 @@ const mockDeps = {
     kill: vi.fn<(...args: any[]) => void>(),
     bind: vi.fn<(...args: any[]) => any>().mockReturnThis()
   },
-  github: { getPrInfo: vi.fn<(...args: any[]) => any>() },
+  github: { getPrInfo: vi.fn<(...args: any[]) => any>(), postReviewComments: vi.fn<(...args: any[]) => any>() },
   filesystem: {},
   reviews: {},
   stt: {},

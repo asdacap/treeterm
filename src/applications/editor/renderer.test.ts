@@ -24,7 +24,7 @@ const mockReviewCommentStore = createStore<ReviewCommentState>()(() => ({
   toggleReviewCommentAddressed: vi.fn(),
   updateOutdatedReviewComments: vi.fn(),
   clearReviewComments: vi.fn(),
-  markAllReviewCommentsAddressed: vi.fn(),
+  markReviewCommentsAddressed: vi.fn(),
 } as ReviewCommentState))
 
 const mockGitControllerStore = createStore<GitControllerState>()(() => ({
@@ -40,6 +40,7 @@ const mockGitControllerStore = createStore<GitControllerState>()(() => ({
   pullFromRemote: vi.fn(),
  
   openGitHub: vi.fn(),
+    pushReviewCommentsToGitHub: vi.fn(),
  
  
   dispose: vi.fn(),

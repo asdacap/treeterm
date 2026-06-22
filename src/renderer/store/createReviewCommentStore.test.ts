@@ -42,7 +42,7 @@ describe('createReviewCommentStore', () => {
     expect(store.getState().getReviewComments()).toEqual([])
   })
 
-  it('markAllReviewCommentsAddressed sets all to addressed=true', () => {
+  it('markReviewCommentsAddressed marks only the given ids', () => {
     const comments = [
       { id: 'c1', filePath: 'a.ts', lineNumber: 1, text: 'A', commitHash: 'h1', createdAt: 1, isOutdated: false, addressed: false, side: 'modified' },
       { id: 'c2', filePath: 'b.ts', lineNumber: 2, text: 'B', commitHash: 'h1', createdAt: 2, isOutdated: false, addressed: false, side: 'modified' },
@@ -50,25 +50,23 @@ describe('createReviewCommentStore', () => {
     const deps = makeDeps({ reviewComments: JSON.stringify(comments) })
     const store = createReviewCommentStore(deps)
 
-    store.getState().markAllReviewCommentsAddressed()
+    store.getState().markReviewCommentsAddressed(['c1'])
 
     const result = JSON.parse(deps.getMetadata().reviewComments!) as { addressed: boolean }[]
     expect(result[0]!.addressed).toBe(true)
-    expect(result[1]!.addressed).toBe(true)
+    expect(result[1]!.addressed).toBe(false)
   })
 
-  it('markAllReviewCommentsAddressed skips already-addressed comments', () => {
+  it('markReviewCommentsAddressed with empty ids is a no-op', () => {
     const comments = [
-      { id: 'c1', filePath: 'a.ts', lineNumber: 1, text: 'A', commitHash: 'h1', createdAt: 1, isOutdated: false, addressed: true, side: 'modified' },
-      { id: 'c2', filePath: 'b.ts', lineNumber: 2, text: 'B', commitHash: 'h1', createdAt: 2, isOutdated: false, addressed: false, side: 'modified' },
+      { id: 'c1', filePath: 'a.ts', lineNumber: 1, text: 'A', commitHash: 'h1', createdAt: 1, isOutdated: false, addressed: false, side: 'modified' },
     ]
     const deps = makeDeps({ reviewComments: JSON.stringify(comments) })
     const store = createReviewCommentStore(deps)
 
-    store.getState().markAllReviewCommentsAddressed()
+    store.getState().markReviewCommentsAddressed([])
 
     const result = JSON.parse(deps.getMetadata().reviewComments!) as { addressed: boolean }[]
-    expect(result[0]!.addressed).toBe(true)
-    expect(result[1]!.addressed).toBe(true)
+    expect(result[0]!.addressed).toBe(false)
   })
 })

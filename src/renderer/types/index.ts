@@ -437,8 +437,18 @@ export interface GitHubPrInfo {
 
 export type GitHubPrInfoResult = { prInfo: GitHubPrInfo } | { noPr: true; createUrl: string } | { error: string }
 
+export type GitHubPostCommentsResult =
+  | { posted: number; failed: { id: string; error: string }[] }
+  | { error: string }
+
 export interface GitHubApi {
   getPrInfo: (repoPath: string, head: string, base: string) => Promise<GitHubPrInfoResult>
+  postReviewComments: (
+    repoPath: string,
+    head: string,
+    base: string,
+    comments: ReviewComment[],
+  ) => Promise<GitHubPostCommentsResult>
 }
 
 /** Prepend connectionId to a function's parameter list */

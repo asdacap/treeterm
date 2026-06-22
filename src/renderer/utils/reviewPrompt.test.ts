@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { generateReviewPrompt } from './reviewPrompt'
+import { generateReviewPrompt, buildPromptForComments } from './reviewPrompt'
 import type { ReviewComment } from '../types'
 
 function makeComment(overrides: Partial<ReviewComment> = {}): ReviewComment {
@@ -72,5 +72,22 @@ describe('generateReviewPrompt', () => {
     expect(result).not.toContain('"done"')
     expect(result).toContain('"pending"')
     expect(result).toContain('"old" [OUTDATED]')
+  })
+})
+
+describe('buildPromptForComments', () => {
+  it('returns empty string for empty array', () => {
+    expect(buildPromptForComments([])).toBe('')
+  })
+
+  it('formats addressed comments without filtering them out', () => {
+    const result = buildPromptForComments([makeComment({ addressed: true, text: 'still prompt me' })])
+    expect(result).toContain('## src/foo.ts')
+    expect(result).toContain('"still prompt me"')
+  })
+
+  it('formats a single comment for re-prompting', () => {
+    const result = buildPromptForComments([makeComment({ lineNumber: 42, text: 'tweak' })])
+    expect(result).toContain('- Line 42 (modified): "tweak"')
   })
 })

@@ -5466,12 +5466,72 @@ body,
 }
 
 .comments-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 8px 4px;
   font-weight: 600;
   font-size: 13px;
   color: var(--text-primary);
   border-bottom: 1px solid var(--border);
   margin-bottom: 4px;
+}
+
+.comments-filter {
+  display: flex;
+  gap: 4px;
+}
+
+.comments-filter-tab {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 3px 10px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.comments-filter-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.comments-filter-tab.active {
+  background: var(--accent, var(--bg-hover));
+  color: var(--text-primary);
+  border-color: var(--accent, var(--border));
+}
+
+.comments-push-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 3px 10px;
+  border-radius: 3px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.comments-push-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.comments-push-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.comments-push-status {
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .comments-loading,
@@ -5527,10 +5587,6 @@ body,
   min-width: 0;
 }
 
-.comments-addressed {
-  cursor: pointer;
-}
-
 .comments-code-context {
   background: var(--bg-secondary);
   border-radius: 4px;
@@ -5571,12 +5627,30 @@ body,
 .comments-card-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   font-size: 11px;
 }
 
 .comments-card-time {
   color: var(--text-secondary);
+  flex: 1;
+  min-width: 0;
+}
+
+.comments-reprompt-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.comments-reprompt-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .comments-goto-btn {

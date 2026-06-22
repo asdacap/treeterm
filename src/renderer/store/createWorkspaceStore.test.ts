@@ -44,6 +44,7 @@ function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStore
     setActivityTabState: vi.fn<(...args: any[]) => void>(),
     github: {
       getPrInfo: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ noPr: true, createUrl: 'https://github.com/test/repo/compare/main...feat?expand=1' }),
+      postReviewComments: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ posted: 0, failed: [] }),
     },
     worktreeRegistry: {
       list: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue([]),

@@ -11,7 +11,7 @@ export function ReviewCommentsButton({ workspace }: ReviewCommentsButtonProps): 
   const reviewCommentStore = useStore(workspace, s => s.reviewComments)
   const promptHarness = useStore(workspace, s => s.promptHarness)
   const getReviewComments = useStore(reviewCommentStore, s => s.getReviewComments)
-  const markAllReviewCommentsAddressed = useStore(reviewCommentStore, s => s.markAllReviewCommentsAddressed)
+  const markReviewCommentsAddressed = useStore(reviewCommentStore, s => s.markReviewCommentsAddressed)
   const comments = getReviewComments()
   const prompt = generateReviewPrompt(comments)
 
@@ -20,7 +20,7 @@ export function ReviewCommentsButton({ workspace }: ReviewCommentsButtonProps): 
   const handleClick = async () => {
     const sent = await promptHarness(prompt)
     if (sent) {
-      markAllReviewCommentsAddressed()
+      markReviewCommentsAddressed(comments.filter(c => !c.addressed).map(c => c.id))
     }
   }
 

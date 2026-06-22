@@ -47,7 +47,7 @@ const mockWorkspaceStoreStateData = {
     toggleReviewCommentAddressed: vi.fn(),
     updateOutdatedReviewComments: vi.fn(),
     clearReviewComments: vi.fn(),
-    markAllReviewCommentsAddressed: vi.fn(),
+    markReviewCommentsAddressed: vi.fn(),
   } as ReviewCommentState)),
   promptHarness: vi.fn(),
   quickForkWorkspace: vi.fn(),
@@ -91,6 +91,7 @@ const mockWorkspaceStoreStateData = {
     pullFromRemote: vi.fn(),
    
     openGitHub: vi.fn(),
+    pushReviewCommentsToGitHub: vi.fn(),
    
    
     dispose: vi.fn(),

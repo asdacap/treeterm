@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useStore } from 'zustand'
 import { useAppStore } from '../store/app'
-import { generateReviewPrompt } from '../utils/reviewPrompt'
+import { generateReviewPrompt, buildPromptForComments } from '../utils/reviewPrompt'
 import type { ReviewComment, FilesystemState, WorkspaceStore } from '../types'
 import { useFilesystemApi } from '../hooks/useWorkspaceApis'
 
@@ -10,6 +10,27 @@ interface CommentsListProps {
 }
 
 const CONTEXT_LINES = 3
+
+enum CommentFilter {
+  Unprompted = 'unprompted',
+  Prompted = 'prompted',
+}
+
+const FILTER_PREDICATES: Record<CommentFilter, (c: ReviewComment) => boolean> = {
+  [CommentFilter.Unprompted]: (c) => !c.addressed,
+  [CommentFilter.Prompted]: (c) => c.addressed,
+}
+
+enum PushStatus {
+  Idle = 'idle',
+  Loading = 'loading',
+  Result = 'result',
+}
+
+type PushState =
+  | { status: PushStatus.Idle }
+  | { status: PushStatus.Loading }
+  | { status: PushStatus.Result; message: string }
 
 function extractCodeContext(
   fileContent: string,
@@ -33,15 +54,20 @@ export default function CommentsList({
 }: CommentsListProps): React.JSX.Element {
   const wsData = useStore(workspace, s => s.workspace)
   const reviewCommentStore = useStore(workspace, s => s.reviewComments)
+  const gitController = useStore(workspace, s => s.gitController)
   const addTab = useStore(workspace, s => s.addTab)
+  const promptHarness = useStore(workspace, s => s.promptHarness)
   const getReviewComments = useStore(reviewCommentStore, s => s.getReviewComments)
-  const toggleReviewCommentAddressed = useStore(reviewCommentStore, s => s.toggleReviewCommentAddressed)
+  const markReviewCommentsAddressed = useStore(reviewCommentStore, s => s.markReviewCommentsAddressed)
   const deleteReviewComment = useStore(reviewCommentStore, s => s.deleteReviewComment)
+  const pushReviewCommentsToGitHub = useStore(gitController, s => s.pushReviewCommentsToGitHub)
   const clipboard = useAppStore((state) => state.clipboard)
   const filesystem = useFilesystemApi(workspace)
   const comments: ReviewComment[] = getReviewComments()
   const [fileContents, setFileContents] = useState(new Map<string, string>())
   const [promptExpanded, setPromptExpanded] = useState(false)
+  const [filter, setFilter] = useState<CommentFilter>(CommentFilter.Unprompted)
+  const [pushState, setPushState] = useState<PushState>({ status: PushStatus.Idle })
 
   // Batch-fetch file contents for code context
   useEffect(() => {
@@ -71,10 +97,6 @@ export default function CommentsList({
     void fetchFiles()
   }, [comments, wsData.path, fileContents, filesystem])
 
-  const handleToggleAddressed = (commentId: string) => {
-    toggleReviewCommentAddressed(commentId)
-  }
-
   const handleDelete = (commentId: string) => {
     deleteReviewComment(commentId)
   }
@@ -86,6 +108,13 @@ export default function CommentsList({
     })
   }
 
+  const handleReprompt = async (comment: ReviewComment) => {
+    const sent = await promptHarness(buildPromptForComments([comment]))
+    if (sent) {
+      markReviewCommentsAddressed([comment.id])
+    }
+  }
+
   const handleCopyPrompt = () => {
     const prompt = generateReviewPrompt(comments)
     if (prompt) {
@@ -93,19 +122,69 @@ export default function CommentsList({
     }
   }
 
+  const unprompted = comments.filter(c => !c.addressed)
+
+  const handlePush = async () => {
+    if (unprompted.length === 0) return
+    setPushState({ status: PushStatus.Loading })
+    const result = await pushReviewCommentsToGitHub(unprompted)
+    if ('error' in result) {
+      setPushState({ status: PushStatus.Result, message: `Push failed: ${result.error}` })
+      return
+    }
+    const failedIds = new Set(result.failed.map(f => f.id))
+    const postedIds = unprompted.filter(c => !failedIds.has(c.id)).map(c => c.id)
+    markReviewCommentsAddressed(postedIds)
+    const message = result.failed.length === 0
+      ? `Pushed ${String(result.posted)} comment(s) to GitHub`
+      : `Pushed ${String(result.posted)}, ${String(result.failed.length)} failed`
+    setPushState({ status: PushStatus.Result, message })
+  }
+
   if (comments.length === 0) {
     return <div className="comments-list"><div className="comments-empty">No review comments yet</div></div>
   }
 
+  const promptedCount = comments.length - unprompted.length
+  const filtered = comments.filter(FILTER_PREDICATES[filter])
   const prompt = generateReviewPrompt(comments)
 
   return (
     <div className="comments-list">
       <div className="comments-header">
-        <span>Comments ({comments.length})</span>
+        <div className="comments-filter">
+          <button
+            className={`comments-filter-tab ${filter === CommentFilter.Unprompted ? 'active' : ''}`}
+            onClick={() => { setFilter(CommentFilter.Unprompted); }}
+          >
+            Unprompted ({unprompted.length})
+          </button>
+          <button
+            className={`comments-filter-tab ${filter === CommentFilter.Prompted ? 'active' : ''}`}
+            onClick={() => { setFilter(CommentFilter.Prompted); }}
+          >
+            Prompted ({promptedCount})
+          </button>
+        </div>
+        <button
+          className="comments-push-btn"
+          onClick={() => { void handlePush(); }}
+          disabled={unprompted.length === 0 || pushState.status === PushStatus.Loading}
+          title="Push unprompted comments to GitHub as inline PR review comments"
+        >
+          {pushState.status === PushStatus.Loading ? 'Pushing…' : `Push to GitHub (${String(unprompted.length)})`}
+        </button>
       </div>
+
+      {pushState.status === PushStatus.Result && (
+        <div className="comments-push-status">{pushState.message}</div>
+      )}
+
       <div className="comments-cards">
-        {comments.map(comment => {
+        {filtered.length === 0 && (
+          <div className="comments-empty">No {filter} comments</div>
+        )}
+        {filtered.map(comment => {
           const content = fileContents.get(comment.filePath)
           const codeContext = content ? extractCodeContext(content, comment.lineNumber) : null
 
@@ -126,13 +205,6 @@ export default function CommentsList({
                     Outdated
                   </span>
                 )}
-                <input
-                  type="checkbox"
-                  className="comments-addressed"
-                  checked={comment.addressed}
-                  onChange={() => { handleToggleAddressed(comment.id); }}
-                  title="Mark as addressed"
-                />
                 <button
                   className="comment-delete-btn"
                   onClick={() => { handleDelete(comment.id); }}
@@ -162,6 +234,13 @@ export default function CommentsList({
                 <span className="comments-card-time">
                   {new Date(comment.createdAt).toLocaleString()}
                 </span>
+                <button
+                  className="comments-reprompt-btn"
+                  onClick={() => { void handleReprompt(comment); }}
+                  title={comment.addressed ? 'Re-send this comment to the AI harness' : 'Send this comment to the AI harness'}
+                >
+                  {comment.addressed ? 'Re-prompt' : 'Prompt'}
+                </button>
                 <button
                   className="comments-goto-btn"
                   onClick={() => { handleGoToFile(comment); }}

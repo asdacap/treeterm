@@ -126,6 +126,7 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
     setActivityTabState: vi.fn(),
     github: {
       getPrInfo: vi.fn().mockResolvedValue({ noPr: true, createUrl: 'https://github.com/test/repo/compare/main...feat?expand=1' }),
+      postReviewComments: vi.fn().mockResolvedValue({ posted: 0, failed: [] }),
     },
     worktreeRegistry: {
       list: vi.fn().mockResolvedValue([]),

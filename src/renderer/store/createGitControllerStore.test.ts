@@ -22,6 +22,7 @@ function makeDeps(overrides: Partial<GitControllerDeps> = {}): GitControllerDeps
     } as unknown as GitControllerDeps['git'],
     github: {
       getPrInfo: vi.fn().mockResolvedValue({ noPr: true, createUrl: 'https://github.com/test/repo/compare/main...feat?expand=1' }),
+      postReviewComments: vi.fn().mockResolvedValue({ posted: 0, failed: [] }),
     },
     lookupWorkspace: vi.fn().mockReturnValue(undefined),
     refreshGitInfo: vi.fn().mockResolvedValue(undefined),
@@ -568,6 +569,65 @@ describe('createGitControllerStore', () => {
       const result = await store.getState().openGitHub()
       expect(result).toEqual({ url: 'https://github.com/create', hasPr: false })
       expect(store.getState().prInfo).toBeNull()
+    })
+  })
+
+  describe('pushReviewCommentsToGitHub', () => {
+    const comment = {
+      id: 'c1', filePath: 'a.ts', lineNumber: 1, text: 'fix', commitHash: null,
+      createdAt: 1, isOutdated: false, addressed: false, side: 'modified' as const,
+    }
+
+    it('returns posted:0 for empty list without calling the API', async () => {
+      const deps = makeDeps()
+      const store = createGitControllerStore(deps)
+      store.getState().dispose()
+
+      const result = await store.getState().pushReviewCommentsToGitHub([])
+      expect(result).toEqual({ posted: 0, failed: [] })
+      expect(deps.github.postReviewComments).not.toHaveBeenCalled()
+    })
+
+    it('returns error when workspace is missing PR context', async () => {
+      const ws = makeWorkspace({ parentId: undefined, gitBranch: 'feat', gitRootPath: '/root' })
+      const deps = makeDeps({ initialWorkspace: ws, getWorkspace: vi.fn().mockReturnValue(ws) })
+      const store = createGitControllerStore(deps)
+      store.getState().dispose()
+
+      const result = await store.getState().pushReviewCommentsToGitHub([comment])
+      expect(result).toEqual({ error: 'Missing workspace info' })
+      expect(deps.github.postReviewComments).not.toHaveBeenCalled()
+    })
+
+    it('returns error when parent branch is not found', async () => {
+      const ws = makeWorkspace({ parentId: 'parent', gitBranch: 'feat', gitRootPath: '/root' })
+      const deps = makeDeps({
+        initialWorkspace: ws,
+        getWorkspace: vi.fn().mockReturnValue(ws),
+        lookupWorkspace: vi.fn().mockReturnValue(undefined),
+      })
+      const store = createGitControllerStore(deps)
+      store.getState().dispose()
+
+      const result = await store.getState().pushReviewCommentsToGitHub([comment])
+      expect(result).toEqual({ error: 'Parent branch not found' })
+    })
+
+    it('delegates to github.postReviewComments with resolved branches', async () => {
+      const ws = makeWorkspace({ parentId: 'parent', gitBranch: 'feat', gitRootPath: '/root' })
+      const parentWs = makeWorkspace({ id: 'parent', gitBranch: 'main' })
+      const deps = makeDeps({
+        initialWorkspace: ws,
+        getWorkspace: vi.fn().mockReturnValue(ws),
+        lookupWorkspace: vi.fn().mockReturnValue(parentWs),
+      })
+      vi.mocked(deps.github.postReviewComments).mockResolvedValue({ posted: 1, failed: [] })
+      const store = createGitControllerStore(deps)
+      store.getState().dispose()
+
+      const result = await store.getState().pushReviewCommentsToGitHub([comment])
+      expect(result).toEqual({ posted: 1, failed: [] })
+      expect(deps.github.postReviewComments).toHaveBeenCalledWith('/root', 'feat', 'main', [comment])
     })
   })
 
