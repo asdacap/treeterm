@@ -213,12 +213,21 @@ export function FileDiffSection({
               onChange={(e) => {
                 if (!isViewed && !collapsed) {
                   const headerEl = (e.target as HTMLElement).closest('.file-diff-header')
-                  if (headerEl) {
-                    const headerHeight = headerEl.getBoundingClientRect().height
+                  // Capture the clicked (sticky) header's position now — this is where the
+                  // cursor is. After the file collapses we bring the next file's header here,
+                  // so its "Viewed" checkbox (same column) lands under the cursor for rapid
+                  // sequential checking. Because the sticky header is pinned at the viewport
+                  // top while scrolled into the file, this also lands at the next file's
+                  // start with no overshoot, regardless of how far in we'd scrolled.
+                  const anchorTop = headerEl?.getBoundingClientRect().top ?? 0
+                  const nextHeader = sectionRef.current
+                    ?.parentElement?.nextElementSibling
+                    ?.querySelector('.file-diff-header')
+                  if (headerEl && nextHeader) {
                     requestAnimationFrame(() => {
                       const scrollParent = headerEl.closest('.stacked-diff-list')
                       if (scrollParent) {
-                        scrollParent.scrollTop += headerHeight
+                        scrollParent.scrollTop += nextHeader.getBoundingClientRect().top - anchorTop
                       }
                     })
                   }

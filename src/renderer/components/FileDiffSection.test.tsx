@@ -287,28 +287,48 @@ describe('FileDiffSection', () => {
     expect(screen.queryByTestId('multi-file-diff')).toBeNull()
   })
 
-  it('scrolls scroll container by header height when marking expanded file as viewed', () => {
+  it('scrolls next file\'s header to the clicked header\'s position when marking expanded file as viewed', () => {
     const onToggleViewed = vi.fn()
     const rafCallbacks: FrameRequestCallback[] = []
     const originalRaf = globalThis.requestAnimationFrame
     globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => { rafCallbacks.push(cb); return 0 }) as typeof requestAnimationFrame
 
+    // Mirror the production DOM: each section lives in its own wrapper div inside
+    // the scroll container, so parentElement.nextElementSibling reaches the next file.
     const { container } = render(
       <div className="stacked-diff-list">
-        <FileDiffSection
-          {...defaultProps}
-          contents={makeContents()}
-          isViewed={false}
-          onToggleViewed={onToggleViewed}
-        />
+        <div>
+          <FileDiffSection
+            {...defaultProps}
+            contents={makeContents()}
+            isViewed={false}
+            onToggleViewed={onToggleViewed}
+          />
+        </div>
+        <div>
+          <FileDiffSection
+            {...defaultProps}
+            file={makeDiffFile({ path: 'src/other.ts' })}
+            contents={makeContents()}
+            isViewed={false}
+            onToggleViewed={vi.fn()}
+          />
+        </div>
       </div>
     )
 
     const scrollContainer = container.querySelector('.stacked-diff-list') as HTMLElement
-    const header = container.querySelector('.file-diff-header') as HTMLElement
+    const headers = container.querySelectorAll('.file-diff-header')
+    const clickedHeader = headers[0] as HTMLElement
+    const nextHeader = headers[1] as HTMLElement
 
-    vi.spyOn(header, 'getBoundingClientRect').mockReturnValue({
+    // Clicked (sticky) header is pinned at the viewport top; the next file's header
+    // sits 200px below after the collapse.
+    vi.spyOn(clickedHeader, 'getBoundingClientRect').mockReturnValue({
       height: 36, width: 100, top: 0, left: 0, bottom: 36, right: 100, x: 0, y: 0, toJSON: () => {},
+    })
+    vi.spyOn(nextHeader, 'getBoundingClientRect').mockReturnValue({
+      height: 36, width: 100, top: 200, left: 0, bottom: 236, right: 100, x: 0, y: 200, toJSON: () => {},
     })
     Object.defineProperty(scrollContainer, 'scrollTop', { value: 100, writable: true })
 
@@ -318,9 +338,9 @@ describe('FileDiffSection', () => {
     expect(onToggleViewed).toHaveBeenCalledTimes(1)
     expect(rafCallbacks).toHaveLength(1)
 
-    // Execute the rAF callback
+    // Execute the rAF callback: scroll by (nextHeader.top - anchorTop) = 200 - 0.
     rafCallbacks[0]!(0)
-    expect(scrollContainer.scrollTop).toBe(136)
+    expect(scrollContainer.scrollTop).toBe(300)
 
     globalThis.requestAnimationFrame = originalRaf
   })
