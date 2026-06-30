@@ -20,6 +20,20 @@ export interface SSHTunnelOptions {
   allowOutdatedDaemon?: boolean
 }
 
+export enum BootstrapResultType {
+  Connected = 'connected',
+  HashMismatch = 'hash-mismatch',
+}
+
+/**
+ * Outcome of bootstrapping/connecting to the remote daemon. A hash mismatch is a
+ * recoverable, expected outcome (resolve, not throw) so the caller can offer the
+ * user a refresh / connect-anyway choice instead of treating it as a hard failure.
+ */
+export type BootstrapResult =
+  | { type: BootstrapResultType.Connected; socketPath: string }
+  | { type: BootstrapResultType.HashMismatch; localHash: string; remoteHash: string }
+
 export class SSHTunnel {
   private sshProcess: ChildProcess | null = null
   private bootstrapBuffer: string[] = []
@@ -41,7 +55,7 @@ export class SSHTunnel {
     return this._connected
   }
 
-  async connect(): Promise<string> {
+  async connect(): Promise<BootstrapResult> {
     // Ensure the socket directory exists
     const socketDir = path.dirname(this.localSocketPath)
     if (!fs.existsSync(socketDir)) {
@@ -54,16 +68,20 @@ export class SSHTunnel {
     }
 
     // Step 1: Bootstrap remote daemon and get socket path
-    const remoteSocketPath = await this.bootstrapRemoteDaemon()
+    const bootstrap = await this.bootstrapRemoteDaemon()
+    if (bootstrap.type === BootstrapResultType.HashMismatch) {
+      // Recoverable: do not forward the tunnel — let the caller decide what to do.
+      return bootstrap
+    }
 
     // Step 2: Start SSH tunnel with socket forwarding
-    this.startTunnel(remoteSocketPath)
+    this.startTunnel(bootstrap.socketPath)
 
     // Step 3: Wait for local socket to appear
     await this.waitForSocket()
 
     this._connected = true
-    return this.localSocketPath
+    return { type: BootstrapResultType.Connected, socketPath: this.localSocketPath }
   }
 
   disconnect(): void {
@@ -251,8 +269,8 @@ export class SSHTunnel {
     return startMatch[1]!.trim()
   }
 
-  private async bootstrapRemoteDaemon(): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
+  private async bootstrapRemoteDaemon(): Promise<BootstrapResult> {
+    return new Promise<BootstrapResult>((resolve, reject) => {
       const sshArgs = this.buildBaseSSHArgs()
 
       const refreshDaemon = this.options.refreshDaemon ? '1' : '0'
@@ -383,7 +401,7 @@ export class SSHTunnel {
               if (remoteHash && remoteHash !== 'NONE') {
                 const localHash = this.getLocalDaemonChecksum(remoteArch)
                 if (remoteHash === localHash) {
-                  resolve(socketPath)
+                  resolve({ type: BootstrapResultType.Connected, socketPath })
                   return
                 }
                 if (this.options.refreshDaemon) {
@@ -401,21 +419,20 @@ export class SSHTunnel {
                   this.appendBootstrapOutput(
                     `Daemon binary mismatch (local=${localHash.substring(0, 12)}... remote=${remoteHash.substring(0, 12)}...), proceeding with outdated daemon as requested.`,
                   )
-                  resolve(socketPath)
+                  resolve({ type: BootstrapResultType.Connected, socketPath })
                   return
                 } else {
-                  // Default: reject with clear error — do not auto-kill
-                  reject(
-                    new Error(
-                      `Daemon binary hash mismatch (local=${localHash.substring(0, 12)}... remote=${remoteHash.substring(0, 12)}...). ` +
-                      `The remote daemon is outdated. Check "Refresh remote daemon" to update it, or "Allow outdated daemon" to connect anyway.`,
-                    ),
+                  // Default: surface a recoverable mismatch — do not auto-kill. The
+                  // caller offers refresh / connect-anyway based on this result.
+                  this.appendBootstrapOutput(
+                    `Daemon binary hash mismatch (local=${localHash.substring(0, 12)}... remote=${remoteHash.substring(0, 12)}...).`,
                   )
+                  resolve({ type: BootstrapResultType.HashMismatch, localHash, remoteHash })
                   return
                 }
               } else {
                 // No hash available (sha256sum missing) — trust the running daemon
-                resolve(socketPath)
+                resolve({ type: BootstrapResultType.Connected, socketPath })
                 return
               }
             }
@@ -430,7 +447,7 @@ export class SSHTunnel {
             }
 
             // Upload and start daemon (binary missing, wrong arch, or hash mismatch)
-            resolve(await this.uploadAndStartDaemon(remoteArch, remoteHome))
+            resolve({ type: BootstrapResultType.Connected, socketPath: await this.uploadAndStartDaemon(remoteArch, remoteHome) })
           } catch (err) {
             reject(
               new Error(

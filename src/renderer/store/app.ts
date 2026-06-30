@@ -39,7 +39,7 @@ import { createGitHubApi } from '../lib/githubClient'
 import { createRunActionsApi } from '../lib/runActionsClient'
 import { createWorktreeRegistryApi } from '../lib/worktreeRegistry'
 import { createLlmClient } from '../lib/llmClient'
-import { ConnectionStatus, ConnectionTargetType } from '../../shared/types'
+import { ConnectionStatus, ConnectionTargetType, ConnectionErrorKind } from '../../shared/types'
 
 export interface AppDeps {
   platform: Platform
@@ -95,7 +95,7 @@ interface AppState extends AppDeps {
   disconnectSession: (sessionId: string) => void
   addRemoteSession: (session: Session, connection: ConnectionInfo) => Promise<void>
   startRemoteConnect: (config: SSHConnectionConfig) => void
-  setSessionError: (connectionId: string, error: string) => void
+  setSessionError: (connectionId: string, error: string, errorKind?: ConnectionErrorKind) => void
   removeSession: (id: string) => void
 }
 
@@ -473,11 +473,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
     useNavigationStore.getState().setActiveView({ type: 'session', sessionId: remoteSessionId })
   },
 
-  setSessionError: (connectionId: string, error: string) => {
+  setSessionError: (connectionId: string, error: string, errorKind: ConnectionErrorKind = ConnectionErrorKind.Generic) => {
     const found = findSessionByConnectionId(get, connectionId)
     if (!found) return
     const conn = found.entry.store.getState().connection
-    found.entry.store.setState({ connection: { ...conn, status: ConnectionStatus.Error, error } })
+    found.entry.store.setState({ connection: { ...conn, status: ConnectionStatus.Error, error, errorKind } })
   },
 
   removeSession: (id: string) => {

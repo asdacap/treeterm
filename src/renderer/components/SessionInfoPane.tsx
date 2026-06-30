@@ -8,7 +8,7 @@ import type { SessionState } from '../store/createSessionStore'
 import { WorkspaceEntryStatus } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
 import type { PortForwardConfig, PortForwardInfo } from '../types'
-import { ConnectionStatus, PortForwardStatus, ConnectionTargetType } from '../../shared/types'
+import { ConnectionStatus, PortForwardStatus, ConnectionTargetType, ConnectionErrorKind } from '../../shared/types'
 import PortForwardDialog from './PortForwardDialog'
 import JsonViewer from './JsonViewer'
 import SystemMonitor from './SystemMonitor'
@@ -20,6 +20,7 @@ enum TabId {
   Ssh = 'ssh',
   Json = 'json',
   Tty = 'tty',
+  Mismatch = 'mismatch',
 }
 
 enum SshSubTab {
@@ -67,6 +68,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
   const isRemote = connection.target.type === ConnectionTargetType.Remote
   const isConnected = connection.status === ConnectionStatus.Connected
   const connectionError = (connection.status === ConnectionStatus.Error || connection.status === ConnectionStatus.Disconnected) ? connection.error : undefined
+  const isHashMismatch = connection.status === ConnectionStatus.Error && connection.errorKind === ConnectionErrorKind.DaemonHashMismatch
 
   const ssh = useAppStore(s => s.ssh)
   const exec = useAppStore(s => s.exec)
@@ -74,7 +76,12 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
   const sessionNamesStore = useAppStore(s => s.sessionNamesStore)
   const displayName = useStore(sessionNamesStore, s => s.names.get(sessionId)?.name ?? sessionId)
 
-  const [activeTab, setActiveTab] = useState(isRemote ? TabId.Ssh : TabId.Info)
+  // `selectedTab` is the user's explicit choice; null means "follow the default".
+  // The default switches to the Mismatch tab when a daemon hash mismatch occurs so
+  // it is front-and-center even if the mismatch arrives after this pane mounted.
+  const [selectedTab, setSelectedTab] = useState<TabId | null>(null)
+  const defaultTab = isHashMismatch ? TabId.Mismatch : isRemote ? TabId.Ssh : TabId.Info
+  const activeTab = selectedTab ?? defaultTab
   const [sshSubTab, setSshSubTab] = useState(SshSubTab.Bootstrap)
   const [bootstrapOutput, setBootstrapOutput] = useState<OutputLine[]>([])
   const [tunnelOutput, setTunnelOutput] = useState<OutputLine[]>([])
@@ -183,14 +190,16 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
     }
   }
 
-  const handleRetry = () => {
+  const reconnect = (opts?: { refreshDaemon?: boolean; allowOutdatedDaemon?: boolean }) => {
     if (!isRemote || connection.target.type !== ConnectionTargetType.Remote) return
     const config = connection.target.config
     // Reset connection to connecting state
     sessionStore.setState({ connection: { ...connection, status: ConnectionStatus.Connecting } })
-    void ssh.connect(config).then(({ info, session }) => {
+    void ssh.connect(config, opts).then(({ info, session }) => {
       if (info.status !== ConnectionStatus.Connected || !session) {
-        useAppStore.getState().setSessionError(config.id, info.status === ConnectionStatus.Error ? info.error : 'Connection failed')
+        const msg = info.status === ConnectionStatus.Error ? info.error : 'Connection failed'
+        const kind = info.status === ConnectionStatus.Error ? info.errorKind : ConnectionErrorKind.Generic
+        useAppStore.getState().setSessionError(config.id, msg, kind)
         return
       }
       void useAppStore.getState().addRemoteSession(session, info)
@@ -204,12 +213,16 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
     ? (connection.target.config.label || `${connection.target.config.user}@${connection.target.config.host}`)
     : displayName || sessionId
 
-  // Tabs: Info + SSH (if remote) + JSON/TTYs (when the connection is usable)
-  const tabs: { id: TabId; label: string }[] = isRemote
+  // Tabs: Info + SSH (if remote) + JSON/TTYs (when the connection is usable).
+  // On a daemon hash mismatch, a dedicated "Daemon Mismatch" tab is prepended.
+  const baseTabs: { id: TabId; label: string }[] = isRemote
     ? isConnected
       ? [{ id: TabId.Info, label: 'Info' }, { id: TabId.Ssh, label: 'SSH' }, { id: TabId.Json, label: 'JSON' }, { id: TabId.Tty, label: 'TTYs' }]
       : [{ id: TabId.Info, label: 'Info' }, { id: TabId.Ssh, label: 'SSH' }]
     : [{ id: TabId.Info, label: 'Info' }, { id: TabId.Json, label: 'JSON' }, { id: TabId.Tty, label: 'TTYs' }]
+  const tabs: { id: TabId; label: string }[] = isHashMismatch
+    ? [{ id: TabId.Mismatch, label: 'Daemon Mismatch' }, ...baseTabs]
+    : baseTabs
 
   // SSH sub-tabs: Bootstrap + Tunnel + Daemon always, Port Forwards when connected
   const sshSubTabs: { id: SshSubTab; label: string }[] = isConnected
@@ -262,7 +275,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
         )}
         {(connection.status === ConnectionStatus.Error || connection.status === ConnectionStatus.Disconnected) && (
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            <button className="ssh-pane-tab" onClick={handleRetry}>Retry</button>
+            <button className="ssh-pane-tab" onClick={() => { reconnect(); }}>Retry</button>
             <button className="ssh-pane-tab" style={{ color: '#f44336' }} onClick={() => { disconnectSession(sessionId); }}>Remove</button>
           </div>
         )}
@@ -272,7 +285,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
           <button
             key={tab.id}
             className={`ssh-pane-tab ${activeTab === tab.id ? 'active' : ''}`}
-            onClick={() => { setActiveTab(tab.id); }}
+            onClick={() => { setSelectedTab(tab.id); }}
           >
             {tab.label}
           </button>
@@ -314,7 +327,32 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
           )}
         </div>
       )}
-      {activeTab === TabId.Info ? (
+      {activeTab === TabId.Mismatch ? (
+        <div className="ssh-pane-output ssh-pane-mismatch">
+          <div className="ssh-pane-mismatch-message">
+            {connectionError ?? 'The remote daemon binary does not match the local build.'}
+          </div>
+          <div className="ssh-pane-mismatch-actions">
+            <button
+              className="ssh-pane-tab"
+              style={{ color: '#ff9800' }}
+              onClick={() => { reconnect({ refreshDaemon: true }); }}
+            >
+              Refresh daemon
+            </button>
+            <span className="ssh-pane-mismatch-warning">⚠ Drops all running processes on the remote.</span>
+          </div>
+          <div className="ssh-pane-mismatch-actions">
+            <button
+              className="ssh-pane-tab"
+              onClick={() => { reconnect({ allowOutdatedDaemon: true }); }}
+            >
+              Ignore mismatch &amp; connect anyway
+            </button>
+            <span className="ssh-pane-mismatch-hint">Connects against the outdated remote daemon.</span>
+          </div>
+        </div>
+      ) : activeTab === TabId.Info ? (
         <div className="ssh-pane-output">
           <div className="ssh-pane-output-line">Session ID: {sessionId}</div>
           {isRemote && connection.target.type === ConnectionTargetType.Remote ? (

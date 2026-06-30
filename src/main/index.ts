@@ -7,7 +7,7 @@ import { getDefaultSocketPath } from './socketPath'
 import { IpcServer } from './ipc/ipc-server'
 import { ConnectionManager } from './connectionManager'
 import type { ExecInput, ExecOutput } from '../generated/treeterm'
-import { ConnectionStatus, ConnectionTargetType } from '../shared/types'
+import { ConnectionStatus, ConnectionTargetType, ConnectionErrorKind } from '../shared/types'
 import type { SSHConnectionConfig, PortForwardConfig } from '../shared/types'
 import { PtyEventType, ExecEventType, type ExecEvent } from '../shared/ipc-types'
 import { createExecStreamRegistry } from './execStreamRegistry'
@@ -788,7 +788,7 @@ server.onSshConnect(async (config, options) => {
         ? `Remote daemon is outdated. Retry with 'Refresh remote daemon' checked. (${errorMsg})`
         : `Connected but failed to load session: ${errorMsg}`
       return {
-        info: { ...info, status: ConnectionStatus.Error, error: userError },
+        info: { ...info, status: ConnectionStatus.Error, error: userError, errorKind: ConnectionErrorKind.Generic },
         session: null
       }
     }

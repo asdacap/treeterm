@@ -5,12 +5,13 @@
 
 import { randomUUID } from 'crypto'
 import { GrpcDaemonClient } from './grpcClient'
-import { SSHTunnel } from './ssh'
+import { SSHTunnel, BootstrapResultType } from './ssh'
 import { PortForwardProcess } from './portForward'
 import {
   ConnectionStatus,
   ConnectPhase,
   ConnectionTargetType,
+  ConnectionErrorKind,
 } from '../shared/types'
 import type {
   SSHConnectionConfig,
@@ -29,6 +30,7 @@ class Connection {
   status: ConnectionStatus
   connectPhase?: ConnectPhase
   error?: string
+  errorKind: ConnectionErrorKind = ConnectionErrorKind.Generic
   tunnel?: SSHTunnel
 
   private static HEARTBEAT_TIMEOUT_MS = 50_000
@@ -61,7 +63,7 @@ class Connection {
 
   toInfo(): ConnectionInfo {
     if (this.status === ConnectionStatus.Error) {
-      return { id: this.id, target: this.target, status: ConnectionStatus.Error, error: this.error ?? 'Unknown error' }
+      return { id: this.id, target: this.target, status: ConnectionStatus.Error, error: this.error ?? 'Unknown error', errorKind: this.errorKind }
     }
     if (this.status === ConnectionStatus.Reconnecting) {
       return { id: this.id, target: this.target, status: ConnectionStatus.Reconnecting, error: this.error ?? 'Reconnecting...', attempt: this.reconnectAttempt }
@@ -365,10 +367,17 @@ class Connection {
       this.emitTunnelOutput(line)
     })
 
-    const localSocketPath = await tunnel.connect()
+    const result = await tunnel.connect()
+    if (result.type === BootstrapResultType.HashMismatch) {
+      // Background reconnect has no user prompt — fail loudly so the retry loop
+      // surfaces it. The user resolves the mismatch via the initial connect flow.
+      throw new Error(
+        `Daemon binary hash mismatch (local=${result.localHash.substring(0, 12)}... remote=${result.remoteHash.substring(0, 12)}...).`,
+      )
+    }
 
     // Connect gRPC client through the new forwarded socket
-    const client = new GrpcDaemonClient(localSocketPath)
+    const client = new GrpcDaemonClient(result.socketPath)
     await client.connect()
     this.client = client
   }
@@ -522,7 +531,28 @@ export class ConnectionManager {
       console.log(`[connectionManager] SSH tunnel connecting to ${config.host}:${String(config.port)} (id=${config.id})`)
       conn.connectPhase = ConnectPhase.Tunnel
       this.emitStatus(config.id)
-      const localSocketPath = await tunnel.connect()
+      const result = await tunnel.connect()
+
+      if (result.type === BootstrapResultType.HashMismatch) {
+        // Recoverable: surface a typed error so the UI can offer refresh / connect-anyway.
+        const errorMsg =
+          `Daemon binary hash mismatch (local=${result.localHash.substring(0, 12)}... remote=${result.remoteHash.substring(0, 12)}...). ` +
+          `The remote daemon is outdated. Refresh it to re-upload (drops running processes), or connect anyway.`
+        console.warn(`[connectionManager] Daemon hash mismatch (id=${config.id}): ${errorMsg}`)
+        conn.status = ConnectionStatus.Error
+        conn.error = errorMsg
+        conn.errorKind = ConnectionErrorKind.DaemonHashMismatch
+        this.emitStatus(config.id)
+        tunnel.disconnect()
+        return {
+          id: config.id,
+          target,
+          status: ConnectionStatus.Error,
+          error: errorMsg,
+          errorKind: ConnectionErrorKind.DaemonHashMismatch,
+        }
+      }
+      const localSocketPath = result.socketPath
       console.log(`[connectionManager] SSH tunnel connected, local socket: ${localSocketPath}`)
 
       // Connect gRPC client through the forwarded socket
@@ -585,6 +615,7 @@ export class ConnectionManager {
       }
       conn.status = ConnectionStatus.Error
       conn.error = errorMsg
+      conn.errorKind = ConnectionErrorKind.Generic
       this.emitStatus(config.id)
 
       // Clean up on failure
@@ -594,7 +625,8 @@ export class ConnectionManager {
         id: config.id,
         target,
         status: ConnectionStatus.Error,
-        error: errorMsg
+        error: errorMsg,
+        errorKind: ConnectionErrorKind.Generic,
       }
     }
   }

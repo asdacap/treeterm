@@ -44,12 +44,22 @@ export enum ConnectPhase {
   Daemon = 'daemon',
 }
 
+/**
+ * Classifies a connection error so the UI can offer error-specific recovery.
+ * `DaemonHashMismatch` means the remote's cached daemon binary differs from the
+ * locally-bundled one — recoverable via "refresh" or "connect anyway".
+ */
+export enum ConnectionErrorKind {
+  Generic = 'generic',
+  DaemonHashMismatch = 'daemon-hash-mismatch',
+}
+
 export type ConnectionInfo =
   | { id: string; target: ConnectionTarget; status: ConnectionStatus.Connecting; connectPhase?: ConnectPhase }
   | { id: string; target: ConnectionTarget; status: ConnectionStatus.Connected }
   | { id: string; target: ConnectionTarget; status: ConnectionStatus.Reconnecting; error: string; attempt: number }
   | { id: string; target: ConnectionTarget; status: ConnectionStatus.Disconnected; error?: string }
-  | { id: string; target: ConnectionTarget; status: ConnectionStatus.Error; error: string }
+  | { id: string; target: ConnectionTarget; status: ConnectionStatus.Error; error: string; errorKind: ConnectionErrorKind }
 
 // === Port Forward Types ===
 

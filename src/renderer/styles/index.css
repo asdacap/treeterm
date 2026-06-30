@@ -6242,6 +6242,35 @@ body,
   border-top: 1px solid var(--border-color);
 }
 
+.ssh-pane-mismatch {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ssh-pane-mismatch-message {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary);
+}
+
+.ssh-pane-mismatch-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ssh-pane-mismatch-warning {
+  color: #ff9800;
+  font-size: 12px;
+}
+
+.ssh-pane-mismatch-hint {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .ssh-upload-pane {
   display: flex;
   flex-direction: column;

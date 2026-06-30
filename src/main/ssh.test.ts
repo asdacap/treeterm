@@ -22,7 +22,7 @@ vi.mock('./socketPath', () => ({
 
 import { spawn } from 'child_process'
 import * as fs from 'fs'
-import { SSHTunnel } from './ssh'
+import { SSHTunnel, BootstrapResultType } from './ssh'
 import type { SSHConnectionConfig } from '../shared/types'
 
 type MockProcess = EventEmitter & {
@@ -234,7 +234,7 @@ describe('SSHTunnel', () => {
       proc.emit('close', 0)
 
       const result = await promise
-      expect(result).toBe('/tmp/treeterm-1000/daemon.sock')
+      expect(result).toEqual({ type: BootstrapResultType.Connected, socketPath: '/tmp/treeterm-1000/daemon.sock' })
     })
 
     it('rejects on non-zero exit code', async () => {
@@ -328,7 +328,7 @@ describe('SSHTunnel', () => {
       proc.emit('close', 0)
 
       const result = await promise
-      expect(result).toBe('/tmp/treeterm-1000/daemon.sock')
+      expect(result).toEqual({ type: BootstrapResultType.Connected, socketPath: '/tmp/treeterm-1000/daemon.sock' })
       // Only 1 spawn call (the bootstrap itself) — no kill or upload
       expect(spawn).toHaveBeenCalledTimes(1)
     })
@@ -377,7 +377,7 @@ describe('SSHTunnel', () => {
       startProc.emit('close', 0)
 
       const result = await promise
-      expect(result).toBe('/tmp/treeterm-1000/daemon.sock')
+      expect(result).toEqual({ type: BootstrapResultType.Connected, socketPath: '/tmp/treeterm-1000/daemon.sock' })
       expect(spawn).toHaveBeenCalledTimes(4)
 
       // scp destination must be an absolute path (no `~/`), to survive SFTP-mode scp
@@ -407,7 +407,7 @@ describe('SSHTunnel', () => {
       await expect(promise).rejects.toThrow('Could not detect remote home directory')
     })
 
-    it('rejects with error on hash mismatch without refreshDaemon', async () => {
+    it('resolves with a hash-mismatch result (no flags) without killing or uploading', async () => {
       const proc = makeMockProcess()
       vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
 
@@ -424,7 +424,12 @@ describe('SSHTunnel', () => {
       )
       proc.emit('close', 0)
 
-      await expect(promise).rejects.toThrow('Daemon binary hash mismatch')
+      const result = await promise
+      expect(result).toEqual({
+        type: BootstrapResultType.HashMismatch,
+        localHash: 'localhash000',
+        remoteHash: 'remotehash999',
+      })
       // Only bootstrap spawn — no kill or upload
       expect(spawn).toHaveBeenCalledTimes(1)
     })
@@ -447,7 +452,7 @@ describe('SSHTunnel', () => {
       proc.emit('close', 0)
 
       const result = await promise
-      expect(result).toBe('/tmp/treeterm-1000/daemon.sock')
+      expect(result).toEqual({ type: BootstrapResultType.Connected, socketPath: '/tmp/treeterm-1000/daemon.sock' })
       // Only bootstrap spawn — no kill or upload
       expect(spawn).toHaveBeenCalledTimes(1)
     })
@@ -468,7 +473,7 @@ describe('SSHTunnel', () => {
       proc.emit('close', 0)
 
       const result = await promise
-      expect(result).toBe('/tmp/treeterm-1000/daemon.sock')
+      expect(result).toEqual({ type: BootstrapResultType.Connected, socketPath: '/tmp/treeterm-1000/daemon.sock' })
       // Only 1 spawn call — no upload triggered
       expect(spawn).toHaveBeenCalledTimes(1)
     })

@@ -7,7 +7,7 @@ let tunnelOutputCallback: ((line: string) => void) | null = null
 let tunnelDisconnectCallback: ((error?: string) => void) | null = null
 
 const mockTunnelInstance = {
-  connect: vi.fn().mockResolvedValue('/tmp/test.sock'),
+  connect: vi.fn().mockResolvedValue({ type: 'connected', socketPath: '/tmp/test.sock' }),
   disconnect: vi.fn(),
   onBootstrapOutput: vi.fn().mockImplementation((cb: (line: string) => void) => {
     tunnelBootstrapOutputCallback = cb
@@ -29,7 +29,8 @@ vi.mock('./ssh', () => {
   return {
     SSHTunnel: vi.fn().mockImplementation(function() {
       return { ...mockTunnelInstance }
-    })
+    }),
+    BootstrapResultType: { Connected: 'connected', HashMismatch: 'hash-mismatch' },
   }
 })
 
@@ -212,7 +213,7 @@ describe('ConnectionManager', () => {
 
   describe('connectRemote', () => {
     beforeEach(() => {
-      mockTunnelInstance.connect.mockResolvedValue('/tmp/test.sock')
+      mockTunnelInstance.connect.mockResolvedValue({ type: 'connected', socketPath: '/tmp/test.sock' })
       mockTunnelInstance.disconnect.mockClear()
       mockRemoteClient.connect.mockResolvedValue(undefined)
       mockRemoteClient.disconnect.mockClear()
@@ -254,6 +255,28 @@ describe('ConnectionManager', () => {
 
       const result = await manager.connectRemote(remoteConfig)
       expect(result).toMatchObject({ status: 'error', error: 'string error' })
+    })
+
+    it('tags a generic failure with errorKind "generic"', async () => {
+      mockTunnelInstance.connect.mockRejectedValue(new Error('SSH failed'))
+
+      const result = await manager.connectRemote(remoteConfig)
+      expect(result).toMatchObject({ status: 'error', errorKind: 'generic' })
+    })
+
+    it('surfaces a daemon hash mismatch as a typed recoverable error', async () => {
+      mockTunnelInstance.connect.mockResolvedValue({
+        type: 'hash-mismatch',
+        localHash: 'localhash0000',
+        remoteHash: 'remotehash9999',
+      })
+      mockRemoteClient.connect.mockClear() // local connect ran in beforeEach
+
+      const result = await manager.connectRemote(remoteConfig)
+      expect(result).toMatchObject({ status: 'error', errorKind: 'daemon-hash-mismatch' })
+      // Tunnel is torn down; gRPC client is never created for a mismatch
+      expect(mockTunnelInstance.disconnect).toHaveBeenCalled()
+      expect(mockRemoteClient.connect).not.toHaveBeenCalled()
     })
 
     it('emits status changes during connection', async () => {
