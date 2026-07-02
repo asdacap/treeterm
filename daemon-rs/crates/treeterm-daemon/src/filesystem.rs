@@ -5,7 +5,7 @@ use tokio::fs;
 use tokio::sync::Mutex;
 use treeterm_proto::treeterm::*;
 
-pub const MAX_FILE_SIZE: u64 = 1024 * 1024; // 1MB
+pub const MAX_FILE_SIZE: u64 = 64 * 1024; // 64KB
 
 /// Serializes all writes so the compare-and-swap check and the rename are atomic
 /// with respect to other writers going through this daemon.
@@ -166,7 +166,7 @@ pub async fn read_file_streaming(workspace_path: &Path, file_path: &str) -> Resu
 
     let meta = fs::metadata(&resolved).await.map_err(|e| e.to_string())?;
     if meta.len() > MAX_FILE_SIZE {
-        return Err("File too large to preview (max 1MB)".into());
+        return Err("File too large to preview (max 64KB)".into());
     }
 
     let content = fs::read(&resolved).await.map_err(|e| e.to_string())?;
