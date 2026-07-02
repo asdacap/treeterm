@@ -257,6 +257,15 @@ describe('createWorkspaceStore', () => {
       expect(deps.createTty).toHaveBeenCalledTimes(1)
     })
 
+    it('forwards the handle to createTty as the daemon idempotency key', async () => {
+      const deps = makeTtyDeps()
+      const store = createWorkspaceStore(makeWorkspace({ id: 'ws-1' }), deps)
+
+      await store.getState().ensureTty('h-1', '/test')
+
+      expect(deps.createTty).toHaveBeenCalledWith('/test', undefined, undefined, 'h-1')
+    })
+
     it('coalesces concurrent calls with the same handle into a single PTY', async () => {
       const deps = makeTtyDeps()
       const store = createWorkspaceStore(makeWorkspace({ id: 'ws-1' }), deps)

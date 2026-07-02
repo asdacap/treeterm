@@ -52,6 +52,9 @@ type CreateSessionConfig = {
   rows?: number
   sandbox?: SandboxConfig
   startupCommand?: string
+  /** Client-minted idempotency key: the daemon returns the existing live PTY for a
+   *  known handle instead of spawning a duplicate. */
+  handle?: string
 }
 
 type DisconnectListener = () => void
@@ -290,7 +293,8 @@ export class GrpcDaemonClient {
         cols: config.cols,
         rows: config.rows,
         sandbox: config.sandbox,
-        startupCommand: config.startupCommand
+        startupCommand: config.startupCommand,
+        handle: config.handle
       }
 
       client.createPty(request, (error, response) => {

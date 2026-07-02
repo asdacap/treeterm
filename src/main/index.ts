@@ -295,13 +295,13 @@ function reestablishFileWatches(connectionId: string, client: GrpcDaemonClient):
 }
 
 // IPC Handlers
-server.onPtyCreate(async (event, connectionId, handle, cwd, sandbox, startupCommand) => {
+server.onPtyCreate(async (event, connectionId, handle, cwd, sandbox, startupCommand, ptyHandle) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
 
   try {
     const client = getClientForConnection(connectionId)
     await client.ensureDaemonRunning()
-    const sessionId = await client.createPtySession({ cwd, sandbox: sandbox, startupCommand })
+    const sessionId = await client.createPtySession({ cwd, sandbox: sandbox, startupCommand, handle: ptyHandle })
     const ptyStream = client.openPtyStream(handle, sessionId, (evt) => {
       if (!event.sender.isDestroyed()) {
         event.sender.send('pty:event', handle, evt)

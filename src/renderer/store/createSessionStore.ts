@@ -69,8 +69,11 @@ export interface SessionState {
 
   // Connection for this session (local or remote, transitions: connecting → connected/error)
   connection: ConnectionInfo
+  /** Apply a connection status update. On a transition back to Connected, flushes
+   *  workspace bodies whose writes were deferred while disconnected. */
+  handleConnectionStatusChange: (info: ConnectionInfo) => void
 
-  createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
+  createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string, ptyHandle?: string) => Promise<string>
   openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<{ tty: Tty; unsubscribe: () => void }>
   killTty: (ptyId: string) => void
   listTty: () => Promise<TTYSessionInfo[]>
@@ -292,13 +295,21 @@ export function createSessionStore(
     // Per-workspace serial write queue + coalesce flag.
     tail: Promise<unknown>
     pending: boolean
+    // A write was skipped while disconnected; flushed when the connection returns.
+    dirty: boolean
+    // A CAS write conflicted before its guard sha advanced. The next watch event
+    // (which carries the winning sha) re-enqueues a write so local-only state
+    // (e.g. a freshly-created ptyId) still lands instead of silently diverging.
+    retryOnNextEvent: boolean
+    // Consecutive CAS conflicts; surfaced as a workspace error past a threshold.
+    conflictStreak: number
   }
   const wsSync = new Map<string, WorkspaceSyncState>()
 
   function getOrCreateSync(id: string): WorkspaceSyncState {
     let s = wsSync.get(id)
     if (!s) {
-      s = { lastSeenSha: '', lastWrittenJson: '', recentHashes: [], unsubscribe: undefined, tail: Promise.resolve(), pending: false }
+      s = { lastSeenSha: '', lastWrittenJson: '', recentHashes: [], unsubscribe: undefined, tail: Promise.resolve(), pending: false, dirty: false, retryOnNextEvent: false, conflictStreak: 0 }
       wsSync.set(id, s)
     }
     return s
@@ -353,9 +364,18 @@ export function createSessionStore(
       // the workspace and tear down a just-mounted terminal.
       if (sync.recentHashes.includes(event.sha256)) {
         sync.lastSeenSha = event.sha256
+        // A conflicted write lost to one of our own earlier writes: local state still
+        // holds the losing delta, so rewrite it on top of the winning sha.
+        if (sync.retryOnNextEvent) {
+          sync.retryOnNextEvent = false
+          enqueueContentSync(id)
+        }
         return
       }
       sync.lastSeenSha = event.sha256
+      // A conflicted write lost to a genuine external edit: applying the winning body
+      // below replaces local state, so there is no losing delta left to rewrite.
+      sync.retryOnNextEvent = false
       let workspace: Workspace
       try {
         workspace = parseWorkspaceFile(id, path, event.content)
@@ -378,18 +398,29 @@ export function createSessionStore(
 
   // Write a workspace's current body to its JSON file via CAS. Coalesced and
   // serialized per workspace id (see enqueueContentSync).
+  // How many consecutive CAS conflicts a workspace tolerates before the divergence
+  // is surfaced as a workspace error instead of silently retrying forever.
+  const MAX_CONFLICT_STREAK = 5
+
   async function writeWorkspaceContent(id: string): Promise<void> {
     const { workspaces, connection, workspaceDataDir } = store.getState()
-    if (connection.status !== ConnectionStatus.Connected) return
+    const sync = wsSync.get(id)
+    if (!sync) return
+    if (connection.status !== ConnectionStatus.Connected) {
+      // Not droppable: local state may already hold changes (e.g. a fresh ptyId)
+      // the disk copy lacks. Flushed by handleConnectionStatusChange on reconnect.
+      sync.dirty = true
+      return
+    }
     if (!workspaceDataDir) return
     const entry = workspaces.get(id)
     if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return
-    const sync = wsSync.get(id)
-    if (!sync) return
+    sync.dirty = false
 
     // Chain the parent's hash into the body so its own hash is distinct even if the
     // logical content reverts to an earlier state (parentHash == the CAS guard sha).
-    const json = stableStringify(toStoredWorkspaceFile(entry.data, sync.lastSeenSha))
+    const guardSha = sync.lastSeenSha
+    const json = stableStringify(toStoredWorkspaceFile(entry.data, guardSha))
     if (json === sync.lastWrittenJson) return
 
     // Record the hash before writing: the daemon can emit the watch echo before
@@ -397,17 +428,29 @@ export function createSessionStore(
     const newSha = await sha256Hex(json)
     rememberHash(sync, newSha)
 
-    const result = await deps.filesystem.writeFile(workspaceDataDir, `${id}.json`, json, sync.lastSeenSha)
+    const result = await deps.filesystem.writeFile(workspaceDataDir, `${id}.json`, json, guardSha)
     if (result.success) {
       sync.lastWrittenJson = json
       sync.lastSeenSha = newSha
+      sync.conflictStreak = 0
     } else {
       // The write did not land; its hash stays in the bounded ring and ages out
       // harmlessly (its echo will never arrive).
       if ('conflict' in result) {
-        // Another writer won. The watch has (or will) deliver the winning body and
-        // onFileEvent reconciles — do not clobber it.
-        console.warn('[session] workspace content write conflict, reconciling via watch:', id)
+        // Another write won. Local state may hold changes the winning body lacks, so
+        // rewrite it on top of the winner instead of dropping it — that silent
+        // divergence is what left ptyId:null on disk and orphaned PTYs on reconnect.
+        sync.conflictStreak++
+        if (sync.conflictStreak >= MAX_CONFLICT_STREAK) {
+          setWorkspaceFileError(id, `Workspace file keeps conflicting with another writer (${String(sync.conflictStreak)} attempts)`)
+        }
+        if (sync.lastSeenSha !== guardSha) {
+          // The winning body's watch event already arrived — retry on top of it now.
+          enqueueContentSync(id)
+        } else {
+          // The winner's event is still in flight; onFileEvent retries when it lands.
+          sync.retryOnNextEvent = true
+        }
       } else {
         setWorkspaceFileError(id, `Failed to save workspace: ${result.error}`)
       }
@@ -443,9 +486,16 @@ export function createSessionStore(
   // that later sees the published ref finds the file already present. The watch is
   // opened only after the write so its first (Present) event matches lastSeenSha
   // and is suppressed rather than racing an Absent read against the pending write.
+  //
+  // The write goes through the same per-workspace serial queue as enqueueContentSync:
+  // a follow-up mutation (e.g. the tab's ptyId landing after PTY creation) enqueues
+  // while this write is still in flight, and both would otherwise CAS against the
+  // same pre-create sha — the loser was dropped, leaving ptyId:null on disk.
   async function createWorkspaceFile(id: string, path: string): Promise<void> {
-    getOrCreateSync(id)
-    await writeWorkspaceContent(id)
+    const sync = getOrCreateSync(id)
+    const write = sync.tail.then(() => writeWorkspaceContent(id), () => writeWorkspaceContent(id))
+    sync.tail = write.catch(() => undefined)
+    await write
     ensureWatch(id, path)
   }
 
@@ -599,7 +649,7 @@ export function createSessionStore(
     return {
       appRegistry: deps.appRegistry,
       openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => store.getState().openTtyStream(ptyId, onEvent),
-      createTty: (cwd, sandbox?, startupCommand?) => store.getState().createTty(cwd, sandbox, startupCommand),
+      createTty: (cwd, sandbox?, startupCommand?, ptyHandle?) => store.getState().createTty(cwd, sandbox, startupCommand, ptyHandle),
       connectionId: config.connection.id,
       git: deps.git,
       filesystem: deps.filesystem,
@@ -1009,9 +1059,21 @@ export function createSessionStore(
 
     connection: config.connection,
 
-    createTty: async (cwd: string, sandbox?: SandboxConfig, startupCommand?: string): Promise<string> => {
+    handleConnectionStatusChange: (info: ConnectionInfo): void => {
+      const prevStatus = get().connection.status
+      set({ connection: info })
+      if (info.status === ConnectionStatus.Connected && prevStatus !== ConnectionStatus.Connected) {
+        // Flush bodies whose writes were deferred while disconnected, before the
+        // stale on-disk copy can be used to rebuild state on reconnect.
+        for (const [id, sync] of Array.from(wsSync.entries())) {
+          if (sync.dirty) enqueueContentSync(id)
+        }
+      }
+    },
+
+    createTty: async (cwd: string, sandbox?: SandboxConfig, startupCommand?: string, ptyHandle?: string): Promise<string> => {
       const handle = crypto.randomUUID()
-      const result = await deps.terminal.create(connectionId, handle, cwd, sandbox, startupCommand)
+      const result = await deps.terminal.create(connectionId, handle, cwd, sandbox, startupCommand, ptyHandle)
       if (!result.success) {
         throw new Error(result.error || 'Failed to create PTY')
       }

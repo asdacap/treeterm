@@ -164,8 +164,8 @@ client.onSshPortForwardOutput((portForwardId, line) => {
 const preloadApi: PreloadApi = {
   platform: process.platform as Platform,
   terminal: {
-    create: (connectionId: string, handle: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => {
-      return client.ptyCreate(connectionId, handle, cwd, sandbox, startupCommand)
+    create: (connectionId: string, handle: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string, ptyHandle?: string) => {
+      return client.ptyCreate(connectionId, handle, cwd, sandbox, startupCommand, ptyHandle)
     },
     attach: (connectionId: string, handle: string, sessionId: string) => {
       return client.ptyAttach(connectionId, handle, sessionId)

@@ -62,6 +62,9 @@ message CreatePtyRequest {
   optional int32 rows = 4;
   optional SandboxConfig sandbox = 5;
   optional string startup_command = 6;
+  // Client-minted idempotency key (the tab's persisted ptyHandle). When set and a
+  // live session already exists for it, that session is returned instead of a new one.
+  optional string handle = 7;
 }
 
 message CreatePtyResponse {

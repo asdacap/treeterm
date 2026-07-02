@@ -55,7 +55,7 @@ export interface TerminalAppRef extends AppRef {
 export interface WorkspaceStoreDeps {
   appRegistry: AppRegistryApi
   openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<{ tty: Tty; unsubscribe: () => void }>
-  createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<string>
+  createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string, ptyHandle?: string) => Promise<string>
   connectionId: string
   git: GitApi
   filesystem: FilesystemApi
@@ -328,8 +328,11 @@ export function createWorkspaceStore(
       const existing = ttyByHandle.get(handle)
       if (existing) return existing
       // On failure, drop the memo so a later re-init can retry rather than replaying
-      // the rejection forever.
-      const promise = deps.createTty(cwd, sandbox, startupCommand).catch((err: unknown) => {
+      // the rejection forever. The handle is also sent to the daemon as an
+      // idempotency key: this memo dies with the store (e.g. the reconnect
+      // dispose/recreate), so the daemon returns the handle's existing live PTY
+      // instead of spawning a duplicate when the persisted ptyId never landed on disk.
+      const promise = deps.createTty(cwd, sandbox, startupCommand, handle).catch((err: unknown) => {
         if (ttyByHandle.get(handle) === promise) ttyByHandle.delete(handle)
         throw err
       })

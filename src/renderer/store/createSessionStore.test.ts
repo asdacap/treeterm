@@ -915,6 +915,12 @@ describe('createSessionStore', () => {
       expect(ptyId).toBe('pty-1')
     })
 
+    it('forwards the ptyHandle idempotency key to terminal.create', async () => {
+      await store.getState().createTty('/test', undefined, undefined, 'stable-handle')
+      const args = vi.mocked(deps.terminal.create).mock.calls[0]!
+      expect(args[5]).toBe('stable-handle')
+    })
+
     it('throws when terminal.create fails with error message', async () => {
       vi.mocked(deps.terminal.create).mockResolvedValue({ success: false, error: 'No PTY available' })
       await expect(store.getState().createTty('/test')).rejects.toThrow('No PTY available')
@@ -1450,7 +1456,9 @@ describe('createSessionStore', () => {
 
     it('writes the JSON body and publishes a ref when creating a workspace', async () => {
       store.getState().addWorkspace('/created')
-      await flushPromises()
+      // The initial write goes through the per-workspace serial queue, adding an
+      // extra async hop before writeFile is reached.
+      for (let i = 0; i < 5; i++) await flushPromises()
 
       // The JSON file is written (CAS must-not-exist) and the ref list is published.
       expect(deps.filesystem.writeFile).toHaveBeenCalled()
@@ -1468,6 +1476,162 @@ describe('createSessionStore', () => {
       await flushPromises()
 
       expect(deps.filesystem.deleteFile).toHaveBeenCalledWith('/test/.treeterm/workspaces', `${id}.json`)
+    })
+  })
+
+  describe('content write races and recovery', () => {
+    // Resolve a workspace's loaded store handle (fails loudly if not loaded).
+    function loadedHandle(id: string) {
+      const entry = store.getState().workspaces.get(id)!
+      expect(entry.status).toBe(WorkspaceEntryStatus.Loaded)
+      return (entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).store
+    }
+
+    it('serializes the initial file write with a follow-up mutation write', async () => {
+      const writes: { content: string; expectedSha: string }[] = []
+      let releaseFirst: (() => void) | undefined
+      vi.mocked(deps.filesystem.writeFile).mockImplementation((_wp: string, _fp: string, content: string, expectedSha?: string) => {
+        writes.push({ content, expectedSha: expectedSha ?? '' })
+        if (writes.length === 1) {
+          return new Promise((resolve) => { releaseFirst = () => { resolve({ success: true }) } })
+        }
+        return Promise.resolve({ success: true })
+      })
+
+      const id = store.getState().addWorkspace('/serial')
+      for (let i = 0; i < 5; i++) await flushPromises()
+      expect(writes.length).toBe(1)
+
+      // Mutate while the initial CAS-create is still in flight — the exact shape of
+      // the ptyId-update race that used to leave ptyId:null on disk.
+      loadedHandle(id).getState().updateMetadata('note', 'during-create', 'test')
+      for (let i = 0; i < 5; i++) await flushPromises()
+      // The second write must not start until the first resolves.
+      expect(writes.length).toBe(1)
+
+      releaseFirst!()
+      for (let i = 0; i < 8; i++) await flushPromises()
+      expect(writes.length).toBe(2)
+      // It CAS-guards on the first body's sha instead of racing with '' (must-not-exist).
+      expect(writes[1]!.expectedSha).toBe(await sha256Hex(writes[0]!.content))
+      expect((JSON.parse(writes[1]!.content) as Workspace).metadata.note).toBe('during-create')
+    })
+
+    it('rewrites local state after a CAS conflict once the winning echo arrives', async () => {
+      const ws = makeWorkspace({ id: 'ws-cas', name: 'cas', path: '/cas' })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
+      emitFilePresent(ws, 'sha-initial')
+      const handle = loadedHandle('ws-cas')
+
+      const writes: { content: string; expectedSha: string }[] = []
+      vi.mocked(deps.filesystem.writeFile).mockImplementation((_wp: string, _fp: string, content: string, expectedSha?: string) => {
+        writes.push({ content, expectedSha: expectedSha ?? '' })
+        if (writes.length === 1) return Promise.resolve({ success: false, error: 'sha mismatch', conflict: true as const })
+        return Promise.resolve({ success: true })
+      })
+
+      handle.getState().updateMetadata('note', 'keep-me', 'test')
+      for (let i = 0; i < 5; i++) await flushPromises()
+      expect(writes.length).toBe(1)
+
+      // The winning body's watch event lands after the conflict. Its sha is one of
+      // ours (a self-echo), so local state still holds the losing delta — the store
+      // must rewrite it on top instead of silently diverging from disk.
+      const cb = fileWatchCallbacks.get('ws-cas.json')!
+      cb({ type: FileWatchEventType.Present, content: 'irrelevant', sha256: 'sha-initial' })
+      for (let i = 0; i < 8; i++) await flushPromises()
+
+      expect(writes.length).toBe(2)
+      expect((JSON.parse(writes[1]!.content) as Workspace).metadata.note).toBe('keep-me')
+    })
+
+    it('retries immediately when the winning event already arrived during the conflicting write', async () => {
+      const ws = makeWorkspace({ id: 'ws-cas2', name: 'cas2', path: '/cas2' })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
+      emitFilePresent(ws, 'sha-initial')
+      const handle = loadedHandle('ws-cas2')
+
+      const writes: { content: string; expectedSha: string }[] = []
+      vi.mocked(deps.filesystem.writeFile).mockImplementation((_wp: string, _fp: string, content: string, expectedSha?: string) => {
+        writes.push({ content, expectedSha: expectedSha ?? '' })
+        if (writes.length === 1) {
+          // The external winner's event is delivered before the conflict response.
+          const winner = makeWorkspace({ id: 'ws-cas2', name: 'cas2', path: '/cas2', metadata: { external: 'yes' } })
+          fileWatchCallbacks.get('ws-cas2.json')!({ type: FileWatchEventType.Present, content: JSON.stringify(toStoredWorkspaceFile(winner, '')), sha256: 'sha-winner' })
+          return Promise.resolve({ success: false, error: 'sha mismatch', conflict: true as const })
+        }
+        return Promise.resolve({ success: true })
+      })
+
+      handle.getState().updateMetadata('note', 'mine', 'test')
+      for (let i = 0; i < 8; i++) await flushPromises()
+
+      expect(writes.length).toBe(2)
+      // The retry CAS-guards on the winner's sha, not the stale pre-conflict one.
+      expect(writes[1]!.expectedSha).toBe('sha-winner')
+    })
+
+    it('surfaces repeated CAS conflicts as a workspace error', async () => {
+      const ws = makeWorkspace({ id: 'ws-streak', name: 'streak', path: '/streak' })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
+      emitFilePresent(ws, 'sha-initial')
+      const handle = loadedHandle('ws-streak')
+
+      vi.mocked(deps.filesystem.writeFile).mockResolvedValue({ success: false, error: 'sha mismatch', conflict: true })
+
+      for (let n = 0; n < 5; n++) {
+        handle.getState().updateMetadata('note', `v${String(n)}`, 'test')
+        for (let i = 0; i < 5; i++) await flushPromises()
+      }
+
+      const entry = store.getState().workspaces.get('ws-streak')!
+      expect(entry.status).toBe(WorkspaceEntryStatus.OperationError)
+      expect((entry as Extract<typeof entry, { status: WorkspaceEntryStatus.OperationError }>).error).toContain('conflict')
+    })
+
+    it('defers writes while disconnected and flushes them on reconnect', async () => {
+      const ws = makeWorkspace({ id: 'ws-dirty', name: 'dirty', path: '/dirty' })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
+      emitFilePresent(ws, 'sha-initial')
+      const handle = loadedHandle('ws-dirty')
+
+      const writes: { content: string; expectedSha: string }[] = []
+      vi.mocked(deps.filesystem.writeFile).mockImplementation((_wp: string, _fp: string, content: string, expectedSha?: string) => {
+        writes.push({ content, expectedSha: expectedSha ?? '' })
+        return Promise.resolve({ success: true })
+      })
+
+      const target = store.getState().connection.target
+      store.getState().handleConnectionStatusChange({ id: 'local', target, status: ConnectionStatus.Reconnecting, error: 'tunnel dropped', attempt: 1 })
+      handle.getState().updateMetadata('note', 'offline-edit', 'test')
+      for (let i = 0; i < 5; i++) await flushPromises()
+      expect(writes.length).toBe(0)
+
+      store.getState().handleConnectionStatusChange({ id: 'local', target, status: ConnectionStatus.Connected })
+      for (let i = 0; i < 8; i++) await flushPromises()
+
+      expect(writes.length).toBe(1)
+      expect((JSON.parse(writes[0]!.content) as Workspace).metadata.note).toBe('offline-edit')
+      expect(writes[0]!.expectedSha).toBe('sha-initial')
+    })
+
+    it('does not flush clean workspaces on reconnect', async () => {
+      const ws = makeWorkspace({ id: 'ws-clean', name: 'clean', path: '/clean' })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
+      emitFilePresent(ws, 'sha-initial')
+
+      const writes: string[] = []
+      vi.mocked(deps.filesystem.writeFile).mockImplementation((_wp: string, _fp: string, content: string) => {
+        writes.push(content)
+        return Promise.resolve({ success: true })
+      })
+
+      const target = store.getState().connection.target
+      store.getState().handleConnectionStatusChange({ id: 'local', target, status: ConnectionStatus.Reconnecting, error: 'tunnel dropped', attempt: 1 })
+      store.getState().handleConnectionStatusChange({ id: 'local', target, status: ConnectionStatus.Connected })
+      for (let i = 0; i < 5; i++) await flushPromises()
+
+      expect(writes.length).toBe(0)
     })
   })
 })

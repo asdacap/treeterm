@@ -84,7 +84,14 @@ export interface CreatePtyRequest {
   cols?: number | undefined;
   rows?: number | undefined;
   sandbox?: SandboxConfig | undefined;
-  startupCommand?: string | undefined;
+  startupCommand?:
+    | string
+    | undefined;
+  /**
+   * Client-minted idempotency key (the tab's persisted ptyHandle). When set and a
+   * live session already exists for it, that session is returned instead of a new one.
+   */
+  handle?: string | undefined;
 }
 
 export interface CreatePtyRequest_EnvEntry {
@@ -1024,7 +1031,15 @@ export const PtySessionInfo: MessageFns<PtySessionInfo> = {
 };
 
 function createBaseCreatePtyRequest(): CreatePtyRequest {
-  return { cwd: "", env: {}, cols: undefined, rows: undefined, sandbox: undefined, startupCommand: undefined };
+  return {
+    cwd: "",
+    env: {},
+    cols: undefined,
+    rows: undefined,
+    sandbox: undefined,
+    startupCommand: undefined,
+    handle: undefined,
+  };
 }
 
 export const CreatePtyRequest: MessageFns<CreatePtyRequest> = {
@@ -1046,6 +1061,9 @@ export const CreatePtyRequest: MessageFns<CreatePtyRequest> = {
     }
     if (message.startupCommand !== undefined) {
       writer.uint32(50).string(message.startupCommand);
+    }
+    if (message.handle !== undefined) {
+      writer.uint32(58).string(message.handle);
     }
     return writer;
   },
@@ -1108,6 +1126,14 @@ export const CreatePtyRequest: MessageFns<CreatePtyRequest> = {
           message.startupCommand = reader.string();
           continue;
         }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.handle = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1137,6 +1163,7 @@ export const CreatePtyRequest: MessageFns<CreatePtyRequest> = {
         : isSet(object.startup_command)
         ? globalThis.String(object.startup_command)
         : undefined,
+      handle: isSet(object.handle) ? globalThis.String(object.handle) : undefined,
     };
   },
 
@@ -1166,6 +1193,9 @@ export const CreatePtyRequest: MessageFns<CreatePtyRequest> = {
     if (message.startupCommand !== undefined) {
       obj.startupCommand = message.startupCommand;
     }
+    if (message.handle !== undefined) {
+      obj.handle = message.handle;
+    }
     return obj;
   },
 
@@ -1190,6 +1220,7 @@ export const CreatePtyRequest: MessageFns<CreatePtyRequest> = {
       ? SandboxConfig.fromPartial(object.sandbox)
       : undefined;
     message.startupCommand = object.startupCommand ?? undefined;
+    message.handle = object.handle ?? undefined;
     return message;
   },
 };

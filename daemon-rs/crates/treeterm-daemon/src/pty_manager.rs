@@ -44,12 +44,20 @@ pub struct PtySession {
     /// closing master_fd to prevent stale AsyncFd from corrupting tokio's I/O driver
     /// when the fd number is reused by a new PTY session.
     pub reader_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Client-supplied idempotency key (see `create_pty`). Kept on the session so
+    /// `kill` can clean the handle→session map.
+    pub handle: Option<String>,
 }
 
 #[derive(Clone)]
 pub struct PtyManager {
     sessions: Arc<RwLock<HashMap<String, Arc<Mutex<PtySession>>>>>,
     counter: Arc<AtomicUsize>,
+    /// handle → live session id. A client that lost its local state (e.g. its
+    /// store was rebuilt after a reconnect before the session id reached disk)
+    /// re-issues CreatePty with the same handle and gets the running session back
+    /// instead of spawning a duplicate that orphans the original.
+    handles: Arc<RwLock<HashMap<String, String>>>,
 }
 
 fn get_login_shell() -> String {
@@ -71,6 +79,7 @@ impl PtyManager {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             counter: Arc::new(AtomicUsize::new(0)),
+            handles: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -81,8 +90,32 @@ impl PtyManager {
         cols: u16,
         rows: u16,
         startup_command: Option<String>,
+        handle: Option<String>,
     ) -> Result<String, String> {
-        let id = format!("pty-{}", self.counter.fetch_add(1, Ordering::Relaxed) + 1);
+        // Idempotency: a repeated create for a known handle returns the live session
+        // instead of spawning a duplicate. A handle mapped to an exited session falls
+        // through to a fresh create (which re-claims the handle below).
+        let handle = handle.filter(|h| !h.is_empty());
+        if let Some(h) = &handle {
+            let mapped = self.handles.read().await.get(h).cloned();
+            if let Some(existing_id) = mapped {
+                let existing = self.sessions.read().await.get(&existing_id).cloned();
+                if let Some(session) = existing {
+                    if session.lock().await.exit_code.is_none() {
+                        tracing::info!(session_id = %existing_id, handle = %h, "pty session reused for handle");
+                        return Ok(existing_id);
+                    }
+                }
+            }
+        }
+
+        // Timestamped so ids stay unique across daemon restarts — a bare counter
+        // restarts at 1 and lets stale persisted references collide with new sessions.
+        let id = format!(
+            "pty-{}-{}",
+            chrono_now_millis(),
+            self.counter.fetch_add(1, Ordering::Relaxed) + 1
+        );
 
         let (master_fd, child_pid) = unsafe {
             let mut master: libc::c_int = 0;
@@ -157,10 +190,14 @@ impl PtyManager {
             exit_tx: exit_tx.clone(),
             resize_tx: resize_tx.clone(),
             reader_handle: None,
+            handle: handle.clone(),
         };
 
         let session = Arc::new(Mutex::new(session));
         self.sessions.write().await.insert(id.clone(), Arc::clone(&session));
+        if let Some(h) = &handle {
+            self.handles.write().await.insert(h.clone(), id.clone());
+        }
 
         // Subscribe for startup command detection
         let startup_rx = if startup_command.as_deref().map_or(false, |s| !s.trim().is_empty()) {
@@ -339,6 +376,14 @@ impl PtyManager {
         let removed = self.sessions.write().await.remove(session_id);
         if let Some(session) = removed {
             let mut session = session.lock().await;
+            // Release the idempotency handle — but only if it still maps to this
+            // session (a newer session may have re-claimed it after this one exited).
+            if let Some(h) = session.handle.take() {
+                let mut handles = self.handles.write().await;
+                if handles.get(&h).is_some_and(|mapped| mapped.as_str() == session_id) {
+                    handles.remove(&h);
+                }
+            }
             // Abort reader task and AWAIT it — abort() only schedules cancellation;
             // the task (and its AsyncFd) may still be alive until tokio processes it.
             // Awaiting ensures the AsyncFd is fully dropped and deregistered from epoll
@@ -480,6 +525,7 @@ impl PtyManager {
         // Drain sessions from map first, releasing the write lock to avoid
         // blocking all other operations during per-session cleanup.
         let drained: Vec<_> = self.sessions.write().await.drain().collect();
+        self.handles.write().await.clear();
 
         let mut sigkill_tasks = Vec::new();
         for (id, session) in drained {
@@ -697,7 +743,7 @@ mod tests {
     async fn create_pty_returns_id() {
         let mgr = PtyManager::new();
         let id = mgr
-            .create_pty("/tmp".into(), HashMap::new(), 80, 24, None)
+            .create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None)
             .await
             .unwrap();
 
@@ -713,15 +759,78 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_pty_sequential_ids() {
+    async fn create_pty_distinct_ids() {
         let mgr = PtyManager::new();
-        let id1 = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
-        let id2 = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+        let id1 = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
+        let id2 = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
 
-        assert_eq!(id1, "pty-1");
-        assert_eq!(id2, "pty-2");
+        assert_ne!(id1, id2);
+        assert!(id1.starts_with("pty-"));
+        assert!(id2.starts_with("pty-"));
 
         mgr.kill(&id1).await;
+        mgr.kill(&id2).await;
+    }
+
+    #[tokio::test]
+    async fn create_pty_same_handle_returns_existing_session() {
+        let mgr = PtyManager::new();
+        let handle = Some("handle-a".to_string());
+        let id1 = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, handle.clone()).await.unwrap();
+        let id2 = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, handle).await.unwrap();
+
+        assert_eq!(id1, id2);
+        assert_eq!(mgr.list_sessions().await.len(), 1);
+
+        mgr.kill(&id1).await;
+    }
+
+    #[tokio::test]
+    async fn create_pty_handle_released_on_kill() {
+        let mgr = PtyManager::new();
+        let handle = Some("handle-b".to_string());
+        let id1 = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, handle.clone()).await.unwrap();
+        mgr.kill(&id1).await;
+
+        let id2 = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, handle).await.unwrap();
+        assert_ne!(id1, id2);
+
+        mgr.kill(&id2).await;
+    }
+
+    #[tokio::test]
+    async fn create_pty_empty_handle_never_deduplicates() {
+        let mgr = PtyManager::new();
+        let id1 = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, Some(String::new())).await.unwrap();
+        let id2 = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, Some(String::new())).await.unwrap();
+
+        assert_ne!(id1, id2);
+
+        mgr.kill(&id1).await;
+        mgr.kill(&id2).await;
+    }
+
+    #[tokio::test]
+    async fn create_pty_handle_of_exited_session_creates_fresh() {
+        let mgr = PtyManager::new();
+        let handle = Some("handle-c".to_string());
+        let id1 = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, handle.clone()).await.unwrap();
+
+        // Simulate the child having exited without the session being killed.
+        {
+            let sessions = mgr.sessions.read().await;
+            sessions.get(&id1).unwrap().lock().await.exit_code = Some(0);
+        }
+
+        let id2 = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, handle).await.unwrap();
+        assert_ne!(id1, id2);
+
+        // The handle now maps to the fresh session; killing the old one must not
+        // release the remapped handle.
+        mgr.kill(&id1).await;
+        let id3 = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, Some("handle-c".to_string())).await.unwrap();
+        assert_eq!(id2, id3);
+
         mgr.kill(&id2).await;
     }
 
@@ -749,7 +858,7 @@ mod tests {
     #[tokio::test]
     async fn get_size_returns_initial_dimensions() {
         let mgr = PtyManager::new();
-        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 100, 50, None).await.unwrap();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 100, 50, None, None).await.unwrap();
 
         let (cols, rows) = mgr.get_size(&id).await.unwrap();
         assert_eq!(cols, 100);
@@ -768,7 +877,7 @@ mod tests {
         // back to the runtime.
         let mgr = PtyManager::new();
         let id = mgr
-            .create_pty("/tmp".into(), HashMap::new(), 80, 24, None)
+            .create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None)
             .await
             .unwrap();
 
@@ -792,7 +901,7 @@ mod tests {
     #[tokio::test]
     async fn write_and_get_initial_state() {
         let mgr = PtyManager::new();
-        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
 
         // Write something to the pty
         let _ = mgr.write(&id, b"echo hello\n").await;
@@ -811,7 +920,7 @@ mod tests {
     #[tokio::test]
     async fn resize_pty_updates_dimensions() {
         let mgr = PtyManager::new();
-        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
 
         mgr.resize(&id, 120, 40).await.unwrap();
         let (cols, rows) = mgr.get_size(&id).await.unwrap();
@@ -824,7 +933,7 @@ mod tests {
     #[tokio::test]
     async fn kill_removes_session() {
         let mgr = PtyManager::new();
-        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
 
         mgr.kill(&id).await;
 
@@ -865,8 +974,8 @@ mod tests {
     #[tokio::test]
     async fn shutdown_clears_all_sessions() {
         let mgr = PtyManager::new();
-        mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
-        mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+        mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
+        mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
 
         assert_eq!(mgr.list_sessions().await.len(), 2);
 
@@ -877,7 +986,7 @@ mod tests {
     #[tokio::test]
     async fn get_exit_code_initially_none() {
         let mgr = PtyManager::new();
-        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
 
         let exit_code = mgr.get_exit_code(&id).await.unwrap();
         assert!(exit_code.is_none());
@@ -888,7 +997,7 @@ mod tests {
     #[tokio::test]
     async fn raw_buffer_starts_empty() {
         let mgr = PtyManager::new();
-        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
 
         let sessions = mgr.sessions.read().await;
         let session = sessions.get(&id).unwrap().lock().await;
@@ -903,7 +1012,7 @@ mod tests {
     #[tokio::test]
     async fn raw_buffer_accumulates_data() {
         let mgr = PtyManager::new();
-        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
 
         // Write data and wait for read loop to process
         mgr.write(&id, b"echo test\n").await.unwrap();
@@ -923,7 +1032,7 @@ mod tests {
     #[tokio::test]
     async fn raw_buffer_flush_cap() {
         let mgr = PtyManager::new();
-        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
 
         {
             let sessions = mgr.sessions.read().await;
@@ -960,7 +1069,7 @@ mod tests {
     #[tokio::test]
     async fn resize_adds_buffer_event() {
         let mgr = PtyManager::new();
-        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
 
         mgr.resize(&id, 120, 40).await.unwrap();
 
@@ -981,7 +1090,7 @@ mod tests {
     #[tokio::test]
     async fn initial_state_includes_parser_size() {
         let mgr = PtyManager::new();
-        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
 
         let events = mgr.get_initial_state(&id).await.unwrap();
 
@@ -997,7 +1106,7 @@ mod tests {
     #[tokio::test]
     async fn initial_state_includes_buffer_events_after_parser_size() {
         let mgr = PtyManager::new();
-        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None).await.unwrap();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
 
         // Resize to new dimensions — this goes into the buffer
         mgr.resize(&id, 100, 30).await.unwrap();

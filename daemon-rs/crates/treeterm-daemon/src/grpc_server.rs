@@ -48,7 +48,7 @@ impl TreeTermDaemon for DaemonService {
         let session_id = self
             .session_store
             .pty_manager()
-            .create_pty(r.cwd, env, cols, rows, r.startup_command)
+            .create_pty(r.cwd, env, cols, rows, r.startup_command, r.handle)
             .await
             .map_err(|e| Status::internal(e))?;
 

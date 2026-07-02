@@ -356,7 +356,10 @@ export interface ClipboardApi {
 }
 
 export interface TerminalApi {
-  create: (connectionId: string, handle: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string) => Promise<IpcResult<{ sessionId: string }>>
+  /** `handle` routes stream events; `ptyHandle` is the PTY's stable identity (persisted
+   *  in tab state) sent to the daemon as an idempotency key so re-creation after a
+   *  reconnect returns the existing live PTY instead of spawning a duplicate. */
+  create: (connectionId: string, handle: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string, ptyHandle?: string) => Promise<IpcResult<{ sessionId: string }>>
   attach: (connectionId: string, handle: string, sessionId: string) => Promise<IpcResult>
   list: (connectionId: string) => Promise<TTYSessionInfo[]>
   write: (handle: string, data: string) => Promise<void>

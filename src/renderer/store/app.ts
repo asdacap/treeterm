@@ -352,7 +352,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       for (const entry of Array.from(get().sessionStores.values())) {
         const conn = entry.store.getState().connection
         if (conn.id === info.id) {
-          entry.store.setState({ connection: info })
+          entry.store.getState().handleConnectionStatusChange(info)
         }
       }
     })

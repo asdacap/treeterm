@@ -83,7 +83,7 @@ import type {
 export interface IpcRequests {
   // PTY operations
   ptyCreate: {
-    params: [connectionId: string, handle: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string]
+    params: [connectionId: string, handle: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string, ptyHandle?: string]
     result: IpcResult<{ sessionId: string }>
   }
   ptyAttach: {
