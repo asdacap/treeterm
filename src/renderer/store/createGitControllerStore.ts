@@ -41,6 +41,13 @@ export function createGitControllerStore(deps: GitControllerDeps): GitController
     store.setState({ gitRefreshing: true })
     try {
       try {
+        // Re-read the current workspace's own branch — an agent (or the user)
+        // may have switched/renamed the branch out of band via the terminal.
+        // Done first so downstream conflict/PR checks use the fresh branch.
+        await deps.refreshGitInfo()
+      } catch { /* ignore — workspace may be removed */ }
+
+      try {
         const uncommitted = await deps.git.hasUncommittedChanges(deps.getWorkspace().path)
         store.setState({ hasUncommittedChanges: uncommitted })
       } catch { /* ignore — workspace may be removed */ }

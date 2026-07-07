@@ -58,6 +58,23 @@ describe('createGitControllerStore', () => {
       expect(store.getState().gitRefreshing).toBe(false)
     })
 
+    it('refreshes the current workspace branch (agent may change it out of band)', async () => {
+      const deps = makeDeps()
+      const store = createGitControllerStore(deps)
+
+      await flushRefresh(store)
+      expect(deps.refreshGitInfo).toHaveBeenCalledTimes(1)
+    })
+
+    it('catches refreshGitInfo error gracefully and still completes', async () => {
+      const deps = makeDeps()
+      vi.mocked(deps.refreshGitInfo).mockRejectedValue(new Error('gone'))
+      const store = createGitControllerStore(deps)
+
+      await flushRefresh(store)
+      expect(store.getState().gitRefreshing).toBe(false)
+    })
+
     it('sets hasUncommittedChanges from git API', async () => {
       const deps = makeDeps()
       vi.mocked(deps.git.hasUncommittedChanges).mockResolvedValue(true)
@@ -379,7 +396,7 @@ describe('createGitControllerStore', () => {
       const store = createGitControllerStore(deps)
 
       void store.getState().refreshGit()
-      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledTimes(1)
+      expect(deps.refreshGitInfo).toHaveBeenCalledTimes(1)
       expect(store.getState().gitRefreshing).toBe(true)
 
       store.getState().dispose()
