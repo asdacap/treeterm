@@ -67,7 +67,7 @@ vi.mock('../../applications/comments/renderer', () => ({
 import type { StoreApi } from 'zustand'
 import { useAppStore, type AppDeps } from './app'
 import { useNavigationStore } from './navigation'
-import { useSessionNamesStore } from './sessionNames'
+import { useSessionNamesStore, deriveDefaultSessionName } from './sessionNames'
 import type { SessionState, SessionDeps } from './createSessionStore'
 import { WorkspaceEntryStatus } from './createSessionStore'
 import type { Workspace } from '../types'
@@ -904,13 +904,13 @@ describe('useAppStore', () => {
     })
   })
 
-  describe('session auto-naming', () => {
+  describe('session naming', () => {
     beforeEach(() => {
       useSessionNamesStore.setState({ names: new Map() })
     })
 
     describe('local session via localConnect', () => {
-      it('names local session LOCAL', async () => {
+      it('does not persist a default name — LOCAL is derived from the connection', async () => {
         const localConn: ConnectionInfo = { id: 'local', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected }
         vi.mocked(mockDeps.appApi.localConnect).mockResolvedValue({
           info: localConn,
@@ -919,7 +919,9 @@ describe('useAppStore', () => {
         const cleanup = await useAppStore.getState().initialize(mockDeps)
         // Session name is keyed by the store key (random ID), find it
         const storeKey = Array.from(useAppStore.getState().sessionStores.keys())[0]!
-        expect(useSessionNamesStore.getState().getName(storeKey)).toBe('LOCAL')
+        // No entry is persisted; the display derives 'LOCAL' from the connection.
+        expect(useSessionNamesStore.getState().getName(storeKey)).toBeUndefined()
+        expect(deriveDefaultSessionName(localConn)).toBe('LOCAL')
         cleanup()
       })
 
@@ -953,7 +955,7 @@ describe('useAppStore', () => {
         return undefined
       }
 
-      it('names session with user@host when no label', async () => {
+      it('derives user@host when no label and persists no default entry', async () => {
         const connection = {
           id: 'conn-1',
           target: { type: ConnectionTargetType.Remote, config: { id: 'conn-1', host: 'myserver.com', user: 'alice', port: 22, portForwards: [] } },
@@ -962,10 +964,11 @@ describe('useAppStore', () => {
         const session = { id: 'ssh-session-1', workspaceRefs: [], workspaceDataDir: "", createdAt: 0, lastActivity: 0, version: 1 }
         await useAppStore.getState().addRemoteSession(session, connection)
         const storeKey = findStoreKeyByConnectionId('conn-1')!
-        expect(useSessionNamesStore.getState().getName(storeKey)).toBe('alice@myserver.com')
+        expect(useSessionNamesStore.getState().getName(storeKey)).toBeUndefined()
+        expect(deriveDefaultSessionName(connection)).toBe('alice@myserver.com')
       })
 
-      it('uses label over user@host when label is set', async () => {
+      it('derives the label over user@host when a label is set', async () => {
         const connection = {
           id: 'conn-2',
           target: { type: ConnectionTargetType.Remote, config: { id: 'conn-2', host: 'myserver.com', user: 'alice', port: 22, label: 'Production', portForwards: [] } },
@@ -974,7 +977,8 @@ describe('useAppStore', () => {
         const session = { id: 'ssh-session-2', workspaceRefs: [], workspaceDataDir: "", createdAt: 0, lastActivity: 0, version: 1 }
         await useAppStore.getState().addRemoteSession(session, connection)
         const storeKey = findStoreKeyByConnectionId('conn-2')!
-        expect(useSessionNamesStore.getState().getName(storeKey)).toBe('Production')
+        expect(useSessionNamesStore.getState().getName(storeKey)).toBeUndefined()
+        expect(deriveDefaultSessionName(connection)).toBe('Production')
       })
 
       it('opens resolved remote home directory as workspace when session has no workspaces', async () => {

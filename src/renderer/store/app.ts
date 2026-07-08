@@ -292,9 +292,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
         console.log('[App] Local connection established, session:', session.id)
         const localSessionId = generateSessionId()
         const sessionStore = getOrCreateSession(localSessionId, get, set, info)
-        if (!get().sessionNamesStore.getState().getName(localSessionId)) {
-          get().sessionNamesStore.getState().setName(localSessionId, 'LOCAL')
-        }
         // Seed version/lock/dataDir from the daemon for every session — even an
         // empty one. A daemon session persists across restarts and keeps bumping
         // its version, so it can have 0 refs yet a version > 0. Without seeding,
@@ -433,12 +430,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
       storeKey = generateSessionId()
       store = getOrCreateSession(storeKey, get, set, connection)
     }
-    if (!get().sessionNamesStore.getState().getName(storeKey)) {
-      const label = connection.target.type === ConnectionTargetType.Remote
-        ? (connection.target.config.label || `${connection.target.config.user}@${connection.target.config.host}`)
-        : storeKey
-      get().sessionNamesStore.getState().setName(storeKey, label)
-    }
     console.log(`[renderer:app] Session store created/retrieved for session=${session.id}, storeKey=${storeKey}`)
     if (session.workspaceRefs.length > 0) {
       console.log(`[renderer:app] Restoring ${String(session.workspaceRefs.length)} refs for session=${session.id}`)
@@ -467,9 +458,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const connection: ConnectionInfo = { id: config.id, target: { type: ConnectionTargetType.Remote, config }, status: ConnectionStatus.Connecting }
     const remoteSessionId = generateSessionId()
     getOrCreateSession(remoteSessionId, get, set, connection)
-    if (!get().sessionNamesStore.getState().getName(remoteSessionId)) {
-      get().sessionNamesStore.getState().setName(remoteSessionId, config.label || `${config.user}@${config.host}`)
-    }
     useNavigationStore.getState().setActiveView({ type: 'session', sessionId: remoteSessionId })
   },
 

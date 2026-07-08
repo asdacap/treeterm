@@ -7,6 +7,7 @@ import { Loader2 } from 'lucide-react'
 import type { SessionState } from '../store/createSessionStore'
 import { WorkspaceEntryStatus } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
+import { deriveDefaultSessionName } from '../store/sessionNames'
 import type { PortForwardConfig, PortForwardInfo } from '../types'
 import { ConnectionStatus, PortForwardStatus, ConnectionTargetType, ConnectionErrorKind } from '../../shared/types'
 import PortForwardDialog from './PortForwardDialog'
@@ -74,7 +75,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
   const exec = useAppStore(s => s.exec)
   const disconnectSession = useAppStore(s => s.disconnectSession)
   const sessionNamesStore = useAppStore(s => s.sessionNamesStore)
-  const displayName = useStore(sessionNamesStore, s => s.names.get(sessionId)?.name ?? sessionId)
+  const customName = useStore(sessionNamesStore, s => s.names.get(sessionId)?.name)
 
   // `selectedTab` is the user's explicit choice; null means "follow the default".
   // The default switches to the Mismatch tab when a daemon hash mismatch occurs so
@@ -208,10 +209,9 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
     })
   }
 
-  // Derive label
-  const label = isRemote && connection.target.type === ConnectionTargetType.Remote
-    ? (connection.target.config.label || `${connection.target.config.user}@${connection.target.config.host}`)
-    : displayName || sessionId
+  // Header label: a user-set custom name wins; otherwise the connection-derived
+  // name — never the raw ephemeral session id.
+  const label = customName ?? deriveDefaultSessionName(connection)
 
   // Tabs: Info + SSH (if remote) + JSON/TTYs (when the connection is usable).
   // On a daemon hash mismatch, a dedicated "Daemon Mismatch" tab is prepended.

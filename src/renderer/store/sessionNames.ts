@@ -1,6 +1,24 @@
 /* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import { create } from 'zustand'
 import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware'
+import { ConnectionTargetType, type ConnectionInfo } from '../../shared/types'
+
+/**
+ * The label shown for a session when the user has not set a custom name.
+ *
+ * Derived purely from the connection — never from the ephemeral session id.
+ * The session id is regenerated on every connect/reconnect, so anything keyed
+ * by it (including the persisted custom-name store) can miss; falling back to
+ * this keeps the display stable ("LOCAL" / "user@host") instead of leaking the
+ * raw `session-<timestamp>-<random>` id.
+ */
+export function deriveDefaultSessionName(connection: ConnectionInfo): string {
+  if (connection.target.type === ConnectionTargetType.Remote) {
+    const cfg = connection.target.config
+    return cfg.label || `${cfg.user}@${cfg.host}`
+  }
+  return 'LOCAL'
+}
 
 interface SessionNameEntry {
   name: string
