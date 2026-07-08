@@ -16,6 +16,7 @@ import { useNavigationStore } from './store/navigation'
 import { WorkspaceEntryStatus } from './store/createSessionStore'
 import type { SessionState } from './store/createSessionStore'
 import { useSettingsStore } from './store/settings'
+import { log } from './utils/logger'
 
 // One-time migration: clear localStorage since daemon is now source of truth
 if (typeof localStorage !== 'undefined') {
@@ -34,7 +35,7 @@ function ActiveProcessesDialogContainer({ sessionStore, onClose }: { sessionStor
 }
 
 export default function App() {
-  console.log('[App] Component rendering')
+  log.debug('[App] Component rendering')
   const isSettingsLoaded = useSettingsStore(s => s.isLoaded)
   const [treeWidth, setTreeWidth] = useState(250)
   const [isResizing, setIsResizing] = useState(false)
