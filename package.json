@@ -33,6 +33,7 @@
     "test:e2e:ui": "playwright test --ui",
     "test:daemon": "cd daemon-rs && cargo test",
     "test:daemon:coverage": "cd daemon-rs && cargo llvm-cov --lcov --output-path ../coverage/daemon-lcov.info",
+    "test:daemon:container": "daemon-rs/tests/container/run-container-test.sh",
     "test:all": "vitest run && npm run test:daemon && playwright test",
     "lint": "eslint src/",
     "test:lint-rules": "node eslint-rules/no-string-literal-comparison.test.js && node eslint-rules/no-get-state-in-render.test.js",

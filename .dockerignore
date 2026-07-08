@@ -1,0 +1,16 @@
+# The only Docker build in this repo is the daemon container boot test
+# (daemon-rs/tests/container/Dockerfile), which needs just daemon-rs/ and
+# src/proto/. Keep the build context small by excluding regenerable/heavy dirs.
+node_modules/
+out/
+dist/
+coverage/
+test-results/
+.git/
+.worktrees/
+daemon-rs/target/
+result
+result-*
+.direnv/
+*.tsbuildinfo
+.DS_Store
