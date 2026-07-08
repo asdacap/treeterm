@@ -490,12 +490,25 @@ export default function BaseTerminal({
           cache.unsubscribeEvents = result.unsubscribe
         } catch (error) {
           log.error(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, currentExistingPtyId, error)
-          if (cancelled) return
+          if (cancelled) {
+            terminal.dispose()
+            return
+          }
           setOverlay({ message: `Failed to reattach terminal: ${error instanceof Error ? error.message : 'Unknown error'}`, type: 'error' })
           return
         }
 
-        if (cancelled) return
+        if (cancelled) {
+          // A StrictMode double-mount (or a quick unmount) raced ahead of this async
+          // init. terminal.open() and the stream subscription already happened, but this
+          // closure never stored them on termAppRef.cachedTerminal, so the effect cleanup
+          // couldn't reach them. Tear them down here — otherwise terminal A lingers as an
+          // orphaned DOM node while mount 2 opens terminal B in the same container
+          // (duplicated output), and the orphan steals focus with no onData wired (no input).
+          cache.unsubscribeEvents()
+          terminal.dispose()
+          return
+        }
 
         cache.tty = tty
 
