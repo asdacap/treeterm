@@ -401,6 +401,45 @@ describe('createWorkspaceStore', () => {
     })
   })
 
+  describe('reviewViewedFiles', () => {
+    it('survives closing the review tab', async () => {
+      const app = makeFakeApp({ id: 'review', canClose: true })
+      const deps = makeHandleDeps({
+        appRegistry: {
+          get: vi.fn<(...args: any[]) => any>().mockReturnValue(app),
+          getDefaultApp: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
+        },
+      })
+      const ws = makeWorkspace({
+        id: 'ws-1',
+        appStates: { 'tab-1': { applicationId: 'review', title: 'Review', state: {} } },
+        activeTabId: 'tab-1',
+      })
+      const store = createWorkspaceStore(ws, deps)
+
+      store.getState().reviewViewedFiles.getState().toggleViewedFile({
+        path: 'a.ts', additions: 3, deletions: 4,
+      })
+      await store.getState().removeTab('tab-1')
+
+      expect(Object.keys(store.getState().workspace.appStates)).toHaveLength(0)
+      expect(store.getState().reviewViewedFiles.getState().getViewedFiles()).toEqual({
+        'a.ts': { additions: 3, deletions: 4 },
+      })
+    })
+
+    it('persists viewed files into workspace metadata', () => {
+      const store = createWorkspaceStore(makeWorkspace({ id: 'ws-1' }), makeHandleDeps())
+
+      store.getState().reviewViewedFiles.getState().toggleViewedFile({
+        path: 'a.ts', additions: 1, deletions: 2,
+      })
+
+      const stored = store.getState().workspace.metadata.reviewViewedFiles
+      expect(JSON.parse(stored!)).toEqual({ 'a.ts': { additions: 1, deletions: 2 } })
+    })
+  })
+
   describe('removeTab', () => {
     it('removes tab and adjusts activeTabId', async () => {
       const app = makeFakeApp({ canClose: true })

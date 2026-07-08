@@ -9,6 +9,7 @@ import { createStore } from 'zustand/vanilla'
 import type { WorkspaceStoreState } from '../../renderer/store/createWorkspaceStore'
 import type { GitControllerState } from '../../renderer/store/createGitControllerStore'
 import type { ReviewCommentState } from '../../renderer/store/createReviewCommentStore'
+import { createMockReviewViewedFilesStore } from '../../shared/test-fixtures/reviewViewedFiles'
 
 // Mock React
 vi.mock('react', () => ({
@@ -49,6 +50,7 @@ const mockWorkspaceStoreStateData = {
     clearReviewComments: vi.fn(),
     markReviewCommentsAddressed: vi.fn(),
   } as ReviewCommentState)),
+  reviewViewedFiles: createMockReviewViewedFilesStore(),
   promptHarness: vi.fn(),
   quickForkWorkspace: vi.fn(),
   updateMetadata: vi.fn(), deleteMetadata: vi.fn(), toggleFavourite: vi.fn(),

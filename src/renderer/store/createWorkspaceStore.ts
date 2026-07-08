@@ -14,6 +14,8 @@ import { createGitControllerStore } from './createGitControllerStore'
 import type { GitController } from './createGitControllerStore'
 import { createReviewCommentStore } from './createReviewCommentStore'
 import type { ReviewCommentStore } from './createReviewCommentStore'
+import { createReviewViewedFilesStore } from './createReviewViewedFilesStore'
+import type { ReviewViewedFilesStore } from './createReviewViewedFilesStore'
 
 /**
  * Cached xterm.js terminal for BaseTerminal-derived tabs only (Terminal, AiHarness).
@@ -117,6 +119,9 @@ export interface WorkspaceStoreState {
 
   // Review comment controller
   reviewComments: ReviewCommentStore
+
+  // Review "viewed file" checkboxes — workspace-scoped so they outlive the review tab
+  reviewViewedFiles: ReviewViewedFilesStore
 
   // Tab lifecycle
   initTab: (tabId: string) => void
@@ -267,6 +272,11 @@ export function createWorkspaceStore(
     updateMetadata: (key, value, reason) => { store.getState().updateMetadata(key, value, reason); },
   })
 
+  const reviewViewedFiles = createReviewViewedFilesStore({
+    getMetadata: () => store.getState().metadata,
+    updateMetadata: (key, value, reason) => { store.getState().updateMetadata(key, value, reason); },
+  })
+
   store = createStore<WorkspaceStoreState>()((set, get) => ({
     workspace,
     metadata: workspace.metadata,
@@ -279,6 +289,7 @@ export function createWorkspaceStore(
 
     gitController,
     reviewComments,
+    reviewViewedFiles,
 
     initTab: (tabId: string): void => {
       if (tabRefs.has(tabId)) return

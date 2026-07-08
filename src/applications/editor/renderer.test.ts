@@ -6,6 +6,7 @@ import { createStore } from 'zustand/vanilla'
 import type { WorkspaceStoreState, WorkspaceStore } from '../../renderer/store/createWorkspaceStore'
 import type { GitControllerState } from '../../renderer/store/createGitControllerStore'
 import type { ReviewCommentState } from '../../renderer/store/createReviewCommentStore'
+import { createMockReviewViewedFilesStore } from '../../shared/test-fixtures/reviewViewedFiles'
 
 // Mock React
 vi.mock('react', () => ({
@@ -55,6 +56,7 @@ function createMockWorkspaceStoreStateData(overrides?: Partial<WorkspaceStoreSta
     updateTabTitle: vi.fn(),
     updateTabState: vi.fn(),
     reviewComments: mockReviewCommentStore,
+    reviewViewedFiles: createMockReviewViewedFilesStore(),
     promptHarness: vi.fn(),
     quickForkWorkspace: vi.fn(),
     updateMetadata: vi.fn(), deleteMetadata: vi.fn(), toggleFavourite: vi.fn(),

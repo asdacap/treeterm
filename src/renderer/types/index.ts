@@ -167,7 +167,8 @@ export interface ReviewState {
   viewMode: 'committed' | 'uncommitted' | 'commits'
   selectedFilePath?: string
   scrollTop?: number
-  viewedFiles?: Record<string, ViewedFileStats>
+  // NOTE: viewed-file checkboxes live in workspace metadata (see createReviewViewedFilesStore),
+  // not here — tab state is destroyed when the review tab is closed.
 }
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- intentional marker interface for tab state

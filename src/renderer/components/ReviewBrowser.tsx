@@ -5,7 +5,7 @@ import { WorkerPoolContextProvider } from '@pierre/diffs/react'
 import { useStore } from 'zustand'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
 import { getTabs } from '../types'
-import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, GitLogCommit, WorkspaceStore, WorkspaceGitApi, ReviewState, ViewedFileStats } from '../types'
+import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, GitLogCommit, WorkspaceStore, WorkspaceGitApi, ReviewState } from '../types'
 import { FileChangeStatus } from '../types'
 import { useGitApi } from '../hooks/useWorkspaceApis'
 import { CommittedDiffFileTree, UncommittedDiffFileTree, sortFilesAsTree, filterFilesByDir } from './DiffFileTree'
@@ -42,12 +42,17 @@ export default function ReviewBrowser({
   const closeAndClean = useStore(workspace, s => s.closeAndClean)
   const removeTab = useStore(workspace, s => s.removeTab)
   const reviewCommentStore = useStore(workspace, s => s.reviewComments)
+  const reviewViewedFilesStore = useStore(workspace, s => s.reviewViewedFiles)
   const gitController = useStore(workspace, s => s.gitController)
   const updateTabState = useStore(workspace, s => s.updateTabState)
   const getReviewComments = useStore(reviewCommentStore, s => s.getReviewComments)
   const addReviewComment = useStore(reviewCommentStore, s => s.addReviewComment)
   const deleteReviewComment = useStore(reviewCommentStore, s => s.deleteReviewComment)
   const updateOutdatedReviewComments = useStore(reviewCommentStore, s => s.updateOutdatedReviewComments)
+  const getViewedFiles = useStore(reviewViewedFilesStore, s => s.getViewedFiles)
+  const toggleViewedFile = useStore(reviewViewedFilesStore, s => s.toggleViewedFile)
+  const markFilesViewed = useStore(reviewViewedFilesStore, s => s.markFilesViewed)
+  const reconcileViewedFiles = useStore(reviewViewedFilesStore, s => s.reconcileViewedFiles)
   const refreshGit = useStore(gitController, s => s.refreshGit)
   const git = useGitApi(workspace)
   const workspaceId = wsData.id
@@ -81,11 +86,6 @@ export default function ReviewBrowser({
 
   // Directory filter — narrows both panes to a folder; transient (in-memory only)
   const [dirFilter, setDirFilter] = useState<string | null>(null)
-
-  // Viewed files state — maps file path to diff stats at time of marking viewed
-  const [viewedFiles, setViewedFiles] = useState<Record<string, ViewedFileStats>>(
-    reviewState?.viewedFiles ?? {}
-  )
 
   // Uncommitted changes state
   const [uncommitted, setUncommitted] = useState<UncommittedChanges | null>(null)
@@ -256,32 +256,6 @@ export default function ReviewBrowser({
       console.error('Failed to load reviews:', error)
       setLoadError(`Failed to load review state: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
-  }
-
-  // Filter viewed files: invalidate entries whose stats changed, but preserve entries
-  // for files not in the provided list (they belong to a different view mode).
-  const reconcileViewedFiles = (files: (DiffFile | UncommittedFile)[]) => {
-    setViewedFiles(prev => {
-      const fileMap = new Map(files.map(f => [f.path, f]))
-      const next: Record<string, ViewedFileStats> = {}
-      let changed = false
-      for (const [path, stats] of Object.entries(prev)) {
-        const file = fileMap.get(path)
-        if (file) {
-          if (file.additions === stats.additions && file.deletions === stats.deletions) {
-            next[path] = stats
-          } else {
-            changed = true
-          }
-        } else {
-          // File not in this list — preserve (belongs to another view mode)
-          next[path] = stats
-        }
-      }
-      if (!changed) return prev
-      persistViewState({ viewedFiles: next })
-      return next
-    })
   }
 
   const loadDiff = async () => {
@@ -626,7 +600,9 @@ export default function ReviewBrowser({
   const hasCommittedChanges = diff && diff.files.length > 0
   const hasConflicts = conflictInfo?.hasConflicts || false
 
-  // Viewed files computed values
+  // Viewed files computed values — sourced from workspace metadata, not tab state,
+  // so the checkboxes survive closing and reopening the review tab.
+  const viewedFiles = getViewedFiles()
   const viewedFilePaths = new Set(Object.keys(viewedFiles))
   const committedViewedCount = diff?.files.filter(f => f.path in viewedFiles).length ?? 0
   const uncommittedViewedCount = uncommitted?.files.filter(f => f.path in viewedFiles).length ?? 0
@@ -643,49 +619,26 @@ export default function ReviewBrowser({
   // Jump to the next/previous file that hasn't been marked viewed yet.
   // `files` must be in the same display order as the StackedDiffList so the
   // scroll target matches what the user sees.
-  const navigateUnviewed = useCallback(
-    (files: (DiffFile | UncommittedFile)[], direction: 'next' | 'prev') => {
-      const paths = files.map((f) => f.path)
-      if (paths.length === 0) return
-      const currentIdx = activeFile ? paths.indexOf(activeFile) : -1
-      const candidates = direction === 'next'
-        ? paths.slice(currentIdx + 1)
-        : paths.slice(0, currentIdx === -1 ? paths.length : currentIdx).reverse()
-      const target = candidates.find((p) => !(p in viewedFiles))
-      if (target !== undefined) setScrollToFile(target)
-    },
-    [activeFile, viewedFiles]
-  )
+  const navigateUnviewed = (files: (DiffFile | UncommittedFile)[], direction: 'next' | 'prev') => {
+    const paths = files.map((f) => f.path)
+    if (paths.length === 0) return
+    const currentIdx = activeFile ? paths.indexOf(activeFile) : -1
+    const candidates = direction === 'next'
+      ? paths.slice(currentIdx + 1)
+      : paths.slice(0, currentIdx === -1 ? paths.length : currentIdx).reverse()
+    const target = candidates.find((p) => !(p in viewedFiles))
+    if (target !== undefined) setScrollToFile(target)
+  }
 
-  const handleToggleViewed = useCallback((file: DiffFile | UncommittedFile) => {
-    setViewedFiles(prev => {
-      let next: Record<string, ViewedFileStats>
-      if (prev[file.path]) {
-        next = Object.fromEntries(Object.entries(prev).filter(([k]) => k !== file.path))
-      } else {
-        next = { ...prev, [file.path]: { additions: file.additions, deletions: file.deletions } }
-      }
-      persistViewState({ viewedFiles: next })
-      return next
-    })
-  }, [persistViewState])
+  const handleToggleViewed = (file: DiffFile | UncommittedFile) => {
+    toggleViewedFile(file)
+  }
 
-  const handleMarkViewedAbove = useCallback((filesToMark: (DiffFile | UncommittedFile)[]) => {
-    setViewedFiles(prev => {
-      const next = { ...prev }
-      for (const file of filesToMark) {
-        if (!next[file.path]) {
-          next[file.path] = { additions: file.additions, deletions: file.deletions }
-        }
-      }
-      persistViewState({ viewedFiles: next })
-      return next
-    })
-  }, [persistViewState])
+  const handleMarkViewedAbove = (filesToMark: (DiffFile | UncommittedFile)[]) => {
+    markFilesViewed(filesToMark)
+  }
 
-  const isFileViewed = useCallback((filePath: string): boolean => {
-    return filePath in viewedFiles
-  }, [viewedFiles])
+  const isFileViewed = (filePath: string): boolean => filePath in viewedFiles
 
   const handleCommentSubmit = (text: string) => {
     if (!commentInput || !currentCommitHash) return

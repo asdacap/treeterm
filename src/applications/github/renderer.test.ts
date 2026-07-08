@@ -6,6 +6,7 @@ import { createStore } from 'zustand/vanilla'
 import type { WorkspaceStoreState } from '../../renderer/store/createWorkspaceStore'
 import type { GitControllerState } from '../../renderer/store/createGitControllerStore'
 import type { ReviewCommentState } from '../../renderer/store/createReviewCommentStore'
+import { createMockReviewViewedFilesStore } from '../../shared/test-fixtures/reviewViewedFiles'
 
 vi.mock('react', () => ({
   createElement: vi.fn((component: unknown, props: unknown) => ({ component, props }))
@@ -25,6 +26,7 @@ const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => ({
     toggleReviewCommentAddressed: vi.fn(), updateOutdatedReviewComments: vi.fn(),
     clearReviewComments: vi.fn(), markReviewCommentsAddressed: vi.fn(),
   } as ReviewCommentState)),
+  reviewViewedFiles: createMockReviewViewedFilesStore(),
   promptHarness: vi.fn(),
   quickForkWorkspace: vi.fn(), updateMetadata: vi.fn(), deleteMetadata: vi.fn(), toggleFavourite: vi.fn(),
   updateStatus: vi.fn(), refreshGitInfo: vi.fn(),

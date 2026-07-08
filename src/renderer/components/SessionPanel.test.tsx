@@ -7,6 +7,7 @@ import type { WorkspaceStoreState } from '../store/createWorkspaceStore'
 import type { GitHubPrInfo, Workspace } from '../types'
 import { ActivityState } from '../types'
 import { makeWorkspace } from '../../shared/test-fixtures/workspace'
+import { createMockReviewViewedFilesStore } from '../../shared/test-fixtures/reviewViewedFiles'
 
 vi.mock('../store/activityState', () => ({
   useActivityStateStore: vi.fn(() => ActivityState.Idle),
@@ -54,6 +55,7 @@ function makeWorkspaceStore(
     addTab: vi.fn(), openOrFocusTab: vi.fn(), removeTab: vi.fn(), setActiveTab: vi.fn(),
     updateTabTitle: vi.fn(), updateTabState: vi.fn(),
     reviewComments: createStore<any>()(() => ({})),
+    reviewViewedFiles: createMockReviewViewedFilesStore(),
     promptHarness: vi.fn(),
     quickForkWorkspace: vi.fn(), updateMetadata: vi.fn(), deleteMetadata: vi.fn(), toggleFavourite,
     updateStatus: vi.fn(), refreshGitInfo: vi.fn(),
