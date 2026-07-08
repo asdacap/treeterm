@@ -487,8 +487,14 @@ export function createWorkspaceStore(
     },
 
     updateTabState: <T,>(tabId: string, updater: (state: T) => T): void => {
+      // A tab's components flush state during their unmount cleanup (e.g. FileEditor
+      // persisting scrollTop). React runs that cleanup *after* removeTab has already
+      // dropped the tab from appStates, so there is nothing left to write to — skip,
+      // rather than resurrecting the tab from an undefined entry.
+      if (!get().workspace.appStates[tabId]) return
+
       updateWorkspace((ws) => {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- existence checked above
         const appState = ws.appStates[tabId]!
         return {
           ...ws,
