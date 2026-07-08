@@ -28,6 +28,7 @@ const { createdTerminals, FakeTerminal } = vi.hoisted(() => {
     }
 
     open(container: HTMLElement): void { container.appendChild(this.element) }
+    loadAddon(): void {}
     onData(): { dispose(): void } { return { dispose() {} } }
     write(_data: unknown, cb?: () => void): void { if (cb) cb() }
     resize(): void {}
@@ -43,6 +44,14 @@ const { createdTerminals, FakeTerminal } = vi.hoisted(() => {
 })
 
 vi.mock('@xterm/xterm', () => ({ Terminal: FakeTerminal }))
+// jsdom has no WebGL2 context, so the real addon would throw on activate and BaseTerminal would
+// silently take its DOM-renderer fallback — masking whether the addon is wired up at all.
+vi.mock('@xterm/addon-webgl', () => ({
+  WebglAddon: class {
+    onContextLoss(): void {}
+    dispose(): void {}
+  },
+}))
 vi.mock('../utils/fitTerminal', () => ({ fitTerminal: () => {} }))
 vi.mock('../utils/activityStateDetector', () => ({
   createActivityStateDetector: () => ({ processData: () => {}, destroy: () => {} }),

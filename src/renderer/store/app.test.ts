@@ -15,6 +15,14 @@ vi.mock('../../applications/terminal/renderer', () => ({
   })
 }))
 
+vi.mock('../../applications/ghosttyTerminal/renderer', () => ({
+  createGhosttyTerminalApplication: vi.fn<(...args: any[]) => any>().mockReturnValue({
+    id: 'ghostty-terminal', name: 'Terminal (Ghostty)', icon: '👻', createInitialState: () => ({}),
+    render: () => null, onWorkspaceLoad: () => ({ close: () => {}, dispose: () => {} }), canClose: true, showInNewTabMenu: true,
+    displayStyle: 'flex', isDefault: false
+  })
+}))
+
 vi.mock('../../applications/filesystem/renderer', () => ({
   filesystemApplication: {
     id: 'filesystem', name: 'Files', icon: 'F', createInitialState: () => ({}),

@@ -3,7 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src *" />
+    <!-- connect-src needs an explicit `data:`: the `*` wildcard only matches network schemes, and
+         ghostty-web loads its inlined ghostty-vt.wasm by fetch()ing a data: URL. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src * data:" />
     <title>Treeterm</title>
   </head>
   <body>

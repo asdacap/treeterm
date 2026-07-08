@@ -12,6 +12,7 @@ import { useNavigationStore } from './navigation'
 import { useActivityStateStore } from './activityState'
 import type { SessionNamesState } from './sessionNames'
 import { createTerminalApplication, createTerminalVariant } from '../../applications/terminal/renderer'
+import { createGhosttyTerminalApplication } from '../../applications/ghosttyTerminal/renderer'
 import { filesystemApplication } from '../../applications/filesystem/renderer'
 import { createAiHarnessVariant } from '../../applications/aiHarness/renderer'
 import { createCustomRunnerVariant } from '../../applications/customRunner/renderer'
@@ -181,6 +182,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const { terminal } = get()
     const deps = { terminal: { kill: terminal.kill.bind(terminal) } }
     get().registerApplication(createTerminalApplication(deps))
+    get().registerApplication(createGhosttyTerminalApplication(deps))
     get().registerApplication(filesystemApplication)
     get().registerApplication(reviewApplication)
     get().registerApplication(editorApplication)

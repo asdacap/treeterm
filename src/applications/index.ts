@@ -1,4 +1,5 @@
 export { createTerminalApplication, createTerminalVariant } from './terminal/renderer'
+export { createGhosttyTerminalApplication } from './ghosttyTerminal/renderer'
 export { filesystemApplication } from './filesystem/renderer'
 export { createAiHarnessVariant } from './aiHarness/renderer'
 export { reviewApplication } from './review/renderer'

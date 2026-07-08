@@ -3,9 +3,17 @@ import Terminal from '../../renderer/components/Terminal'
 import { createElement } from 'react'
 import { useActivityStateStore } from '../../renderer/store/activityState'
 
-type TerminalDeps = { terminal: { kill: (connectionId: string, sessionId: string) => void } }
+export type TerminalDeps = { terminal: { kill: (connectionId: string, sessionId: string) => void } }
 
-function makeTerminalOnWorkspaceLoad(
+/**
+ * PTY lifecycle for any terminal-backed application: idempotent creation keyed by ptyHandle,
+ * and a close() that kills the PTY even when creation has not resolved yet.
+ *
+ * Exported so alternate terminal frontends (see `applications/ghosttyTerminal`) reuse this
+ * rather than restating the creation race. Renderers that never populate `cachedTerminal`
+ * get a no-op `disposeCachedTerminal()`.
+ */
+export function makeTerminalOnWorkspaceLoad(
   deps: TerminalDeps,
   startupCommand?: string
 ): (tab: Tab, workspaceStore: WorkspaceStore) => TerminalAppRef {

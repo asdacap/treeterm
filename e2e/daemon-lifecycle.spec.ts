@@ -11,6 +11,7 @@ import {
   getDaemonPid,
   waitForDaemon,
   waitForTerminalReady,
+  getTerminalText,
   cleanupTestData
 } from './helpers'
 
@@ -124,10 +125,7 @@ test.describe('Daemon Lifecycle', () => {
     await window2.keyboard.press('Enter')
     await window2.waitForTimeout(1000)
 
-    const content = await window2.evaluate(() => {
-      const rows = document.querySelectorAll('.xterm-rows > div')
-      return Array.from(rows).map(row => row.textContent || '').join('\n')
-    })
+    const content = await getTerminalText(window2)
     console.log('[Test] Content after daemon restart:', content.substring(0, 200))
 
     // Should have new command

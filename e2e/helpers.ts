@@ -130,30 +130,34 @@ export async function waitForTerminalReady(window: Page): Promise<void> {
   await window.waitForTimeout(500)
 }
 
+/**
+ * Read the visible terminal's text out of xterm's buffer.
+ *
+ * This cannot scrape the DOM: the WebGL renderer removes `.xterm-rows`, so there are no row
+ * elements to read. BaseTerminal publishes the terminal on its container element for exactly
+ * this purpose (see `TerminalContainerElement`).
+ */
 export async function getTerminalText(window: Page): Promise<string> {
-  // Get text by selecting all from terminal and copying
-  await window.focus('.xterm textarea')
+  return window.evaluate(() => {
+    interface BufferLine { translateToString(trimRight?: boolean): string }
+    interface Buffer { length: number; getLine(y: number): BufferLine | undefined }
+    interface TerminalLike { buffer: { active: Buffer } }
+    type Container = HTMLElement & { terminal?: TerminalLike }
 
-  // Try to get text content from the visible terminal
-  const text = await window.evaluate(() => {
-    // Get the terminal viewport element
-    const viewport = document.querySelector('.xterm-viewport')
-    if (!viewport) return ''
+    const containers = Array.from(document.querySelectorAll<Container>('.terminal-container'))
+    // offsetParent is null for tabs hidden via display:none — prefer the visible one.
+    const container =
+      containers.find((c) => c.terminal && c.offsetParent !== null) ??
+      containers.find((c) => c.terminal)
+    if (!container?.terminal) return ''
 
-    // Get all row elements
-    const rows = document.querySelectorAll('.xterm-rows > div')
-    if (rows.length === 0) return ''
-
+    const buffer = container.terminal.buffer.active
     const lines: string[] = []
-    rows.forEach(row => {
-      const text = row.textContent || ''
-      lines.push(text)
-    })
-
+    for (let y = 0; y < buffer.length; y++) {
+      lines.push(buffer.getLine(y)?.translateToString(true) ?? '')
+    }
     return lines.join('\n')
   })
-
-  return text
 }
 
 export function cleanupTestData(): void {

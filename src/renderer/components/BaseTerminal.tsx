@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { useStore } from 'zustand'
 import { fitTerminal } from '../utils/fitTerminal'
+import { loadWebglRenderer, WebglFallbackReason, type WebglFallback } from '../utils/loadWebglRenderer'
+import { TERMINAL_THEME_COLORS } from './terminalTheme'
 import { log } from '../utils/logger'
 import { useSettingsStore } from '../store/settings'
 import { useAppStore } from '../store/app'
@@ -76,27 +78,14 @@ function handleCachedEvent(cache: CachedTerminal, event: PtyEvent): void {
   }
 }
 
-const TERMINAL_THEME_COLORS = {
-  foreground: '#d4d4d4',
-  cursor: '#d4d4d4',
-  selectionBackground: '#264f78',
-  black: '#000000',
-  red: '#cd3131',
-  green: '#0dbc79',
-  yellow: '#e5e510',
-  blue: '#2472c8',
-  magenta: '#bc3fbc',
-  cyan: '#11a8cd',
-  white: '#e5e5e5',
-  brightBlack: '#666666',
-  brightRed: '#f14c4c',
-  brightGreen: '#23d18b',
-  brightYellow: '#f5f543',
-  brightBlue: '#3b8eea',
-  brightMagenta: '#d670d6',
-  brightCyan: '#29b8db',
-  brightWhite: '#ffffff'
-} as const
+/**
+ * The WebGL renderer deletes xterm's `.xterm-rows` DOM, so e2e can no longer scrape row
+ * elements for text. The terminal is published on its container element instead, and tests
+ * read `terminal.buffer` through it. See `e2e/helpers.ts#getTerminalText`.
+ */
+export interface TerminalContainerElement extends HTMLDivElement {
+  terminal?: XTerm
+}
 
 // Base state interface that all terminal-based states should extend
 export interface BaseTerminalState extends TerminalState {
@@ -411,8 +400,10 @@ export default function BaseTerminal({
       // Restore pinned state from cache
       setPinnedToBottom(existingCache.pinnedToBottom)
 
-      // Reparent terminal element to the new container
+      // Reparent terminal element to the new container. The WebGL canvas moves with it —
+      // a GL context survives being detached and re-attached to the DOM.
       setLoading(false)
+      ;(containerRef.current as TerminalContainerElement).terminal = terminal
       if (terminal.element) {
         containerRef.current.appendChild(terminal.element)
         terminal.refresh(0, terminal.rows - 1)
@@ -455,6 +446,19 @@ export default function BaseTerminal({
         })
 
         terminal.open(containerRef.current)
+
+        // GPU renderer. Degrades to xterm's DOM renderer rather than failing the terminal:
+        // headless/software-rendered environments have no WebGL2 context, and Chromium evicts
+        // the oldest context once a workspace holds more cached terminals than it allows live.
+        loadWebglRenderer(terminal, (fallback: WebglFallback) => {
+          if (fallback.reason === WebglFallbackReason.Unavailable) {
+            log.warn(`[${config.logPrefix} ${tabId}] WebGL unavailable, using DOM renderer:`, fallback.error.message)
+          } else {
+            log.warn(`[${config.logPrefix} ${tabId}] WebGL context lost, reverted to DOM renderer`)
+          }
+        })
+
+        ;(containerRef.current as TerminalContainerElement).terminal = terminal
 
         // Create cache entry — event handler is registered before the stream starts
         const cache: CachedTerminal = {
