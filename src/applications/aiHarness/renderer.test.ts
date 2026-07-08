@@ -18,6 +18,16 @@ vi.mock('../../renderer/components/AiHarness', () => ({
   default: vi.fn(() => null)
 }))
 
+// Mock activity state store
+const mockRemoveTabState = vi.fn<(tabId: string) => void>()
+vi.mock('../../renderer/store/activityState', () => ({
+  useActivityStateStore: {
+    getState: vi.fn(() => ({
+      removeTabState: mockRemoveTabState
+    }))
+  }
+}))
+
 const mockTerminalKill = vi.fn<(connectionId: string, ptyId: string) => void>()
 const mockDeps = { terminal: { kill: mockTerminalKill } }
 
@@ -278,7 +288,7 @@ describe('AI Harness Renderer', () => {
         expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-789')
       })
 
-      it('close does not kill PTY when tab has no ptyId', () => {
+      it('close kills the in-flight PTY once creation resolves', async () => {
         const app = createAiHarnessVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
@@ -286,22 +296,73 @@ describe('AI Harness Renderer', () => {
           title: 'Claude',
           state: {
             ptyId: null,
+            ptyHandle: 'handle-1',
             sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] }
           }
         }
 
+        let resolveTty!: (value: string) => void
+        const ttyPromise = new Promise<string>((resolve) => { resolveTty = resolve })
         const store = createStore<WorkspaceStoreState>()(() => ({
           ...mockWorkspaceStoreStateData,
           initAnalyzer: vi.fn().mockReturnValue(mockAnalyzer),
+          ensureTty: vi.fn().mockReturnValue(ttyPromise),
         }))
 
         const ref = app.onWorkspaceLoad(tab, store)
+        // Tab closed before the PTY exists: nothing to kill yet, and once it lands the
+        // tab's appState is gone, so this ref is the only thing that can kill it.
         ref.close()
-
         expect(mockTerminalKill).not.toHaveBeenCalled()
+
+        resolveTty('pty-late')
+        await ttyPromise
+        await new Promise(resolve => setTimeout(resolve, 0))
+
+        expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-late')
       })
 
-      it('dispose does not kill PTY', () => {
+      it('does not start the analyzer when creation resolves after dispose', async () => {
+        const mockAnalyzerState = { start: vi.fn(), stop: vi.fn(), getHistory: vi.fn().mockReturnValue([]) }
+        const mockDisposedAnalyzer = { getState: vi.fn().mockReturnValue(mockAnalyzerState), setState: vi.fn(), subscribe: vi.fn() }
+
+        const app = createAiHarnessVariant(mockInstance, mockDeps)
+        const tab: Tab = {
+          id: 'tab-1',
+          applicationId: 'aiharness-claude',
+          title: 'Claude',
+          state: {
+            ptyId: null,
+            ptyHandle: 'handle-1',
+            sandbox: { enabled: true, allowNetwork: false, allowedPaths: [] }
+          }
+        }
+
+        let resolveTty!: (value: string) => void
+        const ttyPromise = new Promise<string>((resolve) => { resolveTty = resolve })
+        const mockUpdateTabState = vi.fn()
+        const store = createStore<WorkspaceStoreState>()(() => ({
+          ...mockWorkspaceStoreStateData,
+          initAnalyzer: vi.fn().mockReturnValue(mockDisposedAnalyzer),
+          ensureTty: vi.fn().mockReturnValue(ttyPromise),
+          updateTabState: mockUpdateTabState,
+        }))
+
+        const ref = app.onWorkspaceLoad(tab, store)
+        ref.dispose()
+
+        resolveTty('pty-late')
+        await ttyPromise
+        await new Promise(resolve => setTimeout(resolve, 0))
+
+        // start() only guards against an already-running analyzer, so without the
+        // disposed check it would restart the one dispose() just stopped.
+        expect(mockAnalyzerState.stop).toHaveBeenCalled()
+        expect(mockAnalyzerState.start).not.toHaveBeenCalled()
+        expect(mockUpdateTabState).not.toHaveBeenCalled()
+      })
+
+      it('dispose does not kill PTY but stops the analyzer and removes activity state', () => {
         const app = createAiHarnessVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
@@ -322,6 +383,8 @@ describe('AI Harness Renderer', () => {
         ref.dispose()
 
         expect(mockTerminalKill).not.toHaveBeenCalled()
+        expect(mockAnalyzerState.stop).toHaveBeenCalled()
+        expect(mockRemoveTabState).toHaveBeenCalledWith('tab-1')
       })
 
       it('returns ref with analyzer', () => {

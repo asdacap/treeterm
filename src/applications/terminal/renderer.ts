@@ -13,11 +13,16 @@ function makeTerminalOnWorkspaceLoad(
     const ws = workspaceStore.getState()
     const state = tab.state as TerminalState
 
+    // Held so close() can kill a PTY whose creation has not resolved yet — the tab's
+    // appState is gone by then, so the resolved ptyId has nowhere to land.
+    let creating: Promise<string> | null = null
+
     if (!state.ptyId) {
       // ptyHandle is the PTY's stable identity, minted once at tab creation. Keying
       // creation by it makes the dispose/re-init churn of reconciliation idempotent.
       const handle = state.ptyHandle ?? crypto.randomUUID()
-      void ws.ensureTty(handle, ws.workspace.path, undefined, startupCommand).then((ptyId) => {
+      creating = ws.ensureTty(handle, ws.workspace.path, undefined, startupCommand)
+      void creating.then((ptyId) => {
         workspaceStore.getState().updateTabState<TerminalState>(tab.id, (s) => ({
           ...s,
           ptyId,
@@ -39,10 +44,16 @@ function makeTerminalOnWorkspaceLoad(
       },
       close: () => {
         const current = workspaceStore.getState().workspace.appStates[tab.id]?.state as TerminalState | undefined
+        const connectionId = current?.connectionId ?? ws.connectionId
         const ptyId = current?.ptyId ?? state.ptyId
         if (ptyId) {
-          deps.terminal.kill(current?.connectionId ?? ws.connectionId, ptyId)
+          deps.terminal.kill(connectionId, ptyId)
+          return
         }
+        // Creation still in flight. Its .then() will find the tab gone and drop the
+        // ptyId, and removeTab drops the ptyHandle memo — so nothing else will ever
+        // reference this PTY. Kill it the moment we learn its id.
+        if (creating) void creating.then((id) => { deps.terminal.kill(connectionId, id) })
       },
       dispose: () => {
         ref.disposeCachedTerminal()

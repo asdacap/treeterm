@@ -2,6 +2,7 @@ import type { Application, Tab, TerminalAppRef, AiHarnessState, AiHarnessInstanc
 import { isAiHarnessState } from '../../renderer/types'
 import AiHarness from '../../renderer/components/AiHarness'
 import { createElement } from 'react'
+import { useActivityStateStore } from '../../renderer/store/activityState'
 import type { Analyzer } from '../../renderer/store/createAnalyzerStore'
 
 type TerminalDeps = { terminal: { kill: (connectionId: string, sessionId: string) => void } }
@@ -34,6 +35,14 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
       const state = tab.state as AiHarnessState
       const analyzer = ws.initAnalyzer(tab.id)
 
+      // Held so close() can kill a PTY whose creation has not resolved yet — the tab's
+      // appState is gone by then, so the resolved ptyId has nowhere to land.
+      let creating: Promise<string> | null = null
+      // `analyzer.start()` only guards against a *running* analyzer, so a creation that
+      // resolves after dispose() would restart the one dispose() just stopped, leaving
+      // an orphaned poll loop and TTY stream that nothing holds a handle to.
+      let disposed = false
+
       if (state.ptyId) {
         // Restore: PTY already exists, just start analyzer
         // Pre-cache writer so promptHarness doesn't open a second stream
@@ -43,7 +52,9 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
         // New tab: create PTY (keyed by the stable per-PTY handle so reconciliation
         // churn can't duplicate it) then start analyzer
         const handle = state.ptyHandle ?? crypto.randomUUID()
-        void ws.ensureTty(handle, ws.workspace.path, state.sandbox, instance.command).then((ptyId) => {
+        creating = ws.ensureTty(handle, ws.workspace.path, state.sandbox, instance.command)
+        void creating.then((ptyId) => {
+          if (disposed) return
           workspaceStore.getState().updateTabState<AiHarnessState>(tab.id, (s) => ({
             ...s,
             ptyId,
@@ -68,14 +79,20 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
         close: () => {
           // Read current state for up-to-date ptyId (may have been set after onWorkspaceLoad)
           const current = workspaceStore.getState().workspace.appStates[tab.id]?.state as AiHarnessState | undefined
+          const connectionId = current?.connectionId ?? ws.connectionId
           const ptyId = current?.ptyId ?? state.ptyId
           if (ptyId) {
-            deps.terminal.kill(current?.connectionId ?? ws.connectionId, ptyId)
+            deps.terminal.kill(connectionId, ptyId)
+            return
           }
+          // Creation still in flight — see terminal/renderer.ts.
+          if (creating) void creating.then((id) => { deps.terminal.kill(connectionId, id) })
         },
         dispose: () => {
+          disposed = true
           ref.disposeCachedTerminal()
           analyzer.getState().stop()
+          useActivityStateStore.getState().removeTabState(tab.id)
         },
       }
       return ref

@@ -272,19 +272,33 @@ describe('createCustomRunnerVariant', () => {
         expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-123')
       })
 
-      it('does not kill PTY when ptyId is null', () => {
+      it('kills the in-flight PTY once creation resolves', async () => {
+        let resolveTty!: (value: string) => void
+        const ttyPromise = new Promise<string>((resolve) => { resolveTty = resolve })
+        const store = createStore<WorkspaceStoreState>()(() => ({
+          ...mockWorkspaceStoreStateData,
+          ensureTty: vi.fn().mockReturnValue(ttyPromise),
+        }))
+
         const variant = createCustomRunnerVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'customrunner-rider',
           title: 'Rider',
-          state: { ptyId: null }
+          state: { ptyId: null, ptyHandle: 'handle-1' }
         }
 
-        const ref = variant.onWorkspaceLoad(tab, mockWorkspaceStore)
+        const ref = variant.onWorkspaceLoad(tab, store)
+        // Tab closed before the PTY exists — otherwise it is orphaned: the resolved
+        // ptyId lands on a deleted appState and the ptyHandle memo is already gone.
         ref.close()
-
         expect(mockTerminalKill).not.toHaveBeenCalled()
+
+        resolveTty('pty-late')
+        await ttyPromise
+        await new Promise(resolve => setTimeout(resolve, 0))
+
+        expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-late')
       })
     })
 

@@ -152,19 +152,34 @@ describe('Terminal Renderer', () => {
         expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-123')
       })
 
-      it('close does not kill PTY when tab has no ptyId', () => {
+      it('close kills the in-flight PTY once creation resolves', async () => {
+        let resolveTty!: (value: string) => void
+        const ttyPromise = new Promise<string>((resolve) => { resolveTty = resolve })
+        const store = createStore<WorkspaceStoreState>()(() => ({
+          ...mockWorkspaceStoreStateData,
+          ensureTty: vi.fn().mockReturnValue(ttyPromise),
+        }))
+
         const app = createTerminalApplication(mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal',
           title: 'Terminal',
-          state: { ptyId: null }
+          state: { ptyId: null, ptyHandle: 'handle-1' }
         }
 
-        const ref = app.onWorkspaceLoad(tab, mockWorkspaceStore)
+        const ref = app.onWorkspaceLoad(tab, store)
+        // Tab closed before the PTY exists. removeTab drops both the appState (so the
+        // resolved ptyId is never recorded) and the ptyHandle memo — this ref is the
+        // only thing left that can kill it.
         ref.close()
-
         expect(mockTerminalKill).not.toHaveBeenCalled()
+
+        resolveTty('pty-late')
+        await ttyPromise
+        await new Promise(resolve => setTimeout(resolve, 0))
+
+        expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-late')
       })
 
       it('dispose does not kill PTY but removes activity state', () => {
@@ -399,19 +414,31 @@ describe('Terminal Renderer', () => {
         expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-456')
       })
 
-      it('close does not kill PTY when state has no ptyId', () => {
+      it('close kills the in-flight PTY once creation resolves', async () => {
+        let resolveTty!: (value: string) => void
+        const ttyPromise = new Promise<string>((resolve) => { resolveTty = resolve })
+        const store = createStore<WorkspaceStoreState>()(() => ({
+          ...mockWorkspaceStoreStateData,
+          ensureTty: vi.fn().mockReturnValue(ttyPromise),
+        }))
+
         const variant = createTerminalVariant(mockInstance, mockDeps)
         const tab: Tab = {
           id: 'tab-1',
           applicationId: 'terminal-custom-term',
           title: 'Custom Terminal',
-          state: { ptyId: null }
+          state: { ptyId: null, ptyHandle: 'handle-1' }
         }
 
-        const ref = variant.onWorkspaceLoad(tab, mockWorkspaceStore)
+        const ref = variant.onWorkspaceLoad(tab, store)
         ref.close()
-
         expect(mockTerminalKill).not.toHaveBeenCalled()
+
+        resolveTty('pty-late')
+        await ttyPromise
+        await new Promise(resolve => setTimeout(resolve, 0))
+
+        expect(mockTerminalKill).toHaveBeenCalledWith('local', 'pty-late')
       })
 
       it('dispose does not kill PTY but removes activity state', () => {

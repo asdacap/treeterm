@@ -297,9 +297,9 @@ export default function BaseTerminal({
           }
           case PtyEventType.Exit: {
             log.debug(`[${config.logPrefix} ${tabId}] PTY exited with code:`, event.exitCode)
-            if (!cancelled) {
-              // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist in appStates
-              const currentTab = workspace.getState().workspace.appStates[tabId]!
+            // Tab already removed (PTY exit arrived after tab close) — nothing to update.
+            const currentTab = cancelled ? undefined : workspace.getState().workspace.appStates[tabId]
+            if (currentTab) {
               const keepOnExit = (currentTab.state as BaseTerminalState | undefined)?.keepOnExit
               const immediateFailure = event.exitCode !== 0 && (Date.now() - cache.connectedAt) < 1000
               if (immediateFailure) {

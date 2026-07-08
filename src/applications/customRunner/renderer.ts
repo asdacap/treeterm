@@ -24,10 +24,16 @@ export function createCustomRunnerVariant(instance: CustomRunnerInstance, deps: 
     onWorkspaceLoad: (tab: Tab, workspaceStore: WorkspaceStore): TerminalAppRef => {
       const ws = workspaceStore.getState()
       const state = tab.state as TerminalState
+
+      // Held so close() can kill a PTY whose creation has not resolved yet — the tab's
+      // appState is gone by then, so the resolved ptyId has nowhere to land.
+      let creating: Promise<string> | null = null
+
       if (!state.ptyId) {
         const resolvedCommand = resolveTemplate(instance.commandTemplate, ws.workspace.path)
         const handle = state.ptyHandle ?? crypto.randomUUID()
-        void ws.ensureTty(handle, ws.workspace.path, undefined, resolvedCommand).then((ptyId) => {
+        creating = ws.ensureTty(handle, ws.workspace.path, undefined, resolvedCommand)
+        void creating.then((ptyId) => {
           workspaceStore.getState().updateTabState<TerminalState>(tab.id, (s) => ({
             ...s,
             ptyId,
@@ -48,10 +54,14 @@ export function createCustomRunnerVariant(instance: CustomRunnerInstance, deps: 
         },
         close: () => {
           const current = workspaceStore.getState().workspace.appStates[tab.id]?.state as TerminalState | undefined
+          const connectionId = current?.connectionId ?? ws.connectionId
           const ptyId = current?.ptyId ?? state.ptyId
           if (ptyId) {
-            deps.terminal.kill(current?.connectionId ?? ws.connectionId, ptyId)
+            deps.terminal.kill(connectionId, ptyId)
+            return
           }
+          // Creation still in flight — see terminal/renderer.ts.
+          if (creating) void creating.then((id) => { deps.terminal.kill(connectionId, id) })
         },
         dispose: () => {
           ref.disposeCachedTerminal()
