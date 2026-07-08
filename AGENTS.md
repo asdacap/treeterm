@@ -160,6 +160,12 @@ Prefer to inject dependencies rather than using window or electron singleton. An
 ### Lazy validation
 Prefer to validate data at the last minute. Eg: do not check for valid parent id while loading the session. Instead when rendering the tree, if the parent id is unknow, just put the orphant worktree in a separate section. Similarly with pty id, if tty is missing, show error instead of trying to get the actually tty connectino before even opening the terminal.
 
+### Unmount is not close
+- A tab's components are derived from `appStates` (`TabContentPortals` renders `getTabs(workspace)`). Deleting the entry is what *unmounts* the component, so unmount cleanup always runs **after** the tab is gone.
+- Therefore a tab id is never guaranteed to exist by the time a component writes back. Do not write `ws.appStates[tabId]!` — check, and skip the write. Resurrecting a deleted tab from an `undefined` entry is worse than dropping the write: it syncs a tab with no `applicationId` to the daemon.
+- Unmount happens for two different reasons and the component cannot tell them apart: genuine close (state must die) and transient churn like a workspace switch (state must persist). Write cleanup so both are correct — see `updateTabState` and `disposeTabResources`.
+- Corollary: never persist state on close. It is discarded with the tab; the write only buys a wasted `syncToDaemon`.
+
 ### State
 - It is expected that the same session can be opened by multiple window.
 - Therefore high level window state need to be synced. 
