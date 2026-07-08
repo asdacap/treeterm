@@ -9,6 +9,7 @@ import type { StoreApi } from 'zustand'
 import type { SessionState, WorkspaceEntry } from '../store/createSessionStore'
 import { WorkspaceEntryStatus } from '../store/createSessionStore'
 import { useAppStore } from '../store/app'
+import { deriveDefaultSessionName } from '../store/sessionNames'
 import { useNavigationStore } from '../store/navigation'
 import { useKeybindingStore, PrefixModeState } from '../store/keybinding'
 import CreateChildDialog, { TabMode } from './CreateChildDialog'
@@ -96,26 +97,29 @@ export default function SessionPanel({
 
   // Session name editing
   const sessionNamesStore = useAppStore(s => s.sessionNamesStore)
-  const displayName = useStore(sessionNamesStore, s => s.names.get(sessionId)?.name)
+  const customName = useStore(sessionNamesStore, s => s.names.get(sessionId)?.name)
   const setSessionName = useStore(sessionNamesStore, s => s.setName)
   const removeSessionName = useStore(sessionNamesStore, s => s.removeName)
+  // Fall back to the connection-derived name — never the raw ephemeral session id.
+  const defaultName = deriveDefaultSessionName(connection)
+  const displayName = customName ?? defaultName
   const [isEditingName, setIsEditingName] = useState(false)
   const [editName, setEditName] = useState('')
 
   const handleStartEditName = useCallback(() => {
-    setEditName(displayName || sessionId)
+    setEditName(displayName)
     setIsEditingName(true)
-  }, [displayName, sessionId])
+  }, [displayName])
 
   const handleSaveName = useCallback(() => {
     const trimmed = editName.trim()
-    if (trimmed && trimmed !== sessionId) {
+    if (trimmed && trimmed !== defaultName) {
       setSessionName(sessionId, trimmed)
     } else {
       removeSessionName(sessionId)
     }
     setIsEditingName(false)
-  }, [editName, sessionId, setSessionName, removeSessionName])
+  }, [editName, sessionId, defaultName, setSessionName, removeSessionName])
 
   const [isSessionCollapsed, setIsSessionCollapsed] = useState(false)
 
@@ -578,7 +582,7 @@ export default function SessionPanel({
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
             {renderStatusIcon(connection.status)}
-            {displayName || sessionId}
+            {displayName}
             {sessionLock && (
               <button
                 className="force-unlock-button"

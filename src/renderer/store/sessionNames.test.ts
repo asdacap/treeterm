@@ -1,5 +1,44 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
-import { useSessionNamesStore } from './sessionNames'
+import { useSessionNamesStore, deriveDefaultSessionName } from './sessionNames'
+import { ConnectionStatus, ConnectionTargetType, type ConnectionInfo } from '../../shared/types'
+
+describe('deriveDefaultSessionName', () => {
+  it('returns LOCAL for a local connection', () => {
+    const conn: ConnectionInfo = {
+      id: 'local',
+      target: { type: ConnectionTargetType.Local },
+      status: ConnectionStatus.Connected,
+    }
+    expect(deriveDefaultSessionName(conn)).toBe('LOCAL')
+  })
+
+  it('returns user@host for a remote connection without a label', () => {
+    const conn: ConnectionInfo = {
+      id: 'c1',
+      target: { type: ConnectionTargetType.Remote, config: { id: 'c1', host: 'myserver.com', user: 'alice', port: 22, portForwards: [] } },
+      status: ConnectionStatus.Connected,
+    }
+    expect(deriveDefaultSessionName(conn)).toBe('alice@myserver.com')
+  })
+
+  it('prefers the label over user@host when a label is set', () => {
+    const conn: ConnectionInfo = {
+      id: 'c2',
+      target: { type: ConnectionTargetType.Remote, config: { id: 'c2', host: 'myserver.com', user: 'alice', port: 22, label: 'Production', portForwards: [] } },
+      status: ConnectionStatus.Connected,
+    }
+    expect(deriveDefaultSessionName(conn)).toBe('Production')
+  })
+
+  it('falls back to user@host when the label is an empty string', () => {
+    const conn: ConnectionInfo = {
+      id: 'c3',
+      target: { type: ConnectionTargetType.Remote, config: { id: 'c3', host: 'myserver.com', user: 'alice', port: 22, label: '', portForwards: [] } },
+      status: ConnectionStatus.Connected,
+    }
+    expect(deriveDefaultSessionName(conn)).toBe('alice@myserver.com')
+  })
+})
 
 describe('SessionNamesStore', () => {
   beforeEach(() => {
