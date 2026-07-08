@@ -511,6 +511,44 @@ describe('createWorkspaceStore', () => {
       store.getState().updateTabState('tab-1', (s: { count: number }) => ({ ...s, count: 2, ptyId: 'pty-1' }))
       expect(deps.syncToDaemon).toHaveBeenCalledTimes(2)
     })
+
+    it('no-ops for unknown tab rather than resurrecting it', () => {
+      const deps = makeHandleDeps()
+      const ws = makeWorkspace({
+        id: 'ws-1',
+        appStates: { 'tab-1': { applicationId: 'terminal', title: 'T1', state: { count: 0 } } },
+      })
+      const store = createWorkspaceStore(ws, deps)
+
+      // Should not throw, must not create an entry, must not sync
+      store.getState().updateTabState('nonexistent', (s: { count: number }) => ({ ...s, count: 1 }))
+
+      expect(Object.keys(store.getState().workspace.appStates)).toEqual(['tab-1'])
+      expect(deps.syncToDaemon).not.toHaveBeenCalled()
+    })
+
+    it('survives an unmount-cleanup write racing a removeTab of the same tab', async () => {
+      const app = makeFakeApp({ canClose: true })
+      const deps = makeHandleDeps({
+        appRegistry: {
+          get: vi.fn<(...args: any[]) => any>().mockReturnValue(app),
+          getDefaultApp: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
+        },
+      })
+      const ws = makeWorkspace({
+        id: 'ws-1',
+        appStates: { 'tab-1': { applicationId: 'editor', title: 'f.ts', state: { scrollTop: 0 } } },
+      })
+      const store = createWorkspaceStore(ws, deps)
+
+      await store.getState().removeTab('tab-1')
+
+      // React flushes FileEditor's unmount cleanup only after the tab is gone
+      expect(() => {
+        store.getState().updateTabState('tab-1', (s: { scrollTop: number }) => ({ ...s, scrollTop: 42 }))
+      }).not.toThrow()
+      expect(store.getState().workspace.appStates['tab-1']).toBeUndefined()
+    })
   })
 
   describe('review comments', () => {
