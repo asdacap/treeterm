@@ -77,6 +77,11 @@ function isValidBranchName(name: string): boolean {
   return /^[a-z0-9]+(-[a-z0-9]+)*$/.test(name)
 }
 
+// Delay after the user presses Enter before capturing the terminal screen for the
+// LLM. Gives the command time to run and render its output so the title/branch
+// suggestion reflects what actually happened, not the bare prompt.
+const TITLE_GENERATION_DELAY_MS = 1000
+
 export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer {
   // Internal closure state — not part of Zustand state
   let terminal: Terminal | null = null
@@ -85,6 +90,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   let lastVersion = 0
   let pollInterval: ReturnType<typeof setInterval> | null = null
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  let titleTimer: ReturnType<typeof setTimeout> | null = null
   let unsubscribeEvents: (() => void) | null = null
   let running = false
   let titleGenerated = false
@@ -280,6 +286,10 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       clearTimeout(debounceTimer)
       debounceTimer = null
     }
+    if (titleTimer) {
+      clearTimeout(titleTimer)
+      titleTimer = null
+    }
     if (terminal) {
       terminal.dispose()
       terminal = null
@@ -435,7 +445,11 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       if (titleGenerated) return
       if (data.includes('\r')) {
         titleGenerated = true
-        void generateTitle()
+        // Wait for the command to run and render before capturing the screen.
+        titleTimer = setTimeout(() => {
+          titleTimer = null
+          void generateTitle()
+        }, TITLE_GENERATION_DELAY_MS)
       }
     },
 

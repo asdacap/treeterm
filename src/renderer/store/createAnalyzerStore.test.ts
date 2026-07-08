@@ -459,6 +459,7 @@ describe('createAnalyzerStore', () => {
 
   describe('onUserInput', () => {
     it('triggers title generation on first Enter key', async () => {
+      vi.useFakeTimers()
       const mock = makeMockTty()
       deps = makeDeps({
         openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }) }),
@@ -466,23 +467,22 @@ describe('createAnalyzerStore', () => {
       const store = createAnalyzerStore('tab-1', deps)
 
       store.getState().start('pty-1')
-      await vi.waitFor(() => {
-        expect(store.getState().getBufferText()).not.toBeNull()
-      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(store.getState().getBufferText()).not.toBeNull()
 
       store.getState().onUserInput('hello\r')
 
-      await vi.waitFor(() => {
-        expect(deps.llm.generateTitle).toHaveBeenCalled()
-      })
-      await vi.waitFor(() => {
-        expect(deps.updateMetadata).toHaveBeenCalledWith('displayName', 'Test Title', 'analyzerSetDisplayName')
-      })
-      await vi.waitFor(() => {
-        expect(deps.updateMetadata).toHaveBeenCalledWith('description', 'Test Description', 'analyzerSetDescription')
-      })
+      // Screen is not captured until the delay elapses.
+      await vi.advanceTimersByTimeAsync(999)
+      expect(deps.llm.generateTitle).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(deps.llm.generateTitle).toHaveBeenCalled()
+      expect(deps.updateMetadata).toHaveBeenCalledWith('displayName', 'Test Title', 'analyzerSetDisplayName')
+      expect(deps.updateMetadata).toHaveBeenCalledWith('description', 'Test Description', 'analyzerSetDescription')
 
       store.getState().stop()
+      vi.useRealTimers()
     })
 
     it('does not trigger title generation on non-Enter input', async () => {
@@ -504,6 +504,7 @@ describe('createAnalyzerStore', () => {
     })
 
     it('does not trigger title generation twice', async () => {
+      vi.useFakeTimers()
       const mock = makeMockTty()
       deps = makeDeps({
         openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }) }),
@@ -511,21 +512,43 @@ describe('createAnalyzerStore', () => {
       const store = createAnalyzerStore('tab-1', deps)
 
       store.getState().start('pty-1')
-      await vi.waitFor(() => {
-        expect(store.getState().getBufferText()).not.toBeNull()
-      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(store.getState().getBufferText()).not.toBeNull()
 
       store.getState().onUserInput('\r')
-
-      await vi.waitFor(() => {
-        expect(deps.llm.generateTitle).toHaveBeenCalledTimes(1)
-      })
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(deps.llm.generateTitle).toHaveBeenCalledTimes(1)
 
       store.getState().onUserInput('\r')
+      await vi.advanceTimersByTimeAsync(1000)
       // Still only called once
       expect(deps.llm.generateTitle).toHaveBeenCalledTimes(1)
 
       store.getState().stop()
+      vi.useRealTimers()
+    })
+
+    it('cancels the pending title capture when stopped before the delay elapses', async () => {
+      vi.useFakeTimers()
+      const mock = makeMockTty()
+      deps = makeDeps({
+        openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }) }),
+      })
+      const store = createAnalyzerStore('tab-1', deps)
+
+      store.getState().start('pty-1')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(store.getState().getBufferText()).not.toBeNull()
+
+      store.getState().onUserInput('hello\r')
+      // Stop before the 1s delay fires.
+      await vi.advanceTimersByTimeAsync(500)
+      store.getState().stop()
+
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(deps.llm.generateTitle).not.toHaveBeenCalled()
+
+      vi.useRealTimers()
     })
 
     it('does not generate title when displayName and description already exist', async () => {
@@ -549,6 +572,7 @@ describe('createAnalyzerStore', () => {
     })
 
     it('generates description even when displayName already exists', async () => {
+      vi.useFakeTimers()
       const mock = makeMockTty()
       deps = makeDeps({
         getDisplayName: vi.fn().mockReturnValue('Existing Title'),
@@ -558,22 +582,19 @@ describe('createAnalyzerStore', () => {
       const store = createAnalyzerStore('tab-1', deps)
 
       store.getState().start('pty-1')
-      await vi.waitFor(() => {
-        expect(store.getState().getBufferText()).not.toBeNull()
-      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(store.getState().getBufferText()).not.toBeNull()
 
       store.getState().onUserInput('\r')
+      await vi.advanceTimersByTimeAsync(1000)
 
-      await vi.waitFor(() => {
-        expect(deps.llm.generateTitle).toHaveBeenCalled()
-      })
-      await vi.waitFor(() => {
-        expect(deps.updateMetadata).toHaveBeenCalledWith('description', 'Test Description', 'analyzerSetDescription')
-      })
+      expect(deps.llm.generateTitle).toHaveBeenCalled()
+      expect(deps.updateMetadata).toHaveBeenCalledWith('description', 'Test Description', 'analyzerSetDescription')
       // Should not overwrite existing displayName
       expect(deps.updateMetadata).not.toHaveBeenCalledWith('displayName', expect.anything(), expect.anything())
 
       store.getState().stop()
+      vi.useRealTimers()
     })
   })
 
@@ -820,6 +841,7 @@ describe('createAnalyzerStore', () => {
     })
 
     it('logs title generation to history', async () => {
+      vi.useFakeTimers()
       const mock = makeMockTty()
       deps = makeDeps({
         openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }) }),
@@ -827,20 +849,13 @@ describe('createAnalyzerStore', () => {
       const store = createAnalyzerStore('tab-1', deps)
 
       store.getState().start('pty-1')
-      await vi.waitFor(() => {
-        expect(store.getState().getBufferText()).not.toBeNull()
-      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(store.getState().getBufferText()).not.toBeNull()
 
       store.getState().onUserInput('hello\r')
+      await vi.advanceTimersByTimeAsync(1000)
 
-      await vi.waitFor(() => {
-        expect(deps.llm.generateTitle).toHaveBeenCalled()
-      })
-
-      await vi.waitFor(() => {
-        const history = store.getState().getHistory()
-        expect(history.some(h => h.kind === 'title')).toBe(true)
-      })
+      expect(deps.llm.generateTitle).toHaveBeenCalled()
 
       const history = store.getState().getHistory()
       const titleEntry = history.find(h => h.kind === 'title')
@@ -849,9 +864,11 @@ describe('createAnalyzerStore', () => {
       expect(titleEntry?.response).toBe(JSON.stringify({ title: 'Test Title', description: 'Test Description', branchName: 'test-title' }))
 
       store.getState().stop()
+      vi.useRealTimers()
     })
 
     it('skips branch rename when branch is user-defined', async () => {
+      vi.useFakeTimers()
       const mock = makeMockTty()
       deps = makeDeps({
         openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: any) => void) => { mock.setEventCallback(onEvent); return Promise.resolve({ tty: mock.tty, scrollback: ['$ '], exitCode: undefined }) }),
@@ -860,23 +877,18 @@ describe('createAnalyzerStore', () => {
       const store = createAnalyzerStore('tab-1', deps)
 
       store.getState().start('pty-1')
-      await vi.waitFor(() => {
-        expect(store.getState().getBufferText()).not.toBeNull()
-      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(store.getState().getBufferText()).not.toBeNull()
 
       store.getState().onUserInput('hello\r')
+      await vi.advanceTimersByTimeAsync(1000)
 
-      await vi.waitFor(() => {
-        expect(deps.llm.generateTitle).toHaveBeenCalled()
-      })
-
-      await vi.waitFor(() => {
-        expect(deps.updateMetadata).toHaveBeenCalledWith('displayName', 'Test Title', 'analyzerSetDisplayName')
-      })
-
+      expect(deps.llm.generateTitle).toHaveBeenCalled()
+      expect(deps.updateMetadata).toHaveBeenCalledWith('displayName', 'Test Title', 'analyzerSetDisplayName')
       expect(deps.renameBranch).not.toHaveBeenCalled()
 
       store.getState().stop()
+      vi.useRealTimers()
     })
 
     it('skips title, description and branch rename when workspace has no parent', async () => {
@@ -905,6 +917,7 @@ describe('createAnalyzerStore', () => {
     })
 
     it('logs title generation failure to history', async () => {
+      vi.useFakeTimers()
       const mock = makeMockTty()
       deps = makeDeps({
         llm: {
@@ -916,20 +929,13 @@ describe('createAnalyzerStore', () => {
       const store = createAnalyzerStore('tab-1', deps)
 
       store.getState().start('pty-1')
-      await vi.waitFor(() => {
-        expect(store.getState().getBufferText()).not.toBeNull()
-      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(store.getState().getBufferText()).not.toBeNull()
 
       store.getState().onUserInput('hello\r')
+      await vi.advanceTimersByTimeAsync(1000)
 
-      await vi.waitFor(() => {
-        expect(deps.llm.generateTitle).toHaveBeenCalled()
-      })
-
-      await vi.waitFor(() => {
-        const history = store.getState().getHistory()
-        expect(history.some(h => h.kind === 'title' && h.error)).toBe(true)
-      })
+      expect(deps.llm.generateTitle).toHaveBeenCalled()
 
       const history = store.getState().getHistory()
       const titleEntry = history.find(h => h.kind === 'title' && h.error)
@@ -938,6 +944,7 @@ describe('createAnalyzerStore', () => {
       expect(titleEntry?.response).toBe('')
 
       store.getState().stop()
+      vi.useRealTimers()
     })
   })
 
