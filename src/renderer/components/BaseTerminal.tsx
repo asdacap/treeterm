@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { useStore } from 'zustand'
 import { fitTerminal } from '../utils/fitTerminal'
+import { log } from '../utils/logger'
 import { useSettingsStore } from '../store/settings'
 import { useAppStore } from '../store/app'
 import { useActivityStateStore } from '../store/activityState'
@@ -295,7 +296,7 @@ export default function BaseTerminal({
             break
           }
           case PtyEventType.Exit: {
-            console.log(`[${config.logPrefix} ${tabId}] PTY exited with code:`, event.exitCode)
+            log.debug(`[${config.logPrefix} ${tabId}] PTY exited with code:`, event.exitCode)
             if (!cancelled) {
               // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist in appStates
               const currentTab = workspace.getState().workspace.appStates[tabId]!
@@ -337,12 +338,12 @@ export default function BaseTerminal({
             break
           }
           case PtyEventType.Error: {
-            console.error(`[${config.logPrefix} ${tabId}] PTY stream error:`, event.message)
+            log.error(`[${config.logPrefix} ${tabId}] PTY stream error:`, event.message)
             setOverlay({ message: event.message, type: 'error' })
             break
           }
           case PtyEventType.End: {
-            console.log(`[${config.logPrefix} ${tabId}] PTY stream ended`)
+            log.debug(`[${config.logPrefix} ${tabId}] PTY stream ended`)
             setOverlay((prev) => prev ?? { message: 'Terminal disconnected', type: 'error' })
             break
           }
@@ -363,7 +364,7 @@ export default function BaseTerminal({
       resizeTimeout = setTimeout(() => {
         if (cancelled) return
         fitTerminal(terminal, resize, getComputedStyle)
-        console.log(`[${config.logPrefix} ${tabId}] resize (initial):`, { cols: terminal.cols, rows: terminal.rows })
+        log.debug(`[${config.logPrefix} ${tabId}] resize (initial):`, { cols: terminal.cols, rows: terminal.rows })
         initialResizeDone = true
       }, 100)
 
@@ -382,7 +383,7 @@ export default function BaseTerminal({
         const tty = ttyRef.current
         if (!tty) return
         tty.getState().write(data).catch((error: unknown) => {
-          console.error(`[${config.logPrefix} ${tabId}] pty write failed:`, error)
+          log.error(`[${config.logPrefix} ${tabId}] pty write failed:`, error)
           setOverlay({
             message: error instanceof Error ? error.message : String(error),
             type: 'error',
@@ -393,7 +394,7 @@ export default function BaseTerminal({
 
     if (existingCache) {
       // === REMOUNT PATH: reuse cached terminal ===
-      console.log(`[${config.logPrefix} ${tabId}] remount from cache`)
+      log.debug(`[${config.logPrefix} ${tabId}] remount from cache`)
       const terminal = existingCache.terminal
 
       // Apply current settings (font, cursor, theme may have changed)
@@ -420,7 +421,7 @@ export default function BaseTerminal({
       attachMountedState(terminal, existingCache.tty, existingCache)
     } else {
       // === FIRST MOUNT PATH: create terminal and cache it ===
-      console.log(`[${config.logPrefix} ${tabId}] first mount`, {
+      log.debug(`[${config.logPrefix} ${tabId}] first mount`, {
         existingPtyId: currentExistingPtyId,
         workspaceId
       })
@@ -467,7 +468,7 @@ export default function BaseTerminal({
           pinnedToBottom: false,
           badgeClickTimer: null,
           onExitUnmounted: (exitCode: number) => {
-            console.log(`[${config.logPrefix} ${tabId}] PTY exited while unmounted, code:`, exitCode)
+            log.debug(`[${config.logPrefix} ${tabId}] PTY exited while unmounted, code:`, exitCode)
             const currentTab = workspace.getState().workspace.appStates[tabId]
             if (!currentTab) return // Tab already removed (PTY exit arrived after tab close)
             const keepOnExit = (currentTab.state as BaseTerminalState | undefined)?.keepOnExit
@@ -484,11 +485,11 @@ export default function BaseTerminal({
           const result = await session.openTtyStream(currentExistingPtyId, (event) => {
             handleCachedEvent(cache, event)
           })
-          console.log(`[${config.logPrefix} ${tabId}] reattached to session:`, currentExistingPtyId)
+          log.debug(`[${config.logPrefix} ${tabId}] reattached to session:`, currentExistingPtyId)
           tty = result.tty
           cache.unsubscribeEvents = result.unsubscribe
         } catch (error) {
-          console.log(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, currentExistingPtyId, error)
+          log.error(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, currentExistingPtyId, error)
           if (cancelled) return
           setOverlay({ message: `Failed to reattach terminal: ${error instanceof Error ? error.message : 'Unknown error'}`, type: 'error' })
           return
@@ -511,7 +512,7 @@ export default function BaseTerminal({
 
     // Cleanup — detach mounted state but keep terminal + TTY subscription alive
     return () => {
-      console.log(`[${config.logPrefix} ${tabId}] cleanup (terminal cached, PTY preserved)`)
+      log.debug(`[${config.logPrefix} ${tabId}] cleanup (terminal cached, PTY preserved)`)
       cancelled = true
       if (resizeTimeout) clearTimeout(resizeTimeout)
 
@@ -573,7 +574,7 @@ export default function BaseTerminal({
 
   const handleCopy = () => {
     const selection = terminalRef.current?.getSelection()
-    console.log(`[${config.logPrefix} ${tabId}] copy:`, { selection: selection ?? '(no selection)', hasTerminal: !!terminalRef.current })
+    log.debug(`[${config.logPrefix} ${tabId}] copy:`, { selection: selection ?? '(no selection)', hasTerminal: !!terminalRef.current })
     if (selection) {
       clipboard.writeText(selection)
     }
@@ -582,13 +583,13 @@ export default function BaseTerminal({
 
   const handlePaste = async () => {
     const text = await clipboard.readText()
-    console.log(`[${config.logPrefix} ${tabId}] paste:`, { clipboardText: text || '(empty)', hasTty: !!ttyRef.current })
+    log.debug(`[${config.logPrefix} ${tabId}] paste:`, { clipboardText: text || '(empty)', hasTty: !!ttyRef.current })
     closeContextMenu()
     if (text && ttyRef.current) {
       try {
         await ttyRef.current.getState().write(text)
       } catch (error) {
-        console.error(`[${config.logPrefix} ${tabId}] paste write failed:`, error)
+        log.error(`[${config.logPrefix} ${tabId}] paste write failed:`, error)
         setOverlay({
           message: error instanceof Error ? error.message : String(error),
           type: 'error',
