@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use notify::Watcher;
+use notify::{EventKind, Watcher};
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
 use tonic::Status;
@@ -118,6 +118,19 @@ pub struct FileWatcher {
     inner: Arc<Mutex<Inner>>,
 }
 
+/// Whether an OS-native event could reflect a change to file content or existence.
+///
+/// The parent-directory watch registered by notify includes `IN_OPEN`, so every
+/// `open()` on a watched file — including the ones `reconcile` itself performs to
+/// re-read the file — surfaces here. Forwarding those `Access` events would make
+/// each reconcile-read trigger another reconcile, a self-sustaining CPU storm that
+/// never terminates because the directory content never actually changes. Real
+/// changes always arrive as `Modify`/`Create`/`Remove`, so `Access` is dropped.
+/// `Any`/`Other` are kept: they are the conservative "something happened" fallbacks.
+fn event_may_change_content(kind: &EventKind) -> bool {
+    !matches!(kind, EventKind::Access(_))
+}
+
 /// Stable key for a watched file: canonicalized parent (when it exists) + file name,
 /// so subscribe-time keys and intercept-time keys always match.
 fn normalize(path: &Path) -> PathBuf {
@@ -149,6 +162,9 @@ impl FileWatcher {
         let (notify_tx, mut notify_rx) = mpsc::unbounded_channel::<PathBuf>();
         let notify_watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             if let Ok(event) = res {
+                if !event_may_change_content(&event.kind) {
+                    return;
+                }
                 for path in event.paths {
                     let _ = notify_tx.send(path);
                 }
@@ -378,6 +394,23 @@ mod tests {
     /// Long poll interval: tests below exercise the intercept path deterministically.
     fn watcher() -> FileWatcher {
         FileWatcher::new(Duration::from_secs(3600))
+    }
+
+    #[test]
+    fn access_events_are_ignored_but_changes_are_forwarded() {
+        use notify::event::{AccessKind, AccessMode, CreateKind, ModifyKind, RemoveKind};
+
+        // Access (open/close/read) must be dropped: reconcile's own reads produce
+        // these, and forwarding them re-triggers reconcile in an endless loop.
+        assert!(!event_may_change_content(&EventKind::Access(AccessKind::Open(AccessMode::Read))));
+        assert!(!event_may_change_content(&EventKind::Access(AccessKind::Close(AccessMode::Write))));
+        assert!(!event_may_change_content(&EventKind::Access(AccessKind::Any)));
+
+        // Real content/existence changes must always be forwarded.
+        assert!(event_may_change_content(&EventKind::Modify(ModifyKind::Any)));
+        assert!(event_may_change_content(&EventKind::Create(CreateKind::File)));
+        assert!(event_may_change_content(&EventKind::Remove(RemoveKind::File)));
+        assert!(event_may_change_content(&EventKind::Any));
     }
 
     #[tokio::test]
