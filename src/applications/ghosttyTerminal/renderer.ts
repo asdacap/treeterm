@@ -6,10 +6,9 @@ import { makeTerminalOnWorkspaceLoad, type TerminalDeps } from '../terminal/rend
 /**
  * A second terminal application rendered by ghostty-web instead of xterm.js.
  *
- * PTY lifecycle is shared with the xterm terminal via makeTerminalOnWorkspaceLoad — only the
- * frontend differs, so both apps create, reattach to and kill PTYs identically. The returned
- * ref's `cachedTerminal` stays null: GhosttyTerminal disposes its terminal on unmount and
- * rebuilds from the daemon's replay on remount.
+ * PTY lifecycle is shared with the xterm terminal via makeTerminalOnWorkspaceLoad, and the UI
+ * with it via BaseTerminal — only the `TerminalEngine` differs. Both apps create, reattach to
+ * and kill PTYs identically, and both cache their terminal across unmount on the returned ref.
  */
 export function createGhosttyTerminalApplication(deps: TerminalDeps): Application<TerminalState> {
   return {

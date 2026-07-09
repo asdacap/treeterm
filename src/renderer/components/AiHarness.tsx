@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
-import type { Terminal as XTerm } from '@xterm/xterm'
 import BaseTerminal, { type BaseTerminalConfig } from './BaseTerminal'
+import { createXtermEngine } from '../terminal/xtermEngine'
+import type { TerminalEngine } from '../terminal/engine'
 import { PromptCommitButton } from './PromptCommitButton'
 import { PromptRebaseButton } from './PromptRebaseButton'
 import { ReviewCommentsButton } from './ReviewCommentsButton'
@@ -103,14 +104,15 @@ function AiHarnessContent({
   disableScrollbar,
   stripScrollbackClear,
 }: AiHarnessContentProps) {
-  const handleTerminalReady = useCallback((term: XTerm) => {
-    term.onData((data) => {
+  const handleTerminalReady = useCallback((engine: TerminalEngine) => {
+    engine.onData((data) => {
       analyzer.getState().onUserInput(data)
     })
   }, [analyzer])
 
   // Stable config — useState initializer runs once, so BaseTerminal never re-renders from config changes
   const [config] = useState<BaseTerminalConfig>(() => ({
+    createEngine: createXtermEngine,
     themeBackground: backgroundColor,
     logPrefix: 'AiHarness',
     disableScrollbar,

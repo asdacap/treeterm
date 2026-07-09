@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useStore } from 'zustand'
 import BaseTerminal, { type BaseTerminalConfig, type BaseTerminalState } from './BaseTerminal'
+import { createXtermEngine } from '../terminal/xtermEngine'
 import type { SandboxConfig, WorkspaceStore } from '../types'
 
 interface TerminalProps {
@@ -20,6 +21,7 @@ export default function Terminal({ workspace, tabId, sandbox }: TerminalProps) {
   const isSandboxed = sandbox?.enabled ?? false
   // Stable config — useState initializer runs once, so BaseTerminal never re-renders from config changes
   const [terminalConfig] = useState<BaseTerminalConfig>(() => ({
+    createEngine: createXtermEngine,
     themeBackground: isSandboxed ? '#1a1a2e' : '#1e1e1e',
     logPrefix: 'Terminal',
   }))

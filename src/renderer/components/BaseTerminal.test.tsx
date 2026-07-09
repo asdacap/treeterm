@@ -4,57 +4,83 @@ import { StrictMode } from 'react'
 import { render, act } from '@testing-library/react'
 import { createStore } from 'zustand/vanilla'
 import { SessionStoreContext } from '../contexts/SessionStoreContext'
-import BaseTerminal from './BaseTerminal'
+import BaseTerminal, { type BaseTerminalConfig, type TerminalContainerElement } from './BaseTerminal'
+import { ScrollPosition } from '../types'
+import { PtyEventType } from '../../shared/ipc-types'
+import type { PtyEvent } from '../types'
+import type { TerminalDisposable, TerminalEngine } from '../terminal/engine'
 
-// --- Fake xterm terminal: records instances + dispose calls, minimal DOM surface ---
-const { createdTerminals, FakeTerminal } = vi.hoisted(() => {
-  const createdTerminals: { disposed: boolean; element: HTMLDivElement }[] = []
-  class FakeTerminal {
-    disposed = false
-    element = document.createElement('div')
-    cols = 80
-    rows = 24
-    options: Record<string, unknown> = {}
-    buffer = {
-      active: { type: 'normal', baseY: 0, viewportY: 0 },
-      onBufferChange: () => ({ dispose() {} }),
-    }
+// --- Fake engine: records what BaseTerminal drives it with, plus a minimal DOM presence ---
+class FakeEngine implements TerminalEngine {
+  disposed = false
+  attachedTo: HTMLElement | null = null
+  focused = false
+  cols = 80
+  rows = 24
+  alternate = false
+  scrollPosition = ScrollPosition.Bottom
+  scrollRatio = 1
+  scrolledToBottom = 0
+  scrolledToRatio: number | null = null
+  writes: (string | Uint8Array)[] = []
+  resizes: { cols: number; rows: number }[] = []
+  displayOptions: unknown = null
+  selection = ''
+  readonly element = document.createElement('div')
+  readonly raw = { buffer: { active: { length: 0, getLine: () => undefined } } }
 
-    constructor() {
-      createdTerminals.push(this)
-      const viewport = document.createElement('div')
-      viewport.className = 'xterm-viewport'
-      this.element.appendChild(viewport)
-    }
+  dataListener: ((data: string) => void) | null = null
+  scrollListener: (() => void) | null = null
+  wheelListener: ((deltaY: number) => void) | null = null
 
-    open(container: HTMLElement): void { container.appendChild(this.element) }
-    loadAddon(): void {}
-    onData(): { dispose(): void } { return { dispose() {} } }
-    write(_data: unknown, cb?: () => void): void { if (cb) cb() }
-    resize(): void {}
-    focus(): void {}
-    scrollToBottom(): void {}
-    scrollToTop(): void {}
-    scrollToLine(): void {}
-    refresh(): void {}
-    getSelection(): string { return '' }
-    dispose(): void { this.disposed = true; this.element.remove() }
+  attach(container: HTMLElement): void {
+    this.attachedTo = container
+    container.appendChild(this.element)
   }
-  return { createdTerminals, FakeTerminal }
+  applyDisplayOptions(options: unknown): void { this.displayOptions = options }
+  write(data: string | Uint8Array, onWritten?: () => void): void { this.writes.push(data); onWritten?.() }
+  resize(cols: number, rows: number): void { this.cols = cols; this.rows = rows; this.resizes.push({ cols, rows }) }
+  focus(): void { this.focused = true }
+  getSelection(): string { return this.selection }
+  dispose(): void { this.disposed = true; this.element.remove() }
+  onData(handler: (data: string) => void): TerminalDisposable {
+    this.dataListener = handler
+    return { dispose: () => { this.dataListener = null } }
+  }
+  onScroll(handler: () => void): TerminalDisposable {
+    this.scrollListener = handler
+    return { dispose: () => { this.scrollListener = null } }
+  }
+  onWheel(handler: (deltaY: number) => void): TerminalDisposable {
+    this.wheelListener = handler
+    return { dispose: () => { this.wheelListener = null } }
+  }
+  isAlternateScreen(): boolean { return this.alternate }
+  getScrollPosition(): ScrollPosition { return this.scrollPosition }
+  getScrollRatio(): number { return this.scrollRatio }
+  scrollToRatio(ratio: number): void { this.scrolledToRatio = ratio }
+  scrollToTop(): void {}
+  scrollToBottom(): void { this.scrolledToBottom++ }
+
+  /** What the container would fit. undefined means "not laid out yet", as in jsdom. */
+  proposal: { cols: number; rows: number } | undefined = undefined
+  proposeDimensions(): { cols: number; rows: number } | undefined { return this.proposal }
+}
+
+const engines: FakeEngine[] = []
+const createEngine = vi.fn(async (): Promise<TerminalEngine> => {
+  await Promise.resolve()
+  const engine = new FakeEngine()
+  engines.push(engine)
+  return engine
 })
 
-vi.mock('@xterm/xterm', () => ({ Terminal: FakeTerminal }))
-// jsdom has no WebGL2 context, so the real addon would throw on activate and BaseTerminal would
-// silently take its DOM-renderer fallback — masking whether the addon is wired up at all.
-vi.mock('@xterm/addon-webgl', () => ({
-  WebglAddon: class {
-    onContextLoss(): void {}
-    dispose(): void {}
-  },
-}))
-vi.mock('../utils/fitTerminal', () => ({ fitTerminal: () => {} }))
+const { processedData } = vi.hoisted(() => ({ processedData: [] as string[] }))
 vi.mock('../utils/activityStateDetector', () => ({
-  createActivityStateDetector: () => ({ processData: () => {}, destroy: () => {} }),
+  createActivityStateDetector: () => ({
+    processData: (data: string) => processedData.push(data),
+    destroy: () => {},
+  }),
 }))
 vi.mock('./ContextMenu', () => ({ default: () => null }))
 
@@ -83,7 +109,9 @@ vi.mock('../store/contextMenu', () => {
 
 // jsdom lacks ResizeObserver, which BaseTerminal instantiates on mount.
 beforeEach(() => {
-  createdTerminals.length = 0
+  engines.length = 0
+  processedData.length = 0
+  createEngine.mockClear()
   ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
     observe(): void {}
     unobserve(): void {}
@@ -91,39 +119,44 @@ beforeEach(() => {
   }
 })
 
+/** Stable config ref — mirrors Terminal.tsx's useState-stabilized config. */
+const config: BaseTerminalConfig = { createEngine, themeBackground: '#000', logPrefix: 'Terminal' }
+
 interface Deferred {
   resolve: () => void
   unsubscribe: ReturnType<typeof vi.fn>
 }
 
+/** One state object per tty, so `getState().write` is the same mock every call. */
 function makeFakeTty() {
-  return {
-    getState: () => ({
-      ptyId: 'pty1',
-      write: vi.fn<(d: string) => Promise<void>>().mockResolvedValue(undefined),
-      resize: vi.fn(),
-      kill: vi.fn(),
-    }),
+  const state = {
+    ptyId: 'pty1',
+    write: vi.fn<(d: string) => Promise<void>>().mockResolvedValue(undefined),
+    resize: vi.fn<(cols: number, rows: number) => void>(),
+    kill: vi.fn(),
   }
+  return { getState: () => state, state }
 }
 
-function makeWorkspaceStore(tabId: string) {
+function makeWorkspaceStore(tabId: string, options: { keepOnExit?: boolean; activeTabId?: string } = {}) {
+  const { keepOnExit = false, activeTabId = tabId } = options
   const appRef = {
     cachedTerminal: null as unknown,
     disposeCachedTerminal: vi.fn(),
     close: vi.fn(),
     dispose: vi.fn(),
   }
+  const removeTab = vi.fn()
   const store = createStore<Record<string, unknown>>()(() => ({
     workspace: {
       id: 'ws1',
-      activeTabId: tabId,
-      appStates: { [tabId]: { applicationId: 'terminal', title: 'Terminal 1', state: { ptyId: 'pty1' } } },
+      activeTabId,
+      appStates: { [tabId]: { applicationId: 'terminal', title: 'Terminal 1', state: { ptyId: 'pty1', keepOnExit } } },
     },
-    removeTab: vi.fn(),
+    removeTab,
     getTabRef: () => appRef,
   }))
-  return { store, appRef }
+  return { store, appRef, removeTab }
 }
 
 function makeSessionStore(deferreds: Deferred[]) {
@@ -141,14 +174,31 @@ function makeSessionStore(deferreds: Deferred[]) {
   return { store: store as never, openTtyStream }
 }
 
+/** Resolves openTtyStream immediately and hands back the captured PTY event sink. */
+function makeLiveSessionStore() {
+  const events: ((event: PtyEvent) => void)[] = []
+  const unsubscribe = vi.fn()
+  const tty = makeFakeTty()
+  const openTtyStream = vi.fn(async (_ptyId: string, onEvent: (event: PtyEvent) => void) => {
+    events.push(onEvent)
+    await Promise.resolve()
+    return { tty, unsubscribe }
+  })
+  const store = createStore<Record<string, unknown>>()(() => ({ openTtyStream }))
+  return { store: store as never, openTtyStream, events, unsubscribe, tty: tty.state }
+}
+
+/** Flushes `await createEngine()` and `await openTtyStream()`. */
+async function flush() {
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve() })
+}
+
 describe('BaseTerminal — StrictMode double-mount cleanup', () => {
-  it('disposes the orphaned terminal + stream from the cancelled first mount', async () => {
+  it('disposes the engine from the cancelled first mount before it opens a stream', async () => {
     const tabId = 'tab1'
     const deferreds: Deferred[] = []
     const { store: workspace } = makeWorkspaceStore(tabId)
     const { store: session, openTtyStream } = makeSessionStore(deferreds)
-    // Stable config ref — mirrors Terminal.tsx's useState-stabilized config.
-    const config = { themeBackground: '#000', logPrefix: 'Terminal' }
 
     render(
       <StrictMode>
@@ -157,30 +207,292 @@ describe('BaseTerminal — StrictMode double-mount cleanup', () => {
         </SessionStoreContext.Provider>
       </StrictMode>,
     )
+    await flush()
 
-    // StrictMode double-invoked the effect: mount → cleanup (cancelled) → mount.
-    // Both mounts opened a terminal and started an attach before either resolved.
-    expect(createdTerminals.length).toBe(2)
-    expect(openTtyStream).toHaveBeenCalledTimes(2)
-    expect(deferreds.length).toBe(2)
-
-    // Resolve both attaches now that the double-mount has settled, then flush the
-    // async init continuations (openTtyStream await → cancelled cleanup / attach).
-    await act(async () => {
-      deferreds.forEach((d) => { d.resolve() })
-      await Promise.resolve()
-    })
-
-    // Exactly one live terminal must remain — the first (cancelled) mount's terminal
-    // and its stream subscription must be torn down, not left orphaned in the DOM.
-    const [first, second] = createdTerminals
-    const liveTerminals = createdTerminals.filter((t) => !t.disposed)
-    expect(liveTerminals.length).toBe(1)
+    // StrictMode double-invoked the effect: mount → cleanup (cancelled) → mount. Both mounts
+    // asked for an engine, but the cancelled one is torn down at the first await — so it never
+    // attaches, and never opens a PTY stream that would immediately need unsubscribing.
+    expect(engines.length).toBe(2)
+    const [first, second] = engines
     expect(first?.disposed).toBe(true)
     expect(second?.disposed).toBe(false)
+    expect(second?.attachedTo).not.toBeNull()
+    expect(openTtyStream).toHaveBeenCalledTimes(1)
+    expect(deferreds.length).toBe(1)
+  })
 
-    // The cancelled mount's stream is unsubscribed; the surviving mount's is not.
+  it('unwinds the engine and the stream when unmounted mid-attach', async () => {
+    const deferreds: Deferred[] = []
+    const { store: workspace } = makeWorkspaceStore('tab1')
+    const { store: session } = makeSessionStore(deferreds)
+
+    const { unmount } = render(
+      <SessionStoreContext.Provider value={session}>
+        <BaseTerminal workspace={workspace as never} tabId="tab1" config={config} />
+      </SessionStoreContext.Provider>,
+    )
+    await flush()
+    expect(engines).toHaveLength(1)
+
+    // A fast tab switch unmounts before the daemon answers.
+    unmount()
+    await act(async () => { deferreds[0]?.resolve(); await Promise.resolve() })
+
+    // The cleanup never saw this stream — the resolved init() must unsubscribe it itself,
+    // otherwise the PTY subscription leaks for the life of the window.
     expect(deferreds[0]?.unsubscribe).toHaveBeenCalledTimes(1)
-    expect(deferreds[1]?.unsubscribe).not.toHaveBeenCalled()
+    expect(engines[0]?.disposed).toBe(true)
+  })
+
+  it('disposes the engine and explains itself when the attach fails', async () => {
+    const { store: workspace } = makeWorkspaceStore('tab1')
+    const openTtyStream = vi.fn(() => Promise.reject(new Error('pty is gone')))
+    const session = createStore<Record<string, unknown>>()(() => ({ openTtyStream }))
+
+    const { container } = render(
+      <SessionStoreContext.Provider value={session as never}>
+        <BaseTerminal workspace={workspace as never} tabId="tab1" config={config} />
+      </SessionStoreContext.Provider>,
+    )
+    await flush()
+
+    expect(container.textContent).toContain('Failed to reattach terminal: pty is gone')
+    expect(engines[0]?.disposed).toBe(true)
+  })
+})
+
+describe('BaseTerminal — terminal cache across unmount', () => {
+  it('reuses the cached engine on remount rather than rebuilding it', async () => {
+    const { store: workspace, appRef } = makeWorkspaceStore('tab1')
+    const session = makeLiveSessionStore()
+
+    const first = render(
+      <SessionStoreContext.Provider value={session.store}>
+        <BaseTerminal workspace={workspace as never} tabId="tab1" config={config} />
+      </SessionStoreContext.Provider>,
+    )
+    await flush()
+    expect(appRef.cachedTerminal).not.toBeNull()
+
+    first.unmount()
+    // The engine and its PTY subscription outlive the component — that is the whole point.
+    expect(engines[0]?.disposed).toBe(false)
+    expect(session.unsubscribe).not.toHaveBeenCalled()
+
+    const second = render(
+      <SessionStoreContext.Provider value={session.store}>
+        <BaseTerminal workspace={workspace as never} tabId="tab1" config={config} />
+      </SessionStoreContext.Provider>,
+    )
+    await flush()
+
+    expect(engines).toHaveLength(1)
+    expect(session.openTtyStream).toHaveBeenCalledTimes(1)
+    // Reparented into the new container, with the current settings re-applied.
+    expect(engines[0]?.attachedTo).toBe(second.container.querySelector('.terminal-container'))
+    expect(engines[0]?.displayOptions).toMatchObject({ fontSize: 14, themeBackground: '#000' })
+  })
+
+  it('keeps the buffer fed while unmounted, so scrollback survives a tab switch', async () => {
+    const { store: workspace } = makeWorkspaceStore('tab1')
+    const session = makeLiveSessionStore()
+
+    const { unmount } = render(
+      <SessionStoreContext.Provider value={session.store}>
+        <BaseTerminal workspace={workspace as never} tabId="tab1" config={config} />
+      </SessionStoreContext.Provider>,
+    )
+    await flush()
+    unmount()
+
+    act(() => { session.events[0]?.({ type: PtyEventType.Data, data: new TextEncoder().encode('while away') }) })
+
+    expect(engines[0]?.writes).toHaveLength(1)
+  })
+
+  it('publishes the engine buffer on the container for e2e to read', async () => {
+    const { store: workspace } = makeWorkspaceStore('tab1')
+    const session = makeLiveSessionStore()
+
+    const { container } = render(
+      <SessionStoreContext.Provider value={session.store}>
+        <BaseTerminal workspace={workspace as never} tabId="tab1" config={config} />
+      </SessionStoreContext.Provider>,
+    )
+    await flush()
+
+    const host = container.querySelector('.terminal-container') as TerminalContainerElement
+    expect(host.terminal).toBe(engines[0]?.raw)
+  })
+})
+
+describe('BaseTerminal — mounted UI', () => {
+  async function mount(options: { keepOnExit?: boolean; activeTabId?: string } = {}) {
+    const { store: workspace, removeTab } = makeWorkspaceStore('tab1', options)
+    const session = makeLiveSessionStore()
+    const utils = render(
+      <SessionStoreContext.Provider value={session.store}>
+        <BaseTerminal workspace={workspace as never} tabId="tab1" config={config} />
+      </SessionStoreContext.Provider>,
+    )
+    await flush()
+    const emit = (event: PtyEvent) => { act(() => { session.events[0]?.(event) }) }
+    return { ...utils, workspace, removeTab, emit, tty: session.tty, engine: engines[0]! }
+  }
+
+  it('raises the alt-screen badge when the engine switches screens', async () => {
+    const { container, engine, emit } = await mount()
+    expect(container.textContent).not.toContain('ALT SCREEN')
+
+    engine.alternate = true
+    emit({ type: PtyEventType.Data, data: new TextEncoder().encode('\x1b[?1049h') })
+
+    expect(container.textContent).toContain('ALT SCREEN')
+  })
+
+  it('tracks the scroll position the engine reports', async () => {
+    const { container, engine } = await mount()
+
+    engine.scrollPosition = ScrollPosition.Middle
+    act(() => { engine.scrollListener?.() })
+
+    expect(container.textContent).toContain('MIDDLE')
+  })
+
+  it('unpins when the user wheels back toward older output', async () => {
+    const { engine, workspace } = await mount()
+    const cache = (workspace.getState().getTabRef as () => { cachedTerminal: { pinnedToBottom: boolean } })().cachedTerminal
+    cache.pinnedToBottom = true
+
+    act(() => { engine.wheelListener?.(-120) })
+
+    expect(cache.pinnedToBottom).toBe(false)
+  })
+
+  it('stays pinned when the user wheels toward newer output', async () => {
+    const { engine, workspace } = await mount()
+    const cache = (workspace.getState().getTabRef as () => { cachedTerminal: { pinnedToBottom: boolean } })().cachedTerminal
+    cache.pinnedToBottom = true
+
+    act(() => { engine.wheelListener?.(120) })
+
+    expect(cache.pinnedToBottom).toBe(true)
+  })
+
+  it('holds a pinned terminal at the bottom when it scrolls away', async () => {
+    const { engine, workspace } = await mount()
+    const cache = (workspace.getState().getTabRef as () => { cachedTerminal: { pinnedToBottom: boolean } })().cachedTerminal
+    cache.pinnedToBottom = true
+    const before = engine.scrolledToBottom
+
+    engine.scrollPosition = ScrollPosition.Middle
+    act(() => { engine.scrollListener?.() })
+
+    expect(engine.scrolledToBottom).toBeGreaterThan(before)
+  })
+
+  it('feeds the activity state detector', async () => {
+    const { emit } = await mount()
+
+    emit({ type: PtyEventType.Data, data: new TextEncoder().encode('hello') })
+
+    expect(processedData).toContain('hello')
+  })
+
+  it('restores the scroll ratio across a resize when the reader is not at the bottom', async () => {
+    const { engine, emit } = await mount()
+    engine.scrollPosition = ScrollPosition.Middle
+    act(() => { engine.scrollListener?.() })
+    engine.scrollRatio = 0.4
+
+    emit({ type: PtyEventType.Resize, cols: 100, rows: 30 })
+
+    expect(engine.resizes).toEqual([{ cols: 100, rows: 30 }])
+    expect(engine.scrolledToRatio).toBe(0.4)
+  })
+
+  it('proposes a fit to the daemon but never resizes the terminal locally', async () => {
+    const { engine, tty } = await mount()
+    engine.proposal = { cols: 100, rows: 30 }
+
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)) })
+
+    expect(tty.resize).toHaveBeenCalledWith(100, 30)
+    // The daemon owns the size — only its echoed Resize event moves the terminal.
+    expect(engine.resizes).toHaveLength(0)
+  })
+
+  it('badges the size the daemon actually applied when it differs from the request', async () => {
+    const { container, engine, emit } = await mount()
+    engine.proposal = { cols: 100, rows: 30 }
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)) })
+
+    // The daemon clamped the 100x30 we asked for down to what the PTY would take.
+    emit({ type: PtyEventType.Resize, cols: 80, rows: 24 })
+    expect(container.querySelector('.size-mismatch-badge')?.textContent).toBe('80x24')
+
+    // ...and it agrees on the next round trip.
+    emit({ type: PtyEventType.Resize, cols: 100, rows: 30 })
+    expect(container.querySelector('.size-mismatch-badge')).toBeNull()
+  })
+
+  it('reports an immediate non-zero exit rather than silently closing the tab', async () => {
+    const { container, removeTab, emit } = await mount()
+
+    emit({ type: PtyEventType.Exit, exitCode: 127, signal: 0 })
+
+    expect(container.textContent).toContain('Process exited immediately with code 127')
+    expect(removeTab).not.toHaveBeenCalled()
+  })
+
+  it('prints the exit code and keeps the tab when keepOnExit is set', async () => {
+    const { removeTab, emit, engine } = await mount({ keepOnExit: true })
+    // Push past the immediate-failure window so keepOnExit is what decides.
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 5000)
+
+    emit({ type: PtyEventType.Exit, exitCode: 3, signal: 0 })
+
+    expect(removeTab).not.toHaveBeenCalled()
+    expect(String(engine.writes.at(-1))).toContain('exit code 3')
+    vi.restoreAllMocks()
+  })
+
+  it('forwards keystrokes to the PTY when its tab is active', async () => {
+    const { engine, tty } = await mount()
+
+    act(() => { engine.dataListener?.('ls\r') })
+
+    expect(tty.write).toHaveBeenCalledWith('ls\r')
+  })
+
+  it('drops onData from an inactive tab — it can only be a replay auto-response', async () => {
+    const { engine, tty } = await mount({ activeTabId: 'other-tab' })
+
+    act(() => { engine.dataListener?.('\x1b[>0;10;1c') })
+
+    expect(tty.write).not.toHaveBeenCalled()
+  })
+
+  it('surfaces a stream error, then clears it on the next byte of output', async () => {
+    const { container, emit } = await mount()
+
+    emit({ type: PtyEventType.Error, message: 'daemon exploded' })
+    expect(container.textContent).toContain('daemon exploded')
+
+    emit({ type: PtyEventType.Data, data: new TextEncoder().encode('recovered') })
+    expect(container.textContent).not.toContain('daemon exploded')
+  })
+
+  it('surfaces stream end as a disconnect', async () => {
+    const { container, emit } = await mount()
+
+    emit({ type: PtyEventType.End })
+
+    expect(container.textContent).toContain('Terminal disconnected')
+  })
+
+  it('focuses the engine when its tab is the active one', async () => {
+    const { engine } = await mount()
+    expect(engine.focused).toBe(true)
   })
 })

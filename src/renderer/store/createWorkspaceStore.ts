@@ -6,7 +6,7 @@ import type { WorktreeRegistryApi } from '../lib/worktreeRegistry'
 import { buildEntryFromWorkspace } from '../lib/worktreeRegistry'
 import { PtyEventType } from '../../shared/ipc-types'
 import { getTabs, isAiHarnessState } from '../types'
-import type { Terminal as XTerm } from '@xterm/xterm'
+import type { TerminalEngine } from '../terminal/engine'
 import type { Tty, TtyWriter } from './createTtyStore'
 import { createAnalyzerStore } from './createAnalyzerStore'
 import type { Analyzer } from './createAnalyzerStore'
@@ -18,12 +18,12 @@ import { createReviewViewedFilesStore } from './createReviewViewedFilesStore'
 import type { ReviewViewedFilesStore } from './createReviewViewedFilesStore'
 
 /**
- * Cached xterm.js terminal for BaseTerminal-derived tabs only (Terminal, AiHarness).
+ * Cached terminal for BaseTerminal-derived tabs only (Terminal, AiHarness).
  * Survives component mount/unmount to avoid re-streaming PTY data on tab switch.
  * NOT serialized — purely in-memory, renderer-side cache.
  */
 export interface CachedTerminal {
-  terminal: XTerm
+  engine: TerminalEngine
   tty: Tty
   /** Unsubscribe the background TTY event subscription (called only on dispose) */
   unsubscribeEvents: () => void
@@ -46,8 +46,8 @@ export interface CachedTerminal {
 }
 
 /**
- * AppRef subtype for terminal-based tabs (Terminal, AiHarness, CustomRunner).
- * Holds the cached xterm.js terminal that survives component mount/unmount.
+ * AppRef subtype for terminal-based tabs (Terminal, GhosttyTerminal, AiHarness, CustomRunner).
+ * Holds the cached terminal engine that survives component mount/unmount.
  */
 export interface TerminalAppRef extends AppRef {
   cachedTerminal: CachedTerminal | null

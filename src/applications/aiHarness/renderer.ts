@@ -72,7 +72,7 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
           if (this.cachedTerminal) {
             this.cachedTerminal.mountedHandler = null
             this.cachedTerminal.unsubscribeEvents()
-            this.cachedTerminal.terminal.dispose()
+            this.cachedTerminal.engine.dispose()
             this.cachedTerminal = null
           }
         },

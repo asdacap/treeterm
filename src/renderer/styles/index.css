@@ -1301,6 +1301,14 @@ body,
   height: 100%;
 }
 
+/* ghostty-web takes over the element it is opened onto, so the engine gives it one of its
+   own inside .terminal-container. It must fill it for the fit calculation to be meaningful. */
+.ghostty-terminal-host {
+  width: 100%;
+  height: 100%;
+  outline: none;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 10px;

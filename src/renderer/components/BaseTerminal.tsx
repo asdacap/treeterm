@@ -1,9 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Terminal as XTerm } from '@xterm/xterm'
 import { useStore } from 'zustand'
-import { fitTerminal } from '../utils/fitTerminal'
-import { loadWebglRenderer, WebglFallbackReason, type WebglFallback } from '../utils/loadWebglRenderer'
-import { TERMINAL_THEME_COLORS } from './terminalTheme'
 import { log } from '../utils/logger'
 import { useSettingsStore } from '../store/settings'
 import { useAppStore } from '../store/app'
@@ -13,10 +9,14 @@ import { createActivityStateDetector } from '../utils/activityStateDetector'
 import type { Tty } from '../store/createTtyStore'
 import { ScrollPosition } from '../types'
 import type { CachedTerminal, TerminalAppRef, PtyEvent, SandboxConfig, TerminalState, WorkspaceStore } from '../types'
+import type { TerminalBufferHost, TerminalEngine, TerminalEngineFactory } from '../terminal/engine'
 import { PtyEventType } from '../../shared/ipc-types'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
-import '@xterm/xterm/css/xterm.css'
+
+const SCROLLBACK_LINES = 50000
+/** Let the container's layout settle before the first fit. */
+const INITIAL_FIT_DELAY_MS = 100
 
 // Utility to format raw chars for console debugging
 function formatRawChars(str: string): string {
@@ -59,14 +59,14 @@ function handleCachedEvent(cache: CachedTerminal, event: PtyEvent): void {
       if (cache.stripScrollbackClear) {
         const decoder = new TextDecoder('utf-8', { fatal: false })
         const stripped = decoder.decode(event.data).replace(/\x1b\[3J/g, '')
-        cache.terminal.write(stripped)
+        cache.engine.write(stripped)
       } else {
-        cache.terminal.write(event.data)
+        cache.engine.write(event.data)
       }
       break
     }
     case PtyEventType.Resize:
-      cache.terminal.resize(event.cols, event.rows)
+      cache.engine.resize(event.cols, event.rows)
       break
     case PtyEventType.Exit:
       cache.onExitUnmounted(event.exitCode)
@@ -79,12 +79,12 @@ function handleCachedEvent(cache: CachedTerminal, event: PtyEvent): void {
 }
 
 /**
- * The WebGL renderer deletes xterm's `.xterm-rows` DOM, so e2e can no longer scrape row
- * elements for text. The terminal is published on its container element instead, and tests
- * read `terminal.buffer` through it. See `e2e/helpers.ts#getTerminalText`.
+ * Neither GPU renderer keeps a DOM row per line, so e2e can no longer scrape row elements for
+ * text. The engine's terminal is published on its container element instead, and tests read
+ * `terminal.buffer` through it. See `e2e/helpers.ts#getTerminalText`.
  */
 export interface TerminalContainerElement extends HTMLDivElement {
-  terminal?: XTerm
+  terminal?: TerminalBufferHost
 }
 
 // Base state interface that all terminal-based states should extend
@@ -93,18 +93,20 @@ export interface BaseTerminalState extends TerminalState {
 }
 
 export interface BaseTerminalConfig {
+  // Which terminal frontend backs this tab (xterm.js or ghostty-web)
+  createEngine: TerminalEngineFactory
   // Theme customization
   themeBackground: string
   // Log prefix for console messages
   logPrefix: string
   // Whether to disable the scrollbar (for tools with own scrolling like opencode)
   disableScrollbar?: boolean
-  // Whether to strip CSI 3J (clear scrollback) from PTY data before writing to xterm
+  // Whether to strip CSI 3J (clear scrollback) from PTY data before writing to the terminal
   stripScrollbackClear?: boolean
   // Whether to disable the regex-based activity state detector (e.g. when using LLM-based analysis)
   disableActivityDetector?: boolean
-  // Callback when terminal is ready, provides terminal instance
-  onTerminalReady?: (terminal: XTerm) => void
+  // Callback when terminal is ready, provides the engine
+  onTerminalReady?: (engine: TerminalEngine) => void
 }
 
 interface BaseTerminalProps {
@@ -124,7 +126,7 @@ export default function BaseTerminal({
   const removeTab = useStore(workspace, s => s.removeTab)
   const workspaceId = wsData.id
   const containerRef = useRef<HTMLDivElement>(null)
-  const terminalRef = useRef<XTerm | null>(null)
+  const engineRef = useRef<TerminalEngine | null>(null)
   const ttyRef = useRef<Tty | null>(null)
   const [overlay, setOverlay] = useState<{ message: string; type: 'info' | 'error' } | null>(null)
   const [loading, setLoading] = useState(true)
@@ -156,7 +158,7 @@ export default function BaseTerminal({
     let resizeTimeout: ReturnType<typeof setTimeout> | null = null
     let inputDisposable: { dispose(): void } | null = null
     let scrollDisposable: { dispose(): void } | null = null
-    let bufferChangeDisposable: { dispose(): void } | null = null
+    let wheelDisposable: { dispose(): void } | null = null
     let resizeObserver: ResizeObserver | null = null
     let detector: ReturnType<typeof createActivityStateDetector> | null = null
     let unsubscribeFocus: (() => void) | null = null
@@ -168,9 +170,26 @@ export default function BaseTerminal({
     const termAppRef = wsState.getTabRef(tabId) as TerminalAppRef | null
     const existingCache = termAppRef?.cachedTerminal ?? null
 
-    /** Attach all DOM-level handlers to a terminal. Shared by first mount and remount. */
-    const attachMountedState = (terminal: XTerm, tty: Tty, cache: CachedTerminal) => {
-      terminalRef.current = terminal
+    const displayOptions = {
+      fontSize: settings.terminal.fontSize,
+      fontFamily: settings.terminal.fontFamily,
+      cursorBlink: settings.terminal.cursorBlink,
+      cursorStyle: settings.terminal.cursorStyle,
+      themeBackground: config.themeBackground,
+    }
+
+    /** Propose a fit to the daemon. The daemon echoes the size back, and only then does the
+     *  terminal resize — see the Resize event below. Nothing resizes the terminal locally. */
+    const applyFit = (engine: TerminalEngine, resize: (cols: number, rows: number) => void): void => {
+      const dimensions = engine.proposeDimensions(getComputedStyle)
+      if (!dimensions) return
+      if (dimensions.cols === engine.cols && dimensions.rows === engine.rows) return
+      resize(dimensions.cols, dimensions.rows)
+    }
+
+    /** Attach all DOM-level handlers to an engine. Shared by first mount and remount. */
+    const attachMountedState = (engine: TerminalEngine, tty: Tty, cache: CachedTerminal) => {
+      engineRef.current = engine
       ttyRef.current = tty
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
@@ -180,51 +199,26 @@ export default function BaseTerminal({
         rawResize(cols, rows)
       }
 
-      // Scroll tracking — listen on the DOM viewport element instead of terminal.onScroll,
-      // because xterm.js suppresses onScroll for user-initiated scrolling (mouse wheel, touch).
-      const viewportEl = terminal.element?.querySelector('.xterm-viewport')
-      if (viewportEl) {
-        const onViewportScroll = (): void => {
-          const buf = terminal.buffer.active
-          let pos: ScrollPosition
-          if (buf.baseY === 0) {
-            pos = ScrollPosition.Bottom
-          } else if (buf.viewportY === 0) {
-            pos = ScrollPosition.Top
-          } else if (buf.baseY - buf.viewportY <= 1) {
-            pos = ScrollPosition.Bottom
-          } else {
-            pos = ScrollPosition.Middle
-          }
-          scrollPositionRef.current = pos
-          setScrollPosition(pos)
+      // The buffer may have switched screens while this tab was unmounted.
+      setIsAlternateScreen(engine.isAlternateScreen())
 
-          // Pin enforcement: if pinned and not at bottom, force scroll back
-          if (cache.pinnedToBottom && pos !== ScrollPosition.Bottom) {
-            terminal.scrollToBottom()
-          }
+      scrollDisposable = engine.onScroll(() => {
+        const position = engine.getScrollPosition()
+        scrollPositionRef.current = position
+        setScrollPosition(position)
+
+        // Pin enforcement: if pinned and not at bottom, force scroll back
+        if (cache.pinnedToBottom && position !== ScrollPosition.Bottom) {
+          engine.scrollToBottom()
         }
+      })
 
-        // Auto-unpin on intentional mouse wheel scroll up
-        const onWheel = (e: Event): void => {
-          const wheelEvent = e as WheelEvent
-          if (wheelEvent.deltaY < 0 && cache.pinnedToBottom) {
-            cache.pinnedToBottom = false
-            setPinnedToBottom(false)
-          }
+      // Auto-unpin on intentional mouse wheel scroll up
+      wheelDisposable = engine.onWheel((deltaY) => {
+        if (deltaY < 0 && cache.pinnedToBottom) {
+          cache.pinnedToBottom = false
+          setPinnedToBottom(false)
         }
-
-        viewportEl.addEventListener('scroll', onViewportScroll)
-        viewportEl.addEventListener('wheel', onWheel)
-        scrollDisposable = { dispose: () => {
-          viewportEl.removeEventListener('scroll', onViewportScroll)
-          viewportEl.removeEventListener('wheel', onWheel)
-        } }
-      }
-
-      bufferChangeDisposable = terminal.buffer.onBufferChange((buf) => {
-        // eslint-disable-next-line custom/no-string-literal-comparison -- xterm.js buffer type is external
-        setIsAlternateScreen(buf.type === 'alternate')
       })
 
       // Activity state detector
@@ -236,12 +230,12 @@ export default function BaseTerminal({
 
       // Focus when this tab becomes active
       unsubscribeFocus = workspace.subscribe((state) => {
-        if (state.workspace.activeTabId === tabId && terminalRef.current) {
-          terminalRef.current.focus()
+        if (state.workspace.activeTabId === tabId && engineRef.current) {
+          engineRef.current.focus()
         }
       })
       if (workspace.getState().workspace.activeTabId === tabId) {
-        terminal.focus()
+        engine.focus()
       }
 
       // Set mounted handler — the background subscription forwards all events here
@@ -255,7 +249,7 @@ export default function BaseTerminal({
 
             const afterWrite = () => {
               if (shouldScrollToBottom) {
-                terminal.scrollToBottom()
+                engine.scrollToBottom()
                 scrollPositionRef.current = ScrollPosition.Bottom
                 setScrollPosition(ScrollPosition.Bottom)
               }
@@ -265,13 +259,12 @@ export default function BaseTerminal({
               const decoder = new TextDecoder('utf-8', { fatal: false })
               const dataStr = decoder.decode(event.data)
               const stripped = dataStr.replace(/\x1b\[3J/g, '')
-              terminal.write(stripped, afterWrite)
+              engine.write(stripped, afterWrite)
             } else {
-              terminal.write(event.data, afterWrite)
+              engine.write(event.data, afterWrite)
             }
 
-            // eslint-disable-next-line custom/no-string-literal-comparison -- xterm.js buffer type is external
-            setIsAlternateScreen(terminal.buffer.active.type === 'alternate')
+            setIsAlternateScreen(engine.isAlternateScreen())
 
             if (detector) {
               const decoder = new TextDecoder('utf-8', { fatal: false })
@@ -294,7 +287,7 @@ export default function BaseTerminal({
               if (immediateFailure) {
                 setOverlay({ message: `Process exited immediately with code ${String(event.exitCode)}`, type: 'error' })
               } else if (keepOnExit) {
-                terminal.write(`\r\n\x1b[2mProcess exited with exit code ${String(event.exitCode)}\x1b[0m\r\n`)
+                engine.write(`\r\n\x1b[2mProcess exited with exit code ${String(event.exitCode)}\x1b[0m\r\n`)
               } else {
                 void removeTab(tabId)
               }
@@ -303,10 +296,9 @@ export default function BaseTerminal({
           }
           case PtyEventType.Resize: {
             const shouldStayAtBottom = cache.pinnedToBottom || scrollPositionRef.current === ScrollPosition.Bottom
-            const buf = terminal.buffer.active
-            const scrollRatio = buf.baseY > 0 ? buf.viewportY / buf.baseY : 0
+            const scrollRatio = engine.getScrollRatio()
 
-            terminal.resize(event.cols, event.rows)
+            engine.resize(event.cols, event.rows)
 
             // Check if daemon-echoed size matches what we requested
             const req = requestedSize
@@ -317,12 +309,11 @@ export default function BaseTerminal({
             }
 
             if (shouldStayAtBottom) {
-              terminal.scrollToBottom()
+              engine.scrollToBottom()
               scrollPositionRef.current = ScrollPosition.Bottom
               setScrollPosition(ScrollPosition.Bottom)
             } else {
-              const newScrollLine = Math.round(terminal.buffer.active.baseY * scrollRatio)
-              terminal.scrollToLine(newScrollLine)
+              engine.scrollToRatio(scrollRatio)
             }
             break
           }
@@ -342,7 +333,7 @@ export default function BaseTerminal({
       // ResizeObserver — gated on initialResizeDone to prevent resize during mount
       resizeObserver = new ResizeObserver(() => {
         if (!initialResizeDone) return
-        fitTerminal(terminal, resize, getComputedStyle)
+        applyFit(engine, resize)
       })
       if (containerRef.current) {
         resizeObserver.observe(containerRef.current)
@@ -352,10 +343,10 @@ export default function BaseTerminal({
       if (resizeTimeout) clearTimeout(resizeTimeout)
       resizeTimeout = setTimeout(() => {
         if (cancelled) return
-        fitTerminal(terminal, resize, getComputedStyle)
-        log.debug(`[${config.logPrefix} ${tabId}] resize (initial):`, { cols: terminal.cols, rows: terminal.rows })
+        applyFit(engine, resize)
+        log.debug(`[${config.logPrefix} ${tabId}] resize (initial):`, { cols: engine.cols, rows: engine.rows })
         initialResizeDone = true
-      }, 100)
+      }, INITIAL_FIT_DELAY_MS)
 
       // Forward terminal input to PTY only when this tab is active.
       // Inactive tabs can't receive keystrokes so any onData during
@@ -364,9 +355,9 @@ export default function BaseTerminal({
       // The write is awaited end-to-end — under PTY backpressure the daemon
       // pauses tonic's message loop, HTTP/2 closes the client's stream-level
       // receive window, and the Promise resolves only when the bytes have
-      // landed. xterm.js queues subsequent onData firings while the previous
+      // landed. The engine queues subsequent onData firings while the previous
       // one is in flight, preserving order.
-      inputDisposable = terminal.onData((data) => {
+      inputDisposable = engine.onData((data) => {
         const activeTab = workspace.getState().workspace.activeTabId
         if (activeTab !== undefined && activeTab !== tabId) return
         const tty = ttyRef.current
@@ -384,32 +375,19 @@ export default function BaseTerminal({
     if (existingCache) {
       // === REMOUNT PATH: reuse cached terminal ===
       log.debug(`[${config.logPrefix} ${tabId}] remount from cache`)
-      const terminal = existingCache.terminal
+      const engine = existingCache.engine
 
       // Apply current settings (font, cursor, theme may have changed)
-      terminal.options.fontSize = settings.terminal.fontSize
-      terminal.options.fontFamily = settings.terminal.fontFamily
-      terminal.options.cursorBlink = settings.terminal.cursorBlink
-      terminal.options.cursorStyle = settings.terminal.cursorStyle
-      terminal.options.theme = {
-        ...TERMINAL_THEME_COLORS,
-        background: config.themeBackground,
-        cursorAccent: config.themeBackground,
-      }
+      engine.applyDisplayOptions(displayOptions)
 
       // Restore pinned state from cache
       setPinnedToBottom(existingCache.pinnedToBottom)
 
-      // Reparent terminal element to the new container. The WebGL canvas moves with it —
-      // a GL context survives being detached and re-attached to the DOM.
       setLoading(false)
-      ;(containerRef.current as TerminalContainerElement).terminal = terminal
-      if (terminal.element) {
-        containerRef.current.appendChild(terminal.element)
-        terminal.refresh(0, terminal.rows - 1)
-      }
+      ;(containerRef.current as TerminalContainerElement).terminal = engine.raw
+      engine.attach(containerRef.current)
 
-      attachMountedState(terminal, existingCache.tty, existingCache)
+      attachMountedState(engine, existingCache.tty, existingCache)
     } else {
       // === FIRST MOUNT PATH: create terminal and cache it ===
       log.debug(`[${config.logPrefix} ${tabId}] first mount`, {
@@ -426,43 +404,30 @@ export default function BaseTerminal({
           return
         }
 
-        if (!containerRef.current) return
+        const engine = await config.createEngine({
+          ...displayOptions,
+          scrollback: SCROLLBACK_LINES,
+          openExternal,
+          label: `${config.logPrefix} ${tabId}`,
+        })
+
+        // `cancelled` is written by the cleanup closure while the awaits in here are in flight.
+        // TS narrows it to false from the effect body and cannot see that write, hence the
+        // no-unnecessary-condition suppressions below.
+        if (cancelled || !containerRef.current) {
+          // A StrictMode double-mount (or a fast tab switch) raced ahead of this async init.
+          // The engine was never attached and never cached, so nothing else will free it.
+          engine.dispose()
+          return
+        }
 
         setLoading(false)
-        const terminal = new XTerm({
-          cursorBlink: settings.terminal.cursorBlink,
-          cursorStyle: settings.terminal.cursorStyle,
-          fontSize: settings.terminal.fontSize,
-          fontFamily: settings.terminal.fontFamily,
-          scrollback: 50000,
-          linkHandler: {
-            activate: (_event, uri) => { openExternal(uri) }
-          },
-          theme: {
-            ...TERMINAL_THEME_COLORS,
-            background: config.themeBackground,
-            cursorAccent: config.themeBackground,
-          }
-        })
-
-        terminal.open(containerRef.current)
-
-        // GPU renderer. Degrades to xterm's DOM renderer rather than failing the terminal:
-        // headless/software-rendered environments have no WebGL2 context, and Chromium evicts
-        // the oldest context once a workspace holds more cached terminals than it allows live.
-        loadWebglRenderer(terminal, (fallback: WebglFallback) => {
-          if (fallback.reason === WebglFallbackReason.Unavailable) {
-            log.warn(`[${config.logPrefix} ${tabId}] WebGL unavailable, using DOM renderer:`, fallback.error.message)
-          } else {
-            log.warn(`[${config.logPrefix} ${tabId}] WebGL context lost, reverted to DOM renderer`)
-          }
-        })
-
-        ;(containerRef.current as TerminalContainerElement).terminal = terminal
+        engine.attach(containerRef.current)
+        ;(containerRef.current as TerminalContainerElement).terminal = engine.raw
 
         // Create cache entry — event handler is registered before the stream starts
         const cache: CachedTerminal = {
-          terminal,
+          engine,
           tty: undefined as unknown as Tty,  // set after openTtyStream resolves
           unsubscribeEvents: () => {},
           mountedHandler: null,
@@ -477,7 +442,7 @@ export default function BaseTerminal({
             if (!currentTab) return // Tab already removed (PTY exit arrived after tab close)
             const keepOnExit = (currentTab.state as BaseTerminalState | undefined)?.keepOnExit
             if (keepOnExit) {
-              terminal.write(`\r\n\x1b[2mProcess exited with exit code ${String(exitCode)}\x1b[0m\r\n`)
+              engine.write(`\r\n\x1b[2mProcess exited with exit code ${String(exitCode)}\x1b[0m\r\n`)
             } else {
               void workspace.getState().removeTab(tabId)
             }
@@ -494,23 +459,22 @@ export default function BaseTerminal({
           cache.unsubscribeEvents = result.unsubscribe
         } catch (error) {
           log.error(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, currentExistingPtyId, error)
-          if (cancelled) {
-            terminal.dispose()
-            return
-          }
+          engine.dispose()
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          if (cancelled) return
           setOverlay({ message: `Failed to reattach terminal: ${error instanceof Error ? error.message : 'Unknown error'}`, type: 'error' })
           return
         }
 
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         if (cancelled) {
-          // A StrictMode double-mount (or a quick unmount) raced ahead of this async
-          // init. terminal.open() and the stream subscription already happened, but this
-          // closure never stored them on termAppRef.cachedTerminal, so the effect cleanup
-          // couldn't reach them. Tear them down here — otherwise terminal A lingers as an
-          // orphaned DOM node while mount 2 opens terminal B in the same container
-          // (duplicated output), and the orphan steals focus with no onData wired (no input).
+          // Unmounted while the daemon was answering. This closure never stored the engine on
+          // termAppRef.cachedTerminal, so the effect cleanup couldn't reach it — tear it down
+          // here. Otherwise the engine lingers as an orphaned DOM node while the next mount
+          // opens its own (duplicated output), and the orphan steals focus with no onData
+          // wired (no input).
           cache.unsubscribeEvents()
-          terminal.dispose()
+          engine.dispose()
           return
         }
 
@@ -519,9 +483,9 @@ export default function BaseTerminal({
         if (termAppRef) termAppRef.cachedTerminal = cache
 
         // Notify parent that terminal is ready (first mount only — handlers persist on the cached terminal)
-        config.onTerminalReady?.(terminal)
+        config.onTerminalReady?.(engine)
 
-        attachMountedState(terminal, tty, cache)
+        attachMountedState(engine, tty, cache)
       }
 
       void init()
@@ -536,7 +500,7 @@ export default function BaseTerminal({
       // Disconnect mounted UI state
       inputDisposable?.dispose()
       scrollDisposable?.dispose()
-      bufferChangeDisposable?.dispose()
+      wheelDisposable?.dispose()
       resizeObserver?.disconnect()
       unsubscribeFocus?.()
       detector?.destroy()
@@ -551,19 +515,19 @@ export default function BaseTerminal({
         }
       }
 
-      terminalRef.current = null
+      engineRef.current = null
       ttyRef.current = null
-      // Do NOT dispose terminal or unsubscribe TTY — they stay cached
+      // Do NOT dispose the engine or unsubscribe the TTY — they stay cached
     }
   }, [tabId, workspaceId, config, settings, removeTab, setTabState, sessionStore, workspace, refreshCounter, openExternal])
 
   const handleScrollDown = useCallback(() => {
-    terminalRef.current?.scrollToBottom()
-  }, [terminalRef])
+    engineRef.current?.scrollToBottom()
+  }, [engineRef])
 
   const handleScrollToTop = useCallback(() => {
-    terminalRef.current?.scrollToTop()
-  }, [terminalRef])
+    engineRef.current?.scrollToTop()
+  }, [engineRef])
 
   const handleRefreshStream = useCallback(() => {
     const ref = workspace.getState().getTabRef(tabId) as TerminalAppRef | null
@@ -590,8 +554,8 @@ export default function BaseTerminal({
   }
 
   const handleCopy = () => {
-    const selection = terminalRef.current?.getSelection()
-    log.debug(`[${config.logPrefix} ${tabId}] copy:`, { selection: selection ?? '(no selection)', hasTerminal: !!terminalRef.current })
+    const selection = engineRef.current?.getSelection()
+    log.debug(`[${config.logPrefix} ${tabId}] copy:`, { selection: selection ?? '(no selection)', hasTerminal: !!engineRef.current })
     if (selection) {
       clipboard.writeText(selection)
     }
@@ -672,7 +636,7 @@ export default function BaseTerminal({
                 cache.badgeClickTimer = null
                 cache.pinnedToBottom = true
                 setPinnedToBottom(true)
-                terminalRef.current?.scrollToBottom()
+                engineRef.current?.scrollToBottom()
               } else {
                 // First click — delay to allow double-click
                 cache.badgeClickTimer = setTimeout(() => {
@@ -708,7 +672,7 @@ export default function BaseTerminal({
         <button
           className="scroll-down-btn terminal-circle-btn"
           onClick={() => {
-            terminalRef.current?.scrollToBottom()
+            engineRef.current?.scrollToBottom()
           }}
           title="Scroll to bottom"
         >
