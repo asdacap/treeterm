@@ -35,8 +35,8 @@ const h = vi.hoisted(() => {
 const sshApi = h.sshApi
 const appState = h.appState
 
-const sessionNamesStore = createStore<{ names: Map<string, { name: string }> }>()(() => ({
-  names: new Map(),
+const sessionNamesStore = createStore<{ getName: (sessionId: string) => string | undefined }>()(() => ({
+  getName: () => undefined,
 }))
 appState.sessionNamesStore = sessionNamesStore
 

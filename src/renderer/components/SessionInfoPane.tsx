@@ -75,7 +75,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
   const exec = useAppStore(s => s.exec)
   const disconnectSession = useAppStore(s => s.disconnectSession)
   const sessionNamesStore = useAppStore(s => s.sessionNamesStore)
-  const customName = useStore(sessionNamesStore, s => s.names.get(sessionId)?.name)
+  const customName = useStore(sessionNamesStore, s => s.getName(sessionId))
 
   // `selectedTab` is the user's explicit choice; null means "follow the default".
   // The default switches to the Mismatch tab when a daemon hash mismatch occurs so

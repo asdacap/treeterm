@@ -111,9 +111,9 @@ export default function SessionPanel({
 
   // Session name editing
   const sessionNamesStore = useAppStore(s => s.sessionNamesStore)
-  const customName = useStore(sessionNamesStore, s => s.names.get(sessionId)?.name)
+  const customName = useStore(sessionNamesStore, s => s.getName(sessionId))
   const setSessionName = useStore(sessionNamesStore, s => s.setName)
-  const removeSessionName = useStore(sessionNamesStore, s => s.removeName)
+  const clearSessionName = useStore(sessionNamesStore, s => s.clearName)
   // Fall back to the connection-derived name — never the raw ephemeral session id.
   const defaultName = deriveDefaultSessionName(connection)
   const displayName = customName ?? defaultName
@@ -130,10 +130,10 @@ export default function SessionPanel({
     if (trimmed && trimmed !== defaultName) {
       setSessionName(sessionId, trimmed)
     } else {
-      removeSessionName(sessionId)
+      clearSessionName(sessionId)
     }
     setIsEditingName(false)
-  }, [editName, sessionId, defaultName, setSessionName, removeSessionName])
+  }, [editName, sessionId, defaultName, setSessionName, clearSessionName])
 
   const [isSessionCollapsed, setIsSessionCollapsed] = useState(false)
 

@@ -20,6 +20,10 @@ export function deriveDefaultSessionName(connection: ConnectionInfo): string {
   return 'LOCAL'
 }
 
+/**
+ * Per-session UI state. An entry exists for any session the user has renamed
+ * *or* reordered, so `name` is `''` whenever only the ordering was customised.
+ */
 interface SessionNameEntry {
   name: string
   lastUsed: number
@@ -29,9 +33,15 @@ interface SessionNameEntry {
 export interface SessionNamesState {
   names: Map<string, SessionNameEntry>
   setName: (sessionId: string, name: string) => void
-  removeName: (sessionId: string) => void
+  clearName: (sessionId: string) => void
   getName: (sessionId: string) => string | undefined
-  reorderSession: (dragId: string, targetId: string, position: 'before' | 'after') => void
+  /**
+   * `sessionIds` is every session currently on screen, in whatever order the
+   * caller holds them. Ordering is assigned across that whole list — not just
+   * the sessions that happen to already have an entry — so an unnamed session
+   * can be dragged just like a renamed one.
+   */
+  reorderSession: (sessionIds: string[], dragId: string, targetId: string, position: 'before' | 'after') => void
   getSortedIds: (ids: string[]) => string[]
   cleanupStale: () => void
 }
@@ -44,6 +54,15 @@ function nextSortOrder(names: Map<string, SessionNameEntry>): number {
     if (entry.sortOrder > max) max = entry.sortOrder
   }
   return max + 1
+}
+
+// Sessions without an entry sort last, keeping their incoming relative order.
+function sortIds(ids: string[], names: Map<string, SessionNameEntry>): string[] {
+  return [...ids].sort((a, b) => {
+    const aOrder = names.get(a)?.sortOrder ?? Infinity
+    const bOrder = names.get(b)?.sortOrder ?? Infinity
+    return aOrder - bOrder
+  })
 }
 
 export const useSessionNamesStore = create<SessionNamesState>()(
@@ -59,47 +78,43 @@ export const useSessionNamesStore = create<SessionNamesState>()(
           }
         })
       },
-      removeName: (sessionId: string) => {
+      // Drops the custom name but keeps the entry: the session's position in the
+      // list survives a rename-back-to-default.
+      clearName: (sessionId: string) => {
         set((state) => {
-          const updated = new Map(state.names)
-          updated.delete(sessionId)
-          return { names: updated }
+          const existing = state.names.get(sessionId)
+          if (!existing) return state
+          return {
+            names: new Map(state.names).set(sessionId, { ...existing, name: '' }),
+          }
         })
       },
       getName: (sessionId: string) => {
-        return get().names.get(sessionId)?.name
+        const name = get().names.get(sessionId)?.name
+        return name === '' ? undefined : name
       },
-      reorderSession: (dragId: string, targetId: string, position: 'before' | 'after') => {
+      reorderSession: (sessionIds: string[], dragId: string, targetId: string, position: 'before' | 'after') => {
         if (dragId === targetId) return
         set((state) => {
-          const { names } = state
-          if (!names.has(dragId) || !names.has(targetId)) return state
+          if (!sessionIds.includes(dragId) || !sessionIds.includes(targetId)) return state
 
-          const sorted = Array.from(names.entries())
-            .sort(([, a], [, b]) => a.sortOrder - b.sortOrder)
+          const ordered = sortIds(sessionIds, state.names).filter((id) => id !== dragId)
+          const targetIdx = ordered.indexOf(targetId)
+          ordered.splice(position === 'before' ? targetIdx : targetIdx + 1, 0, dragId)
 
-          const ordered = sorted.filter(([id]) => id !== dragId)
-          const targetIdx = ordered.findIndex(([id]) => id === targetId)
-          const insertIdx = position === 'before' ? targetIdx : targetIdx + 1
-          const dragEntry = sorted.find(([id]) => id === dragId)
-          if (dragEntry) ordered.splice(insertIdx, 0, dragEntry)
-
-          const updated = new Map<string, SessionNameEntry>()
+          const now = Date.now()
+          const updated = new Map(state.names)
           for (let i = 0; i < ordered.length; i++) {
             // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- index within bounds
-            const [id, entry] = ordered[i]!
-            updated.set(id, { ...entry, sortOrder: i })
+            const id = ordered[i]!
+            const existing = updated.get(id)
+            updated.set(id, existing ? { ...existing, sortOrder: i } : { name: '', lastUsed: now, sortOrder: i })
           }
           return { names: updated }
         })
       },
       getSortedIds: (ids: string[]) => {
-        const { names } = get()
-        return [...ids].sort((a, b) => {
-          const aOrder = names.get(a)?.sortOrder ?? Infinity
-          const bOrder = names.get(b)?.sortOrder ?? Infinity
-          return aOrder - bOrder
-        })
+        return sortIds(ids, get().names)
       },
       cleanupStale: () => {
         const now = Date.now()

@@ -70,36 +70,53 @@ describe('SessionNamesStore', () => {
     })
   })
 
-  describe('removeName', () => {
-    it('removes an existing session name', () => {
+  describe('clearName', () => {
+    it('clears an existing session name', () => {
       useSessionNamesStore.getState().setName('s1', 'Test')
-      useSessionNamesStore.getState().removeName('s1')
+      useSessionNamesStore.getState().clearName('s1')
       expect(useSessionNamesStore.getState().getName('s1')).toBeUndefined()
     })
 
     it('does nothing for non-existent session', () => {
-      useSessionNamesStore.getState().removeName('nonexistent')
+      useSessionNamesStore.getState().clearName('nonexistent')
       expect(useSessionNamesStore.getState().names).toEqual(new Map())
+    })
+
+    it('keeps the session position when the name is cleared', () => {
+      const ids = ['s1', 's2', 's3']
+      useSessionNamesStore.getState().setName('s3', 'C')
+      useSessionNamesStore.getState().reorderSession(ids, 's3', 's1', 'before')
+      useSessionNamesStore.getState().clearName('s3')
+      expect(useSessionNamesStore.getState().getSortedIds(ids)).toEqual(['s3', 's1', 's2'])
     })
   })
 
   describe('reorderSession', () => {
+    const ids = ['s1', 's2', 's3']
+
     it('does nothing when dragId equals targetId', () => {
-      useSessionNamesStore.getState().setName('s1', 'A')
-      useSessionNamesStore.getState().reorderSession('s1', 's1', 'before')
-      expect(useSessionNamesStore.getState().names.get('s1')?.sortOrder).toBe(0)
+      useSessionNamesStore.getState().reorderSession(ids, 's1', 's1', 'before')
+      expect(useSessionNamesStore.getState().names.size).toBe(0)
     })
 
-    it('does nothing when dragId is not in names', () => {
-      useSessionNamesStore.getState().setName('s1', 'A')
-      useSessionNamesStore.getState().reorderSession('missing', 's1', 'before')
-      expect(useSessionNamesStore.getState().names.size).toBe(1)
+    it('does nothing when dragId is not in the session list', () => {
+      useSessionNamesStore.getState().reorderSession(ids, 'missing', 's1', 'before')
+      expect(useSessionNamesStore.getState().names.size).toBe(0)
     })
 
-    it('does nothing when targetId is not in names', () => {
-      useSessionNamesStore.getState().setName('s1', 'A')
-      useSessionNamesStore.getState().reorderSession('s1', 'missing', 'before')
-      expect(useSessionNamesStore.getState().names.get('s1')?.sortOrder).toBe(0)
+    it('does nothing when targetId is not in the session list', () => {
+      useSessionNamesStore.getState().reorderSession(ids, 's1', 'missing', 'before')
+      expect(useSessionNamesStore.getState().names.size).toBe(0)
+    })
+
+    it('reorders sessions that have never been renamed', () => {
+      useSessionNamesStore.getState().reorderSession(ids, 's3', 's1', 'before')
+      expect(useSessionNamesStore.getState().getSortedIds(ids)).toEqual(['s3', 's1', 's2'])
+    })
+
+    it('does not invent a custom name for a reordered session', () => {
+      useSessionNamesStore.getState().reorderSession(ids, 's3', 's1', 'before')
+      expect(useSessionNamesStore.getState().getName('s3')).toBeUndefined()
     })
 
     it('reorders with position before', () => {
@@ -107,9 +124,8 @@ describe('SessionNamesStore', () => {
       useSessionNamesStore.getState().setName('s2', 'B')
       useSessionNamesStore.getState().setName('s3', 'C')
       // Move s3 before s1
-      useSessionNamesStore.getState().reorderSession('s3', 's1', 'before')
-      const sorted = useSessionNamesStore.getState().getSortedIds(['s1', 's2', 's3'])
-      expect(sorted).toEqual(['s3', 's1', 's2'])
+      useSessionNamesStore.getState().reorderSession(ids, 's3', 's1', 'before')
+      expect(useSessionNamesStore.getState().getSortedIds(ids)).toEqual(['s3', 's1', 's2'])
     })
 
     it('reorders with position after', () => {
@@ -117,9 +133,27 @@ describe('SessionNamesStore', () => {
       useSessionNamesStore.getState().setName('s2', 'B')
       useSessionNamesStore.getState().setName('s3', 'C')
       // Move s1 after s2
-      useSessionNamesStore.getState().reorderSession('s1', 's2', 'after')
-      const sorted = useSessionNamesStore.getState().getSortedIds(['s1', 's2', 's3'])
-      expect(sorted).toEqual(['s2', 's1', 's3'])
+      useSessionNamesStore.getState().reorderSession(ids, 's1', 's2', 'after')
+      expect(useSessionNamesStore.getState().getSortedIds(ids)).toEqual(['s2', 's1', 's3'])
+    })
+
+    it('preserves the custom name of a reordered session', () => {
+      useSessionNamesStore.getState().setName('s3', 'C')
+      useSessionNamesStore.getState().reorderSession(ids, 's3', 's1', 'before')
+      expect(useSessionNamesStore.getState().getName('s3')).toBe('C')
+    })
+
+    it('interleaves a renamed session with never-renamed ones', () => {
+      // s2 is the only session with an entry, so it starts with sortOrder 0 while
+      // s1/s3 sort last. Dragging s1 must still place it relative to s2.
+      useSessionNamesStore.getState().setName('s2', 'B')
+      useSessionNamesStore.getState().reorderSession(ids, 's1', 's2', 'after')
+      expect(useSessionNamesStore.getState().getSortedIds(ids)).toEqual(['s2', 's1', 's3'])
+    })
+
+    it('reorders a session dropped onto the last position', () => {
+      useSessionNamesStore.getState().reorderSession(ids, 's1', 's3', 'after')
+      expect(useSessionNamesStore.getState().getSortedIds(ids)).toEqual(['s2', 's3', 's1'])
     })
   })
 

@@ -199,7 +199,7 @@ export default function TreePane({ selectFolder, isCollapsed, onToggleCollapse }
       setDragState(null)
       return
     }
-    reorderSession(dragState.dragId, dragState.overId, dragState.position)
+    reorderSession(rawSessionIds, dragState.dragId, dragState.overId, dragState.position)
     setDragState(null)
   }
 
