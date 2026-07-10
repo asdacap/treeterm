@@ -8,8 +8,8 @@ import { PtyEventType } from '../../shared/ipc-types'
 import { getTabs, isAiHarnessState } from '../types'
 import type { TerminalEngine } from '../terminal/engine'
 import type { Tty, TtyWriter } from './createTtyStore'
-import { createAnalyzerStore } from './createAnalyzerStore'
-import type { Analyzer } from './createAnalyzerStore'
+import { createAnalyzerStore, TitleRefreshStatus } from './createAnalyzerStore'
+import type { Analyzer, TitleRefreshResult } from './createAnalyzerStore'
 import { createGitControllerStore } from './createGitControllerStore'
 import type { GitController } from './createGitControllerStore'
 import { createReviewCommentStore } from './createReviewCommentStore'
@@ -18,6 +18,12 @@ import { createReviewViewedFilesStore } from './createReviewViewedFilesStore'
 import type { ReviewViewedFilesStore } from './createReviewViewedFilesStore'
 import { DisposableMap, DisposableStore } from '../../shared/lifecycle'
 import type { IDisposable } from '../../shared/lifecycle'
+
+/** The LLM labeller reads the AI Harness terminal buffer; without one there is nothing to label from. */
+const NO_AI_HARNESS_TAB: TitleRefreshResult = {
+  status: TitleRefreshStatus.Failure,
+  error: 'No AI Harness tab open — the labeller has no terminal to read',
+}
 
 /**
  * Cached terminal for BaseTerminal-derived tabs only (Terminal, AiHarness).
@@ -167,11 +173,11 @@ export interface WorkspaceStoreState {
   deleteMetadata: (key: string, reason: string) => void
   toggleFavourite: () => void
   /** Re-consult the LLM (via the active AI Harness tab's analyzer) and overwrite the
-   *  workspace's display name + description. No-op if no AI Harness tab is available. */
-  refreshTitleAndDescription: () => Promise<void>
+   *  workspace's display name + description. Fails if no AI Harness tab is available. */
+  refreshTitleAndDescription: () => Promise<TitleRefreshResult>
   /** Re-consult the LLM (via the active AI Harness tab's analyzer) and rename the git
-   *  branch, marking it user-defined. No-op if no AI Harness tab is available. */
-  refreshBranchName: () => Promise<void>
+   *  branch, marking it user-defined. Fails if no AI Harness tab is available. */
+  refreshBranchName: () => Promise<TitleRefreshResult>
   updateSettings: (settings: Partial<WorktreeSettings>) => void
   updateStatus: (status: Workspace['status']) => void
   /** Writes the workspace's displayName + description into the daemon-host-wide worktree registry.
@@ -556,22 +562,16 @@ export function createWorkspaceStore(
       }
     },
 
-    refreshTitleAndDescription: async (): Promise<void> => {
+    refreshTitleAndDescription: async (): Promise<TitleRefreshResult> => {
       const analyzer = findAiHarnessAnalyzer()
-      if (!analyzer) {
-        console.warn('[workspace] refreshTitleAndDescription: no AI Harness tab available')
-        return
-      }
-      await analyzer.getState().refreshTitleAndDescription()
+      if (!analyzer) return NO_AI_HARNESS_TAB
+      return analyzer.getState().refreshTitleAndDescription()
     },
 
-    refreshBranchName: async (): Promise<void> => {
+    refreshBranchName: async (): Promise<TitleRefreshResult> => {
       const analyzer = findAiHarnessAnalyzer()
-      if (!analyzer) {
-        console.warn('[workspace] refreshBranchName: no AI Harness tab available')
-        return
-      }
-      await analyzer.getState().refreshBranchName()
+      if (!analyzer) return NO_AI_HARNESS_TAB
+      return analyzer.getState().refreshBranchName()
     },
 
     saveRegistryEntry: async (): Promise<void> => {

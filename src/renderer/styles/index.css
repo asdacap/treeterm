@@ -796,6 +796,15 @@ body,
   color: var(--text-primary);
 }
 
+.workspace-refresh-title-btn {
+  display: inline-flex;
+  align-items: center;
+}
+
+.workspace-refresh-title-btn:disabled {
+  cursor: default;
+}
+
 .workspace-edit-input {
   font-size: 13px;
   font-weight: 500;

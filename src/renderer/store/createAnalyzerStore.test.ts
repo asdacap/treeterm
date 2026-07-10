@@ -1,6 +1,6 @@
 /* eslint-disable custom/no-string-literal-comparison -- test fixtures */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createAnalyzerStore } from './createAnalyzerStore'
+import { createAnalyzerStore, TitleRefreshStatus } from './createAnalyzerStore'
 import type { AnalyzerDeps } from './createAnalyzerStore'
 import { ActivityState } from '../types'
 import type { LlmApi, Settings } from '../types'
@@ -663,22 +663,68 @@ describe('createAnalyzerStore', () => {
         getDescription: vi.fn().mockReturnValue('Existing Description'),
       })
 
-      await store.getState().refreshTitleAndDescription()
+      const result = await store.getState().refreshTitleAndDescription()
 
+      expect(result.status).toBe(TitleRefreshStatus.Success)
       expect(deps.llm.generateTitle).toHaveBeenCalled()
       expect(deps.updateMetadata).toHaveBeenCalledWith('displayName', 'Test Title', 'manualRefreshTitle')
       expect(deps.updateMetadata).toHaveBeenCalledWith('description', 'Test Description', 'manualRefreshDescription')
       store.getState().stop()
     })
 
-    it('refreshTitleAndDescription no-ops when there is no buffer', async () => {
+    it('refreshTitleAndDescription reports failure when there is no buffer', async () => {
       deps = makeDeps()
       const store = createAnalyzerStore('tab-1', deps)
 
-      await store.getState().refreshTitleAndDescription()
+      const result = await store.getState().refreshTitleAndDescription()
 
+      expect(result).toEqual({ status: TitleRefreshStatus.Failure, error: 'Terminal is empty — nothing for the labeller to read' })
       expect(deps.llm.generateTitle).not.toHaveBeenCalled()
       expect(deps.updateMetadata).not.toHaveBeenCalled()
+    })
+
+    it('refreshTitleAndDescription reports failure when no model is configured', async () => {
+      deps = makeDeps({
+        getSettings: vi.fn().mockReturnValue({
+          llm: { apiKey: 'test-key', baseUrl: 'http://localhost' },
+          terminalAnalyzer: { model: '', titleSystemPrompt: 'title prompt', reasoningEffort: 'low' },
+        } as unknown as Settings),
+      })
+      const store = createAnalyzerStore('tab-1', deps)
+
+      const result = await store.getState().refreshTitleAndDescription()
+
+      expect(result).toEqual({ status: TitleRefreshStatus.Failure, error: 'Terminal analyzer model not configured' })
+      expect(deps.llm.generateTitle).not.toHaveBeenCalled()
+    })
+
+    it('refreshTitleAndDescription surfaces the LLM error message and writes no metadata', async () => {
+      const store = await startedStore({
+        llm: {
+          analyzeTerminal: vi.fn().mockResolvedValue({ state: 'idle', reason: '' }),
+          generateTitle: vi.fn().mockResolvedValue({ error: 'rate limited' }),
+        } as unknown as LlmApi,
+      })
+
+      const result = await store.getState().refreshTitleAndDescription()
+
+      expect(result).toEqual({ status: TitleRefreshStatus.Failure, error: 'rate limited' })
+      expect(deps.updateMetadata).not.toHaveBeenCalled()
+      store.getState().stop()
+    })
+
+    it('refreshTitleAndDescription surfaces a thrown LLM error', async () => {
+      const store = await startedStore({
+        llm: {
+          analyzeTerminal: vi.fn().mockResolvedValue({ state: 'idle', reason: '' }),
+          generateTitle: vi.fn().mockRejectedValue(new Error('network down')),
+        } as unknown as LlmApi,
+      })
+
+      const result = await store.getState().refreshTitleAndDescription()
+
+      expect(result).toEqual({ status: TitleRefreshStatus.Failure, error: 'network down' })
+      store.getState().stop()
     })
 
     it('refreshBranchName renames the branch and marks it user-defined even when already user-defined', async () => {
@@ -686,8 +732,9 @@ describe('createAnalyzerStore', () => {
         getBranchIsUserDefined: vi.fn().mockReturnValue(true),
       })
 
-      await store.getState().refreshBranchName()
+      const result = await store.getState().refreshBranchName()
 
+      expect(result.status).toBe(TitleRefreshStatus.Success)
       expect(deps.renameBranch).toHaveBeenCalledWith('old-branch', 'test-title')
       expect(deps.updateMetadata).toHaveBeenCalledWith('branchIsUserDefined', 'true', 'manualRefreshBranch')
       // Branch-only refresh must not touch the display name / description
@@ -703,10 +750,52 @@ describe('createAnalyzerStore', () => {
         } as unknown as LlmApi,
       })
 
-      await store.getState().refreshBranchName()
+      const result = await store.getState().refreshBranchName()
 
+      expect(result).toEqual({ status: TitleRefreshStatus.Failure, error: 'LLM suggested an invalid branch name: "Invalid Name!"' })
       expect(deps.renameBranch).not.toHaveBeenCalled()
       expect(deps.updateMetadata).not.toHaveBeenCalledWith('branchIsUserDefined', 'true', 'manualRefreshBranch')
+      store.getState().stop()
+    })
+
+    // A missing `branchName` key arrives as undefined, and the string "undefined" would
+    // otherwise satisfy the kebab-case branch name regex.
+    it('refreshBranchName does not rename when the LLM omits the branch name', async () => {
+      const store = await startedStore({
+        llm: {
+          analyzeTerminal: vi.fn().mockResolvedValue({ state: 'idle', reason: '' }),
+          generateTitle: vi.fn().mockResolvedValue({ title: 'Test Title', description: 'd' }),
+        } as unknown as LlmApi,
+      })
+
+      const result = await store.getState().refreshBranchName()
+
+      expect(result.status).toBe(TitleRefreshStatus.Failure)
+      expect(deps.renameBranch).not.toHaveBeenCalled()
+      store.getState().stop()
+    })
+
+    it('refreshBranchName surfaces a rename failure', async () => {
+      const store = await startedStore({
+        renameBranch: vi.fn().mockRejectedValue(new Error('branch already exists')),
+      })
+
+      const result = await store.getState().refreshBranchName()
+
+      expect(result).toEqual({ status: TitleRefreshStatus.Failure, error: 'branch already exists' })
+      expect(deps.updateMetadata).not.toHaveBeenCalledWith('branchIsUserDefined', 'true', 'manualRefreshBranch')
+      store.getState().stop()
+    })
+
+    it('refreshBranchName reports failure when the workspace has no branch', async () => {
+      const store = await startedStore({
+        getGitBranch: vi.fn().mockReturnValue(undefined),
+      })
+
+      const result = await store.getState().refreshBranchName()
+
+      expect(result).toEqual({ status: TitleRefreshStatus.Failure, error: 'Workspace has no branch to rename' })
+      expect(deps.renameBranch).not.toHaveBeenCalled()
       store.getState().stop()
     })
   })

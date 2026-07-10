@@ -20,9 +20,23 @@ import type { ReviewState, WorktreeSettings, Workspace, WorkspaceStore } from '.
 import type { GitController } from '../store/createGitControllerStore'
 import { ConnectionStatus, ConnectionTargetType } from '../../shared/types'
 import { PrIndicators } from './PrIndicators'
+import { TitleRefreshStatus } from '../store/createAnalyzerStore'
+import type { TitleRefreshResult } from '../store/createAnalyzerStore'
 
 // Import WorkspaceIcon from TreePane
 import { WorkspaceIcon } from './TreePane'
+
+/** Surfaces an LLM re-label failure to the user; the context menu has already closed by then. */
+function reportRefreshOutcome(refresh: Promise<TitleRefreshResult>): void {
+  refresh.then((result) => {
+    if (result.status === TitleRefreshStatus.Failure) {
+      alert(result.error)
+    }
+  }).catch((err: unknown) => {
+    console.error('[SessionPanel] refresh threw:', err)
+    alert(err instanceof Error ? err.message : String(err))
+  })
+}
 
 interface SessionPanelProps {
   sessionId: string
@@ -441,7 +455,7 @@ export default function SessionPanel({
     closeContextMenu()
     const entry = workspaces.get(workspaceId)
     if (entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError)) {
-      void entry.store.getState().refreshTitleAndDescription()
+      reportRefreshOutcome(entry.store.getState().refreshTitleAndDescription())
     }
   }
 
@@ -449,7 +463,7 @@ export default function SessionPanel({
     closeContextMenu()
     const entry = workspaces.get(workspaceId)
     if (entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError)) {
-      void entry.store.getState().refreshBranchName()
+      reportRefreshOutcome(entry.store.getState().refreshBranchName())
     }
   }
 

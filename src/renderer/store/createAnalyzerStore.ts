@@ -37,6 +37,16 @@ export interface AnalyzerHistoryEntry {
   durationMs?: number
 }
 
+export enum TitleRefreshStatus {
+  Success = 'success',
+  Failure = 'failure',
+}
+
+/** Outcome of a manual LLM re-label. Failures carry a message fit to show the user. */
+export type TitleRefreshResult =
+  | { status: TitleRefreshStatus.Success }
+  | { status: TitleRefreshStatus.Failure; error: string }
+
 export interface AnalyzerState {
   tabId: string
   aiState: ActivityState
@@ -53,9 +63,9 @@ export interface AnalyzerState {
 
   // On-demand regeneration (triggered manually, e.g. from a context menu).
   // Force-overwrite the title/description, ignoring whether they are already set.
-  refreshTitleAndDescription(): Promise<void>
+  refreshTitleAndDescription(): Promise<TitleRefreshResult>
   // Force-rename the git branch from the LLM suggestion and mark it user-defined.
-  refreshBranchName(): Promise<void>
+  refreshBranchName(): Promise<TitleRefreshResult>
 
   // Auto-approve control
   setAutoApprove(value: boolean): void
@@ -68,7 +78,9 @@ export interface AnalyzerState {
 export type Analyzer = StoreApi<AnalyzerState>
 
 type AnalyzerResult = { state: string; reason: string }
-type TitleSuccess = { title: string; description: string; branchName: string; systemPrompt?: string }
+type TitleQueryResult =
+  | { status: TitleRefreshStatus.Success; title: string; description: string; branchName: string }
+  | { status: TitleRefreshStatus.Failure; error: string }
 type BufferCheckResult =
   | { action: 'skip' }
   | { action: 'reuse'; result: AnalyzerResult }
@@ -307,15 +319,18 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   }
 
   // Runs the LLM title/description/branch generation against the current terminal
-  // buffer and records the call in history. Returns the parsed result, or null when
-  // there is no model configured or no buffer to analyze. Applying the result (which
-  // fields to write, with which guards) is left to the caller.
-  async function requestTitleResult(): Promise<TitleSuccess | null> {
+  // buffer and records the call in history. Applying the result (which fields to
+  // write, with which guards) is left to the caller.
+  async function requestTitleResult(): Promise<TitleQueryResult> {
     const settings = deps.getSettings()
-    if (!settings.terminalAnalyzer.model) return null
+    if (!settings.terminalAnalyzer.model) {
+      return { status: TitleRefreshStatus.Failure, error: 'Terminal analyzer model not configured' }
+    }
 
     const buffer = extractBuffer()
-    if (!buffer) return null
+    if (!buffer) {
+      return { status: TitleRefreshStatus.Failure, error: 'Terminal is empty — nothing for the labeller to read' }
+    }
 
     try {
       const startTime = Date.now()
@@ -328,29 +343,41 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       })
       const durationMs = Date.now() - startTime
       const systemPrompt = 'systemPrompt' in result ? result.systemPrompt : undefined
-      history.push({ timestamp: Date.now(), kind: 'title', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), systemPrompt, durationMs })
+      const error = 'error' in result ? result.error : undefined
+      history.push({ timestamp: Date.now(), kind: 'title', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), error, systemPrompt, durationMs })
       if (history.length > MAX_HISTORY) history.shift()
-      return 'title' in result && result.title ? result : null
+      if ('title' in result && result.title) {
+        return { status: TitleRefreshStatus.Success, title: result.title, description: result.description, branchName: result.branchName }
+      }
+      return { status: TitleRefreshStatus.Failure, error: error ?? 'LLM returned no title' }
     } catch (err) {
+      const error = err instanceof Error ? err.message : String(err)
       console.error('[analyzer] title generation failed:', err)
-      history.push({ timestamp: Date.now(), kind: 'title', model: settings.terminalAnalyzer.model, bufferText: buffer, response: '', error: err instanceof Error ? err.message : String(err) })
+      history.push({ timestamp: Date.now(), kind: 'title', model: settings.terminalAnalyzer.model, bufferText: buffer, response: '', error })
       if (history.length > MAX_HISTORY) history.shift()
-      return null
+      return { status: TitleRefreshStatus.Failure, error }
     }
   }
 
   // Renames the git branch to the LLM-suggested name when it is valid and the
-  // workspace is a worktree with a current branch. Returns true on a successful rename.
-  async function applyBranchName(branchName: string | undefined): Promise<boolean> {
-    if (!branchName || !isValidBranchName(branchName)) return false
+  // workspace is a worktree with a current branch.
+  async function applyBranchName(branchName: string): Promise<TitleRefreshResult> {
+    // `branchName` is typed but LLM-sourced: an absent key arrives as undefined at
+    // runtime, and "undefined" happens to satisfy isValidBranchName.
+    if (!branchName || !isValidBranchName(branchName)) {
+      return { status: TitleRefreshStatus.Failure, error: `LLM suggested an invalid branch name: "${branchName}"` }
+    }
     const currentBranch = deps.getGitBranch()
-    if (!currentBranch || !deps.getParentId()) return false
+    if (!currentBranch || !deps.getParentId()) {
+      return { status: TitleRefreshStatus.Failure, error: 'Workspace has no branch to rename' }
+    }
     try {
       await deps.renameBranch(currentBranch, branchName)
-      return true
+      return { status: TitleRefreshStatus.Success }
     } catch (err) {
+      const error = err instanceof Error ? err.message : String(err)
       console.error('[analyzer] branch rename failed:', err)
-      return false
+      return { status: TitleRefreshStatus.Failure, error }
     }
   }
 
@@ -366,7 +393,10 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     }
 
     const result = await requestTitleResult()
-    if (!result) return
+    if (result.status === TitleRefreshStatus.Failure) {
+      console.warn('[analyzer] automatic title generation failed:', result.error)
+      return
+    }
 
     if (!deps.getDisplayName()) {
       deps.updateMetadata('displayName', result.title, 'analyzerSetDisplayName')
@@ -376,7 +406,10 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       deps.updateMetadata('descriptionPrompted', 'true', 'analyzerSetDescriptionPrompted')
     }
     if (!deps.getBranchIsUserDefined()) {
-      await applyBranchName(result.branchName)
+      const renamed = await applyBranchName(result.branchName)
+      if (renamed.status === TitleRefreshStatus.Failure) {
+        console.warn('[analyzer] automatic branch rename skipped:', renamed.error)
+      }
     }
   }
 
@@ -446,29 +479,27 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       }
     },
 
-    refreshTitleAndDescription: async (): Promise<void> => {
+    refreshTitleAndDescription: async (): Promise<TitleRefreshResult> => {
       const result = await requestTitleResult()
-      if (!result) {
-        console.warn('[analyzer] refreshTitleAndDescription: no buffer or model available')
-        return
-      }
+      if (result.status === TitleRefreshStatus.Failure) return result
+
       deps.updateMetadata('displayName', result.title, 'manualRefreshTitle')
       if (result.description) {
         deps.updateMetadata('description', result.description, 'manualRefreshDescription')
         deps.updateMetadata('descriptionPrompted', 'true', 'manualRefreshDescriptionPrompted')
       }
+      return { status: TitleRefreshStatus.Success }
     },
 
-    refreshBranchName: async (): Promise<void> => {
+    refreshBranchName: async (): Promise<TitleRefreshResult> => {
       const result = await requestTitleResult()
-      if (!result) {
-        console.warn('[analyzer] refreshBranchName: no buffer or model available')
-        return
-      }
+      if (result.status === TitleRefreshStatus.Failure) return result
+
       const renamed = await applyBranchName(result.branchName)
-      if (renamed) {
-        deps.updateMetadata('branchIsUserDefined', 'true', 'manualRefreshBranch')
-      }
+      if (renamed.status === TitleRefreshStatus.Failure) return renamed
+
+      deps.updateMetadata('branchIsUserDefined', 'true', 'manualRefreshBranch')
+      return { status: TitleRefreshStatus.Success }
     },
 
     setAutoApprove: (value: boolean): void => {

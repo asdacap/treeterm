@@ -19,6 +19,7 @@ import type { ReviewState, Platform, WorkspaceStore } from '../types'
 import { getTabs, isAppAvailableForConnection } from '../types'
 import { ConnectionTargetType } from '../../shared/types'
 import { PromptDescriptionButton } from './PromptDescriptionButton'
+import { RefreshTitleButton } from './RefreshTitleButton'
 import RunActionDropdown from './RunActionDropdown'
 import ContextMenu from './ContextMenu'
 import { useContextMenuStore } from '../store/contextMenu'
@@ -354,6 +355,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                     >
                       ✎
                     </button>
+                    {activeHandle && <RefreshTitleButton workspace={activeHandle} />}
                   </>
                 )}
                 <div className="workspace-actions">

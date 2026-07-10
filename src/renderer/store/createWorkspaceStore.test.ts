@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createWorkspaceStore } from './createWorkspaceStore'
 import type { WorkspaceStoreDeps } from './createWorkspaceStore'
+import { TitleRefreshStatus } from './createAnalyzerStore'
 import { getUnmergedSubWorkspaces, WorkspaceEntryStatus } from './createSessionStore'
 import type { WorkspaceEntry } from './createSessionStore'
 import type { LlmApi, Workspace, Application } from '../types'
@@ -172,6 +173,26 @@ describe('createWorkspaceStore', () => {
     store.getState().setActiveTab('tab-2', 'test')
 
     expect(store.getState().workspace.activeTabId).toBe('tab-2')
+  })
+
+  // The labeller reads the AI Harness terminal buffer. A workspace with no such tab has
+  // nothing to read, and the caller must be told rather than left staring at a no-op.
+  describe('LLM re-label without an AI Harness tab', () => {
+    it('refreshTitleAndDescription fails', async () => {
+      const store = createWorkspaceStore(makeWorkspace(), makeHandleDeps())
+
+      const result = await store.getState().refreshTitleAndDescription()
+
+      expect(result).toEqual({ status: TitleRefreshStatus.Failure, error: 'No AI Harness tab open — the labeller has no terminal to read' })
+    })
+
+    it('refreshBranchName fails', async () => {
+      const store = createWorkspaceStore(makeWorkspace(), makeHandleDeps())
+
+      const result = await store.getState().refreshBranchName()
+
+      expect(result).toEqual({ status: TitleRefreshStatus.Failure, error: 'No AI Harness tab open — the labeller has no terminal to read' })
+    })
   })
 
   describe('addTab', () => {
