@@ -10,10 +10,11 @@ import { FileWatchEventType, type PtyEvent, type FileWatchEvent } from '../../sh
 import { ConnectionStatus, WorkspaceStatus } from '../../shared/types'
 import type {
   Workspace, Session, AppState, GitInfo, WorkspaceRef,
-  ConnectionInfo, ActivityState,
+  ConnectionInfo, ActivityState, IpcResult,
   TerminalApi, GitApi, FilesystemApi, ExecApi, SessionApi, Settings, WorktreeSettings,
   Application, SandboxConfig, TTYSessionInfo, LlmApi, GitHubApi, RunActionsApi
 } from '../types'
+import { toDisposable } from '../../shared/lifecycle'
 import type { SessionLock } from '../../shared/types'
 import { parseWorkspaceFile, toStoredWorkspaceFile } from '../../shared/workspaceFile'
 import type { WorktreeRegistryApi } from '../lib/worktreeRegistry'
@@ -74,7 +75,10 @@ export interface SessionState {
   handleConnectionStatusChange: (info: ConnectionInfo) => void
 
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string, ptyHandle?: string) => Promise<string>
-  openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<{ tty: Tty; unsubscribe: () => void }>
+  /** The returned Tty owns its event subscription — give it to a DisposableStore.
+   *  There is no separate cleanup value for a caller to drop, nor for a narrowed
+   *  dependency type to silently erase. */
+  openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<Tty>
   killTty: (ptyId: string) => void
   listTty: () => Promise<TTYSessionInfo[]>
 
@@ -1081,16 +1085,22 @@ export function createSessionStore(
       return result.sessionId
     },
 
-    openTtyStream: async (ptyId: string, onEvent: (event: PtyEvent) => void): Promise<{ tty: Tty; unsubscribe: () => void }> => {
+    openTtyStream: async (ptyId: string, onEvent: (event: PtyEvent) => void): Promise<Tty> => {
       const handle = crypto.randomUUID()
-      const unsubscribe = deps.terminal.onEvent(handle, onEvent)
-      const result = await deps.terminal.attach(connectionId, handle, ptyId)
+      // Registered before attach so the daemon's replayed scrollback is not missed.
+      const subscription = toDisposable(deps.terminal.onEvent(handle, onEvent))
+      let result: IpcResult
+      try {
+        result = await deps.terminal.attach(connectionId, handle, ptyId)
+      } catch (error) {
+        subscription.dispose()
+        throw error
+      }
       if (!result.success) {
-        unsubscribe()
+        subscription.dispose()
         throw new Error(result.error || 'Failed to attach to PTY')
       }
-      const tty = createTtyStore(ptyId, handle, boundTerminal)
-      return { tty, unsubscribe }
+      return createTtyStore(ptyId, handle, boundTerminal, subscription)
     },
 
     killTty: (ptyId: string): void => {
@@ -1135,6 +1145,7 @@ export function createSessionStore(
           const ref = entry.store.getState().getTabRef(tabId)
           if (ref) ref.dispose()
         }
+        entry.store.getState().dispose()
       }
       set((s) => {
         const remaining = new Map(s.workspaces)

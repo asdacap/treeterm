@@ -36,7 +36,7 @@
     "test:daemon:container": "daemon-rs/tests/container/run-container-test.sh",
     "test:all": "vitest run && npm run test:daemon && playwright test",
     "lint": "eslint src/",
-    "test:lint-rules": "node eslint-rules/no-string-literal-comparison.test.js && node eslint-rules/no-get-state-in-render.test.js",
+    "test:lint-rules": "node eslint-rules/no-string-literal-comparison.test.js && node eslint-rules/no-get-state-in-render.test.js && node eslint-rules/no-discarded-disposable.test.js",
     "daemon:stop": "pkill -f 'treeterm-daemon' || echo 'No daemon running'",
     "prepare": "husky"
   },

@@ -16,6 +16,8 @@ import { createReviewCommentStore } from './createReviewCommentStore'
 import type { ReviewCommentStore } from './createReviewCommentStore'
 import { createReviewViewedFilesStore } from './createReviewViewedFilesStore'
 import type { ReviewViewedFilesStore } from './createReviewViewedFilesStore'
+import { DisposableMap, DisposableStore } from '../../shared/lifecycle'
+import type { IDisposable } from '../../shared/lifecycle'
 
 /**
  * Cached terminal for BaseTerminal-derived tabs only (Terminal, AiHarness).
@@ -25,8 +27,9 @@ import type { ReviewViewedFilesStore } from './createReviewViewedFilesStore'
 export interface CachedTerminal {
   engine: TerminalEngine
   tty: Tty
-  /** Unsubscribe the background TTY event subscription (called only on dispose) */
-  unsubscribeEvents: () => void
+  /** Owns the engine and the Tty. Disposed only by `disposeCachedTerminal` — never on
+   *  unmount, since the cache outlives the component ("Unmount is not close"). */
+  owner: DisposableStore
   /** Set by BaseTerminal on mount, cleared to null on unmount.
    *  When set, all events forward to this handler for full UI handling.
    *  When null, the background fallback writes data to the terminal buffer. */
@@ -45,6 +48,11 @@ export interface CachedTerminal {
   badgeClickTimer: ReturnType<typeof setTimeout> | null
 }
 
+/** A cached TtyWriter together with ownership of the Tty backing it. */
+interface TtyWriterEntry extends IDisposable {
+  readonly writer: TtyWriter
+}
+
 /**
  * AppRef subtype for terminal-based tabs (Terminal, GhosttyTerminal, AiHarness, CustomRunner).
  * Holds the cached terminal engine that survives component mount/unmount.
@@ -56,7 +64,7 @@ export interface TerminalAppRef extends AppRef {
 
 export interface WorkspaceStoreDeps {
   appRegistry: AppRegistryApi
-  openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<{ tty: Tty; unsubscribe: () => void }>
+  openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<Tty>
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string, ptyHandle?: string) => Promise<string>
   connectionId: string
   git: GitApi
@@ -128,6 +136,9 @@ export interface WorkspaceStoreState {
   getTabRef: (tabId: string) => AppRef | null
   /** Dispose a tab's runtime resources (tabRef + cached terminal) without modifying appStates or syncing to daemon. */
   disposeTabResources: (tabId: string) => void
+  /** Release workspace-scoped resources (cached TtyWriter subscriptions). Called when
+   *  the workspace itself goes away, not on tab churn. */
+  dispose: () => void
 
   // Analyzer factory (used by applications in onWorkspaceLoad)
   initAnalyzer: (tabId: string) => Analyzer
@@ -248,8 +259,10 @@ export function createWorkspaceStore(
     return null
   }
 
-  // Write-only PTY handles, cached per workspace (separate stream from terminal events)
-  const ttyWriters = new Map<string, TtyWriter>()
+  // Write-only PTY handles, cached per workspace (separate stream from terminal events).
+  // The map owns each entry's Tty, so evicting an entry releases its subscription and
+  // disposing the workspace releases every entry.
+  const ttyWriters = new DisposableMap<string, TtyWriterEntry>()
 
   // PTY creation memo keyed by the caller's stable handle (handle -> the PTY this
   // window created for it). Survives the dispose/re-init churn of file-watch
@@ -312,6 +325,10 @@ export function createWorkspaceStore(
       }
     },
 
+    dispose: (): void => {
+      ttyWriters.dispose()
+    },
+
     initAnalyzer: (tabId: string): Analyzer => createAnalyzerStore(tabId, {
       getSettings: deps.getSettings,
       llm: deps.llm,
@@ -353,12 +370,14 @@ export function createWorkspaceStore(
 
     getTtyWriter: async (ptyId: string): Promise<TtyWriter> => {
       const cached = ttyWriters.get(ptyId)
-      if (cached) return cached
+      if (cached) return cached.writer
+
       let disconnected = false
-      const { tty } = await deps.openTtyStream(ptyId, (event) => {
+      const tty = await deps.openTtyStream(ptyId, (event) => {
         if (event.type === PtyEventType.End || event.type === PtyEventType.Error) {
           disconnected = true
-          ttyWriters.delete(ptyId)
+          // Releases the Tty's subscription as it evicts the entry.
+          ttyWriters.deleteAndDispose(ptyId)
         }
       })
       const state = tty.getState()
@@ -372,7 +391,9 @@ export function createWorkspaceStore(
           state.kill()
         },
       }
-      ttyWriters.set(ptyId, writer)
+      // If the workspace was disposed while attach was in flight, `set` disposes the Tty
+      // now rather than retaining it.
+      ttyWriters.set(ptyId, { writer, dispose: () => { tty.dispose(); } })
       return writer
     },
 
