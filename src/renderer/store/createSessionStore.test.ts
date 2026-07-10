@@ -1634,4 +1634,73 @@ describe('createSessionStore', () => {
       expect(writes.length).toBe(0)
     })
   })
+
+  describe('file errors are attributed to the connection, not the workspace', () => {
+    // Drive the daemon's file-watch error path for a workspace body.
+    function emitFileError(ws: Workspace, message: string): void {
+      const cb = fileWatchCallbacks.get(`${ws.id}.json`)
+      if (!cb) throw new Error(`no file watch registered for ${ws.id}`)
+      cb({ type: FileWatchEventType.Error, message })
+    }
+
+    // Restore one session holding every id, then deliver each body. Restoring twice
+    // would replace the ref set and unsubscribe the earlier workspace's file watch.
+    async function restoreLoaded(...ids: string[]): Promise<Workspace[]> {
+      const created = ids.map(id => makeWorkspace({ id, name: id, path: `/${id}` }))
+      await store.getState().handleRestore(sessionWithRefs(created, 1))
+      for (const ws of created) {
+        emitFilePresent(ws, `sha-${ws.id}`)
+        expect(store.getState().workspaces.get(ws.id)!.status).toBe(WorkspaceEntryStatus.Loaded)
+      }
+      return created
+    }
+
+    it('surfaces a file error as OperationError while the connection is healthy', async () => {
+      const [ws] = await restoreLoaded('ws-live') as [Workspace]
+
+      emitFileError(ws, 'Workspace file is corrupt')
+
+      const entry = store.getState().workspaces.get('ws-live')!
+      expect(entry.status).toBe(WorkspaceEntryStatus.OperationError)
+      expect((entry as Extract<typeof entry, { status: WorkspaceEntryStatus.OperationError }>).error)
+        .toBe('Workspace file is corrupt')
+    })
+
+    it('suppresses file errors that arrive while the connection is down', async () => {
+      const [ws] = await restoreLoaded('ws-down') as [Workspace]
+      const target = store.getState().connection.target
+      store.getState().handleConnectionStatusChange({ id: 'local', target, status: ConnectionStatus.Reconnecting, error: 'dropped', attempt: 1 })
+
+      emitFileError(ws, '14 UNAVAILABLE: Connection dropped')
+
+      expect(store.getState().workspaces.get('ws-down')!.status).toBe(WorkspaceEntryStatus.Loaded)
+    })
+
+    it('clears an OperationError that raced ahead of the status change', async () => {
+      const [a, b] = await restoreLoaded('ws-a', 'ws-b') as [Workspace, Workspace]
+
+      // Both in-flight RPCs reject before main reports the drop.
+      emitFileError(a, '14 UNAVAILABLE: Connection dropped')
+      emitFileError(b, '14 UNAVAILABLE: Connection dropped')
+      expect(store.getState().workspaces.get('ws-a')!.status).toBe(WorkspaceEntryStatus.OperationError)
+      expect(store.getState().workspaces.get('ws-b')!.status).toBe(WorkspaceEntryStatus.OperationError)
+
+      const target = store.getState().connection.target
+      store.getState().handleConnectionStatusChange({ id: 'local', target, status: ConnectionStatus.Reconnecting, error: 'dropped', attempt: 1 })
+
+      expect(store.getState().workspaces.get('ws-a')!.status).toBe(WorkspaceEntryStatus.Loaded)
+      expect(store.getState().workspaces.get('ws-b')!.status).toBe(WorkspaceEntryStatus.Loaded)
+    })
+
+    it('leaves workspaces untouched when a status change does not break the connection', async () => {
+      const [ws] = await restoreLoaded('ws-stable') as [Workspace]
+      emitFileError(ws, 'Workspace file is corrupt')
+
+      const target = store.getState().connection.target
+      // Connected -> Connected: not a break, so a genuine error must survive.
+      store.getState().handleConnectionStatusChange({ id: 'local', target, status: ConnectionStatus.Connected })
+
+      expect(store.getState().workspaces.get('ws-stable')!.status).toBe(WorkspaceEntryStatus.OperationError)
+    })
+  })
 })

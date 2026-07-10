@@ -232,6 +232,12 @@ function registerSessionWatch(connectionId: string, uuid: string, unsubscribe: (
 function reestablishSessionWatches(connectionId: string, client: GrpcDaemonClient): void {
   const entries = sessionWatchUnsubs.get(connectionId) ?? []
 
+  // connection:reconnected is emitted per re-established watch below. With no watch
+  // there is no event, so the renderer never rebuilds and any error UI stays up.
+  if (entries.length === 0) {
+    console.error(`[main] reconnect: connection ${connectionId} has no registered session watch; renderer will not be told to rebuild`)
+  }
+
   // Unsubscribe old watches (they're dead but clean up references)
   for (const entry of entries) {
     entry.unsubscribe()

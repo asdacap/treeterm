@@ -215,9 +215,49 @@ export class GrpcDaemonClient {
 
         console.log('[grpcDaemonClient] connected to daemon')
         this.connected = true
+        this.watchConnectivity()
         resolve()
       })
     })
+  }
+
+  /**
+   * Surface transport-level drops to `onDisconnect` listeners.
+   *
+   * A unary RPC failing with UNAVAILABLE is not a reliable signal — the channel
+   * may still recover, and a suspended peer can leave calls failing while the
+   * channel never reports an error on its own. The channel's connectivity state
+   * is the signal: once it leaves READY the transport is gone.
+   */
+  private watchConnectivity(): void {
+    const client = this.client
+    if (!client) return
+    const channel = client.getChannel()
+
+    const step = (): void => {
+      // A reconnect swaps in a new client; the old channel's watcher must go quiet.
+      if (this.client !== client || !this.connected) return
+      const current = channel.getConnectivityState(false)
+      channel.watchConnectivityState(current, Infinity, () => {
+        if (this.client !== client || !this.connected) return
+        const next = channel.getConnectivityState(false)
+        if (current === grpc.connectivityState.READY && next !== grpc.connectivityState.READY) {
+          this.notifyDisconnect()
+          return
+        }
+        step()
+      })
+    }
+    step()
+  }
+
+  private notifyDisconnect(): void {
+    if (!this.connected) return
+    this.connected = false
+    console.error('[grpcDaemonClient] transport lost for', this.socketPath)
+    for (const listener of Array.from(this.disconnectListeners)) {
+      listener()
+    }
   }
 
   /**
@@ -695,11 +735,12 @@ export class GrpcDaemonClient {
   }
 
   disconnect(): void {
-    if (this.client) {
-      this.client.close()
-      this.client = null
-    }
+    // Cleared first so the connectivity watcher treats the ensuing state change
+    // as an intentional teardown and stays silent.
+    const client = this.client
     this.connected = false
+    this.client = null
+    client?.close()
   }
 
   private spawnDaemon(): void {

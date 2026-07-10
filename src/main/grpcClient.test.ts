@@ -2,7 +2,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mocks = vi.hoisted(() => {
+  // Drives GrpcDaemonClient.watchConnectivity: `state` is what the channel
+  // currently reports, `watchers` holds the pending watchConnectivityState
+  // callbacks so a test can fire a transition by hand.
+  const mockChannel = {
+    state: 2, // READY
+    watchers: [] as (() => void)[],
+    getConnectivityState: vi.fn<() => number>(),
+    watchConnectivityState: vi.fn<(...args: any[]) => void>()
+  }
+  mockChannel.getConnectivityState.mockImplementation(() => mockChannel.state)
+  mockChannel.watchConnectivityState.mockImplementation((_current: number, _deadline: number, cb: () => void) => {
+    mockChannel.watchers.push(cb)
+  })
+
   const mockClientInstance = {
+    getChannel: vi.fn<() => any>().mockReturnValue(mockChannel),
     waitForReady: vi.fn<(...args: any[]) => any>(),
     createPty: vi.fn<(...args: any[]) => any>(),
     killPty: vi.fn<(...args: any[]) => any>(),
@@ -24,7 +39,7 @@ const mocks = vi.hoisted(() => {
     watchFileSignal: vi.fn<(...args: any[]) => any>(),
     close: vi.fn<() => void>()
   }
-  return { mockClientInstance }
+  return { mockClientInstance, mockChannel }
 })
 
 vi.mock('@grpc/grpc-js', () => {
@@ -40,6 +55,13 @@ vi.mock('@grpc/grpc-js', () => {
       NOT_FOUND: 5,
       INTERNAL: 13,
       CANCELLED: 1
+    },
+    connectivityState: {
+      IDLE: 0,
+      CONNECTING: 1,
+      READY: 2,
+      TRANSIENT_FAILURE: 3,
+      SHUTDOWN: 4
     }
   }
 })
@@ -73,7 +95,18 @@ vi.mock('./socketPath', () => ({
 import { GrpcDaemonClient } from './grpcClient'
 import { FileWatchEventType, type FileWatchEvent } from '../shared/ipc-types'
 
-const { mockClientInstance } = mocks
+const { mockClientInstance, mockChannel } = mocks
+
+const READY = 2
+const IDLE = 0
+
+/** Move the channel to `next` and fire the pending connectivity watcher. */
+function transitionChannel(next: number): void {
+  mockChannel.state = next
+  const pending = mockChannel.watchers
+  mockChannel.watchers = []
+  for (const cb of pending) cb()
+}
 
 // Helper to create a mock per-session stream
 function makeMockSessionStream() {
@@ -100,6 +133,9 @@ describe('GrpcDaemonClient', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mockChannel.state = READY
+    mockChannel.watchers = []
+    mockClientInstance.getChannel.mockReturnValue(mockChannel)
     client = new GrpcDaemonClient('/tmp/test.sock')
   })
 
@@ -108,6 +144,75 @@ describe('GrpcDaemonClient', () => {
       connectClient()
       await client.connect()
       expect(client.isConnected()).toBe(true)
+    })
+
+    it('notifies onDisconnect listeners when the channel leaves READY', async () => {
+      connectClient()
+      await client.connect()
+      const listener = vi.fn<() => void>()
+      client.onDisconnect(listener)
+
+      transitionChannel(IDLE)
+
+      expect(listener).toHaveBeenCalledTimes(1)
+      expect(client.isConnected()).toBe(false)
+    })
+
+    it('does not notify while the channel churns below READY and recovers', async () => {
+      connectClient()
+      await client.connect()
+      const listener = vi.fn<() => void>()
+      client.onDisconnect(listener)
+
+      // READY -> READY is a no-op transition: the watcher re-arms, nobody is told.
+      transitionChannel(READY)
+      expect(listener).not.toHaveBeenCalled()
+      expect(client.isConnected()).toBe(true)
+
+      // ...and the re-armed watcher still catches a later real drop.
+      transitionChannel(IDLE)
+      expect(listener).toHaveBeenCalledTimes(1)
+    })
+
+    it('notifies each listener once, and not again on a second transition', async () => {
+      connectClient()
+      await client.connect()
+      const a = vi.fn<() => void>()
+      const b = vi.fn<() => void>()
+      client.onDisconnect(a)
+      client.onDisconnect(b)
+
+      transitionChannel(IDLE)
+      transitionChannel(READY)
+
+      expect(a).toHaveBeenCalledTimes(1)
+      expect(b).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not notify listeners removed before the drop', async () => {
+      connectClient()
+      await client.connect()
+      const listener = vi.fn<() => void>()
+      const unsubscribe = client.onDisconnect(listener)
+      unsubscribe()
+
+      transitionChannel(IDLE)
+
+      expect(listener).not.toHaveBeenCalled()
+    })
+
+    it('stays silent when disconnect() tears the channel down intentionally', async () => {
+      connectClient()
+      await client.connect()
+      const listener = vi.fn<() => void>()
+      client.onDisconnect(listener)
+
+      client.disconnect()
+      transitionChannel(IDLE)
+
+      expect(listener).not.toHaveBeenCalled()
+      expect(client.isConnected()).toBe(false)
+      expect(mockClientInstance.close).toHaveBeenCalled()
     })
 
     it('connect throws when socket does not exist', async () => {

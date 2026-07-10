@@ -342,6 +342,13 @@ export function createSessionStore(
   }
 
   function setWorkspaceFileError(id: string, error: string): void {
+    // A dead connection fails every workspace's file sync at once. That is one
+    // connection fault, not N workspace faults: the connection banner owns it and
+    // the reconnect rebuilds the session from the daemon. Surfacing it per
+    // workspace buries the banner under a dialog whose buttons all need the very
+    // connection that just died.
+    if (store.getState().connection.status !== ConnectionStatus.Connected) return
+
     const entry = store.getState().workspaces.get(id)
     if (!entry) return
     if (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) {
@@ -1066,6 +1073,20 @@ export function createSessionStore(
     handleConnectionStatusChange: (info: ConnectionInfo): void => {
       const prevStatus = get().connection.status
       set({ connection: info })
+      if (info.status !== ConnectionStatus.Connected && prevStatus === ConnectionStatus.Connected) {
+        // An in-flight RPC can reject just before this status arrives, so the guard
+        // in setWorkspaceFileError cannot catch every case. Drop the errors it let
+        // through: they describe the connection, which now has its own banner.
+        set((s) => {
+          const workspaces = new Map(s.workspaces)
+          for (const [id, entry] of Array.from(workspaces.entries())) {
+            if (entry.status === WorkspaceEntryStatus.OperationError) {
+              workspaces.set(id, { status: WorkspaceEntryStatus.Loaded, data: entry.data, store: entry.store })
+            }
+          }
+          return { workspaces }
+        })
+      }
       if (info.status === ConnectionStatus.Connected && prevStatus !== ConnectionStatus.Connected) {
         // Flush bodies whose writes were deferred while disconnected, before the
         // stale on-disk copy can be used to rebuild state on reconnect.
