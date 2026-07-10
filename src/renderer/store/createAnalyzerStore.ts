@@ -138,7 +138,9 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
   function extractBuffer(): string | null {
     if (!terminal) return null
-    const xtermBuffer = terminal.buffer.normal
+    // `active`, not `normal`: a full-screen app (vim, less, htop) writes to the
+    // alternate buffer, and `normal` would still hold the pre-launch prompt.
+    const xtermBuffer = terminal.buffer.active
     const startLine = xtermBuffer.baseY
     const endLine = xtermBuffer.baseY + terminal.rows
     const lines: string[] = []
