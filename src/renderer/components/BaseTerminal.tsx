@@ -11,6 +11,7 @@ import { ScrollPosition } from '../types'
 import type { CachedTerminal, TerminalAppRef, PtyEvent, SandboxConfig, TerminalState, WorkspaceStore } from '../types'
 import type { TerminalBufferHost, TerminalEngine, TerminalEngineFactory } from '../terminal/engine'
 import { PtyEventType } from '../../shared/ipc-types'
+import { DisposableStore, thenRegisterOrDispose } from '../../shared/lifecycle'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
 
@@ -411,13 +412,18 @@ export default function BaseTerminal({
           label: `${config.logPrefix} ${tabId}`,
         })
 
+        // Owns the engine and (once attached) the Tty. Every teardown path below is
+        // `owner.dispose()`; nothing is freed piecemeal.
+        const owner = new DisposableStore()
+        owner.add(engine)
+
         // `cancelled` is written by the cleanup closure while the awaits in here are in flight.
         // TS narrows it to false from the effect body and cannot see that write, hence the
         // no-unnecessary-condition suppressions below.
         if (cancelled || !containerRef.current) {
           // A StrictMode double-mount (or a fast tab switch) raced ahead of this async init.
           // The engine was never attached and never cached, so nothing else will free it.
-          engine.dispose()
+          owner.dispose()
           return
         }
 
@@ -429,7 +435,7 @@ export default function BaseTerminal({
         const cache: CachedTerminal = {
           engine,
           tty: undefined as unknown as Tty,  // set after openTtyStream resolves
-          unsubscribeEvents: () => {},
+          owner,
           mountedHandler: null,
           stripScrollbackClear: config.stripScrollbackClear ?? false,
           connectedAt: Date.now(),
@@ -451,15 +457,15 @@ export default function BaseTerminal({
 
         let tty: Tty
         try {
-          const result = await session.openTtyStream(currentExistingPtyId, (event) => {
-            handleCachedEvent(cache, event)
-          })
+          // `owner` takes the Tty, so the subscription cannot outlive the engine.
+          tty = await thenRegisterOrDispose(
+            session.openTtyStream(currentExistingPtyId, (event) => { handleCachedEvent(cache, event) }),
+            owner,
+          )
           log.debug(`[${config.logPrefix} ${tabId}] reattached to session:`, currentExistingPtyId)
-          tty = result.tty
-          cache.unsubscribeEvents = result.unsubscribe
         } catch (error) {
           log.error(`[${config.logPrefix} ${tabId}] failed to attach to PTY:`, currentExistingPtyId, error)
-          engine.dispose()
+          owner.dispose()
           // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
           if (cancelled) return
           setOverlay({ message: `Failed to reattach terminal: ${error instanceof Error ? error.message : 'Unknown error'}`, type: 'error' })
@@ -473,8 +479,7 @@ export default function BaseTerminal({
           // here. Otherwise the engine lingers as an orphaned DOM node while the next mount
           // opens its own (duplicated output), and the orphan steals focus with no onData
           // wired (no input).
-          cache.unsubscribeEvents()
-          engine.dispose()
+          owner.dispose()
           return
         }
 
@@ -493,6 +498,8 @@ export default function BaseTerminal({
 
     // Cleanup — detach mounted state but keep terminal + TTY subscription alive
     return () => {
+      // NOTE: never dispose `owner` here. Unmount is not close — the cache (and its Tty
+      // subscription) must survive a tab switch. Only disposeCachedTerminal ends it.
       log.debug(`[${config.logPrefix} ${tabId}] cleanup (terminal cached, PTY preserved)`)
       cancelled = true
       if (resizeTimeout) clearTimeout(resizeTimeout)

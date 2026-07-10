@@ -124,10 +124,11 @@ const config: BaseTerminalConfig = { createEngine, themeBackground: '#000', logP
 
 interface Deferred {
   resolve: () => void
-  unsubscribe: ReturnType<typeof vi.fn>
+  dispose: ReturnType<typeof vi.fn>
 }
 
-/** One state object per tty, so `getState().write` is the same mock every call. */
+/** One state object per tty, so `getState().write` is the same mock every call.
+ *  The Tty owns its subscription, so `dispose()` is what releases it. */
 function makeFakeTty() {
   const state = {
     ptyId: 'pty1',
@@ -135,7 +136,7 @@ function makeFakeTty() {
     resize: vi.fn<(cols: number, rows: number) => void>(),
     kill: vi.fn(),
   }
-  return { getState: () => state, state }
+  return { getState: () => state, state, dispose: vi.fn() }
 }
 
 function makeWorkspaceStore(tabId: string, options: { keepOnExit?: boolean; activeTabId?: string } = {}) {
@@ -163,10 +164,10 @@ function makeSessionStore(deferreds: Deferred[]) {
   const openTtyStream = vi.fn(
     () =>
       new Promise((resolve) => {
-        const unsubscribe = vi.fn()
+        const tty = makeFakeTty()
         deferreds.push({
-          resolve: () => { resolve({ tty: makeFakeTty(), unsubscribe }) },
-          unsubscribe,
+          resolve: () => { resolve(tty) },
+          dispose: tty.dispose,
         })
       }),
   )
@@ -177,15 +178,14 @@ function makeSessionStore(deferreds: Deferred[]) {
 /** Resolves openTtyStream immediately and hands back the captured PTY event sink. */
 function makeLiveSessionStore() {
   const events: ((event: PtyEvent) => void)[] = []
-  const unsubscribe = vi.fn()
   const tty = makeFakeTty()
   const openTtyStream = vi.fn(async (_ptyId: string, onEvent: (event: PtyEvent) => void) => {
     events.push(onEvent)
     await Promise.resolve()
-    return { tty, unsubscribe }
+    return tty
   })
   const store = createStore<Record<string, unknown>>()(() => ({ openTtyStream }))
-  return { store: store as never, openTtyStream, events, unsubscribe, tty: tty.state }
+  return { store: store as never, openTtyStream, events, dispose: tty.dispose, tty: tty.state }
 }
 
 /** Flushes `await createEngine()` and `await openTtyStream()`. */
@@ -238,9 +238,9 @@ describe('BaseTerminal — StrictMode double-mount cleanup', () => {
     unmount()
     await act(async () => { deferreds[0]?.resolve(); await Promise.resolve() })
 
-    // The cleanup never saw this stream — the resolved init() must unsubscribe it itself,
-    // otherwise the PTY subscription leaks for the life of the window.
-    expect(deferreds[0]?.unsubscribe).toHaveBeenCalledTimes(1)
+    // The cleanup never saw this stream. `owner` was already disposed, so registering the
+    // late-landing Tty disposes it on the spot instead of leaking it for the window's life.
+    expect(deferreds[0]?.dispose).toHaveBeenCalledTimes(1)
     expect(engines[0]?.disposed).toBe(true)
   })
 
@@ -277,7 +277,7 @@ describe('BaseTerminal — terminal cache across unmount', () => {
     first.unmount()
     // The engine and its PTY subscription outlive the component — that is the whole point.
     expect(engines[0]?.disposed).toBe(false)
-    expect(session.unsubscribe).not.toHaveBeenCalled()
+    expect(session.dispose).not.toHaveBeenCalled()
 
     const second = render(
       <SessionStoreContext.Provider value={session.store}>

@@ -7,6 +7,10 @@ import type { LlmApi, Workspace, Application } from '../types'
 import { createMockExecApi } from '../../shared/mockApis'
 import { WorkspaceStatus } from '../../shared/types'
 import { makeWorkspace } from '../../shared/test-fixtures/workspace'
+import { expectNoDisposableLeaks } from '../../shared/test-fixtures/disposableLeaks'
+import { toDisposable } from '../../shared/lifecycle'
+import { createTtyStore } from './createTtyStore'
+import type { TtyTerminalDeps } from './createTtyStore'
 
 interface TestComment { id: string; filePath: string; lineNumber: number; text: string; commitHash: string | null; createdAt: number; isOutdated: boolean; addressed: boolean; side: string }
 
@@ -16,7 +20,7 @@ function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStore
       get: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
       getDefaultApp: vi.fn<(...args: any[]) => any>().mockReturnValue(null),
     },
-    openTtyStream: vi.fn<(...args: any[]) => any>().mockImplementation(() => Promise.resolve({ tty: null })),
+    openTtyStream: vi.fn<(...args: any[]) => any>().mockImplementation(() => Promise.resolve(null)),
     createTty: vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('pty-1'),
     connectionId: 'local',
     git: {} as unknown as WorkspaceStoreDeps['git'],
@@ -796,9 +800,10 @@ describe('createWorkspaceStore', () => {
         subscribe: vi.fn<(...args: any[]) => any>(),
         destroy: vi.fn<() => void>(),
         getInitialState: vi.fn<() => any>(),
+        dispose: vi.fn(),
       }
       const deps = makeHandleDeps({
-        openTtyStream: vi.fn<(...args: any[]) => any>().mockResolvedValue({ tty: ttyStore }),
+        openTtyStream: vi.fn<(...args: any[]) => any>().mockResolvedValue(ttyStore),
       })
       const ws = makeWorkspace({
         id: 'ws-1',
@@ -834,12 +839,13 @@ describe('createWorkspaceStore', () => {
         subscribe: vi.fn<(...args: any[]) => any>(),
         destroy: vi.fn<() => void>(),
         getInitialState: vi.fn<() => any>(),
+        dispose: vi.fn(),
       }
       const deps = makeHandleDeps({
         openTtyStream: vi.fn<(...args: any[]) => any>().mockImplementation(() => {
           callCount++
           if (callCount === 1) return Promise.reject(new Error('fail'))
-          return Promise.resolve({ tty: ttyStore })
+          return Promise.resolve(ttyStore)
         }),
       })
       const ws = makeWorkspace({
@@ -957,28 +963,85 @@ describe('createWorkspaceStore', () => {
   })
 
   describe('getTtyWriter', () => {
+    // Builds a real Tty over a real `toDisposable`, so the leak tracker below has an actual
+    // subscription to observe. A hand-rolled `{ dispose: vi.fn() }` would be invisible to it,
+    // and the hygiene assertions would pass vacuously.
     function makeTtyDeps() {
       let onEventCb: ((event: { type: string }) => void) | null = null
-      const writeFn = vi.fn<(data: string) => Promise<void>>().mockResolvedValue(undefined)
-      const killFn = vi.fn<() => void>()
-      const ttyStore = {
-        getState: () => ({ ptyId: 'pty-1', write: writeFn, resize: vi.fn<(...args: any[]) => void>(), kill: killFn }),
-        setState: vi.fn<(...args: any[]) => void>(),
-        subscribe: vi.fn<(...args: any[]) => any>(),
-        destroy: vi.fn<() => void>(),
-        getInitialState: vi.fn<() => any>(),
-      }
+      const writeFn = vi.fn<(handle: string, data: string) => Promise<void>>().mockResolvedValue(undefined)
+      const killFn = vi.fn<(ptyId: string) => void>()
+      const unsubscribe = vi.fn()
+      const terminal: TtyTerminalDeps = { write: writeFn, resize: vi.fn(), kill: killFn }
       const deps = makeHandleDeps({
-        openTtyStream: vi.fn<(...args: any[]) => any>().mockImplementation((_ptyId: string, onEvent: (event: { type: string }) => void) => {
+        openTtyStream: vi.fn<(...args: any[]) => any>().mockImplementation((ptyId: string, onEvent: (event: { type: string }) => void) => {
           onEventCb = onEvent
-          return Promise.resolve({ tty: ttyStore })
+          return Promise.resolve(createTtyStore(ptyId, 'handle-1', terminal, toDisposable(unsubscribe)))
         }),
       })
-      return { deps, writeFn, killFn, getOnEvent: () => {
+      return { deps, writeFn, killFn, unsubscribe, getOnEvent: () => {
         if (!onEventCb) throw new Error('onEventCb not set')
         return onEventCb
       } }
     }
+
+    // These three pin the leak this refactor fixed: getTtyWriter used to discard the
+    // subscription returned by openTtyStream, so nothing ever released it — not on
+    // disconnect, not on eviction, not when the workspace went away.
+    it('disposes the Tty when the stream ends', async () => {
+      const { deps, unsubscribe, getOnEvent } = makeTtyDeps()
+      const store = createWorkspaceStore(makeWorkspace(), deps)
+
+      await store.getState().getTtyWriter('pty-1')
+      expect(unsubscribe).not.toHaveBeenCalled()
+
+      getOnEvent()({ type: 'end' })
+
+      expect(unsubscribe).toHaveBeenCalledTimes(1)
+    })
+
+    it('disposes cached Ttys when the workspace is disposed', async () => {
+      const { deps, unsubscribe } = makeTtyDeps()
+      const store = createWorkspaceStore(makeWorkspace(), deps)
+
+      await store.getState().getTtyWriter('pty-1')
+      store.getState().dispose()
+
+      expect(unsubscribe).toHaveBeenCalledTimes(1)
+    })
+
+    it('disposes a Tty that lands after the workspace was disposed', async () => {
+      const { deps, unsubscribe } = makeTtyDeps()
+      const store = createWorkspaceStore(makeWorkspace(), deps)
+
+      const pending = store.getState().getTtyWriter('pty-1')
+      store.getState().dispose()
+      await pending
+
+      expect(unsubscribe).toHaveBeenCalledTimes(1)
+    })
+
+    // The assertions above name the resource they expect to be released. This one asserts
+    // that *nothing at all* survived, which is what catches the next leak nobody predicted.
+    describe('disposable hygiene', () => {
+      expectNoDisposableLeaks()
+
+      it('leaves no live disposables after a workspace opens a writer and is disposed', async () => {
+        const { deps } = makeTtyDeps()
+        const store = createWorkspaceStore(makeWorkspace(), deps)
+
+        await store.getState().getTtyWriter('pty-1')
+        store.getState().dispose()
+      })
+
+      it('leaves no live disposables when the stream ends before disposal', async () => {
+        const { deps, getOnEvent } = makeTtyDeps()
+        const store = createWorkspaceStore(makeWorkspace(), deps)
+
+        await store.getState().getTtyWriter('pty-1')
+        getOnEvent()({ type: 'end' })
+        store.getState().dispose()
+      })
+    })
 
     it('opens stream and returns writer with write/kill', async () => {
       const { deps, writeFn, killFn } = makeTtyDeps()
@@ -986,9 +1049,9 @@ describe('createWorkspaceStore', () => {
 
       const writer = await store.getState().getTtyWriter('pty-1')
       await writer.write('hello')
-      expect(writeFn).toHaveBeenCalledWith('hello')
+      expect(writeFn).toHaveBeenCalledWith("handle-1", "hello")
       writer.kill()
-      expect(killFn).toHaveBeenCalled()
+      expect(killFn).toHaveBeenCalledWith("pty-1")
     })
 
     it('returns cached writer on second call', async () => {

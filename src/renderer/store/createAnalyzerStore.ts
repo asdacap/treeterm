@@ -5,6 +5,7 @@ import { Terminal } from '@xterm/xterm'
 import { ActivityState } from '../types'
 import type { LlmApi, Settings, PtyEvent } from '../types'
 import { PtyEventType } from '../../shared/ipc-types'
+import { DisposableStore, thenRegisterOrDispose } from '../../shared/lifecycle'
 import type { Tty } from './createTtyStore'
 
 export interface AnalyzerDeps {
@@ -14,7 +15,7 @@ export interface AnalyzerDeps {
   getDisplayName: () => string | undefined
   getDescription: () => string | undefined
   setActivityTabState: (tabId: string, state: ActivityState) => void
-  openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<{ tty: Tty; scrollback?: string[]; exitCode?: number }>
+  openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<Tty>
   cwd: string
   renameBranch: (oldName: string, newName: string) => Promise<void>
   getGitBranch: () => string | undefined
@@ -91,7 +92,8 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   let pollInterval: ReturnType<typeof setInterval> | null = null
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
   let titleTimer: ReturnType<typeof setTimeout> | null = null
-  let unsubscribeEvents: (() => void) | null = null
+  /** Owns the TTY attachment for the current start()/stop() cycle. */
+  let streamOwner = new DisposableStore()
   let running = false
   let titleGenerated = false
 
@@ -274,10 +276,9 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
   function stopPolling(): void {
     running = false
-    if (unsubscribeEvents) {
-      unsubscribeEvents()
-      unsubscribeEvents = null
-    }
+    // Releases the TTY event subscription. Before ownership moved onto the Tty this was
+    // a `() => void` the dependency type had silently erased, so it never ran.
+    streamOwner.dispose()
     if (pollInterval) {
       clearInterval(pollInterval)
       pollInterval = null
@@ -400,8 +401,11 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
       // Create headless xterm (no DOM attachment needed)
       terminal = new Terminal()
+      streamOwner = new DisposableStore()
 
-      void deps.openTtyStream(ptyId, (event) => {
+      // The daemon replays scrollback as Data events after attach, and an
+      // already-exited PTY arrives as an Exit event — both land in onEvent below.
+      void thenRegisterOrDispose(deps.openTtyStream(ptyId, (event) => {
         switch (event.type) {
           case PtyEventType.Data:
             terminal?.write(event.data)
@@ -414,21 +418,10 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
             terminal?.resize(event.cols, event.rows)
             break
         }
-      }).then(({ tty, scrollback, exitCode }) => {
-        if (!running && !terminal) return // stopped before stream opened
-
+      }), streamOwner).then((tty) => {
+        // stop() ran while attach was in flight; `tty` is already disposed.
+        if (streamOwner.isDisposed) return
         ownTty = tty
-
-        // Restore scrollback into headless terminal
-        if (scrollback) {
-          for (const chunk of scrollback) {
-            terminal?.write(chunk)
-          }
-          dataVersion++ // trigger initial analysis from scrollback
-        }
-
-        // If already exited, don't start polling
-        if (exitCode !== undefined) return
       }).catch((err: unknown) => {
         console.error('[analyzer] failed to open TTY stream:', err)
       })

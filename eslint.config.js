@@ -4,6 +4,7 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import noStringLiteralUnion from './eslint-rules/no-string-literal-union.js'
 import noStringLiteralComparison from './eslint-rules/no-string-literal-comparison.js'
 import noGetStateInRender from './eslint-rules/no-get-state-in-render.js'
+import noDiscardedDisposable from './eslint-rules/no-discarded-disposable.js'
 
 export default tseslint.config(
   {
@@ -21,12 +22,13 @@ export default tseslint.config(
       }
     },
     plugins: {
-      custom: { rules: { 'no-string-literal-union': noStringLiteralUnion, 'no-string-literal-comparison': noStringLiteralComparison, 'no-get-state-in-render': noGetStateInRender } }
+      custom: { rules: { 'no-string-literal-union': noStringLiteralUnion, 'no-string-literal-comparison': noStringLiteralComparison, 'no-get-state-in-render': noGetStateInRender, 'no-discarded-disposable': noDiscardedDisposable } }
     },
     rules: {
       '@typescript-eslint/no-explicit-any': 'error',
       'custom/no-string-literal-union': 'error',
       'custom/no-string-literal-comparison': 'error',
+      'custom/no-discarded-disposable': 'error',
       'no-restricted-syntax': ['error', {
         selector: "TSTypeReference[typeName.name='Pick']",
         message: 'Pick<T, K> is banned. Pass the full type instead of narrowing with Pick.'
@@ -38,6 +40,10 @@ export default tseslint.config(
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-non-null-assertion': 'off',
+      // Lint guards production code; the leak tracker guards tests. A test that builds a
+      // ref and drops it is not a leak, and `lifecycle.test.ts` must leak on purpose.
+      // Use `expectNoDisposableLeaks()` where a test should assert full teardown.
+      'custom/no-discarded-disposable': 'off',
     }
   },
   {

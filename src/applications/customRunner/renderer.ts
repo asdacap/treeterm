@@ -47,8 +47,8 @@ export function createCustomRunnerVariant(instance: CustomRunnerInstance, deps: 
         disposeCachedTerminal() {
           if (this.cachedTerminal) {
             this.cachedTerminal.mountedHandler = null
-            this.cachedTerminal.unsubscribeEvents()
-            this.cachedTerminal.engine.dispose()
+            // Owns the engine and the Tty subscription.
+            this.cachedTerminal.owner.dispose()
             this.cachedTerminal = null
           }
         },

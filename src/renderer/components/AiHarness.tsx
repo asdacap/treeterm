@@ -105,6 +105,9 @@ function AiHarnessContent({
   stripScrollbackClear,
 }: AiHarnessContentProps) {
   const handleTerminalReady = useCallback((engine: TerminalEngine) => {
+    // onTerminalReady fires once per engine, and engine.dispose() tears its own listeners
+    // down, so this subscription's lifetime is already the engine's.
+    // eslint-disable-next-line custom/no-discarded-disposable -- owned by the engine
     engine.onData((data) => {
       analyzer.getState().onUserInput(data)
     })
