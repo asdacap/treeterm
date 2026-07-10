@@ -136,6 +136,39 @@ describe('createAnalyzerStore', () => {
     expect(store.getState().getBufferText()).toBeNull()
   })
 
+  it('reads the alternate buffer while a full-screen app holds the screen', async () => {
+    const mock = makeMockTty()
+    deps = makeDeps({ openTtyStream: makeTtyStreamMock(mock, []) })
+    const store = createAnalyzerStore('tab-1', deps)
+
+    store.getState().start('pty-1')
+    await vi.waitFor(() => {
+      expect(deps.openTtyStream).toHaveBeenCalled()
+    })
+
+    mock.emitData('$ vim notes.txt\r\n')
+    await vi.waitFor(() => {
+      expect(store.getState().getBufferText()).toContain('vim notes.txt')
+    })
+
+    // Enter alt screen (DECSET 1049) and paint the app's own content.
+    mock.emitData('\x1b[?1049h\x1b[H~ editing notes.txt')
+    await vi.waitFor(() => {
+      expect(store.getState().getBufferText()).toContain('editing notes.txt')
+    })
+    // The pre-launch prompt lives on the normal buffer and must not leak through.
+    expect(store.getState().getBufferText()).not.toContain('vim notes.txt')
+
+    // Leaving alt screen (DECRST 1049) restores the normal buffer.
+    mock.emitData('\x1b[?1049l')
+    await vi.waitFor(() => {
+      expect(store.getState().getBufferText()).toContain('vim notes.txt')
+    })
+    expect(store.getState().getBufferText()).not.toContain('editing notes.txt')
+
+    store.getState().stop()
+  })
+
   it('start opens TTY stream and starts polling when settings are configured', async () => {
     vi.useFakeTimers()
     const mock = makeMockTty()
