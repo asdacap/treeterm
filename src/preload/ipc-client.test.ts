@@ -140,6 +140,11 @@ describe('IpcClient', () => {
       expect(mockSend).toHaveBeenCalledWith('pty:kill', 'local', 'pty-123')
     })
 
+    it('ptyDetach calls ipcRenderer.send with correct channel and handle', () => {
+      client.ptyDetach('handle-123')
+      expect(mockSend).toHaveBeenCalledWith('pty:detach', 'handle-123')
+    })
+
     it('appCloseConfirmed calls ipcRenderer.send with correct channel', () => {
       client.appCloseConfirmed()
       expect(mockSend).toHaveBeenCalledWith('app:close-confirmed')

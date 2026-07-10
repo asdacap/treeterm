@@ -534,6 +534,53 @@ describe('createAnalyzerStore', () => {
     await vi.waitFor(() => { expect(mock.dispose).toHaveBeenCalledTimes(1) })
   })
 
+  // Restart race: the attach continuation must guard the owner it was born with, not
+  // the mutable `streamOwner` (which the second start() has already reassigned). A late
+  // attach from cycle #1 otherwise sees cycle #2's live owner and clobbers the current
+  // TTY with its own already-disposed handle for the wrong pty.
+  it('keeps the current TTY when a previous cycle\'s attach resolves late after restart', async () => {
+    const mock1 = makeMockTty()
+    const mock2 = makeMockTty()
+    const mocks = [mock1, mock2]
+    const resolvers: Array<(tty: Tty) => void> = []
+    let call = 0
+    deps = makeDeps({
+      openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: PtyEvent) => void) => {
+        const mock = mocks[call++]!
+        mock.setEventCallback(onEvent)
+        return new Promise<Tty>((resolve) => { resolvers.push(resolve) })
+      }),
+    })
+    const store = createAnalyzerStore('tab-1', deps)
+
+    // Cycle #1: attach P1 in flight, then stop() disposes owner #1.
+    store.getState().start('pty-1')
+    store.getState().stop()
+
+    // Cycle #2: attach P2 in flight and resolves first, becoming the active TTY.
+    store.getState().start('pty-1')
+    resolvers[1]!(mock2.tty)
+    // Let P2's continuation assign the active TTY before P1 lands.
+    await vi.waitFor(() => { expect(mock2.dispose).not.toHaveBeenCalled() })
+    await Promise.resolve()
+
+    // P1 (previous cycle) resolves late: it must be disposed into the dead owner #1,
+    // and must NOT become the active TTY.
+    resolvers[0]!(mock1.tty)
+    await vi.waitFor(() => { expect(mock1.dispose).toHaveBeenCalledTimes(1) })
+
+    // Auto-approve must reach tty2 (current), never the disposed tty1.
+    store.getState().setAutoApprove(true)
+    store.setState({ aiState: ActivityState.SafePermissionRequested })
+
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    expect(mock2.ttyState.write).toHaveBeenCalledWith('\r')
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    expect(mock1.ttyState.write).not.toHaveBeenCalled()
+
+    store.getState().stop()
+  })
+
   describe('onUserInput', () => {
     it('triggers title generation on first Enter key', async () => {
       vi.useFakeTimers()

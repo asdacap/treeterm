@@ -122,6 +122,62 @@ describe('GhosttyEngine against real ghostty-web', () => {
     expect(engine.raw.buffer.active.getLine(0)?.translateToString(true)).toBe('line 0')
   })
 
+  it('delivers wheel events to onWheel even though ghostty-web stops propagation', async () => {
+    const { engine, container } = await mountEngine()
+    const host = container.querySelector('.ghostty-terminal-host')
+    const canvas = host?.querySelector('canvas')
+    expect(canvas).not.toBeNull()
+
+    const handler = vi.fn<(deltaY: number) => void>()
+    const disposable = engine.onWheel(handler)
+
+    // ghostty-web's own wheel listener is capture-phase and calls stopPropagation, so a bubble
+    // listener on the host would never see this. The delta must arrive via customWheelEventHandler.
+    canvas?.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }))
+    expect(handler).toHaveBeenCalledWith(-120)
+
+    disposable.dispose()
+    canvas?.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }))
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
+
+  it('settles at the bottom instead of fighting an in-flight smooth scroll', async () => {
+    const { engine, container } = await mountEngine()
+    writeLines(engine, 200)
+    expect(engine.getScrollPosition()).toBe(ScrollPosition.Bottom)
+
+    const canvas = container.querySelector('.ghostty-terminal-host canvas')
+    expect(canvas).not.toBeNull()
+
+    // Drive requestAnimationFrame by hand so any smooth-scroll animation is observable frame by frame.
+    const rafQueue: FrameRequestCallback[] = []
+    const rafSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      rafQueue.push(cb)
+      return rafQueue.length
+    })
+    const pump = (generations: number): void => {
+      for (let i = 0; i < generations && rafQueue.length > 0; i++) {
+        const frame = rafQueue.splice(0)
+        for (const cb of frame) cb(i * 16)
+      }
+    }
+
+    try {
+      // Wheel up: ghostty-web would normally start a smooth-scroll animation toward a non-bottom target.
+      canvas?.dispatchEvent(new WheelEvent('wheel', { deltaY: -400, bubbles: true, cancelable: true }))
+      // BaseTerminal's pin enforcement yanks back to the bottom mid-scroll.
+      engine.scrollToBottom()
+      // Before the fix, ghostty-web's animateScroll loop drags the viewport straight back up here,
+      // never converging; the pin handler would call scrollToBottom every frame forever.
+      pump(60)
+
+      expect(engine.getScrollPosition()).toBe(ScrollPosition.Bottom)
+      expect(engine.getScrollRatio()).toBe(1)
+    } finally {
+      rafSpy.mockRestore()
+    }
+  })
+
   it('measures a real cell size from the renderer', async () => {
     const { engine, container } = await mountEngine()
     Object.defineProperty(container, 'clientWidth', { value: 800 })

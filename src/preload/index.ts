@@ -170,6 +170,9 @@ const preloadApi: PreloadApi = {
     attach: (connectionId: string, handle: string, sessionId: string) => {
       return client.ptyAttach(connectionId, handle, sessionId)
     },
+    detach: (handle: string): void => {
+      client.ptyDetach(handle)
+    },
     list: (connectionId: string): Promise<TTYSessionInfo[]> => {
       return client.ptyList(connectionId)
     },

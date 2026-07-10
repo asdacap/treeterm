@@ -423,6 +423,146 @@ describe('GrpcDaemonClient', () => {
       expect(() => { ptyStream.resize(80, 24); }).not.toThrow()
     })
 
+    it('PtyStream.detach cancels the stream without ending it', () => {
+      const mockStream = makeMockSessionStream()
+      mockClientInstance.ptyStream.mockReturnValue(mockStream)
+      mockStream.on.mockReturnValue(mockStream)
+
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn<(...args: any[]) => void>())
+      ptyStream.detach()
+
+      expect(mockStream.cancel).toHaveBeenCalledTimes(1)
+      // Detach is not close: it must not half-close the write side (which the daemon
+      // could read as an intent to end the session).
+      expect(mockStream.end).not.toHaveBeenCalled()
+    })
+
+    it('PtyStream.detach is idempotent', () => {
+      const mockStream = makeMockSessionStream()
+      mockClientInstance.ptyStream.mockReturnValue(mockStream)
+      mockStream.on.mockReturnValue(mockStream)
+
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn<(...args: any[]) => void>())
+      ptyStream.detach()
+      ptyStream.detach()
+
+      expect(mockStream.cancel).toHaveBeenCalledTimes(1)
+    })
+
+    it('PtyStream.detach swallows the CANCELLED error the cancel provokes', () => {
+      const mockStream = makeMockSessionStream()
+      mockClientInstance.ptyStream.mockReturnValue(mockStream)
+      let errorHandler: ((err: Error) => void) | undefined
+      mockStream.on.mockImplementation((event: string, handler: (...args: any[]) => any) => {
+        if (event === 'error') errorHandler = handler as (err: Error) => void
+        return mockStream
+      })
+
+      const cb = vi.fn<(...args: any[]) => void>()
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', cb)
+      ptyStream.detach()
+
+      // gRPC delivers a CANCELLED error asynchronously after cancel() — it must not
+      // surface as a spurious Error event to the (already gone) listener.
+      errorHandler?.(new Error('1 CANCELLED: Call cancelled'))
+      expect(cb).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }))
+    })
+
+    it('PtyStream.detach swallows a late end event', () => {
+      const mockStream = makeMockSessionStream()
+      mockClientInstance.ptyStream.mockReturnValue(mockStream)
+      let endHandler: (() => void) | undefined
+      mockStream.on.mockImplementation((event: string, handler: (...args: any[]) => any) => {
+        if (event === 'end') endHandler = handler as () => void
+        return mockStream
+      })
+
+      const cb = vi.fn<(...args: any[]) => void>()
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', cb)
+      ptyStream.detach()
+
+      endHandler?.()
+      expect(cb).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'end' }))
+    })
+
+    it('PtyStream.detach rejects pending writes', async () => {
+      const mockStream = makeMockSessionStream()
+      mockClientInstance.ptyStream.mockReturnValue(mockStream)
+      mockStream.on.mockReturnValue(mockStream)
+
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn<(...args: any[]) => void>())
+      // A write that never gets its per-message callback — detach must settle it.
+      mockStream.write.mockImplementation(() => { /* no callback, no throw */ })
+      const writePromise = ptyStream.write('hello')
+
+      ptyStream.detach()
+
+      await expect(writePromise).rejects.toThrow('pty stream detached')
+    })
+
+    it('PtyStream.write rejects after detach without touching the stream', async () => {
+      const mockStream = makeMockSessionStream()
+      mockClientInstance.ptyStream.mockReturnValue(mockStream)
+      mockStream.on.mockReturnValue(mockStream)
+
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn<(...args: any[]) => void>())
+      ptyStream.detach()
+      mockStream.write.mockClear()
+
+      await expect(ptyStream.write('data')).rejects.toThrow('pty stream closed')
+      expect(mockStream.write).not.toHaveBeenCalled()
+    })
+
+    it('PtyStream.detach after close is a no-op (no cancel)', () => {
+      const mockStream = makeMockSessionStream()
+      mockClientInstance.ptyStream.mockReturnValue(mockStream)
+      mockStream.on.mockReturnValue(mockStream)
+
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn<(...args: any[]) => void>())
+      ptyStream.close()
+      ptyStream.detach()
+
+      expect(mockStream.end).toHaveBeenCalledTimes(1)
+      expect(mockStream.cancel).not.toHaveBeenCalled()
+    })
+
+    it('PtyStream.close after detach is a no-op (no end)', () => {
+      const mockStream = makeMockSessionStream()
+      mockClientInstance.ptyStream.mockReturnValue(mockStream)
+      mockStream.on.mockReturnValue(mockStream)
+
+      const ptyStream = client.openPtyStream('handle-1', 'pty-1', vi.fn<(...args: any[]) => void>())
+      ptyStream.detach()
+      ptyStream.close()
+
+      expect(mockStream.cancel).toHaveBeenCalledTimes(1)
+      expect(mockStream.end).not.toHaveBeenCalled()
+    })
+
+    it('detaching one attachment leaves another attachment to the same PTY streaming', () => {
+      const streamA = makeMockSessionStream()
+      const streamB = makeMockSessionStream()
+      const dataHandlersB: Array<(data: any) => void> = []
+      streamA.on.mockReturnValue(streamA)
+      streamB.on.mockImplementation((event: string, handler: (data: any) => void) => {
+        if (event === 'data') dataHandlersB.push(handler)
+        return streamB
+      })
+      mockClientInstance.ptyStream.mockReturnValueOnce(streamA).mockReturnValueOnce(streamB)
+
+      const cbA = vi.fn<(...args: any[]) => void>()
+      const cbB = vi.fn<(...args: any[]) => void>()
+      const attachmentA = client.openPtyStream('handle-a', 'pty-1', cbA)
+      client.openPtyStream('handle-b', 'pty-1', cbB)
+
+      attachmentA.detach()
+
+      // B's stream was never cancelled and still delivers PTY output.
+      expect(streamB.cancel).not.toHaveBeenCalled()
+      dataHandlersB[0]?.({ data: { data: Buffer.from('output') } })
+      expect(cbB).toHaveBeenCalledWith({ type: 'data', data: expect.anything() as unknown })
+    })
+
     it('PtyStream receives resize events from stream via constructor callback', () => {
       const mockStream = makeMockSessionStream()
       mockClientInstance.ptyStream.mockReturnValue(mockStream)

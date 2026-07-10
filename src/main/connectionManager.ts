@@ -301,9 +301,9 @@ class Connection {
 
     try {
       if (this.target.type === ConnectionTargetType.Local) {
-        await this.reconnectLocal()
+        await this.reconnectLocal(onStatusChanged)
       } else {
-        await this.reconnectRemote()
+        await this.reconnectRemote(onStatusChanged)
       }
 
       // Success
@@ -328,7 +328,38 @@ class Connection {
     }
   }
 
-  private async reconnectLocal(): Promise<void> {
+  /**
+   * Wire the current client's transport-drop handler. Must be called for every
+   * client instance — including those created during reconnect — otherwise the
+   * new client's `watchConnectivity` fires into an empty listener set and only
+   * the slow heartbeat timeout catches the drop. The `status === Connected`
+   * guard dedupes against the heartbeat monitor, which can detect the same drop.
+   */
+  wireClientDisconnect(onStatusChanged: () => void): void {
+    this.client?.onDisconnect(() => {
+      if (this.status === ConnectionStatus.Connected) {
+        this.error = 'gRPC connection lost'
+        this.startReconnect(onStatusChanged)
+      }
+    })
+  }
+
+  /**
+   * Wire the current tunnel's drop handler. Like the client handler, this must
+   * be re-registered on every new tunnel created during reconnect.
+   */
+  wireTunnelDisconnect(onStatusChanged: () => void): void {
+    this.tunnel?.onDisconnect((error?: string) => {
+      if (this.status === ConnectionStatus.Connected || this.status === ConnectionStatus.Reconnecting) {
+        this.client?.disconnect()
+        this.client = null
+        this.error = error ?? 'SSH tunnel disconnected'
+        this.startReconnect(onStatusChanged)
+      }
+    })
+  }
+
+  private async reconnectLocal(onStatusChanged: () => void): Promise<void> {
     const socketPath = this.client?.socketPath
     this.client?.disconnect()
     this.client = null
@@ -340,9 +371,12 @@ class Connection {
     const newClient = new GrpcDaemonClient(socketPath)
     await newClient.connect()
     this.client = newClient
+    // Re-wire the transport watcher on the fresh client so subsequent drops are
+    // detected fast, not just by the heartbeat timeout.
+    this.wireClientDisconnect(onStatusChanged)
   }
 
-  private async reconnectRemote(): Promise<void> {
+  private async reconnectRemote(onStatusChanged: () => void): Promise<void> {
     if (this.target.type !== ConnectionTargetType.Remote) {
       throw new Error('reconnectRemote called on non-remote connection')
     }
@@ -380,6 +414,10 @@ class Connection {
     const client = new GrpcDaemonClient(result.socketPath)
     await client.connect()
     this.client = client
+    // Re-wire the drop handlers on the fresh tunnel and client. Without this the
+    // second (and later) drop is only caught by the slow heartbeat timeout.
+    this.wireTunnelDisconnect(onStatusChanged)
+    this.wireClientDisconnect(onStatusChanged)
   }
 
   disconnect(): void {
@@ -433,13 +471,7 @@ export class ConnectionManager {
       }
     })
 
-    client.onDisconnect(() => {
-      const c = this.connections.get(id)
-      if (c && c.status === ConnectionStatus.Connected) {
-        c.error = 'gRPC connection lost'
-        c.startReconnect(() => { this.emitStatus(id) })
-      }
-    })
+    conn.wireClientDisconnect(() => { this.emitStatus(id) })
 
     this.emitStatus(id)
     return conn.toInfo()
@@ -578,24 +610,11 @@ export class ConnectionManager {
         }
       })
 
-      // Monitor for disconnection — trigger reconnect for auto-recovery
-      tunnel.onDisconnect((error) => {
-        const c = this.connections.get(config.id)
-        if (c && (c.status === ConnectionStatus.Connected || c.status === ConnectionStatus.Reconnecting)) {
-          c.client?.disconnect()
-          c.client = null
-          c.error = error ?? 'SSH tunnel disconnected'
-          c.startReconnect(() => { this.emitStatus(config.id) })
-        }
-      })
-
-      client.onDisconnect(() => {
-        const c = this.connections.get(config.id)
-        if (c && c.status === ConnectionStatus.Connected) {
-          c.error = 'gRPC connection lost'
-          c.startReconnect(() => { this.emitStatus(config.id) })
-        }
-      })
+      // Monitor for disconnection — trigger reconnect for auto-recovery.
+      // Shared with the reconnect paths so every new tunnel/client instance
+      // gets the same drop handlers wired.
+      conn.wireTunnelDisconnect(() => { this.emitStatus(config.id) })
+      conn.wireClientDisconnect(() => { this.emitStatus(config.id) })
 
       this.emitStatus(config.id)
       const connInfo = this.getConnection(config.id)

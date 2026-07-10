@@ -72,6 +72,7 @@ const CHANNELS = {
   ptyWrite: 'pty:write',
   ptyResize: 'pty:resize',
   ptyKill: 'pty:kill',
+  ptyDetach: 'pty:detach',
   appCloseConfirmed: 'app:close-confirmed',
   appCloseCancelled: 'app:close-cancelled',
   // Event channels
@@ -324,6 +325,10 @@ export class IpcClient {
 
   ptyKill(...args: IpcSends['ptyKill']['params']): void {
     ipcRenderer.send(CHANNELS.ptyKill, ...args)
+  }
+
+  ptyDetach(...args: IpcSends['ptyDetach']['params']): void {
+    ipcRenderer.send(CHANNELS.ptyDetach, ...args)
   }
 
   appCloseConfirmed(...args: IpcSends['appCloseConfirmed']['params']): void {

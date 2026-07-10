@@ -34,17 +34,26 @@ vi.mock('./ssh', () => {
   }
 })
 
+// Latest registered gRPC disconnect callback (module-level convenience used by
+// existing tests). Each client instance also keeps its OWN listener set so we
+// can faithfully model the per-client-instance isolation of `disconnectListeners`
+// in the real GrpcDaemonClient — the whole point of the reconnect-rewiring bug.
 let grpcDisconnectCallback: (() => void) | null = null
+
+interface MockGrpcClientInstance {
+  socketPath: string
+  fireDisconnect: () => void
+  hasDisconnectListener: () => boolean
+}
+
+const createdGrpcClients: MockGrpcClientInstance[] = []
 
 const mockWatchSessionUnsubscribe = vi.fn()
 
 const mockRemoteClient = {
   connect: vi.fn().mockResolvedValue(undefined),
   disconnect: vi.fn(),
-  onDisconnect: vi.fn().mockImplementation((cb: () => void) => {
-    grpcDisconnectCallback = cb
-    return () => { grpcDisconnectCallback = null }
-  }),
+  onDisconnect: vi.fn(),
   watchSession: vi.fn().mockReturnValue({
     initial: Promise.resolve({ id: 'test', workspaces: [], createdAt: 0, lastActivity: 0, version: 1, lock: null }),
     unsubscribe: mockWatchSessionUnsubscribe,
@@ -53,7 +62,24 @@ const mockRemoteClient = {
 
 vi.mock('./grpcClient', () => ({
   GrpcDaemonClient: vi.fn().mockImplementation(function(socketPath: string) {
-    return { ...mockRemoteClient, socketPath }
+    // Per-instance listener set — mirrors the real client's private
+    // `disconnectListeners`. A drop only fires listeners registered on THIS
+    // instance, so a reconnect that forgets to re-wire is observable.
+    const listeners = new Set<() => void>()
+    const instance = {
+      ...mockRemoteClient,
+      socketPath,
+      onDisconnect: vi.fn().mockImplementation((cb: () => void) => {
+        listeners.add(cb)
+        grpcDisconnectCallback = cb
+        return () => { listeners.delete(cb) }
+      }),
+      // Test helper: simulate a transport drop on this specific client.
+      fireDisconnect: () => { for (const cb of Array.from(listeners)) cb() },
+      hasDisconnectListener: () => listeners.size > 0,
+    }
+    createdGrpcClients.push(instance)
+    return instance
   })
 }))
 
@@ -102,6 +128,7 @@ describe('ConnectionManager', () => {
     tunnelOutputCallback = null
     tunnelDisconnectCallback = null
     grpcDisconnectCallback = null
+    createdGrpcClients.length = 0
     manager = new ConnectionManager('/tmp/test.sock')
     const info = await manager.connectLocal()
     localConnectionId = info.id
@@ -640,6 +667,62 @@ describe('ConnectionManager', () => {
 
       manager.reconnect(localConnectionId)
       expect(manager.getConnection(localConnectionId)?.status).toBe('reconnecting')
+    })
+
+    // Regression: fast disconnect detection must survive a reconnect. Before
+    // the fix, reconnectLocal/reconnectRemote built a fresh client without
+    // re-registering onDisconnect, so drop #2 was only caught by the slow
+    // heartbeat timeout. We assert the NEW client instance carries its own
+    // disconnect listener and that firing IT (not the stale one) reconnects.
+    it('re-wires the transport-drop handler on the new client after reconnect (local)', async () => {
+      const client1 = manager.getClient(localConnectionId) as unknown as MockGrpcClientInstance
+      expect(client1.hasDisconnectListener()).toBe(true)
+
+      // Drop #1 on the original client
+      client1.fireDisconnect()
+      expect(manager.getConnection(localConnectionId)?.status).toBe('reconnecting')
+
+      // Successful reconnect builds a FRESH client instance
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(manager.getConnection(localConnectionId)?.status).toBe('connected')
+
+      const client2 = manager.getClient(localConnectionId) as unknown as MockGrpcClientInstance
+      expect(client2).not.toBe(client1)
+      // The core assertion: the rebuilt client has its OWN disconnect listener.
+      expect(client2.hasDisconnectListener()).toBe(true)
+
+      // Drop #2 on the NEW client must be detected promptly (no 50s heartbeat).
+      client2.fireDisconnect()
+      expect(manager.getConnection(localConnectionId)?.status).toBe('reconnecting')
+    })
+
+    it('re-wires transport + tunnel drop handlers on the new instances after reconnect (remote)', async () => {
+      await manager.connectRemote(remoteConfig)
+      const client1 = manager.getClient('remote-1') as unknown as MockGrpcClientInstance
+
+      // Drop #1 via the original client's transport watcher
+      client1.fireDisconnect()
+      expect(manager.getConnection('remote-1')?.status).toBe('reconnecting')
+
+      // Successful reconnect rebuilds tunnel + client
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(manager.getConnection('remote-1')?.status).toBe('connected')
+
+      const client2 = manager.getClient('remote-1') as unknown as MockGrpcClientInstance
+      expect(client2).not.toBe(client1)
+      expect(client2.hasDisconnectListener()).toBe(true)
+
+      // Drop #2 via the new client's transport watcher — detected promptly
+      client2.fireDisconnect()
+      expect(manager.getConnection('remote-1')?.status).toBe('reconnecting')
+
+      // Reconnect again, then verify the rebuilt tunnel's drop handler also fires.
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(manager.getConnection('remote-1')?.status).toBe('connected')
+
+      // tunnelDisconnectCallback is re-captured on each new tunnel via the ssh mock.
+      tunnelDisconnectCallback?.('tunnel gone')
+      expect(manager.getConnection('remote-1')?.status).toBe('reconnecting')
     })
 
     it('failed reconnect attempt schedules retry with backoff', async () => {

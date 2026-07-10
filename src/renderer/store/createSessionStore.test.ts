@@ -106,6 +106,7 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       write: vi.fn(),
       resize: vi.fn(),
       kill: vi.fn(),
+      detach: vi.fn(),
       onEvent: vi.fn().mockReturnValue(() => {}),
       onActiveProcessesOpen: vi.fn().mockReturnValue(() => {}),
       createSession: vi.fn().mockResolvedValue({ success: true, sessionId: 'pty-1' }),
@@ -942,6 +943,26 @@ describe('createSessionStore', () => {
       vi.mocked(deps.terminal.attach).mockResolvedValue({ success: false, error: '' } as never)
       await expect(store.getState().openTtyStream('pty-1', vi.fn())).rejects.toThrow('Failed to attach to PTY')
     })
+
+    it('disposing the returned Tty detaches the main-side stream with its attach handle', async () => {
+      const tty = await store.getState().openTtyStream('pty-1', vi.fn())
+      const attachCall = vi.mocked(deps.terminal.attach).mock.calls[0]!
+      const handle = attachCall[1]
+
+      tty.dispose()
+
+      expect(deps.terminal.detach).toHaveBeenCalledTimes(1)
+      expect(deps.terminal.detach).toHaveBeenCalledWith(handle)
+    })
+
+    it('double-disposing the returned Tty detaches exactly once', async () => {
+      const tty = await store.getState().openTtyStream('pty-1', vi.fn())
+
+      tty.dispose()
+      tty.dispose()
+
+      expect(deps.terminal.detach).toHaveBeenCalledTimes(1)
+    })
   })
 
   describe('clearWorkspaceError', () => {
@@ -1613,6 +1634,98 @@ describe('createSessionStore', () => {
       expect(writes.length).toBe(1)
       expect((JSON.parse(writes[0]!.content) as Workspace).metadata.note).toBe('offline-edit')
       expect(writes[0]!.expectedSha).toBe('sha-initial')
+    })
+
+    it('re-flushes on reconnect a write that failed because the transport dropped mid-RPC', async () => {
+      const ws = makeWorkspace({ id: 'ws-drop', name: 'drop', path: '/drop' })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
+      emitFilePresent(ws, 'sha-initial')
+      const handle = loadedHandle('ws-drop')
+      const target = store.getState().connection.target
+
+      // The write passes the Connected guard, then the transport drops mid-RPC: the
+      // status flips to Reconnecting and the RPC resolves {success:false}. Without the
+      // fix setWorkspaceFileError no-ops (disconnected), dirty stays false, and the
+      // reconnect flush skips this workspace — the delta silently never lands on disk.
+      const writes: { content: string; expectedSha: string }[] = []
+      let dropped = false
+      vi.mocked(deps.filesystem.writeFile).mockImplementation((_wp: string, _fp: string, content: string, expectedSha?: string) => {
+        writes.push({ content, expectedSha: expectedSha ?? '' })
+        if (!dropped) {
+          dropped = true
+          store.getState().handleConnectionStatusChange({ id: 'local', target, status: ConnectionStatus.Reconnecting, error: 'tunnel dropped', attempt: 1 })
+          return Promise.resolve({ success: false, error: '14 UNAVAILABLE: transport dropped' })
+        }
+        return Promise.resolve({ success: true })
+      })
+
+      handle.getState().updateMetadata('note', 'delta', 'test')
+      for (let i = 0; i < 8; i++) await flushPromises()
+
+      // The failure did not surface as a workspace error (the connection banner owns
+      // it), and only the failed write happened so far.
+      expect(store.getState().workspaces.get('ws-drop')!.status).toBe(WorkspaceEntryStatus.Loaded)
+      expect(writes.length).toBe(1)
+
+      // Reconnect: the deferred body is flushed and lands on disk.
+      store.getState().handleConnectionStatusChange({ id: 'local', target, status: ConnectionStatus.Connected })
+      for (let i = 0; i < 8; i++) await flushPromises()
+
+      expect(writes.length).toBe(2)
+      expect((JSON.parse(writes[1]!.content) as Workspace).metadata.note).toBe('delta')
+      expect(writes[1]!.expectedSha).toBe('sha-initial')
+    })
+
+    it('re-flushes on reconnect a write whose RPC rejected after the transport dropped', async () => {
+      const ws = makeWorkspace({ id: 'ws-reject', name: 'reject', path: '/reject' })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
+      emitFilePresent(ws, 'sha-initial')
+      const handle = loadedHandle('ws-reject')
+      const target = store.getState().connection.target
+
+      // The writeFile RPC rejects (not just {success:false}) after the transport drops.
+      // A rejected sync tail with no handler is an unhandled rejection and the same
+      // lost delta; the try/catch routes it through the dirty-on-disconnect guard.
+      const writes: string[] = []
+      let dropped = false
+      vi.mocked(deps.filesystem.writeFile).mockImplementation((_wp: string, _fp: string, content: string) => {
+        if (!dropped) {
+          dropped = true
+          store.getState().handleConnectionStatusChange({ id: 'local', target, status: ConnectionStatus.Reconnecting, error: 'tunnel dropped', attempt: 1 })
+          return Promise.reject(new Error('14 UNAVAILABLE: transport dropped'))
+        }
+        writes.push(content)
+        return Promise.resolve({ success: true })
+      })
+
+      handle.getState().updateMetadata('note', 'survives', 'test')
+      for (let i = 0; i < 8; i++) await flushPromises()
+      expect(store.getState().workspaces.get('ws-reject')!.status).toBe(WorkspaceEntryStatus.Loaded)
+      expect(writes.length).toBe(0)
+
+      store.getState().handleConnectionStatusChange({ id: 'local', target, status: ConnectionStatus.Connected })
+      for (let i = 0; i < 8; i++) await flushPromises()
+
+      expect(writes.length).toBe(1)
+      expect((JSON.parse(writes[0]!) as Workspace).metadata.note).toBe('survives')
+    })
+
+    it('surfaces a non-conflict write failure loudly while the connection is healthy', async () => {
+      const ws = makeWorkspace({ id: 'ws-fail', name: 'fail', path: '/fail' })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
+      emitFilePresent(ws, 'sha-initial')
+      const handle = loadedHandle('ws-fail')
+
+      // Still Connected: a genuine failure must surface as a workspace error, not be
+      // silently deferred as dirty.
+      vi.mocked(deps.filesystem.writeFile).mockResolvedValue({ success: false, error: 'disk full' })
+
+      handle.getState().updateMetadata('note', 'x', 'test')
+      for (let i = 0; i < 8; i++) await flushPromises()
+
+      const entry = store.getState().workspaces.get('ws-fail')!
+      expect(entry.status).toBe(WorkspaceEntryStatus.OperationError)
+      expect((entry as Extract<typeof entry, { status: WorkspaceEntryStatus.OperationError }>).error).toContain('Failed to save workspace')
     })
 
     it('does not flush clean workspaces on reconnect', async () => {

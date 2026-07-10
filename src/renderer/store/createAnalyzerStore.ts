@@ -436,7 +436,12 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
       // Create headless xterm (no DOM attachment needed)
       terminal = new Terminal()
-      streamOwner = new DisposableStore()
+      // Capture this cycle's owner. `streamOwner` is reassigned by the next start(),
+      // so the async continuations below must check the owner they were born with —
+      // not whatever `streamOwner` points at by the time they resolve. Otherwise a
+      // late attach from a previous cycle sees the *new* owner (not disposed) and
+      // clobbers the current TTY with its own already-disposed handle.
+      const owner = streamOwner = new DisposableStore()
 
       // The daemon replays scrollback as Data events after attach, and an
       // already-exited PTY arrives as an Exit event — both land in onEvent below.
@@ -453,9 +458,9 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
             terminal?.resize(event.cols, event.rows)
             break
         }
-      }), streamOwner).then((tty) => {
+      }), owner).then((tty) => {
         // stop() ran while attach was in flight; `tty` is already disposed.
-        if (streamOwner.isDisposed) return
+        if (owner.isDisposed) return
         ownTty = tty
       }).catch((err: unknown) => {
         console.error('[analyzer] failed to open TTY stream:', err)

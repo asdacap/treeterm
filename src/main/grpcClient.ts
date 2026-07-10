@@ -68,6 +68,10 @@ export class PtyStream {
   readonly sessionId: string
   private stream: grpc.ClientDuplexStream<PtyInput, PtyOutput>
   private closed: boolean = false
+  // Set by detach(): the CANCELLED error that cancelling the duplex provokes is a
+  // deliberate teardown, not a fault, so the stream callbacks must stay silent
+  // instead of forwarding a spurious Error/End to a listener that is already gone.
+  private detached: boolean = false
   private pendingWrites: Array<(err: Error | null) => void> = []
 
   constructor(client: TreeTermDaemonClient, handle: string, sessionId: string, onEvent: (event: PtyEvent) => void) {
@@ -88,6 +92,9 @@ export class PtyStream {
     })
 
     this.stream.on('error', (error) => {
+      // A detach cancels the RPC, which surfaces here as CANCELLED. Swallow it:
+      // the attachment is intentionally torn down and nobody is listening.
+      if (this.detached) return
       console.error(`[PtyStream ${this.handle}] stream error for ${sessionId}:`, error)
       this.closed = true
       this.drainPendingWrites(error)
@@ -95,6 +102,7 @@ export class PtyStream {
     })
 
     this.stream.on('end', () => {
+      if (this.detached) return
       this.closed = true
       this.drainPendingWrites(new Error('pty stream ended'))
       onEvent({ type: PtyEventType.End })
@@ -150,6 +158,23 @@ export class PtyStream {
     if (this.closed) return
     this.closed = true
     this.stream.end()
+  }
+
+  /**
+   * Detach this attachment from the PTY without killing it: cancel the gRPC duplex
+   * so the daemon stops streaming to this stream, while the PTY (and any other
+   * window's attachment to the same session) keeps running. This is the counterpart
+   * to `close()`+kill — a pure teardown of one observer. Idempotent, and safe to
+   * call after the stream has already ended or been closed (both set `closed`).
+   */
+  detach(): void {
+    if (this.closed) return
+    this.closed = true
+    this.detached = true
+    // No event will drain these now (the error/end handlers are silenced), so
+    // settle any in-flight writes here instead of leaving their promises hanging.
+    this.drainPendingWrites(new Error('pty stream detached'))
+    this.stream.cancel()
   }
 }
 

@@ -992,7 +992,7 @@ describe('createWorkspaceStore', () => {
       const writeFn = vi.fn<(handle: string, data: string) => Promise<void>>().mockResolvedValue(undefined)
       const killFn = vi.fn<(ptyId: string) => void>()
       const unsubscribe = vi.fn()
-      const terminal: TtyTerminalDeps = { write: writeFn, resize: vi.fn(), kill: killFn }
+      const terminal: TtyTerminalDeps = { write: writeFn, resize: vi.fn(), kill: killFn, detach: vi.fn() }
       const deps = makeHandleDeps({
         openTtyStream: vi.fn<(...args: any[]) => any>().mockImplementation((ptyId: string, onEvent: (event: { type: string }) => void) => {
           onEventCb = onEvent

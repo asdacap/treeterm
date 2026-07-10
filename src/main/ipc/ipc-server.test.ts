@@ -184,6 +184,7 @@ describe('IpcServer', () => {
     it.each([
       ['onPtyResize', 'pty:resize'],
       ['onPtyKill', 'pty:kill'],
+      ['onPtyDetach', 'pty:detach'],
       ['onClipboardWriteText', 'clipboard:writeText'],
       ['onExecKill', 'exec:kill'],
     ] as const)('%s registers handler on %s channel', (method, channel) => {

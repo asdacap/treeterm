@@ -31,9 +31,12 @@ const { terminals, initCalls, FakeTerminal } = vi.hoisted(() => {
     linkProviders: unknown[] = []
     dataListener: ((data: string) => void) | null = null
     scrollListener: ((y: number) => void) | null = null
+    /** ghostty-web owns wheel input; consumers hook in through this, not a DOM listener. */
+    customWheelEventHandler: ((event: WheelEvent) => boolean) | undefined = undefined
+    constructorOptions: Record<string, unknown> | undefined
     selection = ''
 
-    constructor() { terminals.push(this) }
+    constructor(opts?: Record<string, unknown>) { this.constructorOptions = opts; terminals.push(this) }
 
     get buffer() {
       return { active: { type: this.alternate ? 'alternate' : 'normal' } }
@@ -56,6 +59,9 @@ const { terminals, initCalls, FakeTerminal } = vi.hoisted(() => {
     onScroll(listener: (y: number) => void): { dispose(): void } {
       this.scrollListener = listener
       return { dispose: () => { this.scrollListener = null } }
+    }
+    attachCustomWheelEventHandler(handler?: (event: WheelEvent) => boolean): void {
+      this.customWheelEventHandler = handler
     }
     write(data: string | Uint8Array, callback?: () => void): void {
       if (this.disposed) throw new Error('Terminal has been disposed')
@@ -126,6 +132,13 @@ describe('createGhosttyEngine', () => {
     await createGhosttyEngine(options())
     expect(initCalls.count).toBe(1)
     expect(terminals).toHaveLength(1)
+  })
+
+  it('disables ghostty-web smooth scrolling so pin-to-bottom cannot fight an animation', async () => {
+    await createGhosttyEngine(options())
+    // With a non-zero duration ghostty-web runs a self-rescheduling rAF loop that scrollToBottom
+    // never cancels — the source of the pin-enforcement feedback loop.
+    expect(terminals[0]?.constructorOptions?.smoothScrollDuration).toBe(0)
   })
 
   it('opens onto a host of its own rather than the caller container', async () => {
@@ -306,18 +319,20 @@ describe('GhosttyEngine — passthrough', () => {
     expect(terminal.scrollListener).toBeNull()
   })
 
-  it('reports wheel deltas from its host, and stops on dispose', async () => {
-    const { engine, container } = await makeEngine()
+  it('reports wheel deltas through ghostty-web\'s wheel hook, and detaches on dispose', async () => {
+    const { engine, terminal } = await makeEngine()
     const handler = vi.fn<(deltaY: number) => void>()
     const disposable = engine.onWheel(handler)
-    const host = container.querySelector('.ghostty-terminal-host')
 
-    host?.dispatchEvent(new WheelEvent('wheel', { deltaY: -120 }))
+    // ghostty-web stops wheel propagation before it can bubble to a DOM listener, so the delta has
+    // to arrive via its customWheelEventHandler hook. Returning false lets ghostty still scroll.
+    expect(terminal.customWheelEventHandler).toBeTypeOf('function')
+    const consumed = terminal.customWheelEventHandler?.(new WheelEvent('wheel', { deltaY: -120 }))
     expect(handler).toHaveBeenCalledWith(-120)
+    expect(consumed).toBe(false)
 
     disposable.dispose()
-    host?.dispatchEvent(new WheelEvent('wheel', { deltaY: -120 }))
-    expect(handler).toHaveBeenCalledTimes(1)
+    expect(terminal.customWheelEventHandler).toBeUndefined()
   })
 
   it('pushes display options onto the live terminal', async () => {

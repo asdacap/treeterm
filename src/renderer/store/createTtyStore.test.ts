@@ -7,6 +7,7 @@ function makeMockTerminalDeps(): TtyTerminalDeps {
     write: vi.fn<(handle: string, data: string) => Promise<void>>().mockResolvedValue(undefined),
     resize: vi.fn(),
     kill: vi.fn(),
+    detach: vi.fn(),
   }
 }
 
@@ -68,5 +69,28 @@ describe('createTtyStore', () => {
     tty.dispose()
 
     expect(terminal.kill).not.toHaveBeenCalled()
+  })
+
+  // The whole point of the fix: disposing must tear down the main-side gRPC stream,
+  // not just the renderer subscription — otherwise the daemon keeps streaming to an
+  // orphaned attachment. Detach uses the routing handle, not the ptyId.
+  it('dispose detaches the main-side stream by handle', () => {
+    const terminal = makeMockTerminalDeps()
+    const tty = createTtyStore('pty-1', 'handle-1', terminal, noopSubscription())
+
+    tty.dispose()
+
+    expect(terminal.detach).toHaveBeenCalledTimes(1)
+    expect(terminal.detach).toHaveBeenCalledWith('handle-1')
+  })
+
+  it('double dispose detaches exactly once', () => {
+    const terminal = makeMockTerminalDeps()
+    const tty = createTtyStore('pty-1', 'handle-1', terminal, noopSubscription())
+
+    tty.dispose()
+    tty.dispose()
+
+    expect(terminal.detach).toHaveBeenCalledTimes(1)
   })
 })

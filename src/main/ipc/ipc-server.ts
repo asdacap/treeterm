@@ -74,6 +74,7 @@ const CHANNELS = {
   ptyWrite: 'pty:write',
   ptyResize: 'pty:resize',
   ptyKill: 'pty:kill',
+  ptyDetach: 'pty:detach',
   fsUnwatchFile: 'fs:unwatchFile',
   appCloseConfirmed: 'app:close-confirmed',
   appCloseCancelled: 'app:close-cancelled',
@@ -161,6 +162,12 @@ export class IpcServer {
   onPtyKill(handler: (...args: IpcSends['ptyKill']['params']) => void): void {
     ipcMain.on(CHANNELS.ptyKill, (_event: IpcMainEvent, ...args: unknown[]) =>
       { handler(...(args as IpcSends['ptyKill']['params'])); }
+    )
+  }
+
+  onPtyDetach(handler: (...args: IpcSends['ptyDetach']['params']) => void): void {
+    ipcMain.on(CHANNELS.ptyDetach, (_event: IpcMainEvent, ...args: unknown[]) =>
+      { handler(...(args as IpcSends['ptyDetach']['params'])); }
     )
   }
 

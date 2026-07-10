@@ -362,6 +362,10 @@ export interface TerminalApi {
    *  reconnect returns the existing live PTY instead of spawning a duplicate. */
   create: (connectionId: string, handle: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string, ptyHandle?: string) => Promise<IpcResult<{ sessionId: string }>>
   attach: (connectionId: string, handle: string, sessionId: string) => Promise<IpcResult>
+  /** Detach the stream for `handle` (the routing handle from a prior `attach`) without
+   *  killing the PTY. Releases the main-side gRPC duplex so the daemon stops streaming
+   *  to this attachment; other attachments to the same PTY are unaffected. */
+  detach: (handle: string) => void
   list: (connectionId: string) => Promise<TTYSessionInfo[]>
   write: (handle: string, data: string) => Promise<void>
   resize: (handle: string, cols: number, rows: number) => void

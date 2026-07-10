@@ -390,6 +390,18 @@ server.onPtyKill((connectionId, sessionId) => {
   }
 })
 
+// Detach one attachment's gRPC stream WITHOUT killing the PTY. The renderer calls
+// this when a Tty is disposed (e.g. "Refresh stream", analyzer stop, tab teardown):
+// otherwise the old duplex stays open and the daemon keeps streaming a PTY nobody
+// listens to. Unknown/already-ended handles are a no-op — the entry may have been
+// removed already by an End/Error event or a prior detach.
+server.onPtyDetach((handle) => {
+  const stream = ptyStreams.get(handle)
+  if (!stream) return
+  ptyStreams.delete(handle)
+  stream.detach()
+})
+
 
 server.onDaemonShutdown(async (connectionId) => {
   if (!connectionManager) {

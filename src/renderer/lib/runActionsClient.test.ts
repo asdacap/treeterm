@@ -235,6 +235,7 @@ function createMockTerminal(sessionId: string = 'pty-1'): TerminalApi {
   return {
     create: vi.fn(),
     attach: vi.fn(),
+    detach: vi.fn(),
     list: vi.fn(),
     write: vi.fn(),
     resize: vi.fn(),

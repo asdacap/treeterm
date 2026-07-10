@@ -439,7 +439,16 @@ export function createSessionStore(
     const newSha = await sha256Hex(json)
     rememberHash(sync, newSha)
 
-    const result = await deps.filesystem.writeFile(workspaceDataDir, `${id}.json`, json, guardSha)
+    let result: Awaited<ReturnType<typeof deps.filesystem.writeFile>>
+    try {
+      result = await deps.filesystem.writeFile(workspaceDataDir, `${id}.json`, json, guardSha)
+    } catch (err) {
+      // The writeFile RPC itself rejected — typically the transport dropping
+      // mid-call. An unhandled rejection here would also silently lose this body:
+      // route it through the same lost-delta guard as a {success:false} failure.
+      handleWriteFailure(id, sync, err instanceof Error ? err.message : String(err))
+      return
+    }
     if (result.success) {
       sync.lastWrittenJson = json
       sync.lastSeenSha = newSha
@@ -463,9 +472,23 @@ export function createSessionStore(
           sync.retryOnNextEvent = true
         }
       } else {
-        setWorkspaceFileError(id, `Failed to save workspace: ${result.error}`)
+        handleWriteFailure(id, sync, result.error)
       }
     }
+  }
+
+  // A non-conflict write failure (RPC returned {success:false} or rejected). If the
+  // connection dropped mid-RPC the write was lost to the disconnect, not rejected by
+  // the daemon: mark the body dirty so handleConnectionStatusChange re-flushes it on
+  // reconnect. Otherwise the local delta (e.g. a fresh ptyId) silently never lands on
+  // disk — exactly the orphan-PTY class of bug — because setWorkspaceFileError no-ops
+  // while disconnected. If we are still connected it is a genuine failure: fail loudly.
+  function handleWriteFailure(id: string, sync: WorkspaceSyncState, error: string): void {
+    if (store.getState().connection.status !== ConnectionStatus.Connected) {
+      sync.dirty = true
+      return
+    }
+    setWorkspaceFileError(id, `Failed to save workspace: ${error}`)
   }
 
   // Enqueue a content write for a workspace. Coalesces rapid mutations: if a write
@@ -1057,6 +1080,7 @@ export function createSessionStore(
     write: deps.terminal.write,
     resize: deps.terminal.resize,
     kill: (sessionId: string) => { deps.terminal.kill(connectionId, sessionId); },
+    detach: (handle: string) => { deps.terminal.detach(handle); },
   }
 
   const store = createStore<SessionState>()((set, get) => ({

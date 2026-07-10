@@ -329,6 +329,11 @@ export interface IpcSends {
   ptyKill: {
     params: [connectionId: string, sessionId: string]
   }
+  // Detach one attachment's stream (identified by its routing handle) without
+  // killing the PTY. The daemon keeps the PTY alive for other attachments.
+  ptyDetach: {
+    params: [handle: string]
+  }
   appCloseConfirmed: {
     params: []
   }

@@ -138,9 +138,15 @@ class GhosttyEngine implements TerminalEngine {
   }
 
   onWheel(handler: (deltaY: number) => void): TerminalDisposable {
-    const onWheel = (event: Event): void => { handler((event as WheelEvent).deltaY) }
-    this.host.addEventListener('wheel', onWheel)
-    return { dispose: () => { this.host.removeEventListener('wheel', onWheel) } }
+    // ghostty-web owns wheel input: it registers a capture-phase listener on the host that calls
+    // stopPropagation before anything bubbles, so a bubble-phase listener here would never fire.
+    // Its customWheelEventHandler hook runs *inside* that listener, before ghostty scrolls — return
+    // false so ghostty still performs the scroll while our handler sees the delta first.
+    this.terminal.attachCustomWheelEventHandler((event: WheelEvent): boolean => {
+      handler(event.deltaY)
+      return false
+    })
+    return { dispose: () => { this.terminal.attachCustomWheelEventHandler(undefined) } }
   }
 
   isAlternateScreen(): boolean {
@@ -194,6 +200,12 @@ export async function createGhosttyEngine(options: TerminalEngineOptions): Promi
     fontSize: options.fontSize,
     fontFamily: options.fontFamily,
     scrollback: options.scrollback,
+    // Disable ghostty-web's smooth-scroll animation. Its animateScroll loop reschedules itself via
+    // requestAnimationFrame until viewportY reaches targetViewportY, and scrollToBottom()/scrollToLine()
+    // move viewportY without resetting that target — so BaseTerminal's pin-to-bottom enforcement fights
+    // the animation forever (two setState calls per frame). With duration 0, smoothScrollTo settles
+    // viewportY and targetViewportY immediately and never schedules a frame, so scrollToBottom settles.
+    smoothScrollDuration: 0,
     theme: {
       ...TERMINAL_THEME_COLORS,
       background: options.themeBackground,
