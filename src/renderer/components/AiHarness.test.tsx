@@ -7,9 +7,9 @@ import type { BaseTerminalConfig } from './BaseTerminal'
 import type { TerminalEngine } from '../terminal/engine'
 import { ActivityState } from '../types'
 
-// AiHarness is a selector plus a status bar: it picks the ghostty engine, taps keystrokes
+// AiHarness is a selector plus a status bar: it picks the xterm engine, taps keystrokes
 // into the analyzer, and hands everything else to BaseTerminal. Terminal behaviour lives in
-// BaseTerminal.test.tsx and ghosttyEngine.test.ts.
+// BaseTerminal.test.tsx and xtermEngine.test.ts.
 const { configs } = vi.hoisted(() => ({ configs: [] as BaseTerminalConfig[] }))
 vi.mock('./BaseTerminal', () => ({
   default: ({ config }: { config: BaseTerminalConfig }) => {
@@ -17,7 +17,7 @@ vi.mock('./BaseTerminal', () => ({
     return <div data-testid="base-terminal" />
   },
 }))
-vi.mock('../terminal/ghosttyEngine', () => ({ createGhosttyEngine: vi.fn() }))
+vi.mock('../terminal/xtermEngine', () => ({ createXtermEngine: vi.fn() }))
 // The context-menu store pulls in the app store (→ monaco) transitively; mock it so
 // this lightweight suite stays free of the editor stack. Same for the prompt buttons.
 vi.mock('../store/contextMenu', async () => {
@@ -113,14 +113,14 @@ describe('AiHarness', () => {
     expect(queryByTestId('base-terminal')).toBeNull()
   })
 
-  it('drives BaseTerminal with the ghostty engine', async () => {
-    const { createGhosttyEngine } = await import('../terminal/ghosttyEngine')
+  it('drives BaseTerminal with the xterm engine', async () => {
+    const { createXtermEngine } = await import('../terminal/xtermEngine')
     const workspace = makeWorkspaceStore('tab1', { ptyId: 'pty1', sandbox: {} }, makeAnalyzer())
 
     const { getByTestId } = renderHarness(workspace)
 
     expect(getByTestId('base-terminal')).toBeTruthy()
-    expect(configs[0]?.createEngine).toBe(createGhosttyEngine)
+    expect(configs[0]?.createEngine).toBe(createXtermEngine)
     expect(configs[0]?.logPrefix).toBe('AiHarness')
     expect(configs[0]?.disableActivityDetector).toBe(true)
   })

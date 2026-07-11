@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react'
 import { useStore } from 'zustand'
 import type { StoreApi } from 'zustand'
 import BaseTerminal, { type BaseTerminalConfig } from './BaseTerminal'
-import { createGhosttyEngine } from '../terminal/ghosttyEngine'
+import { createXtermEngine } from '../terminal/xtermEngine'
 import type { TerminalEngine } from '../terminal/engine'
 import { PromptCommitButton } from './PromptCommitButton'
 import { PromptRebaseButton } from './PromptRebaseButton'
@@ -110,7 +110,7 @@ function AiHarnessContent({
 
   // Stable config — useState initializer runs once, so BaseTerminal never re-renders from config changes
   const [config] = useState<BaseTerminalConfig>(() => ({
-    createEngine: createGhosttyEngine,
+    createEngine: createXtermEngine,
     themeBackground: backgroundColor,
     logPrefix: 'AiHarness',
     disableScrollbar,
