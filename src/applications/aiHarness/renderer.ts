@@ -112,7 +112,6 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
         command: instance.command,
         backgroundColor: instance.backgroundColor,
         disableScrollbar: instance.disableScrollbar,
-        stripScrollbackClear: instance.stripScrollbackClear,
       })
     },
 

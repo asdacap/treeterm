@@ -479,24 +479,6 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                             />
                             Disable Scrollbar
                           </label>
-                          <label className="settings-checkbox-label">
-                            <input
-                              type="checkbox"
-                              checked={inst.stripScrollbackClear}
-                              onChange={(e) =>
-                                { setLocalSettings((prev) => ({
-                                  ...prev,
-                                  aiHarness: {
-                                    ...prev.aiHarness,
-                                    instances: prev.aiHarness.instances.map((a, i) =>
-                                      i === index ? { ...a, stripScrollbackClear: e.target.checked } : a
-                                    )
-                                  }
-                                })); }
-                              }
-                            />
-                            Strip Scrollback Clear
-                          </label>
                         </div>
                       </div>
                       <button
@@ -535,8 +517,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                             enableSandbox: false,
                             allowNetwork: true,
                             backgroundColor: '#1a1a1a',
-                            disableScrollbar: false,
-                            stripScrollbackClear: false
+                            disableScrollbar: false
                           }
                         ]
                       }

@@ -8,7 +8,7 @@ import { PromptCommitButton } from './PromptCommitButton'
 import { PromptRebaseButton } from './PromptRebaseButton'
 import { ReviewCommentsButton } from './ReviewCommentsButton'
 import { PromptGitHubCommentsButton } from './PromptGitHubCommentsButton'
-import type { ActivityState, SandboxConfig, TerminalAppRef, WorkspaceStore } from '../types'
+import type { ActivityState, SandboxConfig, WorkspaceStore } from '../types'
 import { isAiHarnessState } from '../types'
 import type { AiHarnessRef } from '../../applications/aiHarness/renderer'
 import type { AnalyzerState } from '../store/createAnalyzerStore'
@@ -44,7 +44,6 @@ interface AiHarnessProps {
   command: string
   backgroundColor: string
   disableScrollbar?: boolean
-  stripScrollbackClear?: boolean
 }
 
 export default function AiHarness({
@@ -52,7 +51,6 @@ export default function AiHarness({
   tabId,
   backgroundColor,
   disableScrollbar,
-  stripScrollbackClear,
 }: AiHarnessProps) {
   const wsData = useStore(workspace, s => s.workspace)
   const getTabRef = useStore(workspace, s => s.getTabRef)
@@ -82,7 +80,6 @@ export default function AiHarness({
       analyzer={ref.analyzer}
       backgroundColor={backgroundColor}
       disableScrollbar={disableScrollbar}
-      stripScrollbackClear={stripScrollbackClear}
     />
   )
 }
@@ -93,7 +90,6 @@ interface AiHarnessContentProps {
   analyzer: AiHarnessRef['analyzer']
   backgroundColor: string
   disableScrollbar?: boolean
-  stripScrollbackClear?: boolean
 }
 
 function AiHarnessContent({
@@ -102,7 +98,6 @@ function AiHarnessContent({
   analyzer,
   backgroundColor,
   disableScrollbar,
-  stripScrollbackClear,
 }: AiHarnessContentProps) {
   const handleTerminalReady = useCallback((engine: TerminalEngine) => {
     // onTerminalReady fires once per engine, and engine.dispose() tears its own listeners
@@ -119,7 +114,6 @@ function AiHarnessContent({
     themeBackground: backgroundColor,
     logPrefix: 'AiHarness',
     disableScrollbar,
-    stripScrollbackClear,
     disableActivityDetector: true,
     onTerminalReady: handleTerminalReady,
   }))
@@ -157,10 +151,6 @@ function AiHarnessStatusBar({ analyzer, workspace, tabId }: AiHarnessStatusBarPr
   const analyzing = useStore(analyzer, s => s.analyzing)
   const reason = useStore(analyzer, s => s.reason)
   const autoApprove = useStore(analyzer, s => s.autoApprove)
-  const getTabRef = useStore(workspace, s => s.getTabRef)
-
-  const cache = (getTabRef(tabId) as TerminalAppRef | null)?.cachedTerminal
-  const [stripScrollback, setStripScrollback] = useState(cache?.stripScrollbackClear ?? false)
 
   const openContextMenu = useContextMenuStore((s) => s.open)
   const closeContextMenu = useContextMenuStore((s) => s.close)
@@ -206,19 +196,6 @@ function AiHarnessStatusBar({ analyzer, workspace, tabId }: AiHarnessStatusBarPr
           />
           <span className="ai-harness-toggle-slider" />
           <span className="ai-harness-toggle-label">Auto-approve safe</span>
-        </label>
-        <label className="ai-harness-toggle">
-          <input
-            type="checkbox"
-            checked={stripScrollback}
-            onChange={(e) => {
-              const checked = e.target.checked
-              if (cache) cache.stripScrollbackClear = checked
-              setStripScrollback(checked)
-            }}
-          />
-          <span className="ai-harness-toggle-slider" />
-          <span className="ai-harness-toggle-label">Strip scrollback</span>
         </label>
       </div>
       <ContextMenu menuId={badgeMenuId} activeMenuId={activeMenuId} position={menuPosition}>

@@ -112,8 +112,7 @@ describe('AI Harness Renderer', () => {
     enableSandbox: true,
     allowNetwork: false,
     backgroundColor: '#1a1a24',
-    disableScrollbar: true,
-    stripScrollbackClear: false
+    disableScrollbar: true
   }
 
   beforeEach(() => {

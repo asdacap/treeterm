@@ -57,13 +57,7 @@ function handleCachedEvent(cache: CachedTerminal, event: PtyEvent): void {
   switch (event.type) {
     case PtyEventType.Data: {
       cache.dataVersion++
-      if (cache.stripScrollbackClear) {
-        const decoder = new TextDecoder('utf-8', { fatal: false })
-        const stripped = decoder.decode(event.data).replace(/\x1b\[3J/g, '')
-        cache.engine.write(stripped)
-      } else {
-        cache.engine.write(event.data)
-      }
+      cache.engine.write(event.data)
       break
     }
     case PtyEventType.Resize:
@@ -102,8 +96,6 @@ export interface BaseTerminalConfig {
   logPrefix: string
   // Whether to disable the scrollbar (for tools with own scrolling like opencode)
   disableScrollbar?: boolean
-  // Whether to strip CSI 3J (clear scrollback) from PTY data before writing to the terminal
-  stripScrollbackClear?: boolean
   // Whether to disable the regex-based activity state detector (e.g. when using LLM-based analysis)
   disableActivityDetector?: boolean
   // Callback when terminal is ready, provides the engine
@@ -256,14 +248,7 @@ export default function BaseTerminal({
               }
             }
 
-            if (cache.stripScrollbackClear) {
-              const decoder = new TextDecoder('utf-8', { fatal: false })
-              const dataStr = decoder.decode(event.data)
-              const stripped = dataStr.replace(/\x1b\[3J/g, '')
-              engine.write(stripped, afterWrite)
-            } else {
-              engine.write(event.data, afterWrite)
-            }
+            engine.write(event.data, afterWrite)
 
             setIsAlternateScreen(engine.isAlternateScreen())
 
@@ -437,7 +422,6 @@ export default function BaseTerminal({
           tty: undefined as unknown as Tty,  // set after openTtyStream resolves
           owner,
           mountedHandler: null,
-          stripScrollbackClear: config.stripScrollbackClear ?? false,
           connectedAt: Date.now(),
           dataVersion: 0,
           pinnedToBottom: false,

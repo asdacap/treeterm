@@ -40,8 +40,6 @@ export interface CachedTerminal {
    *  When set, all events forward to this handler for full UI handling.
    *  When null, the background fallback writes data to the terminal buffer. */
   mountedHandler: ((event: PtyEvent) => void) | null
-  /** Config flag for background handler — strips CSI 3J from PTY data */
-  stripScrollbackClear: boolean
   /** Timestamp when the TTY stream was opened (for immediate-failure detection) */
   connectedAt: number
   /** Persistent data version counter (survives across mounts) */
