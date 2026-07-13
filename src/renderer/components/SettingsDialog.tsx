@@ -255,6 +255,25 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                   <label className="settings-checkbox-label">
                     <input
                       type="checkbox"
+                      checked={localSettings.terminal.allowOsc52Clipboard}
+                      onChange={(e) =>
+                        { setLocalSettings((prev) => ({
+                          ...prev,
+                          terminal: { ...prev.terminal, allowOsc52Clipboard: e.target.checked }
+                        })); }
+                      }
+                    />
+                    Allow Terminal Clipboard Writes (OSC 52)
+                  </label>
+                  <p className="settings-hint">
+                    Lets local or remote terminal programs copy text to your system clipboard
+                  </p>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-checkbox-label">
+                    <input
+                      type="checkbox"
                       checked={localSettings.terminal.showRawChars}
                       onChange={(e) =>
                         { setLocalSettings((prev) => ({

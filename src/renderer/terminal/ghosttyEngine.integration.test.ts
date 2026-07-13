@@ -33,8 +33,10 @@ function options(): TerminalEngineOptions {
     cursorStyle: 'block',
     cursorBlink: true,
     themeBackground: '#1e1e1e',
+    allowOsc52Clipboard: false,
     scrollback: 50000,
     openExternal: vi.fn(),
+    writeClipboardText: vi.fn(),
     label: 'Ghostty integration',
   }
 }

@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ScrollPosition } from '../types'
 import { log } from '../utils/logger'
-import { createXtermEngine } from './xtermEngine'
+import { createXtermEngine, decodeOsc52Clipboard } from './xtermEngine'
 import type { TerminalEngine, TerminalEngineOptions } from './engine'
 
 const { terminals, FakeTerminal } = vi.hoisted(() => {
@@ -27,6 +27,13 @@ const { terminals, FakeTerminal } = vi.hoisted(() => {
     resizes: { cols: number; rows: number }[] = []
     dataListener: ((data: string) => void) | null = null
     selection = ''
+    osc52Handler: ((data: string) => boolean) | null = null
+    parser = {
+      registerOscHandler: (identifier: number, handler: (data: string) => boolean): { dispose(): void } => {
+        if (identifier === 52) this.osc52Handler = handler
+        return { dispose: () => { this.osc52Handler = null } }
+      },
+    }
 
     constructor(public readonly ctorOptions: { linkHandler: { activate: (event: MouseEvent, uri: string) => void } }) {
       terminals.push(this)
@@ -100,8 +107,10 @@ function options(): TerminalEngineOptions {
     cursorStyle: 'block',
     cursorBlink: true,
     themeBackground: '#1e1e1e',
+    allowOsc52Clipboard: false,
     scrollback: 50000,
     openExternal,
+    writeClipboardText: vi.fn(),
     label: 'Terminal tab1',
   }
 }
@@ -124,7 +133,25 @@ beforeEach(() => {
   document.body.innerHTML = ''
 })
 
+describe('decodeOsc52Clipboard', () => {
+  it('decodes clipboard text only for the clipboard target', () => {
+    expect(decodeOsc52Clipboard('c;aGVsbG8g4pyT')).toBe('hello ✓')
+    expect(decodeOsc52Clipboard('p;aGVsbG8=')).toBeUndefined()
+    expect(decodeOsc52Clipboard('c;?')).toBeUndefined()
+    expect(decodeOsc52Clipboard('c;not base64')).toBeUndefined()
+  })
+})
+
 describe('createXtermEngine', () => {
+  it('writes an OSC 52 clipboard request only when enabled', async () => {
+    const writeClipboardText = vi.fn<(text: string) => void>()
+    await createXtermEngine({ ...options(), allowOsc52Clipboard: true, writeClipboardText })
+
+    terminals[0]!.osc52Handler!('c;aGVsbG8=')
+
+    expect(writeClipboardText).toHaveBeenCalledWith('hello')
+  })
+
   it('routes activated links to the OS browser rather than a BrowserWindow', async () => {
     await createXtermEngine(options())
     terminals[0]!.ctorOptions.linkHandler.activate(new MouseEvent('click'), 'https://example.com')
@@ -286,6 +313,7 @@ describe('XtermEngine — DOM wiring', () => {
       cursorBlink: false,
       cursorStyle: 'bar',
       themeBackground: '#000000',
+      allowOsc52Clipboard: false,
     })
 
     expect(terminal.options.fontSize).toBe(20)

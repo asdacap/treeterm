@@ -40,12 +40,16 @@ export interface TerminalDisplayOptions {
   cursorStyle: 'block' | 'underline' | 'bar'
   cursorBlink: boolean
   themeBackground: string
+  /** Whether OSC 52 output may write to the local system clipboard. */
+  allowOsc52Clipboard: boolean
 }
 
 export interface TerminalEngineOptions extends TerminalDisplayOptions {
   scrollback: number
   /** Where an activated hyperlink goes. Left to the engines, both would open a BrowserWindow. */
   openExternal: (uri: string) => void
+  /** Writes terminal-requested clipboard text to the local system clipboard. */
+  writeClipboardText: (text: string) => void
   /** Identifies this terminal in the engine's own renderer diagnostics. */
   label: string
 }

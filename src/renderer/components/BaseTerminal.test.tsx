@@ -89,7 +89,7 @@ vi.mock('./ContextMenu', () => ({ default: () => null }))
 // effect re-runs on every render and the StrictMode double-mount can't be observed.
 vi.mock('../store/settings', () => {
   const settings = {
-    terminal: { fontSize: 14, fontFamily: 'monospace', cursorBlink: true, cursorStyle: 'block', showRawChars: false },
+    terminal: { fontSize: 14, fontFamily: 'monospace', cursorBlink: true, cursorStyle: 'block', showRawChars: false, allowOsc52Clipboard: false },
     debug: { showBadge: false },
   }
   return { useSettingsStore: <T,>(selector: (s: { settings: unknown }) => T): T => selector({ settings }) }

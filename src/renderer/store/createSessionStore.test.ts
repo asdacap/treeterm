@@ -112,7 +112,7 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       createSession: vi.fn().mockResolvedValue({ success: true, sessionId: 'pty-1' }),
     },
     getSettings: vi.fn().mockReturnValue({
-      terminal: { fontSize: 14, fontFamily: 'monospace', cursorStyle: 'block', cursorBlink: true, showRawChars: false, instances: [] },
+      terminal: { fontSize: 14, fontFamily: 'monospace', cursorStyle: 'block', cursorBlink: true, showRawChars: false, allowOsc52Clipboard: false, instances: [] },
       sandbox: { enabledByDefault: false, allowNetworkByDefault: true },
       aiHarness: { instances: [] },
     }),

@@ -15,6 +15,27 @@ import type {
 } from './engine'
 import '@xterm/xterm/css/xterm.css'
 
+const MAX_OSC52_PAYLOAD_BYTES = 1024 * 1024
+
+/** Decodes the `c;base64` payload supplied by an OSC 52 clipboard-write sequence. */
+export function decodeOsc52Clipboard(data: string): string | undefined {
+  const separator = data.indexOf(';')
+  // OSC 52's only supported selection target is `c` (the clipboard).
+  if (separator !== 1 || data.charCodeAt(0) !== 99) return undefined
+
+  const encoded = data.slice(separator + 1)
+  // `?` is a clipboard read request, which TreeTerm intentionally never serves.
+  if ((encoded.length === 1 && encoded.charCodeAt(0) === 63) || encoded.length === 0 || encoded.length > Math.ceil(MAX_OSC52_PAYLOAD_BYTES / 3) * 4) return undefined
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) return undefined
+
+  try {
+    const bytes = Uint8Array.from(atob(encoded), (character: string) => character.charCodeAt(0))
+    if (bytes.byteLength > MAX_OSC52_PAYLOAD_BYTES) return undefined
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch {
+    return undefined
+  }
+}
 
 /**
  * `BaseTerminal`'s original engine: xterm.js with the WebGL renderer, falling back to the
@@ -22,11 +43,22 @@ import '@xterm/xterm/css/xterm.css'
  */
 class XtermEngine implements TerminalEngine {
   private opened = false
+  private allowOsc52Clipboard: boolean
 
   constructor(
     private readonly terminal: XTerm,
     private readonly label: string,
-  ) {}
+    allowOsc52Clipboard: boolean,
+    writeClipboardText: (text: string) => void,
+  ) {
+    this.allowOsc52Clipboard = allowOsc52Clipboard
+    this.terminal.parser.registerOscHandler(52, (data: string): boolean => {
+      if (!this.allowOsc52Clipboard) return true
+      const text = decodeOsc52Clipboard(data)
+      if (text !== undefined) writeClipboardText(text)
+      return true
+    })
+  }
 
   get raw(): TerminalBufferHost {
     return this.terminal
@@ -64,6 +96,7 @@ class XtermEngine implements TerminalEngine {
     this.terminal.options.fontFamily = options.fontFamily
     this.terminal.options.cursorBlink = options.cursorBlink
     this.terminal.options.cursorStyle = options.cursorStyle
+    this.allowOsc52Clipboard = options.allowOsc52Clipboard
     this.terminal.options.theme = {
       ...TERMINAL_THEME_COLORS,
       background: options.themeBackground,
@@ -174,5 +207,10 @@ export function createXtermEngine(options: TerminalEngineOptions): Promise<Termi
       cursorAccent: options.themeBackground,
     },
   })
-  return Promise.resolve(new XtermEngine(terminal, options.label))
+  return Promise.resolve(new XtermEngine(
+    terminal,
+    options.label,
+    options.allowOsc52Clipboard,
+    options.writeClipboardText,
+  ))
 }

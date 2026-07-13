@@ -201,6 +201,7 @@ export interface Settings {
     cursorStyle: 'block' | 'underline' | 'bar'
     cursorBlink: boolean
     showRawChars: boolean
+    allowOsc52Clipboard: boolean
     instances: TerminalInstance[]
   }
   sandbox: {

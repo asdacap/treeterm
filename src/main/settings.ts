@@ -13,6 +13,7 @@ const defaultSettings: Settings = {
     cursorStyle: 'block',
     cursorBlink: true,
     showRawChars: false,
+    allowOsc52Clipboard: false,
     instances: []
   },
   sandbox: {

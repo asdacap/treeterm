@@ -104,8 +104,10 @@ function options(): TerminalEngineOptions {
     cursorStyle: 'block',
     cursorBlink: true,
     themeBackground: '#1e1e1e',
+    allowOsc52Clipboard: false,
     scrollback: 50000,
     openExternal,
+    writeClipboardText: vi.fn(),
     label: 'Ghostty tab1',
   }
 }
@@ -344,6 +346,7 @@ describe('GhosttyEngine — passthrough', () => {
       cursorBlink: false,
       cursorStyle: 'bar',
       themeBackground: '#000000',
+      allowOsc52Clipboard: false,
     })
 
     expect(terminal.options.fontSize).toBe(20)

@@ -169,6 +169,7 @@ export default function BaseTerminal({
       cursorBlink: settings.terminal.cursorBlink,
       cursorStyle: settings.terminal.cursorStyle,
       themeBackground: config.themeBackground,
+      allowOsc52Clipboard: settings.terminal.allowOsc52Clipboard,
     }
 
     /** Propose a fit to the daemon. The daemon echoes the size back, and only then does the
@@ -394,6 +395,7 @@ export default function BaseTerminal({
           ...displayOptions,
           scrollback: SCROLLBACK_LINES,
           openExternal,
+          writeClipboardText: clipboard.writeText,
           label: `${config.logPrefix} ${tabId}`,
         })
 
@@ -510,7 +512,7 @@ export default function BaseTerminal({
       ttyRef.current = null
       // Do NOT dispose the engine or unsubscribe the TTY — they stay cached
     }
-  }, [tabId, workspaceId, config, settings, removeTab, setTabState, sessionStore, workspace, refreshCounter, openExternal])
+  }, [tabId, workspaceId, config, settings, removeTab, setTabState, sessionStore, workspace, refreshCounter, openExternal, clipboard.writeText])
 
   const handleScrollDown = useCallback(() => {
     engineRef.current?.scrollToBottom()

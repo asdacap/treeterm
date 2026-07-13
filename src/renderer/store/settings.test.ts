@@ -34,6 +34,7 @@ describe('SettingsStore', () => {
           cursorStyle: 'block',
           cursorBlink: true,
           showRawChars: false,
+          allowOsc52Clipboard: false,
           instances: []
         },
         sandbox: {
@@ -104,6 +105,7 @@ describe('SettingsStore', () => {
           cursorStyle: 'block',
           cursorBlink: true,
           showRawChars: false,
+          allowOsc52Clipboard: false,
           instances: []
         },
         appearance: { theme: 'light' },
