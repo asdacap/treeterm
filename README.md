@@ -159,7 +159,7 @@ Settings are stored in the Electron userData directory:
 | Terminal | instances | [] (custom terminal variants) |
 | Sandbox | enabledByDefault | false |
 | Sandbox | allowNetworkByDefault | true |
-| AI Harness | instances | [{id: claude, command: claude, ...}] |
+| AI Harness | instances | [{id: claude, command: npx @earendil-works/pi-coding-agent, ...}] |
 | Custom Runner | instances | [] |
 | Appearance | theme | dark |
 | Prefix Mode | enabled | true |

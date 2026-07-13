@@ -24,6 +24,7 @@ describe('settings', () => {
       expect(defaults.terminal.cursorBlink).toBe(true)
       expect(defaults.appearance.theme).toBe('dark')
       expect(defaults.sandbox.enabledByDefault).toBe(false)
+      expect(defaults.aiHarness.instances[0]!.command).toBe('npx @earendil-works/pi-coding-agent')
     })
   })
 
@@ -104,6 +105,19 @@ describe('settings', () => {
 
       expect(settings.terminal.instances).toHaveLength(1)
       expect(settings.terminal.instances[0]!.id).toBe('existing')
+    })
+
+    it('uses the Pi agent command when old claude config has no command', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true)
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        JSON.stringify({
+          claude: { startByDefault: true, enableSandbox: false }
+        })
+      )
+
+      const settings = loadSettings()
+
+      expect(settings.aiHarness.instances[0]!.command).toBe('npx @earendil-works/pi-coding-agent')
     })
 
     it('migrates old claude config to aiHarness.instances', () => {

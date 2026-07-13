@@ -11,7 +11,7 @@ vi.mock('./app', () => ({
   }
 }))
 
-import { useSettingsStore } from './settings'
+import { defaultSettings, useSettingsStore } from './settings'
 import type { Settings } from '../types'
 
 // Mock settings API
@@ -90,6 +90,7 @@ describe('SettingsStore', () => {
       expect(store.settings.terminal.fontSize).toBe(14)
       expect(store.settings.appearance.theme).toBe('dark')
       expect(store.settings.prefixMode.enabled).toBe(true)
+      expect(defaultSettings.aiHarness.instances[0]!.command).toBe('npx @earendil-works/pi-coding-agent')
       expect(store.isLoaded).toBe(false)
     })
   })

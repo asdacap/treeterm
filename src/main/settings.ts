@@ -24,8 +24,7 @@ const defaultSettings: Settings = {
       id: 'claude',
       name: 'Claude',
       icon: '✦',
-      // eslint-disable-next-line custom/no-string-literal-comparison -- Node platform is external
-      command: process.platform === 'darwin' ? 'claude' : 'npx @anthropic-ai/claude-code',
+      command: 'npx @earendil-works/pi-coding-agent',
       isDefault: false,
       enableSandbox: false,
       allowNetwork: true,
@@ -207,8 +206,7 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
       id: 'claude',
       name: 'Claude',
       icon: '✦',
-      // eslint-disable-next-line custom/no-string-literal-comparison -- Node platform is external
-      command: oldClaude.command || (process.platform === 'darwin' ? 'claude' : 'npx @anthropic-ai/claude-code'),
+      command: oldClaude.command || 'npx @earendil-works/pi-coding-agent',
       isDefault: oldClaude.startByDefault || false,
       enableSandbox: oldClaude.enableSandbox || false,
       allowNetwork: true,

@@ -20,7 +20,7 @@ export const defaultSettings: Settings = {
       id: 'claude',
       name: 'Claude',
       icon: '✦',
-      command: 'claude',
+      command: 'npx @earendil-works/pi-coding-agent',
       isDefault: false,
       enableSandbox: false,
       allowNetwork: true,
