@@ -498,6 +498,56 @@ describe('createSessionStore', () => {
     })
   })
 
+  describe('dispose', () => {
+    // addWorkspace's write → ensureWatch chain settles over several async hops; wait
+    // for the watch rather than assuming a single flush lands it (flaky under load).
+    async function addWorkspaceWithWatch(path: string): Promise<string> {
+      const id = store.getState().addWorkspace(path)
+      for (let i = 0; i < 20 && !fileWatchCallbacks.has(`${id}.json`); i++) await flushPromises()
+      return id
+    }
+
+    it('unsubscribes every workspace file watch', async () => {
+      const id = await addWorkspaceWithWatch('/repo')
+      expect(fileWatchCallbacks.has(`${id}.json`)).toBe(true)
+
+      store.getState().dispose()
+
+      // The leaked watch is the ghost-writer bug: after dispose nothing must keep
+      // observing the file.
+      expect(fileWatchCallbacks.has(`${id}.json`)).toBe(false)
+    })
+
+    it('ignores a file-watch event that races teardown (no apply, no write)', async () => {
+      const id = await addWorkspaceWithWatch('/repo')
+      const entry = store.getState().workspaces.get(id)
+      if (!entry || entry.status !== WorkspaceEntryStatus.Loaded) throw new Error('workspace not loaded')
+      const originalName = entry.data.name
+      // A callback the daemon could still invoke between requesting unsubscribe and it
+      // landing — the frozen-Connected ghost on a local daemon is exactly this case.
+      const cb = fileWatchCallbacks.get(`${id}.json`)
+      if (!cb) throw new Error('no watch registered')
+      vi.mocked(deps.filesystem.writeFile).mockClear()
+
+      store.getState().dispose()
+      cb({
+        type: FileWatchEventType.Present,
+        content: JSON.stringify(toStoredWorkspaceFile({ ...entry.data, name: 'EXTERNAL-EDIT' }, '')),
+        sha256: 'race-sha',
+      })
+      await flushPromises()
+
+      const after = store.getState().workspaces.get(id)
+      const nameAfter = after?.status === WorkspaceEntryStatus.Loaded ? after.data.name : undefined
+      expect(nameAfter).toBe(originalName)
+      expect(deps.filesystem.writeFile).not.toHaveBeenCalled()
+    })
+
+    it('is safe to call with no workspaces', () => {
+      expect(() => { store.getState().dispose() }).not.toThrow()
+    })
+  })
+
   describe('git info', () => {
     it('updateGitInfo updates workspace git fields', async () => {
       const id = store.getState().addWorkspace('/test')
