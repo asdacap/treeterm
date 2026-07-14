@@ -21,7 +21,7 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
     createInitialState: () => ({
       ptyId: null,
       ptyHandle: crypto.randomUUID(),
-      keepOnExit: false,
+      keepOnExit: instance.keepOnExit,
       sandbox: {
         enabled: instance.enableSandbox,
         allowNetwork: instance.allowNetwork,

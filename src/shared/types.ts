@@ -154,6 +154,9 @@ export interface AiHarnessInstance {
   allowNetwork: boolean
   backgroundColor: string
   disableScrollbar: boolean
+  // When true, the tab stays open (showing the exit code) after the harness process
+  // exits instead of auto-closing.
+  keepOnExit: boolean
 }
 
 export interface CustomRunnerInstance {

@@ -498,6 +498,24 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                             />
                             Disable Scrollbar
                           </label>
+                          <label className="settings-checkbox-label">
+                            <input
+                              type="checkbox"
+                              checked={inst.keepOnExit}
+                              onChange={(e) =>
+                                { setLocalSettings((prev) => ({
+                                  ...prev,
+                                  aiHarness: {
+                                    ...prev.aiHarness,
+                                    instances: prev.aiHarness.instances.map((a, i) =>
+                                      i === index ? { ...a, keepOnExit: e.target.checked } : a
+                                    )
+                                  }
+                                })); }
+                              }
+                            />
+                            Keep Tab Open on Exit
+                          </label>
                         </div>
                       </div>
                       <button
@@ -536,7 +554,8 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                             enableSandbox: false,
                             allowNetwork: true,
                             backgroundColor: '#1a1a1a',
-                            disableScrollbar: false
+                            disableScrollbar: false,
+                            keepOnExit: false
                           }
                         ]
                       }

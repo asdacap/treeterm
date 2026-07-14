@@ -30,7 +30,8 @@ const defaultSettings: Settings = {
       enableSandbox: false,
       allowNetwork: true,
       backgroundColor: '#1a1a24',
-      disableScrollbar: false
+      disableScrollbar: false,
+      keepOnExit: false
     }]
   },
   customRunner: {
@@ -199,8 +200,12 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
       }))
   }
 
-  // Migrate AI Harness instances from old claude settings
-  let aiHarnessInstances: AiHarnessInstance[] = loaded.aiHarness?.instances || []
+  // Migrate AI Harness instances from old claude settings. Default any fields added
+  // after an instance was first saved (e.g. keepOnExit) so the shape stays complete.
+  let aiHarnessInstances: AiHarnessInstance[] = (loaded.aiHarness?.instances || []).map(inst => ({
+    ...inst,
+    keepOnExit: (inst as { keepOnExit?: boolean }).keepOnExit ?? false
+  }))
   const oldClaude = (loaded as { claude?: { command?: string; startByDefault?: boolean; enableSandbox?: boolean } }).claude
   if (oldClaude && aiHarnessInstances.length === 0) {
     aiHarnessInstances = [{
@@ -212,7 +217,8 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
       enableSandbox: oldClaude.enableSandbox || false,
       allowNetwork: true,
       backgroundColor: '#1a1a24',
-      disableScrollbar: false
+      disableScrollbar: false,
+      keepOnExit: false
     }]
   }
 

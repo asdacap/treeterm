@@ -112,7 +112,8 @@ describe('AI Harness Renderer', () => {
     enableSandbox: true,
     allowNetwork: false,
     backgroundColor: '#1a1a24',
-    disableScrollbar: true
+    disableScrollbar: true,
+    keepOnExit: false
   }
 
   beforeEach(() => {
@@ -158,6 +159,14 @@ describe('AI Harness Renderer', () => {
           },
           autoApprove: false,
         })
+      })
+
+      it('carries keepOnExit through from the instance', () => {
+        const keepApp = createAiHarnessVariant({ ...mockInstance, keepOnExit: true }, mockDeps)
+        expect(keepApp.createInitialState().keepOnExit).toBe(true)
+
+        const closeApp = createAiHarnessVariant({ ...mockInstance, keepOnExit: false }, mockDeps)
+        expect(closeApp.createInitialState().keepOnExit).toBe(false)
       })
 
       it('uses instance sandbox settings', () => {

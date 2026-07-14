@@ -150,6 +150,19 @@ describe('settings', () => {
       expect(settings.aiHarness.instances[0]!.id).toBe('existing-ai')
     })
 
+    it('defaults keepOnExit to false for instances saved before the field existed', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true)
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        JSON.stringify({
+          aiHarness: { instances: [{ id: 'existing-ai', name: 'AI', icon: '✦', command: 'ai', isDefault: false, enableSandbox: false, allowNetwork: true, backgroundColor: '#000', disableScrollbar: false }] }
+        })
+      )
+
+      const settings = loadSettings()
+
+      expect(settings.aiHarness.instances[0]!.keepOnExit).toBe(false)
+    })
+
     it('preserves customRunner.instances from loaded settings', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true)
       vi.mocked(fs.readFileSync).mockReturnValue(
