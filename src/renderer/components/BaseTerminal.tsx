@@ -124,7 +124,6 @@ export default function BaseTerminal({
   const [overlay, setOverlay] = useState<{ message: string; type: 'info' | 'error' } | null>(null)
   const [loading, setLoading] = useState(true)
   const [scrollPosition, setScrollPosition] = useState(ScrollPosition.Bottom)
-  const scrollPositionRef = useRef(ScrollPosition.Bottom)
   const [pinnedToBottom, setPinnedToBottom] = useState(false)
   const [isAlternateScreen, setIsAlternateScreen] = useState(false)
   const [sizeMismatch, setSizeMismatch] = useState<{ requested: { cols: number; rows: number }; actual: { cols: number; rows: number } } | null>(null)
@@ -198,7 +197,6 @@ export default function BaseTerminal({
 
       scrollDisposable = engine.onScroll(() => {
         const position = engine.getScrollPosition()
-        scrollPositionRef.current = position
         setScrollPosition(position)
 
         // Pin enforcement: if pinned and not at bottom, force scroll back
@@ -239,12 +237,16 @@ export default function BaseTerminal({
             cache.dataVersion++
             setOverlay(null)
 
-            const shouldScrollToBottom = cache.pinnedToBottom || scrollPositionRef.current === ScrollPosition.Bottom
+            // Query the engine's live scroll position instead of a cached copy. The cached
+            // scrollPosition only updates on the async DOM 'scroll' event, but xterm moves the
+            // viewport synchronously on wheel. With a continuously-repainting TUI (Pi runs in the
+            // main buffer), a data frame arrives before the scroll event fires, so a stale value
+            // would read Bottom and yank the user back down every frame.
+            const shouldScrollToBottom = cache.pinnedToBottom || engine.getScrollPosition() === ScrollPosition.Bottom
 
             const afterWrite = () => {
               if (shouldScrollToBottom) {
                 engine.scrollToBottom()
-                scrollPositionRef.current = ScrollPosition.Bottom
                 setScrollPosition(ScrollPosition.Bottom)
               }
             }
@@ -282,7 +284,7 @@ export default function BaseTerminal({
             break
           }
           case PtyEventType.Resize: {
-            const shouldStayAtBottom = cache.pinnedToBottom || scrollPositionRef.current === ScrollPosition.Bottom
+            const shouldStayAtBottom = cache.pinnedToBottom || engine.getScrollPosition() === ScrollPosition.Bottom
             const scrollRatio = engine.getScrollRatio()
 
             engine.resize(event.cols, event.rows)
@@ -297,7 +299,6 @@ export default function BaseTerminal({
 
             if (shouldStayAtBottom) {
               engine.scrollToBottom()
-              scrollPositionRef.current = ScrollPosition.Bottom
               setScrollPosition(ScrollPosition.Bottom)
             } else {
               engine.scrollToRatio(scrollRatio)

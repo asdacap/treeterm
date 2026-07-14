@@ -391,6 +391,30 @@ describe('BaseTerminal — mounted UI', () => {
     expect(engine.scrolledToBottom).toBeGreaterThan(before)
   })
 
+  it('follows new output while the reader sits at the bottom', async () => {
+    const { engine, emit } = await mount()
+    // Default scrollPosition is Bottom — the reader is watching the tail.
+    const before = engine.scrolledToBottom
+
+    emit({ type: PtyEventType.Data, data: new TextEncoder().encode('more output') })
+
+    expect(engine.scrolledToBottom).toBeGreaterThan(before)
+  })
+
+  it('does not yank a scrolled-up reader down when data arrives before the scroll event fires', async () => {
+    const { engine, emit } = await mount()
+    // The reader wheeled up: xterm moved the viewport synchronously, so getScrollPosition()
+    // already reports Middle — but the DOM 'scroll' event that would update any cached copy
+    // has not fired yet (scrollListener deliberately left uncalled). A continuously-repainting
+    // TUI streams a data frame in this window; it must honour the live position, not a stale one.
+    engine.scrollPosition = ScrollPosition.Middle
+    const before = engine.scrolledToBottom
+
+    emit({ type: PtyEventType.Data, data: new TextEncoder().encode('repaint frame') })
+
+    expect(engine.scrolledToBottom).toBe(before)
+  })
+
   it('feeds the activity state detector', async () => {
     const { emit } = await mount()
 
