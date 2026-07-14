@@ -10,6 +10,7 @@ import type { Tty } from '../store/createTtyStore'
 import { ScrollPosition } from '../types'
 import type { CachedTerminal, TerminalAppRef, PtyEvent, SandboxConfig, TerminalState, WorkspaceStore } from '../types'
 import type { TerminalBufferHost, TerminalEngine, TerminalEngineFactory } from '../terminal/engine'
+import { snapshotViewport } from '../terminal/engine'
 import { PtyEventType } from '../../shared/ipc-types'
 import { DisposableStore, thenRegisterOrDispose } from '../../shared/lifecycle'
 import { useContextMenuStore } from '../store/contextMenu'
@@ -249,16 +250,17 @@ export default function BaseTerminal({
                 engine.scrollToBottom()
                 setScrollPosition(ScrollPosition.Bottom)
               }
+              // Snapshot after the write lands in the buffer (xterm parses asynchronously). The
+              // detector treats an unchanged viewport as idle, so an app that repaints identical
+              // content stops reading as Working.
+              if (detector) {
+                detector.processData(snapshotViewport(engine))
+              }
             }
 
             engine.write(event.data, afterWrite)
 
             setIsAlternateScreen(engine.isAlternateScreen())
-
-            if (detector) {
-              const decoder = new TextDecoder('utf-8', { fatal: false })
-              detector.processData(decoder.decode(event.data))
-            }
             if (settings.terminal.showRawChars) {
               const decoder = new TextDecoder('utf-8', { fatal: false })
               rawChars = (rawChars + decoder.decode(event.data)).slice(-50)

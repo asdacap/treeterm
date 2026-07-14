@@ -27,7 +27,20 @@ class FakeEngine implements TerminalEngine {
   displayOptions: unknown = null
   selection = ''
   readonly element = document.createElement('div')
-  readonly raw = { buffer: { active: { length: 0, getLine: () => undefined } } }
+  // A minimal line buffer that `write` feeds, so `snapshotViewport` (activity detection) reads
+  // real rendered content instead of an empty stub.
+  readonly bufferLines: string[] = []
+  readonly raw = {
+    buffer: {
+      active: {
+        length: 0, // kept in sync with bufferLines by write()
+        getLine: (y: number): { translateToString: () => string } | undefined =>
+          y >= 0 && y < this.bufferLines.length
+            ? { translateToString: (): string => this.bufferLines[y] ?? '' }
+            : undefined,
+      },
+    },
+  }
 
   dataListener: ((data: string) => void) | null = null
   scrollListener: (() => void) | null = null
@@ -38,7 +51,13 @@ class FakeEngine implements TerminalEngine {
     container.appendChild(this.element)
   }
   applyDisplayOptions(options: unknown): void { this.displayOptions = options }
-  write(data: string | Uint8Array, onWritten?: () => void): void { this.writes.push(data); onWritten?.() }
+  write(data: string | Uint8Array, onWritten?: () => void): void {
+    this.writes.push(data)
+    const text = typeof data === 'string' ? data : new TextDecoder().decode(data)
+    for (const line of text.split('\n')) this.bufferLines.push(line)
+    this.raw.buffer.active.length = this.bufferLines.length
+    onWritten?.()
+  }
   resize(cols: number, rows: number): void { this.cols = cols; this.rows = rows; this.resizes.push({ cols, rows }) }
   focus(): void { this.focused = true }
   getSelection(): string { return this.selection }
@@ -415,12 +434,13 @@ describe('BaseTerminal — mounted UI', () => {
     expect(engine.scrolledToBottom).toBe(before)
   })
 
-  it('feeds the activity state detector', async () => {
+  it('feeds the activity state detector the rendered viewport snapshot', async () => {
     const { emit } = await mount()
 
     emit({ type: PtyEventType.Data, data: new TextEncoder().encode('hello') })
 
-    expect(processedData).toContain('hello')
+    // The detector receives the post-write screen snapshot, not the raw bytes.
+    expect(processedData.at(-1)).toContain('hello')
   })
 
   it('restores the scroll ratio across a resize when the reader is not at the bottom', async () => {

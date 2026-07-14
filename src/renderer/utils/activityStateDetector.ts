@@ -18,6 +18,9 @@ export function createActivityStateDetector(
   let currentState: ActivityState = ActivityState.Idle
   let idleTimerId: ReturnType<typeof setTimeout> | null = null
   let debounceTimerId: ReturnType<typeof setTimeout> | null = null
+  // The last rendered viewport. An incoming frame identical to this repainted nothing visible, so
+  // it is not treated as activity (see processData).
+  let lastSnapshot: string | null = null
 
   const emitState = (state: ActivityState) => {
     // Always clear pending debounce when trying to emit 'working'
@@ -65,9 +68,14 @@ export function createActivityStateDetector(
     }, idleTimeout)
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const processData = (_data: string) => {
-    // Any stream activity = working
+  const processData = (snapshot: string) => {
+    // A frame that leaves the rendered viewport identical repainted nothing visible — ignore it
+    // entirely so the idle timer keeps running toward Idle. Only a real screen change counts as
+    // activity.
+    if (snapshot === lastSnapshot) {
+      return
+    }
+    lastSnapshot = snapshot
     emitState(ActivityState.Working)
     scheduleIdleCheck()
   }

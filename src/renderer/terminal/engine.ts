@@ -108,3 +108,30 @@ export interface TerminalEngine {
 }
 
 export type TerminalEngineFactory = (options: TerminalEngineOptions) => Promise<TerminalEngine>
+
+/**
+ * The plain text of the rendered viewport — the tail `rows` lines of the parsed buffer.
+ *
+ * Used for activity detection: comparing consecutive snapshots tells whether the screen actually
+ * changed, so an app that repaints identical content (clear a line, rewrite the same text) reads
+ * as idle even though bytes keep arriving.
+ *
+ * `max(0, length - rows)` reproduces the analyzer's bottom-anchored `baseY..baseY+rows` window
+ * using only the public `length`/`getLine`/`rows` surface (`baseY` isn't exposed here). It is
+ * bottom-anchored — it tracks the program's newest output regardless of where the user scrolled —
+ * and reads only the tail, never the full scrollback. A full-screen app (vim/htop) writes to the
+ * alternate buffer where `length == rows`, so the whole screen is captured.
+ *
+ * `translateToString(true)` trims trailing whitespace and ignores cursor position and SGR colors,
+ * so a cursor-only or color-only repaint counts as no change. That is an accepted limitation — the
+ * target is identical-content repaint.
+ */
+export function snapshotViewport(engine: Pick<TerminalEngine, 'raw' | 'rows'>): string {
+  const active = engine.raw.buffer.active
+  const start = Math.max(0, active.length - engine.rows)
+  const lines: string[] = []
+  for (let y = start; y < active.length; y++) {
+    lines.push(active.getLine(y)?.translateToString(true) ?? '')
+  }
+  return lines.join('\n')
+}

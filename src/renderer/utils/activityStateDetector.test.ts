@@ -67,6 +67,57 @@ describe('createActivityStateDetector', () => {
     expect(finalCalls.length).toBeGreaterThan(0)
   })
 
+  it('ignores identical snapshots: emits working once then idles despite repeated repaints', () => {
+    const onStateChange = vi.fn()
+    const { processData } = createActivityStateDetector(onStateChange, { idleTimeout: 500, debounceMs: 0 })
+
+    // A TUI repainting the exact same screen every 100ms.
+    processData('same screen')
+    for (let t = 0; t < 500; t += 100) {
+      vi.advanceTimersByTime(100)
+      processData('same screen') // identical — no visible change
+    }
+    vi.advanceTimersByTime(50) // flush the (debounced) idle emit past the timeout boundary
+
+    // Working emitted exactly once (the first, changed frame); the repeats never reset the timer.
+    const workingCalls = onStateChange.mock.calls.filter((c: unknown[]) => c[0] === 'working')
+    expect(workingCalls).toHaveLength(1)
+
+    // Timer was never reset by the identical repaints, so it has fired.
+    const idleCalls = onStateChange.mock.calls.filter((c: unknown[]) => c[0] === 'idle')
+    expect(idleCalls.length).toBeGreaterThan(0)
+  })
+
+  it('a changed snapshot after identical repaints re-emits working and resets the timer', () => {
+    const onStateChange = vi.fn()
+    const { processData } = createActivityStateDetector(onStateChange, { idleTimeout: 500, debounceMs: 0 })
+
+    processData('frame a')
+    vi.advanceTimersByTime(600) // idle
+    expect(onStateChange.mock.calls.filter((c: unknown[]) => c[0] === 'idle')).toHaveLength(1)
+
+    processData('frame b') // different content — real activity
+    const workingCalls = onStateChange.mock.calls.filter((c: unknown[]) => c[0] === 'working')
+    expect(workingCalls).toHaveLength(2)
+  })
+
+  it('stays idle when identical repaints keep arriving after it has settled', () => {
+    const onStateChange = vi.fn()
+    const { processData } = createActivityStateDetector(onStateChange, { idleTimeout: 100, debounceMs: 0 })
+
+    processData('static')
+    vi.advanceTimersByTime(150) // settle to idle
+    onStateChange.mockClear()
+
+    // Identical repaints must not resurrect Working.
+    processData('static')
+    vi.advanceTimersByTime(200)
+    processData('static')
+    vi.advanceTimersByTime(200)
+
+    expect(onStateChange).not.toHaveBeenCalled()
+  })
+
   describe('destroy', () => {
     it('clears timers without throwing', () => {
       const onStateChange = vi.fn()
