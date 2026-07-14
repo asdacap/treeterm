@@ -125,6 +125,12 @@ export interface SessionState {
   // Session lifecycle
   handleRestore: (session: Session) => Promise<void>
   handleExternalUpdate: (session: Session) => Promise<void>
+  /** Tear the session down: stop every workspace file watch, drop sync bookkeeping,
+   *  and dispose each workspace's resources. Must be called before the store is
+   *  dropped (reconnect rebuild, session removal) — otherwise the leaked file
+   *  watches keep the store alive as a ghost that still writes the same JSON files
+   *  as its replacement, causing sustained CAS conflicts. */
+  dispose: () => void
 }
 
 /** JSON.stringify with sorted keys so field ordering doesn't affect comparison */
@@ -310,6 +316,11 @@ export function createSessionStore(
   }
   const wsSync = new Map<string, WorkspaceSyncState>()
 
+  // Set once dispose() runs. Guards every watch/write path so a file-watch callback
+  // that fires during teardown (the unsubscribe and the event can race) can neither
+  // write nor re-init tabs on a store that is being thrown away.
+  let disposed = false
+
   function getOrCreateSync(id: string): WorkspaceSyncState {
     let s = wsSync.get(id)
     if (!s) {
@@ -329,6 +340,7 @@ export function createSessionStore(
   // Open a content watch for a workspace's JSON file (idempotent). The first event
   // is the current state; subsequent events reconcile external edits.
   function ensureWatch(id: string, path: string): void {
+    if (disposed) return
     const sync = getOrCreateSync(id)
     if (sync.unsubscribe) return
     const dataDir = store.getState().workspaceDataDir
@@ -364,6 +376,7 @@ export function createSessionStore(
 
   // Apply a workspace body received from a file-watch event into the store.
   function onFileEvent(id: string, path: string, event: FileWatchEvent): void {
+    if (disposed) return // teardown in progress; the watch may fire before unsubscribe lands
     const sync = wsSync.get(id)
     if (!sync) return // unsubscribed (workspace removed)
 
@@ -414,6 +427,7 @@ export function createSessionStore(
   const MAX_CONFLICT_STREAK = 5
 
   async function writeWorkspaceContent(id: string): Promise<void> {
+    if (disposed) return
     const { workspaces, connection, workspaceDataDir } = store.getState()
     const sync = wsSync.get(id)
     if (!sync) return
@@ -494,6 +508,7 @@ export function createSessionStore(
   // Enqueue a content write for a workspace. Coalesces rapid mutations: if a write
   // is already queued (not yet started), it will pick up the latest state.
   function enqueueContentSync(id: string): void {
+    if (disposed) return
     const sync = getOrCreateSync(id)
     if (sync.pending) return
     sync.pending = true
@@ -1839,6 +1854,29 @@ export function createSessionStore(
 
       console.log('[Session] External ref update received, version:', daemonSession.version, 'refs:', daemonSession.workspaceRefs.length)
       reconcileRefs(daemonSession.workspaceRefs)
+    },
+
+    dispose: (): void => {
+      // Flip the guard first so any watch callback racing the unsubscribe below is a
+      // no-op, then stop every file watch and forget the sync bookkeeping — this is
+      // the leak that left ghost stores writing the same JSON files as their
+      // replacement after a reconnect. Finally dispose each workspace's resources,
+      // mirroring the per-workspace teardown in onWorkspaceRemoved.
+      disposed = true
+      for (const sync of Array.from(wsSync.values())) {
+        if (sync.unsubscribe) sync.unsubscribe()
+      }
+      wsSync.clear()
+      for (const entry of Array.from(get().workspaces.values())) {
+        if (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) {
+          entry.store.getState().gitController.getState().dispose()
+          for (const tabId of Object.keys(entry.store.getState().appStates)) {
+            const ref = entry.store.getState().getTabRef(tabId)
+            if (ref) ref.dispose()
+          }
+          entry.store.getState().dispose()
+        }
+      }
     }
   }))
 

@@ -220,9 +220,10 @@ describe('useAppStore', () => {
   })
 
   describe('disconnectSession', () => {
-    it('removes session from sessionStores', () => {
+    it('removes session from sessionStores and disposes the store', () => {
+      const dispose = vi.fn<() => void>()
       const mockStore = {
-        getState: vi.fn<() => any>().mockReturnValue({ workspaces: new Map() }),
+        getState: vi.fn<() => any>().mockReturnValue({ workspaces: new Map(), dispose }),
         setState: vi.fn<(...args: any[]) => void>(),
         subscribe: vi.fn<(...args: any[]) => any>()
       } as never
@@ -233,11 +234,13 @@ describe('useAppStore', () => {
       useAppStore.getState().disconnectSession('s1')
       expect(useAppStore.getState().sessionStores.get('s1')).toBeUndefined()
       expect(useAppStore.getState().sessionStores.get('s2')).toBeDefined()
+      // The dropped store must be torn down so its file watches stop.
+      expect(dispose).toHaveBeenCalledTimes(1)
     })
 
     it('clears navigation when disconnecting viewed session', () => {
       const mockStore = {
-        getState: vi.fn<() => any>().mockReturnValue({ workspaces: new Map([['ws-1', { id: 'ws-1' }]]) }),
+        getState: vi.fn<() => any>().mockReturnValue({ workspaces: new Map([['ws-1', { id: 'ws-1' }]]), dispose: vi.fn() }),
         setState: vi.fn<(...args: any[]) => void>(),
         subscribe: vi.fn<(...args: any[]) => any>()
       } as never

@@ -392,6 +392,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   disconnectSession: (sessionId: string) => {
+    // Tear the store down before dropping it: without this its file watches leak
+    // and keep writing the session's JSON files after disconnect.
+    get().sessionStores.get(sessionId)?.store.getState().dispose()
     set((state) => {
       const remaining = new Map(state.sessionStores)
       remaining.delete(sessionId)
@@ -471,6 +474,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   removeSession: (id: string) => {
+    // Tear the store down before dropping it: without this its file watches leak
+    // and keep writing the session's JSON files after removal.
+    get().sessionStores.get(id)?.store.getState().dispose()
     set((state) => {
       const rest = new Map(state.sessionStores)
       rest.delete(id)
@@ -553,17 +559,10 @@ function disposeSessionForConnection(connectionId: string, get: () => AppState):
 
     console.log(`[renderer:app] Disposing session ${sessionId} for reconnecting connection ${connectionId}`)
 
-    // Dispose all workspaces: tab refs (includes cached terminals), git controllers
-    const workspaces = entry.store.getState().workspaces
-    for (const [, wsEntry] of Array.from(workspaces.entries())) {
-      if (wsEntry.status === WorkspaceEntryStatus.Loaded || wsEntry.status === WorkspaceEntryStatus.OperationError) {
-        wsEntry.store.getState().gitController.getState().dispose()
-        for (const tabId of Object.keys(wsEntry.store.getState().appStates)) {
-          const ref = wsEntry.store.getState().getTabRef(tabId)
-          if (ref) ref.dispose()
-        }
-      }
-    }
+    // Full teardown: stops the workspace file watches (otherwise the store lingers
+    // as a ghost writing the same JSON files as its replacement), then disposes each
+    // workspace's tab refs (includes cached terminals) and git controllers.
+    entry.store.getState().dispose()
 
     toRemove.push(sessionId)
   }
