@@ -310,7 +310,7 @@ export function FileTree({
         />
         {search.query && (
           <button className="file-tree-search-clear" onClick={clearSearch} title="Clear search">
-            \u2715
+            {'\u2715'}
           </button>
         )}
       </div>
@@ -444,7 +444,7 @@ function FavouriteFilesSection({
           onClick={() => { onSelectFile(file.path) }}
           title={file.relativePath}
         >
-          <span className="file-tree-icon">\uD83D\uDCC4</span>
+          <span className="file-tree-icon">{'\uD83D\uDCC4'}</span>
           <span className="file-tree-name">{file.relativePath}</span>
         </div>
       ))}

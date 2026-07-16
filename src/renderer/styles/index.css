@@ -2848,6 +2848,63 @@ body,
   color: #f14c4c;
 }
 
+.filesystem-browser-tree {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  flex-shrink: 0;
+}
+
+.filesystem-browser-tree .file-tree {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+.filesystem-browser-tree-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 4px 10px;
+  border-right: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+}
+
+.filesystem-browser-tree-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
+.filesystem-browser-collapse,
+.filesystem-browser-expand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.filesystem-browser-collapse:hover,
+.filesystem-browser-expand:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.filesystem-browser-expand {
+  align-self: flex-start;
+  margin: 4px;
+  flex-shrink: 0;
+}
+
 /* File Tree */
 .file-tree {
   border-right: 1px solid var(--border-color);

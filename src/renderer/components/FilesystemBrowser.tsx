@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react'
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useStore } from 'zustand'
 import { FileTree } from './FileTree'
 import { FileViewer } from './FileViewer'
@@ -48,6 +49,7 @@ function FilesystemBrowserContent({
   // Resize state
   const [treeWidth, setTreeWidth] = useState(250)
   const [isResizing, setIsResizing] = useState(false)
+  const [isTreeCollapsed, setIsTreeCollapsed] = useState(false)
 
   // Reviews state — derived from store
   const allComments = getReviewComments()
@@ -150,16 +152,40 @@ function FilesystemBrowserContent({
 
   return (
     <div className="filesystem-browser" onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
-      <div style={{ width: treeWidth }}>
-        <FileTree
-          workspace={workspace}
-          selectedPath={state.selectedPath}
-          expandedDirs={state.expandedDirs}
-          onSelectFile={setSelectedPath}
-          onToggleDir={toggleExpandedDir}
-        />
-      </div>
-      <div className={`divider ${isResizing ? 'active' : ''}`} onMouseDown={handleMouseDown} />
+      {isTreeCollapsed ? (
+        <button
+          className="filesystem-browser-expand"
+          title="Show file tree"
+          aria-label="Show file tree"
+          onClick={() => { setIsTreeCollapsed(false); }}
+        >
+          <PanelLeftOpen size={16} />
+        </button>
+      ) : (
+        <>
+          <div className="filesystem-browser-tree" style={{ width: treeWidth }}>
+            <div className="filesystem-browser-tree-header">
+              <span className="filesystem-browser-tree-title">Files</span>
+              <button
+                className="filesystem-browser-collapse"
+                title="Hide file tree"
+                aria-label="Hide file tree"
+                onClick={() => { setIsTreeCollapsed(true); }}
+              >
+                <PanelLeftClose size={16} />
+              </button>
+            </div>
+            <FileTree
+              workspace={workspace}
+              selectedPath={state.selectedPath}
+              expandedDirs={state.expandedDirs}
+              onSelectFile={setSelectedPath}
+              onToggleDir={toggleExpandedDir}
+            />
+          </div>
+          <div className={`divider ${isResizing ? 'active' : ''}`} onMouseDown={handleMouseDown} />
+        </>
+      )}
       <div className="filesystem-browser-content">
         <FileViewer
           workspace={workspace}
