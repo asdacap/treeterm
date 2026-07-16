@@ -164,7 +164,7 @@ export interface ReviewState {
   // Overrides the branch used as the base for review display (diff, commits, file contents).
   // Merge and conflict-check still target parentWorkspace.gitBranch — the override is display-only.
   baseBranchOverride?: string
-  viewMode: 'committed' | 'uncommitted' | 'commits'
+  viewMode: 'committed' | 'uncommitted' | 'commits' | 'favourites'
   selectedFilePath?: string
   scrollTop?: number
   // NOTE: viewed-file checkboxes live in workspace metadata (see createReviewViewedFilesStore),

@@ -37,6 +37,13 @@ describe('workspaceFile', () => {
     expect(() => parseWorkspaceFile('ws-1', '/repo', JSON.stringify(withoutParent))).toThrow()
   })
 
+  it('loads old workspace files without favouritePaths as an empty list', () => {
+    const legacy: Partial<ReturnType<typeof toStoredWorkspaceFile>> = { ...toStoredWorkspaceFile(makeWorkspace(), '') }
+    delete legacy.favouritePaths
+
+    expect(parseWorkspaceFile('ws-1', '/repo', JSON.stringify(legacy)).favouritePaths).toEqual([])
+  })
+
   it('throws on invalid JSON', () => {
     expect(() => parseWorkspaceFile('ws-1', '/repo', '{ not json')).toThrow()
   })

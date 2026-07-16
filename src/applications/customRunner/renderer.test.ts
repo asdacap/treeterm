@@ -98,6 +98,11 @@ const mockWorkspaceStoreStateData = {
   } as GitControllerState)),
   refreshTitleAndDescription: vi.fn(),
   refreshBranchName: vi.fn(),
+  favouritePathsRevision: 0,
+  getFavouritePaths: vi.fn().mockReturnValue([]),
+  isFavouritePath: vi.fn().mockReturnValue(false),
+  addFavouritePath: vi.fn(),
+  removeFavouritePath: vi.fn(),
 } as WorkspaceStoreState
 
 const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => mockWorkspaceStoreStateData)

@@ -38,6 +38,7 @@ function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStore
     quickForkWorkspace: vi.fn<(...args: any[]) => Promise<{ success: boolean }>>().mockResolvedValue({ success: true }),
     refreshGitInfo: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
     lookupWorkspace: vi.fn<(...args: any[]) => any>().mockReturnValue(undefined),
+    subscribeWorkspaceChanges: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
     getSettings: vi.fn<() => any>().mockReturnValue({
       llm: { apiKey: '', baseUrl: '' },
       terminalAnalyzer: { model: '', systemPrompt: '', titleSystemPrompt: '', reasoningEffort: 'off', safePaths: [], bufferLines: 10 },
@@ -1237,6 +1238,68 @@ describe('createWorkspaceStore', () => {
 
       store.getState().toggleFavourite()
       expect(store.getState().metadata.isFavourite).toBe('true')
+    })
+  })
+
+  describe('favourite paths', () => {
+    it('inherits favourite paths from every ancestor', () => {
+      const root = makeWorkspace({ id: 'root', favouritePaths: ['src'] })
+      const parent = makeWorkspace({ id: 'parent', parentId: 'root', favouritePaths: ['README.md'] })
+      const child = makeWorkspace({ id: 'child', parentId: 'parent', favouritePaths: ['package.json'] })
+      const workspaces = new Map([root, parent, child].map((workspace) => [workspace.id, workspace]))
+      const store = createWorkspaceStore(child, makeHandleDeps({ lookupWorkspace: (id) => workspaces.get(id) }))
+
+      expect(store.getState().getFavouritePaths()).toEqual(['package.json', 'README.md', 'src'])
+      expect(store.getState().isFavouritePath('src/index.ts')).toBe(true)
+    })
+
+    it('adds and removes local favourites and persists each mutation', () => {
+      const deps = makeHandleDeps()
+      const store = createWorkspaceStore(makeWorkspace(), deps)
+
+      store.getState().addFavouritePath('./src/index.ts')
+      expect(store.getState().workspace.favouritePaths).toEqual(['src/index.ts'])
+      expect(deps.syncToDaemon).toHaveBeenLastCalledWith('addFavouritePath')
+
+      store.getState().removeFavouritePath('src/index.ts')
+      expect(store.getState().workspace.favouritePaths).toEqual([])
+      expect(deps.syncToDaemon).toHaveBeenLastCalledWith('removeFavouritePath')
+    })
+
+    it('does not duplicate paths included by an inherited favourite directory', () => {
+      const parent = makeWorkspace({ id: 'parent', favouritePaths: ['src'] })
+      const deps = makeHandleDeps({ lookupWorkspace: () => parent })
+      const store = createWorkspaceStore(makeWorkspace({ parentId: 'parent' }), deps)
+
+      store.getState().addFavouritePath('src/index.ts')
+
+      expect(store.getState().workspace.favouritePaths).toEqual([])
+      expect(deps.syncToDaemon).not.toHaveBeenCalled()
+    })
+
+    it('invalidates inherited favourites only when the effective paths change and unsubscribes on dispose', () => {
+      let notifyWorkspaceChange: () => void = () => {}
+      const unsubscribe = vi.fn()
+      let parent = makeWorkspace({ id: 'parent', favouritePaths: ['src'] })
+      const deps = makeHandleDeps({
+        lookupWorkspace: () => parent,
+        subscribeWorkspaceChanges: (callback) => {
+          notifyWorkspaceChange = callback
+          return unsubscribe
+        },
+      })
+      const store = createWorkspaceStore(makeWorkspace({ parentId: 'parent' }), deps)
+
+      notifyWorkspaceChange()
+      expect(store.getState().favouritePathsRevision).toBe(0)
+
+      parent = { ...parent, favouritePaths: ['src', 'README.md'] }
+      notifyWorkspaceChange()
+      expect(store.getState().favouritePathsRevision).toBe(1)
+      expect(store.getState().getFavouritePaths()).toEqual(['src', 'README.md'])
+
+      store.getState().dispose()
+      expect(unsubscribe).toHaveBeenCalledOnce()
     })
   })
 

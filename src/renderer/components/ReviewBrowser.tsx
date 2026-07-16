@@ -1,17 +1,19 @@
 /* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { ChevronDown, RefreshCw, Loader2 } from 'lucide-react'
+import { ChevronDown, RefreshCw, Loader2, Star } from 'lucide-react'
 import { WorkerPoolContextProvider } from '@pierre/diffs/react'
 import { useStore } from 'zustand'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
 import { getTabs } from '../types'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, GitLogCommit, WorkspaceStore, WorkspaceGitApi, ReviewState } from '../types'
 import { FileChangeStatus } from '../types'
-import { useGitApi } from '../hooks/useWorkspaceApis'
+import { useFilesystemApi, useGitApi } from '../hooks/useWorkspaceApis'
 import { CommittedDiffFileTree, UncommittedDiffFileTree, sortFilesAsTree, filterFilesByDir } from './DiffFileTree'
 import { StackedDiffList } from './StackedDiffList'
 import { DiffToolbar } from './DiffToolbar'
 import { createDiffsWorker } from '../pierre-diffs-config'
+import { FileViewer } from './FileViewer'
+import { resolveFavouriteFiles, type FavouriteFile } from '../utils/favouriteFiles'
 
 interface ReviewBrowserProps {
   workspace: WorkspaceStore
@@ -26,7 +28,19 @@ enum ViewMode {
   Committed = 'committed',
   Uncommitted = 'uncommitted',
   Commits = 'commits',
+  Favourites = 'favourites',
 }
+
+enum FavouriteReviewStatus {
+  Loading = 'loading',
+  Ready = 'ready',
+  Error = 'error',
+}
+
+type FavouriteReviewState =
+  | { status: FavouriteReviewStatus.Loading }
+  | { status: FavouriteReviewStatus.Ready; files: FavouriteFile[] }
+  | { status: FavouriteReviewStatus.Error; error: string }
 
 export default function ReviewBrowser({
   workspace,
@@ -55,6 +69,11 @@ export default function ReviewBrowser({
   const reconcileViewedFiles = useStore(reviewViewedFilesStore, s => s.reconcileViewedFiles)
   const refreshGit = useStore(gitController, s => s.refreshGit)
   const git = useGitApi(workspace)
+  const filesystem = useFilesystemApi(workspace)
+  const favouritePathsRevision = useStore(workspace, s => s.favouritePathsRevision)
+  const getFavouritePaths = useStore(workspace, s => s.getFavouritePaths)
+  const favouritePaths = getFavouritePaths()
+  const favouritePathsKey = favouritePaths.join('\0')
   const workspaceId = wsData.id
   const parentWorkspace = parentWorkspaceId ? lookupWorkspace(parentWorkspaceId) : undefined
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist in appStates
@@ -91,9 +110,11 @@ export default function ReviewBrowser({
   const [uncommitted, setUncommitted] = useState<UncommittedChanges | null>(null)
   const [viewMode, setViewMode] = useState(() => {
     const saved = reviewState?.viewMode as ViewMode | undefined
+    const fallback = hasBaseBranch ? ViewMode.Committed : ViewMode.Uncommitted
     // No base branch resolved → can't show committed-vs-base diff, fall back to Uncommitted
     if (!hasBaseBranch && saved === ViewMode.Committed) return ViewMode.Uncommitted
-    return saved ?? (hasBaseBranch ? ViewMode.Committed : ViewMode.Uncommitted)
+    if (!favouritePathsKey && saved === ViewMode.Favourites) return fallback
+    return saved ?? fallback
   })
 
   // Staging state
@@ -143,6 +164,48 @@ export default function ReviewBrowser({
 
   const [refreshing, setRefreshing] = useState(false)
 
+  const [favouriteReviewState, setFavouriteReviewState] = useState<FavouriteReviewState>(favouritePathsKey
+    ? { status: FavouriteReviewStatus.Loading }
+    : { status: FavouriteReviewStatus.Ready, files: [] })
+  const [selectedFavouritePath, setSelectedFavouritePath] = useState<string | null>(null)
+  const [loadingFavouritePathsKey, setLoadingFavouritePathsKey] = useState(favouritePathsKey)
+  const [favouriteRefreshRevision, setFavouriteRefreshRevision] = useState(0)
+  if (loadingFavouritePathsKey !== favouritePathsKey) {
+    setLoadingFavouritePathsKey(favouritePathsKey)
+    setFavouriteReviewState(favouritePathsKey
+      ? { status: FavouriteReviewStatus.Loading }
+      : { status: FavouriteReviewStatus.Ready, files: [] })
+    setSelectedFavouritePath(null)
+    if (!favouritePathsKey && viewMode === ViewMode.Favourites) {
+      setViewMode(hasBaseBranch ? ViewMode.Committed : ViewMode.Uncommitted)
+    }
+  }
+
+  useEffect(() => {
+    const paths = favouritePathsKey ? favouritePathsKey.split('\0') : []
+    let cancelled = false
+    if (paths.length === 0) return
+    void resolveFavouriteFiles(wsData.path, paths, filesystem, () => cancelled).then(
+      (files) => {
+        if (cancelled) return
+        setFavouriteReviewState({ status: FavouriteReviewStatus.Ready, files })
+        setSelectedFavouritePath((selected) =>
+          selected && files.some((file) => file.relativePath === selected)
+            ? selected
+            : files[0]?.relativePath ?? null
+        )
+      },
+      (loadFavouriteError: unknown) => {
+        if (!cancelled) setFavouriteReviewState({
+          status: FavouriteReviewStatus.Error,
+          error: loadFavouriteError instanceof Error ? loadFavouriteError.message : String(loadFavouriteError),
+        })
+      }
+    )
+    return () => { cancelled = true }
+  // favouritePathsRevision explicitly invalidates inherited paths when an ancestor changes.
+  }, [wsData.path, favouritePathsKey, favouritePathsRevision, favouriteRefreshRevision, filesystem])
+
   // Persist view state to tab state for restoration across workspace switches
   const persistViewState = useCallback((updates: Partial<ReviewState>) => {
     updateTabState<ReviewState>(tabId, (s) => ({ ...s, ...updates }))
@@ -150,6 +213,10 @@ export default function ReviewBrowser({
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true)
+    if (favouritePathsKey) {
+      setFavouriteReviewState({ status: FavouriteReviewStatus.Loading })
+      setFavouriteRefreshRevision((revision) => revision + 1)
+    }
     try {
       const h = helpersRef.current
       await Promise.all([
@@ -162,7 +229,7 @@ export default function ReviewBrowser({
     } finally {
       setRefreshing(false)
     }
-  }, [hasBaseBranch, hasParent, refreshGit])
+  }, [hasBaseBranch, hasParent, refreshGit, favouritePathsKey])
 
   // Auto-refresh when tab becomes visible (e.g., switching back from terminal)
   const wasVisibleRef = useRef<boolean | null>(null)
@@ -900,15 +967,69 @@ export default function ReviewBrowser({
             <span className="diff-tab-count">{commits.length}{commitsHasMore ? '+' : ''}</span>
           )}
         </button>
+        {favouritePaths.length > 0 && (
+          <button
+            className={`diff-tab ${viewMode === ViewMode.Favourites ? 'active' : ''}`}
+            onClick={() => { setViewMode(ViewMode.Favourites); persistViewState({ viewMode: ViewMode.Favourites }) }}
+          >
+            <Star size={12} fill="currentColor" />
+            Favourites
+            {favouriteReviewState.status === FavouriteReviewStatus.Ready && (
+              <span className="diff-tab-count">{favouriteReviewState.files.length}</span>
+            )}
+          </button>
+        )}
       </div>
 
-      {loading ? (
+      {viewMode !== ViewMode.Favourites && loading ? (
         <div className="review-loading">Loading changes...</div>
-      ) : error ? (
+      ) : viewMode !== ViewMode.Favourites && error ? (
         <div className="review-error">{error}</div>
       ) : (
         <>
-          {viewMode === ViewMode.Commits ? (
+          {viewMode === ViewMode.Favourites ? (
+            <div className="review-favourites-view">
+              {favouriteReviewState.status === FavouriteReviewStatus.Loading ? (
+                <div className="review-loading">Loading favourite files...</div>
+              ) : favouriteReviewState.status === FavouriteReviewStatus.Error ? (
+                <div className="review-error">{favouriteReviewState.error}</div>
+              ) : favouriteReviewState.files.length === 0 ? (
+                <div className="diff-empty">No favourite files exist in this workspace</div>
+              ) : (
+                <>
+                  <div className="review-favourites-list" style={{ width: fileListWidth }}>
+                    <div className="diff-file-section">Favourite files</div>
+                    {favouriteReviewState.files.map((file) => (
+                      <div
+                        key={file.relativePath}
+                        className={`diff-file-item ${selectedFavouritePath === file.relativePath ? 'selected' : ''}`}
+                        title={file.relativePath}
+                        onClick={() => { setSelectedFavouritePath(file.relativePath) }}
+                      >
+                        <Star size={12} fill="currentColor" className="review-favourite-star" />
+                        <span className="diff-file-path">{file.relativePath}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="review-favourite-viewer">
+                    <FileViewer
+                      key={`${selectedFavouritePath ?? 'none'}:${String(favouriteRefreshRevision)}`}
+                      workspace={workspace}
+                      filePath={favouriteReviewState.files.find((file) => file.relativePath === selectedFavouritePath)?.path ?? null}
+                      comments={selectedFavouritePath ? reviews.filter((review) => review.filePath === selectedFavouritePath) : []}
+                      onLineClick={(lineNumber) => {
+                        if (selectedFavouritePath) setCommentInput({ filePath: selectedFavouritePath, lineNumber, side: 'modified' })
+                      }}
+                      inlineCommentInput={commentInput?.filePath === selectedFavouritePath ? { lineNumber: commentInput.lineNumber } : null}
+                      onCommentSubmit={handleCommentSubmit}
+                      onCommentCancel={() => { setCommentInput(null) }}
+                      onCommentDelete={handleCommentDelete}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          ) : viewMode === ViewMode.Commits ? (
             <div className="commits-view">
               <div className="commits-pane">
                 {commitsLoading && commits.length === 0 ? (

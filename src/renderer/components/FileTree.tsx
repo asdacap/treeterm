@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { Star } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { FileEntry, WorkspaceStore } from '../types'
 import { useFilesystemApi } from '../hooks/useWorkspaceApis'
+import { resolveFavouriteFiles, type FavouriteFile } from '../utils/favouriteFiles'
+import { normalizeFileEntryRelativePath } from '../../shared/workspaceFavourites'
 
 interface FileTreeProps {
   workspace: WorkspaceStore
@@ -32,8 +35,16 @@ export function FileTree({
   onToggleDir
 }: FileTreeProps): React.JSX.Element {
   const wsData = useStore(workspace, s => s.workspace)
+  const favouritePathsRevision = useStore(workspace, s => s.favouritePathsRevision)
+  const getFavouritePaths = useStore(workspace, s => s.getFavouritePaths)
+  const checkFavouritePath = useStore(workspace, s => s.isFavouritePath)
+  const addFavouritePath = useStore(workspace, s => s.addFavouritePath)
+  const removeFavouritePath = useStore(workspace, s => s.removeFavouritePath)
   const workspacePath = wsData.path
   const filesystem = useFilesystemApi(workspace)
+  const favouritePaths = getFavouritePaths()
+  const localFavouritePaths = wsData.favouritePaths
+  const favouritePathsKey = favouritePaths.join('\0')
   const [dirContents, setDirContents] = useState(new Map<string, DirectoryState>())
   const [search, setSearch] = useState<SearchState>({
     query: '',
@@ -153,6 +164,31 @@ export function FileTree({
     })
   }
 
+  const renderFavouriteButton = (entry: FileEntry): React.JSX.Element => {
+    const relativePath = normalizeFileEntryRelativePath(entry.relativePath, workspacePath)
+    const isFavourite = checkFavouritePath(relativePath)
+    const isLocalFavourite = localFavouritePaths.includes(relativePath)
+    const title = isLocalFavourite
+      ? 'Remove from favourites'
+      : isFavourite
+        ? 'Inherited or included by a favourite folder'
+        : `Add ${entry.isDirectory ? 'folder' : 'file'} to favourites`
+    return (
+      <button
+        className={`file-tree-favourite ${isFavourite ? 'active' : ''}`}
+        title={title}
+        aria-label={title}
+        onClick={(event) => {
+          event.stopPropagation()
+          if (isLocalFavourite) removeFavouritePath(relativePath)
+          else if (!isFavourite) addFavouritePath(relativePath)
+        }}
+      >
+        <Star size={13} fill={isFavourite ? 'currentColor' : 'none'} />
+      </button>
+    )
+  }
+
   // Highlight matching text in filename
   const highlightMatch = (name: string, query: string): React.JSX.Element => {
     if (!query.trim()) return <>{name}</>
@@ -200,6 +236,7 @@ export function FileTree({
           </span>
           <span className="file-tree-icon">{entry.isDirectory ? '\uD83D\uDCC1' : '\uD83D\uDCC4'}</span>
           <span className="file-tree-name">{entry.name}</span>
+          {renderFavouriteButton(entry)}
         </div>
         {entry.isDirectory && isExpanded && (
           <div className="file-tree-children">
@@ -248,6 +285,7 @@ export function FileTree({
           {highlightMatch(entry.name, search.query)}
         </span>
         <span className="file-tree-search-path">{entry.relativePath}</span>
+        {renderFavouriteButton(entry)}
       </div>
     )
   }
@@ -276,6 +314,17 @@ export function FileTree({
           </button>
         )}
       </div>
+
+      {favouritePathsKey && (
+        <FavouriteFilesSection
+          key={`${String(favouritePathsRevision)}:${favouritePathsKey}`}
+          workspacePath={workspacePath}
+          favouritePathsKey={favouritePathsKey}
+          filesystem={filesystem}
+          selectedPath={selectedPath}
+          onSelectFile={onSelectFile}
+        />
+      )}
 
       {/* Search Results */}
       {isSearching && (
@@ -321,6 +370,84 @@ export function FileTree({
           {rootState?.entries.map((entry) => renderEntry(entry, 0))}
         </>
       )}
+    </div>
+  )
+}
+
+enum FavouriteFilesStatus {
+  Loading = 'loading',
+  Ready = 'ready',
+  Error = 'error',
+}
+
+type FavouriteFilesState =
+  | { status: FavouriteFilesStatus.Loading }
+  | { status: FavouriteFilesStatus.Ready; files: FavouriteFile[] }
+  | { status: FavouriteFilesStatus.Error; error: string }
+
+function FavouriteFilesSection({
+  workspacePath,
+  favouritePathsKey,
+  filesystem,
+  selectedPath,
+  onSelectFile,
+}: {
+  workspacePath: string
+  favouritePathsKey: string
+  filesystem: ReturnType<typeof useFilesystemApi>
+  selectedPath: string | null
+  onSelectFile: (path: string) => void
+}): React.JSX.Element | null {
+  const [state, setState] = useState<FavouriteFilesState>({ status: FavouriteFilesStatus.Loading })
+  const [retryRevision, setRetryRevision] = useState(0)
+
+  useEffect(() => {
+    const favouritePaths = favouritePathsKey.split('\0')
+    let cancelled = false
+    void resolveFavouriteFiles(workspacePath, favouritePaths, filesystem, () => cancelled).then(
+      (files) => { if (!cancelled) setState({ status: FavouriteFilesStatus.Ready, files }) },
+      (error: unknown) => {
+        if (!cancelled) setState({
+          status: FavouriteFilesStatus.Error,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    )
+    return () => { cancelled = true }
+  }, [workspacePath, favouritePathsKey, filesystem, retryRevision])
+
+  return (
+    <div className="file-tree-favourites">
+      <div className="file-tree-section-title"><Star size={12} fill="currentColor" /> Favourites</div>
+      {state.status === FavouriteFilesStatus.Loading && <div className="file-tree-favourites-message">Loading favourites...</div>}
+      {state.status === FavouriteFilesStatus.Error && (
+        <div className="file-tree-favourites-message file-tree-error">
+          <span>{state.error}</span>
+          <button
+            className="file-tree-favourites-retry"
+            onClick={() => {
+              setState({ status: FavouriteFilesStatus.Loading })
+              setRetryRevision((revision) => revision + 1)
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      {state.status === FavouriteFilesStatus.Ready && state.files.length === 0 && (
+        <div className="file-tree-favourites-message">No favourite files exist in this workspace</div>
+      )}
+      {state.status === FavouriteFilesStatus.Ready && state.files.map((file) => (
+        <div
+          key={file.relativePath}
+          className={`file-tree-item file-tree-favourite-file ${selectedPath === file.path ? 'selected' : ''}`}
+          onClick={() => { onSelectFile(file.path) }}
+          title={file.relativePath}
+        >
+          <span className="file-tree-icon">\uD83D\uDCC4</span>
+          <span className="file-tree-name">{file.relativePath}</span>
+        </div>
+      ))}
     </div>
   )
 }

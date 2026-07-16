@@ -721,6 +721,7 @@ export function createSessionStore(
         const entry = store.getState().workspaces.get(id)
         return entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data : undefined
       },
+      subscribeWorkspaceChanges: (callback) => store.subscribe(callback),
       github: deps.github,
       worktreeRegistry: deps.worktreeRegistry,
     }
@@ -734,6 +735,7 @@ export function createSessionStore(
       store.setState((s) => {
         const entry = s.workspaces.get(state.workspace.id)
         if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return s
+        if (entry.data === state.workspace) return s
         return {
           workspaces: new Map(s.workspaces).set(state.workspace.id, { ...entry, data: state.workspace })
         }
@@ -834,6 +836,7 @@ export function createSessionStore(
             ...(options.displayName ? { displayName: options.displayName } : {}),
             ...(options.initialBranch ? { branchIsUserDefined: 'true' } : {}),
           },
+          favouritePaths: [],
           createdAt: Date.now(),
           lastActivity: Date.now(),
         }
@@ -902,6 +905,7 @@ export function createSessionStore(
       appStates,
       activeTabId,
       metadata: { sortOrder: nextSortOrder(parentId), ...(options.metadata ?? {}) },
+      favouritePaths: [],
       createdAt: Date.now(),
       lastActivity: Date.now(),
     }
@@ -1259,6 +1263,7 @@ export function createSessionStore(
           appStates,
           activeTabId,
           metadata: { sortOrder: nextSortOrder(undefined) },
+          favouritePaths: [],
           createdAt: Date.now(),
           lastActivity: Date.now(),
         }

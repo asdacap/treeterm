@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
 /* eslint-disable custom/no-string-literal-comparison -- tests compare DOM text content against literal branch names */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, act, fireEvent, waitFor } from '@testing-library/react'
+import { render, act, fireEvent, waitFor, screen } from '@testing-library/react'
 import React from 'react'
-import type { WorkspaceGitApi } from '../types'
+import type { WorkspaceFilesystemApi, WorkspaceGitApi, WorkspaceStore } from '../types'
+import type { ReviewCommentState } from '../store/createReviewCommentStore'
+import type { ReviewViewedFilesState } from '../store/createReviewViewedFilesStore'
+import type { GitControllerState } from '../store/createGitControllerStore'
+import { createStore } from 'zustand/vanilla'
+import { makeWorkspace } from '../../shared/test-fixtures/workspace'
 
 const mockObservers: Array<{
   callback: IntersectionObserverCallback
@@ -34,6 +39,9 @@ vi.mock('@pierre/diffs', () => ({}))
 vi.mock('../pierre-diffs-config', () => ({
   createDiffsWorker: () => ({} as Worker),
 }))
+vi.mock('./FileViewer', () => ({
+  FileViewer: () => <div data-testid="file-viewer" />,
+}))
 // DiffFileTree pulls in the context-menu store (→ app store → monaco) transitively;
 // mock it so this lightweight suite stays free of the editor stack.
 vi.mock('../store/contextMenu', async () => {
@@ -56,7 +64,7 @@ vi.mock('../store/contextMenu', async () => {
   }
 })
 
-import { CommitsLoadMoreSentinel, BaseBranchSelector } from './ReviewBrowser'
+import ReviewBrowser, { CommitsLoadMoreSentinel, BaseBranchSelector } from './ReviewBrowser'
 
 function fireIntersection(index: number, isIntersecting: boolean) {
   const observer = mockObservers[index]
@@ -417,5 +425,96 @@ describe('BaseBranchSelector', () => {
     })
     expect(listLocalBranches).toHaveBeenCalledTimes(1)
     expect(listRemoteBranches).toHaveBeenCalledTimes(1)
+  })
+})
+
+function makeReviewWorkspace(favouritePaths: string[], viewMode: 'favourites' | 'uncommitted'): WorkspaceStore {
+  const reviewComments = createStore<ReviewCommentState>()(() => ({
+    getReviewComments: () => [],
+    addReviewComment: vi.fn(),
+    deleteReviewComment: vi.fn(),
+    toggleReviewCommentAddressed: vi.fn(),
+    updateOutdatedReviewComments: vi.fn(),
+    clearReviewComments: vi.fn(),
+    markReviewCommentsAddressed: vi.fn(),
+  }))
+  const reviewViewedFiles = createStore<ReviewViewedFilesState>()(() => ({
+    getViewedFiles: () => ({}),
+    toggleViewedFile: vi.fn(),
+    markFilesViewed: vi.fn(),
+    reconcileViewedFiles: vi.fn(),
+  }))
+  const gitController = createStore<GitControllerState>()(() => ({ refreshGit: vi.fn() } as unknown as GitControllerState))
+  const gitApi = new Proxy({
+    getUncommittedChanges: vi.fn().mockResolvedValue({
+      success: true,
+      changes: { files: [], totalAdditions: 0, totalDeletions: 0 },
+    }),
+    getHeadCommitHash: vi.fn().mockResolvedValue({ success: true, hash: 'head' }),
+  } as unknown as WorkspaceGitApi, {
+    get(target, property: string) {
+      if (property in target) return (target as unknown as Record<string, unknown>)[property]
+      return vi.fn().mockResolvedValue({ success: true })
+    },
+  })
+  const filesystemApi: WorkspaceFilesystemApi = {
+    readDirectory: vi.fn((path: string) => Promise.resolve({
+      success: true as const,
+      contents: {
+        path,
+        entries: path === '/repo'
+          ? [{ name: 'src', path: '/repo/src', relativePath: 'src', isDirectory: true }]
+          : [{ name: 'index.ts', path: '/repo/src/index.ts', relativePath: 'src/index.ts', isDirectory: false }],
+      },
+    })),
+    readFile: vi.fn(),
+    writeFile: vi.fn(),
+    searchFiles: vi.fn(),
+  }
+  const workspace = makeWorkspace({
+    path: '/repo',
+    favouritePaths,
+    appStates: { review: { applicationId: 'review', title: 'Review', state: { viewMode } } },
+  })
+  const store = createStore(() => ({
+    workspace,
+    lookupWorkspace: () => undefined,
+    promptHarness: vi.fn(),
+    mergeAndRemove: vi.fn(),
+    mergeAndKeep: vi.fn(),
+    closeAndClean: vi.fn(),
+    removeTab: vi.fn(),
+    reviewComments,
+    reviewViewedFiles,
+    gitController,
+    updateTabState: vi.fn(),
+    gitApi,
+    filesystemApi,
+    favouritePathsRevision: 0,
+    getFavouritePaths: () => favouritePaths,
+  }))
+  return store as unknown as WorkspaceStore
+}
+
+describe('ReviewBrowser favourites', () => {
+  it('loads favourite directories and opens their files in the review viewer', async () => {
+    const workspace = makeReviewWorkspace(['src'], 'favourites')
+
+    render(<ReviewBrowser workspace={workspace} tabId="review" isVisible={false} />)
+
+    expect(await screen.findByText('src/index.ts')).toBeDefined()
+    expect(screen.getByTestId('file-viewer')).toBeDefined()
+    expect(screen.getByRole('button', { name: /Favourites/ }).className).toContain('active')
+  })
+
+  it('falls back to Uncommitted when a persisted Favourites view has no favourites', async () => {
+    const workspace = makeReviewWorkspace([], 'favourites')
+
+    render(<ReviewBrowser workspace={workspace} tabId="review" isVisible={false} />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Uncommitted' }).className).toContain('active')
+    })
+    expect(screen.queryByRole('button', { name: /Favourites/ })).toBeNull()
   })
 })

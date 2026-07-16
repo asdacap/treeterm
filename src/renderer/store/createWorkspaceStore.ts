@@ -18,6 +18,7 @@ import { createReviewViewedFilesStore } from './createReviewViewedFilesStore'
 import type { ReviewViewedFilesStore } from './createReviewViewedFilesStore'
 import { DisposableMap, DisposableStore } from '../../shared/lifecycle'
 import type { IDisposable } from '../../shared/lifecycle'
+import { getWorkspaceFavouritePaths, isFavouritePath, normalizeFavouritePath } from '../../shared/workspaceFavourites'
 
 /** The LLM labeller reads the AI Harness terminal buffer; without one there is nothing to label from. */
 const NO_AI_HARNESS_TAB: TitleRefreshResult = {
@@ -89,12 +90,15 @@ export interface WorkspaceStoreDeps {
   quickForkWorkspace: (id: string) => Promise<{ success: boolean; error?: string }>
   refreshGitInfo: (id: string) => Promise<void>
   lookupWorkspace: (id: string) => Workspace | undefined
+  subscribeWorkspaceChanges: (callback: () => void) => () => void
   github: GitHubApi
   worktreeRegistry: WorktreeRegistryApi
 }
 
 export interface WorkspaceStoreState {
   workspace: Workspace
+  /** Invalidates consumers of inherited workspace data when an ancestor changes. */
+  favouritePathsRevision: number
 
   /**
    * Parsed workspace metadata. Always mirrors `workspace.metadata` — kept in
@@ -170,6 +174,10 @@ export interface WorkspaceStoreState {
   updateMetadata: (key: string, value: string, reason: string) => void
   deleteMetadata: (key: string, reason: string) => void
   toggleFavourite: () => void
+  getFavouritePaths: () => string[]
+  isFavouritePath: (path: string) => boolean
+  addFavouritePath: (path: string) => void
+  removeFavouritePath: (path: string) => void
   /** Re-consult the LLM (via the active AI Harness tab's analyzer) and overwrite the
    *  workspace's display name + description. Fails if no AI Harness tab is available. */
   refreshTitleAndDescription: () => Promise<TitleRefreshResult>
@@ -273,6 +281,7 @@ export function createWorkspaceStore(
   // reconciliation so a given handle never spawns more than one PTY. Holds the
   // in-flight promise so concurrent inits in the same tick coalesce. See ensureTty.
   const ttyByHandle = new Map<string, Promise<string>>()
+  let unsubscribeWorkspaceChanges: () => void = () => {}
 
   const gitController = createGitControllerStore({
     git: deps.git,
@@ -296,6 +305,7 @@ export function createWorkspaceStore(
 
   store = createStore<WorkspaceStoreState>()((set, get) => ({
     workspace,
+    favouritePathsRevision: 0,
     metadata: workspace.metadata,
     appStates: workspace.appStates,
     settings: initialSettings,
@@ -330,6 +340,7 @@ export function createWorkspaceStore(
     },
 
     dispose: (): void => {
+      unsubscribeWorkspaceChanges()
       ttyWriters.dispose()
     },
 
@@ -560,6 +571,27 @@ export function createWorkspaceStore(
       }
     },
 
+    getFavouritePaths: (): string[] => getWorkspaceFavouritePaths(get().workspace, deps.lookupWorkspace),
+
+    isFavouritePath: (path: string): boolean => isFavouritePath(path, get().getFavouritePaths()),
+
+    addFavouritePath: (rawPath: string): void => {
+      const path = normalizeFavouritePath(rawPath)
+      if (!path || get().isFavouritePath(path)) return
+      updateWorkspace((ws) => ({ ...ws, favouritePaths: [...ws.favouritePaths, path] }))
+      deps.syncToDaemon('addFavouritePath')
+    },
+
+    removeFavouritePath: (rawPath: string): void => {
+      const path = normalizeFavouritePath(rawPath)
+      if (!get().workspace.favouritePaths.includes(path)) return
+      updateWorkspace((ws) => ({
+        ...ws,
+        favouritePaths: ws.favouritePaths.filter((favouritePath) => favouritePath !== path),
+      }))
+      deps.syncToDaemon('removeFavouritePath')
+    },
+
     refreshTitleAndDescription: async (): Promise<TitleRefreshResult> => {
       const analyzer = findAiHarnessAnalyzer()
       if (!analyzer) return NO_AI_HARNESS_TAB
@@ -681,6 +713,14 @@ export function createWorkspaceStore(
     removeKeepBoth: () => deps.removeWorkspaceKeepBoth(id),
     lookupWorkspace: (otherId: string) => deps.lookupWorkspace(otherId),
   }))
+
+  let inheritedFavouritesKey = getWorkspaceFavouritePaths(store.getState().workspace, deps.lookupWorkspace).join('\0')
+  unsubscribeWorkspaceChanges = deps.subscribeWorkspaceChanges(() => {
+    const nextKey = getWorkspaceFavouritePaths(store.getState().workspace, deps.lookupWorkspace).join('\0')
+    if (nextKey === inheritedFavouritesKey) return
+    inheritedFavouritesKey = nextKey
+    store.setState((state) => ({ favouritePathsRevision: state.favouritePathsRevision + 1 }))
+  })
 
   return store
 }

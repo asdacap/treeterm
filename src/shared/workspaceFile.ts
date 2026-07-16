@@ -38,6 +38,7 @@ export const WorkspaceFileSchema = z.object({
   appStates: z.record(z.string(), AppStateSchema),
   activeTabId: z.string().optional(),
   metadata: z.record(z.string(), z.string()),
+  favouritePaths: z.array(z.string()).default([]),
   createdAt: z.number(),
   lastActivity: z.number(),
 })
