@@ -9,6 +9,7 @@ import { EditorStatus, EditorViewMode } from '../types'
 import { useFilesystemApi, useExecApi } from '../hooks/useWorkspaceApis'
 import { monacoNavigationBridge } from '../monaco-config'
 import { searchDefinition } from '../utils/definitionSearch'
+import { detectMonacoLanguage } from '../utils/detectMonacoLanguage'
 import { MarkdownPreview } from './MarkdownPreview'
 import { CommentInput } from './CommentInput'
 import { CommentDisplay } from './CommentDisplay'
@@ -36,15 +37,6 @@ interface FileState {
   language: string
   loading: boolean
   error: string | null
-}
-
-// Map backend language IDs to Monaco language IDs
-function mapLanguageToMonaco(language: string): string {
-  const languageMap: Record<string, string> = {
-    bash: 'shell',
-    // Most others are directly compatible
-  }
-  return languageMap[language] || language
 }
 
 function getMimeType(filePath: string): string {
@@ -122,7 +114,7 @@ export function FileViewer({
         if (result.success) {
           setFileState({
             content: result.file.content,
-            language: mapLanguageToMonaco(result.file.language),
+            language: result.file.language === 'image' ? 'image' : detectMonacoLanguage(filePath),
             loading: false,
             error: null
           })

@@ -8,18 +8,12 @@ import { EditorStatus, EditorViewMode } from '../types'
 import { useFilesystemApi, useExecApi } from '../hooks/useWorkspaceApis'
 import { monacoNavigationBridge } from '../monaco-config'
 import { searchDefinition } from '../utils/definitionSearch'
+import { detectMonacoLanguage } from '../utils/detectMonacoLanguage'
 import { MarkdownPreview } from './MarkdownPreview'
 
 interface FileEditorProps {
   workspace: WorkspaceStore
   tabId: string
-}
-
-function mapLanguageToMonaco(language: string): string {
-  const languageMap: Record<string, string> = {
-    bash: 'shell'
-  }
-  return languageMap[language] || language
 }
 
 function getFilename(filePath: string): string {
@@ -59,7 +53,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): React.JSX.Ele
         const result = await filesystem.readFile(state.filePath)
 
         if (result.success) {
-          const language = mapLanguageToMonaco(result.file.language)
+          const language = detectMonacoLanguage(state.filePath)
 
           updateTabState<EditorState>(tabId, () => ({
             status: EditorStatus.Ready,
