@@ -19,7 +19,6 @@ function makeParentStore(): { store: WorkspaceStore; gitApi: ReturnType<typeof c
   const registry = createMockWorktreeRegistryApi()
   const store = createStore<WorkspaceStoreState>()(() => ({
     workspace: makeWorkspace({ id: 'ws-1', path: '/repo', isGitRepo: true, gitRootPath: '/repo' }),
-    settings: { defaultApplicationId: '' },
     gitApi,
     gitHubApi: github,
     worktreeRegistryApi: registry,

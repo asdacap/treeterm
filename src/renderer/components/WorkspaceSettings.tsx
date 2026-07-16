@@ -11,7 +11,7 @@ interface WorkspaceSettingsProps {
 export default function WorkspaceSettings({ workspace, applications }: WorkspaceSettingsProps) {
   const ws = useStore(workspace, s => s.workspace)
   const metadata = useStore(workspace, s => s.metadata)
-  const defaultApplicationId = useStore(workspace, s => s.settings.defaultApplicationId)
+  const defaultApplicationId = useStore(workspace, s => s.workspace.settings.defaultApplicationId)
   const updateMetadata = useStore(workspace, s => s.updateMetadata)
   const updateSettings = useStore(workspace, s => s.updateSettings)
   const appList = Array.from(applications.values()).filter((app) => app.showInNewTabMenu)

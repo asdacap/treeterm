@@ -114,13 +114,6 @@ export interface WorkspaceStoreState {
    */
   appStates: Record<string, AppState>
 
-  /**
-   * Renderer-only per-workspace settings. Ephemeral by design — never
-   * persisted to the daemon, resets to defaults when the store is
-   * (re)created (e.g. on session restore).
-   */
-  settings: WorktreeSettings
-
   /** Replace the workspace data and re-sync parsed slices. Used by session
    *  store for external (daemon) updates that bypass the mutation helpers. */
   setWorkspace: (ws: Workspace) => void
@@ -228,8 +221,7 @@ function generateTabId(): string {
 
 export function createWorkspaceStore(
   workspace: Workspace,
-  deps: WorkspaceStoreDeps,
-  initialSettings: WorktreeSettings = { defaultApplicationId: '' }
+  deps: WorkspaceStoreDeps
 ): WorkspaceStore {
   const id = workspace.id
 
@@ -308,7 +300,6 @@ export function createWorkspaceStore(
     favouritePathsRevision: 0,
     metadata: workspace.metadata,
     appStates: workspace.appStates,
-    settings: initialSettings,
 
     setWorkspace: (ws: Workspace): void => {
       set({ workspace: ws, metadata: ws.metadata, appStates: ws.appStates })
@@ -615,7 +606,11 @@ export function createWorkspaceStore(
     },
 
     updateSettings: (newSettings: Partial<WorktreeSettings>): void => {
-      set((s) => ({ settings: { ...s.settings, ...newSettings } }))
+      updateWorkspace((ws) => ({
+        ...ws,
+        settings: { ...ws.settings, ...newSettings },
+      }))
+      deps.syncToDaemon('updateSettings')
     },
 
     updateStatus: (status: Workspace['status']): void => {

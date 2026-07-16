@@ -99,29 +99,18 @@ export interface SandboxConfig {
 // `WorkspaceStatus`) is owned by `./workspaceFile` and re-exported here so the
 // many existing `import { Workspace } from '../shared/types'` sites keep working.
 //
-// Renderer-only per-workspace ephemeral state (e.g. `WorktreeSettings`) lives
-// on WorkspaceStore, not on these types.
-
 import type {
   Session as ProtoSession,
   WorkspaceRef as ProtoWorkspaceRef,
   SessionLock as ProtoSessionLock,
 } from '../generated/treeterm'
 
-export type { AppState, Workspace } from './workspaceFile'
+export type { AppState, Workspace, WorktreeSettings } from './workspaceFile'
 export { WorkspaceStatus } from './workspaceFile'
 
 export type SessionLock = ProtoSessionLock
 export type WorkspaceRef = ProtoWorkspaceRef
 export type Session = ProtoSession
-
-// Worktree-specific settings that can be inherited from parent.
-// Renderer-only parameter type — never serialized to the daemon.
-export interface WorktreeSettings {
-  // Default application to open when creating a new worktree.
-  // Empty string means inherit from parent or use global default.
-  defaultApplicationId: string
-}
 
 // === PTY Session Types ===
 

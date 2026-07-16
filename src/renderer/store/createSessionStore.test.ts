@@ -903,6 +903,44 @@ describe('createSessionStore', () => {
       await flushPromises()
     })
 
+    it('uses current parent settings when they change during child creation', async () => {
+      const originalApp = makeFakeApp({ id: 'original-app' })
+      const updatedApp = makeFakeApp({ id: 'updated-app' })
+      vi.mocked(deps.appRegistry.get).mockImplementation((id: string) => {
+        if (id === 'original-app') return originalApp
+        if (id === 'updated-app') return updatedApp
+        return undefined
+      })
+
+      let finishCreateWorktree: ((result: { success: true; path: string; branch: string }) => void) | undefined
+      vi.mocked(deps.git.createWorktree).mockImplementation(() => new Promise(resolve => {
+        finishCreateWorktree = resolve
+      }))
+
+      const parentId = store.getState().addWorkspace('/parent', {
+        settings: { defaultApplicationId: 'original-app' },
+      })
+      await flushPromises()
+
+      const result = store.getState().addChildWorkspace(parentId, 'child', false, { defaultApplicationId: 'unknown-app' })
+      expect(result.success).toBe(true)
+      await flushPromises()
+
+      const parentEntry = store.getState().workspaces.get(parentId)
+      if (parentEntry?.status !== WorkspaceEntryStatus.Loaded) throw new Error('Parent workspace did not load')
+      parentEntry.store.getState().updateSettings({ defaultApplicationId: 'updated-app' })
+
+      if (!finishCreateWorktree) throw new Error('Worktree creation did not start')
+      finishCreateWorktree({ success: true, path: '/repo/.worktrees/child', branch: 'child' })
+      await flushPromises()
+
+      const childEntry = Array.from(store.getState().workspaces.values()).find(
+        (entry) => entry.status === WorkspaceEntryStatus.Loaded && entry.data.parentId === parentId
+      )
+      if (childEntry?.status !== WorkspaceEntryStatus.Loaded) throw new Error('Child workspace did not load')
+      expect(Object.values(childEntry.data.appStates)[0]?.applicationId).toBe('updated-app')
+    })
+
     it('falls back to globalDefaultApplicationId from settings', async () => {
       const globalApp = makeFakeApp({ id: 'global-setting-app' })
       vi.mocked(deps.appRegistry.get).mockImplementation((id: string) => {

@@ -11,6 +11,7 @@ export function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     isWorktree: false,
     appStates: {},
     metadata: {},
+    settings: { defaultApplicationId: '' },
     favouritePaths: [],
     createdAt: 0,
     lastActivity: 0,

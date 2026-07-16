@@ -26,6 +26,17 @@ export const AppStateSchema = z.object({
 
 export type AppState = z.infer<typeof AppStateSchema>
 
+export const WorktreeSettingsSchema = z.object({
+  // Empty string means inherit from the parent or use the global default.
+  defaultApplicationId: z.string(),
+})
+
+export type WorktreeSettings = z.infer<typeof WorktreeSettingsSchema>
+
+export const defaultWorktreeSettings: WorktreeSettings = {
+  defaultApplicationId: '',
+}
+
 export const WorkspaceFileSchema = z.object({
   name: z.string(),
   parentId: z.string().optional(),
@@ -38,6 +49,9 @@ export const WorkspaceFileSchema = z.object({
   appStates: z.record(z.string(), AppStateSchema),
   activeTabId: z.string().optional(),
   metadata: z.record(z.string(), z.string()),
+  // Default legacy files so existing sessions gain persisted settings on their
+  // next workspace write without requiring a separate migration.
+  settings: WorktreeSettingsSchema.default(defaultWorktreeSettings),
   favouritePaths: z.array(z.string()).default([]),
   createdAt: z.number(),
   lastActivity: z.number(),

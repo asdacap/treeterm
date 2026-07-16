@@ -44,6 +44,21 @@ describe('workspaceFile', () => {
     expect(parseWorkspaceFile('ws-1', '/repo', JSON.stringify(legacy)).favouritePaths).toEqual([])
   })
 
+  it('round-trips workspace settings', () => {
+    const workspace = makeWorkspace({ settings: { defaultApplicationId: 'editor' } })
+
+    const parsed = parseWorkspaceFile('ws-1', '/repo', JSON.stringify(toStoredWorkspaceFile(workspace, '')))
+
+    expect(parsed.settings).toEqual({ defaultApplicationId: 'editor' })
+  })
+
+  it('loads old workspace files without settings using inherited defaults', () => {
+    const legacy: Partial<ReturnType<typeof toStoredWorkspaceFile>> = { ...toStoredWorkspaceFile(makeWorkspace(), '') }
+    delete legacy.settings
+
+    expect(parseWorkspaceFile('ws-1', '/repo', JSON.stringify(legacy)).settings).toEqual({ defaultApplicationId: '' })
+  })
+
   it('throws on invalid JSON', () => {
     expect(() => parseWorkspaceFile('ws-1', '/repo', '{ not json')).toThrow()
   })

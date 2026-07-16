@@ -19,12 +19,12 @@ function makeWorkspaceStore(overrides: { settings?: { defaultApplicationId: stri
     name: 'test-workspace',
     path: '/test',
     metadata,
+    settings: overrides.settings ?? { defaultApplicationId: '' },
     ...overrides.workspace,
   }
   const store = createStore<any>()(() => ({
     workspace: ws,
     metadata,
-    settings: overrides.settings ?? { defaultApplicationId: '' },
     updateMetadata,
     updateSettings,
   }))

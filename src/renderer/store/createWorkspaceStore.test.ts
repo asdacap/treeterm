@@ -176,6 +176,16 @@ describe('createWorkspaceStore', () => {
     expect(store.getState().workspace.activeTabId).toBe('tab-2')
   })
 
+  it('updateSettings persists settings in the workspace body', () => {
+    const deps = makeHandleDeps()
+    const store = createWorkspaceStore(makeWorkspace(), deps)
+
+    store.getState().updateSettings({ defaultApplicationId: 'editor' })
+
+    expect(store.getState().workspace.settings).toEqual({ defaultApplicationId: 'editor' })
+    expect(deps.syncToDaemon).toHaveBeenCalledWith('updateSettings')
+  })
+
   // The labeller reads the AI Harness terminal buffer. A workspace with no such tab has
   // nothing to read, and the caller must be told rather than left staring at a no-op.
   describe('LLM re-label without an AI Harness tab', () => {

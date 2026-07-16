@@ -16,7 +16,7 @@ import type {
 } from '../types'
 import { toDisposable } from '../../shared/lifecycle'
 import type { SessionLock } from '../../shared/types'
-import { parseWorkspaceFile, toStoredWorkspaceFile } from '../../shared/workspaceFile'
+import { defaultWorktreeSettings, parseWorkspaceFile, toStoredWorkspaceFile } from '../../shared/workspaceFile'
 import type { WorktreeRegistryApi } from '../lib/worktreeRegistry'
 
 export enum WorkspaceEntryStatus {
@@ -727,8 +727,8 @@ export function createSessionStore(
     }
   }
 
-  function createHandleForWorkspace(workspace: Workspace, initialSettings?: WorktreeSettings): WorkspaceStore {
-    const handle = createWorkspaceStore(workspace, makeHandleDeps(workspace.id), initialSettings)
+  function createHandleForWorkspace(workspace: Workspace): WorkspaceStore {
+    const handle = createWorkspaceStore(workspace, makeHandleDeps(workspace.id))
 
     // Keep the workspaces snapshot in sync when handle state changes
     handle.subscribe((state) => {
@@ -805,7 +805,10 @@ export function createSessionStore(
         // Build workspace data and store only on success
         const appStates: Record<string, AppState> = {}
         let activeTabId: string | undefined = undefined
-        const parentSettings = parentEntry && parentEntry.status === WorkspaceEntryStatus.Loaded ? parentEntry.store.getState().settings : undefined
+        const currentParentEntry = store.getState().workspaces.get(parentId)
+        const parentSettings = currentParentEntry && (currentParentEntry.status === WorkspaceEntryStatus.Loaded || currentParentEntry.status === WorkspaceEntryStatus.OperationError)
+          ? currentParentEntry.data.settings
+          : undefined
         const defaultApp = getDefaultAppForWorktree(deps, options.settings, parentSettings)
         if (defaultApp) {
           const tabId = generateTabId()
@@ -836,12 +839,13 @@ export function createSessionStore(
             ...(options.displayName ? { displayName: options.displayName } : {}),
             ...(options.initialBranch ? { branchIsUserDefined: 'true' } : {}),
           },
+          settings: options.settings ?? defaultWorktreeSettings,
           favouritePaths: [],
           createdAt: Date.now(),
           lastActivity: Date.now(),
         }
 
-        const handle = createHandleForWorkspace(childWorkspace, options.settings)
+        const handle = createHandleForWorkspace(childWorkspace)
         for (const tabId of Object.keys(appStates)) {
           handle.getState().initTab(tabId)
         }
@@ -879,7 +883,7 @@ export function createSessionStore(
     const appStates: Record<string, AppState> = {}
     let activeTabId: string | undefined = undefined
 
-    const parentSettings = parentEntry && parentEntry.status === WorkspaceEntryStatus.Loaded ? parentEntry.store.getState().settings : undefined
+    const parentSettings = parentEntry && parentEntry.status === WorkspaceEntryStatus.Loaded ? parentEntry.data.settings : undefined
     const defaultApp = getDefaultAppForWorktree(deps, options.settings, parentSettings)
     if (defaultApp) {
       const tabId = generateTabId()
@@ -905,12 +909,13 @@ export function createSessionStore(
       appStates,
       activeTabId,
       metadata: { sortOrder: nextSortOrder(parentId), ...(options.metadata ?? {}) },
+      settings: options.settings ?? defaultWorktreeSettings,
       favouritePaths: [],
       createdAt: Date.now(),
       lastActivity: Date.now(),
     }
 
-    const handle = createHandleForWorkspace(childWorkspace, options.settings)
+    const handle = createHandleForWorkspace(childWorkspace)
 
     store.setState((s) => ({
       workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: childWorkspace, store: handle }),
@@ -1263,12 +1268,13 @@ export function createSessionStore(
           appStates,
           activeTabId,
           metadata: { sortOrder: nextSortOrder(undefined) },
+          settings: options?.settings ?? defaultWorktreeSettings,
           favouritePaths: [],
           createdAt: Date.now(),
           lastActivity: Date.now(),
         }
 
-        const handle = createHandleForWorkspace(workspace, options?.settings)
+        const handle = createHandleForWorkspace(workspace)
         for (const tabId of Object.keys(appStates)) {
           handle.getState().initTab(tabId)
         }

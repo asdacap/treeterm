@@ -40,7 +40,7 @@ export default function CreateChildDialog({
   initialMode
 }: CreateChildDialogProps) {
   const parentWsData = useStore(parentWorkspace, s => s.workspace)
-  const parentDefaultAppId = useStore(parentWorkspace, s => s.settings.defaultApplicationId)
+  const parentDefaultAppId = useStore(parentWorkspace, s => s.workspace.settings.defaultApplicationId)
   const git = useGitApi(parentWorkspace)
   const github = useGitHubApi(parentWorkspace)
   const worktreeRegistry = useWorktreeRegistryApi(parentWorkspace)

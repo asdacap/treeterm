@@ -14,7 +14,6 @@ function makeRootStore() {
   const registry = createMockWorktreeRegistryApi()
   const store = createStore<WorkspaceStoreState>()(() => ({
     workspace: makeWorkspace({ id: 'ws-root', name: 'repo', path: '/repo', isGitRepo: true, gitRootPath: '/repo', gitBranch: 'master' }),
-    settings: { defaultApplicationId: '' },
     gitApi,
     worktreeRegistryApi: registry,
   } as WorkspaceStoreState))
