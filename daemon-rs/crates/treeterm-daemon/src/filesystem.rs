@@ -74,7 +74,6 @@ pub fn detect_language(file_path: &Path) -> &'static str {
         "rs" => "rust",
         "go" => "go",
         "java" => "java",
-        "cs" => "csharp",
         "c" | "h" => "c",
         "cpp" | "hpp" => "cpp",
         "yaml" | "yml" => "yaml",
@@ -326,8 +325,6 @@ mod tests {
         assert_eq!(detect_language(Path::new("foo.rs")), "rust");
         assert_eq!(detect_language(Path::new("foo.py")), "python");
         assert_eq!(detect_language(Path::new("foo.go")), "go");
-        assert_eq!(detect_language(Path::new("foo.cs")), "csharp");
-        assert_eq!(detect_language(Path::new("foo.CS")), "csharp");
         assert_eq!(detect_language(Path::new("foo.json")), "json");
         assert_eq!(detect_language(Path::new("foo.yaml")), "yaml");
         assert_eq!(detect_language(Path::new("foo.yml")), "yaml");
