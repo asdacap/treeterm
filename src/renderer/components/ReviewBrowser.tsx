@@ -13,7 +13,7 @@ import { StackedDiffList } from './StackedDiffList'
 import { DiffToolbar } from './DiffToolbar'
 import { createDiffsWorker } from '../pierre-diffs-config'
 import { FileViewer } from './FileViewer'
-import { resolveFavouriteFiles, type FavouriteFile } from '../utils/favouriteFiles'
+import { favouriteFileName, resolveFavouriteFiles, type FavouriteFile } from '../utils/favouriteFiles'
 
 interface ReviewBrowserProps {
   workspace: WorkspaceStore
@@ -1421,7 +1421,7 @@ export function FavouriteFileSection({ state, selection, scrollableDiffPaths, on
             onClick={() => { onSelect(file) }}
           >
             <Star size={12} fill="currentColor" className="review-favourite-star" />
-            <span className="diff-file-path">{file.relativePath}</span>
+            <span className="diff-file-path">{favouriteFileName(file)}</span>
             {scrollableDiffPaths.has(file.relativePath) && (
               <span className="review-favourite-changed" title="Changed in this view — jumps to the diff">
                 changed

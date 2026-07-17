@@ -3,7 +3,7 @@ import { Star } from 'lucide-react'
 import { useStore } from 'zustand'
 import type { FileEntry, WorkspaceStore } from '../types'
 import { useFilesystemApi } from '../hooks/useWorkspaceApis'
-import { resolveFavouriteFiles, type FavouriteFile } from '../utils/favouriteFiles'
+import { favouriteFileName, resolveFavouriteFiles, type FavouriteFile } from '../utils/favouriteFiles'
 import { normalizeFileEntryRelativePath } from '../../shared/workspaceFavourites'
 
 interface FileTreeProps {
@@ -445,7 +445,7 @@ function FavouriteFilesSection({
           title={file.relativePath}
         >
           <span className="file-tree-icon">{'\uD83D\uDCC4'}</span>
-          <span className="file-tree-name">{file.relativePath}</span>
+          <span className="file-tree-name">{favouriteFileName(file)}</span>
         </div>
       ))}
     </div>

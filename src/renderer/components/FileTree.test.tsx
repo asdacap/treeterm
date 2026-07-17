@@ -56,6 +56,8 @@ describe('FileTree favourites', () => {
     render(<FileTree workspace={workspace} selectedPath={null} expandedDirs={[]} onSelectFile={onSelectFile} onToggleDir={vi.fn()} />)
 
     const favourite = await screen.findByTitle('src/index.ts')
+    expect(favourite.textContent).toContain('index.ts')
+    expect(favourite.textContent).not.toContain('src/index.ts')
     fireEvent.click(favourite)
     expect(onSelectFile).toHaveBeenCalledWith('/repo/src/index.ts')
   })

@@ -1,7 +1,7 @@
 /* eslint-disable custom/no-string-literal-comparison -- test fixture paths */
 import { describe, expect, it, vi } from 'vitest'
 import type { FileEntry, WorkspaceFilesystemApi } from '../types'
-import { resolveFavouriteFiles } from './favouriteFiles'
+import { favouriteFileName, resolveFavouriteFiles } from './favouriteFiles'
 
 function entry(relativePath: string, isDirectory: boolean): FileEntry {
   return {
@@ -82,5 +82,15 @@ describe('resolveFavouriteFiles', () => {
     await resolveFavouriteFiles('/repo', ['src'], fs, () => cancelled)
 
     expect(fs.readDirectory).not.toHaveBeenCalledWith('/repo/src/second')
+  })
+})
+
+describe('favouriteFileName', () => {
+  it('reduces a nested path to its basename', () => {
+    expect(favouriteFileName({ path: '/repo/src/deep/index.ts', relativePath: 'src/deep/index.ts' })).toBe('index.ts')
+  })
+
+  it('keeps a root-level path unchanged', () => {
+    expect(favouriteFileName({ path: '/repo/README.md', relativePath: 'README.md' })).toBe('README.md')
   })
 })

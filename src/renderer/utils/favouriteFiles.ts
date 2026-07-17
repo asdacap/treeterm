@@ -6,6 +6,14 @@ export interface FavouriteFile {
   relativePath: string
 }
 
+/** Label for a favourite in the lists: the basename, with the full relative path kept as
+ *  the tooltip. Favourites are often deep in a tree and the leading directories crowd out
+ *  the part that identifies the file. */
+export function favouriteFileName(file: FavouriteFile): string {
+  // lastIndexOf returns -1 for a root-level favourite, so slice(0) keeps it whole.
+  return file.relativePath.slice(file.relativePath.lastIndexOf('/') + 1)
+}
+
 export async function resolveFavouriteFiles(
   workspacePath: string,
   favouritePaths: string[],

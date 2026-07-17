@@ -515,9 +515,12 @@ describe('ReviewBrowser favourites', () => {
 
     const { container } = render(<ReviewBrowser workspace={workspace} tabId="review" isVisible={false} />)
 
-    expect(await screen.findByText('src/index.ts')).toBeDefined()
+    // Labelled by basename only, with the full relative path kept as the tooltip.
+    const favourite = await screen.findByTitle('src/index.ts')
+    expect(favourite.textContent).toContain('index.ts')
+    expect(favourite.textContent).not.toContain('src/index.ts')
     // The section lives inside the left change list rather than replacing the whole view.
-    expect(container.querySelector('.diff-file-list')?.textContent).toContain('src/index.ts')
+    expect(container.querySelector('.diff-file-list')?.contains(favourite)).toBe(true)
     expect(screen.queryByRole('button', { name: /Favourites/ })).toBeNull()
   })
 
@@ -550,7 +553,7 @@ describe('ReviewBrowser favourites', () => {
     // Nothing is auto-selected — the diff pane stays in charge until the user picks a favourite.
     expect(screen.queryByTestId('file-viewer')).toBeNull()
 
-    fireEvent.click(await screen.findByText('src/index.ts'))
+    fireEvent.click(await screen.findByTitle('src/index.ts'))
 
     expect(screen.getByTestId('file-viewer')).toBeDefined()
   })
