@@ -3,7 +3,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, act, fireEvent, waitFor, screen } from '@testing-library/react'
 import React from 'react'
-import type { WorkspaceFilesystemApi, WorkspaceGitApi, WorkspaceStore } from '../types'
+import type { UncommittedFile, WorkspaceFilesystemApi, WorkspaceGitApi, WorkspaceStore } from '../types'
+import { FileChangeStatus } from '../types'
 import type { ReviewCommentState } from '../store/createReviewCommentStore'
 import type { ReviewViewedFilesState } from '../store/createReviewViewedFilesStore'
 import type { GitControllerState } from '../store/createGitControllerStore'
@@ -29,6 +30,10 @@ class MockIntersectionObserver {
 }
 
 vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
+
+// jsdom has no layout, so StackedDiffList's scroll-to-file effect needs a stub.
+const scrollIntoView = vi.fn()
+Element.prototype.scrollIntoView = scrollIntoView
 
 // Stub pierre-diffs imports pulled in transitively via ReviewBrowser.
 vi.mock('@pierre/diffs/react', () => ({
@@ -428,7 +433,11 @@ describe('BaseBranchSelector', () => {
   })
 })
 
-function makeReviewWorkspace(favouritePaths: string[], viewMode: 'favourites' | 'uncommitted'): WorkspaceStore {
+function makeReviewWorkspace(
+  favouritePaths: string[],
+  viewMode: string,
+  uncommittedFiles: UncommittedFile[] = []
+): WorkspaceStore {
   const reviewComments = createStore<ReviewCommentState>()(() => ({
     getReviewComments: () => [],
     addReviewComment: vi.fn(),
@@ -448,7 +457,11 @@ function makeReviewWorkspace(favouritePaths: string[], viewMode: 'favourites' | 
   const gitApi = new Proxy({
     getUncommittedChanges: vi.fn().mockResolvedValue({
       success: true,
-      changes: { files: [], totalAdditions: 0, totalDeletions: 0 },
+      changes: { files: uncommittedFiles, totalAdditions: 0, totalDeletions: 0 },
+    }),
+    getUncommittedFileContentsForDiff: vi.fn().mockResolvedValue({
+      success: true,
+      contents: { original: '', modified: '', language: 'typescript' },
     }),
     getHeadCommitHash: vi.fn().mockResolvedValue({ success: true, hash: 'head' }),
   } as unknown as WorkspaceGitApi, {
@@ -497,24 +510,73 @@ function makeReviewWorkspace(favouritePaths: string[], viewMode: 'favourites' | 
 }
 
 describe('ReviewBrowser favourites', () => {
-  it('loads favourite directories and opens their files in the review viewer', async () => {
-    const workspace = makeReviewWorkspace(['src'], 'favourites')
+  it('lists favourite directory contents as a section of the change list, not a tab', async () => {
+    const workspace = makeReviewWorkspace(['src'], 'uncommitted')
 
-    render(<ReviewBrowser workspace={workspace} tabId="review" isVisible={false} />)
+    const { container } = render(<ReviewBrowser workspace={workspace} tabId="review" isVisible={false} />)
 
     expect(await screen.findByText('src/index.ts')).toBeDefined()
-    expect(screen.getByTestId('file-viewer')).toBeDefined()
-    expect(screen.getByRole('button', { name: /Favourites/ }).className).toContain('active')
+    // The section lives inside the left change list rather than replacing the whole view.
+    expect(container.querySelector('.diff-file-list')?.textContent).toContain('src/index.ts')
+    expect(screen.queryByRole('button', { name: /Favourites/ })).toBeNull()
   })
 
-  it('falls back to Uncommitted when a persisted Favourites view has no favourites', async () => {
-    const workspace = makeReviewWorkspace([], 'favourites')
+  it('renders no favourites section when no favourite resolves in the worktree', async () => {
+    const workspace = makeReviewWorkspace([], 'uncommitted')
 
     render(<ReviewBrowser workspace={workspace} tabId="review" isVisible={false} />)
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Uncommitted' }).className).toContain('active')
     })
-    expect(screen.queryByRole('button', { name: /Favourites/ })).toBeNull()
+    expect(screen.queryByText('Favourites')).toBeNull()
+  })
+
+  it('falls back to Uncommitted for a view mode persisted before favourites became a section', async () => {
+    const workspace = makeReviewWorkspace(['src'], 'favourites')
+
+    render(<ReviewBrowser workspace={workspace} tabId="review" isVisible={false} />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Uncommitted' }).className).toContain('active')
+    })
+  })
+
+  it('opens a favourite that is absent from the diff in the file viewer', async () => {
+    const workspace = makeReviewWorkspace(['src'], 'uncommitted')
+
+    render(<ReviewBrowser workspace={workspace} tabId="review" isVisible={false} />)
+
+    // Nothing is auto-selected — the diff pane stays in charge until the user picks a favourite.
+    expect(screen.queryByTestId('file-viewer')).toBeNull()
+
+    fireEvent.click(await screen.findByText('src/index.ts'))
+
+    expect(screen.getByTestId('file-viewer')).toBeDefined()
+  })
+
+  it('scrolls the diff instead of opening the viewer when the favourite is part of the diff', async () => {
+    const workspace = makeReviewWorkspace(['src'], 'uncommitted', [{
+      path: 'src/index.ts',
+      status: FileChangeStatus.Modified,
+      staged: false,
+      additions: 1,
+      deletions: 0,
+    }])
+
+    const { container } = render(<ReviewBrowser workspace={workspace} tabId="review" isVisible={false} />)
+
+    // The same path is in the Unstaged tree, so anchor on the marker only the
+    // favourites section renders.
+    await waitFor(() => {
+      expect(container.querySelector('.review-favourite-changed')).not.toBeNull()
+    })
+    const favourite = container.querySelector('.review-favourite-changed')!.closest('.diff-file-item')!
+
+    scrollIntoView.mockClear()
+    fireEvent.click(favourite)
+
+    expect(scrollIntoView).toHaveBeenCalled()
+    expect(screen.queryByTestId('file-viewer')).toBeNull()
   })
 })

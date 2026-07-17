@@ -28,7 +28,6 @@ enum ViewMode {
   Committed = 'committed',
   Uncommitted = 'uncommitted',
   Commits = 'commits',
-  Favourites = 'favourites',
 }
 
 enum FavouriteReviewStatus {
@@ -41,6 +40,17 @@ type FavouriteReviewState =
   | { status: FavouriteReviewStatus.Loading }
   | { status: FavouriteReviewStatus.Ready; files: FavouriteFile[] }
   | { status: FavouriteReviewStatus.Error; error: string }
+
+enum FavouriteSelectionStatus {
+  None = 'none',
+  Selected = 'selected',
+}
+
+/** A favourite that is not part of the current diff has no diff entry to scroll to, so
+ *  selecting it takes over the right-hand pane with the file's full contents. */
+type FavouriteSelection =
+  | { status: FavouriteSelectionStatus.None }
+  | { status: FavouriteSelectionStatus.Selected; file: FavouriteFile }
 
 export default function ReviewBrowser({
   workspace,
@@ -72,8 +82,7 @@ export default function ReviewBrowser({
   const filesystem = useFilesystemApi(workspace)
   const favouritePathsRevision = useStore(workspace, s => s.favouritePathsRevision)
   const getFavouritePaths = useStore(workspace, s => s.getFavouritePaths)
-  const favouritePaths = getFavouritePaths()
-  const favouritePathsKey = favouritePaths.join('\0')
+  const favouritePathsKey = getFavouritePaths().join('\0')
   const workspaceId = wsData.id
   const parentWorkspace = parentWorkspaceId ? lookupWorkspace(parentWorkspaceId) : undefined
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist in appStates
@@ -109,12 +118,14 @@ export default function ReviewBrowser({
   // Uncommitted changes state
   const [uncommitted, setUncommitted] = useState<UncommittedChanges | null>(null)
   const [viewMode, setViewMode] = useState(() => {
+    // Cast, not validate: a build before favourites became a file-list section could have
+    // persisted 'favourites', which matches no ViewMode member and lands on the fallback.
     const saved = reviewState?.viewMode as ViewMode | undefined
     const fallback = hasBaseBranch ? ViewMode.Committed : ViewMode.Uncommitted
     // No base branch resolved → can't show committed-vs-base diff, fall back to Uncommitted
     if (!hasBaseBranch && saved === ViewMode.Committed) return ViewMode.Uncommitted
-    if (!favouritePathsKey && saved === ViewMode.Favourites) return fallback
-    return saved ?? fallback
+    if (saved === ViewMode.Committed || saved === ViewMode.Uncommitted || saved === ViewMode.Commits) return saved
+    return fallback
   })
 
   // Staging state
@@ -167,7 +178,7 @@ export default function ReviewBrowser({
   const [favouriteReviewState, setFavouriteReviewState] = useState<FavouriteReviewState>(favouritePathsKey
     ? { status: FavouriteReviewStatus.Loading }
     : { status: FavouriteReviewStatus.Ready, files: [] })
-  const [selectedFavouritePath, setSelectedFavouritePath] = useState<string | null>(null)
+  const [favouriteSelection, setFavouriteSelection] = useState<FavouriteSelection>({ status: FavouriteSelectionStatus.None })
   const [loadingFavouritePathsKey, setLoadingFavouritePathsKey] = useState(favouritePathsKey)
   const [favouriteRefreshRevision, setFavouriteRefreshRevision] = useState(0)
   if (loadingFavouritePathsKey !== favouritePathsKey) {
@@ -175,10 +186,7 @@ export default function ReviewBrowser({
     setFavouriteReviewState(favouritePathsKey
       ? { status: FavouriteReviewStatus.Loading }
       : { status: FavouriteReviewStatus.Ready, files: [] })
-    setSelectedFavouritePath(null)
-    if (!favouritePathsKey && viewMode === ViewMode.Favourites) {
-      setViewMode(hasBaseBranch ? ViewMode.Committed : ViewMode.Uncommitted)
-    }
+    setFavouriteSelection({ status: FavouriteSelectionStatus.None })
   }
 
   useEffect(() => {
@@ -189,10 +197,14 @@ export default function ReviewBrowser({
       (files) => {
         if (cancelled) return
         setFavouriteReviewState({ status: FavouriteReviewStatus.Ready, files })
-        setSelectedFavouritePath((selected) =>
-          selected && files.some((file) => file.relativePath === selected)
-            ? selected
-            : files[0]?.relativePath ?? null
+        // Never auto-select: the favourites section shares its pane with the diff, so
+        // picking one on load would hide the changes the user opened review to read.
+        // A reload only has to drop a selection whose file no longer resolves.
+        setFavouriteSelection((selection) =>
+          selection.status === FavouriteSelectionStatus.Selected
+            && !files.some((file) => file.relativePath === selection.file.relativePath)
+            ? { status: FavouriteSelectionStatus.None }
+            : selection
         )
       },
       (loadFavouriteError: unknown) => {
@@ -675,6 +687,31 @@ export default function ReviewBrowser({
   const uncommittedViewedCount = uncommitted?.files.filter(f => f.path in viewedFiles).length ?? 0
   const commitDiffViewedCount = commitDiffFiles.filter(f => f.path in viewedFiles).length
 
+  // Paths the diff pane of the *current* view can scroll to. A favourite in this set is
+  // reachable in the diff, so selecting it scrolls there instead of opening the viewer.
+  const scrollableDiffPaths = new Set(
+    (viewMode === ViewMode.Committed
+      ? diff?.files ?? []
+      : viewMode === ViewMode.Commits
+        ? commitDiffFiles
+        : uncommitted?.files ?? []
+    ).map((file) => file.path)
+  )
+
+  // Selecting anything in the diff releases the pane back to the diff list.
+  const handleSelectDiffFile = (path: string) => {
+    setFavouriteSelection({ status: FavouriteSelectionStatus.None })
+    setScrollToFile(path)
+  }
+
+  const handleSelectFavourite = (file: FavouriteFile) => {
+    if (scrollableDiffPaths.has(file.relativePath)) {
+      handleSelectDiffFile(file.relativePath)
+      return
+    }
+    setFavouriteSelection({ status: FavouriteSelectionStatus.Selected, file })
+  }
+
   const handleLineClick = (filePath: string, lineNumber: number, side: 'original' | 'modified') => {
     setCommentInput({ filePath, lineNumber, side })
   }
@@ -694,7 +731,7 @@ export default function ReviewBrowser({
       ? paths.slice(currentIdx + 1)
       : paths.slice(0, currentIdx === -1 ? paths.length : currentIdx).reverse()
     const target = candidates.find((p) => !(p in viewedFiles))
-    if (target !== undefined) setScrollToFile(target)
+    if (target !== undefined) handleSelectDiffFile(target)
   }
 
   const handleToggleViewed = (file: DiffFile | UncommittedFile) => {
@@ -731,6 +768,39 @@ export default function ReviewBrowser({
   const handleCommentDelete = (commentId: string) => {
     deleteReviewComment(commentId)
   }
+
+  // A selected favourite takes over the right-hand pane in whichever view it was picked
+  // from, so every view routes its pane through here rather than rendering the diff directly.
+  const renderRightPane = (diffPane: React.ReactNode): React.ReactNode => {
+    if (favouriteSelection.status === FavouriteSelectionStatus.None) return diffPane
+    const { file } = favouriteSelection
+    return (
+      <div className="review-favourite-viewer">
+        <FileViewer
+          key={`${file.relativePath}:${String(favouriteRefreshRevision)}`}
+          workspace={workspace}
+          filePath={file.path}
+          comments={reviews.filter((review) => review.filePath === file.relativePath)}
+          onLineClick={(lineNumber) => {
+            setCommentInput({ filePath: file.relativePath, lineNumber, side: 'modified' })
+          }}
+          inlineCommentInput={commentInput?.filePath === file.relativePath ? { lineNumber: commentInput.lineNumber } : null}
+          onCommentSubmit={handleCommentSubmit}
+          onCommentCancel={() => { setCommentInput(null) }}
+          onCommentDelete={handleCommentDelete}
+        />
+      </div>
+    )
+  }
+
+  const favouritesSection = (
+    <FavouriteFileSection
+      state={favouriteReviewState}
+      selection={favouriteSelection}
+      scrollableDiffPaths={scrollableDiffPaths}
+      onSelect={handleSelectFavourite}
+    />
+  )
 
   // Staging action factory for uncommitted files
   const getUncommittedStagingAction = (file: DiffFile | UncommittedFile) => {
@@ -967,69 +1037,15 @@ export default function ReviewBrowser({
             <span className="diff-tab-count">{commits.length}{commitsHasMore ? '+' : ''}</span>
           )}
         </button>
-        {favouritePaths.length > 0 && (
-          <button
-            className={`diff-tab ${viewMode === ViewMode.Favourites ? 'active' : ''}`}
-            onClick={() => { setViewMode(ViewMode.Favourites); persistViewState({ viewMode: ViewMode.Favourites }) }}
-          >
-            <Star size={12} fill="currentColor" />
-            Favourites
-            {favouriteReviewState.status === FavouriteReviewStatus.Ready && (
-              <span className="diff-tab-count">{favouriteReviewState.files.length}</span>
-            )}
-          </button>
-        )}
       </div>
 
-      {viewMode !== ViewMode.Favourites && loading ? (
+      {loading ? (
         <div className="review-loading">Loading changes...</div>
-      ) : viewMode !== ViewMode.Favourites && error ? (
+      ) : error ? (
         <div className="review-error">{error}</div>
       ) : (
         <>
-          {viewMode === ViewMode.Favourites ? (
-            <div className="review-favourites-view">
-              {favouriteReviewState.status === FavouriteReviewStatus.Loading ? (
-                <div className="review-loading">Loading favourite files...</div>
-              ) : favouriteReviewState.status === FavouriteReviewStatus.Error ? (
-                <div className="review-error">{favouriteReviewState.error}</div>
-              ) : favouriteReviewState.files.length === 0 ? (
-                <div className="diff-empty">No favourite files exist in this workspace</div>
-              ) : (
-                <>
-                  <div className="review-favourites-list" style={{ width: fileListWidth }}>
-                    <div className="diff-file-section">Favourite files</div>
-                    {favouriteReviewState.files.map((file) => (
-                      <div
-                        key={file.relativePath}
-                        className={`diff-file-item ${selectedFavouritePath === file.relativePath ? 'selected' : ''}`}
-                        title={file.relativePath}
-                        onClick={() => { setSelectedFavouritePath(file.relativePath) }}
-                      >
-                        <Star size={12} fill="currentColor" className="review-favourite-star" />
-                        <span className="diff-file-path">{file.relativePath}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="review-favourite-viewer">
-                    <FileViewer
-                      key={`${selectedFavouritePath ?? 'none'}:${String(favouriteRefreshRevision)}`}
-                      workspace={workspace}
-                      filePath={favouriteReviewState.files.find((file) => file.relativePath === selectedFavouritePath)?.path ?? null}
-                      comments={selectedFavouritePath ? reviews.filter((review) => review.filePath === selectedFavouritePath) : []}
-                      onLineClick={(lineNumber) => {
-                        if (selectedFavouritePath) setCommentInput({ filePath: selectedFavouritePath, lineNumber, side: 'modified' })
-                      }}
-                      inlineCommentInput={commentInput?.filePath === selectedFavouritePath ? { lineNumber: commentInput.lineNumber } : null}
-                      onCommentSubmit={handleCommentSubmit}
-                      onCommentCancel={() => { setCommentInput(null) }}
-                      onCommentDelete={handleCommentDelete}
-                    />
-                  </div>
-                </>
-              )}
-            </div>
-          ) : viewMode === ViewMode.Commits ? (
+          {viewMode === ViewMode.Commits ? (
             <div className="commits-view">
               <div className="commits-pane">
                 {commitsLoading && commits.length === 0 ? (
@@ -1089,97 +1105,105 @@ export default function ReviewBrowser({
                         <CommittedDiffFileTree
                           files={filterFilesByDir(commitDiffFiles, dirFilter)}
                           selectedFile={activeFile}
-                          onSelectFile={(path) => { setScrollToFile(path) }}
+                          onSelectFile={handleSelectDiffFile}
                           getStatusIcon={getStatusIcon}
                           viewedFiles={viewedFilePaths}
                           onFilterDir={setDirFilter}
                         />
                       )}
+                      {favouritesSection}
                     </div>
                     <div
                       className={`divider ${isResizing ? 'active' : ''}`}
                       onMouseDown={handleResizeMouseDown}
                     />
-                    <WorkerPoolContextProvider
-                      poolOptions={{ workerFactory: createDiffsWorker, poolSize: 2 }}
-                      highlighterOptions={{ preferredHighlighter: 'shiki-wasm' }}
-                    >
-                      <StackedDiffList
-                        files={sortFilesAsTree(filterFilesByDir(commitDiffFiles, dirFilter))}
-                        loadFileContents={loadCommitFileContents}
-                        diffStyle={isSplitView ? 'split' : 'unified'}
-                        expandUnchanged={!hideUnchangedRegions}
-                        ignoreWhitespace={ignoreWhitespace}
-                        getStatusIcon={getStatusIcon}
-                        reviews={[]}
-                        onLineClick={handleLineClick}
-                        commentInput={null}
-                        scrollToFile={scrollToFile}
-                        onActiveFileChange={setActiveFile}
-                        onScrollToFileHandled={handleScrollToFileHandled}
-                        isFileViewed={isFileViewed}
-                        onToggleViewed={handleToggleViewed}
-                        onMarkViewedAbove={handleMarkViewedAbove}
-                      />
-                    </WorkerPoolContextProvider>
+                    {renderRightPane(
+                      <WorkerPoolContextProvider
+                        poolOptions={{ workerFactory: createDiffsWorker, poolSize: 2 }}
+                        highlighterOptions={{ preferredHighlighter: 'shiki-wasm' }}
+                      >
+                        <StackedDiffList
+                          files={sortFilesAsTree(filterFilesByDir(commitDiffFiles, dirFilter))}
+                          loadFileContents={loadCommitFileContents}
+                          diffStyle={isSplitView ? 'split' : 'unified'}
+                          expandUnchanged={!hideUnchangedRegions}
+                          ignoreWhitespace={ignoreWhitespace}
+                          getStatusIcon={getStatusIcon}
+                          reviews={[]}
+                          onLineClick={handleLineClick}
+                          commentInput={null}
+                          scrollToFile={scrollToFile}
+                          onActiveFileChange={setActiveFile}
+                          onScrollToFileHandled={handleScrollToFileHandled}
+                          isFileViewed={isFileViewed}
+                          onToggleViewed={handleToggleViewed}
+                          onMarkViewedAbove={handleMarkViewedAbove}
+                        />
+                      </WorkerPoolContextProvider>
+                    )}
                   </div>
                 </>
               )}
             </div>
           ) : viewMode === ViewMode.Committed ? (
-            !hasCommittedChanges ? (
-              <div className="diff-empty">No committed changes to show</div>
-            ) : (
-              <>
-                <div className="diff-summary">
-                  <span className="diff-branch">{diff.baseBranch}</span>
-                  <span className="diff-arrow">...</span>
-                  <span className="diff-branch">{diff.headBranch}</span>
-                  <span className="diff-stats">
-                    <span className="additions">+{diff.totalAdditions}</span>
-                    <span className="deletions">-{diff.totalDeletions}</span>
-                  </span>
-                </div>
+            <>
+              {hasCommittedChanges && (
+                <>
+                  <div className="diff-summary">
+                    <span className="diff-branch">{diff.baseBranch}</span>
+                    <span className="diff-arrow">...</span>
+                    <span className="diff-branch">{diff.headBranch}</span>
+                    <span className="diff-stats">
+                      <span className="additions">+{diff.totalAdditions}</span>
+                      <span className="deletions">-{diff.totalDeletions}</span>
+                    </span>
+                  </div>
 
-                <DiffToolbar
-                  isSplitView={isSplitView}
-                  onToggleSplit={() => { setIsSplitView(!isSplitView) }}
-                  hideUnchanged={hideUnchangedRegions}
-                  onToggleHideUnchanged={() => { setHideUnchangedRegions(!hideUnchangedRegions) }}
-                  ignoreWhitespace={ignoreWhitespace}
-                  onToggleIgnoreWhitespace={() => { setIgnoreWhitespace(!ignoreWhitespace) }}
-                  totalComments={reviews.length}
-                  viewedCount={committedViewedCount}
-                  totalFiles={diff.files.length}
-                  dirFilter={dirFilter}
-                  onClearDirFilter={() => { setDirFilter(null) }}
-                  onPrevUnviewed={() => { navigateUnviewed(sortFilesAsTree(filterFilesByDir(diff.files, dirFilter)), 'prev') }}
-                  onNextUnviewed={() => { navigateUnviewed(sortFilesAsTree(filterFilesByDir(diff.files, dirFilter)), 'next') }}
-                  hasUnviewed={committedViewedCount < diff.files.length}
-                />
+                  <DiffToolbar
+                    isSplitView={isSplitView}
+                    onToggleSplit={() => { setIsSplitView(!isSplitView) }}
+                    hideUnchanged={hideUnchangedRegions}
+                    onToggleHideUnchanged={() => { setHideUnchangedRegions(!hideUnchangedRegions) }}
+                    ignoreWhitespace={ignoreWhitespace}
+                    onToggleIgnoreWhitespace={() => { setIgnoreWhitespace(!ignoreWhitespace) }}
+                    totalComments={reviews.length}
+                    viewedCount={committedViewedCount}
+                    totalFiles={diff.files.length}
+                    dirFilter={dirFilter}
+                    onClearDirFilter={() => { setDirFilter(null) }}
+                    onPrevUnviewed={() => { navigateUnviewed(sortFilesAsTree(filterFilesByDir(diff.files, dirFilter)), 'prev') }}
+                    onNextUnviewed={() => { navigateUnviewed(sortFilesAsTree(filterFilesByDir(diff.files, dirFilter)), 'next') }}
+                    hasUnviewed={committedViewedCount < diff.files.length}
+                  />
+                </>
+              )}
 
-                <div
-                  className="diff-content"
-                  onMouseMove={handleResizeMouseMove}
-                  onMouseUp={handleResizeMouseUp}
-                  onMouseLeave={handleResizeMouseUp}
-                >
-                  <div className="diff-file-list" style={{ width: fileListWidth }}>
+              <div
+                className="diff-content"
+                onMouseMove={handleResizeMouseMove}
+                onMouseUp={handleResizeMouseUp}
+                onMouseLeave={handleResizeMouseUp}
+              >
+                <div className="diff-file-list" style={{ width: fileListWidth }}>
+                  {hasCommittedChanges && (
                     <CommittedDiffFileTree
                       files={filterFilesByDir(diff.files, dirFilter)}
                       selectedFile={activeFile}
-                      onSelectFile={(path) => { setScrollToFile(path); persistViewState({ selectedFilePath: path }) }}
+                      onSelectFile={(path) => { handleSelectDiffFile(path); persistViewState({ selectedFilePath: path }) }}
                       getStatusIcon={getStatusIcon}
                       viewedFiles={viewedFilePaths}
                       onFilterDir={setDirFilter}
                     />
-                  </div>
+                  )}
+                  {favouritesSection}
+                </div>
 
-                  <div
-                    className={`divider ${isResizing ? 'active' : ''}`}
-                    onMouseDown={handleResizeMouseDown}
-                  />
+                <div
+                  className={`divider ${isResizing ? 'active' : ''}`}
+                  onMouseDown={handleResizeMouseDown}
+                />
 
+                {renderRightPane(hasCommittedChanges ? (
                   <WorkerPoolContextProvider
                     poolOptions={{ workerFactory: createDiffsWorker, poolSize: 2 }}
                     highlighterOptions={{ preferredHighlighter: 'shiki-wasm' }}
@@ -1205,92 +1229,97 @@ export default function ReviewBrowser({
                       onMarkViewedAbove={handleMarkViewedAbove}
                     />
                   </WorkerPoolContextProvider>
-                </div>
-              </>
-            )
+                ) : (
+                  <div className="diff-empty">No committed changes to show</div>
+                ))}
+              </div>
+            </>
           ) : (
-            !hasUncommitted ? (
-              <div className="diff-empty">No uncommitted changes</div>
-            ) : (
-              <>
-                <div className="diff-summary">
-                  <span className="diff-branch">Working directory</span>
-                  <span className="diff-stats">
-                    <span className="additions">+{uncommitted.totalAdditions}</span>
-                    <span className="deletions">-{uncommitted.totalDeletions}</span>
-                  </span>
-                  <div className="diff-actions">
-                    <button onClick={() => { void handleStageAll(); }} className="diff-action-btn" disabled={stagingInProgress}>
-                      {stagingInProgress ? 'Processing...' : 'Stage All'}
-                    </button>
-                    <button onClick={() => { void handleUnstageAll(); }} className="diff-action-btn" disabled={stagingInProgress}>
-                      {stagingInProgress ? 'Processing...' : 'Unstage All'}
-                    </button>
+            <>
+              {hasUncommitted && (
+                <>
+                  <div className="diff-summary">
+                    <span className="diff-branch">Working directory</span>
+                    <span className="diff-stats">
+                      <span className="additions">+{uncommitted.totalAdditions}</span>
+                      <span className="deletions">-{uncommitted.totalDeletions}</span>
+                    </span>
+                    <div className="diff-actions">
+                      <button onClick={() => { void handleStageAll(); }} className="diff-action-btn" disabled={stagingInProgress}>
+                        {stagingInProgress ? 'Processing...' : 'Stage All'}
+                      </button>
+                      <button onClick={() => { void handleUnstageAll(); }} className="diff-action-btn" disabled={stagingInProgress}>
+                        {stagingInProgress ? 'Processing...' : 'Unstage All'}
+                      </button>
+                    </div>
                   </div>
-                </div>
-                {stageError && <div className="review-load-error">{stageError}</div>}
+                  {stageError && <div className="review-load-error">{stageError}</div>}
 
-                <DiffToolbar
-                  isSplitView={isSplitView}
-                  onToggleSplit={() => { setIsSplitView(!isSplitView) }}
-                  hideUnchanged={hideUnchangedRegions}
-                  onToggleHideUnchanged={() => { setHideUnchangedRegions(!hideUnchangedRegions) }}
-                  ignoreWhitespace={ignoreWhitespace}
-                  onToggleIgnoreWhitespace={() => { setIgnoreWhitespace(!ignoreWhitespace) }}
-                  totalComments={reviews.length}
-                  viewedCount={uncommittedViewedCount}
-                  totalFiles={uncommitted.files.length}
-                  dirFilter={dirFilter}
-                  onClearDirFilter={() => { setDirFilter(null) }}
-                  onPrevUnviewed={() => { navigateUnviewed(sortFilesAsTree([...filteredStagedFiles, ...filteredUnstagedFiles]), 'prev') }}
-                  onNextUnviewed={() => { navigateUnviewed(sortFilesAsTree([...filteredStagedFiles, ...filteredUnstagedFiles]), 'next') }}
-                  hasUnviewed={uncommittedViewedCount < uncommitted.files.length}
-                />
+                  <DiffToolbar
+                    isSplitView={isSplitView}
+                    onToggleSplit={() => { setIsSplitView(!isSplitView) }}
+                    hideUnchanged={hideUnchangedRegions}
+                    onToggleHideUnchanged={() => { setHideUnchangedRegions(!hideUnchangedRegions) }}
+                    ignoreWhitespace={ignoreWhitespace}
+                    onToggleIgnoreWhitespace={() => { setIgnoreWhitespace(!ignoreWhitespace) }}
+                    totalComments={reviews.length}
+                    viewedCount={uncommittedViewedCount}
+                    totalFiles={uncommitted.files.length}
+                    dirFilter={dirFilter}
+                    onClearDirFilter={() => { setDirFilter(null) }}
+                    onPrevUnviewed={() => { navigateUnviewed(sortFilesAsTree([...filteredStagedFiles, ...filteredUnstagedFiles]), 'prev') }}
+                    onNextUnviewed={() => { navigateUnviewed(sortFilesAsTree([...filteredStagedFiles, ...filteredUnstagedFiles]), 'next') }}
+                    hasUnviewed={uncommittedViewedCount < uncommitted.files.length}
+                  />
+                </>
+              )}
+
+              <div
+                className="diff-content"
+                onMouseMove={handleResizeMouseMove}
+                onMouseUp={handleResizeMouseUp}
+                onMouseLeave={handleResizeMouseUp}
+              >
+                <div className="diff-file-list" style={{ width: fileListWidth }}>
+                  {filteredStagedFiles.length > 0 && (
+                    <>
+                      <div className="diff-file-section">Staged</div>
+                      <UncommittedDiffFileTree
+                        files={filteredStagedFiles}
+                        selectedFile={null}
+                        onSelectFile={(file) => { handleSelectDiffFile(file.path) }}
+                        getStatusIcon={getStatusIcon}
+                        onAction={(path) => { void handleUnstageFile(path); }}
+                        actionLabel="Unstage"
+                        stagingInProgress={stagingInProgress}
+                        onFilterDir={setDirFilter}
+                      />
+                    </>
+                  )}
+                  {filteredUnstagedFiles.length > 0 && (
+                    <>
+                      <div className="diff-file-section">Unstaged</div>
+                      <UncommittedDiffFileTree
+                        files={filteredUnstagedFiles}
+                        selectedFile={null}
+                        onSelectFile={(file) => { handleSelectDiffFile(file.path) }}
+                        getStatusIcon={getStatusIcon}
+                        onAction={(path) => { void handleStageFile(path); }}
+                        actionLabel="Stage"
+                        stagingInProgress={stagingInProgress}
+                        onFilterDir={setDirFilter}
+                      />
+                    </>
+                  )}
+                  {favouritesSection}
+                </div>
 
                 <div
-                  className="diff-content"
-                  onMouseMove={handleResizeMouseMove}
-                  onMouseUp={handleResizeMouseUp}
-                  onMouseLeave={handleResizeMouseUp}
-                >
-                  <div className="diff-file-list" style={{ width: fileListWidth }}>
-                    {filteredStagedFiles.length > 0 && (
-                      <>
-                        <div className="diff-file-section">Staged</div>
-                        <UncommittedDiffFileTree
-                          files={filteredStagedFiles}
-                          selectedFile={null}
-                          onSelectFile={(file) => { setScrollToFile(file.path) }}
-                          getStatusIcon={getStatusIcon}
-                          onAction={(path) => { void handleUnstageFile(path); }}
-                          actionLabel="Unstage"
-                          stagingInProgress={stagingInProgress}
-                          onFilterDir={setDirFilter}
-                        />
-                      </>
-                    )}
-                    {filteredUnstagedFiles.length > 0 && (
-                      <>
-                        <div className="diff-file-section">Unstaged</div>
-                        <UncommittedDiffFileTree
-                          files={filteredUnstagedFiles}
-                          selectedFile={null}
-                          onSelectFile={(file) => { setScrollToFile(file.path) }}
-                          getStatusIcon={getStatusIcon}
-                          onAction={(path) => { void handleStageFile(path); }}
-                          actionLabel="Stage"
-                          stagingInProgress={stagingInProgress}
-                          onFilterDir={setDirFilter}
-                        />
-                      </>
-                    )}
-                  </div>
+                  className={`divider ${isResizing ? 'active' : ''}`}
+                  onMouseDown={handleResizeMouseDown}
+                />
 
-                  <div
-                    className={`divider ${isResizing ? 'active' : ''}`}
-                    onMouseDown={handleResizeMouseDown}
-                  />
-
+                {renderRightPane(hasUncommitted ? (
                   <WorkerPoolContextProvider
                     poolOptions={{ workerFactory: createDiffsWorker, poolSize: 2 }}
                     highlighterOptions={{ preferredHighlighter: 'shiki-wasm' }}
@@ -1317,42 +1346,91 @@ export default function ReviewBrowser({
                       onMarkViewedAbove={handleMarkViewedAbove}
                     />
                   </WorkerPoolContextProvider>
-                </div>
+                ) : (
+                  <div className="diff-empty">No uncommitted changes</div>
+                ))}
+              </div>
 
-                {stagedFiles.length > 0 && (
-                  <div className="review-commit-section">
-                    <input
-                      type="text"
-                      className="review-commit-input"
-                      placeholder="Commit message..."
-                      value={commitMessage}
-                      onChange={(e) => { setCommitMessage(e.target.value); }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault()
-                          void handleCommit()
-                        }
-                      }}
-                    />
-                    <button
-                      className="review-commit-btn"
-                      onClick={() => { void handleCommit(); }}
-                      disabled={committing || !commitMessage.trim()}
-                    >
-                      {committing ? 'Committing...' : 'Commit'}
-                    </button>
-                    {commitError && (
-                      <div className="review-commit-error">{commitError}</div>
-                    )}
-                  </div>
-                )}
-              </>
-            )
+              {stagedFiles.length > 0 && (
+                <div className="review-commit-section">
+                  <input
+                    type="text"
+                    className="review-commit-input"
+                    placeholder="Commit message..."
+                    value={commitMessage}
+                    onChange={(e) => { setCommitMessage(e.target.value); }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        void handleCommit()
+                      }
+                    }}
+                  />
+                  <button
+                    className="review-commit-btn"
+                    onClick={() => { void handleCommit(); }}
+                    disabled={committing || !commitMessage.trim()}
+                  >
+                    {committing ? 'Committing...' : 'Commit'}
+                  </button>
+                  {commitError && (
+                    <div className="review-commit-error">{commitError}</div>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </>
       )}
 
     </div>
+  )
+}
+
+/** Workspace-level favourite files, rendered as a section of the review's left-hand change
+ *  list alongside Staged/Unstaged. Renders nothing when no favourite resolves in this
+ *  worktree — favourites are inherited, so a branch legitimately may not have any. */
+export function FavouriteFileSection({ state, selection, scrollableDiffPaths, onSelect }: {
+  state: FavouriteReviewState
+  selection: FavouriteSelection
+  scrollableDiffPaths: Set<string>
+  onSelect: (file: FavouriteFile) => void
+}) {
+  if (state.status === FavouriteReviewStatus.Ready && state.files.length === 0) return null
+
+  const selectedPath = selection.status === FavouriteSelectionStatus.Selected
+    ? selection.file.relativePath
+    : null
+
+  return (
+    <>
+      <div className="diff-file-section">
+        <Star size={11} fill="currentColor" className="review-favourite-star" />
+        Favourites
+      </div>
+      {state.status === FavouriteReviewStatus.Loading ? (
+        <div className="diff-loading">Loading favourites...</div>
+      ) : state.status === FavouriteReviewStatus.Error ? (
+        <div className="review-error">{state.error}</div>
+      ) : (
+        state.files.map((file) => (
+          <div
+            key={file.relativePath}
+            className={`diff-file-item ${selectedPath === file.relativePath ? 'selected' : ''}`}
+            title={file.relativePath}
+            onClick={() => { onSelect(file) }}
+          >
+            <Star size={12} fill="currentColor" className="review-favourite-star" />
+            <span className="diff-file-path">{file.relativePath}</span>
+            {scrollableDiffPaths.has(file.relativePath) && (
+              <span className="review-favourite-changed" title="Changed in this view — jumps to the diff">
+                changed
+              </span>
+            )}
+          </div>
+        ))
+      )}
+    </>
   )
 }
 

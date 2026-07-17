@@ -2161,18 +2161,6 @@ body,
   flex-shrink: 0;
 }
 
-.review-favourites-view {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-.review-favourites-list {
-  flex-shrink: 0;
-  overflow-y: auto;
-  border-right: 1px solid var(--border-color);
-}
-
 .review-favourite-viewer {
   display: flex;
   flex: 1;
@@ -2182,6 +2170,17 @@ body,
 .review-favourite-star {
   flex-shrink: 0;
   color: #e3b341;
+}
+
+/* Marks a favourite that also appears in the current diff, so clicking it scrolls
+   the diff pane rather than opening the file viewer. */
+.review-favourite-changed {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
 }
 
 .diff-file-item {
@@ -3861,6 +3860,9 @@ body,
 
 /* File section labels */
 .diff-file-section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px 12px;
   background: var(--bg-secondary);
   font-size: 11px;
