@@ -9,6 +9,12 @@ interface FileLoadState {
   error: string | null
 }
 
+// Consecutive frames the target must sit still at the top before a scroll counts
+// as landed, and the hard cap that stops us fighting a section whose neighbours
+// never stop resizing (or a user who scrolled away).
+export const SETTLE_FRAMES = 3
+export const MAX_ALIGN_FRAMES = 90
+
 interface StagingAction {
   label: string
   onAction: () => void
@@ -62,14 +68,50 @@ export function StackedDiffList({
   const sectionRefsRef = useRef<Map<string, HTMLElement>>(new Map())
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
-  // Scroll to file when scrollToFile changes
+  // Scroll to file when scrollToFile changes.
+  //
+  // A smooth scrollIntoView animates toward a position computed once, up front.
+  // Every section the animation sweeps past crosses FileDiffSection's lazy-load
+  // margin, mounts its viewer, and grows past the stale spacer it was standing
+  // in for — which pushes the target away from the position we're animating to.
+  // The animation still stops there, so it lands on whichever file drifted into
+  // that spot: a file before the target, varying with how many loaded in time.
+  //
+  // Jump instantly instead, so no section in between is ever swept past, then
+  // re-assert the position each frame until the target's own neighbours have
+  // finished mounting and stopped moving it.
   useEffect(() => {
     if (!scrollToFile) return
-    const el = sectionRefsRef.current.get(scrollToFile)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    let frames = 0
+    let settled = 0
+    let rafId = 0
+
+    const align = (): void => {
+      const el = sectionRefsRef.current.get(scrollToFile)
+      if (!el) {
+        onScrollToFileHandled?.()
+        return
+      }
+      const delta = el.getBoundingClientRect().top - container.getBoundingClientRect().top
+      if (Math.abs(delta) < 1) {
+        settled++
+      } else {
+        settled = 0
+        container.scrollTop += delta
+      }
+      frames++
+      if (settled < SETTLE_FRAMES && frames < MAX_ALIGN_FRAMES) {
+        rafId = requestAnimationFrame(align)
+        return
+      }
+      onScrollToFileHandled?.()
     }
-    onScrollToFileHandled?.()
+
+    align()
+    return () => { cancelAnimationFrame(rafId) }
   }, [scrollToFile, onScrollToFileHandled])
 
   // Active file tracking via IntersectionObserver on section headers

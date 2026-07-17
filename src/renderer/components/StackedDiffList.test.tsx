@@ -23,6 +23,37 @@ class MockIntersectionObserver {
 
 vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
 
+// Hand-driven animation frames, so the scroll-settling loop can be stepped one
+// frame at a time.
+const pendingFrames = new Map<number, FrameRequestCallback>()
+let nextFrameId = 1
+vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+  const id = nextFrameId++
+  pendingFrames.set(id, cb)
+  return id
+})
+vi.stubGlobal('cancelAnimationFrame', (id: number) => { pendingFrames.delete(id) })
+
+function runFrames(count: number): void {
+  for (let i = 0; i < count; i++) {
+    const due: FrameRequestCallback[] = Array.from(pendingFrames.values())
+    pendingFrames.clear()
+    act(() => { for (const cb of due) { cb(0) } })
+  }
+}
+
+// jsdom has no layout, so getBoundingClientRect is stubbed: the scroll container
+// sits at top 0 and the named file's wrapper reports whatever topOf() says.
+function stubRects(filePath: string, topOf: () => number): void {
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    const isTarget =
+      this instanceof HTMLElement &&
+      this.dataset.filePath === filePath &&
+      !this.classList.contains('file-diff-section')
+    return { top: isTarget ? topOf() : 0, height: 0 } as DOMRect
+  })
+}
+
 vi.mock('@pierre/diffs/react', () => ({
   MultiFileDiff: (props: Record<string, unknown>) => {
     const { oldFile } = props as { oldFile: { name: string } }
@@ -36,7 +67,7 @@ vi.mock('../pierre-diffs-config', () => ({
   createDiffsWorker: () => ({} as Worker),
 }))
 
-import { StackedDiffList } from './StackedDiffList'
+import { StackedDiffList, SETTLE_FRAMES, MAX_ALIGN_FRAMES } from './StackedDiffList'
 import type { DiffFile, FileDiffContents, ReviewComment } from '../types'
 import { FileChangeStatus } from '../types'
 
@@ -75,7 +106,9 @@ const defaultProps = {
 describe('StackedDiffList', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.restoreAllMocks()
     mockObservers.length = 0
+    pendingFrames.clear()
   })
 
   it('renders a section for each file', () => {
@@ -152,12 +185,64 @@ describe('StackedDiffList', () => {
     expect(screen.getByText('Network error')).toBeDefined()
   })
 
-  it('calls onScrollToFileHandled after scrolling to file', () => {
+  it('calls onScrollToFileHandled once the target settles at the top', () => {
     const onScrollToFileHandled = vi.fn()
-    // Mock scrollIntoView
-    Element.prototype.scrollIntoView = vi.fn()
 
     render(<StackedDiffList {...defaultProps} scrollToFile="src/a.ts" onScrollToFileHandled={onScrollToFileHandled} />)
+
+    // Already aligned, so the loop only has to burn its settle frames.
+    expect(onScrollToFileHandled).not.toHaveBeenCalled()
+    runFrames(SETTLE_FRAMES)
+    expect(onScrollToFileHandled).toHaveBeenCalled()
+  })
+
+  it('re-aligns the scroll position while a section above the target keeps growing', () => {
+    const onScrollToFileHandled = vi.fn()
+
+    // Target starts 500px below the container top.
+    let targetTop = 500
+    stubRects('src/b.ts', () => targetTop)
+
+    const { container } = render(
+      <StackedDiffList {...defaultProps} scrollToFile="src/b.ts" onScrollToFileHandled={onScrollToFileHandled} />
+    )
+    const list = container.querySelector('.stacked-diff-list') as HTMLElement
+
+    // The jump lands on mount, before any frame runs — a smooth animation would
+    // still be in flight here.
+    expect(list.scrollTop).toBe(500)
+
+    // A neighbour mounts its viewer and shoves the target 100px further down.
+    targetTop = 100
+    runFrames(1)
+    expect(list.scrollTop).toBe(600)
+    expect(onScrollToFileHandled).not.toHaveBeenCalled()
+
+    // Growth stops: the target holds still and the loop settles.
+    targetTop = 0
+    runFrames(SETTLE_FRAMES)
+    expect(list.scrollTop).toBe(600)
+    expect(onScrollToFileHandled).toHaveBeenCalled()
+  })
+
+  it('stops re-aligning after the frame cap when the target never settles', () => {
+    const onScrollToFileHandled = vi.fn()
+
+    // Never stops moving — the loop must give up rather than pin the scroll forever.
+    stubRects('src/b.ts', () => 10)
+
+    render(<StackedDiffList {...defaultProps} scrollToFile="src/b.ts" onScrollToFileHandled={onScrollToFileHandled} />)
+
+    runFrames(MAX_ALIGN_FRAMES)
+    expect(onScrollToFileHandled).toHaveBeenCalled()
+    expect(pendingFrames.size).toBe(0)
+  })
+
+  it('reports the scroll handled when the target file is not in the list', () => {
+    const onScrollToFileHandled = vi.fn()
+
+    render(<StackedDiffList {...defaultProps} scrollToFile="src/gone.ts" onScrollToFileHandled={onScrollToFileHandled} />)
+
     expect(onScrollToFileHandled).toHaveBeenCalled()
   })
 

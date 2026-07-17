@@ -32,8 +32,13 @@ class MockIntersectionObserver {
 vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
 
 // jsdom has no layout, so StackedDiffList's scroll-to-file effect needs a stub.
-const scrollIntoView = vi.fn()
-Element.prototype.scrollIntoView = scrollIntoView
+// jsdom has no layout: report the diff section 300px below the scroll container
+// so a scroll-to-file lands at a position the test can assert on.
+const TARGET_OFFSET = 300
+Element.prototype.getBoundingClientRect = function (this: Element): DOMRect {
+  const isSection = this instanceof HTMLElement && this.dataset.filePath !== undefined
+  return { top: isSection ? TARGET_OFFSET : 0, height: 0 } as DOMRect
+}
 
 // Stub pierre-diffs imports pulled in transitively via ReviewBrowser.
 vi.mock('@pierre/diffs/react', () => ({
@@ -576,10 +581,10 @@ describe('ReviewBrowser favourites', () => {
     })
     const favourite = container.querySelector('.review-favourite-changed')!.closest('.diff-file-item')!
 
-    scrollIntoView.mockClear()
     fireEvent.click(favourite)
 
-    expect(scrollIntoView).toHaveBeenCalled()
+    const list = container.querySelector('.stacked-diff-list') as HTMLElement
+    expect(list.scrollTop).toBe(TARGET_OFFSET)
     expect(screen.queryByTestId('file-viewer')).toBeNull()
   })
 })
