@@ -1099,6 +1099,7 @@ export default function ReviewBrowser({
                     onMouseLeave={handleResizeMouseUp}
                   >
                     <div className="diff-file-list" style={{ width: fileListWidth }}>
+                      {favouritesSection}
                       {commitDiffLoading ? (
                         <div className="diff-loading">Loading...</div>
                       ) : (
@@ -1111,7 +1112,6 @@ export default function ReviewBrowser({
                           onFilterDir={setDirFilter}
                         />
                       )}
-                      {favouritesSection}
                     </div>
                     <div
                       className={`divider ${isResizing ? 'active' : ''}`}
@@ -1185,6 +1185,7 @@ export default function ReviewBrowser({
                 onMouseLeave={handleResizeMouseUp}
               >
                 <div className="diff-file-list" style={{ width: fileListWidth }}>
+                  {favouritesSection}
                   {hasCommittedChanges && (
                     <CommittedDiffFileTree
                       files={filterFilesByDir(diff.files, dirFilter)}
@@ -1195,7 +1196,6 @@ export default function ReviewBrowser({
                       onFilterDir={setDirFilter}
                     />
                   )}
-                  {favouritesSection}
                 </div>
 
                 <div
@@ -1281,6 +1281,7 @@ export default function ReviewBrowser({
                 onMouseLeave={handleResizeMouseUp}
               >
                 <div className="diff-file-list" style={{ width: fileListWidth }}>
+                  {favouritesSection}
                   {filteredStagedFiles.length > 0 && (
                     <>
                       <div className="diff-file-section">Staged</div>
@@ -1311,7 +1312,6 @@ export default function ReviewBrowser({
                       />
                     </>
                   )}
-                  {favouritesSection}
                 </div>
 
                 <div
