@@ -147,7 +147,7 @@ async fn read_snapshot(path: &Path) -> Result<Snapshot, Status> {
     match tokio::fs::read(path).await {
         Ok(bytes) => {
             if bytes.len() as u64 > filesystem::MAX_FILE_SIZE {
-                return Err(Status::failed_precondition("File too large to watch (max 64KB)"));
+                return Err(Status::failed_precondition("File too large to watch (max 1MB)"));
             }
             let sha256 = filesystem::sha256_hex(&bytes);
             Ok(Snapshot::Present { sha256, content: bytes })
