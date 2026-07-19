@@ -4,6 +4,7 @@ import type { StoreApi } from 'zustand'
 import type { Workspace, AppRef, AppRegistryApi, AppState, GitApi, FilesystemApi, ExecApi, RunActionsApi, WorkspaceGitApi, WorkspaceFilesystemApi, WorkspaceGitHubApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi, PtyEvent } from '../types'
 import type { WorktreeRegistryApi } from '../lib/worktreeRegistry'
 import { buildEntryFromWorkspace } from '../lib/worktreeRegistry'
+import { MAX_READ_FILE_BYTES } from '../lib/fileLimits'
 import { PtyEventType } from '../../shared/ipc-types'
 import { getTabs, isAiHarnessState } from '../types'
 import type { TerminalEngine } from '../terminal/engine'
@@ -682,7 +683,7 @@ export function createWorkspaceStore(
 
     filesystemApi: {
       readDirectory: (dirPath) => deps.filesystem.readDirectory(workspace.path, dirPath),
-      readFile: (filePath) => deps.filesystem.readFile(workspace.path, filePath),
+      readFile: (filePath) => deps.filesystem.readFile(workspace.path, filePath, MAX_READ_FILE_BYTES),
       writeFile: (filePath, content, expectedSha256) => deps.filesystem.writeFile(workspace.path, filePath, content, expectedSha256),
       searchFiles: (query) => deps.filesystem.searchFiles(workspace.path, query),
     },

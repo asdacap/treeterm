@@ -111,7 +111,7 @@ export interface IpcRequests {
     result: IpcResult<{ contents: DirectoryContents }>
   }
   fsReadFile: {
-    params: [connectionId: string, workspacePath: string, filePath: string]
+    params: [connectionId: string, workspacePath: string, filePath: string, maxBytes: number]
     result: IpcResult<{ file: FileContents }>
   }
   fsWriteFile: {

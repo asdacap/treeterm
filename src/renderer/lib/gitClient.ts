@@ -24,6 +24,7 @@ import { ExecEventType, type IpcResult } from '../../shared/ipc-types'
 import { FileChangeStatus } from '../../shared/types'
 import { resolveHomedir } from './homedir'
 import { withTimeout } from './withTimeout'
+import { MAX_READ_FILE_BYTES } from './fileLimits'
 
 // Backstop only — the daemon enforces a 30s exec timeout, so this fires only if the result event
 // is never delivered to the renderer.
@@ -864,7 +865,7 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
           // Read working tree file via FilesystemApi
           let modifiedContent = ''
           try {
-            const fileResult = await filesystem.readFile(repoPath, filePath)
+            const fileResult = await filesystem.readFile(repoPath, filePath, MAX_READ_FILE_BYTES)
             if (fileResult.success) {
               modifiedContent = fileResult.file.content
             }

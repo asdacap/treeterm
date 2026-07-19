@@ -230,8 +230,8 @@ const preloadApi: PreloadApi = {
     readDirectory: (connectionId: string, workspacePath: string, dirPath: string) => {
       return client.fsReadDirectory(connectionId, workspacePath, dirPath)
     },
-    readFile: (connectionId: string, workspacePath: string, filePath: string) => {
-      return client.fsReadFile(connectionId, workspacePath, filePath)
+    readFile: (connectionId: string, workspacePath: string, filePath: string, maxBytes: number) => {
+      return client.fsReadFile(connectionId, workspacePath, filePath, maxBytes)
     },
     writeFile: (connectionId: string, workspacePath: string, filePath: string, content: string, expectedSha256?: string) => {
       return client.fsWriteFile(connectionId, workspacePath, filePath, content, expectedSha256)

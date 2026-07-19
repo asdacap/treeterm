@@ -810,8 +810,81 @@ describe('GrpcDaemonClient', () => {
         return stream
       })
 
-      const result = await client.readFile('/ws', '/file.txt')
+      const result = await client.readFile('/ws', '/file.txt', 1024 * 1024)
       expect(result).toMatchObject({ success: true, file: { content: 'hello' } })
+    })
+
+    it('readFile rejects on the header when size exceeds maxBytes, cancelling before any data', async () => {
+      const cancel = vi.fn<() => void>()
+      const dataHandler = vi.fn<(chunk: any) => void>()
+
+      mockClientInstance.readFile.mockImplementation(() => {
+        const stream = {
+          cancel,
+          on: (event: string, handler: (data: any) => void) => {
+            if (event === 'data') {
+              setTimeout(() => {
+                handler({ header: { path: '/big.bin', size: 5_000_000, language: 'text' } })
+                // The daemon keeps streaming until the cancel lands; these must be ignored.
+                handler({ data: { data: Buffer.from('never used') } })
+                dataHandler({})
+              }, 0)
+            }
+            return stream
+          }
+        }
+        return stream
+      })
+
+      const result = await client.readFile('/ws', '/big.bin', 1024 * 1024)
+      expect(result).toMatchObject({ success: false, error: 'File too large to open (4.8MB, limit 1.0MB)' })
+      expect(cancel).toHaveBeenCalled()
+    })
+
+    it('readFile accepts a file exactly at maxBytes', async () => {
+      const chunks = [
+        { header: { path: '/exact.txt', size: 1024 * 1024, language: 'text' } },
+        { data: { data: Buffer.from('hello') } },
+        { end: { success: true } }
+      ]
+      mockClientInstance.readFile.mockImplementation(() => {
+        const stream = {
+          cancel: vi.fn<() => void>(),
+          on: (event: string, handler: (data: any) => void) => {
+            if (event === 'data') {
+              setTimeout(() => { for (const chunk of chunks) handler(chunk) }, 0)
+            }
+            return stream
+          }
+        }
+        return stream
+      })
+
+      const result = await client.readFile('/ws', '/exact.txt', 1024 * 1024)
+      expect(result).toMatchObject({ success: true, file: { content: 'hello' } })
+    })
+
+    it('readFile ignores the CANCELLED error raised by its own oversize cancel', async () => {
+      let errorHandler: ((err: Error) => void) | null = null
+      mockClientInstance.readFile.mockImplementation(() => {
+        const stream = {
+          cancel: () => { errorHandler?.(new Error('1 CANCELLED: Cancelled on client')) },
+          on: (event: string, handler: (arg: never) => void) => {
+            if (event === 'data') {
+              const onData = handler as (chunk: unknown) => void
+              setTimeout(() => { onData({ header: { path: '/big.bin', size: 5_000_000, language: 'text' } }) }, 0)
+            } else if (event === 'error') {
+              errorHandler = handler as (err: Error) => void
+            }
+            return stream
+          }
+        }
+        return stream
+      })
+
+      // Must resolve with the size error, not reject with CANCELLED.
+      const result = await client.readFile('/ws', '/big.bin', 1024 * 1024)
+      expect(result.success).toBe(false)
     })
 
     it('writeFile resolves with result', async () => {
@@ -845,14 +918,14 @@ describe('GrpcDaemonClient', () => {
         return stream
       })
 
-      const result = await client.readFile('/ws', '/missing.txt')
+      const result = await client.readFile('/ws', '/missing.txt', 1024 * 1024)
       expect(result.success).toBe(false)
     })
 
     it('filesystem methods throw when not connected', async () => {
       client.disconnect()
       await expect(client.readDirectory('/ws', '.')).rejects.toThrow('Not connected')
-      await expect(client.readFile('/ws', '/f')).rejects.toThrow('Not connected')
+      await expect(client.readFile('/ws', '/f', 1024 * 1024)).rejects.toThrow('Not connected')
       await expect(client.writeFile('/ws', '/f', 'c')).rejects.toThrow('Not connected')
       await expect(client.searchFiles('/ws', 'q')).rejects.toThrow('Not connected')
     })
@@ -1103,7 +1176,7 @@ describe('GrpcDaemonClient', () => {
         }, 0)
         return stream
       })
-      const result = await client.readFile('/ws', '/ws/image.png')
+      const result = await client.readFile('/ws', '/ws/image.png', 1024 * 1024)
       expect(result.success).toBe(true)
       if (result.success) {
         expect(result.file.language).toBe('image')

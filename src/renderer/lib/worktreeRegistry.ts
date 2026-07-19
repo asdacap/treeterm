@@ -2,6 +2,7 @@ import type { ExecApi, FilesystemApi } from '../types'
 import type { Workspace } from '../types'
 import { resolveHomedir } from './homedir'
 import { sha256Hex } from './sha256'
+import { MAX_READ_FILE_BYTES } from './fileLimits'
 
 export const REGISTRY_DIR_REL = '.treeterm'
 export const REGISTRY_FILE = 'worktrees.json'
@@ -47,7 +48,7 @@ async function readRegistryFile(
   fs: FilesystemApi,
   dir: string,
 ): Promise<{ entries: WorktreeRegistryEntry[]; sha256: string }> {
-  const result = await fs.readFile(dir, REGISTRY_FILE)
+  const result = await fs.readFile(dir, REGISTRY_FILE, MAX_READ_FILE_BYTES)
   if (!result.success) {
     if (isMissingFileError(result.error)) return { entries: [], sha256: '' }
     throw new Error(`Failed to read worktree registry: ${result.error}`)

@@ -5,8 +5,6 @@ use tokio::fs;
 use tokio::sync::Mutex;
 use treeterm_proto::treeterm::*;
 
-pub const MAX_FILE_SIZE: u64 = 1024 * 1024; // 1MB
-
 /// Serializes all writes so the compare-and-swap check and the rename are atomic
 /// with respect to other writers going through this daemon.
 fn write_lock() -> &'static Mutex<()> {
@@ -164,11 +162,10 @@ pub async fn read_file_streaming(workspace_path: &Path, file_path: &str) -> Resu
         return Err("Access denied: Path outside workspace".into());
     }
 
+    // No size ceiling here: ReadFile is a server-stream and the header carries the
+    // size, so the caller decides what it is willing to pull down before any data
+    // chunk is sent. The renderer sets that budget.
     let meta = fs::metadata(&resolved).await.map_err(|e| e.to_string())?;
-    if meta.len() > MAX_FILE_SIZE {
-        return Err("File too large to preview (max 1MB)".into());
-    }
-
     let content = fs::read(&resolved).await.map_err(|e| e.to_string())?;
     let language = detect_language(&resolved);
 
@@ -480,14 +477,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn read_file_streaming_too_large() {
+    async fn read_file_streaming_has_no_size_ceiling() {
         let tmp = TempDir::new().unwrap();
-        let big = vec![0u8; (MAX_FILE_SIZE + 1) as usize];
+        let big = vec![b'x'; 2 * 1024 * 1024];
         fs::write(tmp.path().join("big.bin"), &big).await.unwrap();
 
-        let result = read_file_streaming(tmp.path(), "big.bin").await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("too large"));
+        let (header, content) = read_file_streaming(tmp.path(), "big.bin").await.unwrap();
+        assert_eq!(header.size, big.len() as i64);
+        assert_eq!(content.len(), big.len());
     }
 
     #[tokio::test]

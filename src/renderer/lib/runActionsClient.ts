@@ -9,6 +9,7 @@
 import type { RunAction } from '../../shared/types'
 import type { IpcResult, IpcOk } from '../../shared/ipc-types'
 import type { FilesystemApi, TerminalApi } from '../types'
+import { MAX_READ_FILE_BYTES } from './fileLimits'
 
 type ReadFile = (relativePath: string) => Promise<string | null>
 
@@ -245,7 +246,7 @@ export function createRunActionsApi(
   const makeReadFile = (workspacePath: string): ReadFile => async (relativePath: string): Promise<string | null> => {
     try {
       const absolutePath = `${workspacePath}/${relativePath}`
-      const result = await filesystem.readFile(workspacePath, absolutePath)
+      const result = await filesystem.readFile(workspacePath, absolutePath, MAX_READ_FILE_BYTES)
       if (result.success) return (result as IpcOk<{ file: { content: string } }>).file.content
       return null
     } catch {

@@ -239,7 +239,8 @@ export interface FileContents {
 
 export interface FilesystemApi {
   readDirectory: (workspacePath: string, dirPath: string) => Promise<IpcResult<{ contents: DirectoryContents }>>
-  readFile: (workspacePath: string, filePath: string) => Promise<IpcResult<{ file: FileContents }>>
+  /** `maxBytes` caps the transfer; oversize files fail on the stream header. */
+  readFile: (workspacePath: string, filePath: string, maxBytes: number) => Promise<IpcResult<{ file: FileContents }>>
   writeFile: (workspacePath: string, filePath: string, content: string, expectedSha256?: string) => Promise<FsWriteFileResult>
   deleteFile: (workspacePath: string, filePath: string) => Promise<IpcResult>
   searchFiles: (workspacePath: string, query: string) => Promise<IpcResult<{ entries: FileEntry[] }>>

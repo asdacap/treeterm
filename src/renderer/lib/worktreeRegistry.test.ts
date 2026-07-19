@@ -3,6 +3,7 @@ import type { ExecApi, FilesystemApi } from '../types'
 import { ExecEventType, type ExecEvent } from '../../shared/ipc-types'
 import { makeWorkspace } from '../../shared/test-fixtures/workspace'
 import { sha256Hex } from './sha256'
+import { MAX_READ_FILE_BYTES } from './fileLimits'
 import {
   buildEntryFromWorkspace,
   createWorktreeRegistryApi,
@@ -71,7 +72,7 @@ describe('worktreeRegistry', () => {
       vi.mocked(fs.readFile).mockResolvedValue({ success: false, error: 'No such file or directory (os error 2)' })
       const entries = await loadRegistry(fs, exec, 'conn-1')
       expect(entries).toEqual([])
-      expect(fs.readFile).toHaveBeenCalledWith('/home/user/.treeterm', 'worktrees.json')
+      expect(fs.readFile).toHaveBeenCalledWith('/home/user/.treeterm', 'worktrees.json', MAX_READ_FILE_BYTES)
     })
 
     it('parses valid registry file', async () => {

@@ -143,12 +143,27 @@ fn normalize(path: &Path) -> PathBuf {
     }
 }
 
-async fn read_snapshot(path: &Path) -> Result<Snapshot, Status> {
+/// Size ceiling for a poll-backed watch. It applies only to entries with no
+/// OS-native watch: polling re-reads the whole file every pass whether or not it
+/// changed, so an unbounded file burns that read forever. An entry with a working
+/// OS watch re-reads only when the file actually changed, so it is uncapped.
+const MAX_POLL_FILE_SIZE: u64 = 1024 * 1024; // 1MB
+
+/// `poll_backed` is `!entry.notify_registered` — see [`MAX_POLL_FILE_SIZE`].
+async fn read_snapshot(path: &Path, poll_backed: bool) -> Result<Snapshot, Status> {
+    // Stat before reading so an oversize poll-backed file is never pulled into
+    // memory. A stat error falls through to the read, which maps NotFound to Absent.
+    if poll_backed
+        && let Ok(meta) = tokio::fs::metadata(path).await
+        && meta.len() > MAX_POLL_FILE_SIZE
+    {
+        return Err(Status::failed_precondition(
+            "File too large to watch without an OS-native watch (max 1MB)",
+        ));
+    }
+
     match tokio::fs::read(path).await {
         Ok(bytes) => {
-            if bytes.len() as u64 > filesystem::MAX_FILE_SIZE {
-                return Err(Status::failed_precondition("File too large to watch (max 1MB)"));
-            }
             let sha256 = filesystem::sha256_hex(&bytes);
             Ok(Snapshot::Present { sha256, content: bytes })
         }
@@ -159,7 +174,7 @@ async fn read_snapshot(path: &Path) -> Result<Snapshot, Status> {
 
 impl FileWatcher {
     pub fn new(poll_interval: Duration) -> Self {
-        let (notify_tx, mut notify_rx) = mpsc::unbounded_channel::<PathBuf>();
+        let (notify_tx, notify_rx) = mpsc::unbounded_channel::<PathBuf>();
         let notify_watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             if let Ok(event) = res {
                 if !event_may_change_content(&event.kind) {
@@ -173,6 +188,22 @@ impl FileWatcher {
         .map_err(|e| tracing::warn!(error = %e, "OS file watcher unavailable, relying on polling"))
         .ok();
 
+        Self::spawn(poll_interval, notify_watcher, notify_rx)
+    }
+
+    /// As if `notify` were unavailable: every entry is poll-backed, which is the
+    /// NFS case [`MAX_POLL_FILE_SIZE`] exists for.
+    #[cfg(test)]
+    fn new_poll_only(poll_interval: Duration) -> Self {
+        let (_tx, notify_rx) = mpsc::unbounded_channel::<PathBuf>();
+        Self::spawn(poll_interval, None, notify_rx)
+    }
+
+    fn spawn(
+        poll_interval: Duration,
+        notify_watcher: Option<notify::RecommendedWatcher>,
+        mut notify_rx: mpsc::UnboundedReceiver<PathBuf>,
+    ) -> Self {
         let watcher = Self {
             inner: Arc::new(Mutex::new(Inner {
                 entries: HashMap::new(),
@@ -238,16 +269,27 @@ impl FileWatcher {
         // Snapshot and registration happen under one lock so the initial event and
         // subsequent broadcasts can never miss or reorder an update in between.
         let mut inner = self.inner.lock().await;
-        let snapshot = read_snapshot(&key).await?;
 
-        let entry = inner.entries.entry(key.clone()).or_insert_with(|| WatchEntry {
-            last_state: snapshot.last_state(),
+        // Register before the first read: a brand-new entry would otherwise look
+        // poll-backed and get size-capped even though its OS watch is about to
+        // succeed. Events landing in between queue on the lock we already hold.
+        inner.entries.entry(key.clone()).or_insert_with(|| WatchEntry {
+            last_state: LastState::Absent,
             subscribers: Vec::new(),
             notify_registered: false,
         });
+        Self::register_notify(&mut inner, &key);
+
+        // On error the entry we may have just created is left behind with no
+        // subscribers; the next poll pass GCs it and unwatches its parent dir.
+        let poll_backed = !inner.entries[&key].notify_registered;
+        let snapshot = read_snapshot(&key, poll_backed).await?;
+
+        let entry = inner.entries.get_mut(&key).expect("inserted above");
 
         // The read doubles as a reconcile: existing subscribers learn about any
-        // change that happened since the last mechanism fired.
+        // change that happened since the last mechanism fired. A fresh entry starts
+        // Absent, so a present file broadcasts to its still-empty subscriber list.
         if entry.last_state != snapshot.last_state() {
             entry.last_state = snapshot.last_state();
             entry.subscribers.retain(|s| s.tx.send_snapshot(&snapshot));
@@ -257,7 +299,6 @@ impl FileWatcher {
         tx.send_snapshot(&snapshot);
         entry.subscribers.push(Subscriber { tx });
 
-        Self::register_notify(&mut inner, &key);
         Ok(())
     }
 
@@ -280,7 +321,8 @@ impl FileWatcher {
     async fn reconcile(&self, key: &Path) {
         let mut inner = self.inner.lock().await;
         let Some(entry) = inner.entries.get_mut(key) else { return };
-        match read_snapshot(key).await {
+        let poll_backed = !entry.notify_registered;
+        match read_snapshot(key, poll_backed).await {
             Ok(snapshot) => {
                 if entry.last_state != snapshot.last_state() {
                     entry.last_state = snapshot.last_state();
@@ -455,12 +497,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn subscribe_rejects_oversize_file() {
+    async fn poll_backed_subscribe_rejects_oversize_file() {
         let dir = TempDir::new().unwrap();
         let ws = dir.path().canonicalize().unwrap();
-        let big = vec![0u8; (filesystem::MAX_FILE_SIZE + 1) as usize];
+        let big = vec![0u8; (MAX_POLL_FILE_SIZE + 1) as usize];
         tokio::fs::write(ws.join("big.bin"), &big).await.unwrap();
-        let fw = watcher();
+        let fw = FileWatcher::new_poll_only(Duration::from_secs(3600));
         let (tx, _rx) = channel_content();
 
         let err = fw
@@ -468,6 +510,32 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+    }
+
+    #[tokio::test]
+    async fn os_watched_subscribe_accepts_oversize_file() {
+        let dir = TempDir::new().unwrap();
+        let ws = dir.path().canonicalize().unwrap();
+        let big = vec![b'x'; (MAX_POLL_FILE_SIZE + 1) as usize];
+        tokio::fs::write(ws.join("big.bin"), &big).await.unwrap();
+        let fw = watcher();
+        let (tx, mut rx) = channel_content();
+
+        fw.subscribe_content(&ws, "big.bin", "w1".into(), tx).await.unwrap();
+        assert_eq!(present(rx.try_recv().unwrap().unwrap()).content.len(), big.len());
+    }
+
+    #[tokio::test]
+    async fn poll_backed_subscribe_accepts_file_at_the_limit() {
+        let dir = TempDir::new().unwrap();
+        let ws = dir.path().canonicalize().unwrap();
+        let exact = vec![b'x'; MAX_POLL_FILE_SIZE as usize];
+        tokio::fs::write(ws.join("exact.bin"), &exact).await.unwrap();
+        let fw = FileWatcher::new_poll_only(Duration::from_secs(3600));
+        let (tx, mut rx) = channel_content();
+
+        fw.subscribe_content(&ws, "exact.bin", "w1".into(), tx).await.unwrap();
+        assert_eq!(present(rx.try_recv().unwrap().unwrap()).content.len(), exact.len());
     }
 
     #[tokio::test]

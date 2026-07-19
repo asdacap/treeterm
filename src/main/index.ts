@@ -549,8 +549,8 @@ server.onFsReadDirectory((connectionId, workspacePath, dirPath) => {
   return getClientForConnection(connectionId).readDirectory(workspacePath, dirPath)
 })
 
-server.onFsReadFile((connectionId, workspacePath, filePath) => {
-  return getClientForConnection(connectionId).readFile(workspacePath, filePath)
+server.onFsReadFile((connectionId, workspacePath, filePath, maxBytes) => {
+  return getClientForConnection(connectionId).readFile(workspacePath, filePath, maxBytes)
 })
 
 server.onFsWriteFile((connectionId, workspacePath, filePath, content, expectedSha256) => {

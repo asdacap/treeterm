@@ -185,6 +185,12 @@ function isImageFile(filePath: string): boolean {
   return IMAGE_EXTENSIONS.has(ext)
 }
 
+/** Byte count for the oversize-file message. Main has no access to the renderer's
+ *  formatter and this is the only place in Main that needs one. */
+function formatMegabytes(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
+}
+
 export class GrpcDaemonClient {
   private client: TreeTermDaemonClient | null = null
   private connected: boolean = false
@@ -672,7 +678,10 @@ export class GrpcDaemonClient {
     })
   }
 
-  async readFile(workspacePath: string, filePath: string): Promise<IpcResult<{ file: FileContents }>> {
+  /** `maxBytes` is the caller's transfer budget. The daemon streams without a size
+   *  ceiling, so the header — which always precedes the data chunks — is where an
+   *  oversize file is rejected, before any content crosses the wire. */
+  async readFile(workspacePath: string, filePath: string, maxBytes: number): Promise<IpcResult<{ file: FileContents }>> {
     if (!this.client) throw new Error('Not connected to daemon')
     const client = this.client
 
@@ -680,18 +689,33 @@ export class GrpcDaemonClient {
       const stream = client.readFile({ workspacePath, filePath })
       const chunks: Buffer[] = []
       let fileMetadata: { path: string; size: number; language: string } | null = null
+      // stream.cancel() surfaces as a CANCELLED 'error'; we have already settled.
+      let settled = false
+      const settle = (result: IpcResult<{ file: FileContents }>): void => {
+        settled = true
+        resolve(result)
+      }
 
       stream.on('data', (chunk: { header?: { path: string; size: number | string; language: string }; data?: { data: Buffer }; end?: { success: boolean; error?: string } }) => {
+        if (settled) return
         if (chunk.header) {
-          fileMetadata = { path: chunk.header.path, size: Number(chunk.header.size), language: chunk.header.language }
+          const size = Number(chunk.header.size)
+          if (size > maxBytes) {
+            // Settle before cancelling: cancel raises a CANCELLED 'error', and on a
+            // synchronous transport that lands before we would have marked settled.
+            settle({ success: false as const, error: `File too large to open (${formatMegabytes(size)}, limit ${formatMegabytes(maxBytes)})` })
+            stream.cancel()
+            return
+          }
+          fileMetadata = { path: chunk.header.path, size, language: chunk.header.language }
         } else if (chunk.data) {
           chunks.push(chunk.data.data)
         } else if (chunk.end) {
           if (!chunk.end.success) {
-            resolve({ success: false as const, error: chunk.end.error ?? 'Unknown error' })
+            settle({ success: false as const, error: chunk.end.error ?? 'Unknown error' })
           } else if (fileMetadata) {
             const isImage = isImageFile(fileMetadata.path)
-            resolve({
+            settle({
               success: true,
               file: {
                 path: fileMetadata.path,
@@ -704,7 +728,7 @@ export class GrpcDaemonClient {
         }
       })
 
-      stream.on('error', (err) => { reject(err); })
+      stream.on('error', (err) => { if (!settled) reject(err) })
     })
   }
 
