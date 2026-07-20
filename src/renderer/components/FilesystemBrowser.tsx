@@ -71,6 +71,13 @@ function FilesystemBrowserContent({
     }))
   }, [tabId, updateTabState])
 
+  const handleScrollToLineUsed = useCallback(() => {
+    updateTabState<FilesystemState>(tabId, (s) => ({
+      ...s,
+      scrollToLine: undefined
+    }))
+  }, [tabId, updateTabState])
+
   const toggleExpandedDir = (dirPath: string) => {
     updateTabState<FilesystemState>(tabId, (s) => {
       const isExpanded = s.expandedDirs.includes(dirPath)
@@ -197,12 +204,7 @@ function FilesystemBrowserContent({
           onCommentCancel={() => { setCommentInput(null); }}
           onCommentDelete={handleCommentDelete}
           scrollToLine={state.scrollToLine}
-          onScrollToLineUsed={() => {
-            updateTabState<FilesystemState>(tabId, (s) => ({
-              ...s,
-              scrollToLine: undefined
-            }))
-          }}
+          onScrollToLineUsed={handleScrollToLineUsed}
           initialScrollTop={state.scrollTop}
           onScrollPositionChange={handleScrollPositionChange}
         />

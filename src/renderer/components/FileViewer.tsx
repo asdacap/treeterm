@@ -86,9 +86,25 @@ export function FileViewer({
   const viewZoneIdRef = useRef<string | null>(null)
   const [commentContainer, setCommentContainer] = useState<HTMLDivElement | null>(null)
   const [viewMode, setViewMode] = useState<'source' | 'preview'>(onLineClick ? 'source' : 'preview')
+  // Path the persisted scroll offset has already been applied for, so it is restored
+  // once per file rather than re-asserted on every render.
+  const [scrollRestoredFor, setScrollRestoredFor] = useState<string | null>(null)
   // Inline comment display zones
   const commentDisplayZonesRef = useRef(new Map<string, { zoneId: string; container: HTMLDivElement }>())
   const [commentDisplayContainers, setCommentDisplayContainers] = useState(new Map<string, { container: HTMLDivElement; comments: ReviewComment[] }>())
+
+  // Callers rebuild the comments array on every render (they filter a store selection), so its
+  // identity is useless as an effect dependency — the view-zone effect below would re-run forever,
+  // since it sets state unconditionally. Re-key off the comment contents instead.
+  const commentsSignature = comments
+    .map(c => `${c.id}:${String(c.lineNumber)}:${String(c.isOutdated)}`)
+    .join('|')
+  const [stableComments, setStableComments] = useState(comments)
+  const [prevCommentsSignature, setPrevCommentsSignature] = useState(commentsSignature)
+  if (commentsSignature !== prevCommentsSignature) {
+    setPrevCommentsSignature(commentsSignature)
+    setStableComments(comments)
+  }
 
   // Reset file state and view mode when file path or onLineClick changes
   const [prevFilePath, setPrevFilePath] = useState(filePath)
@@ -100,6 +116,7 @@ export function FileViewer({
       setFileState({ content: '', language: 'plaintext', loading: false, error: null })
     }
     setViewMode(onLineClick ? 'source' : 'preview')
+    setScrollRestoredFor(null)
   }
 
   useEffect(() => {
@@ -174,16 +191,26 @@ export function FileViewer({
     }
   }, [onScrollPositionChange])
 
-  // Scroll to a specific line when requested, or restore scroll position
+  // Scroll to a specific line when requested
+  useEffect(() => {
+    if (!editorRef.current || fileState.loading || !scrollToLine) return
+    editorRef.current.revealLineInCenter(scrollToLine)
+    onScrollToLineUsed?.()
+  }, [scrollToLine, fileState.loading, onScrollToLineUsed])
+
+  // Restore the persisted scroll offset once per file. This must not re-run on unrelated
+  // renders: the offset is only written back on unmount, so a later render (opening the
+  // inline comment input, for example) would otherwise snap the editor back to a stale
+  // position — clamped to the bottom when the current file is shorter than the last one.
   useEffect(() => {
     if (!editorRef.current || fileState.loading) return
-    if (scrollToLine) {
-      editorRef.current.revealLineInCenter(scrollToLine)
-      onScrollToLineUsed?.()
-    } else if (initialScrollTop) {
+    if (scrollRestoredFor === filePath) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot guard; the scroll can only be applied once the editor exists
+    setScrollRestoredFor(filePath)
+    if (!scrollToLine && initialScrollTop) {
       editorRef.current.setScrollTop(initialScrollTop)
     }
-  }, [scrollToLine, fileState.loading, initialScrollTop, onScrollToLineUsed])
+  }, [filePath, fileState.loading, initialScrollTop, scrollToLine, scrollRestoredFor])
 
   // Add decorations for lines with comments
   useEffect(() => {
@@ -194,9 +221,9 @@ export function FileViewer({
       decorationsRef.current.clear()
     }
 
-    if (!comments.length) return
+    if (!stableComments.length) return
 
-    const decorations = comments.map(comment => ({
+    const decorations = stableComments.map(comment => ({
       range: {
         startLineNumber: comment.lineNumber,
         startColumn: 1,
@@ -211,7 +238,7 @@ export function FileViewer({
     }))
 
     decorationsRef.current = editorRef.current.createDecorationsCollection(decorations)
-  }, [comments])
+  }, [stableComments])
 
   // Manage inline comment display view zones
   useEffect(() => {
@@ -221,7 +248,7 @@ export function FileViewer({
 
     // Group comments by lineNumber
     const groups = new Map<string, ReviewComment[]>()
-    for (const comment of comments) {
+    for (const comment of stableComments) {
       const key = String(comment.lineNumber)
       const group = groups.get(key)
       if (group) {
@@ -279,7 +306,7 @@ export function FileViewer({
       })
       currentZones.clear()
     }
-  }, [comments])
+  }, [stableComments])
 
   // Manage inline comment view zone
   useEffect(() => {
