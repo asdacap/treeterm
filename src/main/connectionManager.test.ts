@@ -725,6 +725,49 @@ describe('ConnectionManager', () => {
       expect(manager.getConnection('remote-1')?.status).toBe('reconnecting')
     })
 
+    // Regression: removing a session disconnects the connection, but an attempt may
+    // already be in flight. If its late success is allowed through, it arms the
+    // heartbeat on a connection nobody holds and the reconnect loop runs forever.
+    it('a disconnect mid-attempt does not resurrect the connection', async () => {
+      const { GrpcDaemonClient } = await import('./grpcClient')
+      const MockGrpc = vi.mocked(GrpcDaemonClient)
+      let releaseConnect: () => void = () => {}
+      const connectGate = new Promise<void>((resolve) => { releaseConnect = resolve })
+      const lateClient = {
+        ...mockRemoteClient,
+        socketPath: '/tmp/test.sock',
+        connect: vi.fn().mockReturnValue(connectGate),
+        disconnect: vi.fn(),
+        onDisconnect: vi.fn().mockReturnValue(() => {}),
+      }
+      MockGrpc.mockImplementation(function() {
+        return lateClient as unknown as GrpcDaemonClient
+      })
+
+      // Heartbeat timeout starts the loop; the first attempt blocks inside connect().
+      vi.advanceTimersByTime(50_000)
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(manager.getConnection(localConnectionId)?.status).toBe('reconnecting')
+
+      // The session is removed while that attempt is still in flight.
+      manager.disconnect(localConnectionId)
+      expect(manager.getConnection(localConnectionId)).toBeUndefined()
+
+      mockRemoteClient.watchSession.mockClear()
+      releaseConnect()
+      await vi.advanceTimersByTimeAsync(60_000)
+
+      expect(manager.getConnection(localConnectionId)).toBeUndefined()
+      // The transport built by the late attempt is thrown away...
+      expect(lateClient.disconnect).toHaveBeenCalled()
+      // ...and no heartbeat is armed, so nothing schedules another attempt.
+      expect(mockRemoteClient.watchSession).not.toHaveBeenCalled()
+
+      MockGrpc.mockImplementation(function() {
+        return { ...mockRemoteClient, socketPath: '/tmp/test.sock' } as unknown as GrpcDaemonClient
+      })
+    })
+
     it('failed reconnect attempt schedules retry with backoff', async () => {
       // Make the gRPC client connect fail
       const { GrpcDaemonClient } = await import('./grpcClient')

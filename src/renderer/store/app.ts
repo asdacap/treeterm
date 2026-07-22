@@ -97,7 +97,6 @@ interface AppState extends AppDeps {
   addRemoteSession: (session: Session, connection: ConnectionInfo) => Promise<void>
   startRemoteConnect: (config: SSHConnectionConfig) => void
   setSessionError: (connectionId: string, error: string, errorKind?: ConnectionErrorKind) => void
-  removeSession: (id: string) => void
 }
 
 // Placeholder used before initialize() injects real deps.
@@ -392,9 +391,18 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   disconnectSession: (sessionId: string) => {
+    const entry = get().sessionStores.get(sessionId)
+    if (!entry) return
+    const connectionId = entry.store.getState().connection.id
     // Tear the store down before dropping it: without this its file watches leak
     // and keep writing the session's JSON files after disconnect.
-    get().sessionStores.get(sessionId)?.store.getState().dispose()
+    entry.store.getState().dispose()
+    // Drop the connection in Main too. The store is the only thing that used it, but
+    // Main owns the heartbeat monitor and the reconnect loop — left alone they keep
+    // spawning SSH tunnels forever for a session that is no longer on screen.
+    get().ssh.disconnect(connectionId).catch((error: unknown) => {
+      console.error(`[App] Failed to disconnect connection ${connectionId}:`, error)
+    })
     set((state) => {
       const remaining = new Map(state.sessionStores)
       remaining.delete(sessionId)
@@ -471,17 +479,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
     if (!found) return
     const conn = found.entry.store.getState().connection
     found.entry.store.setState({ connection: { ...conn, status: ConnectionStatus.Error, error, errorKind } })
-  },
-
-  removeSession: (id: string) => {
-    // Tear the store down before dropping it: without this its file watches leak
-    // and keep writing the session's JSON files after removal.
-    get().sessionStores.get(id)?.store.getState().dispose()
-    set((state) => {
-      const rest = new Map(state.sessionStores)
-      rest.delete(id)
-      return { sessionStores: rest }
-    })
   },
 
 }))

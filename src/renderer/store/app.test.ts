@@ -220,13 +220,26 @@ describe('useAppStore', () => {
   })
 
   describe('disconnectSession', () => {
+    const makeMockStore = (connectionId: string, workspaces: Map<string, unknown>, dispose: () => void) => ({
+      getState: vi.fn<() => any>().mockReturnValue({
+        workspaces,
+        dispose,
+        connection: { id: connectionId, target: { type: ConnectionTargetType.Remote }, status: ConnectionStatus.Connected },
+      }),
+      setState: vi.fn<(...args: any[]) => void>(),
+      subscribe: vi.fn<(...args: any[]) => any>()
+    } as never)
+
+    let sshDisconnect: ReturnType<typeof vi.fn>
+
+    beforeEach(() => {
+      sshDisconnect = vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined)
+      useAppStore.setState({ ssh: { disconnect: sshDisconnect } as never })
+    })
+
     it('removes session from sessionStores and disposes the store', () => {
       const dispose = vi.fn<() => void>()
-      const mockStore = {
-        getState: vi.fn<() => any>().mockReturnValue({ workspaces: new Map(), dispose }),
-        setState: vi.fn<(...args: any[]) => void>(),
-        subscribe: vi.fn<(...args: any[]) => any>()
-      } as never
+      const mockStore = makeMockStore('conn-1', new Map(), dispose)
       useAppStore.setState({ sessionStores: new Map([
         ['s1', { store: mockStore }],
         ['s2', { store: mockStore }]
@@ -238,12 +251,32 @@ describe('useAppStore', () => {
       expect(dispose).toHaveBeenCalledTimes(1)
     })
 
+    it('drops the connection in Main so its reconnect loop stops', () => {
+      const mockStore = makeMockStore('conn-1', new Map(), vi.fn())
+      useAppStore.setState({ sessionStores: new Map([['s1', { store: mockStore }]]) })
+      useAppStore.getState().disconnectSession('s1')
+      expect(sshDisconnect).toHaveBeenCalledWith('conn-1')
+    })
+
+    it('does nothing for an unknown session', () => {
+      useAppStore.setState({ sessionStores: new Map() })
+      useAppStore.getState().disconnectSession('missing')
+      expect(sshDisconnect).not.toHaveBeenCalled()
+    })
+
+    it('survives a failing disconnect', async () => {
+      sshDisconnect.mockRejectedValue(new Error('ipc down'))
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const mockStore = makeMockStore('conn-1', new Map(), vi.fn())
+      useAppStore.setState({ sessionStores: new Map([['s1', { store: mockStore }]]) })
+      useAppStore.getState().disconnectSession('s1')
+      await vi.waitFor(() => { expect(consoleError).toHaveBeenCalled() })
+      expect(useAppStore.getState().sessionStores.get('s1')).toBeUndefined()
+      consoleError.mockRestore()
+    })
+
     it('clears navigation when disconnecting viewed session', () => {
-      const mockStore = {
-        getState: vi.fn<() => any>().mockReturnValue({ workspaces: new Map([['ws-1', { id: 'ws-1' }]]), dispose: vi.fn() }),
-        setState: vi.fn<(...args: any[]) => void>(),
-        subscribe: vi.fn<(...args: any[]) => any>()
-      } as never
+      const mockStore = makeMockStore('conn-1', new Map([['ws-1', { id: 'ws-1' }]]), vi.fn())
       useAppStore.setState({ sessionStores: new Map([
         ['s1', { store: mockStore }],
         ['s2', { store: mockStore }]

@@ -818,6 +818,15 @@ server.onSshConnect(async (config, options) => {
 // eslint-disable-next-line @typescript-eslint/require-await
 server.onSshDisconnect(async (connectionId) => {
   if (!connectionManager) throw new Error('ConnectionManager not initialized')
+
+  // Drop this connection's session watches. Their streams die with the client anyway,
+  // but a stale entry left behind would be re-watched — and re-broadcast to the
+  // renderer — the next time the same connection id reconnects.
+  for (const entry of sessionWatchUnsubs.get(connectionId) ?? []) {
+    entry.unsubscribe()
+  }
+  sessionWatchUnsubs.delete(connectionId)
+
   connectionManager.disconnect(connectionId)
 })
 

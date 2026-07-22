@@ -293,8 +293,18 @@ class Connection {
     }, delay)
   }
 
+  /**
+   * Read the status through a call so it is re-read after every `await`. Comparing
+   * `this.status` inline lets the compiler carry the narrowing from one check across
+   * the awaits and declare the next check dead — it is not: `disconnect()` and
+   * `cancelReconnect()` change the status while an attempt is in flight.
+   */
+  private isReconnecting(): boolean {
+    return this.status === ConnectionStatus.Reconnecting
+  }
+
   private async doReconnectAttempt(onStatusChanged: () => void): Promise<void> {
-    if (this.status !== ConnectionStatus.Reconnecting) return
+    if (!this.isReconnecting()) return
 
     this.reconnectAttempt++
     onStatusChanged()
@@ -304,6 +314,16 @@ class Connection {
         await this.reconnectLocal(onStatusChanged)
       } else {
         await this.reconnectRemote(onStatusChanged)
+      }
+
+      // Disconnected (session removed) or cancelled while this attempt was in flight.
+      // The transport we just built belongs to nobody — tear it down. Marking it
+      // Connected here would arm the heartbeat, and its first timeout would restart
+      // the reconnect loop on a connection that is no longer in the registry: SSH
+      // tunnels respawning forever with no UI left to stop them.
+      if (!this.isReconnecting()) {
+        this.teardownTransport()
+        return
       }
 
       // Success
@@ -319,7 +339,7 @@ class Connection {
         }
       })
     } catch (err) {
-      if (this.status !== ConnectionStatus.Reconnecting) return // cancelled during attempt
+      if (!this.isReconnecting()) return // cancelled during attempt
       const msg = err instanceof Error ? err.message : String(err)
       console.error(`[connection] reconnect attempt ${String(this.reconnectAttempt)} failed for ${this.id}: ${msg}`)
       this.error = msg
@@ -382,12 +402,7 @@ class Connection {
     }
 
     // Tear down old client and tunnel
-    this.client?.disconnect()
-    this.client = null
-    if (this.tunnel) {
-      this.tunnel.disconnect()
-      this.tunnel = undefined
-    }
+    this.teardownTransport()
 
     // Create new tunnel with original config
     const tunnel = new SSHTunnel(this.target.config)
@@ -420,7 +435,21 @@ class Connection {
     this.wireClientDisconnect(onStatusChanged)
   }
 
+  /** Drop the current client and tunnel. Safe to call when neither exists. */
+  private teardownTransport(): void {
+    this.client?.disconnect()
+    this.client = null
+    if (this.tunnel) {
+      this.tunnel.disconnect()
+      this.tunnel = undefined
+    }
+  }
+
   disconnect(): void {
+    // Set the status first: the drop handlers wired onto the client and tunnel below
+    // restart the reconnect loop while the status still reads Connected/Reconnecting.
+    this.status = ConnectionStatus.Disconnected
+
     // Stop heartbeat monitor and any reconnect attempts
     this.stopHeartbeat()
     if (this.reconnectTimer) {
@@ -437,13 +466,7 @@ class Connection {
     this.portForwardStatusWatchers.clear()
 
     // Disconnect client and tunnel
-    this.client?.disconnect()
-    this.client = null
-    if (this.tunnel) {
-      this.tunnel.disconnect()
-    }
-
-    this.status = ConnectionStatus.Disconnected
+    this.teardownTransport()
   }
 }
 
