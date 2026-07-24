@@ -764,6 +764,122 @@ describe('createGitApi', () => {
       }
     })
 
+    // Without --untracked-files=all git reports a wholly-new directory as a single
+    // `newdir/` entry, which has no blob to diff and cannot be read as a file — the
+    // review pane renders it blank. Every untracked file must be listed on its own.
+    it('asks git to list every untracked file, not just the containing directory', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: '?? newdir/inner.ts\n' },  // status
+        { stdout: '' },                       // staged numstat
+        { stdout: '' },                       // unstaged numstat
+        { stdout: '1\t0\t/dev/null => newdir/inner.ts\n', exitCode: 1 },  // untracked line count
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getUncommittedChanges('/repo')
+
+      expect(exec.start).toHaveBeenNthCalledWith(
+        1, 'conn-1', '/repo', 'git', ['status', '--porcelain', '--untracked-files=all']
+      )
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.changes.files).toHaveLength(1)
+        expect(result.changes.files[0]!.path).toBe('newdir/inner.ts')
+        expect(result.changes.files[0]!.status).toBe(FileChangeStatus.Untracked)
+      }
+    })
+
+    // `git diff --numstat` never reports untracked paths, so without the extra
+    // --no-index pass every new file would show +0/-0.
+    it('counts lines in untracked files by diffing them against an empty blob', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: '?? new.ts\n' },                          // status
+        { stdout: '' },                                      // staged numstat
+        { stdout: '' },                                      // unstaged numstat
+        // --no-index exits 1 whenever the inputs differ, and names the pair rather
+        // than the path alone.
+        { stdout: '7\t0\t/dev/null => new.ts\n', exitCode: 1 },
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getUncommittedChanges('/repo')
+
+      expect(exec.start).toHaveBeenNthCalledWith(
+        4, 'conn-1', '/repo', 'git',
+        ['diff', '--numstat', '--no-index', '--', '/dev/null', 'new.ts']
+      )
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.changes.files[0]!.additions).toBe(7)
+        expect(result.changes.files[0]!.deletions).toBe(0)
+        expect(result.changes.totalAdditions).toBe(7)
+      }
+    })
+
+    it('counts a binary untracked file as zero changed lines', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: '?? logo.png\n' },
+        { stdout: '' },
+        { stdout: '' },
+        { stdout: '-\t-\t/dev/null => logo.png\n', exitCode: 1 },
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getUncommittedChanges('/repo')
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.changes.files[0]!.additions).toBe(0)
+        expect(result.changes.files[0]!.deletions).toBe(0)
+      }
+    })
+
+    it('fails loudly when the untracked line count errors out', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: '?? new.ts\n' },
+        { stdout: '' },
+        { stdout: '' },
+        // exitCode 2+ is a real failure, unlike the 1 that merely means "differs"
+        { stderr: 'fatal: could not resolve', exitCode: 2 },
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getUncommittedChanges('/repo')
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('Could not resolve reference')
+      }
+    })
+
+    it('keeps numstat stats for tracked files keyed by path', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: ' M src/app.ts\n?? new.ts\n' },
+        { stdout: '' },
+        { stdout: '3\t4\tsrc/app.ts\n' },
+        { stdout: '1\t0\t/dev/null => new.ts\n', exitCode: 1 },
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getUncommittedChanges('/repo')
+      expect(result.success).toBe(true)
+      if (result.success) {
+        const tracked = result.changes.files.find(f => f.path === 'src/app.ts')
+        expect(tracked!.additions).toBe(3)
+        expect(tracked!.deletions).toBe(4)
+        expect(result.changes.totalAdditions).toBe(4)
+        expect(result.changes.totalDeletions).toBe(4)
+      }
+    })
+
     it('returns empty result for clean repo', async () => {
       const exec = createMockExec()
       const fs = createMockFilesystem()

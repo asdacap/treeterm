@@ -170,6 +170,27 @@ export function parseStatus(output: string): GitStatusEntry[] {
   return entries
 }
 
+/** Reads the leading `<additions>\t<deletions>` of a numstat line. Binary files
+ *  report `-` for both, which counts as zero changed lines. */
+function parseNumstatCounts(line: string): { additions: number; deletions: number } {
+  const [add, del] = line.split('\t')
+  return {
+    additions: (add ?? '') === '-' ? 0 : parseInt(add ?? '', 10) || 0,
+    deletions: (del ?? '') === '-' ? 0 : parseInt(del ?? '', 10) || 0,
+  }
+}
+
+/** Indexes whole `git diff --numstat` output by the path in its third column. */
+function parseNumstat(stdout: string): Map<string, { additions: number; deletions: number }> {
+  const stats = new Map<string, { additions: number; deletions: number }>()
+  for (const line of stdout.trim().split('\n').filter(Boolean)) {
+    const filePath = line.split('\t')[2]
+    if (!filePath) continue
+    stats.set(filePath, parseNumstatCounts(line))
+  }
+  return stats
+}
+
 function interpretError(result: ExecResult): Error {
   const stderr = result.stderr.toLowerCase()
   const cmd = `git ${result.args.join(' ')}`
@@ -680,39 +701,47 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
     // ----- getUncommittedChanges -----
     async getUncommittedChanges(repoPath: string): Promise<IpcResult<{ changes: UncommittedChanges }>> {
       try {
-        const statusResult = await git(repoPath, ['status', '--porcelain'])
+        // `--untracked-files=all` is required, not a nicety: git's default
+        // (`normal`) collapses a wholly-untracked directory into one `dir/` entry.
+        // That entry is a directory, so it has no blob to diff against and cannot
+        // be read as a file — the review pane renders it as an empty diff and the
+        // tree shows a nameless row. Listing every untracked file individually is
+        // what makes new files inside new directories reviewable at all.
+        const statusResult = await git(repoPath, ['status', '--porcelain', '--untracked-files=all'])
         if (statusResult.exitCode !== 0) throw interpretError(statusResult)
 
         const status = parseStatus(statusResult.stdout)
 
         // Get staged diff stats
         const stagedStatResult = await git(repoPath, ['diff', '--cached', '--numstat'])
-        const stagedStatMap = new Map<string, { additions: number; deletions: number }>()
-
-        for (const line of stagedStatResult.stdout.trim().split('\n').filter(Boolean)) {
-          const [add, del, filePath] = line.split('\t')
-          if (!filePath) continue
-          stagedStatMap.set(filePath, {
-            additions: (add ?? '') === '-' ? 0 : parseInt(add ?? '', 10) || 0,
-            deletions: (del ?? '') === '-' ? 0 : parseInt(del ?? '', 10) || 0,
-          })
-        }
+        const stagedStatMap = parseNumstat(stagedStatResult.stdout)
 
         // Get unstaged diff stats
         const unstagedStatResult = await git(repoPath, ['diff', '--numstat'])
-        const unstagedStatMap = new Map<string, { additions: number; deletions: number }>()
+        const unstagedStatMap = parseNumstat(unstagedStatResult.stdout)
 
-        for (const line of unstagedStatResult.stdout.trim().split('\n').filter(Boolean)) {
-          const [add, del, filePath] = line.split('\t')
-          if (!filePath) continue
-          unstagedStatMap.set(filePath, {
-            additions: (add ?? '') === '-' ? 0 : parseInt(add ?? '', 10) || 0,
-            deletions: (del ?? '') === '-' ? 0 : parseInt(del ?? '', 10) || 0,
-          })
-        }
+        // `git diff` only ever reports paths git already knows about, so an untracked
+        // file has no numstat entry in either map and would render as +0/-0. Diff each
+        // one against an empty blob to get its real line count. Note --no-index exits 1
+        // when the inputs differ — always, here — so only >1 is an actual failure, and
+        // it names the pair as `/dev/null => path` rather than a bare path, hence
+        // reading the counts off the single output line instead of keying by path.
+        const untrackedStatMap = new Map<string, { additions: number; deletions: number }>()
+        await Promise.all(
+          status
+            .filter((s) => s.status === FileChangeStatus.Untracked)
+            .map(async (s) => {
+              const result = await git(repoPath, ['diff', '--numstat', '--no-index', '--', '/dev/null', s.path])
+              if (result.exitCode > 1) throw interpretError(result)
+              const line = result.stdout.trim().split('\n').filter(Boolean)[0]
+              if (line) untrackedStatMap.set(s.path, parseNumstatCounts(line))
+            })
+        )
 
         const files = status.map((s) => {
-          const statMap = s.staged ? stagedStatMap : unstagedStatMap
+          const statMap = s.status === FileChangeStatus.Untracked
+            ? untrackedStatMap
+            : s.staged ? stagedStatMap : unstagedStatMap
           return {
             ...s,
             additions: statMap.get(s.path)?.additions || 0,
