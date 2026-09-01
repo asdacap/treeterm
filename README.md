@@ -8,6 +8,8 @@ Session state is stored in a daemon process per host, so I can update the client
 
 Under the hood, it's an Electron app that manages multiple workspaces using Git worktrees, enabling branching development with AI agents.
 
+<img width="3024" height="1896" alt="image" src="https://github.com/user-attachments/assets/b0e0ae76-311e-48c2-a249-e7455440feb9" />
+
 ## Architecture
 
 TreeTerm uses a three-layer architecture connected by IPC and gRPC:
