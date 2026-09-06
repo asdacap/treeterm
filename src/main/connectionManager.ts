@@ -39,6 +39,7 @@ class Connection {
   private heartbeatUnsub: (() => void) | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectAttempt: number = 0
+  private reconnectInFlight: boolean = false
 
   private bootstrapWatchers: Set<OutputCallback> = new Set()
   private tunnelWatchers: Set<OutputCallback> = new Set()
@@ -261,6 +262,7 @@ class Connection {
   }
 
   startReconnect(onStatusChanged: () => void): void {
+    if (this.isReconnecting()) return
     this.stopHeartbeat()
     this.reconnectAttempt = 0
     this.status = ConnectionStatus.Reconnecting
@@ -304,8 +306,10 @@ class Connection {
   }
 
   private async doReconnectAttempt(onStatusChanged: () => void): Promise<void> {
-    if (!this.isReconnecting()) return
+    if (!this.isReconnecting() || this.reconnectInFlight) return
 
+    // A second attempt could finish after the first succeeds and tear down its client.
+    this.reconnectInFlight = true
     this.reconnectAttempt++
     onStatusChanged()
 
@@ -345,6 +349,8 @@ class Connection {
       this.error = msg
       onStatusChanged()
       this.scheduleReconnectAttempt(onStatusChanged)
+    } finally {
+      this.reconnectInFlight = false
     }
   }
 

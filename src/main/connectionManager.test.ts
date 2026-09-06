@@ -619,6 +619,39 @@ describe('ConnectionManager', () => {
   })
 
   describe('reconnect', () => {
+    it('keeps the remote client usable when reconnectNow is repeated during an attempt', async () => {
+      await manager.connectRemote(remoteConfig)
+      let releaseConnect: () => void = () => {}
+      const connectGate = new Promise<void>((resolve) => { releaseConnect = resolve })
+      mockRemoteClient.connect.mockReturnValueOnce(connectGate)
+
+      manager.forceReconnect('remote-1')
+      await vi.advanceTimersByTimeAsync(1_000)
+      const connectCalls = mockTunnelInstance.connect.mock.calls.length
+      manager.reconnectNow('remote-1')
+      await vi.advanceTimersByTimeAsync(0)
+
+      releaseConnect()
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(mockTunnelInstance.connect).toHaveBeenCalledTimes(connectCalls)
+      expect(manager.getConnection('remote-1')?.status).toBe(ConnectionStatus.Connected)
+      expect(() => manager.getClient('remote-1')).not.toThrow()
+    })
+
+    it('does not schedule another attempt when the tunnel drops during reconnect', async () => {
+      await manager.connectRemote(remoteConfig)
+      manager.forceReconnect('remote-1')
+      await vi.advanceTimersByTimeAsync(500)
+      tunnelDisconnectCallback?.('tunnel lost')
+      await vi.advanceTimersByTimeAsync(500)
+
+      expect(manager.getConnection('remote-1')?.status).toBe(ConnectionStatus.Connected)
+      expect(manager.getClient('remote-1')).toBeDefined()
+      // Only the two active heartbeat timers remain; no redundant retry timer.
+      expect(vi.getTimerCount()).toBe(2)
+    })
+
     it('successful reconnect restores connected status', async () => {
       // Trigger heartbeat timeout to enter reconnecting state
       vi.advanceTimersByTime(50_000)
