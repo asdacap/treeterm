@@ -321,11 +321,22 @@ export const useAppStore = create<AppState>()((set, get) => ({
       void get().addRemoteSession(session, connection)
     })
 
-    const unsubReconnected = appApi.onConnectionReconnected((session, connection) => {
+    const handleReconnected = async (session: Session, connection: ConnectionInfo): Promise<void> => {
       console.log('[App] Connection reconnected:', connection.id, 'session:', session.id)
       // Preserve session name before disposing old session
       const oldSession = findSessionByConnectionId(get, connection.id)
       const oldName = oldSession ? get().sessionNamesStore.getState().getName(oldSession.key) : undefined
+      if (oldSession) {
+        // The old store may hold bodies whose writes were deferred or failed while the
+        // connection was down. Flush them on the fresh transport *before* the store is
+        // replaced: the new store rebuilds from disk, so anything not written by then
+        // is gone. The status call is idempotent — it only guarantees the Connected
+        // transition (which enqueues the dirty bodies) was seen, whatever IPC ordering
+        // delivered the status broadcast and this event in.
+        const old = oldSession.entry.store.getState()
+        old.handleConnectionStatusChange(connection)
+        await old.flushDeferredWrites()
+      }
       // Dispose old session and recreate fresh
       disposeSessionForConnection(connection.id, get)
       const reconnSessionId = generateSessionId()
@@ -340,6 +351,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
         const firstRef = session.workspaceRefs[0]!
         useNavigationStore.getState().setActiveView({ type: 'workspace', workspaceId: firstRef.id, sessionId: reconnSessionId })
       }
+    }
+    const unsubReconnected = appApi.onConnectionReconnected((session, connection) => {
+      void handleReconnected(session, connection)
     })
 
     const unsubActiveProcesses = terminal.onActiveProcessesOpen(() => {

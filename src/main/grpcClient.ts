@@ -187,6 +187,16 @@ function isImageFile(filePath: string): boolean {
 
 /** Byte count for the oversize-file message. Main has no access to the renderer's
  *  formatter and this is the only place in Main that needs one. */
+/** Deadline for every unary RPC. Without one a half-open transport (a suspended
+ *  remote host, a hung SSH tunnel) leaves the call pending forever, and the
+ *  renderer's per-workspace write queue blocks behind it until the heartbeat
+ *  timeout finally swaps the client. Streams are excluded: they are long-lived. */
+export const UNARY_DEADLINE_MS = 30_000
+
+function unaryOptions(): Partial<grpc.CallOptions> {
+  return { deadline: Date.now() + UNARY_DEADLINE_MS }
+}
+
 function formatMegabytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
 }
@@ -368,7 +378,7 @@ export class GrpcDaemonClient {
         handle: config.handle
       }
 
-      client.createPty(request, (error, response) => {
+      client.createPty(request, new grpc.Metadata(), unaryOptions(), (error, response) => {
         if (error) {
           reject(new Error(error.message))
         } else {
@@ -387,7 +397,7 @@ export class GrpcDaemonClient {
     return new Promise((resolve, reject) => {
       const request: KillPtyRequest = { sessionId }
 
-      client.killPty(request, (error) => {
+      client.killPty(request, new grpc.Metadata(), unaryOptions(), (error) => {
         if (error) {
           reject(new Error(error.message))
         } else {
@@ -404,7 +414,7 @@ export class GrpcDaemonClient {
     const client = this.client
 
     return new Promise((resolve, reject) => {
-      client.listPtySessions({}, (error, response) => {
+      client.listPtySessions({}, new grpc.Metadata(), unaryOptions(), (error, response) => {
         if (error) {
           reject(new Error(error.message))
         } else {
@@ -422,7 +432,7 @@ export class GrpcDaemonClient {
     const client = this.client
 
     return new Promise((resolve, reject) => {
-      client.shutdown({}, (error) => {
+      client.shutdown({}, new grpc.Metadata(), unaryOptions(), (error) => {
         if (error) {
           reject(new Error(error.message))
         } else {
@@ -450,7 +460,7 @@ export class GrpcDaemonClient {
         expectedVersion
       }
 
-      client.updateSession(request, (error, response) => {
+      client.updateSession(request, new grpc.Metadata(), unaryOptions(), (error, response) => {
         if (error) {
           reject(new Error(error.message))
         } else {
@@ -473,7 +483,7 @@ export class GrpcDaemonClient {
         ttlMs: ttlMs ?? 60_000
       }
 
-      client.lockSession(request, (error: grpc.ServiceError | null, response: LockSessionResponse) => {
+      client.lockSession(request, new grpc.Metadata(), unaryOptions(), (error: grpc.ServiceError | null, response: LockSessionResponse) => {
         if (error) {
           reject(new Error(error.message))
         } else if (!response.session) {
@@ -495,7 +505,7 @@ export class GrpcDaemonClient {
     const client = this.client
 
     return new Promise((resolve, reject) => {
-      client.unlockSession({}, (error: grpc.ServiceError | null, response: ProtoSession) => {
+      client.unlockSession({}, new grpc.Metadata(), unaryOptions(), (error: grpc.ServiceError | null, response: ProtoSession) => {
         if (error) {
           reject(new Error(error.message))
         } else {
@@ -512,7 +522,7 @@ export class GrpcDaemonClient {
     const client = this.client
 
     return new Promise((resolve, reject) => {
-      client.forceUnlockSession({}, (error: grpc.ServiceError | null, response: ProtoSession) => {
+      client.forceUnlockSession({}, new grpc.Metadata(), unaryOptions(), (error: grpc.ServiceError | null, response: ProtoSession) => {
         if (error) {
           reject(new Error(error.message))
         } else {
@@ -671,7 +681,7 @@ export class GrpcDaemonClient {
     if (!this.client) throw new Error('Not connected to daemon')
     const client = this.client
     return new Promise((resolve, reject) => {
-      client.readDirectory({ workspacePath, dirPath }, (error, response) => {
+      client.readDirectory({ workspacePath, dirPath }, new grpc.Metadata(), unaryOptions(), (error, response) => {
         if (error) reject(new Error(error.message))
         else resolve(response as IpcResult<{ contents: DirectoryContents }>)
       })
@@ -737,7 +747,7 @@ export class GrpcDaemonClient {
     const client = this.client
 
     return new Promise((resolve, reject) => {
-      const stream = client.writeFile((error, response) => {
+      const stream = client.writeFile(unaryOptions(), (error, response) => {
         if (error) { reject(new Error(error.message)); return }
         if (response.success) resolve({ success: true })
         else if (response.conflict) resolve({ success: false, error: response.error ?? 'write conflict', conflict: true })
@@ -764,7 +774,7 @@ export class GrpcDaemonClient {
     if (!this.client) throw new Error('Not connected to daemon')
     const client = this.client
     return new Promise((resolve, reject) => {
-      client.deleteFile({ workspacePath, filePath }, (error, response) => {
+      client.deleteFile({ workspacePath, filePath }, new grpc.Metadata(), unaryOptions(), (error, response) => {
         if (error) reject(new Error(error.message))
         else if (response.success) resolve({ success: true })
         else resolve({ success: false, error: response.error ?? 'delete failed' })
@@ -776,7 +786,7 @@ export class GrpcDaemonClient {
     if (!this.client) throw new Error('Not connected to daemon')
     const client = this.client
     return new Promise((resolve, reject) => {
-      client.searchFiles({ workspacePath, query }, (error, response) => {
+      client.searchFiles({ workspacePath, query }, new grpc.Metadata(), unaryOptions(), (error, response) => {
         if (error) reject(new Error(error.message))
         else resolve(response as IpcResult<{ entries: FileEntry[] }>)
       })

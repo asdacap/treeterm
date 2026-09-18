@@ -1,12 +1,12 @@
 /* eslint-disable custom/no-string-literal-comparison -- test fixtures use string literals intentionally; domain types are already enum-backed */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createSessionStore, WorkspaceEntryStatus } from './createSessionStore'
 import type { SessionDeps, SessionState } from './createSessionStore'
 import type { LlmApi, Application, GitInfo } from '../types'
 import { ConnectionStatus, ConnectionTargetType, type ConnectionInfo } from '../../shared/types'
 import type { StoreApi } from 'zustand'
 import { createMockExecApi } from '../../shared/mockApis'
-import { makeWorkspace, makeSession } from '../../shared/test-fixtures/workspace'
+import { makeWorkspace, makeSession, makeSessionLock } from '../../shared/test-fixtures/workspace'
 import { FileWatchEventType, type FileWatchEvent } from '../../shared/ipc-types'
 import { toStoredWorkspaceFile, type Workspace } from '../../shared/workspaceFile'
 import { sha256Hex } from '../lib/sha256'
@@ -1654,7 +1654,7 @@ describe('createSessionStore', () => {
       expect((JSON.parse(writes[1]!.content) as Workspace).metadata.note).toBe('keep-me')
     })
 
-    it('retries immediately when the winning event already arrived during the conflicting write', async () => {
+    it('does not rewrite when an external winner already replaced local state during the conflicting write', async () => {
       const ws = makeWorkspace({ id: 'ws-cas2', name: 'cas2', path: '/cas2' })
       await store.getState().handleRestore(sessionWithRefs([ws], 1))
       emitFilePresent(ws, 'sha-initial')
@@ -1664,7 +1664,8 @@ describe('createSessionStore', () => {
       vi.mocked(deps.filesystem.writeFile).mockImplementation((_wp: string, _fp: string, content: string, expectedSha?: string) => {
         writes.push({ content, expectedSha: expectedSha ?? '' })
         if (writes.length === 1) {
-          // The external winner's event is delivered before the conflict response.
+          // The external winner's event is delivered before the conflict response
+          // (the daemon broadcasts the winner before answering the loser).
           const winner = makeWorkspace({ id: 'ws-cas2', name: 'cas2', path: '/cas2', metadata: { external: 'yes' } })
           fileWatchCallbacks.get('ws-cas2.json')!({ type: FileWatchEventType.Present, content: JSON.stringify(toStoredWorkspaceFile(winner, '')), sha256: 'sha-winner' })
           return Promise.resolve({ success: false, error: 'sha mismatch', conflict: true as const })
@@ -1675,9 +1676,50 @@ describe('createSessionStore', () => {
       handle.getState().updateMetadata('note', 'mine', 'test')
       for (let i = 0; i < 8; i++) await flushPromises()
 
+      // Applying the winner replaced local state, so there is no losing delta left:
+      // a retry would only republish the winner's body under a new parentHash.
+      expect(writes.length).toBe(1)
+      expect(handle.getState().metadata.external).toBe('yes')
+      expect(handle.getState().metadata.note).toBeUndefined()
+
+      // A later local mutation still writes, guarded on the winner's sha.
+      handle.getState().updateMetadata('note', 'later', 'test')
+      for (let i = 0; i < 8; i++) await flushPromises()
       expect(writes.length).toBe(2)
-      // The retry CAS-guards on the winner's sha, not the stale pre-conflict one.
       expect(writes[1]!.expectedSha).toBe('sha-winner')
+    })
+
+    it('stops retrying after MAX_CONFLICT_STREAK consecutive own-echo conflicts and surfaces the error', async () => {
+      const ws = makeWorkspace({ id: 'ws-cap', name: 'cap', path: '/cap' })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
+      emitFilePresent(ws, 'sha-initial')
+      const handle = loadedHandle('ws-cap')
+
+      // Every write conflicts, and the "winner" that then lands is always one of our
+      // own recorded hashes, so local state keeps its delta and keeps retrying.
+      let attempts = 0
+      vi.mocked(deps.filesystem.writeFile).mockImplementation(async (_wp: string, _fp: string, content: string) => {
+        attempts++
+        fileWatchCallbacks.get('ws-cap.json')!({ type: FileWatchEventType.Present, content, sha256: await sha256Hex(content) })
+        return { success: false, error: 'sha mismatch', conflict: true as const }
+      })
+
+      handle.getState().updateMetadata('note', 'stuck', 'test')
+      for (let i = 0; i < 60; i++) await flushPromises()
+
+      expect(attempts).toBe(5)
+      const entry = store.getState().workspaces.get('ws-cap')!
+      expect(entry.status).toBe(WorkspaceEntryStatus.OperationError)
+      expect((entry as Extract<typeof entry, { status: WorkspaceEntryStatus.OperationError }>).error).toContain('conflicting')
+
+      // Adopting an external body resolves the divergence: the streak resets and a
+      // new local mutation gets a fresh run of attempts.
+      const external = makeWorkspace({ id: 'ws-cap', name: 'cap', path: '/cap', metadata: { external: 'yes' } })
+      fileWatchCallbacks.get('ws-cap.json')!({ type: FileWatchEventType.Present, content: JSON.stringify(toStoredWorkspaceFile(external, '')), sha256: 'sha-external' })
+      attempts = 0
+      handle.getState().updateMetadata('note', 'again', 'test')
+      for (let i = 0; i < 60; i++) await flushPromises()
+      expect(attempts).toBe(5)
     })
 
     it('surfaces repeated CAS conflicts as a workspace error', async () => {
@@ -1837,11 +1879,21 @@ describe('createSessionStore', () => {
   })
 
   describe('file errors are attributed to the connection, not the workspace', () => {
-    // Drive the daemon's file-watch error path for a workspace body.
+    // Drive the daemon's file-watch error path for a workspace body. While the
+    // connection is healthy the watch is reopened with backoff first, so a fatal
+    // error is one that outlives every reopen attempt.
     function emitFileError(ws: Workspace, message: string): void {
-      const cb = fileWatchCallbacks.get(`${ws.id}.json`)
-      if (!cb) throw new Error(`no file watch registered for ${ws.id}`)
-      cb({ type: FileWatchEventType.Error, message })
+      vi.useFakeTimers()
+      try {
+        for (let attempt = 0; attempt < 4; attempt++) {
+          const cb = fileWatchCallbacks.get(`${ws.id}.json`)
+          if (!cb) throw new Error(`no file watch registered for ${ws.id}`)
+          cb({ type: FileWatchEventType.Error, message })
+          vi.runAllTimers()
+        }
+      } finally {
+        vi.useRealTimers()
+      }
     }
 
     // Restore one session holding every id, then deliver each body. Restoring twice
@@ -1864,7 +1916,7 @@ describe('createSessionStore', () => {
       const entry = store.getState().workspaces.get('ws-live')!
       expect(entry.status).toBe(WorkspaceEntryStatus.OperationError)
       expect((entry as Extract<typeof entry, { status: WorkspaceEntryStatus.OperationError }>).error)
-        .toBe('Workspace file is corrupt')
+        .toBe('Workspace file watch failed: Workspace file is corrupt')
     })
 
     it('suppresses file errors that arrive while the connection is down', async () => {
@@ -1902,6 +1954,339 @@ describe('createSessionStore', () => {
       store.getState().handleConnectionStatusChange({ id: 'local', target, status: ConnectionStatus.Connected })
 
       expect(store.getState().workspaces.get('ws-stable')!.status).toBe(WorkspaceEntryStatus.OperationError)
+    })
+  })
+
+  describe('rejected ref sync keeps unpublished workspaces', () => {
+    // Seed one published workspace at the given version so the store has a base.
+    async function seedPublished(version: number): Promise<Workspace> {
+      const existing = makeWorkspace({ id: 'ws-existing', name: 'existing', path: '/existing' })
+      await store.getState().handleRestore(sessionWithRefs([existing], version))
+      emitFilePresent(existing, 'sha-existing')
+      return existing
+    }
+
+    function rejectedByLock(daemonRefs: { id: string; path: string }[], version: number) {
+      return { success: true as const, session: makeSession({ workspaceRefs: daemonRefs, version, lock: makeSessionLock({ expiresAt: Date.now() + 60_000 }) }) }
+    }
+
+    it('keeps a locally-added workspace when another window holds the lock, and publishes it once the lock is released', async () => {
+      await seedPublished(7)
+      const daemonRefs = [{ id: 'ws-existing', path: '/existing' }]
+      const update = vi.mocked(deps.sessionApi.update)
+      update.mockResolvedValue(rejectedByLock(daemonRefs, 7))
+
+      const id = store.getState().addWorkspace('/new')
+      for (let i = 0; i < 10; i++) await flushPromises()
+
+      expect(update).toHaveBeenCalledTimes(1)
+      expect(store.getState().workspaces.get(id)!.status).toBe(WorkspaceEntryStatus.Loaded)
+
+      // The other window unlocks: the daemon broadcasts the unlocked session.
+      update.mockImplementation((_sid: string, refs: { id: string; path: string }[], _s?: string, ev?: number) =>
+        Promise.resolve({ success: true, session: makeSession({ workspaceRefs: refs, version: (ev ?? 0) + 1 }) }))
+      await store.getState().handleExternalUpdate(makeSession({ workspaceRefs: daemonRefs, version: 8 }))
+      for (let i = 0; i < 10; i++) await flushPromises()
+
+      expect(update).toHaveBeenCalledTimes(2)
+      expect(update.mock.calls[1]![1].map(r => r.id)).toEqual(['ws-existing', id])
+      expect(store.getState().workspaces.get(id)!.status).toBe(WorkspaceEntryStatus.Loaded)
+      expect(store.getState().sessionVersion).toBe(9)
+    })
+
+    it('does not retry while the lock is still held, but does once it has expired', async () => {
+      await seedPublished(7)
+      const daemonRefs = [{ id: 'ws-existing', path: '/existing' }]
+      const update = vi.mocked(deps.sessionApi.update)
+      update.mockResolvedValue(rejectedByLock(daemonRefs, 7))
+      store.getState().addWorkspace('/new')
+      for (let i = 0; i < 10; i++) await flushPromises()
+      expect(update).toHaveBeenCalledTimes(1)
+
+      // A heartbeat re-broadcast with the lock still live: nothing to do yet.
+      await store.getState().handleExternalUpdate(makeSession({ workspaceRefs: daemonRefs, version: 7, lock: makeSessionLock({ expiresAt: Date.now() + 60_000 }) }))
+      for (let i = 0; i < 10; i++) await flushPromises()
+      expect(update).toHaveBeenCalledTimes(1)
+
+      // The holder crashed; the daemon only clears the lock lazily, so the broadcast
+      // still carries it, expired.
+      await store.getState().handleExternalUpdate(makeSession({ workspaceRefs: daemonRefs, version: 7, lock: makeSessionLock({ expiresAt: Date.now() - 1 }) }))
+      for (let i = 0; i < 10; i++) await flushPromises()
+      expect(update).toHaveBeenCalledTimes(2)
+    })
+
+    it('retries immediately with the fresh version after a plain version mismatch', async () => {
+      await seedPublished(7)
+      const update = vi.mocked(deps.sessionApi.update)
+      let calls = 0
+      update.mockImplementation((_sid: string, refs: { id: string; path: string }[], _s?: string, ev?: number) => {
+        calls++
+        if (calls === 1) {
+          // Another window bumped the version to 9 in between; its refs are the same.
+          return Promise.resolve({ success: true, session: makeSession({ workspaceRefs: [{ id: 'ws-existing', path: '/existing' }], version: 9 }) })
+        }
+        return Promise.resolve({ success: true, session: makeSession({ workspaceRefs: refs, version: (ev ?? 0) + 1 }) })
+      })
+
+      const id = store.getState().addWorkspace('/new')
+      for (let i = 0; i < 12; i++) await flushPromises()
+
+      expect(calls).toBe(2)
+      expect(update.mock.calls[1]![3]).toBe(9)
+      expect(store.getState().workspaces.get(id)!.status).toBe(WorkspaceEntryStatus.Loaded)
+      expect(store.getState().sessionVersion).toBe(10)
+    })
+
+    it('adopts a workspace another window added during the rejected sync', async () => {
+      await seedPublished(7)
+      const update = vi.mocked(deps.sessionApi.update)
+      let calls = 0
+      update.mockImplementation((_sid: string, refs: { id: string; path: string }[], _s?: string, ev?: number) => {
+        calls++
+        if (calls === 1) {
+          return Promise.resolve({ success: true, session: makeSession({ workspaceRefs: [{ id: 'ws-existing', path: '/existing' }, { id: 'ws-theirs', path: '/theirs' }], version: 9 }) })
+        }
+        return Promise.resolve({ success: true, session: makeSession({ workspaceRefs: refs, version: (ev ?? 0) + 1 }) })
+      })
+
+      const id = store.getState().addWorkspace('/new')
+      for (let i = 0; i < 12; i++) await flushPromises()
+
+      // Theirs is a placeholder awaiting its file; ours is kept; the retry sends both.
+      expect(store.getState().workspaces.get('ws-theirs')!.status).toBe(WorkspaceEntryStatus.Loading)
+      expect(store.getState().workspaces.get(id)!.status).toBe(WorkspaceEntryStatus.Loaded)
+      expect(update.mock.calls[1]![1].map(r => r.id).sort()).toEqual(['ws-existing', 'ws-theirs', id].sort())
+    })
+
+    it('surfaces an error on the unpublished workspace after repeated rejections', async () => {
+      await seedPublished(7)
+      const update = vi.mocked(deps.sessionApi.update)
+      // Every attempt sees a newer version and gets rejected again.
+      let version = 7
+      update.mockImplementation(() => {
+        version += 2
+        return Promise.resolve({ success: true, session: makeSession({ workspaceRefs: [{ id: 'ws-existing', path: '/existing' }], version }) })
+      })
+
+      const id = store.getState().addWorkspace('/new')
+      for (let i = 0; i < 40; i++) await flushPromises()
+
+      expect(update).toHaveBeenCalledTimes(5)
+      const entry = store.getState().workspaces.get(id)!
+      expect(entry.status).toBe(WorkspaceEntryStatus.OperationError)
+      expect((entry as Extract<typeof entry, { status: WorkspaceEntryStatus.OperationError }>).error).toContain('Could not publish workspace')
+      // The published workspace is untouched.
+      expect(store.getState().workspaces.get('ws-existing')!.status).toBe(WorkspaceEntryStatus.Loaded)
+    })
+
+    it('keeps an unpublished workspace when an external session event arrives before its sync lands', async () => {
+      await seedPublished(7)
+      const update = vi.mocked(deps.sessionApi.update)
+      let release: (() => void) | undefined
+      update.mockImplementation((_sid: string, refs: { id: string; path: string }[], _s?: string, ev?: number) =>
+        new Promise(resolve => { release = () => { resolve({ success: true, session: makeSession({ workspaceRefs: refs, version: (ev ?? 0) + 1 }) }) } }))
+
+      const id = store.getState().addWorkspace('/new')
+      for (let i = 0; i < 10; i++) await flushPromises()
+      expect(release).toBeDefined()
+
+      // Another window's lock/unlock is broadcast while our UpdateSession is in flight.
+      await store.getState().handleExternalUpdate(makeSession({ workspaceRefs: [{ id: 'ws-existing', path: '/existing' }], version: 8 }))
+      expect(store.getState().workspaces.get(id)!.status).toBe(WorkspaceEntryStatus.Loaded)
+
+      release!()
+      for (let i = 0; i < 10; i++) await flushPromises()
+      expect(store.getState().workspaces.get(id)!.status).toBe(WorkspaceEntryStatus.Loaded)
+    })
+
+    it('still removes a published workspace that another window removed', async () => {
+      await seedPublished(7)
+      await store.getState().handleExternalUpdate(makeSession({ workspaceRefs: [], version: 8 }))
+      expect(store.getState().workspaces.has('ws-existing')).toBe(false)
+    })
+
+    it('rolls back the optimistic ref state when the update RPC throws', async () => {
+      await seedPublished(7)
+      const update = vi.mocked(deps.sessionApi.update)
+      update.mockRejectedValueOnce(new Error('ipc failed'))
+      const id = store.getState().addWorkspace('/new')
+      for (let i = 0; i < 10; i++) await flushPromises()
+      expect(update).toHaveBeenCalledTimes(1)
+
+      update.mockImplementation((_sid: string, refs: { id: string; path: string }[], _s?: string, ev?: number) =>
+        Promise.resolve({ success: true, session: makeSession({ workspaceRefs: refs, version: (ev ?? 0) + 1 }) }))
+      // A later membership sync of the very same refs must still be sent.
+      await store.getState().syncToDaemon('again')
+      expect(update).toHaveBeenCalledTimes(2)
+      expect(update.mock.calls[1]![1].map(r => r.id)).toContain(id)
+    })
+  })
+
+  describe('deferred write flush', () => {
+    const target = { type: ConnectionTargetType.Local } as const
+
+    function loadedHandle(id: string) {
+      const entry = store.getState().workspaces.get(id)!
+      expect(entry.status).toBe(WorkspaceEntryStatus.Loaded)
+      return (entry as Extract<typeof entry, { status: WorkspaceEntryStatus.Loaded }>).store
+    }
+
+    it('re-flushes a write that failed before the disconnect status arrived', async () => {
+      const ws = makeWorkspace({ id: 'ws-early', name: 'early', path: '/early' })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
+      emitFilePresent(ws, 'sha-initial')
+      const handle = loadedHandle('ws-early')
+
+      const writes: string[] = []
+      let first = true
+      vi.mocked(deps.filesystem.writeFile).mockImplementation((_wp: string, _fp: string, content: string) => {
+        writes.push(content)
+        if (first) { first = false; return Promise.reject(new Error('14 UNAVAILABLE: transport dropped')) }
+        return Promise.resolve({ success: true })
+      })
+
+      handle.getState().updateMetadata('note', 'delta', 'test')
+      for (let i = 0; i < 6; i++) await flushPromises()
+      // The RPC rejected while the store still read Connected: loud, as a genuine
+      // failure would be...
+      expect(store.getState().workspaces.get('ws-early')!.status).toBe(WorkspaceEntryStatus.OperationError)
+
+      // ...then the disconnect status lands and clears it (the banner owns it).
+      store.getState().handleConnectionStatusChange({ id: 'local', target, status: ConnectionStatus.Reconnecting, error: 'x', attempt: 1 })
+      expect(store.getState().workspaces.get('ws-early')!.status).toBe(WorkspaceEntryStatus.Loaded)
+
+      // Reconnect: the delta must still be flushed.
+      store.getState().handleConnectionStatusChange({ id: 'local', target, status: ConnectionStatus.Connected })
+      for (let i = 0; i < 8; i++) await flushPromises()
+      expect(writes.length).toBe(2)
+      expect((JSON.parse(writes[1]!) as Workspace).metadata.note).toBe('delta')
+    })
+
+    it('flushDeferredWrites writes every dirty body and resolves once they have landed', async () => {
+      const a = makeWorkspace({ id: 'ws-a', name: 'a', path: '/a' })
+      const b = makeWorkspace({ id: 'ws-b', name: 'b', path: '/b' })
+      await store.getState().handleRestore(sessionWithRefs([a, b], 1))
+      emitFilePresent(a, 'sha-a')
+      emitFilePresent(b, 'sha-b')
+
+      const written: string[] = []
+      vi.mocked(deps.filesystem.writeFile).mockImplementation((_wp: string, fp: string) => {
+        written.push(fp)
+        return Promise.resolve({ success: true })
+      })
+
+      store.getState().handleConnectionStatusChange({ id: 'local', target, status: ConnectionStatus.Reconnecting, error: 'x', attempt: 1 })
+      loadedHandle('ws-a').getState().updateMetadata('note', 'offline', 'test')
+      for (let i = 0; i < 4; i++) await flushPromises()
+      expect(written).toEqual([])
+
+      // Status update delivered without the Connected transition having been seen
+      // through the ssh status channel: flush is still deterministic.
+      store.setState({ connection: { id: 'local', target, status: ConnectionStatus.Connected } })
+      await store.getState().flushDeferredWrites()
+      expect(written).toEqual(['ws-a.json'])
+    })
+  })
+
+  describe('git info writes only on change', () => {
+    it('skips the write when the refreshed git info is unchanged', async () => {
+      const ws = makeWorkspace({ id: 'ws-git', name: 'git', path: '/git', isGitRepo: true, gitBranch: 'main', gitRootPath: '/git' })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
+      emitFilePresent(ws, 'sha-initial')
+      vi.mocked(deps.filesystem.writeFile).mockClear()
+
+      store.getState().updateGitInfo('ws-git', { isRepo: true, branch: 'main', rootPath: '/git' })
+      for (let i = 0; i < 6; i++) await flushPromises()
+      expect(deps.filesystem.writeFile).not.toHaveBeenCalled()
+
+      store.getState().updateGitInfo('ws-git', { isRepo: true, branch: 'feature', rootPath: '/git' })
+      for (let i = 0; i < 6; i++) await flushPromises()
+      expect(deps.filesystem.writeFile).toHaveBeenCalledTimes(1)
+      const body = JSON.parse(vi.mocked(deps.filesystem.writeFile).mock.calls[0]![2]) as Workspace
+      expect(body.gitBranch).toBe('feature')
+    })
+  })
+
+  describe('file watch reopen after stream error', () => {
+    const target = { type: ConnectionTargetType.Local } as const
+
+    async function restoreOne(id: string): Promise<Workspace> {
+      const ws = makeWorkspace({ id, name: id, path: `/${id}` })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
+      emitFilePresent(ws, `sha-${id}`)
+      return ws
+    }
+
+    function emitError(ws: Workspace, message: string): void {
+      fileWatchCallbacks.get(`${ws.id}.json`)!({ type: FileWatchEventType.Error, message })
+    }
+
+    afterEach(() => { vi.useRealTimers() })
+
+    it('reopens the watch with backoff and a delivered event resets the retry count', async () => {
+      const ws = await restoreOne('ws-reopen')
+      vi.useFakeTimers()
+      const watchFile = vi.mocked(deps.filesystem.watchFile)
+      expect(watchFile).toHaveBeenCalledTimes(1)
+
+      emitError(ws, 'stream reset')
+      expect(store.getState().workspaces.get('ws-reopen')!.status).toBe(WorkspaceEntryStatus.Loaded)
+      expect(watchFile).toHaveBeenCalledTimes(1)
+      vi.advanceTimersByTime(999)
+      expect(watchFile).toHaveBeenCalledTimes(1)
+      vi.advanceTimersByTime(1)
+      expect(watchFile).toHaveBeenCalledTimes(2)
+
+      // Second error doubles the delay.
+      emitError(ws, 'stream reset')
+      vi.advanceTimersByTime(1999)
+      expect(watchFile).toHaveBeenCalledTimes(2)
+      vi.advanceTimersByTime(1)
+      expect(watchFile).toHaveBeenCalledTimes(3)
+
+      // A real event on the reopened stream resets the counter: the next error
+      // is back to the base delay.
+      emitFilePresent(ws, 'sha-after-reopen')
+      emitError(ws, 'stream reset')
+      vi.advanceTimersByTime(1000)
+      expect(watchFile).toHaveBeenCalledTimes(4)
+    })
+
+    it('surfaces the error once the retries are exhausted', async () => {
+      const ws = await restoreOne('ws-dead')
+      vi.useFakeTimers()
+      for (let n = 0; n < 3; n++) {
+        emitError(ws, 'unreadable')
+        vi.runAllTimers()
+      }
+      expect(store.getState().workspaces.get('ws-dead')!.status).toBe(WorkspaceEntryStatus.Loaded)
+      expect(deps.filesystem.watchFile).toHaveBeenCalledTimes(4)
+
+      emitError(ws, 'unreadable')
+      vi.runAllTimers()
+      const entry = store.getState().workspaces.get('ws-dead')!
+      expect(entry.status).toBe(WorkspaceEntryStatus.OperationError)
+      expect((entry as Extract<typeof entry, { status: WorkspaceEntryStatus.OperationError }>).error).toContain('unreadable')
+      expect(deps.filesystem.watchFile).toHaveBeenCalledTimes(4)
+    })
+
+    it('does not reopen while the connection is down', async () => {
+      const ws = await restoreOne('ws-down')
+      vi.useFakeTimers()
+      store.getState().handleConnectionStatusChange({ id: 'local', target, status: ConnectionStatus.Reconnecting, error: 'x', attempt: 1 })
+      emitError(ws, 'transport dropped')
+      vi.runAllTimers()
+      expect(deps.filesystem.watchFile).toHaveBeenCalledTimes(1)
+      expect(store.getState().workspaces.get('ws-down')!.status).toBe(WorkspaceEntryStatus.Loaded)
+    })
+
+    it('dispose cancels a pending reopen', async () => {
+      const ws = await restoreOne('ws-disposed')
+      vi.useFakeTimers()
+      emitError(ws, 'stream reset')
+      store.getState().dispose()
+      vi.runAllTimers()
+      expect(deps.filesystem.watchFile).toHaveBeenCalledTimes(1)
     })
   })
 })

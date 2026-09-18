@@ -120,6 +120,9 @@ export interface SessionState {
   reorderWorkspace: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after') => void
   moveWorkspace: (workspaceId: string, targetWorkspaceId: string, position: 'before' | 'after' | 'onto') => void
   syncToDaemon: (reason: string) => Promise<void>
+  /** Write every workspace body whose write was deferred or failed, and wait for
+   *  those writes to settle. Called on reconnect before this store is replaced. */
+  flushDeferredWrites: () => Promise<void>
   forceUnlock: () => Promise<{ success: boolean; error?: string }>
 
   // Session lifecycle
@@ -277,6 +280,23 @@ export function createSessionStore(
   // stable JSON string. Used to suppress echoes and skip no-op ref syncs.
   let lastSyncedRefsJson = ''
 
+  // Ids of workspaces created here whose ref the daemon has not yet acknowledged.
+  // Ref reconciliation (from a rejected sync or an external session event) must not
+  // treat them as "removed elsewhere": they were never published in the first place.
+  const unpublishedIds = new Set<string>()
+  // id → path of every ref the daemon currently lists (maintained by reconcileRefs).
+  // A ref whose body has not arrived, or failed to parse, is only a Loading/Error
+  // placeholder locally; currentRefs still has to re-publish it or a sync from this
+  // window would drop another window's workspace from the session.
+  const knownRefs = new Map<string, string>()
+  // Consecutive rejected ref syncs; past the cap the unpublished workspaces are
+  // surfaced as errors instead of retrying forever. Reset on acceptance or a new add.
+  const MAX_REF_SYNC_ATTEMPTS = 5
+  let refSyncAttempts = 0
+  // A ref sync was rejected while another window held the session lock. The lock
+  // release is broadcast to every watcher, so the next session event retries.
+  let refSyncRetryOnNextEvent = false
+
   // Per-workspace content-sync bookkeeping. The JSON body of each workspace is
   // written via CAS WriteFile and observed via WatchFile, independently of the
   // ref-list (membership) sync below.
@@ -313,6 +333,14 @@ export function createSessionStore(
     retryOnNextEvent: boolean
     // Consecutive CAS conflicts; surfaced as a workspace error past a threshold.
     conflictStreak: number
+    // A genuine external body was applied since the current write captured its guard.
+    // A conflict after that has no losing delta left to rewrite: local state *is* the
+    // winner, and re-writing it would only publish the same body under a new parentHash.
+    externalApplied: boolean
+    // Consecutive watch-stream errors while connected; the watch is reopened with
+    // backoff up to MAX_WATCH_RETRIES, then surfaced as a workspace error.
+    watchRetries: number
+    watchRetryTimer?: ReturnType<typeof setTimeout>
   }
   const wsSync = new Map<string, WorkspaceSyncState>()
 
@@ -324,7 +352,7 @@ export function createSessionStore(
   function getOrCreateSync(id: string): WorkspaceSyncState {
     let s = wsSync.get(id)
     if (!s) {
-      s = { lastSeenSha: '', lastWrittenJson: '', recentHashes: [], unsubscribe: undefined, tail: Promise.resolve(), pending: false, dirty: false, retryOnNextEvent: false, conflictStreak: 0 }
+      s = { lastSeenSha: '', lastWrittenJson: '', recentHashes: [], unsubscribe: undefined, tail: Promise.resolve(), pending: false, dirty: false, retryOnNextEvent: false, conflictStreak: 0, externalApplied: false, watchRetries: 0, watchRetryTimer: undefined }
       wsSync.set(id, s)
     }
     return s
@@ -343,14 +371,50 @@ export function createSessionStore(
     if (disposed) return
     const sync = getOrCreateSync(id)
     if (sync.unsubscribe) return
-    const dataDir = store.getState().workspaceDataDir
+    const { workspaceDataDir: dataDir, connection } = store.getState()
     if (!dataDir) return
+    // Opening a watch on a dead connection only yields an Error event. The reconnect
+    // rebuilds the store, and with it every watch, so there is nothing to keep here.
+    if (connection.status !== ConnectionStatus.Connected) return
     const handle = deps.filesystem.watchFile(
       dataDir,
       `${id}.json`,
       (event) => { onFileEvent(id, path, event) }
     )
     sync.unsubscribe = handle.unsubscribe
+  }
+
+  // How many times a watch stream that errors while connected is reopened before
+  // the workspace is surfaced as broken. Backoff doubles from WATCH_RETRY_BASE_MS.
+  const MAX_WATCH_RETRIES = 3
+  const WATCH_RETRY_BASE_MS = 1000
+
+  function clearWatchRetry(sync: WorkspaceSyncState): void {
+    if (sync.watchRetryTimer !== undefined) {
+      clearTimeout(sync.watchRetryTimer)
+      sync.watchRetryTimer = undefined
+    }
+  }
+
+  // A watch stream errored while the connection itself is healthy (e.g. the daemon
+  // drained subscribers because the file became unreadable). Drop the dead handle
+  // and reopen: without this ensureWatch is a permanent no-op and the workspace
+  // stops seeing external edits, while any later CAS conflict waits forever for a
+  // winner event that never arrives.
+  function reopenWatchAfterError(id: string, path: string, sync: WorkspaceSyncState, message: string): void {
+    if (sync.unsubscribe) sync.unsubscribe()
+    sync.unsubscribe = undefined
+    sync.watchRetries++
+    if (sync.watchRetries > MAX_WATCH_RETRIES) {
+      setWorkspaceFileError(id, `Workspace file watch failed: ${message}`)
+      return
+    }
+    clearWatchRetry(sync)
+    const delay = WATCH_RETRY_BASE_MS * 2 ** (sync.watchRetries - 1)
+    sync.watchRetryTimer = setTimeout(() => {
+      sync.watchRetryTimer = undefined
+      ensureWatch(id, path)
+    }, delay)
   }
 
   function setWorkspaceFileError(id: string, error: string): void {
@@ -381,6 +445,7 @@ export function createSessionStore(
     if (!sync) return // unsubscribed (workspace removed)
 
     if (event.type === FileWatchEventType.Present) {
+      sync.watchRetries = 0
       // Echo of one of our own writes. The watch event can arrive before writeFile()
       // resolves (so before lastSeenSha advances), so we matched against the ring of
       // hashes we recorded up front. parentHash chaining guarantees each body's hash is
@@ -398,8 +463,12 @@ export function createSessionStore(
       }
       sync.lastSeenSha = event.sha256
       // A conflicted write lost to a genuine external edit: applying the winning body
-      // below replaces local state, so there is no losing delta left to rewrite.
+      // below replaces local state, so there is no losing delta left to rewrite. That
+      // also holds for a conflict response still in flight (externalApplied), and the
+      // divergence a conflict streak was counting is resolved by adopting the winner.
       sync.retryOnNextEvent = false
+      sync.externalApplied = true
+      sync.conflictStreak = 0
       let workspace: Workspace
       try {
         workspace = parseWorkspaceFile(id, path, event.content)
@@ -412,19 +481,31 @@ export function createSessionStore(
       rememberHash(sync, event.sha256)
       applyWorkspaceFile(store, workspace, createHandleForWorkspace)
     } else if (event.type === FileWatchEventType.Absent) {
+      sync.watchRetries = 0
       // The file backing a known ref is gone. Surface loudly — membership removal
       // goes through ref-list reconciliation, not the content watch.
       setWorkspaceFileError(id, 'Workspace file is missing')
     } else {
-      setWorkspaceFileError(id, event.message)
+      // While disconnected the stream error just mirrors the connection fault: the
+      // banner owns it and the reconnect rebuilds the store (and every watch).
+      if (store.getState().connection.status !== ConnectionStatus.Connected) return
+      reopenWatchAfterError(id, path, sync, event.message)
     }
   }
 
   // Write a workspace's current body to its JSON file via CAS. Coalesced and
   // serialized per workspace id (see enqueueContentSync).
   // How many consecutive CAS conflicts a workspace tolerates before the divergence
-  // is surfaced as a workspace error instead of silently retrying forever.
+  // is surfaced as a workspace error and retrying stops. The streak resets when a
+  // write lands or when an external body is adopted (the divergence is then gone).
   const MAX_CONFLICT_STREAK = 5
+
+  // Reset the "an external body was applied" marker for the write about to start.
+  // Done through a call rather than inline so the flow analysis does not carry the
+  // `false` across the awaits — onFileEvent flips it while the RPC is in flight.
+  function beginWriteAttempt(sync: WorkspaceSyncState): void {
+    sync.externalApplied = false
+  }
 
   async function writeWorkspaceContent(id: string): Promise<void> {
     if (disposed) return
@@ -445,6 +526,7 @@ export function createSessionStore(
     // Chain the parent's hash into the body so its own hash is distinct even if the
     // logical content reverts to an earlier state (parentHash == the CAS guard sha).
     const guardSha = sync.lastSeenSha
+    beginWriteAttempt(sync)
     const json = stableStringify(toStoredWorkspaceFile(entry.data, guardSha))
     if (json === sync.lastWrittenJson) return
 
@@ -471,12 +553,18 @@ export function createSessionStore(
       // The write did not land; its hash stays in the bounded ring and ages out
       // harmlessly (its echo will never arrive).
       if ('conflict' in result) {
+        // The winner's event already arrived and replaced local state with the
+        // winning body. Nothing of ours is left to rewrite; a retry would only
+        // republish the winner under a new parentHash, which every other window
+        // would then apply as an "external edit" of its own.
+        if (sync.externalApplied) return
         // Another write won. Local state may hold changes the winning body lacks, so
         // rewrite it on top of the winner instead of dropping it — that silent
         // divergence is what left ptyId:null on disk and orphaned PTYs on reconnect.
         sync.conflictStreak++
         if (sync.conflictStreak >= MAX_CONFLICT_STREAK) {
           setWorkspaceFileError(id, `Workspace file keeps conflicting with another writer (${String(sync.conflictStreak)} attempts)`)
+          return
         }
         if (sync.lastSeenSha !== guardSha) {
           // The winning body's watch event already arrived — retry on top of it now.
@@ -491,18 +579,26 @@ export function createSessionStore(
     }
   }
 
-  // A non-conflict write failure (RPC returned {success:false} or rejected). If the
-  // connection dropped mid-RPC the write was lost to the disconnect, not rejected by
-  // the daemon: mark the body dirty so handleConnectionStatusChange re-flushes it on
-  // reconnect. Otherwise the local delta (e.g. a fresh ptyId) silently never lands on
-  // disk — exactly the orphan-PTY class of bug — because setWorkspaceFileError no-ops
-  // while disconnected. If we are still connected it is a genuine failure: fail loudly.
+  // A non-conflict write failure (RPC returned {success:false} or rejected). The body
+  // is always marked dirty so the next reconnect flush re-writes it: a transport drop
+  // can reject the RPC *before* the Reconnecting status reaches this store, and the
+  // status handler then clears the error it would otherwise leave behind — without
+  // the dirty flag that path silently lost the delta (e.g. a fresh ptyId) and the
+  // reconnect rebuilt the workspace from the stale disk copy. While the connection
+  // still reads healthy it is also a genuine failure: fail loudly.
   function handleWriteFailure(id: string, sync: WorkspaceSyncState, error: string): void {
-    if (store.getState().connection.status !== ConnectionStatus.Connected) {
-      sync.dirty = true
-      return
-    }
+    sync.dirty = true
+    if (store.getState().connection.status !== ConnectionStatus.Connected) return
     setWorkspaceFileError(id, `Failed to save workspace: ${error}`)
+  }
+
+  // Enqueue every dirty body and wait for those writes to settle. Used on reconnect
+  // before the store is replaced, so the flush cannot race the new store's first read.
+  async function flushDeferredWrites(): Promise<void> {
+    for (const [id, sync] of Array.from(wsSync.entries())) {
+      if (sync.dirty) enqueueContentSync(id)
+    }
+    await Promise.all(Array.from(wsSync.values()).map(sync => sync.tail))
   }
 
   // Enqueue a content write for a workspace. Coalesces rapid mutations: if a write
@@ -541,6 +637,8 @@ export function createSessionStore(
   // while this write is still in flight, and both would otherwise CAS against the
   // same pre-create sha — the loser was dropped, leaving ptyId:null on disk.
   async function createWorkspaceFile(id: string, path: string): Promise<void> {
+    unpublishedIds.add(id)
+    refSyncAttempts = 0
     const sync = getOrCreateSync(id)
     const write = sync.tail.then(() => writeWorkspaceContent(id), () => writeWorkspaceContent(id))
     sync.tail = write.catch(() => undefined)
@@ -601,12 +699,21 @@ export function createSessionStore(
     return chain(op)
   }
 
-  // Build the current ref list (membership) from loaded workspaces.
+  // Build the current ref list (membership): every loaded workspace, plus the
+  // daemon-listed refs that are still placeholders here (see knownRefs). A local
+  // placeholder the daemon does not know (addWorkspace before its git info resolves)
+  // is not a member yet.
   function currentRefs(): WorkspaceRef[] {
-    return Array.from(store.getState().workspaces.values())
-      .filter((e): e is Extract<WorkspaceEntry, { status: WorkspaceEntryStatus.Loaded | WorkspaceEntryStatus.OperationError }> =>
-        e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError)
-      .map(e => ({ id: e.data.id, path: e.data.path }))
+    const refs: WorkspaceRef[] = []
+    for (const [id, e] of Array.from(store.getState().workspaces.entries())) {
+      if (e.status === WorkspaceEntryStatus.Loaded || e.status === WorkspaceEntryStatus.OperationError) {
+        refs.push({ id: e.data.id, path: e.data.path })
+        continue
+      }
+      const knownPath = knownRefs.get(id)
+      if (knownPath !== undefined) refs.push({ id, path: knownPath })
+    }
+    return refs
   }
 
   // Reconcile the local workspace set against the daemon's ref list: open watches
@@ -614,8 +721,13 @@ export function createSessionStore(
   function reconcileRefs(refs: WorkspaceRef[]): void {
     store.setState({ isRestoring: true })
     const incomingIds = new Set(refs.map(r => r.id))
+    for (const id of Array.from(knownRefs.keys())) {
+      if (!incomingIds.has(id)) knownRefs.delete(id)
+    }
 
     for (const ref of refs) {
+      knownRefs.set(ref.id, ref.path)
+      unpublishedIds.delete(ref.id) // the daemon knows it now, however it got there
       ensureWatch(ref.id, ref.path)
       const entry = store.getState().workspaces.get(ref.id)
       if (!entry) {
@@ -630,6 +742,9 @@ export function createSessionStore(
 
     for (const [id, entry] of Array.from(store.getState().workspaces.entries())) {
       if (incomingIds.has(id)) continue
+      // Added here and not yet published: absent from the daemon's list because our
+      // sync has not landed (or was rejected), not because another window removed it.
+      if (unpublishedIds.has(id)) continue
       if (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) {
         store.getState().onWorkspaceRemoved(id)
       }
@@ -640,6 +755,10 @@ export function createSessionStore(
   // Push the current ref list (membership) to the daemon. Goes through the serial
   // queue so it can't race lock/unlock. Content bodies sync separately.
   async function syncRefs(reason: string): Promise<void> {
+    // Captured outside the try so a thrown RPC also rolls back the optimistic
+    // lastSyncedRefsJson below; otherwise the next sync of the same refs is a no-op
+    // and the membership change never reaches the daemon.
+    const prevSyncedJson = lastSyncedRefsJson
     try {
       const { connection } = store.getState()
       if (connection.status !== ConnectionStatus.Connected) {
@@ -654,7 +773,6 @@ export function createSessionStore(
       console.log('[session] syncing workspace refs to daemon, reason:', reason)
 
       // Optimistic: treat our send as the new known ref state so the echo is skipped.
-      const prevSyncedJson = lastSyncedRefsJson
       lastSyncedRefsJson = currentJson
 
       const expectedVersion = store.getState().sessionVersion
@@ -665,33 +783,66 @@ export function createSessionStore(
         console.error('[session] failed to update session refs:', result.error)
         return
       }
+      // Cross-check: an accepted response must echo exactly what we sent at the next
+      // version. Anything else means the daemon rejected it (version mismatch or a
+      // lock held by another connection) and returned its current state instead.
 
       const returnedJson = stableStringify(result.session.workspaceRefs)
       const versionOk = result.session.version === expectedVersion + 1
       const accepted = versionOk && returnedJson === currentJson
 
       if (accepted) {
+        for (const ref of refs) unpublishedIds.delete(ref.id)
+        refSyncAttempts = 0
+        refSyncRetryOnNextEvent = false
         store.setState({
           sessionVersion: result.session.version,
           sessionLock: result.session.lock,
           workspaceDataDir: result.session.workspaceDataDir,
         })
       } else {
-        const reason = versionOk
-          ? 'refs changed under us (content mismatch)'
-          : `version mismatch, expected ${String(expectedVersion + 1)} got ${String(result.session.version)}`
+        const lockedByOther = result.session.lock !== undefined
+        const reason = lockedByOther
+          ? 'session locked by another window'
+          : versionOk
+            ? 'refs changed under us (content mismatch)'
+            : `version mismatch, expected ${String(expectedVersion + 1)} got ${String(result.session.version)}`
         console.warn('[session] ref update rejected —', reason, '— reconciling')
         store.setState({
           sessionVersion: result.session.version,
           sessionLock: result.session.lock,
           workspaceDataDir: result.session.workspaceDataDir,
         })
+        // Adopt the daemon's membership as the acknowledged base. Workspaces added
+        // here but not yet published survive reconcileRefs and are retried below.
         lastSyncedRefsJson = stableStringify(result.session.workspaceRefs)
         reconcileRefs(result.session.workspaceRefs)
+        scheduleRefSyncRetry(reason, lockedByOther)
       }
     } catch (error) {
+      lastSyncedRefsJson = prevSyncedJson
       console.error('[session] failed to sync refs to daemon:', error)
     }
+  }
+
+  // After a rejected ref sync: retry now that the version is fresh, or — when
+  // another window holds the lock, so an immediate retry would be rejected the same
+  // way — on the next session event (the unlock is broadcast to every watcher).
+  // Past MAX_REF_SYNC_ATTEMPTS the unpublished workspaces are surfaced as errors.
+  function scheduleRefSyncRetry(reason: string, lockedByOther: boolean): void {
+    if (unpublishedIds.size === 0 && stableStringify(currentRefs()) === lastSyncedRefsJson) return
+    refSyncAttempts++
+    if (refSyncAttempts >= MAX_REF_SYNC_ATTEMPTS) {
+      for (const id of Array.from(unpublishedIds)) {
+        setWorkspaceFileError(id, `Could not publish workspace to the session after ${String(refSyncAttempts)} attempts: ${reason}`)
+      }
+      return
+    }
+    if (lockedByOther) {
+      refSyncRetryOnNextEvent = true
+      return
+    }
+    void enqueueSync(`retry after rejection (${reason})`)
   }
 
   function makeHandleDeps(workspaceId: string): WorkspaceStoreDeps {
@@ -1204,9 +1355,14 @@ export function createSessionStore(
     onWorkspaceRemoved: (id: string): void => {
       const entry = get().workspaces.get(id)
       if (!entry) return
+      unpublishedIds.delete(id)
+      knownRefs.delete(id)
       // Stop watching this workspace's file and forget its sync bookkeeping.
       const sync = wsSync.get(id)
-      if (sync?.unsubscribe) sync.unsubscribe()
+      if (sync) {
+        clearWatchRetry(sync)
+        if (sync.unsubscribe) sync.unsubscribe()
+      }
       wsSync.delete(id)
       if (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) {
         entry.store.getState().gitController.getState().dispose()
@@ -1535,12 +1691,14 @@ export function createSessionStore(
     updateGitInfo: (id: string, gitInfo: GitInfo) => {
       const entry = get().workspaces.get(id)
       if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return
-      entry.store.getState().setWorkspace({
-        ...entry.store.getState().workspace,
-        isGitRepo: gitInfo.isRepo,
-        gitBranch: gitInfo.isRepo ? gitInfo.branch : undefined,
-        gitRootPath: gitInfo.isRepo ? gitInfo.rootPath : undefined
-      })
+      const current = entry.store.getState().workspace
+      const gitBranch = gitInfo.isRepo ? gitInfo.branch : undefined
+      const gitRootPath = gitInfo.isRepo ? gitInfo.rootPath : undefined
+      // Git refreshes fire on terminal activity, pane focus and review actions. An
+      // unchanged result must not write: parentHash chaining makes any write a new
+      // body, which every other window would then apply as an external edit.
+      if (current.isGitRepo === gitInfo.isRepo && current.gitBranch === gitBranch && current.gitRootPath === gitRootPath) return
+      entry.store.getState().setWorkspace({ ...current, isGitRepo: gitInfo.isRepo, gitBranch, gitRootPath })
       enqueueContentSync(id)
     },
 
@@ -1822,6 +1980,8 @@ export function createSessionStore(
       await enqueueSync(reason)
     },
 
+    flushDeferredWrites,
+
     forceUnlock: async () => {
       const result = await deps.sessionApi.forceUnlock(store.getState().connection.id)
       if (!result.success) return { success: false, error: result.error }
@@ -1855,6 +2015,13 @@ export function createSessionStore(
         workspaceDataDir: daemonSession.workspaceDataDir,
       })
 
+      // A ref sync rejected under another window's lock waits here for the unlock.
+      // An expired lock is only cleared lazily by the daemon, so treat it as gone too.
+      if (refSyncRetryOnNextEvent && (daemonSession.lock === undefined || daemonSession.lock.expiresAt <= Date.now())) {
+        refSyncRetryOnNextEvent = false
+        void enqueueSync('retry after lock released')
+      }
+
       const incomingRefsJson = stableStringify(daemonSession.workspaceRefs)
       if (incomingRefsJson === lastSyncedRefsJson) {
         // Membership unchanged (a content echo or lock-only change). Workspace
@@ -1875,6 +2042,7 @@ export function createSessionStore(
       // mirroring the per-workspace teardown in onWorkspaceRemoved.
       disposed = true
       for (const sync of Array.from(wsSync.values())) {
+        clearWatchRetry(sync)
         if (sync.unsubscribe) sync.unsubscribe()
       }
       wsSync.clear()

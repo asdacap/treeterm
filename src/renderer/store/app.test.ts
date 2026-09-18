@@ -81,7 +81,7 @@ import { WorkspaceEntryStatus } from './createSessionStore'
 import type { Workspace } from '../types'
 import { AppAvailability } from '../types'
 import { ConnectionStatus, ConnectionTargetType } from '../../shared/types'
-import type { ConnectionInfo } from '../../shared/types'
+import type { ConnectionInfo, Session } from '../../shared/types'
 import { makeSession } from '../../shared/test-fixtures/workspace'
 import { resolveHomedir } from '../lib/homedir'
 
@@ -217,6 +217,46 @@ describe('useAppStore', () => {
       expect(useAppStore.getState().isSettingsOpen).toBe(false)
     })
 
+  })
+
+  describe('connection reconnected', () => {
+    it('flushes the old store\'s deferred writes before disposing it and rebuilding', async () => {
+      let onReconnected: ((session: Session, connection: ConnectionInfo) => void) | undefined
+      vi.mocked(mockDeps.appApi.onConnectionReconnected).mockImplementation((cb: (session: Session, connection: ConnectionInfo) => void) => {
+        onReconnected = cb
+        return () => {}
+      })
+      const cleanup = await useAppStore.getState().initialize(mockDeps)
+      expect(onReconnected).toBeDefined()
+
+      // The old store still reads Reconnecting: the Connected status broadcast and
+      // this event race over IPC, and the flush must not depend on which won.
+      const order: string[] = []
+      const connection: ConnectionInfo = { id: 'conn-r', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected }
+      const oldState = {
+        connection: { ...connection, status: ConnectionStatus.Reconnecting, error: 'dropped', attempt: 1 },
+        workspaces: new Map(),
+        handleConnectionStatusChange: vi.fn<(info: ConnectionInfo) => void>((info) => { order.push(`status:${info.status}`) }),
+        flushDeferredWrites: vi.fn<() => Promise<void>>(async () => {
+          await new Promise(r => setTimeout(r, 0))
+          order.push('flush')
+        }),
+        dispose: vi.fn<() => void>(() => { order.push('dispose') }),
+      }
+      const oldStore = { getState: () => oldState, setState: vi.fn(), subscribe: vi.fn() }
+      useAppStore.setState({ sessionStores: new Map([['s-old', { store: oldStore as never }]]) })
+
+      onReconnected!(makeSession({ id: 'sess-r' }), connection)
+      for (let i = 0; i < 5; i++) await new Promise(r => setTimeout(r, 0))
+
+      expect(order).toEqual([`status:${ConnectionStatus.Connected}`, 'flush', 'dispose'])
+      expect(oldState.handleConnectionStatusChange).toHaveBeenCalledWith(connection)
+      expect(useAppStore.getState().sessionStores.has('s-old')).toBe(false)
+      const rebuilt = Array.from(useAppStore.getState().sessionStores.values())
+        .find(e => (e.store.getState() as { connection: ConnectionInfo }).connection.id === 'conn-r')
+      expect(rebuilt).toBeDefined()
+      cleanup()
+    })
   })
 
   describe('disconnectSession', () => {
