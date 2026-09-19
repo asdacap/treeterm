@@ -179,7 +179,76 @@ describe('PortForwardProcess', () => {
 
       // Process close fires after kill - should not override stopped
       mockProcess.emit('close', 0)
+      mockProcess.emit('error', new Error('late'))
       expect(pf.status).toBe('stopped')
+    })
+  })
+
+  describe('restart', () => {
+    it('kills the old process, spawns a new one and becomes active again', async () => {
+      const { spawn } = await import('child_process')
+      const pf = new PortForwardProcess(sshConfig, pfConfig)
+      pf.start()
+      vi.advanceTimersByTime(2000)
+      expect(pf.status).toBe('active')
+      const oldProcess = mockProcess
+      const spawnCalls = (spawn as Mock).mock.calls.length
+
+      mockProcess = createMockProcess()
+      pf.restart()
+
+      expect(oldProcess.kill).toHaveBeenCalled()
+      expect((spawn as Mock).mock.calls.length).toBe(spawnCalls + 1)
+      expect(pf.status).toBe('connecting')
+      vi.advanceTimersByTime(2000)
+      expect(pf.status).toBe('active')
+    })
+
+    it('restarts from error state without killing anything and clears the error', () => {
+      const pf = new PortForwardProcess(sshConfig, pfConfig)
+      pf.start()
+      mockProcess.emit('close', 255)
+      expect(pf.toInfo()).toMatchObject({ status: 'error', error: 'Port forward process exited (code 255)' })
+      const deadProcess = mockProcess
+
+      mockProcess = createMockProcess()
+      pf.restart()
+
+      expect(deadProcess.kill).not.toHaveBeenCalled()
+      expect(pf.toInfo()).toEqual({ ...pfConfig, status: 'connecting' })
+    })
+
+    it('ignores a late close or error from the replaced process', () => {
+      const pf = new PortForwardProcess(sshConfig, pfConfig)
+      pf.start()
+      const oldProcess = mockProcess
+
+      mockProcess = createMockProcess()
+      pf.restart()
+
+      oldProcess.emit('close', 255)
+      oldProcess.emit('error', new Error('late'))
+      expect(pf.status).toBe('connecting')
+
+      vi.advanceTimersByTime(2000)
+      expect(pf.status).toBe('active')
+
+      // The new process is still the live one: its close is honoured.
+      mockProcess.emit('close', 1)
+      expect(pf.status).toBe('error')
+    })
+
+    it('notifies status listeners on restart', () => {
+      const pf = new PortForwardProcess(sshConfig, pfConfig)
+      pf.start()
+      const statuses: string[] = []
+      pf.onStatusChange((info) => { statuses.push(info.status) })
+
+      mockProcess = createMockProcess()
+      pf.restart()
+      vi.advanceTimersByTime(2000)
+
+      expect(statuses).toEqual(['connecting', 'active'])
     })
   })
 

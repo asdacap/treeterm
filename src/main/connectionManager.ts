@@ -177,6 +177,12 @@ class Connection {
     return true
   }
 
+  restartPortForwards(): void {
+    for (const pf of this.portForwards.values()) {
+      pf.restart()
+    }
+  }
+
   hasPortForward(portForwardId: string): boolean {
     return this.portForwards.has(portForwardId)
   }
@@ -335,6 +341,11 @@ class Connection {
       this.error = undefined
       this.reconnectAttempt = 0
       onStatusChanged()
+
+      // The forwards ride their own ssh sessions, which died with the network (or
+      // are about to — same keepalive as the tunnel). Rebuild them all; a forward
+      // that still reads Active now is not trustworthy.
+      this.restartPortForwards()
 
       // Restart heartbeat — on next failure, reconnect again
       this.startHeartbeatMonitor(() => {
@@ -575,6 +586,10 @@ export class ConnectionManager {
 
     const conn = new Connection(config.id, target, null, ConnectionStatus.Connecting, tunnel)
     conn.connectPhase = ConnectPhase.Bootstrap
+    // A stale (Error/Disconnected/Reconnecting) entry is being replaced: stop its
+    // port forwards and reconnect loop, or they keep running with no owner and
+    // hold the local ports the new connection's forwards need.
+    this.connections.get(config.id)?.disconnect()
     this.connections.set(config.id, conn)
 
     // Forward tunnel output to connection's watchers

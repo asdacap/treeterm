@@ -86,11 +86,16 @@ vi.mock('./grpcClient', () => ({
 const mockPortForwardInstance = {
   start: vi.fn(),
   stop: vi.fn(),
+  restart: vi.fn(),
   getOutput: vi.fn().mockReturnValue(['pf-line']),
   onOutput: vi.fn().mockReturnValue(() => {}),
   onStatusChange: vi.fn().mockReturnValue(() => {}),
   toInfo: vi.fn(),
 }
+
+// Every PortForwardProcess the manager creates, in creation order, so a test can
+// assert on one specific forward (the shared spies above are spread into each).
+const createdPortForwards: (typeof mockPortForwardInstance)[] = []
 
 vi.mock('./portForward', () => ({
   PortForwardProcess: vi.fn().mockImplementation(function(_ssh: unknown, config: PortForwardConfig) {
@@ -102,7 +107,9 @@ vi.mock('./portForward', () => ({
       remotePort: config.remotePort,
       status: 'connecting' as const,
     })
-    return { ...mockPortForwardInstance }
+    const instance = { ...mockPortForwardInstance }
+    createdPortForwards.push(instance)
+    return instance
   })
 }))
 
@@ -129,6 +136,7 @@ describe('ConnectionManager', () => {
     tunnelDisconnectCallback = null
     grpcDisconnectCallback = null
     createdGrpcClients.length = 0
+    createdPortForwards.length = 0
     manager = new ConnectionManager('/tmp/test.sock')
     const info = await manager.connectLocal()
     localConnectionId = info.id
@@ -499,6 +507,93 @@ describe('ConnectionManager', () => {
       const cb = vi.fn()
       const { initial } = manager.watchPortForwardStatus('unknown', cb)
       expect(initial).toBeUndefined()
+    })
+  })
+
+  describe('port forwards across reconnect', () => {
+    const pfConfig: PortForwardConfig = {
+      id: 'pf-1',
+      connectionId: 'remote-1',
+      localPort: 8080,
+      remoteHost: 'localhost',
+      remotePort: 3000,
+    }
+
+    it('restarts every port forward once the connection reconnects', async () => {
+      await manager.connectRemote(remoteConfig)
+      manager.addPortForward(pfConfig)
+      manager.addPortForward({ ...pfConfig, id: 'pf-2', localPort: 8081 })
+
+      createdGrpcClients.at(-1)?.fireDisconnect()
+      expect(manager.getConnection('remote-1')?.status).toBe(ConnectionStatus.Reconnecting)
+      expect(mockPortForwardInstance.restart).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(1_000)
+
+      expect(manager.getConnection('remote-1')?.status).toBe(ConnectionStatus.Connected)
+      expect(mockPortForwardInstance.restart).toHaveBeenCalledTimes(2)
+      expect(mockPortForwardInstance.stop).not.toHaveBeenCalled()
+      // Same PortForwardProcess objects restarted in place, not replaced: watchers
+      // keyed by forward id stay valid.
+      expect(createdPortForwards).toHaveLength(2)
+      for (const pf of createdPortForwards) expect(pf.restart).toHaveBeenCalled()
+    })
+
+    it('does not restart port forwards on a failed attempt, only on the one that succeeds', async () => {
+      await manager.connectRemote(remoteConfig)
+      manager.addPortForward(pfConfig)
+      mockTunnelInstance.connect.mockRejectedValueOnce(new Error('host unreachable'))
+
+      tunnelDisconnectCallback?.('tunnel lost')
+      await vi.advanceTimersByTimeAsync(1_000)
+
+      expect(manager.getConnection('remote-1')?.status).toBe(ConnectionStatus.Reconnecting)
+      expect(mockPortForwardInstance.restart).not.toHaveBeenCalled()
+
+      // Second attempt (2s backoff) succeeds.
+      await vi.advanceTimersByTimeAsync(2_000)
+
+      expect(manager.getConnection('remote-1')?.status).toBe(ConnectionStatus.Connected)
+      expect(mockPortForwardInstance.restart).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not restart port forwards when the connection is removed mid-attempt', async () => {
+      await manager.connectRemote(remoteConfig)
+      manager.addPortForward(pfConfig)
+      let releaseConnect: () => void = () => {}
+      const connectGate = new Promise<void>((resolve) => { releaseConnect = resolve })
+      mockRemoteClient.connect.mockReturnValueOnce(connectGate)
+
+      manager.forceReconnect('remote-1')
+      await vi.advanceTimersByTimeAsync(1_000)
+      manager.disconnect('remote-1')
+      releaseConnect()
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(mockPortForwardInstance.stop).toHaveBeenCalledTimes(1)
+      expect(mockPortForwardInstance.restart).not.toHaveBeenCalled()
+    })
+
+    it('stops the stale connection\'s port forwards when connectRemote replaces it', async () => {
+      await manager.connectRemote(remoteConfig)
+      manager.addPortForward(pfConfig)
+      const stale = createdPortForwards.at(-1)
+      expect(stale).toBeDefined()
+
+      tunnelDisconnectCallback?.('tunnel lost')
+      manager.cancelReconnect('remote-1')
+      expect(manager.getConnection('remote-1')?.status).toBe(ConnectionStatus.Error)
+
+      // Manual "Retry": a fresh Connection takes over the same id.
+      const info = await manager.connectRemote(remoteConfig)
+
+      expect(info.status).toBe(ConnectionStatus.Connected)
+      expect(stale?.stop).toHaveBeenCalledTimes(1)
+      expect(manager.listPortForwards('remote-1')).toHaveLength(0)
+      // The replaced connection's reconnect loop is dead: no attempt fires later.
+      const tunnelConnects = mockTunnelInstance.connect.mock.calls.length
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(mockTunnelInstance.connect).toHaveBeenCalledTimes(tunnelConnects)
     })
   })
 

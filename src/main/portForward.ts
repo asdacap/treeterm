@@ -34,7 +34,8 @@ export class PortForwardProcess {
     this.appendOutput(`[portfwd] Starting port forward: localhost:${String(this.config.localPort)} -> ${this.config.remoteHost}:${String(this.config.remotePort)}`)
     this.appendOutput(`[portfwd] $ ssh ${args.join(' ')}`)
 
-    this.process = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] })
+    const proc = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] })
+    this.process = proc
 
     // After 2 seconds without exit, consider the forward active
     this.stabilizationTimer = setTimeout(() => {
@@ -43,29 +44,32 @@ export class PortForwardProcess {
       }
     }, 2000)
 
-    this.process.stdout?.on('data', (data: Buffer) => {
+    proc.stdout.on('data', (data: Buffer) => {
       for (const line of data.toString().split('\n').filter(Boolean)) {
         this.appendOutput(`[portfwd] ${line}`)
       }
     })
 
-    this.process.stderr?.on('data', (data: Buffer) => {
+    proc.stderr.on('data', (data: Buffer) => {
       for (const line of data.toString().split('\n').filter(Boolean)) {
         this.appendOutput(`[portfwd:err] ${line}`)
       }
     })
 
-    this.process.on('close', (code) => {
+    // `close`/`error` fire asynchronously after `stop()`/`restart()` have already
+    // dropped or replaced `this.process`. Only the current process may change state;
+    // a late event from a killed process must not clobber its replacement.
+    proc.on('close', (code) => {
+      if (this.process !== proc) return
       this.clearStabilizationTimer()
       this.process = null
-      if (this._status !== PortForwardStatus.Stopped) {
-        const msg = `Port forward process exited (code ${String(code)})`
-        this.appendOutput(`[portfwd] ${msg}`)
-        this.setStatus(PortForwardStatus.Error, msg)
-      }
+      const msg = `Port forward process exited (code ${String(code)})`
+      this.appendOutput(`[portfwd] ${msg}`)
+      this.setStatus(PortForwardStatus.Error, msg)
     })
 
-    this.process.on('error', (err) => {
+    proc.on('error', (err) => {
+      if (this.process !== proc) return
       this.clearStabilizationTimer()
       this.process = null
       const msg = `Port forward error: ${err.message}`
@@ -74,13 +78,21 @@ export class PortForwardProcess {
     })
   }
 
+  /**
+   * Kill the current ssh process (if any) and spawn a fresh one. Used after the
+   * parent connection reconnects: the forward's own ssh session died with the
+   * network, or is about to, so it is rebuilt along with the tunnel.
+   */
+  restart(): void {
+    this.killProcess()
+    this.appendOutput('[portfwd] Restarting port forward')
+    this.setStatus(PortForwardStatus.Connecting)
+    this.start()
+  }
+
   stop(): void {
-    this.clearStabilizationTimer()
+    this.killProcess()
     this.setStatus(PortForwardStatus.Stopped)
-    if (this.process) {
-      this.process.kill()
-      this.process = null
-    }
   }
 
   getOutput(): string[] {
@@ -128,6 +140,14 @@ export class PortForwardProcess {
     const info = this.toInfo()
     for (const cb of this.statusListeners) {
       cb(info)
+    }
+  }
+
+  private killProcess(): void {
+    this.clearStabilizationTimer()
+    if (this.process) {
+      this.process.kill()
+      this.process = null
     }
   }
 
