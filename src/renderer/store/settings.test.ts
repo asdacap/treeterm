@@ -1,3 +1,4 @@
+import { ClassifierProvider } from '../../shared/types'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // Mock app store used by settings store
@@ -21,6 +22,15 @@ const mockSettingsApi = { load: mockLoadSettings, save: mockSaveSettings, onOpen
 const mockTerminalKill = vi.fn<(connectionId: string, id: string) => void>()
 
 describe('SettingsStore', () => {
+  it('uses backward-compatible classifier defaults', () => {
+    expect(defaultSettings.terminalAnalyzer).toMatchObject({
+      provider: ClassifierProvider.ChatCompletions,
+      model: 'openai/gpt-oss-safeguard-20b',
+      jevModel: 'typesafe/jev-1.13',
+      titleModel: 'openai/gpt-oss-safeguard-20b',
+    })
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     // Reset store to default state

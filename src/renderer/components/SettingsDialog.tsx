@@ -4,6 +4,7 @@ import type { Settings, ReasoningEffort } from '../types'
 import { useSettingsStore, defaultSettings } from '../store/settings'
 import { useAppStore } from '../store/app'
 import { Platform } from '../types'
+import { ClassifierProvider } from '../../shared/types'
 import type { SandboxApi } from '../types'
 
 interface SettingsDialogProps {
@@ -763,21 +764,42 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                 <h3 className="settings-section-title" style={{ marginTop: 24 }}>Terminal Analyzer</h3>
 
                 <div className="settings-group">
+                  <label className="settings-label" htmlFor="classifier-provider">Classifier Provider</label>
+                  <select
+                    id="classifier-provider"
+                    className="settings-select"
+                    value={localSettings.terminalAnalyzer.provider}
+                    onChange={(e) => { setLocalSettings((prev) => ({
+                      ...prev,
+                      terminalAnalyzer: { ...prev.terminalAnalyzer, provider: e.target.value as ClassifierProvider }
+                    })); }}
+                  >
+                    <option value={ClassifierProvider.ChatCompletions}>Chat Completions</option>
+                    <option value={ClassifierProvider.Jev}>Jev</option>
+                  </select>
+                  <p className="settings-hint">
+                    Jev uses the shared API Key and the configured Base URL origin at /api/alpha/decisions.
+                    Reasoning applies only to Chat Completions; title generation always uses Chat Completions.
+                  </p>
+                </div>
+
+                <div className="settings-group">
                   <label className="settings-label">Model</label>
                   <input
                     type="text"
                     className="settings-input"
-                    value={localSettings.terminalAnalyzer.model}
+                    aria-label="Classifier Model"
+                    value={localSettings.terminalAnalyzer.provider === ClassifierProvider.Jev ? localSettings.terminalAnalyzer.jevModel : localSettings.terminalAnalyzer.model}
                     onChange={(e) =>
                       { setLocalSettings((prev) => ({
                         ...prev,
-                        terminalAnalyzer: { ...prev.terminalAnalyzer, model: e.target.value }
+                        terminalAnalyzer: { ...prev.terminalAnalyzer, [prev.terminalAnalyzer.provider === ClassifierProvider.Jev ? 'jevModel' : 'model']: e.target.value }
                       })); }
                     }
                     placeholder="openai/gpt-oss-safeguard-20b"
                   />
                   <p className="settings-hint">
-                    Model name for terminal state analysis. Uses the Base URL and API Key above.
+                    Model name for the selected classifier. Chat Completions and Jev model settings are retained separately.
                   </p>
                 </div>
 
@@ -809,6 +831,21 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                   >
                     Reset to default
                   </button>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label" htmlFor="title-model">Title Model</label>
+                  <input
+                    id="title-model"
+                    type="text"
+                    className="settings-input"
+                    value={localSettings.terminalAnalyzer.titleModel}
+                    onChange={(e) => { setLocalSettings((prev) => ({
+                      ...prev,
+                      terminalAnalyzer: { ...prev.terminalAnalyzer, titleModel: e.target.value }
+                    })); }}
+                  />
+                  <p className="settings-hint">Chat Completions model for titles, independent of the classifier provider and model.</p>
                 </div>
 
                 <div className="settings-group">
@@ -902,7 +939,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     </select>
                   </label>
                   <p className="settings-hint">
-                    When checked, reasoning effort is disabled for faster and cheaper analysis.
+                    Reasoning effort for Chat Completions analysis and title generation. Not sent to Jev; still applies to titles when Jev is selected.
                   </p>
                 </div>
               </div>

@@ -4,6 +4,7 @@ import { useActivityStateStore } from '../store/activityState'
 import { ActivityState } from '../types'
 import type { ApplicationRenderProps } from '../types'
 import { ReasoningEffort } from '../../shared/types'
+import { ClassifierProvider } from '../../shared/types'
 import { createLlmClient } from '../lib/llmClient'
 
 const llm = createLlmClient()
@@ -26,7 +27,9 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
   const [analyzerPrompt, setAnalyzerPrompt] = useState(settings.terminalAnalyzer.systemPrompt)
   const [titlePrompt, setTitlePrompt] = useState(settings.terminalAnalyzer.titleSystemPrompt)
   const [bufferText, setBufferText] = useState(debuggerState?.bufferText ?? '')
-  const [model, setModel] = useState(settings.terminalAnalyzer.model)
+  const [chatModel, setChatModel] = useState(settings.terminalAnalyzer.model)
+  const [jevModel, setJevModel] = useState(settings.terminalAnalyzer.jevModel)
+  const [titleModel, setTitleModel] = useState(settings.terminalAnalyzer.titleModel)
   const [reasoningEffort, setReasoningEffort] = useState(settings.terminalAnalyzer.reasoningEffort)
   const [result, setResult] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -48,7 +51,13 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
   const systemPrompt = mode === DebugMode.Analyzer ? analyzerPrompt : titlePrompt
   const setSystemPrompt = mode === DebugMode.Analyzer ? setAnalyzerPrompt : setTitlePrompt
 
-  const handleTest = async () => {
+  const provider = mode === DebugMode.Title ? ClassifierProvider.ChatCompletions : settings.terminalAnalyzer.provider
+  const classifierModel = provider === ClassifierProvider.Jev ? jevModel : chatModel
+  const setClassifierModel = provider === ClassifierProvider.Jev ? setJevModel : setChatModel
+  const model = mode === DebugMode.Title ? titleModel : classifierModel
+  const setModel = mode === DebugMode.Title ? setTitleModel : setClassifierModel
+
+  const handleTest = async (): Promise<void> => {
     if (!model) {
       setError('Model must be configured.')
       return
@@ -69,7 +78,9 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
           apiKey: settings.llm.apiKey,
           model,
           systemPrompt: analyzerPrompt,
-          reasoningEffort,
+          ...(provider === ClassifierProvider.Jev
+            ? { provider }
+            : { provider, reasoningEffort }),
           safePaths: settings.terminalAnalyzer.safePaths
         })
         setDuration(Date.now() - start)
@@ -117,12 +128,20 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
   return (
     <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, height: '100%', overflow: 'auto' }}>
       <h3 style={{ margin: 0, color: '#ccc' }}>System Prompt Debugger</h3>
+      <div style={{ color: '#aaa', fontSize: 12 }}>
+        Provider: {provider === ClassifierProvider.Jev ? 'Jev' : 'Chat Completions'}
+        {provider === ClassifierProvider.Jev && (
+          <p>Jev uses the shared API Key and configured Base URL origin at /api/alpha/decisions.
+            Results include the decision and summary. Reasoning is not sent to Jev.</p>
+        )}
+      </div>
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
         <div style={{ flex: 1 }}>
           <label style={{ color: '#aaa', fontSize: 12 }}>Model</label>
           <input
             type="text"
+            aria-label="Model"
             value={model}
             onChange={(e) => { setModel(e.target.value); }}
             style={{
@@ -159,6 +178,7 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
         <label style={{ color: '#aaa', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', whiteSpace: 'nowrap' }}>
           Reasoning
           <select
+            disabled={provider === ClassifierProvider.Jev}
             value={reasoningEffort}
             onChange={(e) => { setReasoningEffort(e.target.value as ReasoningEffort); }}
             style={{

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ReasoningEffort } from '../../shared/types'
+import { ClassifierProvider, ReasoningEffort } from '../../shared/types'
 
 const { mockCreate } = vi.hoisted(() => ({
   mockCreate: vi.fn<(...args: unknown[]) => unknown>(),
@@ -179,6 +179,7 @@ describe('createLlmClient send', () => {
 // ---------------------------------------------------------------------------
 
 const analyzerSettings = {
+  provider: ClassifierProvider.ChatCompletions as const,
   baseUrl: 'https://api.openai.com/v1',
   apiKey: 'test-key',
   model: 'gpt-4',
@@ -404,7 +405,7 @@ describe('createLlmClient analyzeTerminal cache', () => {
     mockCreate.mockImplementation(() => {
       callCount++
       return Promise.resolve({
-        choices: [{ message: { content: `{"state":"s${String(callCount)}","reason":"r${String(callCount)}"}` } }],
+        choices: [{ message: { content: `{"state":"idle","reason":"r${String(callCount)}"}` } }],
       })
     })
 
