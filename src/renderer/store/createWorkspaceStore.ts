@@ -98,6 +98,9 @@ export interface WorkspaceStoreDeps {
 
 export interface WorkspaceStoreState {
   workspace: Workspace
+  /** Renderer-only persistence state; never serialized into workspace data. */
+  attentionPending: boolean
+  setAttentionPending: (pending: boolean) => void
   /** Invalidates consumers of inherited workspace data when an ancestor changes. */
   favouritePathsRevision: number
 
@@ -298,6 +301,8 @@ export function createWorkspaceStore(
 
   store = createStore<WorkspaceStoreState>()((set, get) => ({
     workspace,
+    attentionPending: false,
+    setAttentionPending: (pending: boolean): void => { set({ attentionPending: pending }); },
     favouritePathsRevision: 0,
     metadata: workspace.metadata,
     appStates: workspace.appStates,

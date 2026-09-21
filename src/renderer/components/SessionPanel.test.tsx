@@ -49,6 +49,7 @@ function makeWorkspaceStore(
 ) {
   const toggleFavourite = vi.fn()
   const store = createStore<WorkspaceStoreState>()(() => ({
+    attentionPending: false,
     workspace: makeWorkspace(workspaceOverride) as unknown as Workspace,
     metadata: { displayName: 'My WS', ...metadataOverride },
     appStates: {},
@@ -80,7 +81,6 @@ function renderTreeItem(
   store: ReturnType<typeof makeWorkspaceStore>['store'],
   props: Partial<{
     isActive: boolean
-    attentionPending: boolean
     onToggleFavourite: (id: string) => void
     onRefreshTitle: (id: string) => void
     onRefreshBranch: (id: string) => void
@@ -97,7 +97,6 @@ function renderTreeItem(
       store={store}
       data={ws}
       depth={0}
-      attentionPending={props.attentionPending ?? false}
       isActive={props.isActive ?? false}
       isFocused={false}
       isExpanded={false}
@@ -395,10 +394,13 @@ describe('LoadedWorkspaceTreeItem — PR number', () => {
 describe('workspace unread attention', () => {
   it('shows pending persistence without speculating unread state or disabling the row', () => {
     const { store } = makeWorkspaceStore()
-    const { container, getByRole, queryByRole } = renderTreeItem(store, { attentionPending: true })
+    const { container, getByRole, queryByRole } = renderTreeItem(store)
+    act(() => { store.setState({ attentionPending: true }) })
     expect(getByRole('status', { name: 'Saving workspace attention' })).toBeTruthy()
     expect(container.querySelector('.tree-item')?.getAttribute('aria-busy')).toBe('true')
     expect(queryByRole('img', { name: 'Unread workspace activity' })).toBeNull()
+    act(() => { store.setState({ attentionPending: false }) })
+    expect(queryByRole('status', { name: 'Saving workspace attention' })).toBeNull()
   })
   it('keeps unread on click and clears only when committed metadata updates', () => {
     const { store } = makeWorkspaceStore({ workspaceAttention: JSON.stringify({ revision: 'event-1', acknowledgedRevision: '' }) })

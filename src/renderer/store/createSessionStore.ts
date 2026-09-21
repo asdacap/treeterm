@@ -30,12 +30,8 @@ export enum WorkspaceEntryStatus {
 export type WorkspaceEntry =
   | { status: WorkspaceEntryStatus.Loading; name: string; message: string; output: string[] }
   | { status: WorkspaceEntryStatus.Error; name: string; error: string }
-  | { status: WorkspaceEntryStatus.Loaded; data: Workspace; store: WorkspaceStore; attentionPending: boolean }
-  | { status: WorkspaceEntryStatus.OperationError; data: Workspace; store: WorkspaceStore; attentionPending: boolean; error: string }
-
-function getAttentionPending(entry: WorkspaceEntry | undefined): boolean {
-  return entry !== undefined && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) && entry.attentionPending
-}
+  | { status: WorkspaceEntryStatus.Loaded; data: Workspace; store: WorkspaceStore }
+  | { status: WorkspaceEntryStatus.OperationError; data: Workspace; store: WorkspaceStore; error: string }
 
 export type SessionEntry = { store: StoreApi<SessionState> }
 
@@ -437,7 +433,7 @@ export function createSessionStore(
     if (!entry) return
     if (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) {
       store.setState(s => ({
-        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: entry.data, store: entry.store, attentionPending: entry.attentionPending, error })
+        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: entry.data, store: entry.store, error })
       }))
     } else {
       store.setState(s => ({
@@ -447,12 +443,9 @@ export function createSessionStore(
   }
 
   function setAttentionPending(id: string, attentionPending: boolean): void {
-    store.setState(state => {
-      const entry = state.workspaces.get(id)
-      if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return state
-      if (entry.attentionPending === attentionPending) return state
-      return { workspaces: new Map(state.workspaces).set(id, { ...entry, attentionPending }) }
-    })
+    const entry = store.getState().workspaces.get(id)
+    if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return
+    entry.store.getState().setAttentionPending(attentionPending)
   }
 
   // Domain validation belongs with workspace reconciliation, not watch transport.
@@ -1067,7 +1060,7 @@ export function createSessionStore(
         }
 
         store.setState(s => ({
-          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: childWorkspace, store: handle, attentionPending: false })
+          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: childWorkspace, store: handle })
         }))
         await createWorkspaceFile(id, childWorkspace.path)
         await enqueueSync('addChildWorkspace')
@@ -1134,7 +1127,7 @@ export function createSessionStore(
     const handle = createHandleForWorkspace(childWorkspace)
 
     store.setState((s) => ({
-      workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: childWorkspace, store: handle, attentionPending: false }),
+      workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: childWorkspace, store: handle }),
       activeWorkspaceId: id
     }))
 
@@ -1223,20 +1216,20 @@ export function createSessionStore(
     const lockStatus = await acquireLock()
     if (!lockStatus.acquired) {
       store.setState(s => ({
-        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data, store: wsStore, attentionPending: getAttentionPending(s.workspaces.get(id)), error: lockStatus.error })
+        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data, store: wsStore, error: lockStatus.error })
       }))
       return
     }
 
     // Temporarily show loading in the main pane — preserve data+store for recovery
     store.setState(s => ({
-      workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data, store: wsStore, attentionPending: getAttentionPending(s.workspaces.get(id)) })
+      workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data, store: wsStore })
     }))
     try {
       await removeWorkspaceInternal(id, options)
     } catch (err) {
       store.setState(s => ({
-        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data, store: wsStore, attentionPending: getAttentionPending(s.workspaces.get(id)), error: err instanceof Error ? err.message : String(err) })
+        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data, store: wsStore, error: err instanceof Error ? err.message : String(err) })
       }))
     } finally {
       await releaseLock().catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
@@ -1272,7 +1265,7 @@ export function createSessionStore(
       const parentHasChanges = await deps.git.hasUncommittedChanges(parent.path)
       if (parentHasChanges) {
         store.setState(s => ({
-          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, attentionPending: getAttentionPending(s.workspaces.get(id)), error: 'Parent workspace has uncommitted changes. Commit or stash them before merging.' })
+          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, error: 'Parent workspace has uncommitted changes. Commit or stash them before merging.' })
         }))
         return { success: false, error: 'Parent workspace has uncommitted changes. Commit or stash them before merging.' }
       }
@@ -1285,7 +1278,7 @@ export function createSessionStore(
         )
         if (!commitResult.success) {
           store.setState(s => ({
-            workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, attentionPending: getAttentionPending(s.workspaces.get(id)), error: `Failed to commit changes: ${commitResult.error}` })
+            workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, error: `Failed to commit changes: ${commitResult.error}` })
           }))
           return { success: false, error: `Failed to commit changes: ${commitResult.error}` }
         }
@@ -1299,7 +1292,7 @@ export function createSessionStore(
 
       if (!mergeResult.success) {
         store.setState(s => ({
-          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, attentionPending: getAttentionPending(s.workspaces.get(id)), error: `Merge failed: ${mergeResult.error}` })
+          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, error: `Merge failed: ${mergeResult.error}` })
         }))
         return { success: false, error: `Merge failed: ${mergeResult.error}` }
       }
@@ -1307,7 +1300,7 @@ export function createSessionStore(
       return { success: true }
     } catch (err) {
       store.setState(s => ({
-        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, attentionPending: getAttentionPending(s.workspaces.get(id)), error: err instanceof Error ? err.message : String(err) })
+        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, error: err instanceof Error ? err.message : String(err) })
       }))
       return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
@@ -1345,7 +1338,7 @@ export function createSessionStore(
           const workspaces = new Map(s.workspaces)
           for (const [id, entry] of Array.from(workspaces.entries())) {
             if (entry.status === WorkspaceEntryStatus.OperationError) {
-              workspaces.set(id, { status: WorkspaceEntryStatus.Loaded, data: entry.data, store: entry.store, attentionPending: entry.attentionPending })
+              workspaces.set(id, { status: WorkspaceEntryStatus.Loaded, data: entry.data, store: entry.store })
             }
           }
           return { workspaces }
@@ -1406,7 +1399,7 @@ export function createSessionStore(
       const entry = get().workspaces.get(id)
       if (!entry || entry.status !== WorkspaceEntryStatus.OperationError) return
       set((s) => ({
-        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: entry.data, store: entry.store, attentionPending: entry.attentionPending })
+        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: entry.data, store: entry.store })
       }))
     },
 
@@ -1507,7 +1500,7 @@ export function createSessionStore(
         }
 
         set(s => ({
-          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: workspace, store: handle, attentionPending: false })
+          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: workspace, store: handle })
         }))
         await createWorkspaceFile(id, workspace.path)
         void enqueueSync('addWorkspace')
@@ -1803,7 +1796,7 @@ export function createSessionStore(
           const currentEntry = get().workspaces.get(id)
           if (currentEntry && (currentEntry.status === WorkspaceEntryStatus.Loaded || currentEntry.status === WorkspaceEntryStatus.OperationError)) {
             store.setState(s => ({
-              workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: currentEntry.data, store: currentEntry.store, attentionPending: currentEntry.attentionPending, error: `Merge succeeded but cleanup failed: ${err instanceof Error ? err.message : String(err)}` })
+              workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: currentEntry.data, store: currentEntry.store, error: `Merge succeeded but cleanup failed: ${err instanceof Error ? err.message : String(err)}` })
             }))
           }
           return { success: false, error: err instanceof Error ? err.message : String(err) }
@@ -1839,7 +1832,7 @@ export function createSessionStore(
         const entry = get().workspaces.get(id)
         if (entry && entry.status === WorkspaceEntryStatus.OperationError) {
           store.setState(s => ({
-            workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: entry.data, store: entry.store, attentionPending: entry.attentionPending })
+            workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: entry.data, store: entry.store })
           }))
         }
 
@@ -2184,7 +2177,7 @@ function reconstructWorkspace(
   const handle = createHandleForWorkspace(workspace)
 
   store.setState((s) => ({
-    workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: workspace, store: handle, attentionPending: false }),
+    workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: workspace, store: handle }),
     activeWorkspaceId: s.activeWorkspaceId ?? id
   }))
 

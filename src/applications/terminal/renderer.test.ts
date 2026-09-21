@@ -80,6 +80,8 @@ const mockWorkspaceStoreStateData = {
   settings: { defaultApplicationId: '' },
   metadata: {},
   appStates: {},
+  attentionPending: false,
+  setAttentionPending: vi.fn<(pending: boolean) => void>(),
   setWorkspace: vi.fn<(...args: any[]) => void>(),
   gitController: createStore<GitControllerState>()(() => ({
     hasUncommittedChanges: false,

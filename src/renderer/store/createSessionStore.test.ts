@@ -182,7 +182,7 @@ describe('createSessionStore', () => {
     function currentAttentionPending(): boolean {
       const entry = store.getState().workspaces.get('attention-ws')!
       if (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError) throw new Error('Not loaded')
-      return entry.attentionPending
+      return entry.store.getState().attentionPending
     }
 
     function currentAttention(): Record<string, string> {
@@ -203,6 +203,7 @@ describe('createSessionStore', () => {
       expect(currentAttentionPending()).toBe(true)
       const call = vi.mocked(deps.filesystem.writeFile).mock.calls.at(-1)!
       const content = call[2]
+      expect(content).not.toContain('attentionPending')
       fileWatchCallbacks.get('attention-ws.json')!({ type: FileWatchEventType.Present, content, sha256: await sha256Hex(content) })
       expect(hasUnreadWorkspaceAttention(currentAttention())).toBe(true)
       expect(currentAttentionPending()).toBe(false)
@@ -218,7 +219,11 @@ describe('createSessionStore', () => {
 
     it('preserves pending attention through operation errors, clearing and reconnect until watch confirmation', async () => {
       const ws = await loadAttentionWorkspace()
+      const originalEntry = store.getState().workspaces.get(ws.id)!
+      if (originalEntry.status !== WorkspaceEntryStatus.Loaded) throw new Error('Not loaded')
+      const workspaceStore = originalEntry.store
       store.getState().recordWorkspaceAttention(ws.id)
+      expect(store.getState().workspaces.get(ws.id)).toBe(originalEntry)
       await settleWrites()
       const content = vi.mocked(deps.filesystem.writeFile).mock.calls.at(-1)![2]
       const watch = fileWatchCallbacks.get('attention-ws.json')!
@@ -239,6 +244,9 @@ describe('createSessionStore', () => {
 
       watch({ type: FileWatchEventType.Present, content, sha256: await sha256Hex(content) })
       expect(currentAttentionPending()).toBe(false)
+      const confirmedEntry = store.getState().workspaces.get(ws.id)!
+      if (confirmedEntry.status !== WorkspaceEntryStatus.Loaded) throw new Error('Not loaded')
+      expect(confirmedEntry.store).toBe(workspaceStore)
     })
 
     it('handles own attention watch before write response without optimistic publication', async () => {
@@ -260,7 +268,9 @@ describe('createSessionStore', () => {
       vi.mocked(deps.filesystem.writeFile).mockImplementation(async (_dir, file, content) => {
         attempts++
         if (attempts === 1) {
+          expect(currentAttentionPending()).toBe(true)
           emitFilePresent({ ...ws, metadata: { displayName: 'Other window' } }, 'external-sha')
+          expect(currentAttentionPending()).toBe(true)
           return { success: false, conflict: true, error: 'conflict' }
         }
         fileWatchCallbacks.get(file)!({ type: FileWatchEventType.Present, content, sha256: await sha256Hex(content) })

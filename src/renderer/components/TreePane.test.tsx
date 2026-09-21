@@ -43,6 +43,7 @@ vi.mock('../store/contextMenu', async () => {
 
 function makeWorkspaceStore(prInfo: GitHubPrInfo | null) {
   return createStore<WorkspaceStoreState>()(() => ({
+    attentionPending: false,
     workspace: makeWorkspace() as unknown as Workspace,
     metadata: { displayName: 'My WS', isFavourite: 'true' },
     appStates: {},
@@ -69,10 +70,10 @@ function makePrInfo(
   }
 }
 
-function renderItem(store: ReturnType<typeof makeWorkspaceStore>, attentionPending = false) {
+function renderItem(store: ReturnType<typeof makeWorkspaceStore>) {
   const sessionStore = createStore<SessionState>()(() => ({
     activeWorkspaceId: null,
-    workspaces: new Map([['ws-1', { status: WorkspaceEntryStatus.Loaded, attentionPending, data: makeWorkspace(), store }]]),
+    workspaces: new Map([['ws-1', { status: WorkspaceEntryStatus.Loaded, data: makeWorkspace(), store }]]),
     setActiveWorkspace: vi.fn(),
   }) as unknown as SessionState) as unknown as StoreApi<SessionState>
   const rendered = render(
@@ -161,17 +162,13 @@ describe('favourite workspace unread attention', () => {
 })
 
 
-describe('FavouriteWorkspaceItem — entry attention state', () => {
-  it('renders pending from the loaded entry and removes the indicator when committed', () => {
-    const { sessionStore, getByRole, queryByRole } = renderItem(makeWorkspaceStore(null), true)
+describe('FavouriteWorkspaceItem — workspace attention state', () => {
+  it('renders pending from the workspace store and removes the indicator when committed', () => {
+    const store = makeWorkspaceStore(null)
+    const { getByRole, queryByRole } = renderItem(store)
+    act(() => { store.setState({ attentionPending: true }) })
     expect(getByRole('status', { name: 'Saving workspace attention' })).toBeTruthy()
-    act(() => {
-      sessionStore.setState(state => {
-        const entry = state.workspaces.get('ws-1')!
-        if (entry.status !== WorkspaceEntryStatus.Loaded) throw new Error('Not loaded')
-        return { workspaces: new Map(state.workspaces).set('ws-1', { ...entry, attentionPending: false }) }
-      })
-    })
+    act(() => { store.setState({ attentionPending: false }) })
     expect(queryByRole('status', { name: 'Saving workspace attention' })).toBeNull()
   })
 

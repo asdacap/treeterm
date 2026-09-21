@@ -39,6 +39,8 @@ const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => ({
   settings: { defaultApplicationId: '' },
   metadata: {},
   appStates: {},
+  attentionPending: false,
+  setAttentionPending: vi.fn<(pending: boolean) => void>(),
   setWorkspace: vi.fn<(...args: any[]) => void>(),
   gitApi: createMockGitApi(), gitHubApi: createMockGitHubApi(), filesystemApi: createMockFilesystemApi(), runActionsApi: createMockRunActionsApi(), execApi: createMockExecApi(),
   worktreeRegistryApi: createMockWorktreeRegistryApi(), saveRegistryEntry: vi.fn(),

@@ -47,6 +47,7 @@ export function FavouriteWorkspaceItem({
   workspaceStore: WorkspaceStore
   data: import('../types').Workspace
 }): React.JSX.Element | null {
+  const pending = useStore(workspaceStore, s => s.attentionPending)
   const unread = useStore(workspaceStore, s => hasUnreadWorkspaceAttention(s.metadata))
   const entry = useStore(sessionStore, s => s.workspaces.get(workspaceId))
   const isFavourite = useStore(workspaceStore, s => s.metadata.isFavourite === 'true')
@@ -66,7 +67,6 @@ export function FavouriteWorkspaceItem({
 
   if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return null
   if (!isFavourite) return null
-  const pending = entry.attentionPending
 
   const handleClick = () => {
     setActiveWorkspace(workspaceId)

@@ -79,7 +79,7 @@ function makeFakeApp(overrides: Partial<Application> = {}): Application {
 }
 
 function toLoaded(ws: Workspace): WorkspaceEntry {
-  return { status: WorkspaceEntryStatus.Loaded, attentionPending: false, data: ws, store: createWorkspaceStore(ws, makeHandleDeps()) }
+  return { status: WorkspaceEntryStatus.Loaded, data: ws, store: createWorkspaceStore(ws, makeHandleDeps()) }
 }
 
 describe('getUnmergedSubWorkspaces', () => {
@@ -1318,4 +1318,29 @@ describe('createWorkspaceStore', () => {
   // removeWorkspaceKeep*, onWorkspaceRemoved, mergeAndRemoveWorkspace,
   // closeAndCleanWorkspace, refreshGitInfo, syncSessionToDaemon) need to be
   // moved to a createSessionStore.test.ts file that tests against the session store.
+})
+
+
+describe('workspace attention persistence state', () => {
+  it('keeps transient pending across workspace updates without persisting it', () => {
+    const deps = makeHandleDeps()
+    const workspace = makeWorkspace()
+    const store = createWorkspaceStore(workspace, deps)
+    expect(store.getState().attentionPending).toBe(false)
+    store.getState().setAttentionPending(true)
+    expect(store.getState().attentionPending).toBe(true)
+    expect(store.getState().workspace).toBe(workspace)
+
+    const watched = makeWorkspace({ metadata: { displayName: 'Watched name' } })
+    store.getState().setWorkspace(watched)
+    expect(store.getState().workspace).toBe(watched)
+    expect(store.getState().attentionPending).toBe(true)
+    expect(store.getState().workspace).not.toHaveProperty('attentionPending')
+    expect(store.getState().metadata).not.toHaveProperty('attentionPending')
+
+    store.getState().setAttentionPending(false)
+    expect(store.getState().attentionPending).toBe(false)
+    expect(deps.syncToDaemon).not.toHaveBeenCalled()
+    store.getState().dispose()
+  })
 })

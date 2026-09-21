@@ -14,7 +14,7 @@ function workspace(tabIds: string[] = ['tab-1'], metadata: Record<string, string
 }
 
 function entry(data: Workspace): WorkspaceEntry {
-  return { status: WorkspaceEntryStatus.Loaded, attentionPending: false, data } as WorkspaceEntry
+  return { status: WorkspaceEntryStatus.Loaded, data } as WorkspaceEntry
 }
 
 function attention(revision: string, acknowledgedRevision = ''): Record<string, string> {
@@ -215,7 +215,7 @@ describe('workspace attention coordinator', () => {
     setTab(ActivityState.Completed)
     h.updateWorkspace(workspace())
     expect(h.record).not.toHaveBeenCalled()
-    h.session.setState({ workspaces: new Map([['ws-1', { ...entry(workspace()), status: WorkspaceEntryStatus.OperationError, attentionPending: false, error: 'operation failed' } as WorkspaceEntry]]) })
+    h.session.setState({ workspaces: new Map([['ws-1', { ...entry(workspace()), status: WorkspaceEntryStatus.OperationError, error: 'operation failed' } as WorkspaceEntry]]) })
     setTab(ActivityState.Working)
     setTab(ActivityState.Completed)
     expect(h.record).toHaveBeenCalledTimes(1)

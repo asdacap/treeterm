@@ -32,7 +32,7 @@ vi.mock('./PtyViewer', () => ({
 }))
 
 function loadedEntry(id: string, name: string, path: string): WorkspaceEntry {
-  return { status: WorkspaceEntryStatus.Loaded, attentionPending: false, data: { id, name, path } as Workspace, store: {} } as unknown as WorkspaceEntry
+  return { status: WorkspaceEntryStatus.Loaded, data: { id, name, path } as Workspace, store: {} } as unknown as WorkspaceEntry
 }
 
 function makeSessionStore(

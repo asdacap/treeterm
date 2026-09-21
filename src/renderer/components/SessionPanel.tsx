@@ -876,7 +876,8 @@ function TreeItemView({
 
 export function LoadedWorkspaceTreeItem({
   store, data, ...rest
-}: { store: WorkspaceStore; data: Workspace } & Omit<TreeItemViewProps, 'loadStatus' | 'ws' | 'displayName' | 'description' | 'tabIds' | 'isFavourite' | 'gitController' | 'unread'>): React.JSX.Element {
+}: { store: WorkspaceStore; data: Workspace } & Omit<TreeItemViewProps, 'loadStatus' | 'ws' | 'displayName' | 'description' | 'tabIds' | 'isFavourite' | 'gitController' | 'unread' | 'attentionPending'>): React.JSX.Element {
+  const attentionPending = useStore(store, s => s.attentionPending)
   const metadata = useStore(store, s => s.metadata)
   const appStates = useStore(store, s => s.appStates)
   const gitController = useStore(store, s => s.gitController)
@@ -890,6 +891,7 @@ export function LoadedWorkspaceTreeItem({
       loadStatus={undefined}
       isFavourite={isFavourite}
       unread={hasUnreadWorkspaceAttention(metadata)}
+      attentionPending={attentionPending}
       gitController={gitController}
       {...rest}
     />
@@ -898,7 +900,7 @@ export function LoadedWorkspaceTreeItem({
 
 function WorkspaceTreeItem({ entry, ...rest }: WorkspaceTreeItemProps): React.JSX.Element {
   if (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) {
-    return <LoadedWorkspaceTreeItem store={entry.store} data={entry.data} attentionPending={entry.attentionPending} {...rest} />
+    return <LoadedWorkspaceTreeItem store={entry.store} data={entry.data} {...rest} />
   }
   return (
     <TreeItemView
