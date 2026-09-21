@@ -8,11 +8,14 @@ import { classificationIdentity } from '../lib/classificationProvider'
 import type { Classification, ClassifierSettings } from '../types/classification'
 import type { LlmApi, Settings, PtyEvent } from '../types'
 import { PtyEventType } from '../../shared/ipc-types'
-import { DisposableStore, thenRegisterOrDispose } from '../../shared/lifecycle'
+import { DisposableStore, thenRegisterOrDispose, toDisposable } from '../../shared/lifecycle'
 import type { Tty } from './createTtyStore'
+import { createIdleDetector, idleTimeoutMs } from '../utils/idleDetector'
 
 export interface AnalyzerDeps {
   getSettings: () => Settings
+  /** Whether the owning workspace already shows an unread marker; lengthens the idle debounce. */
+  hasUnreadAttention: () => boolean
   llm: LlmApi
   updateMetadata: (key: string, value: string, reason: string) => void
   getDisplayName: () => string | undefined
@@ -103,10 +106,8 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   let terminal: Terminal | null = null
   let ownTty: Tty | null = null
   let dataVersion = 0
-  let lastVersion = 0
   let lastConfiguration = configurationIdentity()
   let pollInterval: ReturnType<typeof setInterval> | null = null
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null
   let titleTimer: ReturnType<typeof setTimeout> | null = null
   /** Owns the TTY attachment for the current start()/stop() cycle. */
   let streamOwner = new DisposableStore()
@@ -132,8 +133,8 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       : { ...connection, provider: ClassifierProvider.ChatCompletions, model: settings.terminalAnalyzer.model, reasoningEffort: settings.terminalAnalyzer.reasoningEffort }
   }
 
-  // Poll configuration as well as terminal output: a provider switch must reclassify
-  // an unchanged screen. Credentials are not stored in identity or history.
+  // Configuration is part of the idle detector's snapshot: a provider switch must
+  // reclassify an unchanged screen. Credentials are not stored in identity or history.
   function configurationIdentity(): string {
     const settings = deps.getSettings()
     const configuration = classifierSettings(settings)
@@ -200,6 +201,10 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     const settings = deps.getSettings()
     const providerSettings = classifierSettings(settings)
     const requestConfiguration = configurationIdentity()
+    if (requestConfiguration !== lastConfiguration) {
+      lastConfiguration = requestConfiguration
+      modelErrorShown = false
+    }
 
     if (!providerSettings.model) {
       if (!modelErrorShown) {
@@ -304,36 +309,14 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     }
   }
 
-  function startPolling(): void {
-    if (pollInterval) return
-    running = true
-
-    pollInterval = setInterval(() => {
-      const configuration = configurationIdentity()
-      if (dataVersion === lastVersion && configuration === lastConfiguration) return
-
-      if (configuration !== lastConfiguration) modelErrorShown = false
-      lastConfiguration = configuration
-      lastVersion = dataVersion
-      updateAiState(ActivityState.Working)
-
-      if (debounceTimer) clearTimeout(debounceTimer)
-      debounceTimer = setTimeout(() => { void analyze(); }, 500)
-    }, 500)
-  }
-
   function stopPolling(): void {
     running = false
-    // Releases the TTY event subscription. Before ownership moved onto the Tty this was
-    // a `() => void` the dependency type had silently erased, so it never ran.
+    // Releases the TTY event subscription and the idle detector. Before ownership moved
+    // onto the Tty this was a `() => void` the dependency type had silently erased, so it never ran.
     streamOwner.dispose()
     if (pollInterval) {
       clearInterval(pollInterval)
       pollInterval = null
-    }
-    if (debounceTimer) {
-      clearTimeout(debounceTimer)
-      debounceTimer = null
     }
     if (titleTimer) {
       clearTimeout(titleTimer)
@@ -348,7 +331,6 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     inFlightBuffer = null
     cache.length = 0
     dataVersion = 0
-    lastVersion = 0
     lastConfiguration = configurationIdentity()
     requestInFlight = false
     pendingAnalyze = false
@@ -478,15 +460,26 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       // clobbers the current TTY with its own already-disposed handle.
       const owner = streamOwner = new DisposableStore()
       let viewportText = extractBuffer()
+      const detector = createIdleDetector({
+        initialSnapshot: `${configurationIdentity()}\0${viewportText ?? ''}`,
+        idleTimeoutMs: () => idleTimeoutMs(deps.getSettings(), deps.hasUnreadAttention()),
+        onActivity: () => { updateAiState(ActivityState.Working) },
+        onIdle: () => { void analyze() },
+      })
+      owner.add(toDisposable(detector.destroy))
       const updateViewport = (): void => {
         if (owner.isDisposed) return
         const nextText = extractBuffer()
-        if (nextText === viewportText) return
-        viewportText = nextText
-        dataVersion++
+        if (nextText !== viewportText) {
+          viewportText = nextText
+          dataVersion++
+        }
+        detector.processSnapshot(`${configurationIdentity()}\0${nextText ?? ''}`)
       }
 
-      startPolling()
+      running = true
+      // Output arrives through the stream below; the tick only notices configuration changes.
+      pollInterval = setInterval(updateViewport, 500)
 
       // The daemon replays scrollback as Data events after attach, and an
       // already-exited PTY arrives as an Exit event — both land in onEvent below.

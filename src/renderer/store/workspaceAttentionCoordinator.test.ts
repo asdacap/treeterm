@@ -111,12 +111,13 @@ describe('workspace attention coordinator', () => {
     expect(h.playDing).toHaveBeenCalledTimes(1)
   })
 
-  it('does not suppress sound in the active view, acknowledges only watched unread metadata', () => {
+  it('does not record or ding in the active view, acknowledges only watched unread metadata', () => {
     useNavigationStore.setState({ activeView: { type: 'workspace', sessionId: 'session-1', workspaceId: 'ws-1' } })
     const h = setup()
     setTab(ActivityState.Working)
     setTab(ActivityState.Completed)
-    expect(h.playDing).toHaveBeenCalledTimes(1)
+    expect(h.record).not.toHaveBeenCalled()
+    expect(h.playDing).not.toHaveBeenCalled()
     expect(h.acknowledge).not.toHaveBeenCalled()
     h.updateWorkspace(workspace(['tab-1'], attention('rev-1')))
     expect(h.acknowledge).toHaveBeenCalledExactlyOnceWith('ws-1', 'rev-1')
@@ -124,6 +125,28 @@ describe('workspace attention coordinator', () => {
     expect(h.acknowledge).toHaveBeenCalledTimes(1)
     h.updateWorkspace(workspace(['tab-1'], attention('rev-2')))
     expect(h.acknowledge).toHaveBeenLastCalledWith('ws-1', 'rev-2')
+  })
+
+  it('does not record or ding while the workspace is already unread', () => {
+    const h = setup(workspace(['tab-1'], attention('rev-1')))
+    setTab(ActivityState.Working)
+    setTab(ActivityState.Idle)
+    expect(h.record).not.toHaveBeenCalled()
+    expect(h.playDing).not.toHaveBeenCalled()
+    h.updateWorkspace(workspace(['tab-1'], attention('rev-1', 'rev-1')))
+    setTab(ActivityState.Working)
+    setTab(ActivityState.Idle)
+    expect(h.record).toHaveBeenCalledExactlyOnceWith('ws-1')
+    expect(h.playDing).toHaveBeenCalledTimes(1)
+  })
+
+  it('dings for a background workspace when another workspace is viewed', () => {
+    useNavigationStore.setState({ activeView: { type: 'workspace', sessionId: 'session-1', workspaceId: 'other' } })
+    const h = setup()
+    setTab(ActivityState.Working)
+    setTab(ActivityState.Idle)
+    expect(h.record).toHaveBeenCalledExactlyOnceWith('ws-1')
+    expect(h.playDing).toHaveBeenCalledTimes(1)
   })
 
   it('requires the exact workspace view, not a session, another workspace or another session', () => {

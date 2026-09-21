@@ -23,6 +23,8 @@ describe('settings', () => {
         provider: ClassifierProvider.ChatCompletions,
         model: 'openai/gpt-oss-safeguard-20b',
         titleModel: 'openai/gpt-oss-safeguard-20b',
+        idleDebounceMs: 2000,
+        idleDebounceUnreadMs: 15000,
       })
       expect(defaults.terminal.fontSize).toBe(14)
       expect(defaults.terminal.fontFamily).toBe('Menlo, Monaco, Consolas, monospace')
@@ -92,6 +94,7 @@ describe('settings', () => {
       expect(settings.terminalAnalyzer).toMatchObject({
         provider: expectedProvider,
         model, titleModel: 'titles/chat',
+        idleDebounceMs: 2000, idleDebounceUnreadMs: 15000,
       })
       expect(settings.terminalAnalyzer).not.toHaveProperty('jevModel')
     })

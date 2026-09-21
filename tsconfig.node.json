@@ -30,6 +30,7 @@
     "src/renderer/store/createWorkspaceStore.ts",
     "src/renderer/store/createSessionStore.ts",
     "src/renderer/store/workspaceAttention.ts",
+    "src/renderer/utils/idleDetector.ts",
     "src/renderer/lib/worktreeRegistry.ts",
     "src/renderer/lib/classificationProvider.ts",
     "src/renderer/lib/homedir.ts",

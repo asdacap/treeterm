@@ -251,6 +251,8 @@ export interface Settings {
     reasoningEffort: ReasoningEffort
     safePaths: string[]     // Paths considered safe for permission_request classification
     bufferLines: number     // Number of lines to read from terminal buffer
+    idleDebounceMs: number  // Quiet output (ms) before a tab is idle / classified
+    idleDebounceUnreadMs: number // Same, while the workspace already has an unread marker
   }
   // GitHub integration
   github: {

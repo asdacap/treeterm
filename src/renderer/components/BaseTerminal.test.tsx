@@ -98,16 +98,17 @@ const { processedData, setTabState } = vi.hoisted(() => ({
   processedData: [] as string[],
   setTabState: vi.fn(),
 }))
-vi.mock('../utils/activityStateDetector', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../utils/activityStateDetector')>()
+vi.mock('../utils/idleDetector', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../utils/idleDetector')>()
   return {
-    createActivityStateDetector: (...args: Parameters<typeof actual.createActivityStateDetector>) => {
-      const detector = actual.createActivityStateDetector(...args)
+    ...actual,
+    createIdleDetector: (...args: Parameters<typeof actual.createIdleDetector>) => {
+      const detector = actual.createIdleDetector(...args)
       return {
         ...detector,
-        processData: (data: string): void => {
+        processSnapshot: (data: string): void => {
           processedData.push(data)
-          detector.processData(data)
+          detector.processSnapshot(data)
         },
       }
     },
@@ -122,8 +123,11 @@ vi.mock('../store/settings', () => {
   const settings = {
     terminal: { fontSize: 14, fontFamily: 'monospace', cursorBlink: true, cursorStyle: 'block', showRawChars: false, allowOsc52Clipboard: false },
     debug: { showBadge: false },
+    terminalAnalyzer: { idleDebounceMs: 1000, idleDebounceUnreadMs: 15000 },
   }
-  return { useSettingsStore: <T,>(selector: (s: { settings: unknown }) => T): T => selector({ settings }) }
+  const useSettingsStore = <T,>(selector: (s: { settings: unknown }) => T): T => selector({ settings })
+  useSettingsStore.getState = (): { settings: unknown } => ({ settings })
+  return { useSettingsStore }
 })
 vi.mock('../store/app', () => {
   const state = { clipboard: { writeText: () => {}, readText: () => {} }, openExternal: () => {} }
@@ -179,8 +183,8 @@ function makeFakeTty() {
   return { getState: () => state, state, dispose: vi.fn() }
 }
 
-function makeWorkspaceStore(tabId: string, options: { keepOnExit?: boolean; activeTabId?: string } = {}) {
-  const { keepOnExit = false, activeTabId = tabId } = options
+function makeWorkspaceStore(tabId: string, options: { keepOnExit?: boolean; activeTabId?: string; metadata?: Record<string, string> } = {}) {
+  const { keepOnExit = false, activeTabId = tabId, metadata = {} } = options
   const appRef = {
     cachedTerminal: null as CachedTerminal | null,
     disposeCachedTerminal: vi.fn(),
@@ -195,6 +199,7 @@ function makeWorkspaceStore(tabId: string, options: { keepOnExit?: boolean; acti
       activeTabId,
       appStates: { [tabId]: { applicationId: 'terminal', title: 'Terminal 1', state: { ptyId: 'pty1', keepOnExit } } },
     },
+    metadata,
     removeTab,
     getTabRef: () => appRef,
   }))
@@ -368,9 +373,9 @@ describe('BaseTerminal — terminal cache across unmount', () => {
 })
 
 describe('BaseTerminal — cached activity detector lifecycle', () => {
-  async function mount(disableActivityDetector = false) {
+  async function mount(disableActivityDetector = false, metadata: Record<string, string> = {}) {
     vi.useFakeTimers()
-    const { store: workspace, appRef } = makeWorkspaceStore('tab1')
+    const { store: workspace, appRef } = makeWorkspaceStore('tab1', { metadata })
     const session = makeLiveSessionStore()
     const stableConfig = { ...config, disableActivityDetector }
     const view = (): React.ReactNode => (
@@ -390,10 +395,10 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
     const { emit, unmount, view } = await mount()
     emit('working')
     expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working)
-    // Unmount during the debounced Idle transition, not just during its timeout.
-    act(() => { vi.advanceTimersByTime(1000) })
+    // Unmount just before the idle timeout elapses.
+    act(() => { vi.advanceTimersByTime(999) })
     unmount()
-    act(() => { vi.advanceTimersByTime(100) })
+    act(() => { vi.advanceTimersByTime(1) })
     expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle)
 
     render(view())
@@ -439,6 +444,15 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
     act(() => { vi.advanceTimersByTime(2000) })
     expect(setTabState).toHaveBeenCalledTimes(1)
     expect(processedData).toHaveLength(1)
+  })
+
+  it('waits for the unread idle debounce while the workspace carries an unread marker', async () => {
+    const { emit } = await mount(false, { workspaceAttention: JSON.stringify({ revision: 'r1', acknowledgedRevision: '' }) })
+    emit('working')
+    act(() => { vi.advanceTimersByTime(14999) })
+    expect(setTabState).toHaveBeenCalledTimes(1)
+    act(() => { vi.advanceTimersByTime(1) })
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle)
   })
 
   it('does not detect activity for terminals configured to use an external analyzer', async () => {

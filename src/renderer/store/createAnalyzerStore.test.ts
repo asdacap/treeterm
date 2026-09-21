@@ -68,8 +68,11 @@ function makeDeps(overrides?: Partial<AnalyzerDeps>): AnalyzerDeps {
         reasoningEffort: 'low',
         safePaths: ['/tmp'],
         bufferLines: 10,
+        idleDebounceMs: 500,
+        idleDebounceUnreadMs: 15000,
       },
     } as unknown as Settings),
+    hasUnreadAttention: vi.fn().mockReturnValue(false),
     llm: {
       analyzeTerminal: vi.fn().mockResolvedValue({ state: 'idle', reason: 'prompt visible' }),
       generateTitle: vi.fn().mockResolvedValue({ title: 'Test Title', description: 'Test Description', branchName: 'test-title' }),
@@ -200,7 +203,7 @@ describe('createAnalyzerStore', () => {
     deps = makeDeps({
       getSettings: vi.fn().mockReturnValue({
         llm: { apiKey: '', baseUrl: '' },
-        terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, titleModel: 'test-model', model: '', systemPrompt: '', titleSystemPrompt: '', reasoningEffort: 'off', safePaths: [], bufferLines: 10 },
+        terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, titleModel: 'test-model', model: '', systemPrompt: '', titleSystemPrompt: '', reasoningEffort: 'off', safePaths: [], bufferLines: 10, idleDebounceMs: 500, idleDebounceUnreadMs: 15000 },
       } as unknown as Settings),
       openTtyStream: makeTtyStreamMock(mock, []),
     })
@@ -210,8 +213,8 @@ describe('createAnalyzerStore', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     mock.emitData('$ hello')
-    await vi.advanceTimersByTimeAsync(500)
-    // Poll fires and sets 'working', then schedules analyze
+    await vi.advanceTimersByTimeAsync(0)
+    // A viewport change sets 'working' immediately, then the idle debounce schedules analyze
     expect(store.getState().aiState).toBe(ActivityState.Working)
     await vi.advanceTimersByTimeAsync(500)
     // analyze() sees missing model and sets error once
@@ -222,7 +225,7 @@ describe('createAnalyzerStore', () => {
     const callCount = vi.mocked(deps.setActivityTabState).mock.calls.length
     mock.emitData('$ more data')
     await vi.advanceTimersByTimeAsync(1000)
-    expect(vi.mocked(deps.setActivityTabState).mock.calls.length).toBe(callCount + 1) // only the Working state from poll
+    expect(vi.mocked(deps.setActivityTabState).mock.calls.length).toBe(callCount + 1) // only the Working state from the detector
 
     store.getState().stop()
     vi.useRealTimers()
@@ -234,7 +237,7 @@ describe('createAnalyzerStore', () => {
     deps = makeDeps({
       getSettings: vi.fn().mockReturnValue({
         llm: { apiKey: '', baseUrl: 'http://localhost:11434/v1' },
-        terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, titleModel: 'test-model', model: 'llama3', systemPrompt: 'test prompt', titleSystemPrompt: 'title prompt', reasoningEffort: 'off', safePaths: [], bufferLines: 10 },
+        terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, titleModel: 'test-model', model: 'llama3', systemPrompt: 'test prompt', titleSystemPrompt: 'title prompt', reasoningEffort: 'off', safePaths: [], bufferLines: 10, idleDebounceMs: 500, idleDebounceUnreadMs: 15000 },
       } as unknown as Settings),
       openTtyStream: makeTtyStreamMock(mock, []),
     })
@@ -1433,6 +1436,30 @@ describe('createAnalyzerStore', () => {
     await store.getState().refreshTitleAndDescription()
     expect(deps.llm.generateTitle).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ model: 'test-model' }))
     expect(store.getState().getHistory().at(-1)).toMatchObject({ kind: 'title', model: 'test-model' })
+    store.getState().stop()
+    vi.useRealTimers()
+  })
+
+  it('waits for the unread idle debounce while the workspace carries an unread marker', async () => {
+    vi.useFakeTimers()
+    const mock = makeMockTty()
+    const hasUnreadAttention = vi.fn().mockReturnValue(true)
+    const deps = makeDeps({ hasUnreadAttention, openTtyStream: makeTtyStreamMock(mock) })
+    const store = createAnalyzerStore('tab-1', deps)
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0)
+    mock.emitData('$ ')
+    await vi.advanceTimersByTimeAsync(14999)
+    expect(store.getState().aiState).toBe(ActivityState.Working)
+    expect(deps.llm.analyzeTerminal).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
+
+    // Once acknowledged, the next burst uses the short debounce again.
+    hasUnreadAttention.mockReturnValue(false)
+    mock.emitData('$ ls')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(2)
     store.getState().stop()
     vi.useRealTimers()
   })

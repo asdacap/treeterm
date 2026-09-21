@@ -1577,7 +1577,12 @@ describe('createSessionStore', () => {
     })
 
     it('handleExternalUpdate removes refs gone from the daemon and adds new ones', async () => {
+      const updatesBefore = vi.mocked(deps.sessionApi.update).mock.calls.length
       store.getState().addWorkspace('/existing')
+      // The add must be published before the external update: reconcileRefs keeps an
+      // unpublished workspace by design. Publishing lands after writeFile + an async
+      // sha256 hop, so wait for the ref sync to be sent and then for its accept to apply.
+      while (vi.mocked(deps.sessionApi.update).mock.calls.length === updatesBefore) await flushPromises()
       await flushPromises()
       const existingId = Array.from(store.getState().workspaces.keys())[0]
 

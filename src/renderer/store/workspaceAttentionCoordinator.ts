@@ -53,7 +53,14 @@ export function createWorkspaceAttentionCoordinator(deps: WorkspaceAttentionCoor
       const current = activity.getWorkspaceState(tabIds)
       const previous = tracked.baselines.get(id)
       tracked.baselines.set(id, { membership, activity: current })
-      if (activityChanged && previous?.membership === membership && previous.activity === ActivityState.Working && current !== ActivityState.Working) {
+      // ActiveView is an existing string-discriminated navigation type.
+      // eslint-disable-next-line custom/no-string-literal-comparison
+      const isActiveView = activeView?.type === 'workspace' && activeView.sessionId === session.sessionId && activeView.workspaceId === id
+      const unread = hasUnreadWorkspaceAttention(entry.data.metadata)
+      // Finishing while watched needs no marker (it would be acknowledged in the next observe)
+      // and finishing while already unread must not re-ring or bump a revision another window
+      // may be acknowledging.
+      if (activityChanged && previous?.membership === membership && previous.activity === ActivityState.Working && current !== ActivityState.Working && !isActiveView && !unread) {
         actions.push(() => {
           session.recordWorkspaceAttention(id)
           if (deps.soundEnabled()) {
@@ -61,13 +68,11 @@ export function createWorkspaceAttentionCoordinator(deps: WorkspaceAttentionCoor
           }
         })
       }
-      if (!hasUnreadWorkspaceAttention(entry.data.metadata)) {
+      if (!unread) {
         tracked.acknowledged.delete(id)
         continue
       }
-      // ActiveView is an existing string-discriminated navigation type.
-      // eslint-disable-next-line custom/no-string-literal-comparison
-      if (activeView?.type !== 'workspace' || activeView.sessionId !== session.sessionId || activeView.workspaceId !== id) continue
+      if (!isActiveView) continue
       const { revision } = getWorkspaceAttention(entry.data.metadata)
       if (tracked.acknowledged.get(id) === revision) continue
       tracked.acknowledged.set(id, revision)

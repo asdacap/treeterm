@@ -20,6 +20,7 @@ import type { ReviewViewedFilesStore } from './createReviewViewedFilesStore'
 import { DisposableMap, DisposableStore } from '../../shared/lifecycle'
 import type { IDisposable } from '../../shared/lifecycle'
 import { getWorkspaceFavouritePaths, isFavouritePath, normalizeFavouritePath } from '../../shared/workspaceFavourites'
+import { hasUnreadWorkspaceAttention } from './workspaceAttention'
 
 /** The LLM labeller reads the AI Harness terminal buffer; without one there is nothing to label from. */
 const NO_AI_HARNESS_TAB: TitleRefreshResult = {
@@ -345,6 +346,7 @@ export function createWorkspaceStore(
 
     initAnalyzer: (tabId: string): Analyzer => createAnalyzerStore(tabId, {
       getSettings: deps.getSettings,
+      hasUnreadAttention: () => hasUnreadWorkspaceAttention(get().metadata),
       llm: deps.llm,
       updateMetadata: (key, value, reason) => { get().updateMetadata(key, value, reason); },
       getDisplayName: () => get().metadata.displayName,

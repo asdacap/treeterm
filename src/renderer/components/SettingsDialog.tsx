@@ -921,6 +921,46 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                 </div>
 
                 <div className="settings-group">
+                  <label className="settings-label">Idle Debounce (ms)</label>
+                  <input
+                    type="number"
+                    className="settings-input"
+                    min={0}
+                    step={100}
+                    value={localSettings.terminalAnalyzer.idleDebounceMs}
+                    onChange={(e) =>
+                      { setLocalSettings((prev) => ({
+                        ...prev,
+                        terminalAnalyzer: { ...prev.terminalAnalyzer, idleDebounceMs: parseInt(e.target.value) || 2000 }
+                      })); }
+                    }
+                  />
+                  <p className="settings-hint">
+                    Milliseconds of quiet terminal output before a tab is considered idle or classified.
+                  </p>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label">Idle Debounce When Unread (ms)</label>
+                  <input
+                    type="number"
+                    className="settings-input"
+                    min={0}
+                    step={100}
+                    value={localSettings.terminalAnalyzer.idleDebounceUnreadMs}
+                    onChange={(e) =>
+                      { setLocalSettings((prev) => ({
+                        ...prev,
+                        terminalAnalyzer: { ...prev.terminalAnalyzer, idleDebounceUnreadMs: parseInt(e.target.value) || 15000 }
+                      })); }
+                    }
+                  />
+                  <p className="settings-hint">
+                    Same, while the workspace already shows an unread marker.
+                  </p>
+                </div>
+
+                <div className="settings-group">
                   <label className="settings-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     Reasoning
                     <select

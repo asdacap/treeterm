@@ -5,9 +5,10 @@ import { useSettingsStore } from '../store/settings'
 import { useAppStore } from '../store/app'
 import { useActivityStateStore } from '../store/activityState'
 import { useSessionApi } from '../contexts/SessionStoreContext'
-import { createActivityStateDetector } from '../utils/activityStateDetector'
+import { createIdleDetector, idleTimeoutMs } from '../utils/idleDetector'
+import { hasUnreadWorkspaceAttention } from '../store/workspaceAttention'
 import type { Tty } from '../store/createTtyStore'
-import { ScrollPosition } from '../types'
+import { ActivityState, ScrollPosition } from '../types'
 import type { CachedTerminal, TerminalAppRef, PtyEvent, SandboxConfig, TerminalState, WorkspaceStore } from '../types'
 import type { TerminalBufferHost, TerminalEngine, TerminalEngineFactory } from '../terminal/engine'
 import { snapshotViewport } from '../terminal/engine'
@@ -413,9 +414,15 @@ export default function BaseTerminal({
 
         // Activity belongs to the cached terminal, not its mounted view. Background output
         // and pending Idle transitions must keep running across workspace switches.
+        // The detector outlives settings changes, so the timeout is read when each timer is armed.
         const detector = config.disableActivityDetector
           ? null
-          : createActivityStateDetector((state) => { setTabState(tabId, state) })
+          : createIdleDetector({
+            initialSnapshot: snapshotViewport(engine),
+            idleTimeoutMs: () => idleTimeoutMs(useSettingsStore.getState().settings, hasUnreadWorkspaceAttention(workspace.getState().metadata)),
+            onActivity: () => { setTabState(tabId, ActivityState.Working) },
+            onIdle: () => { setTabState(tabId, ActivityState.Idle) },
+          })
         if (detector) owner.add(toDisposable(detector.destroy))
 
         // Create cache entry — event handler is registered before the stream starts
@@ -425,7 +432,7 @@ export default function BaseTerminal({
           owner,
           processActivity: () => {
             // An asynchronous engine write can finish after actual cache disposal.
-            if (!owner.isDisposed && detector) detector.processData(snapshotViewport(engine))
+            if (!owner.isDisposed && detector) detector.processSnapshot(snapshotViewport(engine))
           },
           mountedHandler: null,
           connectedAt: Date.now(),

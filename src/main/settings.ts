@@ -78,7 +78,9 @@ const defaultSettings: Settings = {
     titleSystemPrompt: 'Given the terminal output below, suggest a short title (max 5 words), a brief description (max 15 words), and a git branch name (lowercase kebab-case, max 4 words). Respond with ONLY a JSON object: {"title": "<title>", "description": "<description>", "branchName": "<branch-name>"}',
     reasoningEffort: 'low' as ReasoningEffort,
     safePaths: ['/tmp'],
-    bufferLines: 30
+    bufferLines: 30,
+    idleDebounceMs: 2000,
+    idleDebounceUnreadMs: 15000
   },
   github: {
     pat: '',
