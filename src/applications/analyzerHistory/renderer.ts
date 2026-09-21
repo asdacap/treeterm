@@ -4,7 +4,7 @@ import AnalyzerHistory from '../../renderer/components/AnalyzerHistory'
 
 export const analyzerHistoryApplication: Application = {
   id: 'analyzer-history',
-  name: 'Analyzer History',
+  name: 'Activity History',
   icon: '📊',
   createInitialState: () => ({}),
   onWorkspaceLoad: () => ({ close: () => {}, dispose: () => {} }),

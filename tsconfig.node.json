@@ -22,6 +22,7 @@
     "src/generated/**/*.ts",
     "src/renderer/types/**/*.ts",
     "src/renderer/terminal/engine.ts",
+    "src/renderer/store/activityState.ts",
     "src/renderer/store/createTtyStore.ts",
     "src/renderer/store/createAnalyzerStore.ts",
     "src/renderer/store/createGitControllerStore.ts",

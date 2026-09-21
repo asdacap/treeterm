@@ -3,11 +3,13 @@ import { createStore, type StoreApi } from 'zustand/vanilla'
 import { ConnectionStatus, ConnectionTargetType } from '../../shared/types'
 import { makeWorkspace } from '../../shared/test-fixtures/workspace'
 import { ActivityState, type Workspace } from '../types'
-import { useActivityStateStore } from './activityState'
+import { ActivityTransitionKind, useActivityStateStore, type ActivityTransitionDetail } from './activityState'
 import { useNavigationStore } from './navigation'
 import { WorkspaceEntryStatus, type SessionState, type WorkspaceEntry } from './createSessionStore'
 import { createWorkspaceAttentionCoordinator } from './workspaceAttentionCoordinator'
 import { WORKSPACE_ATTENTION_KEY } from './workspaceAttention'
+
+const DETAIL: ActivityTransitionDetail = { kind: ActivityTransitionKind.ViewportChanged, snapshot: '' }
 
 function workspace(tabIds: string[] = ['tab-1'], metadata: Record<string, string> = {}): Workspace {
   return makeWorkspace({ appStates: Object.fromEntries(tabIds.map(id => [id, { applicationId: 'terminal', title: id, state: {} }])), metadata })
@@ -66,10 +68,10 @@ function setup(initialWorkspace = workspace()): {
 }
 
 const cleanups: (() => void)[] = []
-const setTab = (state: ActivityState, id = 'tab-1'): void => { useActivityStateStore.getState().setTabState(id, state) }
+const setTab = (state: ActivityState, id = 'tab-1'): void => { useActivityStateStore.getState().setTabState(id, state, DETAIL) }
 
 beforeEach(() => {
-  useActivityStateStore.setState({ states: {} })
+  useActivityStateStore.setState({ states: {}, transitions: {} })
   useNavigationStore.setState({ activeView: null })
 })
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup() })

@@ -12,8 +12,6 @@ import type { SandboxConfig, WorkspaceStore } from '../types'
 import { isAiHarnessState } from '../types'
 import type { AiHarnessRef } from '../../applications/aiHarness/renderer'
 import type { AnalyzerState } from '../store/createAnalyzerStore'
-import { useContextMenuStore } from '../store/contextMenu'
-import ContextMenu from './ContextMenu'
 import { ToggleSwitch } from './ToggleSwitch'
 import { IdleDetectorToggle } from './IdleDetectorToggle'
 import { ActivityStateBadge } from './ActivityStateBadge'
@@ -135,49 +133,22 @@ function AiHarnessStatusBar({ analyzer, workspace, tabId }: AiHarnessStatusBarPr
   const reason = useStore(analyzer, s => s.reason)
   const autoApprove = useStore(analyzer, s => s.autoApprove)
 
-  const openContextMenu = useContextMenuStore((s) => s.open)
-  const closeContextMenu = useContextMenuStore((s) => s.close)
-  const activeMenuId = useContextMenuStore((s) => s.activeMenuId)
-  const menuPosition = useContextMenuStore((s) => s.position)
-  const badgeMenuId = `ai-badge-${tabId}`
-
-  const handleBadgeContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    openContextMenu(badgeMenuId, e.clientX, e.clientY)
-  }
-
-  const handleDebugAnalyzer = () => {
-    closeContextMenu()
-    const bufferText = analyzer.getState().getBufferText()
-    if (!bufferText) return
-    workspace.getState().addTab('system-prompt-debugger', { bufferText })
-  }
-
-  const handleViewHistory = () => {
-    closeContextMenu()
-    workspace.getState().addTab('analyzer-history', { sourceTabId: tabId })
-  }
-
   return (
-    <>
-      <div className="terminal-status-bar">
-        <ActivityStateBadge state={aiState} analyzing={analyzing} title={reason} onContextMenu={handleBadgeContextMenu} />
-        <ToggleSwitch
-          checked={autoApprove}
-          label="Auto-approve safe"
-          onChange={(checked) => { analyzer.getState().setAutoApprove(checked) }}
-        />
-        <IdleDetectorToggle workspace={workspace} tabId={tabId} />
-      </div>
-      <ContextMenu menuId={badgeMenuId} activeMenuId={activeMenuId} position={menuPosition}>
-        <div className="context-menu-item" onClick={handleDebugAnalyzer}>
-          Debug System Prompt
-        </div>
-        <div className="context-menu-item" onClick={handleViewHistory}>
-          History
-        </div>
-      </ContextMenu>
-    </>
+    <div className="terminal-status-bar">
+      <ActivityStateBadge
+        workspace={workspace}
+        tabId={tabId}
+        state={aiState}
+        analyzing={analyzing}
+        title={reason}
+        getBufferText={() => analyzer.getState().getBufferText() ?? ''}
+      />
+      <ToggleSwitch
+        checked={autoApprove}
+        label="Auto-approve safe"
+        onChange={(checked) => { analyzer.getState().setAutoApprove(checked) }}
+      />
+      <IdleDetectorToggle workspace={workspace} tabId={tabId} />
+    </div>
   )
 }

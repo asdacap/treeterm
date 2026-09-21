@@ -3,7 +3,7 @@ import { useStore } from 'zustand'
 import { log } from '../utils/logger'
 import { useSettingsStore } from '../store/settings'
 import { useAppStore } from '../store/app'
-import { useActivityStateStore } from '../store/activityState'
+import { ActivityTransitionKind, useActivityStateStore } from '../store/activityState'
 import { useSessionApi } from '../contexts/SessionStoreContext'
 import { createIdleDetector, idleTimeoutMs } from '../utils/idleDetector'
 import { hasUnreadWorkspaceAttention } from '../store/workspaceAttention'
@@ -422,11 +422,11 @@ export default function BaseTerminal({
             idleTimeoutMs: () => idleTimeoutMs(useSettingsStore.getState().settings, hasUnreadWorkspaceAttention(workspace.getState().metadata)),
             // Only the Working edge is gated: a pending Idle must still land after the user
             // turns the detector off, or the tab would stay Working forever.
-            onActivity: () => {
+            onActivity: (snapshot) => {
               if (isIdleDetectorDisabled(workspace.getState().workspace.appStates[tabId]?.state)) return
-              setTabState(tabId, ActivityState.Working)
+              setTabState(tabId, ActivityState.Working, { kind: ActivityTransitionKind.ViewportChanged, snapshot })
             },
-            onIdle: () => { setTabState(tabId, ActivityState.Idle) },
+            onIdle: (edge) => { setTabState(tabId, ActivityState.Idle, { kind: ActivityTransitionKind.ViewportIdle, ...edge }) },
           })
         if (detector) owner.add(toDisposable(detector.destroy))
 

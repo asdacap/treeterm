@@ -5,7 +5,7 @@ import { createStore } from 'zustand/vanilla'
 import Terminal from './Terminal'
 import GhosttyTerminal from './GhosttyTerminal'
 import type { BaseTerminalConfig } from './BaseTerminal'
-import { useActivityStateStore } from '../store/activityState'
+import { ActivityTransitionKind, useActivityStateStore } from '../store/activityState'
 import { ActivityState } from '../types'
 
 // Terminal / GhosttyTerminal pick an engine and wrap BaseTerminal in the status bar.
@@ -19,16 +19,34 @@ vi.mock('./BaseTerminal', () => ({
 }))
 vi.mock('../terminal/xtermEngine', () => ({ createXtermEngine: vi.fn() }))
 vi.mock('../terminal/ghosttyEngine', () => ({ createGhosttyEngine: vi.fn() }))
+// The badge's context menu pulls in the context-menu store (→ app store → monaco); mock it
+// so this lightweight suite stays free of the editor stack.
+vi.mock('../store/contextMenu', async () => {
+  const { create } = await import('zustand')
+  const store = create<{
+    activeMenuId: string | null
+    position: { x: number; y: number }
+    open: (menuId: string, x: number, y: number) => void
+    close: () => void
+  }>()((set) => ({
+    activeMenuId: null,
+    position: { x: 0, y: 0 },
+    open: (menuId, x, y) => { set({ activeMenuId: menuId, position: { x, y } }); },
+    close: () => { set({ activeMenuId: null }); },
+  }))
+  return { useContextMenuStore: store }
+})
 
 beforeEach(() => {
   configs.length = 0
-  useActivityStateStore.setState({ states: {} })
+  useActivityStateStore.setState({ states: {}, transitions: {} })
 })
 
 function makeWorkspaceStore(state: unknown) {
   return createStore<Record<string, unknown>>()(() => ({
     workspace: { id: 'ws1', activeTabId: 'tab1', appStates: { tab1: { applicationId: 'terminal', title: 'T', state } } },
     updateTabState: vi.fn(),
+    getTabRef: () => null,
   }))
 }
 
@@ -53,7 +71,7 @@ describe('Terminal', () => {
     const badge = container.querySelector('.terminal-status-bar .activity-state-badge')!
     expect(badge.textContent).toBe('idle')
 
-    act(() => { useActivityStateStore.getState().setTabState('tab1', ActivityState.Working) })
+    act(() => { useActivityStateStore.getState().setTabState('tab1', ActivityState.Working, { kind: ActivityTransitionKind.ViewportChanged, snapshot: '$ ls' }) })
     expect(badge.textContent).toBe('working')
   })
 

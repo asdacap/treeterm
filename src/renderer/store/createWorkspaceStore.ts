@@ -1,7 +1,8 @@
 /* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { Workspace, AppRef, AppRegistryApi, AppState, GitApi, FilesystemApi, ExecApi, RunActionsApi, WorkspaceGitApi, WorkspaceFilesystemApi, WorkspaceGitHubApi, LlmApi, Settings, ActivityState, WorktreeSettings, SandboxConfig, GitHubApi, PtyEvent } from '../types'
+import type { Workspace, AppRef, AppRegistryApi, AppState, GitApi, FilesystemApi, ExecApi, RunActionsApi, WorkspaceGitApi, WorkspaceFilesystemApi, WorkspaceGitHubApi, LlmApi, Settings, WorktreeSettings, SandboxConfig, GitHubApi, PtyEvent } from '../types'
+import type { SetActivityTabState } from './activityState'
 import type { WorktreeRegistryApi } from '../lib/worktreeRegistry'
 import { buildEntryFromWorkspace } from '../lib/worktreeRegistry'
 import { MAX_READ_FILE_BYTES } from '../lib/fileLimits'
@@ -82,7 +83,7 @@ export interface WorkspaceStoreDeps {
   runActions: RunActionsApi
   getSettings: () => Settings
   llm: LlmApi
-  setActivityTabState: (tabId: string, state: ActivityState) => void
+  setActivityTabState: SetActivityTabState
   // Session-level callbacks
   syncToDaemon: (reason: string) => void
   removeWorkspace: (id: string) => Promise<void>

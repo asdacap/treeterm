@@ -550,7 +550,7 @@ function getOrCreateSession(
       github: boundGithub,
       worktreeRegistry: boundWorktreeRegistry,
       llm: createLlmClient(),
-      setActivityTabState: (tabId, state) => { useActivityStateStore.getState().setTabState(tabId, state); },
+      setActivityTabState: (tabId, state, detail) => { useActivityStateStore.getState().setTabState(tabId, state, detail); },
     }
   )
   set((state) => ({

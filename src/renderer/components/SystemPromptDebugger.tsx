@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSettingsStore } from '../store/settings'
-import { useActivityStateStore } from '../store/activityState'
+import { ActivityTransitionKind, useActivityStateStore } from '../store/activityState'
 import { ActivityState } from '../types'
 import type { ApplicationRenderProps } from '../types'
 import { ReasoningEffort } from '../../shared/types'
@@ -64,7 +64,7 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
     setError(null)
     setResult(null)
     setDuration(null)
-    setTabState(tab.id, ActivityState.Working)
+    setTabState(tab.id, ActivityState.Working, { kind: ActivityTransitionKind.Debugger, snapshot: bufferText })
 
     const start = Date.now()
     try {
@@ -83,10 +83,10 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
         setDuration(Date.now() - start)
         if ('error' in response) {
           setError(response.error)
-          setTabState(tab.id, ActivityState.Error)
+          setTabState(tab.id, ActivityState.Error, { kind: ActivityTransitionKind.Debugger, snapshot: bufferText })
         } else {
           setResult(JSON.stringify(response))
-          setTabState(tab.id, response.state as ActivityState)
+          setTabState(tab.id, response.state as ActivityState, { kind: ActivityTransitionKind.Debugger, snapshot: bufferText })
         }
       } else {
         const response = await llm.generateTitle(bufferText, {
@@ -99,16 +99,16 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
         setDuration(Date.now() - start)
         if ('error' in response) {
           setError(response.error)
-          setTabState(tab.id, ActivityState.Error)
+          setTabState(tab.id, ActivityState.Error, { kind: ActivityTransitionKind.Debugger, snapshot: bufferText })
         } else {
           setResult(JSON.stringify(response))
-          setTabState(tab.id, ActivityState.Completed)
+          setTabState(tab.id, ActivityState.Completed, { kind: ActivityTransitionKind.Debugger, snapshot: bufferText })
         }
       }
     } catch (err) {
       setDuration(Date.now() - start)
       setError(err instanceof Error ? err.message : String(err))
-      setTabState(tab.id, ActivityState.Error)
+      setTabState(tab.id, ActivityState.Error, { kind: ActivityTransitionKind.Debugger, snapshot: bufferText })
     } finally {
       setLoading(false)
     }

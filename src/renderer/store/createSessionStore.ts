@@ -11,11 +11,12 @@ import { FileWatchEventType, type PtyEvent, type FileWatchEvent } from '../../sh
 import { ConnectionStatus, WorkspaceStatus } from '../../shared/types'
 import type {
   Workspace, Session, AppState, GitInfo, WorkspaceRef,
-  ConnectionInfo, ActivityState, IpcResult,
+  ConnectionInfo, IpcResult,
   TerminalApi, GitApi, FilesystemApi, ExecApi, SessionApi, Settings, WorktreeSettings,
   Application, SandboxConfig, TTYSessionInfo, LlmApi, GitHubApi, RunActionsApi
 } from '../types'
 import { toDisposable } from '../../shared/lifecycle'
+import type { SetActivityTabState } from './activityState'
 import type { SessionLock } from '../../shared/types'
 import { defaultWorktreeSettings, parseWorkspaceFile, toStoredWorkspaceFile } from '../../shared/workspaceFile'
 import type { WorktreeRegistryApi } from '../lib/worktreeRegistry'
@@ -52,7 +53,7 @@ export interface SessionDeps {
   getSettings: () => Settings
   appRegistry: AppRegistryApi
   llm: LlmApi
-  setActivityTabState: (tabId: string, state: ActivityState) => void
+  setActivityTabState: SetActivityTabState
 }
 
 /** One worktree to load in an {@link SessionState.autoOpenWorktrees} batch. */

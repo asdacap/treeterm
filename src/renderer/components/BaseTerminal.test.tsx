@@ -6,6 +6,7 @@ import { createStore } from 'zustand/vanilla'
 import { SessionStoreContext } from '../contexts/SessionStoreContext'
 import BaseTerminal, { type BaseTerminalConfig, type TerminalContainerElement } from './BaseTerminal'
 import { ActivityState, ScrollPosition } from '../types'
+import { ActivityTransitionKind } from '../store/activityState'
 import { PtyEventType } from '../../shared/ipc-types'
 import type { CachedTerminal, PtyEvent } from '../types'
 import type { TerminalDisposable, TerminalEngine } from '../terminal/engine'
@@ -133,9 +134,10 @@ vi.mock('../store/app', () => {
   const state = { clipboard: { writeText: () => {}, readText: () => {} }, openExternal: () => {} }
   return { useAppStore: <T,>(selector: (s: typeof state) => T): T => selector(state) }
 })
-vi.mock('../store/activityState', () => {
+vi.mock('../store/activityState', async (importOriginal) => {
+  const { ActivityTransitionKind } = await importOriginal<typeof import('../store/activityState')>()
   const state = { setTabState }
-  return { useActivityStateStore: <T,>(selector: (s: typeof state) => T): T => selector(state) }
+  return { ActivityTransitionKind, useActivityStateStore: <T,>(selector: (s: typeof state) => T): T => selector(state) }
 })
 vi.mock('../store/contextMenu', () => {
   const state = { open: () => {}, close: () => {}, activeMenuId: null, position: { x: 0, y: 0 } }
@@ -401,7 +403,7 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
       emit('replay')
       expect(setTabState).not.toHaveBeenCalled()
       act(() => { vi.advanceTimersByTime(2000) })
-      expect(setTabState).toHaveBeenCalledExactlyOnceWith('tab1', ActivityState.Idle)
+      expect(setTabState).toHaveBeenCalledExactlyOnceWith('tab1', ActivityState.Idle, expect.objectContaining({ kind: ActivityTransitionKind.ViewportIdle }))
       setTabState.mockClear()
       processedData.length = 0
     }
@@ -414,21 +416,38 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
     emit('more scrollback')
     expect(setTabState).not.toHaveBeenCalled()
     act(() => { vi.advanceTimersByTime(2000) })
-    expect(setTabState).toHaveBeenCalledExactlyOnceWith('tab1', ActivityState.Idle)
+    expect(setTabState).toHaveBeenCalledExactlyOnceWith('tab1', ActivityState.Idle, {
+      kind: ActivityTransitionKind.ViewportIdle, snapshot: processedData.at(-1), idleTimeoutMs: 1000,
+    })
     emit('real work')
-    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working)
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working, expect.objectContaining({ kind: ActivityTransitionKind.ViewportChanged }))
+  })
+
+  it('records both edges with the screen that caused them and the armed timeout', async () => {
+    const { emit, settle } = await mount()
+    settle()
+    emit('working')
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working, {
+      kind: ActivityTransitionKind.ViewportChanged, snapshot: processedData.at(-1),
+    })
+    emit(' more')
+    act(() => { vi.advanceTimersByTime(1000) })
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle, {
+      kind: ActivityTransitionKind.ViewportIdle, snapshot: processedData.at(-1), idleTimeoutMs: 1000,
+    })
+    expect(processedData.at(-1)).toContain('more')
   })
 
   it('finishes pending Idle after unmount and stays idle on remount without new data', async () => {
     const { emit, unmount, view, settle } = await mount()
     settle()
     emit('working')
-    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working)
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working, expect.objectContaining({ kind: ActivityTransitionKind.ViewportChanged }))
     // Unmount just before the idle timeout elapses.
     act(() => { vi.advanceTimersByTime(999) })
     unmount()
     act(() => { vi.advanceTimersByTime(1) })
-    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle)
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle, expect.objectContaining({ kind: ActivityTransitionKind.ViewportIdle }))
 
     render(view())
     await flush()
@@ -443,7 +462,7 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
     unmount()
     act(() => { vi.advanceTimersByTime(1100) })
     emit('background change')
-    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working)
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working, expect.objectContaining({ kind: ActivityTransitionKind.ViewportChanged }))
     expect(processedData.at(-1)).toContain('background change')
 
     // Simulate a TUI repaint that leaves the parsed viewport unchanged.
@@ -454,7 +473,7 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
     await flush()
     emit('same screen')
     act(() => { vi.advanceTimersByTime(600) })
-    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle)
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle, expect.objectContaining({ kind: ActivityTransitionKind.ViewportIdle }))
     expect(setTabState).toHaveBeenCalledTimes(4)
   })
 
@@ -483,7 +502,7 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
     act(() => { vi.advanceTimersByTime(14999) })
     expect(setTabState).not.toHaveBeenCalled()
     act(() => { vi.advanceTimersByTime(1) })
-    expect(setTabState).toHaveBeenCalledExactlyOnceWith('tab1', ActivityState.Idle)
+    expect(setTabState).toHaveBeenCalledExactlyOnceWith('tab1', ActivityState.Idle, expect.objectContaining({ kind: ActivityTransitionKind.ViewportIdle, idleTimeoutMs: 15000 }))
   })
 
   it('skips the Working edge while the tab has the idle detector disabled', async () => {
@@ -493,24 +512,24 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
     expect(setTabState).not.toHaveBeenCalled()
     act(() => { vi.advanceTimersByTime(2000) })
     expect(setTabState).toHaveBeenCalledTimes(1)
-    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle)
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle, expect.objectContaining({ kind: ActivityTransitionKind.ViewportIdle }))
   })
 
   it('still settles to Idle when the detector is disabled mid-burst, and resumes when re-enabled', async () => {
     const { emit, setIdleDetectorDisabled, settle } = await mount()
     settle()
     emit('working')
-    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working)
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working, expect.objectContaining({ kind: ActivityTransitionKind.ViewportChanged }))
     setIdleDetectorDisabled(true)
     act(() => { vi.advanceTimersByTime(2000) })
-    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle)
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle, expect.objectContaining({ kind: ActivityTransitionKind.ViewportIdle }))
     emit('more spam')
     expect(setTabState).toHaveBeenCalledTimes(2)
 
     act(() => { vi.advanceTimersByTime(2000) })
     setIdleDetectorDisabled(false)
     emit('real work')
-    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working)
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working, expect.objectContaining({ kind: ActivityTransitionKind.ViewportChanged }))
   })
 
   it('does not detect activity for terminals configured to use an external analyzer', async () => {

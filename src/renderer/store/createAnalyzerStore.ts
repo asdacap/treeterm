@@ -3,6 +3,7 @@ import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
 import { Terminal } from '@xterm/xterm'
 import { ActivityState } from '../types'
+import { ActivityTransitionKind, type SetActivityTabState } from './activityState'
 import { ClassifierProvider } from '../../shared/types'
 import { classificationIdentity } from '../lib/classificationProvider'
 import type { Classification, ClassifierSettings } from '../types/classification'
@@ -22,7 +23,7 @@ export interface AnalyzerDeps {
   updateMetadata: (key: string, value: string, reason: string) => void
   getDisplayName: () => string | undefined
   getDescription: () => string | undefined
-  setActivityTabState: (tabId: string, state: ActivityState) => void
+  setActivityTabState: SetActivityTabState
   openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<Tty>
   cwd: string
   renameBranch: (oldName: string, newName: string) => Promise<void>
@@ -180,7 +181,11 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       aiState,
       ...(reason !== undefined ? { reason } : {}),
     }))
-    deps.setActivityTabState(tabId, aiState)
+    deps.setActivityTabState(tabId, aiState, {
+      kind: ActivityTransitionKind.Classification,
+      snapshot: extractBuffer() ?? '',
+      reason: reason ?? '',
+    })
   }
 
   async function analyze(): Promise<void> {

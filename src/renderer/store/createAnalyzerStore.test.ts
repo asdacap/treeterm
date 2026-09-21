@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createAnalyzerStore, TitleRefreshStatus } from './createAnalyzerStore'
 import type { AnalyzerDeps } from './createAnalyzerStore'
 import { ActivityState } from '../types'
+import { ActivityTransitionKind } from './activityState'
 import { ClassifierProvider } from '../../shared/types'
 import { createLlmClient, parseLlmJson } from '../lib/llmClient'
 import type { LlmApi, Settings } from '../types'
@@ -101,7 +102,7 @@ function makeDeps(overrides?: Partial<AnalyzerDeps>): AnalyzerDeps {
 async function settle(deps: AnalyzerDeps, mock: ReturnType<typeof makeMockTty>): Promise<void> {
   mock.emitData('replay')
   await vi.advanceTimersByTimeAsync(1000)
-  expect(deps.setActivityTabState).not.toHaveBeenCalledWith('tab-1', ActivityState.Working)
+  expect(deps.setActivityTabState).not.toHaveBeenCalledWith('tab-1', ActivityState.Working, expect.objectContaining({ kind: ActivityTransitionKind.Classification }))
   vi.mocked(deps.setActivityTabState).mockClear()
   vi.mocked(deps.llm.analyzeTerminal).mockClear()
 }
@@ -294,7 +295,7 @@ describe('createAnalyzerStore', () => {
     expect(store.getState().aiState).toBe(ActivityState.Idle)
     expect(store.getState().reason).toBe('prompt visible')
     expect(store.getState().analyzing).toBe(false)
-    expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', ActivityState.Idle)
+    expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', ActivityState.Idle, expect.objectContaining({ kind: ActivityTransitionKind.Classification }))
 
     store.getState().stop()
     vi.useRealTimers()
@@ -1152,13 +1153,17 @@ describe('createAnalyzerStore', () => {
 
     mock.emitData('$ echo hello\r\nhello\r\n$ ')
     vi.advanceTimersByTime(500) // poll detects change
-    // 'working' state set via updateAiState
-    expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', ActivityState.Working)
+    // 'working' state set via updateAiState; the detector edge carries no reason, only the screen
+    expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', ActivityState.Working, {
+      kind: ActivityTransitionKind.Classification, reason: '', snapshot: expect.stringContaining('hello') as string,
+    })
 
     vi.advanceTimersByTime(500) // debounce fires analyze
     await vi.advanceTimersByTimeAsync(0) // resolve async
-    // 'idle' state set after analysis completes
-    expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', ActivityState.Idle)
+    // 'idle' state set after analysis completes, with the classifier's reason
+    expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', ActivityState.Idle, {
+      kind: ActivityTransitionKind.Classification, reason: 'prompt visible', snapshot: expect.stringContaining('hello') as string,
+    })
 
     store.getState().stop()
     vi.useRealTimers()
@@ -1179,11 +1184,11 @@ describe('createAnalyzerStore', () => {
 
     vi.advanceTimersByTime(500)
     await vi.advanceTimersByTimeAsync(0)
-    expect(deps.setActivityTabState).toHaveBeenCalledExactlyOnceWith('tab-1', ActivityState.Idle)
+    expect(deps.setActivityTabState).toHaveBeenCalledExactlyOnceWith('tab-1', ActivityState.Idle, expect.objectContaining({ kind: ActivityTransitionKind.Classification }))
 
     mock.emitData('$ npm test\r\n')
     vi.advanceTimersByTime(500)
-    expect(deps.setActivityTabState).toHaveBeenLastCalledWith('tab-1', ActivityState.Working)
+    expect(deps.setActivityTabState).toHaveBeenLastCalledWith('tab-1', ActivityState.Working, expect.objectContaining({ kind: ActivityTransitionKind.Classification }))
 
     store.getState().stop()
     vi.useRealTimers()
@@ -1204,12 +1209,12 @@ describe('createAnalyzerStore', () => {
 
     mock.emitData('$ echo hello\r\nhello\r\n$ ')
     vi.advanceTimersByTime(500)
-    expect(deps.setActivityTabState).not.toHaveBeenCalledWith('tab-1', ActivityState.Working)
+    expect(deps.setActivityTabState).not.toHaveBeenCalledWith('tab-1', ActivityState.Working, expect.objectContaining({ kind: ActivityTransitionKind.Classification }))
 
     vi.advanceTimersByTime(500)
     await vi.advanceTimersByTimeAsync(0)
     expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
-    expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', ActivityState.Idle)
+    expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', ActivityState.Idle, expect.objectContaining({ kind: ActivityTransitionKind.Classification }))
 
     store.getState().stop()
     vi.useRealTimers()
@@ -1557,7 +1562,7 @@ describe('createAnalyzerStore', () => {
     expect(store.getState().analyzing).toBe(false)
     // eslint-disable-next-line @typescript-eslint/unbound-method -- mocked TTY method
     expect(mock.ttyState.write).not.toHaveBeenCalled()
-    expect(deps.setActivityTabState).not.toHaveBeenCalledWith('tab-1', ActivityState.SafePermissionRequested)
+    expect(deps.setActivityTabState).not.toHaveBeenCalledWith('tab-1', ActivityState.SafePermissionRequested, expect.objectContaining({ kind: ActivityTransitionKind.Classification }))
     expect(store.getState().getHistory()[0]).toMatchObject({ error: '[discarded]' })
     store.getState().stop()
     vi.useRealTimers()

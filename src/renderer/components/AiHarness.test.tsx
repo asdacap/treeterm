@@ -50,6 +50,7 @@ function makeAnalyzer() {
     autoApprove: false,
     setAutoApprove: vi.fn(),
     onUserInput: vi.fn(),
+    getBufferText: vi.fn((): string | null => 'harness output'),
   }))
 }
 
@@ -62,6 +63,7 @@ function makeWorkspaceStore(tabId: string, state: unknown, analyzer: unknown) {
     },
     getTabRef: () => (analyzer ? { analyzer } : null),
     updateTabState: vi.fn(),
+    addTab: vi.fn(),
   }))
 }
 

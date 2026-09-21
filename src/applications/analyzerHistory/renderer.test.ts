@@ -67,7 +67,7 @@ describe('AnalyzerHistory Renderer', () => {
 
   it('has correct application properties', () => {
     expect(analyzerHistoryApplication.id).toBe('analyzer-history')
-    expect(analyzerHistoryApplication.name).toBe('Analyzer History')
+    expect(analyzerHistoryApplication.name).toBe('Activity History')
     expect(analyzerHistoryApplication.canClose).toBe(true)
     expect(analyzerHistoryApplication.showInNewTabMenu).toBe(false)
     expect(analyzerHistoryApplication.displayStyle).toBe('flex')

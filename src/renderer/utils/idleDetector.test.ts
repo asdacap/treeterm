@@ -43,9 +43,11 @@ describe('createIdleDetector', () => {
     h.detector.processSnapshot('one')
     h.detector.processSnapshot('two')
     expect(h.onActivity).toHaveBeenCalledTimes(1)
+    expect(h.onActivity).toHaveBeenCalledWith('one')
     expect(h.onIdle).not.toHaveBeenCalled()
     vi.advanceTimersByTime(500)
     expect(h.onIdle).toHaveBeenCalledTimes(1)
+    expect(h.onIdle).toHaveBeenCalledWith({ snapshot: 'two', idleTimeoutMs: 500 })
     h.detector.processSnapshot('three')
     expect(h.onActivity).toHaveBeenCalledTimes(2)
   })
@@ -91,6 +93,7 @@ describe('createIdleDetector', () => {
     expect(h.onIdle).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1)
     expect(h.onIdle).toHaveBeenCalledTimes(1)
+    expect(h.onIdle).toHaveBeenCalledWith({ snapshot: 'two', idleTimeoutMs: 2000 })
   })
 
   it('destroy cancels a pending idle and is safe to repeat', () => {

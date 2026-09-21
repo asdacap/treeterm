@@ -1,17 +1,24 @@
 import type { Settings } from '../../shared/types'
 
+export interface IdleEdge {
+  /** The last viewport seen before the timer ran out. */
+  snapshot: string
+  /** The timeout that was armed for this quiet period. */
+  idleTimeoutMs: number
+}
+
 export interface IdleDetectorDeps {
   /** What is on screen at creation; the first differing snapshot is the first activity. */
   initialSnapshot: string
   /** Read every time the idle timer is (re)armed so settings and unread state apply live. */
   idleTimeoutMs: () => number
   /**
-   * Quiet -> active transition; fires once per burst of viewport changes, and never for the
-   * first burst after creation (no resting state is known yet).
+   * Quiet -> active transition; fires once per burst of viewport changes with the first changed
+   * frame, and never for the first burst after creation (no resting state is known yet).
    */
-  onActivity: () => void
-  /** No viewport change for idleTimeoutMs(). */
-  onIdle: () => void
+  onActivity: (snapshot: string) => void
+  /** No viewport change for the armed timeout. */
+  onIdle: (edge: IdleEdge) => void
 }
 
 export interface IdleDetector {
@@ -43,13 +50,15 @@ export function createIdleDetector(deps: IdleDetectorDeps): IdleDetector {
     if (idleTimerId) {
       clearTimeout(idleTimerId)
     } else if (settled) {
-      deps.onActivity()
+      deps.onActivity(snapshot)
     }
+    // Captured at arming so the edge reports the timeout that actually elapsed.
+    const timeout = deps.idleTimeoutMs()
     idleTimerId = setTimeout(() => {
       idleTimerId = null
       settled = true
-      deps.onIdle()
-    }, deps.idleTimeoutMs())
+      deps.onIdle({ snapshot: lastSnapshot, idleTimeoutMs: timeout })
+    }, timeout)
   }
 
   const destroy = (): void => {

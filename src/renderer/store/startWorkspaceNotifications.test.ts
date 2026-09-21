@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { startWorkspaceNotifications } from './startWorkspaceNotifications'
-import { useActivityStateStore } from './activityState'
+import { ActivityTransitionKind, useActivityStateStore, type ActivityTransitionDetail } from './activityState'
 import { useNavigationStore } from './navigation'
 import { createStore } from 'zustand/vanilla'
 import { ActivityState } from '../types'
@@ -8,9 +8,11 @@ import { ConnectionStatus } from '../../shared/types'
 import { makeWorkspace } from '../../shared/test-fixtures/workspace'
 import { WorkspaceEntryStatus, type SessionState } from './createSessionStore'
 
+const DETAIL: ActivityTransitionDetail = { kind: ActivityTransitionKind.ViewportChanged, snapshot: '' }
+
 describe('notification renderer lifetime', () => {
   it('reads current sound preference and stops reacting after renderer teardown', async () => {
-    useActivityStateStore.setState({ states: {} })
+    useActivityStateStore.setState({ states: {}, transitions: {} })
     const recordWorkspaceAttention = vi.fn()
     const session = createStore<SessionState>(() => ({
       sessionId: 's1', connection: { status: ConnectionStatus.Connected }, isRestoring: false,
@@ -25,8 +27,8 @@ describe('notification renderer lifetime', () => {
       soundEnabled: () => soundEnabled, reportError: vi.fn(),
     }, player)
     const transition = (): void => {
-      useActivityStateStore.getState().setTabState('t1', ActivityState.Working)
-      useActivityStateStore.getState().setTabState('t1', ActivityState.Idle)
+      useActivityStateStore.getState().setTabState('t1', ActivityState.Working, DETAIL)
+      useActivityStateStore.getState().setTabState('t1', ActivityState.Idle, DETAIL)
     }
     transition()
     expect(player.playDing).toHaveBeenCalledTimes(1)

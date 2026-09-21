@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { ClassifierProvider, ReasoningEffort } from '../../shared/types'
 import { ActivityState, Platform, type ApplicationRenderProps, type Application, type SandboxApi, type Settings } from '../types'
 import { defaultSettings, useSettingsStore } from '../store/settings'
+import { ActivityTransitionKind, useActivityStateStore } from '../store/activityState'
 
 const llm = vi.hoisted(() => ({
   analyzeTerminal: vi.fn(),
@@ -34,6 +35,20 @@ beforeEach(() => {
   llm.generateTitle.mockResolvedValue({ title: 'Generated title' })
 })
 afterEach(cleanup)
+
+it('logs the debugger run as activity transitions carrying the tested buffer', async () => {
+  useActivityStateStore.setState({ states: {}, transitions: {} })
+  const { unmount } = render(<SystemPromptDebugger {...props} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+  await waitFor(() => { expect(useActivityStateStore.getState().states['debug']).toBe(ActivityState.Idle) })
+
+  expect(useActivityStateStore.getState().transitions['debug']?.map((t) => [t.to, t.detail])).toEqual([
+    [ActivityState.Working, { kind: ActivityTransitionKind.Debugger, snapshot: 'terminal output' }],
+    [ActivityState.Idle, { kind: ActivityTransitionKind.Debugger, snapshot: 'terminal output' }],
+  ])
+  unmount()
+  expect(useActivityStateStore.getState().transitions['debug']).toBeUndefined()
+})
 
 for (const Component of [TerminalAnalyzerDebugger, SystemPromptDebugger]) {
   describe(Component.name, () => {

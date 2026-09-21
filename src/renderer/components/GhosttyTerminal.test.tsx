@@ -15,6 +15,23 @@ vi.mock('./BaseTerminal', () => ({
   },
 }))
 vi.mock('../terminal/ghosttyEngine', () => ({ createGhosttyEngine: vi.fn() }))
+// The badge's context menu pulls in the context-menu store (→ app store → monaco); mock it
+// so this lightweight suite stays free of the editor stack.
+vi.mock('../store/contextMenu', async () => {
+  const { create } = await import('zustand')
+  const store = create<{
+    activeMenuId: string | null
+    position: { x: number; y: number }
+    open: (menuId: string, x: number, y: number) => void
+    close: () => void
+  }>()((set) => ({
+    activeMenuId: null,
+    position: { x: 0, y: 0 },
+    open: (menuId, x, y) => { set({ activeMenuId: menuId, position: { x, y } }); },
+    close: () => { set({ activeMenuId: null }); },
+  }))
+  return { useContextMenuStore: store }
+})
 
 beforeEach(() => { configs.length = 0 })
 
@@ -25,6 +42,7 @@ function makeWorkspaceStore(tabId: string, ptyId: string | null) {
       activeTabId: tabId,
       appStates: { [tabId]: { applicationId: 'ghostty-terminal', title: 'Ghostty', state: { ptyId } } },
     },
+    getTabRef: () => null,
   }))
 }
 
