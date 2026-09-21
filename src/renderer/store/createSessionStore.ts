@@ -2,7 +2,7 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
 import { humanId } from 'human-id'
-import { applyAttentionMutations, AttentionMutationType, getWorkspaceAttention, WORKSPACE_ATTENTION_KEY, type AttentionMutation } from './workspaceAttention'
+import { applyAttentionMutations, AttentionMutationType, getWorkspaceAttention, reconcileAttentionWrite, withWatchedAttention, type AttentionMutation, type AttentionSyncState } from './workspaceAttention'
 import { createWorkspaceStore } from './createWorkspaceStore'
 import type { WorkspaceStore, WorkspaceStoreDeps } from './createWorkspaceStore'
 import { createTtyStore } from './createTtyStore'
@@ -30,8 +30,12 @@ export enum WorkspaceEntryStatus {
 export type WorkspaceEntry =
   | { status: WorkspaceEntryStatus.Loading; name: string; message: string; output: string[] }
   | { status: WorkspaceEntryStatus.Error; name: string; error: string }
-  | { status: WorkspaceEntryStatus.Loaded; data: Workspace; store: WorkspaceStore }
-  | { status: WorkspaceEntryStatus.OperationError; data: Workspace; store: WorkspaceStore; error: string }
+  | { status: WorkspaceEntryStatus.Loaded; data: Workspace; store: WorkspaceStore; attentionPending: boolean }
+  | { status: WorkspaceEntryStatus.OperationError; data: Workspace; store: WorkspaceStore; attentionPending: boolean; error: string }
+
+function getAttentionPending(entry: WorkspaceEntry | undefined): boolean {
+  return entry !== undefined && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) && entry.attentionPending
+}
 
 export type SessionEntry = { store: StoreApi<SessionState> }
 
@@ -93,7 +97,6 @@ export interface SessionState {
    *  until the first SessionWatch event arrives; writes are guarded on it. */
   workspaceDataDir: string
 
-  attentionPending: Record<string, boolean>
   recordWorkspaceAttention: (id: string) => void
   acknowledgeWorkspaceAttention: (id: string, observedRevision: string) => void
   clearWorkspaceError: (id: string) => void
@@ -310,10 +313,9 @@ export function createSessionStore(
   // observed, its hash would otherwise linger forever.
   const RECENT_HASHES_MAX = 32
   interface WorkspaceSyncState {
+    attention: AttentionSyncState
     // sha256 of the body we believe the daemon currently holds ('' = absent/unknown).
     // Used as the CAS guard for, and chained as the parentHash of, the next write.
-    attentionMutations: AttentionMutation[]
-    attentionWrites: Map<string, AttentionMutation[]>
     lastSeenSha: string
     // Last body we serialized and wrote, to skip redundant writes.
     lastWrittenJson: string
@@ -358,7 +360,7 @@ export function createSessionStore(
   function getOrCreateSync(id: string): WorkspaceSyncState {
     let s = wsSync.get(id)
     if (!s) {
-      s = { attentionMutations: [], attentionWrites: new Map(), lastSeenSha: '', lastWrittenJson: '', recentHashes: [], unsubscribe: undefined, tail: Promise.resolve(), pending: false, dirty: false, retryOnNextEvent: false, conflictStreak: 0, externalApplied: false, watchRetries: 0, watchRetryTimer: undefined }
+      s = { attention: { mutations: [], writes: new Map() }, lastSeenSha: '', lastWrittenJson: '', recentHashes: [], unsubscribe: undefined, tail: Promise.resolve(), pending: false, dirty: false, retryOnNextEvent: false, conflictStreak: 0, externalApplied: false, watchRetries: 0, watchRetryTimer: undefined }
       wsSync.set(id, s)
     }
     return s
@@ -435,7 +437,7 @@ export function createSessionStore(
     if (!entry) return
     if (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) {
       store.setState(s => ({
-        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: entry.data, store: entry.store, error })
+        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: entry.data, store: entry.store, attentionPending: entry.attentionPending, error })
       }))
     } else {
       store.setState(s => ({
@@ -444,7 +446,44 @@ export function createSessionStore(
     }
   }
 
-  // Apply a workspace body received from a file-watch event into the store.
+  function setAttentionPending(id: string, attentionPending: boolean): void {
+    store.setState(state => {
+      const entry = state.workspaces.get(id)
+      if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return state
+      if (entry.attentionPending === attentionPending) return state
+      return { workspaces: new Map(state.workspaces).set(id, { ...entry, attentionPending }) }
+    })
+  }
+
+  // Domain validation belongs with workspace reconciliation, not watch transport.
+  function parseWatchedWorkspace(id: string, path: string, content: string): Workspace {
+    const workspace = parseWorkspaceFile(id, path, content)
+    getWorkspaceAttention(workspace.metadata)
+    return workspace
+  }
+
+  // Reconcile committed attention before exposing a watched workspace. Own echoes
+  // publish only attention metadata, preserving local tab edits; external bodies
+  // replace the workspace and leave uncommitted attention queued for CAS replay.
+  function reconcileWatchedWorkspace(id: string, workspace: Workspace, sha: string, ownEcho: boolean): boolean {
+    const sync = getOrCreateSync(id)
+    reconcileAttentionWrite(sync.attention, workspace.metadata, sha)
+    if (ownEcho) {
+      const entry = store.getState().workspaces.get(id)
+      if (entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError)) {
+        const current = entry.store.getState().workspace
+        const metadata = withWatchedAttention(current.metadata, workspace.metadata)
+        if (metadata !== current.metadata) entry.store.getState().setWorkspace({ ...current, metadata })
+      }
+    } else {
+      applyWorkspaceFile(store, workspace, createHandleForWorkspace)
+    }
+    const pending = sync.attention.mutations.length > 0
+    setAttentionPending(id, pending)
+    return pending
+  }
+
+  // File-watch transport: lifetime, errors, hash guards, echo suppression and retries.
   function onFileEvent(id: string, path: string, event: FileWatchEvent): void {
     if (disposed) return // teardown in progress; the watch may fire before unsubscribe lands
     const sync = wsSync.get(id)
@@ -452,48 +491,22 @@ export function createSessionStore(
 
     if (event.type === FileWatchEventType.Present) {
       sync.watchRetries = 0
-      // Validate attention at the watch boundary before exposing it to subscribers.
-      let watchedWorkspace: Workspace
+      let workspace: Workspace
       try {
-        watchedWorkspace = parseWorkspaceFile(id, path, event.content)
-        getWorkspaceAttention(watchedWorkspace.metadata)
+        workspace = parseWatchedWorkspace(id, path, event.content)
       } catch (err) {
         setWorkspaceFileError(id, `Invalid workspace file: ${err instanceof Error ? err.message : String(err)}`)
         return
       }
-      const watchedAttention = getWorkspaceAttention(watchedWorkspace.metadata)
-      // WatchFile may coalesce our write with a later acknowledgement from a
-      // different window. Recognize that revision too, not only our body's hash.
-      sync.attentionMutations = sync.attentionMutations.filter(mutation =>
-        mutation.type === AttentionMutationType.Record
-          ? mutation.revision !== watchedAttention.revision
-          : mutation.revision !== watchedAttention.acknowledgedRevision)
-      const committed = sync.attentionWrites.get(event.sha256)
-      if (committed) {
-        sync.attentionMutations = sync.attentionMutations.filter(mutation => !committed.includes(mutation))
-        sync.attentionWrites.delete(event.sha256)
-      }
-      for (const [sha, mutations] of Array.from(sync.attentionWrites)) {
-        if (mutations.every(mutation => !sync.attentionMutations.includes(mutation))) sync.attentionWrites.delete(sha)
-      }
-      store.setState(state => ({ attentionPending: { ...state.attentionPending, [id]: sync.attentionMutations.length > 0 } }))
+      const ownEcho = sync.recentHashes.includes(event.sha256)
+      sync.lastSeenSha = event.sha256
       // Echo of one of our own writes. The watch event can arrive before writeFile()
       // resolves (so before lastSeenSha advances), so we matched against the ring of
       // hashes we recorded up front. parentHash chaining guarantees each body's hash is
       // distinct, so a sha hit means we wrote it: re-applying it would needlessly rebuild
       // the workspace and tear down a just-mounted terminal.
-      if (sync.recentHashes.includes(event.sha256)) {
-        sync.lastSeenSha = event.sha256
-        // Only commit watched attention on our own echo; preserve optimistic tab
-        // state and other edits made while this write was in flight.
-        const entry = store.getState().workspaces.get(id)
-        if (entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError)) {
-          const current = entry.store.getState().workspace
-          const metadata = Object.fromEntries(Object.entries(current.metadata).filter(([key]) => key !== WORKSPACE_ATTENTION_KEY))
-          const value = watchedWorkspace.metadata[WORKSPACE_ATTENTION_KEY]
-          if (value !== undefined) metadata[WORKSPACE_ATTENTION_KEY] = value
-          if (current.metadata[WORKSPACE_ATTENTION_KEY] !== value) entry.store.getState().setWorkspace({ ...current, metadata })
-        }
+      if (ownEcho) {
+        reconcileWatchedWorkspace(id, workspace, event.sha256, true)
         // A conflicted write lost to one of our own earlier writes: local state still
         // holds the losing delta, so rewrite it on top of the winning sha.
         if (sync.retryOnNextEvent) {
@@ -502,7 +515,6 @@ export function createSessionStore(
         }
         return
       }
-      sync.lastSeenSha = event.sha256
       // A conflicted write lost to a genuine external edit: applying the winning body
       // below replaces local state, so there is no losing delta left to rewrite. That
       // also holds for a conflict response still in flight (externalApplied), and the
@@ -510,18 +522,10 @@ export function createSessionStore(
       sync.retryOnNextEvent = false
       sync.externalApplied = true
       sync.conflictStreak = 0
-      let workspace: Workspace
-      try {
-        workspace = parseWorkspaceFile(id, path, event.content)
-      } catch (err) {
-        setWorkspaceFileError(id, `Invalid workspace file: ${err instanceof Error ? err.message : String(err)}`)
-        return
-      }
       // A genuine external edit is now the current body; record it so its own later echo
       // (or a redundant re-read) is recognized rather than re-applied.
       rememberHash(sync, event.sha256)
-      applyWorkspaceFile(store, workspace, createHandleForWorkspace)
-      if (sync.attentionMutations.length > 0) enqueueContentSync(id)
+      if (reconcileWatchedWorkspace(id, workspace, event.sha256, false)) enqueueContentSync(id)
     } else if (event.type === FileWatchEventType.Absent) {
       sync.watchRetries = 0
       // The file backing a known ref is gone. Surface loudly — membership removal
@@ -569,7 +573,7 @@ export function createSessionStore(
     // logical content reverts to an earlier state (parentHash == the CAS guard sha).
     const guardSha = sync.lastSeenSha
     beginWriteAttempt(sync)
-    const attentionMutations = [...sync.attentionMutations]
+    const attentionMutations = [...sync.attention.mutations]
     const body = { ...entry.data, metadata: applyAttentionMutations(entry.data.metadata, attentionMutations) }
     const json = stableStringify(toStoredWorkspaceFile(body, guardSha))
     if (json === sync.lastWrittenJson) return
@@ -578,7 +582,7 @@ export function createSessionStore(
     // writeFile() resolves, and onFileEvent must already know to suppress it by sha.
     const newSha = await sha256Hex(json)
     rememberHash(sync, newSha)
-    if (attentionMutations.length > 0) sync.attentionWrites.set(newSha, attentionMutations)
+    if (attentionMutations.length > 0) sync.attention.writes.set(newSha, attentionMutations)
 
     let result: Awaited<ReturnType<typeof deps.filesystem.writeFile>>
     try {
@@ -587,7 +591,7 @@ export function createSessionStore(
       // The writeFile RPC itself rejected — typically the transport dropping
       // mid-call. An unhandled rejection here would also silently lose this body:
       // route it through the same lost-delta guard as a {success:false} failure.
-      sync.attentionWrites.delete(newSha)
+      sync.attention.writes.delete(newSha)
       handleWriteFailure(id, sync, err instanceof Error ? err.message : String(err))
       return
     }
@@ -596,7 +600,7 @@ export function createSessionStore(
       sync.lastSeenSha = newSha
       sync.conflictStreak = 0
     } else {
-      sync.attentionWrites.delete(newSha)
+      sync.attention.writes.delete(newSha)
       // The write did not land; its hash stays in the bounded ring and ages out
       // harmlessly (its echo will never arrive).
       if ('conflict' in result) {
@@ -605,7 +609,7 @@ export function createSessionStore(
         // republish the winner under a new parentHash, which every other window
         // would then apply as an "external edit" of its own.
         if (sync.externalApplied) {
-          if (sync.attentionMutations.length > 0) enqueueContentSync(id)
+          if (sync.attention.mutations.length > 0) enqueueContentSync(id)
           return
         }
         // Another write won. Local state may hold changes the winning body lacks, so
@@ -900,9 +904,9 @@ export function createSessionStore(
     const entry = store.getState().workspaces.get(id)
     if (!entry || (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError)) return
     const sync = getOrCreateSync(id)
-    if (sync.attentionMutations.some(pending => pending.type === mutation.type && pending.revision === mutation.revision)) return
-    sync.attentionMutations.push(mutation)
-    store.setState(state => ({ attentionPending: { ...state.attentionPending, [id]: true } }))
+    if (sync.attention.mutations.some(pending => pending.type === mutation.type && pending.revision === mutation.revision)) return
+    sync.attention.mutations.push(mutation)
+    setAttentionPending(id, true)
     enqueueContentSync(id)
   }
 
@@ -1063,7 +1067,7 @@ export function createSessionStore(
         }
 
         store.setState(s => ({
-          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: childWorkspace, store: handle })
+          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: childWorkspace, store: handle, attentionPending: false })
         }))
         await createWorkspaceFile(id, childWorkspace.path)
         await enqueueSync('addChildWorkspace')
@@ -1130,7 +1134,7 @@ export function createSessionStore(
     const handle = createHandleForWorkspace(childWorkspace)
 
     store.setState((s) => ({
-      workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: childWorkspace, store: handle }),
+      workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: childWorkspace, store: handle, attentionPending: false }),
       activeWorkspaceId: id
     }))
 
@@ -1219,20 +1223,20 @@ export function createSessionStore(
     const lockStatus = await acquireLock()
     if (!lockStatus.acquired) {
       store.setState(s => ({
-        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data, store: wsStore, error: lockStatus.error })
+        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data, store: wsStore, attentionPending: getAttentionPending(s.workspaces.get(id)), error: lockStatus.error })
       }))
       return
     }
 
     // Temporarily show loading in the main pane — preserve data+store for recovery
     store.setState(s => ({
-      workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data, store: wsStore })
+      workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data, store: wsStore, attentionPending: getAttentionPending(s.workspaces.get(id)) })
     }))
     try {
       await removeWorkspaceInternal(id, options)
     } catch (err) {
       store.setState(s => ({
-        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data, store: wsStore, error: err instanceof Error ? err.message : String(err) })
+        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data, store: wsStore, attentionPending: getAttentionPending(s.workspaces.get(id)), error: err instanceof Error ? err.message : String(err) })
       }))
     } finally {
       await releaseLock().catch((e: unknown) => { console.error('[session] failed to unlock session:', e) })
@@ -1268,7 +1272,7 @@ export function createSessionStore(
       const parentHasChanges = await deps.git.hasUncommittedChanges(parent.path)
       if (parentHasChanges) {
         store.setState(s => ({
-          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, error: 'Parent workspace has uncommitted changes. Commit or stash them before merging.' })
+          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, attentionPending: getAttentionPending(s.workspaces.get(id)), error: 'Parent workspace has uncommitted changes. Commit or stash them before merging.' })
         }))
         return { success: false, error: 'Parent workspace has uncommitted changes. Commit or stash them before merging.' }
       }
@@ -1281,7 +1285,7 @@ export function createSessionStore(
         )
         if (!commitResult.success) {
           store.setState(s => ({
-            workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, error: `Failed to commit changes: ${commitResult.error}` })
+            workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, attentionPending: getAttentionPending(s.workspaces.get(id)), error: `Failed to commit changes: ${commitResult.error}` })
           }))
           return { success: false, error: `Failed to commit changes: ${commitResult.error}` }
         }
@@ -1295,7 +1299,7 @@ export function createSessionStore(
 
       if (!mergeResult.success) {
         store.setState(s => ({
-          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, error: `Merge failed: ${mergeResult.error}` })
+          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, attentionPending: getAttentionPending(s.workspaces.get(id)), error: `Merge failed: ${mergeResult.error}` })
         }))
         return { success: false, error: `Merge failed: ${mergeResult.error}` }
       }
@@ -1303,7 +1307,7 @@ export function createSessionStore(
       return { success: true }
     } catch (err) {
       store.setState(s => ({
-        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, error: err instanceof Error ? err.message : String(err) })
+        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, attentionPending: getAttentionPending(s.workspaces.get(id)), error: err instanceof Error ? err.message : String(err) })
       }))
       return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
@@ -1341,7 +1345,7 @@ export function createSessionStore(
           const workspaces = new Map(s.workspaces)
           for (const [id, entry] of Array.from(workspaces.entries())) {
             if (entry.status === WorkspaceEntryStatus.OperationError) {
-              workspaces.set(id, { status: WorkspaceEntryStatus.Loaded, data: entry.data, store: entry.store })
+              workspaces.set(id, { status: WorkspaceEntryStatus.Loaded, data: entry.data, store: entry.store, attentionPending: entry.attentionPending })
             }
           }
           return { workspaces }
@@ -1392,7 +1396,6 @@ export function createSessionStore(
       return deps.terminal.list(connectionId)
     },
 
-    attentionPending: {},
     recordWorkspaceAttention: (id: string): void => {
       queueAttention(id, { type: AttentionMutationType.Record, revision: crypto.randomUUID() })
     },
@@ -1403,7 +1406,7 @@ export function createSessionStore(
       const entry = get().workspaces.get(id)
       if (!entry || entry.status !== WorkspaceEntryStatus.OperationError) return
       set((s) => ({
-        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: entry.data, store: entry.store })
+        workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: entry.data, store: entry.store, attentionPending: entry.attentionPending })
       }))
     },
 
@@ -1504,7 +1507,7 @@ export function createSessionStore(
         }
 
         set(s => ({
-          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: workspace, store: handle })
+          workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: workspace, store: handle, attentionPending: false })
         }))
         await createWorkspaceFile(id, workspace.path)
         void enqueueSync('addWorkspace')
@@ -1800,7 +1803,7 @@ export function createSessionStore(
           const currentEntry = get().workspaces.get(id)
           if (currentEntry && (currentEntry.status === WorkspaceEntryStatus.Loaded || currentEntry.status === WorkspaceEntryStatus.OperationError)) {
             store.setState(s => ({
-              workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: currentEntry.data, store: currentEntry.store, error: `Merge succeeded but cleanup failed: ${err instanceof Error ? err.message : String(err)}` })
+              workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: currentEntry.data, store: currentEntry.store, attentionPending: currentEntry.attentionPending, error: `Merge succeeded but cleanup failed: ${err instanceof Error ? err.message : String(err)}` })
             }))
           }
           return { success: false, error: err instanceof Error ? err.message : String(err) }
@@ -1836,7 +1839,7 @@ export function createSessionStore(
         const entry = get().workspaces.get(id)
         if (entry && entry.status === WorkspaceEntryStatus.OperationError) {
           store.setState(s => ({
-            workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: entry.data, store: entry.store })
+            workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: entry.data, store: entry.store, attentionPending: entry.attentionPending })
           }))
         }
 
@@ -2181,7 +2184,7 @@ function reconstructWorkspace(
   const handle = createHandleForWorkspace(workspace)
 
   store.setState((s) => ({
-    workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: workspace, store: handle }),
+    workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: workspace, store: handle, attentionPending: false }),
     activeWorkspaceId: s.activeWorkspaceId ?? id
   }))
 

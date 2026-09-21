@@ -14,7 +14,7 @@ describe('notification renderer lifetime', () => {
     const recordWorkspaceAttention = vi.fn()
     const session = createStore<SessionState>(() => ({
       sessionId: 's1', connection: { status: ConnectionStatus.Connected }, isRestoring: false,
-      workspaces: new Map([['w1', { status: WorkspaceEntryStatus.Loaded, data: makeWorkspace({ appStates: { t1: { applicationId: 'terminal', title: 'Terminal', state: {} } } }) }]]),
+      workspaces: new Map([['w1', { status: WorkspaceEntryStatus.Loaded, attentionPending: false, data: makeWorkspace({ appStates: { t1: { applicationId: 'terminal', title: 'Terminal', state: {} } } }) }]]),
       recordWorkspaceAttention,
     }) as unknown as SessionState)
     let soundEnabled = true

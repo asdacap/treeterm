@@ -5,7 +5,7 @@ import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
 import { FavouriteWorkspaceItem } from './TreePane'
 import type { WorkspaceStoreState } from '../store/createWorkspaceStore'
-import type { SessionState } from '../store/createSessionStore'
+import { WorkspaceEntryStatus, type SessionState } from '../store/createSessionStore'
 import type { GitHubPrInfo, Workspace } from '../types'
 import { ActivityState } from '../types'
 import { makeWorkspace } from '../../shared/test-fixtures/workspace'
@@ -69,13 +69,13 @@ function makePrInfo(
   }
 }
 
-function renderItem(store: ReturnType<typeof makeWorkspaceStore>) {
+function renderItem(store: ReturnType<typeof makeWorkspaceStore>, attentionPending = false) {
   const sessionStore = createStore<SessionState>()(() => ({
     activeWorkspaceId: null,
-    attentionPending: {},
+    workspaces: new Map([['ws-1', { status: WorkspaceEntryStatus.Loaded, attentionPending, data: makeWorkspace(), store }]]),
     setActiveWorkspace: vi.fn(),
   }) as unknown as SessionState) as unknown as StoreApi<SessionState>
-  return render(
+  const rendered = render(
     <FavouriteWorkspaceItem
       sessionId="s-1"
       sessionStore={sessionStore}
@@ -84,6 +84,7 @@ function renderItem(store: ReturnType<typeof makeWorkspaceStore>) {
       data={makeWorkspace({ name: 'my-branch' })}
     />
   )
+  return { ...rendered, sessionStore }
 }
 
 describe('FavouriteWorkspaceItem — PR indicators', () => {
@@ -156,5 +157,31 @@ describe('favourite workspace unread attention', () => {
     act(() => { store.setState({ metadata: { isFavourite: 'true', workspaceAttention: JSON.stringify({ revision: 'event-1', acknowledgedRevision: 'event-1' }) } }) })
     expect(queryByRole('img', { name: 'Unread workspace activity' })).toBeNull()
     expect(row.classList.contains('workspace-unread')).toBe(false)
+  })
+})
+
+
+describe('FavouriteWorkspaceItem — entry attention state', () => {
+  it('renders pending from the loaded entry and removes the indicator when committed', () => {
+    const { sessionStore, getByRole, queryByRole } = renderItem(makeWorkspaceStore(null), true)
+    expect(getByRole('status', { name: 'Saving workspace attention' })).toBeTruthy()
+    act(() => {
+      sessionStore.setState(state => {
+        const entry = state.workspaces.get('ws-1')!
+        if (entry.status !== WorkspaceEntryStatus.Loaded) throw new Error('Not loaded')
+        return { workspaces: new Map(state.workspaces).set('ws-1', { ...entry, attentionPending: false }) }
+      })
+    })
+    expect(queryByRole('status', { name: 'Saving workspace attention' })).toBeNull()
+  })
+
+  it('renders nothing when its entry is no longer loaded or is removed', () => {
+    const { sessionStore, container } = renderItem(makeWorkspaceStore(null))
+    act(() => {
+      sessionStore.setState({ workspaces: new Map([['ws-1', { status: WorkspaceEntryStatus.Error, name: 'failed', error: 'failure' }]]) })
+    })
+    expect(container.querySelector('.tree-item')).toBeNull()
+    act(() => { sessionStore.setState({ workspaces: new Map() }) })
+    expect(container.querySelector('.tree-item')).toBeNull()
   })
 })

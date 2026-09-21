@@ -79,7 +79,7 @@ function makeFakeApp(overrides: Partial<Application> = {}): Application {
 }
 
 function toLoaded(ws: Workspace): WorkspaceEntry {
-  return { status: WorkspaceEntryStatus.Loaded, data: ws, store: createWorkspaceStore(ws, makeHandleDeps()) }
+  return { status: WorkspaceEntryStatus.Loaded, attentionPending: false, data: ws, store: createWorkspaceStore(ws, makeHandleDeps()) }
 }
 
 describe('getUnmergedSubWorkspaces', () => {

@@ -53,7 +53,6 @@ export default function SessionPanel({
   const connection = useStore(sessionStore, s => s.connection)
   const sessionLock = useStore(sessionStore, s => s.sessionLock)
   const workspaces = useStore(sessionStore, s => s.workspaces)
-  const attentionPending = useStore(sessionStore, s => s.attentionPending)
   const activeWorkspaceId = useStore(sessionStore, s => s.activeWorkspaceId)
   const addWorkspace = useStore(sessionStore, s => s.addWorkspace)
   const addChildWorkspace = useStore(sessionStore, s => s.addChildWorkspace)
@@ -482,7 +481,6 @@ export default function SessionPanel({
         id={id}
         depth={depth}
         entry={entry}
-        attentionPending={attentionPending[id] ?? false}
         isActive={isActiveSession && activeWorkspaceId === id}
         isFocused={isFocused}
         isExpanded={expanded.has(id)}
@@ -703,7 +701,6 @@ export default function SessionPanel({
 }
 
 interface WorkspaceTreeItemProps {
-  attentionPending?: boolean
   id: string
   depth: number
   entry: WorkspaceEntry
@@ -732,6 +729,7 @@ interface WorkspaceTreeItemProps {
 }
 
 interface TreeItemViewProps extends Omit<WorkspaceTreeItemProps, 'entry'> {
+  attentionPending: boolean
   loadStatus: WorkspaceEntryStatus.Loading | WorkspaceEntryStatus.Error | undefined
   ws: Workspace | undefined
   isFavourite: boolean
@@ -743,7 +741,7 @@ interface TreeItemViewProps extends Omit<WorkspaceTreeItemProps, 'entry'> {
 }
 
 function TreeItemView({
-  id, depth, isActive, isFocused, isExpanded, isFavourite, unread, attentionPending = false,
+  id, depth, isActive, isFocused, isExpanded, isFavourite, unread, attentionPending,
   onToggleExpand, onClick, onQuickFork, onCreateChild, onAutoOpenWorktrees, onRemove, onDismiss, onOpenSettings, onToggleFavourite,
   onRefreshTitle, onRefreshBranch,
   children, renderChild,
@@ -900,7 +898,7 @@ export function LoadedWorkspaceTreeItem({
 
 function WorkspaceTreeItem({ entry, ...rest }: WorkspaceTreeItemProps): React.JSX.Element {
   if (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) {
-    return <LoadedWorkspaceTreeItem store={entry.store} data={entry.data} {...rest} />
+    return <LoadedWorkspaceTreeItem store={entry.store} data={entry.data} attentionPending={entry.attentionPending} {...rest} />
   }
   return (
     <TreeItemView
@@ -911,6 +909,7 @@ function WorkspaceTreeItem({ entry, ...rest }: WorkspaceTreeItemProps): React.JS
       loadStatus={entry.status}
       isFavourite={false}
       unread={false}
+      attentionPending={false}
       gitController={undefined}
       {...rest}
     />

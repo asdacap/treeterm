@@ -642,7 +642,7 @@ describe('useAppStore', () => {
       const { createSessionStore } = await import('./createSessionStore')
       vi.mocked(createSessionStore).mockReturnValue({
         getState: vi.fn<() => any>().mockReturnValue({
-          workspaces: new Map([['ws-existing', { status: WorkspaceEntryStatus.Loaded, data: { id: 'ws-existing', path: '/projects/existing', name: 'existing' }, store: {} }]]),
+          workspaces: new Map([['ws-existing', { status: WorkspaceEntryStatus.Loaded, attentionPending: false, data: { id: 'ws-existing', path: '/projects/existing', name: 'existing' }, store: {} }]]),
           connection: { id: 'local', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected },
           activeWorkspaceId: null,
           isRestoring: false,

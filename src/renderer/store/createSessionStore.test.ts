@@ -179,6 +179,12 @@ describe('createSessionStore', () => {
       return ws
     }
 
+    function currentAttentionPending(): boolean {
+      const entry = store.getState().workspaces.get('attention-ws')!
+      if (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError) throw new Error('Not loaded')
+      return entry.attentionPending
+    }
+
     function currentAttention(): Record<string, string> {
       const entry = store.getState().workspaces.get('attention-ws')!
       if (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError) throw new Error('Not loaded')
@@ -194,12 +200,12 @@ describe('createSessionStore', () => {
       store.getState().recordWorkspaceAttention('attention-ws')
       await settleWrites()
       expect(hasUnreadWorkspaceAttention(currentAttention())).toBe(false)
-      expect(store.getState().attentionPending['attention-ws']).toBe(true)
+      expect(currentAttentionPending()).toBe(true)
       const call = vi.mocked(deps.filesystem.writeFile).mock.calls.at(-1)!
       const content = call[2]
       fileWatchCallbacks.get('attention-ws.json')!({ type: FileWatchEventType.Present, content, sha256: await sha256Hex(content) })
       expect(hasUnreadWorkspaceAttention(currentAttention())).toBe(true)
-      expect(store.getState().attentionPending['attention-ws']).toBe(false)
+      expect(currentAttentionPending()).toBe(false)
       const revision = getWorkspaceAttention(currentAttention()).revision
       store.getState().acknowledgeWorkspaceAttention('attention-ws', revision)
       await settleWrites()
@@ -208,6 +214,31 @@ describe('createSessionStore', () => {
       fileWatchCallbacks.get('attention-ws.json')!({ type: FileWatchEventType.Present, content: ack, sha256: await sha256Hex(ack) })
       expect(hasUnreadWorkspaceAttention(currentAttention())).toBe(false)
       expect(currentAttention().displayName).toBe('Keep me')
+    })
+
+    it('preserves pending attention through operation errors, clearing and reconnect until watch confirmation', async () => {
+      const ws = await loadAttentionWorkspace()
+      store.getState().recordWorkspaceAttention(ws.id)
+      await settleWrites()
+      const content = vi.mocked(deps.filesystem.writeFile).mock.calls.at(-1)![2]
+      const watch = fileWatchCallbacks.get('attention-ws.json')!
+      watch({ type: FileWatchEventType.Present, content: '{ invalid json', sha256: 'invalid-sha' })
+      expect(store.getState().workspaces.get(ws.id)?.status).toBe(WorkspaceEntryStatus.OperationError)
+      expect(currentAttentionPending()).toBe(true)
+
+      store.getState().clearWorkspaceError(ws.id)
+      expect(store.getState().workspaces.get(ws.id)?.status).toBe(WorkspaceEntryStatus.Loaded)
+      expect(currentAttentionPending()).toBe(true)
+
+      watch({ type: FileWatchEventType.Present, content: '{ invalid json', sha256: 'invalid-sha-again' })
+      const target = store.getState().connection.target
+      store.getState().handleConnectionStatusChange({ id: 'local', target, status: ConnectionStatus.Reconnecting, error: 'disconnected', attempt: 1 })
+      store.getState().handleConnectionStatusChange({ id: 'local', target, status: ConnectionStatus.Connected })
+      expect(store.getState().workspaces.get(ws.id)?.status).toBe(WorkspaceEntryStatus.Loaded)
+      expect(currentAttentionPending()).toBe(true)
+
+      watch({ type: FileWatchEventType.Present, content, sha256: await sha256Hex(content) })
+      expect(currentAttentionPending()).toBe(false)
     })
 
     it('handles own attention watch before write response without optimistic publication', async () => {
@@ -220,7 +251,7 @@ describe('createSessionStore', () => {
       store.getState().recordWorkspaceAttention('attention-ws')
       await settleWrites()
       expect(hasUnreadWorkspaceAttention(currentAttention())).toBe(true)
-      expect(store.getState().attentionPending['attention-ws']).toBe(false)
+      expect(currentAttentionPending()).toBe(false)
     })
 
     it('rebases attention after an external CAS winner and keeps unrelated fields', async () => {
@@ -265,7 +296,7 @@ describe('createSessionStore', () => {
       const revision = getWorkspaceAttention(written.metadata).revision
       emitFilePresent({ ...ws, metadata: { [WORKSPACE_ATTENTION_KEY]: JSON.stringify({ revision, acknowledgedRevision: revision }) } }, 'other-ack-sha')
       await settleWrites()
-      expect(store.getState().attentionPending[ws.id]).toBe(false)
+      expect(currentAttentionPending()).toBe(false)
       expect(hasUnreadWorkspaceAttention(currentAttention())).toBe(false)
       expect(vi.mocked(deps.filesystem.writeFile)).toHaveBeenCalledTimes(1)
     })
