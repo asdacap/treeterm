@@ -5,6 +5,14 @@ import { createStore } from 'zustand/vanilla'
 import { WidthLimitToggle } from './WidthLimitToggle'
 import { isWidthLimitDisabled } from '../types'
 
+// The real settings store drags in store/app (and monaco), which jsdom cannot load.
+vi.mock('../store/settings', () => {
+  const settings = { terminal: { maxCols: 160 } }
+  const useSettingsStore = <T,>(selector: (s: { settings: unknown }) => T): T => selector({ settings })
+  useSettingsStore.getState = (): { settings: unknown } => ({ settings })
+  return { useSettingsStore }
+})
+
 function makeWorkspaceStore(state: unknown) {
   const updateTabState = vi.fn()
   const store = createStore<Record<string, unknown>>()(() => ({
@@ -17,7 +25,7 @@ function makeWorkspaceStore(state: unknown) {
 function renderToggle(state: unknown) {
   const { store, updateTabState } = makeWorkspaceStore(state)
   const result = render(<WidthLimitToggle workspace={store as never} tabId="tab1" />)
-  const input = result.getByLabelText('80 col limit') as HTMLInputElement
+  const input = result.getByLabelText('160 col limit') as HTMLInputElement
   const lastUpdater = (): ((s: unknown) => unknown) => updateTabState.mock.calls.at(-1)?.[1] as (s: unknown) => unknown
   return { ...result, input, updateTabState, lastUpdater }
 }

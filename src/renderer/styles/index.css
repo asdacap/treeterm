@@ -1310,6 +1310,24 @@ body,
   height: 100%;
 }
 
+/* Marks the width to the right of the grid that the column limit leaves unused, so it reads as
+   "not terminal" rather than as blank output. Positioned by BaseTerminal at the grid's right edge;
+   pointer-events stay off so the scrollbar underneath keeps working. */
+.terminal-unused-width {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  pointer-events: none;
+  border-left: 1px dashed var(--border-color);
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent 0 6px,
+    var(--border-color) 6px 7px
+  );
+  opacity: 0.35;
+}
+
 /* ghostty-web takes over the element it is opened onto, so the engine gives it one of its
    own inside .terminal-container. It must fill it for the fit calculation to be meaningful. */
 .ghostty-terminal-host {

@@ -11,6 +11,7 @@ import { ScrollPosition } from '../types'
 import { proposeDimensions } from './proposeDimensions'
 import type {
   TerminalBufferHost,
+  TerminalCellSize,
   TerminalDimensions,
   TerminalDisplayOptions,
   TerminalDisposable,
@@ -186,6 +187,12 @@ class GhosttyEngine implements TerminalEngine {
     const renderer = this.terminal.renderer
     if (!renderer) return undefined
     return proposeDimensions(this.host, { width: renderer.charWidth, height: renderer.charHeight }, computeStyle)
+  }
+
+  cellSize(): TerminalCellSize | undefined {
+    const renderer = this.terminal.renderer
+    if (!renderer || !renderer.charWidth || !renderer.charHeight) return undefined
+    return { width: renderer.charWidth, height: renderer.charHeight }
   }
 }
 

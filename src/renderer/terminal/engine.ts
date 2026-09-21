@@ -105,6 +105,9 @@ export interface TerminalEngine {
    * A proposal only — the daemon owns the size and echoes back the one it applied.
    */
   proposeDimensions(computeStyle: (element: Element) => CSSStyleDeclaration): TerminalDimensions | undefined
+
+  /** The measured size of one cell in CSS pixels, or undefined before a font has been measured. */
+  cellSize(): TerminalCellSize | undefined
 }
 
 export type TerminalEngineFactory = (options: TerminalEngineOptions) => Promise<TerminalEngine>

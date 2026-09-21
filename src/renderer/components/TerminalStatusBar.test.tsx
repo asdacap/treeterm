@@ -9,6 +9,13 @@ import type { CachedTerminal } from '../types'
 
 // The badge's context menu pulls in the context-menu store (→ app store → monaco); mock it
 // so this lightweight suite stays free of the editor stack.
+// The real settings store drags in store/app (and monaco), which jsdom cannot load.
+vi.mock('../store/settings', () => {
+  const settings = { terminal: { maxCols: 160 } }
+  const useSettingsStore = <T,>(selector: (s: { settings: unknown }) => T): T => selector({ settings })
+  useSettingsStore.getState = (): { settings: unknown } => ({ settings })
+  return { useSettingsStore }
+})
 vi.mock('../store/contextMenu', async () => {
   const { create } = await import('zustand')
   const store = create<{
@@ -51,7 +58,7 @@ describe('TerminalStatusBar', () => {
     const badge = container.querySelector('.terminal-status-bar .activity-state-badge')!
     expect(badge.textContent).toBe('idle')
     expect((getByLabelText('Idle detector') as HTMLInputElement).checked).toBe(true)
-    expect((getByLabelText('80 col limit') as HTMLInputElement).checked).toBe(true)
+    expect((getByLabelText('160 col limit') as HTMLInputElement).checked).toBe(true)
 
     act(() => {
       useActivityStateStore.getState().setTabState('tab1', ActivityState.Working, { kind: ActivityTransitionKind.ViewportChanged, snapshot: '$ ls' })

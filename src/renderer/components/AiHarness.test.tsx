@@ -20,6 +20,13 @@ vi.mock('./BaseTerminal', () => ({
 vi.mock('../terminal/xtermEngine', () => ({ createXtermEngine: vi.fn() }))
 // The context-menu store pulls in the app store (→ monaco) transitively; mock it so
 // this lightweight suite stays free of the editor stack. Same for the prompt buttons.
+// The real settings store drags in store/app (and monaco), which jsdom cannot load.
+vi.mock('../store/settings', () => {
+  const settings = { terminal: { maxCols: 160 } }
+  const useSettingsStore = <T,>(selector: (s: { settings: unknown }) => T): T => selector({ settings })
+  useSettingsStore.getState = (): { settings: unknown } => ({ settings })
+  return { useSettingsStore }
+})
 vi.mock('../store/contextMenu', async () => {
   const { create } = await import('zustand')
   const store = create<{
@@ -169,7 +176,7 @@ describe('AiHarness', () => {
     const workspace = makeWorkspaceStore('tab1', { ptyId: 'pty1', sandbox: {} }, makeAnalyzer())
 
     const { getByLabelText } = renderHarness(workspace)
-    const toggle = getByLabelText('80 col limit') as HTMLInputElement
+    const toggle = getByLabelText('160 col limit') as HTMLInputElement
     expect(toggle.checked).toBe(true)
     fireEvent.click(toggle)
 

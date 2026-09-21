@@ -7,6 +7,7 @@ import { proposeDimensions } from './proposeDimensions'
 import { xtermCellSize } from './xtermCellSize'
 import type {
   TerminalBufferHost,
+  TerminalCellSize,
   TerminalDimensions,
   TerminalDisplayOptions,
   TerminalDisposable,
@@ -176,6 +177,11 @@ class XtermEngine implements TerminalEngine {
 
   proposeDimensions(computeStyle: (element: Element) => CSSStyleDeclaration): TerminalDimensions | undefined {
     return proposeDimensions(this.element(), xtermCellSize(this.terminal), computeStyle)
+  }
+
+  cellSize(): TerminalCellSize | undefined {
+    const cell = xtermCellSize(this.terminal)
+    return cell.width && cell.height ? cell : undefined
   }
 
   private element(): HTMLElement {

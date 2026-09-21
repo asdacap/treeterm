@@ -17,6 +17,7 @@ const defaultSettings: Settings = {
     cursorBlink: true,
     showRawChars: false,
     allowOsc52Clipboard: true,
+    maxCols: 160,
     instances: []
   },
   sandbox: {

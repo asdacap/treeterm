@@ -7,6 +7,7 @@ import { SessionStoreContext } from '../contexts/SessionStoreContext'
 import BaseTerminal, { type BaseTerminalConfig, type TerminalContainerElement } from './BaseTerminal'
 import { ActivityState, ScrollPosition } from '../types'
 import { ActivityTransitionKind } from '../store/activityState'
+import { useSettingsStore } from '../store/settings'
 import { PtyEventType } from '../../shared/ipc-types'
 import type { CachedTerminal, PtyEvent } from '../types'
 import type { TerminalDisposable, TerminalEngine } from '../terminal/engine'
@@ -85,6 +86,9 @@ class FakeEngine implements TerminalEngine {
   /** What the container would fit. undefined means "not laid out yet", as in jsdom. */
   proposal: { cols: number; rows: number } | undefined = undefined
   proposeDimensions(): { cols: number; rows: number } | undefined { return this.proposal }
+
+  cell: { width: number; height: number } | undefined = undefined
+  cellSize(): { width: number; height: number } | undefined { return this.cell }
 }
 
 const engines: FakeEngine[] = []
@@ -122,7 +126,7 @@ vi.mock('./ContextMenu', () => ({ default: () => null }))
 // effect re-runs on every render and the StrictMode double-mount can't be observed.
 vi.mock('../store/settings', () => {
   const settings = {
-    terminal: { fontSize: 14, fontFamily: 'monospace', cursorBlink: true, cursorStyle: 'block', showRawChars: false, allowOsc52Clipboard: false },
+    terminal: { fontSize: 14, fontFamily: 'monospace', cursorBlink: true, cursorStyle: 'block', showRawChars: false, allowOsc52Clipboard: false, maxCols: 80 },
     debug: { showBadge: false },
     terminalAnalyzer: { idleDebounceMs: 1000, idleDebounceUnreadMs: 15000 },
   }
@@ -664,13 +668,29 @@ describe('BaseTerminal — mounted UI', () => {
     expect(engine.resizes).toHaveLength(0)
   })
 
-  it('caps the proposed width at 80 columns by default', async () => {
+  it('caps the proposed width at the terminal.maxCols setting by default', async () => {
     const { engine, tty } = await mount()
     engine.proposal = { cols: 200, rows: 30 }
 
     await act(async () => { await new Promise((r) => setTimeout(r, 150)) })
 
     expect(tty.resize).toHaveBeenCalledWith(80, 30)
+  })
+
+  it('caps at the configured column count', async () => {
+    const settings = useSettingsStore.getState().settings as { terminal: { maxCols: number } }
+    const previous = settings.terminal.maxCols
+    settings.terminal.maxCols = 160
+    try {
+      const { engine, tty } = await mount()
+      engine.proposal = { cols: 200, rows: 30 }
+
+      await act(async () => { await new Promise((r) => setTimeout(r, 150)) })
+
+      expect(tty.resize).toHaveBeenCalledWith(160, 30)
+    } finally {
+      settings.terminal.maxCols = previous
+    }
   })
 
   it('skips the fit when the capped size already matches the engine', async () => {
@@ -718,6 +738,36 @@ describe('BaseTerminal — mounted UI', () => {
     setTabState({ widthLimitDisabled: false })
     expect(tty.resize).toHaveBeenLastCalledWith(80, 30)
     expect(tty.resize).toHaveBeenCalledTimes(3)
+  })
+
+  it('marks the width the column limit leaves unused, and only when a whole column is left', async () => {
+    const { container, engine, emit, workspace } = await mount()
+    const terminalContainer = container.querySelector('.terminal-container') as HTMLElement
+    // jsdom has no layout: 1000px of container, 10px cells, inside a wrapper with 8px padding.
+    Object.defineProperty(terminalContainer, 'clientWidth', { value: 1000, configurable: true })
+    Object.defineProperty(terminalContainer, 'offsetLeft', { value: 8, configurable: true })
+    engine.cell = { width: 10, height: 20 }
+
+    // 80 columns use 800px of the 1000px, so the strip starts at the grid's right edge.
+    emit({ type: PtyEventType.Resize, cols: 80, rows: 24 })
+    const strip = (): HTMLElement | null => container.querySelector('.terminal-unused-width')
+    expect(strip()?.style.left).toBe('808px')
+
+    // A sub-cell leftover from rounding is not worth marking.
+    emit({ type: PtyEventType.Resize, cols: 100, rows: 24 })
+    expect(strip()).toBeNull()
+
+    // Nor is anything while the tab has the limit switched off.
+    emit({ type: PtyEventType.Resize, cols: 80, rows: 24 })
+    expect(strip()).not.toBeNull()
+    act(() => {
+      workspace.setState((state) => {
+        const ws = state.workspace as { appStates: Record<string, { state: Record<string, unknown> }> }
+        const tab = ws.appStates.tab1!
+        return { workspace: { ...ws, appStates: { tab1: { ...tab, state: { ...tab.state, widthLimitDisabled: true } } } } }
+      })
+    })
+    expect(strip()).toBeNull()
   })
 
   it('badges the size the daemon actually applied when it differs from the request', async () => {

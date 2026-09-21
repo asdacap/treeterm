@@ -21,6 +21,13 @@ vi.mock('../terminal/xtermEngine', () => ({ createXtermEngine: vi.fn() }))
 vi.mock('../terminal/ghosttyEngine', () => ({ createGhosttyEngine: vi.fn() }))
 // The badge's context menu pulls in the context-menu store (→ app store → monaco); mock it
 // so this lightweight suite stays free of the editor stack.
+// The real settings store drags in store/app (and monaco), which jsdom cannot load.
+vi.mock('../store/settings', () => {
+  const settings = { terminal: { maxCols: 160 } }
+  const useSettingsStore = <T,>(selector: (s: { settings: unknown }) => T): T => selector({ settings })
+  useSettingsStore.getState = (): { settings: unknown } => ({ settings })
+  return { useSettingsStore }
+})
 vi.mock('../store/contextMenu', async () => {
   const { create } = await import('zustand')
   const store = create<{

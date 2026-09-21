@@ -20,8 +20,6 @@ import ContextMenu from './ContextMenu'
 const SCROLLBACK_LINES = 50000
 /** Let the container's layout settle before the first fit. */
 const INITIAL_FIT_DELAY_MS = 100
-/** Columns a tab fits to unless its width limit is switched off in the status bar. */
-const DEFAULT_MAX_COLS = 80
 
 // Utility to format raw chars for console debugging
 function formatRawChars(str: string): string {
@@ -131,6 +129,8 @@ export default function BaseTerminal({
   const [pinnedToBottom, setPinnedToBottom] = useState(false)
   const [isAlternateScreen, setIsAlternateScreen] = useState(false)
   const [sizeMismatch, setSizeMismatch] = useState<{ requested: { cols: number; rows: number }; actual: { cols: number; rows: number } } | null>(null)
+  /** Left edge (px, within the padding wrapper) of the width the column limit leaves unused, or null when there is none worth showing. */
+  const [unusedWidthLeft, setUnusedWidthLeft] = useState<number | null>(null)
   const [refreshCounter, setRefreshCounter] = useState(0)
 
   const sessionStore = useSessionApi()
@@ -178,14 +178,30 @@ export default function BaseTerminal({
 
     /** Propose a fit to the daemon. The daemon echoes the size back, and only then does the
      *  terminal resize — see the Resize event below. Nothing resizes the terminal locally.
-     *  Columns are capped at DEFAULT_MAX_COLS unless the tab opted out; the cap is applied before
-     *  the request so the echo matches and the size-mismatch badge stays hidden. */
+     *  Columns are capped at the terminal.maxCols setting unless the tab opted out; the cap is
+     *  applied before the request so the echo matches and the size-mismatch badge stays hidden.
+     *  A saved settings change re-runs this effect, so the new cap is picked up by the mount fit. */
     const applyFit = (engine: TerminalEngine, resize: (cols: number, rows: number) => void): void => {
       const dimensions = engine.proposeDimensions(getComputedStyle)
       if (!dimensions) return
-      const cols = widthLimitDisabled() ? dimensions.cols : Math.min(dimensions.cols, DEFAULT_MAX_COLS)
+      const cols = widthLimitDisabled() ? dimensions.cols : Math.min(dimensions.cols, settings.terminal.maxCols)
       if (cols === engine.cols && dimensions.rows === engine.rows) return
       resize(cols, dimensions.rows)
+    }
+
+    /** Locate the strip to the right of the grid that the column limit leaves unused, so the
+     *  UI can mark it as not being part of the terminal. Sub-cell leftovers from rounding are
+     *  not worth marking, and neither is anything while the limit is off. */
+    const measureUnusedWidth = (engine: TerminalEngine): void => {
+      const container = containerRef.current
+      const cell = engine.cellSize()
+      if (!container || !cell || widthLimitDisabled()) {
+        setUnusedWidthLeft(null)
+        return
+      }
+      const gridWidth = engine.cols * cell.width
+      const unused = container.clientWidth - gridWidth
+      setUnusedWidthLeft(unused >= cell.width ? container.offsetLeft + gridWidth : null)
     }
 
     /** Attach all DOM-level handlers to an engine. Shared by first mount and remount. */
@@ -232,6 +248,7 @@ export default function BaseTerminal({
         if (disabled !== lastWidthLimitDisabled) {
           lastWidthLimitDisabled = disabled
           if (initialResizeDone) applyFit(engine, resize)
+          measureUnusedWidth(engine)
         }
       })
       if (workspace.getState().workspace.activeTabId === tabId) {
@@ -295,6 +312,7 @@ export default function BaseTerminal({
             const scrollRatio = engine.getScrollRatio()
 
             engine.resize(event.cols, event.rows)
+            measureUnusedWidth(engine)
 
             // Check if daemon-echoed size matches what we requested
             const req = requestedSize
@@ -329,6 +347,7 @@ export default function BaseTerminal({
       resizeObserver = new ResizeObserver(() => {
         if (!initialResizeDone) return
         applyFit(engine, resize)
+        measureUnusedWidth(engine)
       })
       if (containerRef.current) {
         resizeObserver.observe(containerRef.current)
@@ -339,6 +358,7 @@ export default function BaseTerminal({
       resizeTimeout = setTimeout(() => {
         if (cancelled) return
         applyFit(engine, resize)
+        measureUnusedWidth(engine)
         log.debug(`[${config.logPrefix} ${tabId}] resize (initial):`, { cols: engine.cols, rows: engine.rows })
         initialResizeDone = true
       }, INITIAL_FIT_DELAY_MS)
@@ -611,6 +631,9 @@ export default function BaseTerminal({
           className={`terminal-container${config.disableScrollbar ? ' disable-scrollbar' : ''}`}
           onContextMenu={handleContextMenu}
         />
+        {unusedWidthLeft !== null && (
+          <div className="terminal-unused-width" style={{ left: unusedWidthLeft }} />
+        )}
       </div>
 
       {loading && (

@@ -199,6 +199,8 @@ export interface Settings {
     cursorBlink: boolean
     showRawChars: boolean
     allowOsc52Clipboard: boolean
+    /** Columns a tab fits to unless its width limit is switched off in the status bar. */
+    maxCols: number
     instances: TerminalInstance[]
   }
   sandbox: {

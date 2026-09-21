@@ -201,6 +201,26 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                 </div>
 
                 <div className="settings-group">
+                  <label className="settings-label">Max Columns</label>
+                  <input
+                    type="number"
+                    className="settings-input"
+                    value={localSettings.terminal.maxCols}
+                    min={40}
+                    max={1000}
+                    onChange={(e) =>
+                      { setLocalSettings((prev) => ({
+                        ...prev,
+                        terminal: { ...prev.terminal, maxCols: parseInt(e.target.value) || defaultSettings.terminal.maxCols }
+                      })); }
+                    }
+                  />
+                  <p className="settings-hint">
+                    Terminals fit to at most this many columns; the &quot;col limit&quot; switch in a tab&apos;s status bar lifts it for that tab
+                  </p>
+                </div>
+
+                <div className="settings-group">
                   <label className="settings-label">Font Family</label>
                   <input
                     type="text"
