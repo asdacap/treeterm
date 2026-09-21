@@ -35,9 +35,11 @@ const NO_AI_HARNESS_TAB: TitleRefreshResult = {
 export interface CachedTerminal {
   engine: TerminalEngine
   tty: Tty
-  /** Owns the engine and the Tty. Disposed only by `disposeCachedTerminal` — never on
+  /** Owns the engine, activity detector, and the Tty. Disposed only by `disposeCachedTerminal` — never on
    *  unmount, since the cache outlives the component ("Unmount is not close"). */
   owner: DisposableStore
+  /** Process a post-write viewport, even while unmounted; inert after disposal. */
+  processActivity: () => void
   /** Set by BaseTerminal on mount, cleared to null on unmount.
    *  When set, all events forward to this handler for full UI handling.
    *  When null, the background fallback writes data to the terminal buffer. */

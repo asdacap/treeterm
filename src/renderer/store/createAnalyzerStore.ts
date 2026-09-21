@@ -183,6 +183,13 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   async function analyze(): Promise<void> {
     if (!running) return
 
+    const buffer = extractBuffer()
+    if (!buffer) {
+      store.setState({ analyzing: false })
+      updateAiState(ActivityState.Idle, '')
+      return
+    }
+
     // Only one request at a time — buffer pending work
     if (requestInFlight) {
       pendingAnalyze = true
@@ -202,9 +209,6 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       }
       return
     }
-
-    const buffer = extractBuffer()
-    if (!buffer) return
 
     try {
 
@@ -466,27 +470,42 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       if (running) return
 
       // Create headless xterm (no DOM attachment needed)
-      terminal = new Terminal()
+      const activeTerminal = terminal = new Terminal()
       // Capture this cycle's owner. `streamOwner` is reassigned by the next start(),
       // so the async continuations below must check the owner they were born with —
       // not whatever `streamOwner` points at by the time they resolve. Otherwise a
       // late attach from a previous cycle sees the *new* owner (not disposed) and
       // clobbers the current TTY with its own already-disposed handle.
       const owner = streamOwner = new DisposableStore()
+      let viewportText = extractBuffer()
+      const updateViewport = (): void => {
+        if (owner.isDisposed) return
+        const nextText = extractBuffer()
+        if (nextText === viewportText) return
+        viewportText = nextText
+        dataVersion++
+      }
+
+      startPolling()
 
       // The daemon replays scrollback as Data events after attach, and an
       // already-exited PTY arrives as an Exit event — both land in onEvent below.
       void thenRegisterOrDispose(deps.openTtyStream(ptyId, (event) => {
+        if (owner.isDisposed) return
         switch (event.type) {
           case PtyEventType.Data:
-            terminal?.write(event.data)
-            dataVersion++
+            // xterm parses asynchronously. Identical TUI repaints must neither
+            // postpone classification nor invalidate a response already in flight.
+            activeTerminal.write(event.data, updateViewport)
             break
           case PtyEventType.Exit:
             store.getState().stop()
+            store.setState({ analyzing: false })
+            updateAiState(ActivityState.Completed, '')
             break
           case PtyEventType.Resize:
-            terminal?.resize(event.cols, event.rows)
+            activeTerminal.resize(event.cols, event.rows)
+            updateViewport()
             break
         }
       }), owner).then((tty) => {
@@ -496,8 +515,6 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       }).catch((err: unknown) => {
         console.error('[analyzer] failed to open TTY stream:', err)
       })
-
-      startPolling()
     },
 
     stop: (): void => {

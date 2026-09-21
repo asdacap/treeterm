@@ -12,7 +12,7 @@ import type { CachedTerminal, TerminalAppRef, PtyEvent, SandboxConfig, TerminalS
 import type { TerminalBufferHost, TerminalEngine, TerminalEngineFactory } from '../terminal/engine'
 import { snapshotViewport } from '../terminal/engine'
 import { PtyEventType } from '../../shared/ipc-types'
-import { DisposableStore, thenRegisterOrDispose } from '../../shared/lifecycle'
+import { DisposableStore, thenRegisterOrDispose, toDisposable } from '../../shared/lifecycle'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
 
@@ -45,7 +45,7 @@ function formatRawChars(str: string): string {
 /**
  * Background event handler for cached terminals.
  * Dispatches to mountedHandler when the component is mounted,
- * falls back to minimal buffer writes when unmounted.
+ * falls back to buffer writes and activity detection when unmounted.
  */
 function handleCachedEvent(cache: CachedTerminal, event: PtyEvent): void {
   // When component is mounted, forward everything to the full UI handler
@@ -58,7 +58,7 @@ function handleCachedEvent(cache: CachedTerminal, event: PtyEvent): void {
   switch (event.type) {
     case PtyEventType.Data: {
       cache.dataVersion++
-      cache.engine.write(event.data)
+      cache.engine.write(event.data, cache.processActivity)
       break
     }
     case PtyEventType.Resize:
@@ -153,7 +153,6 @@ export default function BaseTerminal({
     let scrollDisposable: { dispose(): void } | null = null
     let wheelDisposable: { dispose(): void } | null = null
     let resizeObserver: ResizeObserver | null = null
-    let detector: ReturnType<typeof createActivityStateDetector> | null = null
     let unsubscribeFocus: (() => void) | null = null
     let rawChars = ''
     let initialResizeDone = false
@@ -214,13 +213,6 @@ export default function BaseTerminal({
         }
       })
 
-      // Activity state detector
-      detector = config.disableActivityDetector
-        ? null
-        : createActivityStateDetector(
-            (state) => { setTabState(tabId, state); }
-          )
-
       // Focus when this tab becomes active
       unsubscribeFocus = workspace.subscribe((state) => {
         if (state.workspace.activeTabId === tabId && engineRef.current) {
@@ -253,9 +245,7 @@ export default function BaseTerminal({
               // Snapshot after the write lands in the buffer (xterm parses asynchronously). The
               // detector treats an unchanged viewport as idle, so an app that repaints identical
               // content stops reading as Working.
-              if (detector) {
-                detector.processData(snapshotViewport(engine))
-              }
+              cache.processActivity()
             }
 
             engine.write(event.data, afterWrite)
@@ -421,11 +411,22 @@ export default function BaseTerminal({
         engine.attach(containerRef.current)
         ;(containerRef.current as TerminalContainerElement).terminal = engine.raw
 
+        // Activity belongs to the cached terminal, not its mounted view. Background output
+        // and pending Idle transitions must keep running across workspace switches.
+        const detector = config.disableActivityDetector
+          ? null
+          : createActivityStateDetector((state) => { setTabState(tabId, state) })
+        if (detector) owner.add(toDisposable(detector.destroy))
+
         // Create cache entry — event handler is registered before the stream starts
         const cache: CachedTerminal = {
           engine,
           tty: undefined as unknown as Tty,  // set after openTtyStream resolves
           owner,
+          processActivity: () => {
+            // An asynchronous engine write can finish after actual cache disposal.
+            if (!owner.isDisposed && detector) detector.processData(snapshotViewport(engine))
+          },
           mountedHandler: null,
           connectedAt: Date.now(),
           dataVersion: 0,
@@ -499,7 +500,6 @@ export default function BaseTerminal({
       wheelDisposable?.dispose()
       resizeObserver?.disconnect()
       unsubscribeFocus?.()
-      detector?.destroy()
 
       // Clear mounted handler so background fallback takes over
       const currentRef = workspace.getState().getTabRef(tabId) as TerminalAppRef | null

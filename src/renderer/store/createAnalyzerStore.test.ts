@@ -8,6 +8,7 @@ import { createLlmClient, parseLlmJson } from '../lib/llmClient'
 import type { LlmApi, Settings } from '../types'
 import type { Tty, TtyState } from './createTtyStore'
 import { createStore } from 'zustand/vanilla'
+import { Terminal } from '@xterm/xterm'
 import { PtyEventType } from '../../shared/ipc-types'
 import type { PtyEvent } from '../../shared/ipc-types'
 
@@ -32,6 +33,7 @@ function makeMockTty() {
     dispose,
     setEventCallback: (cb: (event: PtyEvent) => void) => { eventCallback = cb },
     emitData: (data: string) => eventCallback?.({ type: PtyEventType.Data, data: new TextEncoder().encode(data) }),
+    emitResize: (cols: number, rows: number) => eventCallback?.({ type: PtyEventType.Resize, cols, rows }),
     emitExit: (code: number) => eventCallback?.({ type: PtyEventType.Exit, exitCode: code }),
   }
 }
@@ -364,7 +366,9 @@ describe('createAnalyzerStore', () => {
     calls[0]!({ state: 'idle', reason: 'prompt visible' })
     await vi.advanceTimersByTimeAsync(0)
 
-    // Now the pending analyze should have fired
+    // The real parsed change rejects the first response and drains pending work.
+    expect(store.getState().getHistory()[0]?.error).toBe('[discarded]')
+    expect(store.getState().aiState).toBe(ActivityState.Working)
     expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(2)
 
     // Resolve second
@@ -375,7 +379,7 @@ describe('createAnalyzerStore', () => {
     vi.useRealTimers()
   })
 
-  it('dedup skips analysis when same buffer is in-flight', async () => {
+  it('accepts an in-flight classification despite continuous identical viewport repaints', async () => {
     vi.useFakeTimers()
     const mock = makeMockTty()
 
@@ -398,21 +402,28 @@ describe('createAnalyzerStore', () => {
 
     expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
 
-    // Second tick with dataVersion change but same buffer content
-    mock.emitData('') // empty data just bumps dataVersion
-    vi.advanceTimersByTime(1000)
-
-    // Should skip because same buffer is in-flight
+    for (let i = 0; i < 10; i++) {
+      mock.emitData('\x1b[H$ echo hello\r\nhello\r\n$ ')
+      await vi.advanceTimersByTimeAsync(100)
+    }
     expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
 
-    resolveAnalysis({ state: 'idle', reason: '' })
+    resolveAnalysis({ state: ActivityState.Idle, reason: 'prompt visible' })
     await vi.advanceTimersByTimeAsync(0)
+    expect(store.getState().aiState).toBe(ActivityState.Idle)
+    expect(store.getState().reason).toBe('prompt visible')
+    expect(store.getState().getHistory()[0]?.error).toBeUndefined()
+
+    mock.emitData('\x1b[H$ echo hello\r\nhello\r\n$ ')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(store.getState().aiState).toBe(ActivityState.Idle)
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
 
     store.getState().stop()
     vi.useRealTimers()
   })
 
-  it('dedup reuses cached result for unchanged buffer', async () => {
+  it('ignores empty data after classification', async () => {
     vi.useFakeTimers()
     const mock = makeMockTty()
     deps = makeDeps({
@@ -430,15 +441,179 @@ describe('createAnalyzerStore', () => {
 
     expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
 
-    // Second analysis, same buffer (empty data just bumps version)
+    // Empty data does not change the parsed viewport.
     mock.emitData('')
     vi.advanceTimersByTime(1000)
     await vi.advanceTimersByTimeAsync(0)
 
-    // Should reuse cached result, not call LLM again
+    // No new classification is needed.
     expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
 
     store.getState().stop()
+    vi.useRealTimers()
+  })
+
+  it('waits for asynchronous parsing before scheduling classification', async () => {
+    vi.useFakeTimers()
+    const mock = makeMockTty()
+    deps = makeDeps({ openTtyStream: makeTtyStreamMock(mock) })
+    const store = createAnalyzerStore('tab-1', deps)
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- invoked with its original receiver below
+    const originalWrite = Terminal.prototype.write
+    const writes: Array<() => void> = []
+    const write = vi.spyOn(Terminal.prototype, 'write').mockImplementation(function (
+      this: Terminal, data: string | Uint8Array, callback?: () => void,
+    ): void {
+      writes.push(() => { originalWrite.call(this, data, callback) })
+    })
+
+    store.getState().start('pty-1')
+    mock.emitData('$ parsed later')
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(store.getState().getBufferText()).toBeNull()
+    expect(store.getState().aiState).toBe(ActivityState.Idle)
+    expect(deps.llm.analyzeTerminal).not.toHaveBeenCalled()
+
+    writes[0]!()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(deps.llm.analyzeTerminal).mock.calls[0]?.[0]).toContain('$ parsed later')
+
+    store.getState().stop()
+    write.mockRestore()
+    vi.useRealTimers()
+  })
+
+  it('classifies changed viewport text after resize but ignores identical resize', async () => {
+    vi.useFakeTimers()
+    const mock = makeMockTty()
+    deps = makeDeps({ openTtyStream: makeTtyStreamMock(mock, ['abcdefghij']) })
+    const store = createAnalyzerStore('tab-1', deps)
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
+
+    mock.emitResize(5, 24)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(deps.llm.analyzeTerminal).mock.calls[1]?.[0]).toBe('abcde' + '\n'.repeat(23))
+
+    mock.emitResize(5, 24)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(2)
+    expect(store.getState().aiState).toBe(ActivityState.Idle)
+    store.getState().stop()
+    vi.useRealTimers()
+  })
+
+  it('ignores old stream events and parsed-write callbacks after stop and restart', async () => {
+    vi.useFakeTimers()
+    const oldMock = makeMockTty()
+    const newMock = makeMockTty()
+    deps = makeDeps({
+      openTtyStream: vi.fn()
+        .mockImplementationOnce(makeTtyStreamMock(oldMock))
+        .mockImplementationOnce(makeTtyStreamMock(newMock)),
+    })
+    const callbacks: Array<() => void> = []
+    const buffers: Terminal['buffer'][] = []
+    const write = vi.spyOn(Terminal.prototype, 'write').mockImplementation(function (
+      this: Terminal, _data: string | Uint8Array, callback?: () => void,
+    ): void {
+      buffers.push(this.buffer)
+      if (callback) callbacks.push(callback)
+    })
+    const store = createAnalyzerStore('tab-1', deps)
+    store.getState().start('pty-1')
+    oldMock.emitData('old screen')
+    store.getState().stop()
+    callbacks[0]!()
+    store.getState().start('pty-2')
+
+    newMock.emitData('new screen')
+    // Read spying lets an old callback incorrectly reading the new terminal be observed.
+    const getBuffer = vi.spyOn(buffers[1]!, 'active', 'get')
+    callbacks[0]!()
+    oldMock.emitData('late old output')
+    oldMock.emitResize(5, 3)
+    oldMock.emitExit(0)
+    expect(getBuffer).not.toHaveBeenCalled()
+    expect(write).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(newMock.dispose).not.toHaveBeenCalled()
+    expect(deps.llm.analyzeTerminal).not.toHaveBeenCalled()
+    expect(store.getState().aiState).toBe(ActivityState.Idle)
+
+    store.getState().stop()
+    getBuffer.mockRestore()
+    write.mockRestore()
+    vi.useRealTimers()
+  })
+
+  it('returns to idle when the viewport is cleared while classification is pending', async () => {
+    vi.useFakeTimers()
+    const mock = makeMockTty()
+    let resolveResult!: (value: Awaited<ReturnType<LlmApi['analyzeTerminal']>>) => void
+    const result = new Promise<Awaited<ReturnType<LlmApi['analyzeTerminal']>>>((resolve) => { resolveResult = resolve })
+    deps = makeDeps({ openTtyStream: makeTtyStreamMock(mock, ['working']) })
+    vi.mocked(deps.llm.analyzeTerminal).mockReturnValue(result)
+    const store = createAnalyzerStore('tab-1', deps)
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(store.getState().analyzing).toBe(true)
+
+    mock.emitData('\x1b[2J\x1b[H')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(store.getState().aiState).toBe(ActivityState.Idle)
+    expect(store.getState().analyzing).toBe(false)
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
+
+    resolveResult({ state: ActivityState.Working, reason: 'old output' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(store.getState().aiState).toBe(ActivityState.Idle)
+    expect(store.getState().getHistory()[0]?.error).toBe('[discarded]')
+    store.getState().stop()
+    vi.useRealTimers()
+  })
+
+  it('marks an exited PTY completed and ignores its pending classification', async () => {
+    vi.useFakeTimers()
+    const mock = makeMockTty()
+    let resolveResult!: (value: Awaited<ReturnType<LlmApi['analyzeTerminal']>>) => void
+    const result = new Promise<Awaited<ReturnType<LlmApi['analyzeTerminal']>>>((resolve) => { resolveResult = resolve })
+    deps = makeDeps({ openTtyStream: makeTtyStreamMock(mock, ['working']) })
+    vi.mocked(deps.llm.analyzeTerminal).mockReturnValue(result)
+    const store = createAnalyzerStore('tab-1', deps)
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(store.getState().analyzing).toBe(true)
+
+    mock.emitExit(0)
+    expect(store.getState().aiState).toBe(ActivityState.Completed)
+    expect(store.getState().analyzing).toBe(false)
+    resolveResult({ state: ActivityState.Working, reason: 'old output' })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(store.getState().aiState).toBe(ActivityState.Completed)
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
+  it('does not restart polling after an already-exited PTY is replayed during attach', async () => {
+    vi.useFakeTimers()
+    const mock = makeMockTty()
+    deps = makeDeps({
+      openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: PtyEvent) => void) => {
+        onEvent({ type: PtyEventType.Exit, exitCode: 0 })
+        return Promise.resolve(mock.tty)
+      }),
+    })
+    const store = createAnalyzerStore('tab-1', deps)
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(store.getState().aiState).toBe(ActivityState.Completed)
+    expect(mock.dispose).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+    expect(deps.llm.analyzeTerminal).not.toHaveBeenCalled()
     vi.useRealTimers()
   })
 

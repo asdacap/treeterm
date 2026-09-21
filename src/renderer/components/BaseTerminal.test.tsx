@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { StrictMode } from 'react'
-import { render, act } from '@testing-library/react'
+import { render, act, cleanup } from '@testing-library/react'
 import { createStore } from 'zustand/vanilla'
 import { SessionStoreContext } from '../contexts/SessionStoreContext'
 import BaseTerminal, { type BaseTerminalConfig, type TerminalContainerElement } from './BaseTerminal'
-import { ScrollPosition } from '../types'
+import { ActivityState, ScrollPosition } from '../types'
 import { PtyEventType } from '../../shared/ipc-types'
-import type { PtyEvent } from '../types'
+import type { CachedTerminal, PtyEvent } from '../types'
 import type { TerminalDisposable, TerminalEngine } from '../terminal/engine'
 
 // --- Fake engine: records what BaseTerminal drives it with, plus a minimal DOM presence ---
@@ -94,13 +94,25 @@ const createEngine = vi.fn(async (): Promise<TerminalEngine> => {
   return engine
 })
 
-const { processedData } = vi.hoisted(() => ({ processedData: [] as string[] }))
-vi.mock('../utils/activityStateDetector', () => ({
-  createActivityStateDetector: () => ({
-    processData: (data: string) => processedData.push(data),
-    destroy: () => {},
-  }),
+const { processedData, setTabState } = vi.hoisted(() => ({
+  processedData: [] as string[],
+  setTabState: vi.fn(),
 }))
+vi.mock('../utils/activityStateDetector', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../utils/activityStateDetector')>()
+  return {
+    createActivityStateDetector: (...args: Parameters<typeof actual.createActivityStateDetector>) => {
+      const detector = actual.createActivityStateDetector(...args)
+      return {
+        ...detector,
+        processData: (data: string): void => {
+          processedData.push(data)
+          detector.processData(data)
+        },
+      }
+    },
+  }
+})
 vi.mock('./ContextMenu', () => ({ default: () => null }))
 
 // Each mock exposes a STABLE state object so BaseTerminal's effect deps (settings,
@@ -118,7 +130,7 @@ vi.mock('../store/app', () => {
   return { useAppStore: <T,>(selector: (s: typeof state) => T): T => selector(state) }
 })
 vi.mock('../store/activityState', () => {
-  const state = { setTabState: () => {} }
+  const state = { setTabState }
   return { useActivityStateStore: <T,>(selector: (s: typeof state) => T): T => selector(state) }
 })
 vi.mock('../store/contextMenu', () => {
@@ -130,12 +142,21 @@ vi.mock('../store/contextMenu', () => {
 beforeEach(() => {
   engines.length = 0
   processedData.length = 0
+  setTabState.mockClear()
   createEngine.mockClear()
   ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
     observe(): void {}
     unobserve(): void {}
     disconnect(): void {}
   }
+})
+
+const cachedRefs: { cachedTerminal: CachedTerminal | null }[] = []
+afterEach(() => {
+  cleanup()
+  for (const ref of cachedRefs) ref.cachedTerminal?.owner.dispose()
+  cachedRefs.length = 0
+  vi.useRealTimers()
 })
 
 /** Stable config ref — mirrors Terminal.tsx's useState-stabilized config. */
@@ -161,11 +182,12 @@ function makeFakeTty() {
 function makeWorkspaceStore(tabId: string, options: { keepOnExit?: boolean; activeTabId?: string } = {}) {
   const { keepOnExit = false, activeTabId = tabId } = options
   const appRef = {
-    cachedTerminal: null as unknown,
+    cachedTerminal: null as CachedTerminal | null,
     disposeCachedTerminal: vi.fn(),
     close: vi.fn(),
     dispose: vi.fn(),
   }
+  cachedRefs.push(appRef)
   const removeTab = vi.fn()
   const store = createStore<Record<string, unknown>>()(() => ({
     workspace: {
@@ -342,6 +364,91 @@ describe('BaseTerminal — terminal cache across unmount', () => {
 
     const host = container.querySelector('.terminal-container') as TerminalContainerElement
     expect(host.terminal).toBe(engines[0]?.raw)
+  })
+})
+
+describe('BaseTerminal — cached activity detector lifecycle', () => {
+  async function mount(disableActivityDetector = false) {
+    vi.useFakeTimers()
+    const { store: workspace, appRef } = makeWorkspaceStore('tab1')
+    const session = makeLiveSessionStore()
+    const stableConfig = { ...config, disableActivityDetector }
+    const view = (): React.ReactNode => (
+      <SessionStoreContext.Provider value={session.store}>
+        <BaseTerminal workspace={workspace as never} tabId="tab1" config={stableConfig} />
+      </SessionStoreContext.Provider>
+    )
+    const result = render(view())
+    await flush()
+    const emit = (text: string): void => {
+      act(() => { session.events[0]?.({ type: PtyEventType.Data, data: new TextEncoder().encode(text) }) })
+    }
+    return { ...result, appRef, session, view, emit, engine: engines[0]! }
+  }
+
+  it('finishes pending Idle after unmount and stays idle on remount without new data', async () => {
+    const { emit, unmount, view } = await mount()
+    emit('working')
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working)
+    // Unmount during the debounced Idle transition, not just during its timeout.
+    act(() => { vi.advanceTimersByTime(1000) })
+    unmount()
+    act(() => { vi.advanceTimersByTime(100) })
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle)
+
+    render(view())
+    await flush()
+    act(() => { vi.advanceTimersByTime(2000) })
+    expect(setTabState).toHaveBeenCalledTimes(2)
+  })
+
+  it('tracks changed background output and ignores unchanged repaints across remount', async () => {
+    const { emit, unmount, view, engine } = await mount()
+    emit('initial')
+    unmount()
+    act(() => { vi.advanceTimersByTime(1100) })
+    emit('background change')
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working)
+    expect(processedData.at(-1)).toContain('background change')
+
+    // Simulate a TUI repaint that leaves the parsed viewport unchanged.
+    vi.spyOn(engine, 'write').mockImplementation((_data, afterWrite) => { afterWrite?.() })
+    act(() => { vi.advanceTimersByTime(500) })
+    emit('same screen')
+    render(view())
+    await flush()
+    emit('same screen')
+    act(() => { vi.advanceTimersByTime(600) })
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle)
+    expect(setTabState).toHaveBeenCalledTimes(4)
+  })
+
+  it('cancels pending Idle and ignores late write callbacks on actual cache disposal', async () => {
+    const { emit, unmount, appRef, engine, session } = await mount()
+    emit('working')
+    unmount()
+    let finishWrite = (): void => { throw new Error('No pending write') }
+    vi.spyOn(engine, 'write').mockImplementation((_data, afterWrite) => {
+      if (afterWrite) finishWrite = afterWrite
+    })
+    emit('pending background write')
+    appRef.cachedTerminal!.owner.dispose()
+    expect(engine.disposed).toBe(true)
+    expect(session.dispose).toHaveBeenCalledTimes(1)
+    finishWrite()
+    act(() => { vi.advanceTimersByTime(2000) })
+    expect(setTabState).toHaveBeenCalledTimes(1)
+    expect(processedData).toHaveLength(1)
+  })
+
+  it('does not detect activity for terminals configured to use an external analyzer', async () => {
+    const { emit, unmount } = await mount(true)
+    emit('mounted')
+    unmount()
+    emit('background')
+    act(() => { vi.advanceTimersByTime(2000) })
+    expect(processedData).toHaveLength(0)
+    expect(setTabState).not.toHaveBeenCalled()
   })
 })
 
