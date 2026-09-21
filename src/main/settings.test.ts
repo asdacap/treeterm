@@ -242,3 +242,14 @@ describe('settings', () => {
     })
   })
 })
+
+describe('notification sound settings', () => {
+  it.each([{ loaded: {}, enabled: true }, { loaded: { notifications: {} }, enabled: true }, { loaded: { notifications: { soundEnabled: false } }, enabled: false }])('defaults legacy settings and preserves explicit false: %j', ({ loaded, enabled }) => {
+    vi.mocked(fs.existsSync).mockReturnValue(true)
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(loaded))
+    expect(loadSettings().notifications.soundEnabled).toBe(enabled)
+  })
+  it('defaults to enabled', () => {
+    expect(getDefaultSettings().notifications.soundEnabled).toBe(true)
+  })
+})

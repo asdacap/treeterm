@@ -9,6 +9,8 @@ import SessionPanel, { CollapsedSessionPanel } from './SessionPanel'
 import { PrIndicators } from './PrIndicators'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
+import SoundToggle from './SoundToggle'
+import { hasUnreadWorkspaceAttention } from '../store/workspaceAttention'
 import { ActivityIndicator } from './ActivityIndicator'
 import { useNavigationStore } from '../store/navigation'
 import { useStore } from 'zustand'
@@ -45,6 +47,8 @@ export function FavouriteWorkspaceItem({
   workspaceStore: WorkspaceStore
   data: import('../types').Workspace
 }): React.JSX.Element | null {
+  const unread = useStore(workspaceStore, s => hasUnreadWorkspaceAttention(s.metadata))
+  const pending = useStore(sessionStore, s => s.attentionPending[workspaceId] ?? false)
   const isFavourite = useStore(workspaceStore, s => s.metadata.isFavourite === 'true')
   const displayName = useStore(workspaceStore, s => s.metadata.displayName || data.name)
   const appStates = useStore(workspaceStore, s => s.appStates)
@@ -76,7 +80,8 @@ export function FavouriteWorkspaceItem({
   return (
     <div className="favourite-workspace-item-wrapper">
       <div
-        className={`tree-item${isActive ? ' active' : ''}`}
+        className={`tree-item${isActive ? ' active' : ''}${unread ? ' workspace-unread' : ''}`}
+        aria-busy={pending}
         style={{ paddingLeft: 4 }}
         onClick={handleClick}
         onContextMenu={handleContextMenu}
@@ -87,6 +92,8 @@ export function FavouriteWorkspaceItem({
         </span>
         <PrIndicators gitController={gitController} />
         <span className="tree-item-name">{displayName}</span>
+        {unread && <span className="workspace-unread-marker" role="img" aria-label="Unread workspace activity" title="New activity — open workspace to mark as read">●</span>}
+        {pending && <Loader2 size={12} className="spinning" role="status" aria-label="Saving workspace attention" />}
       </div>
       <ContextMenu menuId={menuId} activeMenuId={activeMenuId} position={menuPosition}>
         <div className="context-menu-item" onClick={() => { workspaceStore.getState().addTab('workspace-settings'); useContextMenuStore.getState().close() }}>
@@ -211,6 +218,7 @@ export default function TreePane({ selectFolder, isCollapsed, onToggleCollapse }
     return (
       <div className="tree-pane-collapsed">
         <div className="tree-pane-collapsed-header">
+          <SoundToggle />
           <button
             className="add-button"
             onClick={onToggleCollapse}
@@ -255,6 +263,7 @@ export default function TreePane({ selectFolder, isCollapsed, onToggleCollapse }
   return (
     <div className="tree-pane-content">
       <div className="tree-header">
+        <SoundToggle />
         <span className="tree-title">Sessions</span>
         <div className="tree-header-actions">
           <button

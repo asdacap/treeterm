@@ -33,6 +33,7 @@ export const defaultSettings: Settings = {
   customRunner: {
     instances: []
   },
+  notifications: { soundEnabled: true },
   appearance: {
     theme: 'dark'
   },
@@ -81,7 +82,20 @@ export const defaultSettings: Settings = {
   }
 }
 
+export enum SoundSaveStatus {
+  Idle = 'idle',
+  Saving = 'saving',
+  Error = 'error'
+}
+
+export type SoundSaveState =
+  | { status: SoundSaveStatus.Idle }
+  | { status: SoundSaveStatus.Saving }
+  | { status: SoundSaveStatus.Error; error: string }
+
 interface SettingsState {
+  soundSaveState: SoundSaveState
+  toggleSound: () => Promise<void>
   settingsApi: SettingsApi | null
   terminalKill: ((connectionId: string, id: string) => void) | null
   settings: Settings
@@ -97,6 +111,22 @@ interface SettingsState {
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
+  soundSaveState: { status: SoundSaveStatus.Idle },
+  toggleSound: async (): Promise<void> => {
+    if (get().soundSaveState.status === SoundSaveStatus.Saving) return
+    set({ soundSaveState: { status: SoundSaveStatus.Saving } })
+    try {
+      const settings = get().settings
+      const settingsApi = get().settingsApi
+      if (!settingsApi) throw new Error('Settings API not initialized')
+      const updated = { ...settings, notifications: { soundEnabled: !settings.notifications.soundEnabled } }
+      const result = await settingsApi.save(updated)
+      if (!result.success) throw new Error('Settings save was unsuccessful')
+      set({ settings: updated, soundSaveState: { status: SoundSaveStatus.Idle } })
+    } catch (error) {
+      set({ soundSaveState: { status: SoundSaveStatus.Error, error: error instanceof Error ? error.message : String(error) } })
+    }
+  },
   settingsApi: null,
   terminalKill: null,
   settings: defaultSettings,

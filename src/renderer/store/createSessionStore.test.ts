@@ -9,6 +9,7 @@ import { createMockExecApi } from '../../shared/mockApis'
 import { makeWorkspace, makeSession, makeSessionLock } from '../../shared/test-fixtures/workspace'
 import { FileWatchEventType, type FileWatchEvent } from '../../shared/ipc-types'
 import { toStoredWorkspaceFile, type Workspace } from '../../shared/workspaceFile'
+import { getWorkspaceAttention, hasUnreadWorkspaceAttention, WORKSPACE_ATTENTION_KEY } from './workspaceAttention'
 import { sha256Hex } from '../lib/sha256'
 
 const flushPromises = () => new Promise(r => setTimeout(r, 0))
@@ -168,6 +169,162 @@ describe('createSessionStore', () => {
     // The daemon advertises this via SessionWatch; set it directly for tests that
     // exercise create/remove without first replaying a session event.
     store.setState({ workspaceDataDir: '/test/.treeterm/workspaces' })
+  })
+
+  describe('workspace attention', () => {
+    async function loadAttentionWorkspace(): Promise<Workspace> {
+      const ws = makeWorkspace({ id: 'attention-ws', appStates: {}, metadata: { displayName: 'Keep me' } })
+      await store.getState().handleRestore(sessionWithRefs([ws]))
+      emitFilePresent(ws, 'initial-sha')
+      return ws
+    }
+
+    function currentAttention(): Record<string, string> {
+      const entry = store.getState().workspaces.get('attention-ws')!
+      if (entry.status !== WorkspaceEntryStatus.Loaded && entry.status !== WorkspaceEntryStatus.OperationError) throw new Error('Not loaded')
+      return entry.store.getState().metadata
+    }
+
+    async function settleWrites(): Promise<void> {
+      for (let i = 0; i < 8; i++) await flushPromises()
+    }
+
+    it('publishes only through the watch, then acknowledges the observed revision', async () => {
+      await loadAttentionWorkspace()
+      store.getState().recordWorkspaceAttention('attention-ws')
+      await settleWrites()
+      expect(hasUnreadWorkspaceAttention(currentAttention())).toBe(false)
+      expect(store.getState().attentionPending['attention-ws']).toBe(true)
+      const call = vi.mocked(deps.filesystem.writeFile).mock.calls.at(-1)!
+      const content = call[2]
+      fileWatchCallbacks.get('attention-ws.json')!({ type: FileWatchEventType.Present, content, sha256: await sha256Hex(content) })
+      expect(hasUnreadWorkspaceAttention(currentAttention())).toBe(true)
+      expect(store.getState().attentionPending['attention-ws']).toBe(false)
+      const revision = getWorkspaceAttention(currentAttention()).revision
+      store.getState().acknowledgeWorkspaceAttention('attention-ws', revision)
+      await settleWrites()
+      expect(hasUnreadWorkspaceAttention(currentAttention())).toBe(true)
+      const ack = vi.mocked(deps.filesystem.writeFile).mock.calls.at(-1)![2]
+      fileWatchCallbacks.get('attention-ws.json')!({ type: FileWatchEventType.Present, content: ack, sha256: await sha256Hex(ack) })
+      expect(hasUnreadWorkspaceAttention(currentAttention())).toBe(false)
+      expect(currentAttention().displayName).toBe('Keep me')
+    })
+
+    it('handles own attention watch before write response without optimistic publication', async () => {
+      await loadAttentionWorkspace()
+      vi.mocked(deps.filesystem.writeFile).mockImplementation(async (_dir, file, content) => {
+        expect(hasUnreadWorkspaceAttention(currentAttention())).toBe(false)
+        fileWatchCallbacks.get(file)!({ type: FileWatchEventType.Present, content, sha256: await sha256Hex(content) })
+        return { success: true }
+      })
+      store.getState().recordWorkspaceAttention('attention-ws')
+      await settleWrites()
+      expect(hasUnreadWorkspaceAttention(currentAttention())).toBe(true)
+      expect(store.getState().attentionPending['attention-ws']).toBe(false)
+    })
+
+    it('rebases attention after an external CAS winner and keeps unrelated fields', async () => {
+      const ws = await loadAttentionWorkspace()
+      let attempts = 0
+      vi.mocked(deps.filesystem.writeFile).mockImplementation(async (_dir, file, content) => {
+        attempts++
+        if (attempts === 1) {
+          emitFilePresent({ ...ws, metadata: { displayName: 'Other window' } }, 'external-sha')
+          return { success: false, conflict: true, error: 'conflict' }
+        }
+        fileWatchCallbacks.get(file)!({ type: FileWatchEventType.Present, content, sha256: await sha256Hex(content) })
+        return { success: true }
+      })
+      store.getState().recordWorkspaceAttention('attention-ws')
+      await settleWrites()
+      expect(attempts).toBe(2)
+      expect(currentAttention().displayName).toBe('Other window')
+      expect(hasUnreadWorkspaceAttention(currentAttention())).toBe(true)
+    })
+
+    it('rebases after a conflict response precedes the winning watch', async () => {
+      const ws = await loadAttentionWorkspace()
+      vi.mocked(deps.filesystem.writeFile).mockResolvedValueOnce({ success: false, conflict: true, error: 'conflict' })
+      store.getState().recordWorkspaceAttention(ws.id)
+      await settleWrites()
+      emitFilePresent({ ...ws, metadata: { displayName: 'Winner' } }, 'winner-sha')
+      await settleWrites()
+      expect(vi.mocked(deps.filesystem.writeFile)).toHaveBeenCalledTimes(2)
+      const content = vi.mocked(deps.filesystem.writeFile).mock.calls.at(-1)![2]
+      fileWatchCallbacks.get('attention-ws.json')!({ type: FileWatchEventType.Present, content, sha256: await sha256Hex(content) })
+      expect(hasUnreadWorkspaceAttention(currentAttention())).toBe(true)
+      expect(currentAttention().displayName).toBe('Winner')
+    })
+
+    it('recognizes a coalesced watch that already acknowledges our event', async () => {
+      const ws = await loadAttentionWorkspace()
+      store.getState().recordWorkspaceAttention(ws.id)
+      await settleWrites()
+      const content = vi.mocked(deps.filesystem.writeFile).mock.calls.at(-1)![2]
+      const written = JSON.parse(content) as Workspace
+      const revision = getWorkspaceAttention(written.metadata).revision
+      emitFilePresent({ ...ws, metadata: { [WORKSPACE_ATTENTION_KEY]: JSON.stringify({ revision, acknowledgedRevision: revision }) } }, 'other-ack-sha')
+      await settleWrites()
+      expect(store.getState().attentionPending[ws.id]).toBe(false)
+      expect(hasUnreadWorkspaceAttention(currentAttention())).toBe(false)
+      expect(vi.mocked(deps.filesystem.writeFile)).toHaveBeenCalledTimes(1)
+    })
+
+    it('stale acknowledgement cannot clear a newer watched revision', async () => {
+      const ws = await loadAttentionWorkspace()
+      emitFilePresent({ ...ws, metadata: { [WORKSPACE_ATTENTION_KEY]: JSON.stringify({ revision: 'new', acknowledgedRevision: '' }) } })
+      store.getState().acknowledgeWorkspaceAttention('attention-ws', 'old')
+      await settleWrites()
+      const content = vi.mocked(deps.filesystem.writeFile).mock.calls.at(-1)![2]
+      fileWatchCallbacks.get('attention-ws.json')!({ type: FileWatchEventType.Present, content, sha256: await sha256Hex(content) })
+      expect(hasUnreadWorkspaceAttention(currentAttention())).toBe(true)
+      expect(getWorkspaceAttention(currentAttention()).revision).toBe('new')
+    })
+
+    it('restores unread in another window and clears both windows through watch', async () => {
+      const ws = await loadAttentionWorkspace()
+      const firstWatch = fileWatchCallbacks.get('attention-ws.json')!
+      const other = createSessionStore({ sessionId: 'session-1', connection: { id: 'other', target: { type: ConnectionTargetType.Local }, status: ConnectionStatus.Connected } }, deps)
+      await other.getState().handleRestore(sessionWithRefs([ws]))
+      const otherWatch = fileWatchCallbacks.get('attention-ws.json')!
+      const metadata = { [WORKSPACE_ATTENTION_KEY]: JSON.stringify({ revision: 'persisted-event', acknowledgedRevision: '' }) }
+      const content = JSON.stringify(toStoredWorkspaceFile({ ...ws, metadata }, ''))
+      const event = { type: FileWatchEventType.Present, content, sha256: await sha256Hex(content) } as const
+      firstWatch(event)
+      otherWatch(event)
+      expect(hasUnreadWorkspaceAttention(currentAttention())).toBe(true)
+      other.getState().acknowledgeWorkspaceAttention(ws.id, 'persisted-event')
+      await settleWrites()
+      const ack = vi.mocked(deps.filesystem.writeFile).mock.calls.at(-1)![2]
+      const ackEvent = { type: FileWatchEventType.Present, content: ack, sha256: await sha256Hex(ack) } as const
+      otherWatch(ackEvent)
+      firstWatch(ackEvent)
+      expect(hasUnreadWorkspaceAttention(currentAttention())).toBe(false)
+      const otherEntry = other.getState().workspaces.get(ws.id)!
+      if (otherEntry.status !== WorkspaceEntryStatus.Loaded) throw new Error('Not loaded')
+      expect(hasUnreadWorkspaceAttention(otherEntry.store.getState().metadata)).toBe(false)
+      other.getState().dispose()
+    })
+
+    it('shows persistence errors and rejects malformed watched attention', async () => {
+      const ws = await loadAttentionWorkspace()
+      vi.mocked(deps.filesystem.writeFile).mockRejectedValue(new Error('disk unavailable'))
+      store.getState().recordWorkspaceAttention('attention-ws')
+      await settleWrites()
+      const failedEntry = store.getState().workspaces.get(ws.id)!
+      expect(failedEntry.status).toBe(WorkspaceEntryStatus.OperationError)
+      if (failedEntry.status === WorkspaceEntryStatus.OperationError) expect(failedEntry.error).toContain('disk unavailable')
+      expect(hasUnreadWorkspaceAttention(currentAttention())).toBe(false)
+      emitFilePresent({ ...ws, metadata: { [WORKSPACE_ATTENTION_KEY]: 'invalid' } })
+      const invalidEntry = store.getState().workspaces.get(ws.id)!
+      expect(invalidEntry.status).toBe(WorkspaceEntryStatus.OperationError)
+      if (invalidEntry.status === WorkspaceEntryStatus.OperationError) expect(invalidEntry.error).toContain('Invalid workspace file')
+      store.getState().dispose()
+      const calls = vi.mocked(deps.filesystem.writeFile).mock.calls.length
+      store.getState().recordWorkspaceAttention(ws.id)
+      await settleWrites()
+      expect(vi.mocked(deps.filesystem.writeFile).mock.calls).toHaveLength(calls)
+    })
   })
 
   describe('initial state', () => {
@@ -1647,7 +1804,7 @@ describe('createSessionStore', () => {
       // ours (a self-echo), so local state still holds the losing delta — the store
       // must rewrite it on top instead of silently diverging from disk.
       const cb = fileWatchCallbacks.get('ws-cas.json')!
-      cb({ type: FileWatchEventType.Present, content: 'irrelevant', sha256: 'sha-initial' })
+      cb({ type: FileWatchEventType.Present, content: JSON.stringify(toStoredWorkspaceFile(ws, '')), sha256: 'sha-initial' })
       for (let i = 0; i < 8; i++) await flushPromises()
 
       expect(writes.length).toBe(2)

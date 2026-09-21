@@ -7750,3 +7750,40 @@ body,
 .file-diff-load-anyway-btn:hover {
   background: var(--bg-hover, #30363d);
 }
+
+/* Attention uses an outline-independent accent, preserving selection and drop cues. */
+.tree-item.workspace-unread {
+  border-inline-start: 2px solid var(--accent);
+}
+.workspace-unread-marker {
+  color: var(--accent);
+  flex-shrink: 0;
+  font-size: 10px;
+  margin-inline: 4px;
+}
+.sound-toggle { display: inline-flex; position: relative; }
+.sound-toggle > [role="status"], .sound-toggle > [role="alert"] {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  width: 220px;
+  padding: 8px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--accent);
+  white-space: normal;
+}
+.tree-pane-collapsed-header { flex-wrap: wrap; }
+.notification-error {
+  position: fixed;
+  bottom: 12px;
+  left: 12px;
+  z-index: 1000;
+  max-width: min(480px, calc(100vw - 24px));
+  padding: 10px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--accent);
+}
+.notification-error button { margin-inline-start: 8px; }

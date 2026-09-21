@@ -4,6 +4,11 @@ import './monaco-config' // Configure Monaco before any components use it
 import { useAppStore } from './store/app'
 import { useSessionNamesStore } from './store/sessionNames'
 import App from './App'
+import { startWorkspaceNotifications } from './store/startWorkspaceNotifications'
+import { createDingPlayer } from './audio/ding'
+import { useActivityStateStore } from './store/activityState'
+import { useNavigationStore } from './store/navigation'
+import { useSettingsStore } from './store/settings'
 import '@aptre/flex-layout/style/dark.css'
 import './styles/index.css'
 import './styles/flexlayout-overrides.css'
@@ -17,6 +22,19 @@ declare global {
 // Single point of window/electron access — everything else reads from the store
 window.electron.app.onReady(() => {
   const e = window.electron
+
+  const reportError = (error: unknown): void => {
+    useAppStore.setState({ notificationError: error instanceof Error ? error.message : String(error) })
+  }
+  const stopNotifications = startWorkspaceNotifications({
+    getSessions: () => Array.from(useAppStore.getState().sessionStores.values(), entry => entry.store),
+    subscribeSessions: listener => useAppStore.subscribe(listener),
+    activityStore: useActivityStateStore,
+    navigationStore: useNavigationStore,
+    soundEnabled: () => useSettingsStore.getState().settings.notifications.soundEnabled,
+    reportError,
+  }, createDingPlayer())
+  window.addEventListener('pagehide', stopNotifications, { once: true })
 
   void useAppStore.getState().initialize({
     platform: e.platform,

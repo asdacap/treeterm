@@ -37,6 +37,7 @@ const defaultSettings: Settings = {
   customRunner: {
     instances: []
   },
+  notifications: { soundEnabled: true },
   appearance: {
     theme: 'dark'
   },
@@ -237,6 +238,10 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
     },
     customRunner: {
       instances: loaded.customRunner?.instances || []
+    },
+    notifications: {
+      ...defaults.notifications,
+      ...loaded.notifications
     },
     appearance: {
       ...defaults.appearance,

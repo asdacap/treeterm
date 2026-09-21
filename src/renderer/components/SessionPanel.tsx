@@ -20,6 +20,7 @@ import type { ReviewState, WorktreeSettings, Workspace, WorkspaceStore } from '.
 import type { GitController } from '../store/createGitControllerStore'
 import { ConnectionStatus, ConnectionTargetType } from '../../shared/types'
 import { PrIndicators } from './PrIndicators'
+import { hasUnreadWorkspaceAttention } from '../store/workspaceAttention'
 import { TitleRefreshStatus } from '../store/createAnalyzerStore'
 import type { TitleRefreshResult } from '../store/createAnalyzerStore'
 
@@ -52,6 +53,7 @@ export default function SessionPanel({
   const connection = useStore(sessionStore, s => s.connection)
   const sessionLock = useStore(sessionStore, s => s.sessionLock)
   const workspaces = useStore(sessionStore, s => s.workspaces)
+  const attentionPending = useStore(sessionStore, s => s.attentionPending)
   const activeWorkspaceId = useStore(sessionStore, s => s.activeWorkspaceId)
   const addWorkspace = useStore(sessionStore, s => s.addWorkspace)
   const addChildWorkspace = useStore(sessionStore, s => s.addChildWorkspace)
@@ -480,6 +482,7 @@ export default function SessionPanel({
         id={id}
         depth={depth}
         entry={entry}
+        attentionPending={attentionPending[id] ?? false}
         isActive={isActiveSession && activeWorkspaceId === id}
         isFocused={isFocused}
         isExpanded={expanded.has(id)}
@@ -700,6 +703,7 @@ export default function SessionPanel({
 }
 
 interface WorkspaceTreeItemProps {
+  attentionPending?: boolean
   id: string
   depth: number
   entry: WorkspaceEntry
@@ -731,6 +735,7 @@ interface TreeItemViewProps extends Omit<WorkspaceTreeItemProps, 'entry'> {
   loadStatus: WorkspaceEntryStatus.Loading | WorkspaceEntryStatus.Error | undefined
   ws: Workspace | undefined
   isFavourite: boolean
+  unread: boolean
   displayName: string
   description: string | undefined
   tabIds: string[]
@@ -738,7 +743,7 @@ interface TreeItemViewProps extends Omit<WorkspaceTreeItemProps, 'entry'> {
 }
 
 function TreeItemView({
-  id, depth, isActive, isFocused, isExpanded, isFavourite,
+  id, depth, isActive, isFocused, isExpanded, isFavourite, unread, attentionPending = false,
   onToggleExpand, onClick, onQuickFork, onCreateChild, onAutoOpenWorktrees, onRemove, onDismiss, onOpenSettings, onToggleFavourite,
   onRefreshTitle, onRefreshBranch,
   children, renderChild,
@@ -768,7 +773,8 @@ function TreeItemView({
   return (
     <div className="tree-subtree">
       <div
-        className={`tree-item ${depth === 0 ? 'tree-item-root' : ''} ${isActive ? 'active' : ''} ${isFocused ? 'focused' : ''} ${dragClasses}`}
+        className={`tree-item ${depth === 0 ? 'tree-item-root' : ''} ${isActive ? 'active' : ''} ${isFocused ? 'focused' : ''} ${unread ? 'workspace-unread' : ''} ${dragClasses}`}
+        aria-busy={attentionPending}
         style={{ paddingLeft: 4 + depth * 8 }}
         onClick={() => { onClick(id); }}
         onContextMenu={handleContextMenu}
@@ -799,6 +805,8 @@ function TreeItemView({
         <span className="tree-item-name">
           {displayName}
         </span>
+        {unread && <span className="workspace-unread-marker" role="img" aria-label="Unread workspace activity" title="New activity — open workspace to mark as read">●</span>}
+        {attentionPending && <Loader2 size={12} className="spinning" role="status" aria-label="Saving workspace attention" />}
         <span className="tree-item-favourite">
           {isFavourite && <Star size={14} fill="currentColor" className="tree-item-favourite-icon" />}
         </span>
@@ -870,7 +878,7 @@ function TreeItemView({
 
 export function LoadedWorkspaceTreeItem({
   store, data, ...rest
-}: { store: WorkspaceStore; data: Workspace } & Omit<TreeItemViewProps, 'loadStatus' | 'ws' | 'displayName' | 'description' | 'tabIds' | 'isFavourite' | 'gitController'>): React.JSX.Element {
+}: { store: WorkspaceStore; data: Workspace } & Omit<TreeItemViewProps, 'loadStatus' | 'ws' | 'displayName' | 'description' | 'tabIds' | 'isFavourite' | 'gitController' | 'unread'>): React.JSX.Element {
   const metadata = useStore(store, s => s.metadata)
   const appStates = useStore(store, s => s.appStates)
   const gitController = useStore(store, s => s.gitController)
@@ -883,6 +891,7 @@ export function LoadedWorkspaceTreeItem({
       tabIds={Object.keys(appStates)}
       loadStatus={undefined}
       isFavourite={isFavourite}
+      unread={hasUnreadWorkspaceAttention(metadata)}
       gitController={gitController}
       {...rest}
     />
@@ -901,6 +910,7 @@ function WorkspaceTreeItem({ entry, ...rest }: WorkspaceTreeItemProps): React.JS
       tabIds={[]}
       loadStatus={entry.status}
       isFavourite={false}
+      unread={false}
       gitController={undefined}
       {...rest}
     />

@@ -206,6 +206,9 @@ export interface Settings {
   customRunner: {
     instances: CustomRunnerInstance[]
   }
+  notifications: {
+    soundEnabled: boolean
+  }
   appearance: {
     theme: 'dark' | 'light' | 'system'
   }

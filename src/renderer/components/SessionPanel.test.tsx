@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, act } from '@testing-library/react'
 import { createStore } from 'zustand/vanilla'
 import { LoadedWorkspaceTreeItem } from './SessionPanel'
 import type { WorkspaceStoreState } from '../store/createWorkspaceStore'
@@ -80,6 +80,7 @@ function renderTreeItem(
   store: ReturnType<typeof makeWorkspaceStore>['store'],
   props: Partial<{
     isActive: boolean
+    attentionPending: boolean
     onToggleFavourite: (id: string) => void
     onRefreshTitle: (id: string) => void
     onRefreshBranch: (id: string) => void
@@ -96,6 +97,7 @@ function renderTreeItem(
       store={store}
       data={ws}
       depth={0}
+      attentionPending={props.attentionPending ?? false}
       isActive={props.isActive ?? false}
       isFocused={false}
       isExpanded={false}
@@ -386,5 +388,29 @@ describe('LoadedWorkspaceTreeItem — PR number', () => {
     const { container } = renderTreeItem(store)
 
     expect(container.querySelector('.tree-item-pr-signal')).toBeNull()
+  })
+})
+
+
+describe('workspace unread attention', () => {
+  it('shows pending persistence without speculating unread state or disabling the row', () => {
+    const { store } = makeWorkspaceStore()
+    const { container, getByRole, queryByRole } = renderTreeItem(store, { attentionPending: true })
+    expect(getByRole('status', { name: 'Saving workspace attention' })).toBeTruthy()
+    expect(container.querySelector('.tree-item')?.getAttribute('aria-busy')).toBe('true')
+    expect(queryByRole('img', { name: 'Unread workspace activity' })).toBeNull()
+  })
+  it('keeps unread on click and clears only when committed metadata updates', () => {
+    const { store } = makeWorkspaceStore({ workspaceAttention: JSON.stringify({ revision: 'event-1', acknowledgedRevision: '' }) })
+    const { container, getByRole, queryByRole } = renderTreeItem(store)
+    expect(getByRole('img', { name: 'Unread workspace activity' })).toBeTruthy()
+    const row = container.querySelector('.tree-item')!
+    expect(row.classList.contains('workspace-unread')).toBe(true)
+    fireEvent.click(row)
+    fireEvent.mouseOver(row)
+    expect(getByRole('img', { name: 'Unread workspace activity' })).toBeTruthy()
+    act(() => { store.setState({ metadata: { workspaceAttention: JSON.stringify({ revision: 'event-1', acknowledgedRevision: 'event-1' }) } }) })
+    expect(queryByRole('img', { name: 'Unread workspace activity' })).toBeNull()
+    expect(row.classList.contains('workspace-unread')).toBe(false)
   })
 })

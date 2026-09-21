@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render } from '@testing-library/react'
+import { render, fireEvent, act } from '@testing-library/react'
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
 import { FavouriteWorkspaceItem } from './TreePane'
@@ -72,6 +72,7 @@ function makePrInfo(
 function renderItem(store: ReturnType<typeof makeWorkspaceStore>) {
   const sessionStore = createStore<SessionState>()(() => ({
     activeWorkspaceId: null,
+    attentionPending: {},
     setActiveWorkspace: vi.fn(),
   }) as unknown as SessionState) as unknown as StoreApi<SessionState>
   return render(
@@ -139,5 +140,21 @@ describe('FavouriteWorkspaceItem — PR indicators', () => {
     const { container } = renderItem(store)
 
     expect(container.querySelector('.tree-item-pr-signal--ready')).not.toBeNull()
+  })
+})
+
+
+describe('favourite workspace unread attention', () => {
+  it('tracks committed attention without acknowledging from the row itself', () => {
+    const store = makeWorkspaceStore(null)
+    store.setState({ metadata: { isFavourite: 'true', workspaceAttention: JSON.stringify({ revision: 'event-1', acknowledgedRevision: '' }) } })
+    const { container, getByRole, queryByRole } = renderItem(store)
+    const row = container.querySelector('.tree-item')!
+    expect(row.classList.contains('workspace-unread')).toBe(true)
+    fireEvent.click(row)
+    expect(getByRole('img', { name: 'Unread workspace activity' })).toBeTruthy()
+    act(() => { store.setState({ metadata: { isFavourite: 'true', workspaceAttention: JSON.stringify({ revision: 'event-1', acknowledgedRevision: 'event-1' }) } }) })
+    expect(queryByRole('img', { name: 'Unread workspace activity' })).toBeNull()
+    expect(row.classList.contains('workspace-unread')).toBe(false)
   })
 })

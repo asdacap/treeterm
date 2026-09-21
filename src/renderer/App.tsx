@@ -42,6 +42,7 @@ export default function App() {
   const [isTreeCollapsed, setIsTreeCollapsed] = useState(false)
 
   const {
+    notificationError,
     platform,
     sandbox,
     appApi,
@@ -106,6 +107,10 @@ export default function App() {
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
         >
+          {notificationError && <div className="notification-error" role="alert">
+            Workspace notification sound failed: {notificationError}
+            <button type="button" aria-label="Dismiss notification sound error" onClick={() => { useAppStore.setState({ notificationError: '' }) }}>×</button>
+          </div>}
           <div className="tree-pane" style={{ width: isTreeCollapsed ? 36 : treeWidth }}>
             <TreePane
               selectFolder={selectFolder}

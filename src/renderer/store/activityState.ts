@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { ActivityState } from '../types'
 
-interface ActivityStateStore {
+export interface ActivityStateStore {
   // Tab activity states: tabId -> ActivityState
   states: Record<string, ActivityState>
 

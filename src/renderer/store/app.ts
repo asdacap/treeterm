@@ -66,6 +66,7 @@ export interface AppDeps {
 }
 
 interface AppState extends AppDeps {
+  notificationError: string
   // Lifecycle
   windowUuid: string | null
   isSettingsOpen: boolean
@@ -104,6 +105,7 @@ interface AppState extends AppDeps {
 const UNINITIALIZED = null as never
 
 export const useAppStore = create<AppState>()((set, get) => ({
+  notificationError: '',
   // Injected APIs — overwritten by initialize(deps) before first use
   platform: UNINITIALIZED,
   terminal: UNINITIALIZED,
