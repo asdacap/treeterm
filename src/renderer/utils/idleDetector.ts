@@ -5,7 +5,10 @@ export interface IdleDetectorDeps {
   initialSnapshot: string
   /** Read every time the idle timer is (re)armed so settings and unread state apply live. */
   idleTimeoutMs: () => number
-  /** Quiet -> active transition; fires once per burst of viewport changes. */
+  /**
+   * Quiet -> active transition; fires once per burst of viewport changes, and never for the
+   * first burst after creation (no resting state is known yet).
+   */
   onActivity: () => void
   /** No viewport change for idleTimeoutMs(). */
   onIdle: () => void
@@ -28,17 +31,23 @@ export function idleTimeoutMs(settings: Settings, unread: boolean): number {
 export function createIdleDetector(deps: IdleDetectorDeps): IdleDetector {
   let idleTimerId: ReturnType<typeof setTimeout> | null = null
   let lastSnapshot = deps.initialSnapshot
+  // No resting state is known until the first idle. The first burst after creation is the
+  // attach replay or initial paint, not work starting, so it is not reported as activity;
+  // only the idle that ends it is. Otherwise every tab of a freshly opened session would
+  // go Working -> Idle and ring.
+  let settled = false
 
   const processSnapshot = (snapshot: string): void => {
     if (snapshot === lastSnapshot) return
     lastSnapshot = snapshot
     if (idleTimerId) {
       clearTimeout(idleTimerId)
-    } else {
+    } else if (settled) {
       deps.onActivity()
     }
     idleTimerId = setTimeout(() => {
       idleTimerId = null
+      settled = true
       deps.onIdle()
     }, deps.idleTimeoutMs())
   }

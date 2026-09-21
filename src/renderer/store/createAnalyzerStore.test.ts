@@ -94,6 +94,18 @@ function makeDeps(overrides?: Partial<AnalyzerDeps>): AnalyzerDeps {
   }
 }
 
+/**
+ * Runs the silent first burst after start() (the scrollback replay) through to its
+ * classification so the detector knows a resting state and later bursts publish Working.
+ */
+async function settle(deps: AnalyzerDeps, mock: ReturnType<typeof makeMockTty>): Promise<void> {
+  mock.emitData('replay')
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(deps.setActivityTabState).not.toHaveBeenCalledWith('tab-1', ActivityState.Working)
+  vi.mocked(deps.setActivityTabState).mockClear()
+  vi.mocked(deps.llm.analyzeTerminal).mockClear()
+}
+
 describe('createAnalyzerStore', () => {
   let deps: AnalyzerDeps
 
@@ -187,6 +199,7 @@ describe('createAnalyzerStore', () => {
 
     store.getState().start('pty-1')
     await vi.advanceTimersByTimeAsync(0) // resolve openTtyStream
+    await settle(deps, mock)
 
     // Simulate data arrival
     mock.emitData('$ echo hello\r\nhello\r\n$ ')
@@ -215,8 +228,9 @@ describe('createAnalyzerStore', () => {
 
     mock.emitData('$ hello')
     await vi.advanceTimersByTimeAsync(0)
-    // A viewport change sets 'working' immediately, then the idle debounce schedules analyze
-    expect(store.getState().aiState).toBe(ActivityState.Working)
+    // The first burst after start is the replay: no Working, only the idle debounce schedules analyze
+    expect(store.getState().aiState).toBe(ActivityState.Idle)
+    expect(deps.setActivityTabState).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(500)
     // analyze() sees missing model and sets error once
     expect(store.getState().aiState).toBe(ActivityState.Error)
@@ -1134,6 +1148,7 @@ describe('createAnalyzerStore', () => {
 
     store.getState().start('pty-1')
     await vi.advanceTimersByTimeAsync(0)
+    await settle(deps, mock)
 
     mock.emitData('$ echo hello\r\nhello\r\n$ ')
     vi.advanceTimersByTime(500) // poll detects change
@@ -1144,6 +1159,31 @@ describe('createAnalyzerStore', () => {
     await vi.advanceTimersByTimeAsync(0) // resolve async
     // 'idle' state set after analysis completes
     expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', ActivityState.Idle)
+
+    store.getState().stop()
+    vi.useRealTimers()
+  })
+
+  it('does not publish Working for the replay after start, only its classification', async () => {
+    vi.useFakeTimers()
+    const mock = makeMockTty()
+    deps = makeDeps({
+      openTtyStream: makeTtyStreamMock(mock, ['$ replayed scrollback\r\n$ ']),
+    })
+    const store = createAnalyzerStore('tab-1', deps)
+
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0)
+    vi.advanceTimersByTime(500)
+    expect(deps.setActivityTabState).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(500)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(deps.setActivityTabState).toHaveBeenCalledExactlyOnceWith('tab-1', ActivityState.Idle)
+
+    mock.emitData('$ npm test\r\n')
+    vi.advanceTimersByTime(500)
+    expect(deps.setActivityTabState).toHaveBeenLastCalledWith('tab-1', ActivityState.Working)
 
     store.getState().stop()
     vi.useRealTimers()
@@ -1160,6 +1200,7 @@ describe('createAnalyzerStore', () => {
 
     store.getState().start('pty-1')
     await vi.advanceTimersByTimeAsync(0)
+    await settle(deps, mock)
 
     mock.emitData('$ echo hello\r\nhello\r\n$ ')
     vi.advanceTimersByTime(500)
@@ -1469,11 +1510,13 @@ describe('createAnalyzerStore', () => {
   it('waits for the unread idle debounce while the workspace carries an unread marker', async () => {
     vi.useFakeTimers()
     const mock = makeMockTty()
-    const hasUnreadAttention = vi.fn().mockReturnValue(true)
+    const hasUnreadAttention = vi.fn().mockReturnValue(false)
     const deps = makeDeps({ hasUnreadAttention, openTtyStream: makeTtyStreamMock(mock) })
     const store = createAnalyzerStore('tab-1', deps)
     store.getState().start('pty-1')
     await vi.advanceTimersByTimeAsync(0)
+    await settle(deps, mock)
+    hasUnreadAttention.mockReturnValue(true)
     mock.emitData('$ ')
     await vi.advanceTimersByTimeAsync(14999)
     expect(store.getState().aiState).toBe(ActivityState.Working)

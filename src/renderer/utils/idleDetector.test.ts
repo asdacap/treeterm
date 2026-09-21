@@ -13,12 +13,33 @@ function setup(timeout: () => number = () => 500): {
   return { onActivity, onIdle, detector }
 }
 
+/** Runs the silent first burst through to its idle so a resting state is known. */
+function settle(h: ReturnType<typeof setup>): void {
+  h.detector.processSnapshot('boot')
+  vi.advanceTimersByTime(500)
+  expect(h.onActivity).not.toHaveBeenCalled()
+  expect(h.onIdle).toHaveBeenCalledTimes(1)
+  h.onIdle.mockClear()
+}
+
 describe('createIdleDetector', () => {
   beforeEach(() => { vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers() })
 
+  it('does not report the first burst as activity because no resting state is known', () => {
+    const h = setup()
+    h.detector.processSnapshot('replay')
+    h.detector.processSnapshot('more replay')
+    expect(h.onActivity).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(500)
+    expect(h.onIdle).toHaveBeenCalledTimes(1)
+    h.detector.processSnapshot('real work')
+    expect(h.onActivity).toHaveBeenCalledTimes(1)
+  })
+
   it('fires activity once per burst and idle after the timeout', () => {
     const h = setup()
+    settle(h)
     h.detector.processSnapshot('one')
     h.detector.processSnapshot('two')
     expect(h.onActivity).toHaveBeenCalledTimes(1)
@@ -50,6 +71,7 @@ describe('createIdleDetector', () => {
 
   it('ignores identical snapshots so repeated repaints still idle', () => {
     const h = setup()
+    settle(h)
     h.detector.processSnapshot('same screen')
     for (let t = 0; t < 500; t += 100) {
       vi.advanceTimersByTime(100)

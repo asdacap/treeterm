@@ -395,11 +395,33 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
         return { workspace: { ...ws, appStates: { tab1: { ...tab, state: { ...tab.state, idleDetectorDisabled: value } } } } }
       })
     }
-    return { ...result, appRef, session, view, emit, engine: engines[0]!, setIdleDetectorDisabled }
+    // The first burst after attach is the scrollback replay: silent, then Idle. Run it
+    // through so the detector knows a resting state and later bursts publish Working.
+    const settle = (): void => {
+      emit('replay')
+      expect(setTabState).not.toHaveBeenCalled()
+      act(() => { vi.advanceTimersByTime(2000) })
+      expect(setTabState).toHaveBeenCalledExactlyOnceWith('tab1', ActivityState.Idle)
+      setTabState.mockClear()
+      processedData.length = 0
+    }
+    return { ...result, appRef, session, view, emit, engine: engines[0]!, setIdleDetectorDisabled, settle }
   }
 
+  it('does not report the attach replay as Working, only the Idle that ends it', async () => {
+    const { emit } = await mount()
+    emit('replayed scrollback')
+    emit('more scrollback')
+    expect(setTabState).not.toHaveBeenCalled()
+    act(() => { vi.advanceTimersByTime(2000) })
+    expect(setTabState).toHaveBeenCalledExactlyOnceWith('tab1', ActivityState.Idle)
+    emit('real work')
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working)
+  })
+
   it('finishes pending Idle after unmount and stays idle on remount without new data', async () => {
-    const { emit, unmount, view } = await mount()
+    const { emit, unmount, view, settle } = await mount()
+    settle()
     emit('working')
     expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working)
     // Unmount just before the idle timeout elapses.
@@ -415,7 +437,8 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
   })
 
   it('tracks changed background output and ignores unchanged repaints across remount', async () => {
-    const { emit, unmount, view, engine } = await mount()
+    const { emit, unmount, view, engine, settle } = await mount()
+    settle()
     emit('initial')
     unmount()
     act(() => { vi.advanceTimersByTime(1100) })
@@ -436,7 +459,8 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
   })
 
   it('cancels pending Idle and ignores late write callbacks on actual cache disposal', async () => {
-    const { emit, unmount, appRef, engine, session } = await mount()
+    const { emit, unmount, appRef, engine, session, settle } = await mount()
+    settle()
     emit('working')
     unmount()
     let finishWrite = (): void => { throw new Error('No pending write') }
@@ -455,15 +479,16 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
 
   it('waits for the unread idle debounce while the workspace carries an unread marker', async () => {
     const { emit } = await mount(false, { workspaceAttention: JSON.stringify({ revision: 'r1', acknowledgedRevision: '' }) })
-    emit('working')
+    emit('replay')
     act(() => { vi.advanceTimersByTime(14999) })
-    expect(setTabState).toHaveBeenCalledTimes(1)
+    expect(setTabState).not.toHaveBeenCalled()
     act(() => { vi.advanceTimersByTime(1) })
-    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle)
+    expect(setTabState).toHaveBeenCalledExactlyOnceWith('tab1', ActivityState.Idle)
   })
 
   it('skips the Working edge while the tab has the idle detector disabled', async () => {
-    const { emit } = await mount(false, {}, true)
+    const { emit, settle } = await mount(false, {}, true)
+    settle()
     emit('spam')
     expect(setTabState).not.toHaveBeenCalled()
     act(() => { vi.advanceTimersByTime(2000) })
@@ -472,7 +497,8 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
   })
 
   it('still settles to Idle when the detector is disabled mid-burst, and resumes when re-enabled', async () => {
-    const { emit, setIdleDetectorDisabled } = await mount()
+    const { emit, setIdleDetectorDisabled, settle } = await mount()
+    settle()
     emit('working')
     expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working)
     setIdleDetectorDisabled(true)
