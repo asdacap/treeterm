@@ -23,6 +23,7 @@ describe('OpenRouter Decisions contract', () => {
       body: JSON.stringify({ model: jev.model, state: { terminal: input.buffer, cwd: input.cwd, safe_paths: ['/tmp', '/workspace'] }, questions: { activity_state: {
         type: 'choice', instructions: { guidance: 'Custom policy at /workspace; safe: /tmp, /workspace', output: 'Choose the activity state using these criteria. Return the typed choice, not generated JSON or an explanation.' },
         criteria: {
+          working: 'Program is still running and producing output; no prompt or question is waiting on the user.',
           idle: 'Shell prompt visible, waiting for a command, or user input is incomplete.',
           completed: 'The previous user request has been satisfied.',
           user_input_required: 'Program asks for text input, a design choice, or plan confirmation.',
@@ -36,7 +37,7 @@ describe('OpenRouter Decisions contract', () => {
     expect(decisionsUrl('https://openrouter.ai/api/v1/')).toBe('https://openrouter.ai/api/alpha/decisions')
   })
 
-  it.each([ActivityState.Idle, ActivityState.Completed, ActivityState.UserInputRequired, ActivityState.PermissionRequest, ActivityState.SafePermissionRequested])('normalizes %s without requiring confidence', async (state) => {
+  it.each([ActivityState.Working, ActivityState.Idle, ActivityState.Completed, ActivityState.UserInputRequired, ActivityState.PermissionRequest, ActivityState.SafePermissionRequested])('normalizes %s without requiring confidence', async (state) => {
     const deps = transports()
     vi.mocked(deps.fetch).mockResolvedValue(new Response(JSON.stringify({ answers: { activity_state: { type: 'choice', choice: state } } })))
     await expect(createClassificationProvider(jev, deps).classify(input)).resolves.toEqual({ state, reason: `Classifier decision: ${state}` })
@@ -56,7 +57,7 @@ describe('OpenRouter Decisions contract', () => {
     await expect(createClassificationProvider(jev, deps).classify(input)).resolves.toHaveProperty('state', 'idle')
   })
 
-  it.each(['invalid json', '{}', '{"answers":{}}', '{"answers":{"activity_state":{"type":"score","choice":"idle"}}}', '{"answers":{"activity_state":{"type":"choice","choice":"unknown"}}}', '{"answers":{"activity_state":{"type":"choice","choice":"working"}}}'])('rejects invalid response %s', async (body) => {
+  it.each(['invalid json', '{}', '{"answers":{}}', '{"answers":{"activity_state":{"type":"score","choice":"idle"}}}', '{"answers":{"activity_state":{"type":"choice","choice":"unknown"}}}', '{"answers":{"activity_state":{"type":"choice","choice":"error"}}}'])('rejects invalid response %s', async (body) => {
     const deps = transports()
     vi.mocked(deps.fetch).mockResolvedValue(new Response(body))
     await expect(createClassificationProvider(jev, deps).classify(input)).rejects.toThrow()

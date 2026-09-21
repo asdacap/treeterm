@@ -22,6 +22,7 @@ export interface ClassifierTransports {
 }
 
 const criteria = {
+  [ActivityState.Working]: 'Program is still running and producing output; no prompt or question is waiting on the user.',
   [ActivityState.Idle]: 'Shell prompt visible, waiting for a command, or user input is incomplete.',
   [ActivityState.Completed]: 'The previous user request has been satisfied.',
   [ActivityState.UserInputRequired]: 'Program asks for text input, a design choice, or plan confirmation.',
@@ -30,7 +31,7 @@ const criteria = {
 }
 
 const choiceSchema = z.enum([
-  ActivityState.Idle, ActivityState.Completed, ActivityState.UserInputRequired,
+  ActivityState.Working, ActivityState.Idle, ActivityState.Completed, ActivityState.UserInputRequired,
   ActivityState.PermissionRequest, ActivityState.SafePermissionRequested,
 ])
 const decisionsResponseSchema = z.object({
