@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render } from '@testing-library/react'
+import { render, fireEvent } from '@testing-library/react'
 import { createStore } from 'zustand/vanilla'
 import AiHarness from './AiHarness'
 import type { BaseTerminalConfig } from './BaseTerminal'
@@ -61,6 +61,7 @@ function makeWorkspaceStore(tabId: string, state: unknown, analyzer: unknown) {
       appStates: state === undefined ? {} : { [tabId]: { applicationId: 'ai-harness', title: 'AI', state } },
     },
     getTabRef: () => (analyzer ? { analyzer } : null),
+    updateTabState: vi.fn(),
   }))
 }
 
@@ -123,6 +124,43 @@ describe('AiHarness', () => {
     expect(configs[0]?.createEngine).toBe(createXtermEngine)
     expect(configs[0]?.logPrefix).toBe('AiHarness')
     expect(configs[0]?.disableActivityDetector).toBe(true)
+  })
+
+  it('shows the analyzer state badge with its reason', () => {
+    const analyzer = makeAnalyzer()
+    analyzer.setState({ aiState: ActivityState.PermissionRequest, reason: 'wants to rm', analyzing: true })
+    const workspace = makeWorkspaceStore('tab1', { ptyId: 'pty1', sandbox: {} }, analyzer)
+
+    const { container } = renderHarness(workspace)
+
+    const badge = container.querySelector('.activity-state-badge')!
+    expect(badge.textContent).toBe('permission request')
+    expect(badge.getAttribute('title')).toBe('wants to rm')
+    expect(badge.querySelector('.activity-state-badge-spinner')).not.toBeNull()
+  })
+
+  it('flips auto-approve on the analyzer from its toggle', () => {
+    const analyzer = makeAnalyzer()
+    const workspace = makeWorkspaceStore('tab1', { ptyId: 'pty1', sandbox: {} }, analyzer)
+
+    const { getByLabelText } = renderHarness(workspace)
+    fireEvent.click(getByLabelText('Auto-approve safe'))
+
+    expect(analyzer.getState().setAutoApprove).toHaveBeenCalledWith(true)
+  })
+
+  it('persists the idle detector switch into the tab state', () => {
+    const workspace = makeWorkspaceStore('tab1', { ptyId: 'pty1', sandbox: {} }, makeAnalyzer())
+
+    const { getByLabelText } = renderHarness(workspace)
+    const toggle = getByLabelText('Idle detector') as HTMLInputElement
+    expect(toggle.checked).toBe(true)
+    fireEvent.click(toggle)
+
+    const updateTabState = workspace.getState().updateTabState as ReturnType<typeof vi.fn>
+    expect(updateTabState).toHaveBeenCalledWith('tab1', expect.any(Function))
+    const updater = updateTabState.mock.calls[0]?.[1] as (s: unknown) => unknown
+    expect(updater({ ptyId: 'pty1', sandbox: {} })).toEqual({ ptyId: 'pty1', sandbox: {}, idleDetectorDisabled: true })
   })
 
   it('forwards keystrokes from the engine to the analyzer', () => {

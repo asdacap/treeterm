@@ -6,7 +6,7 @@ import type { WorktreeRegistryApi } from '../lib/worktreeRegistry'
 import { buildEntryFromWorkspace } from '../lib/worktreeRegistry'
 import { MAX_READ_FILE_BYTES } from '../lib/fileLimits'
 import { PtyEventType } from '../../shared/ipc-types'
-import { getTabs, isAiHarnessState } from '../types'
+import { getTabs, isAiHarnessState, isIdleDetectorDisabled } from '../types'
 import type { TerminalEngine } from '../terminal/engine'
 import type { Tty, TtyWriter } from './createTtyStore'
 import { createAnalyzerStore, TitleRefreshStatus } from './createAnalyzerStore'
@@ -347,6 +347,7 @@ export function createWorkspaceStore(
     initAnalyzer: (tabId: string): Analyzer => createAnalyzerStore(tabId, {
       getSettings: deps.getSettings,
       hasUnreadAttention: () => hasUnreadWorkspaceAttention(get().metadata),
+      isIdleDetectorDisabled: () => isIdleDetectorDisabled(get().workspace.appStates[tabId]?.state),
       llm: deps.llm,
       updateMetadata: (key, value, reason) => { get().updateMetadata(key, value, reason); },
       getDisplayName: () => get().metadata.displayName,

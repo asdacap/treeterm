@@ -141,6 +141,8 @@ export interface TerminalState {
   ptyHandle: string | null   // stable per-PTY identity, minted once at tab creation; keys idempotent PTY creation so reconciliation churn can't duplicate it
   connectionId?: string      // which connection this PTY belongs to — used for routing kill
   keepOnExit: boolean
+  // Negative so tabs persisted before the flag existed (field missing) keep the detector on
+  idleDetectorDisabled: boolean
 }
 
 export type AiHarnessState = TerminalState & {
@@ -687,6 +689,11 @@ export function isTerminalState(state: unknown): state is TerminalState {
     'ptyId' in state &&
     (typeof (state as TerminalState).ptyId === 'string' || (state as TerminalState).ptyId === null)
   )
+}
+
+/** Per-tab opt-out for the viewport idle detector. Tabs persisted before the flag existed lack it, hence Partial. */
+export function isIdleDetectorDisabled(state: unknown): boolean {
+  return isTerminalState(state) && (state as Partial<TerminalState>).idleDetectorDisabled === true
 }
 
 export function isAiHarnessState(state: unknown): state is AiHarnessState {

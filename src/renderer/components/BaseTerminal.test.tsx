@@ -183,8 +183,8 @@ function makeFakeTty() {
   return { getState: () => state, state, dispose: vi.fn() }
 }
 
-function makeWorkspaceStore(tabId: string, options: { keepOnExit?: boolean; activeTabId?: string; metadata?: Record<string, string> } = {}) {
-  const { keepOnExit = false, activeTabId = tabId, metadata = {} } = options
+function makeWorkspaceStore(tabId: string, options: { keepOnExit?: boolean; idleDetectorDisabled?: boolean; activeTabId?: string; metadata?: Record<string, string> } = {}) {
+  const { keepOnExit = false, idleDetectorDisabled = false, activeTabId = tabId, metadata = {} } = options
   const appRef = {
     cachedTerminal: null as CachedTerminal | null,
     disposeCachedTerminal: vi.fn(),
@@ -197,7 +197,7 @@ function makeWorkspaceStore(tabId: string, options: { keepOnExit?: boolean; acti
     workspace: {
       id: 'ws1',
       activeTabId,
-      appStates: { [tabId]: { applicationId: 'terminal', title: 'Terminal 1', state: { ptyId: 'pty1', keepOnExit } } },
+      appStates: { [tabId]: { applicationId: 'terminal', title: 'Terminal 1', state: { ptyId: 'pty1', keepOnExit, idleDetectorDisabled } } },
     },
     metadata,
     removeTab,
@@ -373,9 +373,9 @@ describe('BaseTerminal — terminal cache across unmount', () => {
 })
 
 describe('BaseTerminal — cached activity detector lifecycle', () => {
-  async function mount(disableActivityDetector = false, metadata: Record<string, string> = {}) {
+  async function mount(disableActivityDetector = false, metadata: Record<string, string> = {}, idleDetectorDisabled = false) {
     vi.useFakeTimers()
-    const { store: workspace, appRef } = makeWorkspaceStore('tab1', { metadata })
+    const { store: workspace, appRef } = makeWorkspaceStore('tab1', { metadata, idleDetectorDisabled })
     const session = makeLiveSessionStore()
     const stableConfig = { ...config, disableActivityDetector }
     const view = (): React.ReactNode => (
@@ -388,7 +388,14 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
     const emit = (text: string): void => {
       act(() => { session.events[0]?.({ type: PtyEventType.Data, data: new TextEncoder().encode(text) }) })
     }
-    return { ...result, appRef, session, view, emit, engine: engines[0]! }
+    const setIdleDetectorDisabled = (value: boolean): void => {
+      workspace.setState((state) => {
+        const ws = state.workspace as { appStates: Record<string, { state: Record<string, unknown> }> }
+        const tab = ws.appStates.tab1!
+        return { workspace: { ...ws, appStates: { tab1: { ...tab, state: { ...tab.state, idleDetectorDisabled: value } } } } }
+      })
+    }
+    return { ...result, appRef, session, view, emit, engine: engines[0]!, setIdleDetectorDisabled }
   }
 
   it('finishes pending Idle after unmount and stays idle on remount without new data', async () => {
@@ -453,6 +460,31 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
     expect(setTabState).toHaveBeenCalledTimes(1)
     act(() => { vi.advanceTimersByTime(1) })
     expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle)
+  })
+
+  it('skips the Working edge while the tab has the idle detector disabled', async () => {
+    const { emit } = await mount(false, {}, true)
+    emit('spam')
+    expect(setTabState).not.toHaveBeenCalled()
+    act(() => { vi.advanceTimersByTime(2000) })
+    expect(setTabState).toHaveBeenCalledTimes(1)
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle)
+  })
+
+  it('still settles to Idle when the detector is disabled mid-burst, and resumes when re-enabled', async () => {
+    const { emit, setIdleDetectorDisabled } = await mount()
+    emit('working')
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working)
+    setIdleDetectorDisabled(true)
+    act(() => { vi.advanceTimersByTime(2000) })
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle)
+    emit('more spam')
+    expect(setTabState).toHaveBeenCalledTimes(2)
+
+    act(() => { vi.advanceTimersByTime(2000) })
+    setIdleDetectorDisabled(false)
+    emit('real work')
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working)
   })
 
   it('does not detect activity for terminals configured to use an external analyzer', async () => {

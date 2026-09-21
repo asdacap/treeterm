@@ -27,6 +27,7 @@ Drive with Playwright's `_electron` (already in devDependencies). Key gotchas le
 
 - Default terminal ready: wait for visible `.xterm`.
 - New tab: click `button.flexlayout-new-tab-btn`, then `.app-menu-item` by app name.
-- AI harness terminal (ghostty engine): wait for `.ai-harness-terminal .ghostty-terminal-host canvas`. Status bar: `.ai-harness-status-bar`, badge `.ai-state-badge`. The status-bar checkbox inputs are visually hidden — click the `.ai-harness-toggle` label, not the input.
+- Terminal and AI harness tabs share the same layout: `.terminal-app-wrapper > .terminal-app-body` (the terminal) + `.terminal-status-bar` (badge `.activity-state-badge`, sliders `.terminal-toggle`). The plain terminal bar has the "Idle detector" slider; the harness bar adds "Auto-approve safe". Hidden tabs keep their DOM, so scope selectors to the visible bar (e.g. `.terminal-status-bar:has-text("Auto-approve")`) rather than `.first()`. The checkbox inputs are visually hidden — click the `.terminal-toggle` label, not the input.
+- The workspace is not auto-selected on a fresh isolated profile: click its name in the tree (`text=<dirname>`) before waiting for `.xterm`.
 - Read terminal text through the engine buffer published on the container (`.terminal-container` element's `.terminal` property, `buffer.active.getLine(y).translateToString(true)`) — DOM scraping doesn't work for either engine. See `e2e/helpers.ts#getTerminalText`.
 - Without LLM auth the analyzer logs `401 Missing Authentication header` and the badge shows `error` — expected in an isolated env, and proof the analyzer pipeline is live.

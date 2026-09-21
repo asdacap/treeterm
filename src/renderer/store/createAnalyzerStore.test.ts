@@ -73,6 +73,7 @@ function makeDeps(overrides?: Partial<AnalyzerDeps>): AnalyzerDeps {
       },
     } as unknown as Settings),
     hasUnreadAttention: vi.fn().mockReturnValue(false),
+    isIdleDetectorDisabled: vi.fn().mockReturnValue(false),
     llm: {
       analyzeTerminal: vi.fn().mockResolvedValue({ state: 'idle', reason: 'prompt visible' }),
       generateTitle: vi.fn().mockResolvedValue({ title: 'Test Title', description: 'Test Description', branchName: 'test-title' }),
@@ -1142,6 +1143,31 @@ describe('createAnalyzerStore', () => {
     vi.advanceTimersByTime(500) // debounce fires analyze
     await vi.advanceTimersByTimeAsync(0) // resolve async
     // 'idle' state set after analysis completes
+    expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', ActivityState.Idle)
+
+    store.getState().stop()
+    vi.useRealTimers()
+  })
+
+  it('skips the Working edge but still classifies on idle while the idle detector is disabled', async () => {
+    vi.useFakeTimers()
+    const mock = makeMockTty()
+    deps = makeDeps({
+      openTtyStream: makeTtyStreamMock(mock, []),
+      isIdleDetectorDisabled: vi.fn().mockReturnValue(true),
+    })
+    const store = createAnalyzerStore('tab-1', deps)
+
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0)
+
+    mock.emitData('$ echo hello\r\nhello\r\n$ ')
+    vi.advanceTimersByTime(500)
+    expect(deps.setActivityTabState).not.toHaveBeenCalledWith('tab-1', ActivityState.Working)
+
+    vi.advanceTimersByTime(500)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
     expect(deps.setActivityTabState).toHaveBeenCalledWith('tab-1', ActivityState.Idle)
 
     store.getState().stop()

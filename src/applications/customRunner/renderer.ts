@@ -18,7 +18,8 @@ export function createCustomRunnerVariant(instance: CustomRunnerInstance, deps: 
     createInitialState: () => ({
       ptyId: null,
       ptyHandle: crypto.randomUUID(),
-      keepOnExit: false
+      keepOnExit: false,
+      idleDetectorDisabled: false
     }),
 
     onWorkspaceLoad: (tab: Tab, workspaceStore: WorkspaceStore): TerminalAppRef => {

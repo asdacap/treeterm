@@ -8,7 +8,7 @@ import { useSessionApi } from '../contexts/SessionStoreContext'
 import { createIdleDetector, idleTimeoutMs } from '../utils/idleDetector'
 import { hasUnreadWorkspaceAttention } from '../store/workspaceAttention'
 import type { Tty } from '../store/createTtyStore'
-import { ActivityState, ScrollPosition } from '../types'
+import { ActivityState, ScrollPosition, isIdleDetectorDisabled } from '../types'
 import type { CachedTerminal, TerminalAppRef, PtyEvent, SandboxConfig, TerminalState, WorkspaceStore } from '../types'
 import type { TerminalBufferHost, TerminalEngine, TerminalEngineFactory } from '../terminal/engine'
 import { snapshotViewport } from '../terminal/engine'
@@ -420,7 +420,12 @@ export default function BaseTerminal({
           : createIdleDetector({
             initialSnapshot: snapshotViewport(engine),
             idleTimeoutMs: () => idleTimeoutMs(useSettingsStore.getState().settings, hasUnreadWorkspaceAttention(workspace.getState().metadata)),
-            onActivity: () => { setTabState(tabId, ActivityState.Working) },
+            // Only the Working edge is gated: a pending Idle must still land after the user
+            // turns the detector off, or the tab would stay Working forever.
+            onActivity: () => {
+              if (isIdleDetectorDisabled(workspace.getState().workspace.appStates[tabId]?.state)) return
+              setTabState(tabId, ActivityState.Working)
+            },
             onIdle: () => { setTabState(tabId, ActivityState.Idle) },
           })
         if (detector) owner.add(toDisposable(detector.destroy))

@@ -19,7 +19,8 @@ export function createGhosttyTerminalApplication(deps: TerminalDeps): Applicatio
     createInitialState: () => ({
       ptyId: null,
       ptyHandle: crypto.randomUUID(),
-      keepOnExit: false
+      keepOnExit: false,
+      idleDetectorDisabled: false
     }),
 
     onWorkspaceLoad: makeTerminalOnWorkspaceLoad(deps),

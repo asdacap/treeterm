@@ -16,6 +16,8 @@ export interface AnalyzerDeps {
   getSettings: () => Settings
   /** Whether the owning workspace already shows an unread marker; lengthens the idle debounce. */
   hasUnreadAttention: () => boolean
+  /** Per-tab opt-out: output churn no longer marks the tab Working; idle classification still runs. */
+  isIdleDetectorDisabled: () => boolean
   llm: LlmApi
   updateMetadata: (key: string, value: string, reason: string) => void
   getDisplayName: () => string | undefined
@@ -463,7 +465,10 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       const detector = createIdleDetector({
         initialSnapshot: `${configurationIdentity()}\0${viewportText ?? ''}`,
         idleTimeoutMs: () => idleTimeoutMs(deps.getSettings(), deps.hasUnreadAttention()),
-        onActivity: () => { updateAiState(ActivityState.Working) },
+        onActivity: () => {
+          if (deps.isIdleDetectorDisabled()) return
+          updateAiState(ActivityState.Working)
+        },
         onIdle: () => { void analyze() },
       })
       owner.add(toDisposable(detector.destroy))

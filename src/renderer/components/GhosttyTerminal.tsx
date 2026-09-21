@@ -1,5 +1,9 @@
 import { useState } from 'react'
 import { useStore } from 'zustand'
+import { IdleDetectorToggle } from './IdleDetectorToggle'
+import { ActivityStateBadge } from './ActivityStateBadge'
+import { useActivityStateStore } from '../store/activityState'
+import { ActivityState } from '../types'
 import BaseTerminal, { type BaseTerminalConfig, type BaseTerminalState } from './BaseTerminal'
 import { createGhosttyEngine } from '../terminal/ghosttyEngine'
 import type { WorkspaceStore } from '../types'
@@ -19,6 +23,7 @@ export default function GhosttyTerminal({ workspace, tabId }: GhosttyTerminalPro
   const wsData = useStore(workspace, s => s.workspace)
   const appState = wsData.appStates[tabId]
   const existingPtyId = (appState?.state as BaseTerminalState | undefined)?.ptyId
+  const activityState = useActivityStateStore((s) => s.states[tabId] ?? ActivityState.Idle)
 
   // Stable config — useState initializer runs once, so BaseTerminal never re-renders from config changes
   const [terminalConfig] = useState<BaseTerminalConfig>(() => ({
@@ -32,10 +37,18 @@ export default function GhosttyTerminal({ workspace, tabId }: GhosttyTerminalPro
   }
 
   return (
-    <BaseTerminal
-      workspace={workspace}
-      tabId={tabId}
-      config={terminalConfig}
-    />
+    <div className="terminal-app-wrapper">
+      <div className="terminal-app-body">
+        <BaseTerminal
+          workspace={workspace}
+          tabId={tabId}
+          config={terminalConfig}
+        />
+      </div>
+      <div className="terminal-status-bar">
+        <ActivityStateBadge state={activityState} />
+        <IdleDetectorToggle workspace={workspace} tabId={tabId} />
+      </div>
+    </div>
   )
 }

@@ -28,6 +28,7 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
         allowedPaths: []
       },
       autoApprove: false,
+      idleDetectorDisabled: false,
     }),
 
     onWorkspaceLoad: (tab: Tab, workspaceStore: WorkspaceStore): AiHarnessRef => {

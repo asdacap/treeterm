@@ -1,5 +1,9 @@
 import { useState } from 'react'
 import { useStore } from 'zustand'
+import { IdleDetectorToggle } from './IdleDetectorToggle'
+import { ActivityStateBadge } from './ActivityStateBadge'
+import { useActivityStateStore } from '../store/activityState'
+import { ActivityState } from '../types'
 import BaseTerminal, { type BaseTerminalConfig, type BaseTerminalState } from './BaseTerminal'
 import { createXtermEngine } from '../terminal/xtermEngine'
 import type { SandboxConfig, WorkspaceStore } from '../types'
@@ -17,6 +21,7 @@ export default function Terminal({ workspace, tabId, sandbox }: TerminalProps) {
   const wsData = useStore(workspace, s => s.workspace)
   const appState = wsData.appStates[tabId]
   const existingPtyId = (appState?.state as BaseTerminalState | undefined)?.ptyId
+  const activityState = useActivityStateStore((s) => s.states[tabId] ?? ActivityState.Idle)
 
   const isSandboxed = sandbox?.enabled ?? false
   // Stable config — useState initializer runs once, so BaseTerminal never re-renders from config changes
@@ -31,10 +36,18 @@ export default function Terminal({ workspace, tabId, sandbox }: TerminalProps) {
   }
 
   return (
-    <BaseTerminal
-      workspace={workspace}
-      tabId={tabId}
-      config={terminalConfig}
-    />
+    <div className="terminal-app-wrapper">
+      <div className="terminal-app-body">
+        <BaseTerminal
+          workspace={workspace}
+          tabId={tabId}
+          config={terminalConfig}
+        />
+      </div>
+      <div className="terminal-status-bar">
+        <ActivityStateBadge state={activityState} />
+        <IdleDetectorToggle workspace={workspace} tabId={tabId} />
+      </div>
+    </div>
   )
 }

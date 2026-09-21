@@ -8,32 +8,15 @@ import { PromptCommitButton } from './PromptCommitButton'
 import { PromptRebaseButton } from './PromptRebaseButton'
 import { ReviewCommentsButton } from './ReviewCommentsButton'
 import { PromptGitHubCommentsButton } from './PromptGitHubCommentsButton'
-import type { ActivityState, SandboxConfig, WorkspaceStore } from '../types'
+import type { SandboxConfig, WorkspaceStore } from '../types'
 import { isAiHarnessState } from '../types'
 import type { AiHarnessRef } from '../../applications/aiHarness/renderer'
 import type { AnalyzerState } from '../store/createAnalyzerStore'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
-
-const STATE_COLORS: Record<ActivityState, string> = {
-  idle: '#666',
-  working: '#2472c8',
-  user_input_required: '#e5e510',
-  permission_request: '#cd6600',
-  safe_permission_requested: '#0dbc79',
-  completed: '#23d18b',
-  error: '#f44747'
-}
-
-const STATE_LABELS: Record<ActivityState, string> = {
-  idle: 'idle',
-  working: 'working',
-  user_input_required: 'input required',
-  permission_request: 'permission request',
-  safe_permission_requested: 'safe permission',
-  completed: 'completed',
-  error: 'error'
-}
+import { ToggleSwitch } from './ToggleSwitch'
+import { IdleDetectorToggle } from './IdleDetectorToggle'
+import { ActivityStateBadge } from './ActivityStateBadge'
 
 interface AiHarnessProps {
   cwd: string
@@ -119,8 +102,8 @@ function AiHarnessContent({
   }))
 
   return (
-    <div className="ai-harness-wrapper">
-      <div className="ai-harness-terminal">
+    <div className="terminal-app-wrapper">
+      <div className="terminal-app-body">
         <BaseTerminal
           workspace={workspace}
           tabId={tabId}
@@ -178,25 +161,14 @@ function AiHarnessStatusBar({ analyzer, workspace, tabId }: AiHarnessStatusBarPr
 
   return (
     <>
-      <div className="ai-harness-status-bar">
-        <div
-          className="ai-state-badge"
-          style={{ background: STATE_COLORS[aiState] }}
-          title={reason}
-          onContextMenu={handleBadgeContextMenu}
-        >
-          {analyzing && <span className="ai-state-badge-spinner" />}
-          {STATE_LABELS[aiState]}
-        </div>
-        <label className="ai-harness-toggle">
-          <input
-            type="checkbox"
-            checked={autoApprove}
-            onChange={(e) => { analyzer.getState().setAutoApprove(e.target.checked); }}
-          />
-          <span className="ai-harness-toggle-slider" />
-          <span className="ai-harness-toggle-label">Auto-approve safe</span>
-        </label>
+      <div className="terminal-status-bar">
+        <ActivityStateBadge state={aiState} analyzing={analyzing} title={reason} onContextMenu={handleBadgeContextMenu} />
+        <ToggleSwitch
+          checked={autoApprove}
+          label="Auto-approve safe"
+          onChange={(checked) => { analyzer.getState().setAutoApprove(checked) }}
+        />
+        <IdleDetectorToggle workspace={workspace} tabId={tabId} />
       </div>
       <ContextMenu menuId={badgeMenuId} activeMenuId={activeMenuId} position={menuPosition}>
         <div className="context-menu-item" onClick={handleDebugAnalyzer}>

@@ -5091,7 +5091,7 @@ body,
 }
 
 /* AI harness layout */
-.ai-harness-wrapper {
+.terminal-app-wrapper {
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -5099,13 +5099,13 @@ body,
   position: relative;
 }
 
-.ai-harness-terminal {
+.terminal-app-body {
   flex: 1;
   min-height: 0;
   position: relative;
 }
 
-.ai-harness-status-bar {
+.terminal-status-bar {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -5117,7 +5117,7 @@ body,
 }
 
 /* AI state badge */
-.ai-state-badge {
+.activity-state-badge {
   padding: 2px 8px;
   border-radius: 12px;
   font-size: 11px;
@@ -5129,7 +5129,7 @@ body,
 }
 
 /* Auto-approve toggle */
-.ai-harness-toggle {
+.terminal-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -5139,11 +5139,11 @@ body,
   user-select: none;
 }
 
-.ai-harness-toggle input {
+.terminal-toggle input {
   display: none;
 }
 
-.ai-harness-toggle-slider {
+.terminal-toggle-slider {
   width: 28px;
   height: 14px;
   background: #555;
@@ -5152,7 +5152,7 @@ body,
   transition: background 0.2s;
 }
 
-.ai-harness-toggle-slider::after {
+.terminal-toggle-slider::after {
   content: '';
   position: absolute;
   width: 10px;
@@ -5164,19 +5164,19 @@ body,
   transition: transform 0.2s;
 }
 
-.ai-harness-toggle input:checked + .ai-harness-toggle-slider {
+.terminal-toggle input:checked + .terminal-toggle-slider {
   background: #0dbc79;
 }
 
-.ai-harness-toggle input:checked + .ai-harness-toggle-slider::after {
+.terminal-toggle input:checked + .terminal-toggle-slider::after {
   transform: translateX(14px);
 }
 
-.ai-harness-toggle-label {
+.terminal-toggle-label {
   white-space: nowrap;
 }
 
-.ai-state-badge-spinner {
+.activity-state-badge-spinner {
   display: inline-block;
   width: 8px;
   height: 8px;

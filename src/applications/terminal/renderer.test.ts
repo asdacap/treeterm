@@ -139,7 +139,7 @@ describe('Terminal Renderer', () => {
         const app = createTerminalApplication(mockDeps)
         const state = app.createInitialState()
 
-        expect(state).toEqual({ ptyId: null, ptyHandle: expect.any(String) as unknown, keepOnExit: false })
+        expect(state).toEqual({ ptyId: null, ptyHandle: expect.any(String) as unknown, keepOnExit: false, idleDetectorDisabled: false })
       })
     })
 
@@ -319,7 +319,7 @@ describe('Terminal Renderer', () => {
     it('can create initial state', () => {
       const app = createTerminalApplication(mockDeps)
       const state = app.createInitialState()
-      expect(state).toEqual({ ptyId: null, ptyHandle: expect.any(String) as unknown, keepOnExit: false })
+      expect(state).toEqual({ ptyId: null, ptyHandle: expect.any(String) as unknown, keepOnExit: false, idleDetectorDisabled: false })
     })
 
     it('can render Terminal component', () => {
@@ -401,7 +401,7 @@ describe('Terminal Renderer', () => {
         const variant = createTerminalVariant(mockInstance, mockDeps)
         const state = variant.createInitialState()
 
-        expect(state).toEqual({ ptyId: null, ptyHandle: expect.any(String) as unknown, keepOnExit: false })
+        expect(state).toEqual({ ptyId: null, ptyHandle: expect.any(String) as unknown, keepOnExit: false, idleDetectorDisabled: false })
       })
     })
 

@@ -165,6 +165,7 @@ describe('AI Harness Renderer', () => {
             allowedPaths: []
           },
           autoApprove: false,
+          idleDetectorDisabled: false,
         })
       })
 
