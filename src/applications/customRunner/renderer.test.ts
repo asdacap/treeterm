@@ -169,7 +169,7 @@ describe('createCustomRunnerVariant', () => {
       const variant = createCustomRunnerVariant(mockInstance, mockDeps)
       const state = variant.createInitialState()
 
-      expect(state).toEqual({ ptyId: null, ptyHandle: expect.any(String) as unknown, keepOnExit: false, idleDetectorDisabled: false })
+      expect(state).toEqual({ ptyId: null, ptyHandle: expect.any(String) as unknown, keepOnExit: false, idleDetectorDisabled: false, widthLimitDisabled: false })
     })
   })
 

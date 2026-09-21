@@ -29,6 +29,7 @@ export function createAiHarnessVariant(instance: AiHarnessInstance, deps: Termin
       },
       autoApprove: false,
       idleDetectorDisabled: false,
+      widthLimitDisabled: false,
     }),
 
     onWorkspaceLoad: (tab: Tab, workspaceStore: WorkspaceStore): AiHarnessRef => {

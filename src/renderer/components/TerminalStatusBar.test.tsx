@@ -44,13 +44,14 @@ function makeEngine(lines: string[]): CachedTerminal['engine'] {
 }
 
 describe('TerminalStatusBar', () => {
-  it('tracks the tab activity state and exposes the idle detector switch', () => {
+  it('tracks the tab activity state and exposes the idle detector and width limit switches', () => {
     const workspace = makeWorkspaceStore(null)
     const { container, getByLabelText } = render(<TerminalStatusBar workspace={workspace as never} tabId="tab1" />)
 
     const badge = container.querySelector('.terminal-status-bar .activity-state-badge')!
     expect(badge.textContent).toBe('idle')
     expect((getByLabelText('Idle detector') as HTMLInputElement).checked).toBe(true)
+    expect((getByLabelText('80 col limit') as HTMLInputElement).checked).toBe(true)
 
     act(() => {
       useActivityStateStore.getState().setTabState('tab1', ActivityState.Working, { kind: ActivityTransitionKind.ViewportChanged, snapshot: '$ ls' })

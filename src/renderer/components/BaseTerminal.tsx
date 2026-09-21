@@ -8,7 +8,7 @@ import { useSessionApi } from '../contexts/SessionStoreContext'
 import { createIdleDetector, idleTimeoutMs } from '../utils/idleDetector'
 import { hasUnreadWorkspaceAttention } from '../store/workspaceAttention'
 import type { Tty } from '../store/createTtyStore'
-import { ActivityState, ScrollPosition, isIdleDetectorDisabled } from '../types'
+import { ActivityState, ScrollPosition, isIdleDetectorDisabled, isWidthLimitDisabled } from '../types'
 import type { CachedTerminal, TerminalAppRef, PtyEvent, SandboxConfig, TerminalState, WorkspaceStore } from '../types'
 import type { TerminalBufferHost, TerminalEngine, TerminalEngineFactory } from '../terminal/engine'
 import { snapshotViewport } from '../terminal/engine'
@@ -20,6 +20,8 @@ import ContextMenu from './ContextMenu'
 const SCROLLBACK_LINES = 50000
 /** Let the container's layout settle before the first fit. */
 const INITIAL_FIT_DELAY_MS = 100
+/** Columns a tab fits to unless its width limit is switched off in the status bar. */
+const DEFAULT_MAX_COLS = 80
 
 // Utility to format raw chars for console debugging
 function formatRawChars(str: string): string {
@@ -172,13 +174,18 @@ export default function BaseTerminal({
       allowOsc52Clipboard: settings.terminal.allowOsc52Clipboard,
     }
 
+    const widthLimitDisabled = (): boolean => isWidthLimitDisabled(workspace.getState().workspace.appStates[tabId]?.state)
+
     /** Propose a fit to the daemon. The daemon echoes the size back, and only then does the
-     *  terminal resize — see the Resize event below. Nothing resizes the terminal locally. */
+     *  terminal resize — see the Resize event below. Nothing resizes the terminal locally.
+     *  Columns are capped at DEFAULT_MAX_COLS unless the tab opted out; the cap is applied before
+     *  the request so the echo matches and the size-mismatch badge stays hidden. */
     const applyFit = (engine: TerminalEngine, resize: (cols: number, rows: number) => void): void => {
       const dimensions = engine.proposeDimensions(getComputedStyle)
       if (!dimensions) return
-      if (dimensions.cols === engine.cols && dimensions.rows === engine.rows) return
-      resize(dimensions.cols, dimensions.rows)
+      const cols = widthLimitDisabled() ? dimensions.cols : Math.min(dimensions.cols, DEFAULT_MAX_COLS)
+      if (cols === engine.cols && dimensions.rows === engine.rows) return
+      resize(cols, dimensions.rows)
     }
 
     /** Attach all DOM-level handlers to an engine. Shared by first mount and remount. */
@@ -214,10 +221,17 @@ export default function BaseTerminal({
         }
       })
 
-      // Focus when this tab becomes active
+      // Focus when this tab becomes active. The same subscription re-fits when the width limit
+      // switch flips: the container does not change size, so the ResizeObserver stays silent.
+      let lastWidthLimitDisabled = widthLimitDisabled()
       unsubscribeFocus = workspace.subscribe((state) => {
         if (state.workspace.activeTabId === tabId && engineRef.current) {
           engineRef.current.focus()
+        }
+        const disabled = widthLimitDisabled()
+        if (disabled !== lastWidthLimitDisabled) {
+          lastWidthLimitDisabled = disabled
+          if (initialResizeDone) applyFit(engine, resize)
         }
       })
       if (workspace.getState().workspace.activeTabId === tabId) {
@@ -589,7 +603,9 @@ export default function BaseTerminal({
 
   return (
     <div className="terminal-wrapper">
-      <div className="terminal-padding-wrapper">
+      {/* Painted with the terminal background so the width capped off by the column limit
+          (and the padding) matches the grid instead of the app chrome. */}
+      <div className="terminal-padding-wrapper" style={{ background: config.themeBackground }}>
         <div
           ref={containerRef}
           className={`terminal-container${config.disableScrollbar ? ' disable-scrollbar' : ''}`}

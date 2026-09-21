@@ -143,6 +143,8 @@ export interface TerminalState {
   keepOnExit: boolean
   // Negative so tabs persisted before the flag existed (field missing) keep the detector on
   idleDetectorDisabled: boolean
+  // Negative so tabs persisted before the flag existed (field missing) stay capped at 80 columns
+  widthLimitDisabled: boolean
 }
 
 export type AiHarnessState = TerminalState & {
@@ -694,6 +696,11 @@ export function isTerminalState(state: unknown): state is TerminalState {
 /** Per-tab opt-out for the viewport idle detector. Tabs persisted before the flag existed lack it, hence Partial. */
 export function isIdleDetectorDisabled(state: unknown): boolean {
   return isTerminalState(state) && (state as Partial<TerminalState>).idleDetectorDisabled === true
+}
+
+/** Per-tab opt-out for the default 80-column width cap. Same Partial tolerance as above. */
+export function isWidthLimitDisabled(state: unknown): boolean {
+  return isTerminalState(state) && (state as Partial<TerminalState>).widthLimitDisabled === true
 }
 
 export function isAiHarnessState(state: unknown): state is AiHarnessState {

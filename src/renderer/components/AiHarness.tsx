@@ -14,6 +14,7 @@ import type { AiHarnessRef } from '../../applications/aiHarness/renderer'
 import type { AnalyzerState } from '../store/createAnalyzerStore'
 import { ToggleSwitch } from './ToggleSwitch'
 import { IdleDetectorToggle } from './IdleDetectorToggle'
+import { WidthLimitToggle } from './WidthLimitToggle'
 import { ActivityStateBadge } from './ActivityStateBadge'
 
 interface AiHarnessProps {
@@ -149,6 +150,7 @@ function AiHarnessStatusBar({ analyzer, workspace, tabId }: AiHarnessStatusBarPr
         onChange={(checked) => { analyzer.getState().setAutoApprove(checked) }}
       />
       <IdleDetectorToggle workspace={workspace} tabId={tabId} />
+      <WidthLimitToggle workspace={workspace} tabId={tabId} />
     </div>
   )
 }

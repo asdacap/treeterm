@@ -20,7 +20,8 @@ export function createGhosttyTerminalApplication(deps: TerminalDeps): Applicatio
       ptyId: null,
       ptyHandle: crypto.randomUUID(),
       keepOnExit: false,
-      idleDetectorDisabled: false
+      idleDetectorDisabled: false,
+      widthLimitDisabled: false
     }),
 
     onWorkspaceLoad: makeTerminalOnWorkspaceLoad(deps),

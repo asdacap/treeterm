@@ -165,6 +165,20 @@ describe('AiHarness', () => {
     expect(updater({ ptyId: 'pty1', sandbox: {} })).toEqual({ ptyId: 'pty1', sandbox: {}, idleDetectorDisabled: true })
   })
 
+  it('persists the width limit switch into the tab state', () => {
+    const workspace = makeWorkspaceStore('tab1', { ptyId: 'pty1', sandbox: {} }, makeAnalyzer())
+
+    const { getByLabelText } = renderHarness(workspace)
+    const toggle = getByLabelText('80 col limit') as HTMLInputElement
+    expect(toggle.checked).toBe(true)
+    fireEvent.click(toggle)
+
+    const updateTabState = workspace.getState().updateTabState as ReturnType<typeof vi.fn>
+    expect(updateTabState).toHaveBeenCalledWith('tab1', expect.any(Function))
+    const updater = updateTabState.mock.calls[0]?.[1] as (s: unknown) => unknown
+    expect(updater({ ptyId: 'pty1', sandbox: {} })).toEqual({ ptyId: 'pty1', sandbox: {}, widthLimitDisabled: true })
+  })
+
   it('forwards keystrokes from the engine to the analyzer', () => {
     const analyzer = makeAnalyzer()
     const workspace = makeWorkspaceStore('tab1', { ptyId: 'pty1', sandbox: {} }, analyzer)

@@ -185,8 +185,8 @@ function makeFakeTty() {
   return { getState: () => state, state, dispose: vi.fn() }
 }
 
-function makeWorkspaceStore(tabId: string, options: { keepOnExit?: boolean; idleDetectorDisabled?: boolean; activeTabId?: string; metadata?: Record<string, string> } = {}) {
-  const { keepOnExit = false, idleDetectorDisabled = false, activeTabId = tabId, metadata = {} } = options
+function makeWorkspaceStore(tabId: string, options: { keepOnExit?: boolean; idleDetectorDisabled?: boolean; widthLimitDisabled?: boolean; activeTabId?: string; metadata?: Record<string, string> } = {}) {
+  const { keepOnExit = false, idleDetectorDisabled = false, widthLimitDisabled = false, activeTabId = tabId, metadata = {} } = options
   const appRef = {
     cachedTerminal: null as CachedTerminal | null,
     disposeCachedTerminal: vi.fn(),
@@ -199,7 +199,7 @@ function makeWorkspaceStore(tabId: string, options: { keepOnExit?: boolean; idle
     workspace: {
       id: 'ws1',
       activeTabId,
-      appStates: { [tabId]: { applicationId: 'terminal', title: 'Terminal 1', state: { ptyId: 'pty1', keepOnExit, idleDetectorDisabled } } },
+      appStates: { [tabId]: { applicationId: 'terminal', title: 'Terminal 1', state: { ptyId: 'pty1', keepOnExit, idleDetectorDisabled, widthLimitDisabled } } },
     },
     metadata,
     removeTab,
@@ -544,7 +544,7 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
 })
 
 describe('BaseTerminal — mounted UI', () => {
-  async function mount(options: { keepOnExit?: boolean; activeTabId?: string } = {}) {
+  async function mount(options: { keepOnExit?: boolean; widthLimitDisabled?: boolean; activeTabId?: string } = {}) {
     const { store: workspace, removeTab } = makeWorkspaceStore('tab1', options)
     const session = makeLiveSessionStore()
     const utils = render(
@@ -655,26 +655,82 @@ describe('BaseTerminal — mounted UI', () => {
 
   it('proposes a fit to the daemon but never resizes the terminal locally', async () => {
     const { engine, tty } = await mount()
-    engine.proposal = { cols: 100, rows: 30 }
+    engine.proposal = { cols: 60, rows: 30 }
 
     await act(async () => { await new Promise((r) => setTimeout(r, 150)) })
 
-    expect(tty.resize).toHaveBeenCalledWith(100, 30)
+    expect(tty.resize).toHaveBeenCalledWith(60, 30)
     // The daemon owns the size — only its echoed Resize event moves the terminal.
     expect(engine.resizes).toHaveLength(0)
   })
 
-  it('badges the size the daemon actually applied when it differs from the request', async () => {
-    const { container, engine, emit } = await mount()
-    engine.proposal = { cols: 100, rows: 30 }
+  it('caps the proposed width at 80 columns by default', async () => {
+    const { engine, tty } = await mount()
+    engine.proposal = { cols: 200, rows: 30 }
+
     await act(async () => { await new Promise((r) => setTimeout(r, 150)) })
 
-    // The daemon clamped the 100x30 we asked for down to what the PTY would take.
+    expect(tty.resize).toHaveBeenCalledWith(80, 30)
+  })
+
+  it('skips the fit when the capped size already matches the engine', async () => {
+    const { engine, tty } = await mount()
+    // Engine is 80x24; a wider pane still caps to 80, so nothing changes.
+    engine.proposal = { cols: 200, rows: 24 }
+
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)) })
+
+    expect(tty.resize).not.toHaveBeenCalled()
+  })
+
+  it('fits to the full width when the tab has the limit switched off', async () => {
+    const { engine, tty } = await mount({ widthLimitDisabled: true })
+    engine.proposal = { cols: 200, rows: 30 }
+
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)) })
+
+    expect(tty.resize).toHaveBeenCalledWith(200, 30)
+  })
+
+  it('re-fits when the width limit switch flips, and only then', async () => {
+    const { engine, tty, workspace } = await mount()
+    engine.proposal = { cols: 200, rows: 30 }
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)) })
+    expect(tty.resize).toHaveBeenLastCalledWith(80, 30)
+
+    const setTabState = (patch: Record<string, unknown>): void => {
+      act(() => {
+        workspace.setState((state) => {
+          const ws = state.workspace as { appStates: Record<string, { state: Record<string, unknown> }> }
+          const tab = ws.appStates.tab1!
+          return { workspace: { ...ws, appStates: { tab1: { ...tab, state: { ...tab.state, ...patch } } } } }
+        })
+      })
+    }
+
+    // An unrelated tab-state change leaves the size alone.
+    setTabState({ keepOnExit: true })
+    expect(tty.resize).toHaveBeenCalledTimes(1)
+
+    setTabState({ widthLimitDisabled: true })
+    expect(tty.resize).toHaveBeenLastCalledWith(200, 30)
+
+    setTabState({ widthLimitDisabled: false })
+    expect(tty.resize).toHaveBeenLastCalledWith(80, 30)
+    expect(tty.resize).toHaveBeenCalledTimes(3)
+  })
+
+  it('badges the size the daemon actually applied when it differs from the request', async () => {
+    const { container, engine, emit } = await mount()
+    engine.proposal = { cols: 60, rows: 30 }
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)) })
+
+    // The daemon clamped the 60x30 we asked for down to what the PTY would take.
     emit({ type: PtyEventType.Resize, cols: 80, rows: 24 })
     expect(container.querySelector('.size-mismatch-badge')?.textContent).toBe('80x24')
 
     // ...and it agrees on the next round trip.
-    emit({ type: PtyEventType.Resize, cols: 100, rows: 30 })
+    emit({ type: PtyEventType.Resize, cols: 60, rows: 30 })
     expect(container.querySelector('.size-mismatch-badge')).toBeNull()
   })
 

@@ -83,7 +83,8 @@ export function createTerminalApplication(deps: TerminalDeps): Application<Termi
       ptyId: null,
       ptyHandle: crypto.randomUUID(),
       keepOnExit: false,
-      idleDetectorDisabled: false
+      idleDetectorDisabled: false,
+      widthLimitDisabled: false
     }),
 
     onWorkspaceLoad: makeTerminalOnWorkspaceLoad(deps),
@@ -115,7 +116,8 @@ export function createTerminalVariant(instance: TerminalInstance, deps: Terminal
       ptyId: null,
       ptyHandle: crypto.randomUUID(),
       keepOnExit: false,
-      idleDetectorDisabled: false
+      idleDetectorDisabled: false,
+      widthLimitDisabled: false
     }),
 
     onWorkspaceLoad: makeTerminalOnWorkspaceLoad(deps, instance.startupCommand),

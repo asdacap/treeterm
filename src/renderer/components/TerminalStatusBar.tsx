@@ -1,4 +1,5 @@
 import { IdleDetectorToggle } from './IdleDetectorToggle'
+import { WidthLimitToggle } from './WidthLimitToggle'
 import { ActivityStateBadge } from './ActivityStateBadge'
 import { useActivityStateStore } from '../store/activityState'
 import { snapshotViewport } from '../terminal/engine'
@@ -10,7 +11,7 @@ interface TerminalStatusBarProps {
   tabId: string
 }
 
-/** Status bar under a plain terminal: activity badge (with its debug menu) and the idle detector switch. */
+/** Status bar under a plain terminal: activity badge (with its debug menu), the idle detector switch and the width limit switch. */
 export function TerminalStatusBar({ workspace, tabId }: TerminalStatusBarProps) {
   const activityState = useActivityStateStore((s) => s.states[tabId] ?? ActivityState.Idle)
 
@@ -23,6 +24,7 @@ export function TerminalStatusBar({ workspace, tabId }: TerminalStatusBarProps) 
     <div className="terminal-status-bar">
       <ActivityStateBadge workspace={workspace} tabId={tabId} state={activityState} getBufferText={getBufferText} />
       <IdleDetectorToggle workspace={workspace} tabId={tabId} />
+      <WidthLimitToggle workspace={workspace} tabId={tabId} />
     </div>
   )
 }

@@ -85,12 +85,13 @@ describe('createGhosttyTerminalApplication', () => {
 
     expect(mockEnsureTty).toHaveBeenCalledWith('handle-1', '/repo', undefined, undefined)
     const updater = mockUpdateTabState.mock.calls[0]?.[1]
-    expect(updater?.({ ptyId: null, ptyHandle: 'handle-1', keepOnExit: false, idleDetectorDisabled: false })).toEqual({
+    expect(updater?.({ ptyId: null, ptyHandle: 'handle-1', keepOnExit: false, idleDetectorDisabled: false, widthLimitDisabled: false })).toEqual({
       ptyId: 'pty-1',
       ptyHandle: 'handle-1',
       connectionId: 'local',
       keepOnExit: false,
       idleDetectorDisabled: false,
+      widthLimitDisabled: false,
     })
   })
 
@@ -106,7 +107,7 @@ describe('createGhosttyTerminalApplication', () => {
     const app = createGhosttyTerminalApplication(deps)
     const tab = makeTab({ ptyId: 'pty-existing' })
     const workspace = makeWorkspaceStore({
-      tab1: { state: { ptyId: 'pty-existing', ptyHandle: 'handle-1', connectionId: 'local', keepOnExit: false, idleDetectorDisabled: false } },
+      tab1: { state: { ptyId: 'pty-existing', ptyHandle: 'handle-1', connectionId: 'local', keepOnExit: false, idleDetectorDisabled: false, widthLimitDisabled: false } },
     })
 
     app.onWorkspaceLoad(tab, workspace).close()
