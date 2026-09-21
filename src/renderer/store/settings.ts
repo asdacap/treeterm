@@ -1,3 +1,4 @@
+import { ClassifierProvider } from '../../shared/types'
 import { create } from 'zustand'
 import type { Settings, SettingsApi, ReasoningEffort } from '../types'
 import { useAppStore } from './app'
@@ -64,6 +65,8 @@ export const defaultSettings: Settings = {
     model: 'gpt-4o'
   },
   terminalAnalyzer: {
+    provider: ClassifierProvider.ChatCompletions,
+    titleModel: 'openai/gpt-oss-safeguard-20b',
     model: 'openai/gpt-oss-safeguard-20b',
     systemPrompt: 'You are a terminal state analyzer. The current working directory is: {{cwd}}. The safe paths are: {{safe_paths}}. Given the last lines of terminal output, respond with ONLY a JSON object: {"state": "<state>", "reason": "<reason>"} where state is one of the following that best represent the state: \n - "safe_permission_requested" program asking for permission but the action is safe. A safe action are action that either:\n   - Git operation unless it changes other worktree.\n   - Build or test or install dependencies.\n   - Anything that only mutates files within one of the safe paths.\n   - It IS allowed to read outside the safe path, just not mutate them. \n   - But it is not allowed to do a wide ranging search via find or `grep -r` on file outside the safe path.\n - "permission_request" program asking for y/n or similar confirmation but it is not considered safe as "safe_permission_requested".\n - "completed" when previous user request satisfied.\n - "user_input_required" program asking for user text input or confirmation among design choice or a plan confirmation.\n - "idle" for shell prompt visible, waiting for command or user input is incomplete.\nThe reason field should show the reason for the verdict, no more than 10 word. ',
     titleSystemPrompt: 'Given the terminal output below, suggest a short title (max 5 words), a brief description (max 15 words), and a git branch name (lowercase kebab-case, max 4 words). Respond with ONLY a JSON object: {"title": "<title>", "description": "<description>", "branchName": "<branch-name>"}',

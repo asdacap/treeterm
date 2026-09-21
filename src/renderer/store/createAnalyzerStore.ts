@@ -3,6 +3,9 @@ import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
 import { Terminal } from '@xterm/xterm'
 import { ActivityState } from '../types'
+import { ClassifierProvider } from '../../shared/types'
+import { classificationIdentity } from '../lib/classificationProvider'
+import type { Classification, ClassifierSettings } from '../types/classification'
 import type { LlmApi, Settings, PtyEvent } from '../types'
 import { PtyEventType } from '../../shared/ipc-types'
 import { DisposableStore, thenRegisterOrDispose } from '../../shared/lifecycle'
@@ -77,7 +80,7 @@ export interface AnalyzerState {
 
 export type Analyzer = StoreApi<AnalyzerState>
 
-type AnalyzerResult = { state: string; reason: string }
+type AnalyzerResult = Classification
 type TitleQueryResult =
   | { status: TitleRefreshStatus.Success; title: string; description: string; branchName: string }
   | { status: TitleRefreshStatus.Failure; error: string }
@@ -101,6 +104,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   let ownTty: Tty | null = null
   let dataVersion = 0
   let lastVersion = 0
+  let lastConfiguration = configurationIdentity()
   let pollInterval: ReturnType<typeof setInterval> | null = null
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
   let titleTimer: ReturnType<typeof setTimeout> | null = null
@@ -120,6 +124,21 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   // History log
   const history: AnalyzerHistoryEntry[] = []
   const MAX_HISTORY = 1000
+
+  function classifierSettings(settings: Settings): ClassifierSettings {
+    const connection = { baseUrl: settings.llm.baseUrl, apiKey: settings.llm.apiKey }
+    return settings.terminalAnalyzer.provider === ClassifierProvider.Classifier
+      ? { ...connection, provider: ClassifierProvider.Classifier, model: settings.terminalAnalyzer.model }
+      : { ...connection, provider: ClassifierProvider.ChatCompletions, model: settings.terminalAnalyzer.model, reasoningEffort: settings.terminalAnalyzer.reasoningEffort }
+  }
+
+  // Poll configuration as well as terminal output: a provider switch must reclassify
+  // an unchanged screen. Credentials are not stored in identity or history.
+  function configurationIdentity(): string {
+    const settings = deps.getSettings()
+    const configuration = classifierSettings(settings)
+    return JSON.stringify({ provider: configuration.provider, model: configuration.model, baseUrl: configuration.baseUrl, reasoning: configuration.provider === ClassifierProvider.ChatCompletions ? configuration.reasoningEffort : '', cwd: deps.cwd, systemPrompt: settings.terminalAnalyzer.systemPrompt, safePaths: settings.terminalAnalyzer.safePaths })
+  }
 
   function checkBuffer(buffer: string): BufferCheckResult {
     if (buffer === inFlightBuffer) {
@@ -172,8 +191,10 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
     const requestVersion = dataVersion
     const settings = deps.getSettings()
+    const providerSettings = classifierSettings(settings)
+    const requestConfiguration = configurationIdentity()
 
-    if (!settings.terminalAnalyzer.model) {
+    if (!providerSettings.model) {
       if (!modelErrorShown) {
         modelErrorShown = true
         store.setState({ analyzing: false })
@@ -187,7 +208,8 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
     try {
 
-      const checkResult = checkBuffer(buffer)
+      const identity = classificationIdentity({ buffer, cwd: deps.cwd, systemPrompt: settings.terminalAnalyzer.systemPrompt, safePaths: settings.terminalAnalyzer.safePaths }, providerSettings)
+      const checkResult = checkBuffer(identity)
       if (checkResult.action === 'skip') {
         console.debug('[terminal-analyzer] skipping, same buffer in-flight')
         return
@@ -195,22 +217,19 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       if (checkResult.action === 'reuse') {
         console.debug('[terminal-analyzer] reusing cached result for unchanged buffer')
         store.setState({ analyzing: false })
-        updateAiState(checkResult.result.state as ActivityState, checkResult.result.reason)
+        updateAiState(checkResult.result.state, checkResult.result.reason)
         return
       }
 
       console.debug('[terminal-analyzer] buffer:', buffer)
-      inFlightBuffer = buffer
+      inFlightBuffer = identity
       requestInFlight = true
       store.setState({ analyzing: true })
 
       const startTime = Date.now()
       const result = await deps.llm.analyzeTerminal(buffer, deps.cwd, {
-        baseUrl: settings.llm.baseUrl,
-        apiKey: settings.llm.apiKey,
-        model: settings.terminalAnalyzer.model,
+        ...providerSettings,
         systemPrompt: settings.terminalAnalyzer.systemPrompt,
-        reasoningEffort: settings.terminalAnalyzer.reasoningEffort,
         safePaths: settings.terminalAnalyzer.safePaths,
       })
       const durationMs = Date.now() - startTime
@@ -221,9 +240,10 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (!running) return
 
-      if (dataVersion !== requestVersion) {
+      if (dataVersion !== requestVersion || configurationIdentity() !== requestConfiguration) {
+        pendingAnalyze = pendingAnalyze || configurationIdentity() !== requestConfiguration
         console.debug('[terminal-analyzer] discarding stale response')
-        history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), error: '[discarded]', systemPrompt, durationMs })
+        history.push({ timestamp: Date.now(), kind: 'analyzer', model: providerSettings.model, bufferText: buffer, response: JSON.stringify(result), error: '[discarded]', systemPrompt, durationMs })
         if (history.length > MAX_HISTORY) history.shift()
         inFlightBuffer = null
         store.setState({ analyzing: false })
@@ -236,21 +256,21 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
       if ('state' in result) {
         console.debug('[terminal-analyzer] state set:', result.state, 'reason:', result.reason)
-        cache.push({ buffer, result: { state: result.state, reason: result.reason } })
+        cache.push({ buffer: identity, result: { state: result.state, reason: result.reason } })
         if (cache.length > CACHE_SIZE) {
           cache.shift()
         }
         inFlightBuffer = null
         store.setState({ analyzing: false })
-        updateAiState(result.state as ActivityState, result.reason)
-        history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), cached: result.cached, systemPrompt, durationMs })
+        updateAiState(result.state, result.reason)
+        history.push({ timestamp: Date.now(), kind: 'analyzer', model: providerSettings.model, bufferText: buffer, response: JSON.stringify(result), cached: result.cached, systemPrompt, durationMs })
         if (history.length > MAX_HISTORY) history.shift()
       } else {
         console.error('[terminal-analyzer] error:', result.error)
         inFlightBuffer = null
         store.setState({ analyzing: false })
-        updateAiState(ActivityState.Error)
-        history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), error: result.error, systemPrompt, durationMs })
+        updateAiState(ActivityState.Error, result.error)
+        history.push({ timestamp: Date.now(), kind: 'analyzer', model: providerSettings.model, bufferText: buffer, response: JSON.stringify(result), error: result.error, systemPrompt, durationMs })
         if (history.length > MAX_HISTORY) history.shift()
       }
 
@@ -261,10 +281,17 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     } catch (err) {
       requestInFlight = false
       inFlightBuffer = null
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      if (!running) return
+      if (configurationIdentity() !== requestConfiguration) {
+        pendingAnalyze = false
+        void analyze()
+        return
+      }
       console.error('[terminal-analyzer] LLM call failed:', err)
       store.setState({ analyzing: false })
-      updateAiState(ActivityState.Error)
-      history.push({ timestamp: Date.now(), kind: 'analyzer', model: settings.terminalAnalyzer.model, bufferText: buffer, response: '', error: err instanceof Error ? err.message : String(err) })
+      updateAiState(ActivityState.Error, err instanceof Error ? err.message : String(err))
+      history.push({ timestamp: Date.now(), kind: 'analyzer', model: providerSettings.model, bufferText: buffer, response: '', error: err instanceof Error ? err.message : String(err) })
       if (history.length > MAX_HISTORY) history.shift()
       if (pendingAnalyze) {
         pendingAnalyze = false
@@ -278,8 +305,11 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     running = true
 
     pollInterval = setInterval(() => {
-      if (dataVersion === lastVersion) return
+      const configuration = configurationIdentity()
+      if (dataVersion === lastVersion && configuration === lastConfiguration) return
 
+      if (configuration !== lastConfiguration) modelErrorShown = false
+      lastConfiguration = configuration
       lastVersion = dataVersion
       updateAiState(ActivityState.Working)
 
@@ -315,6 +345,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     cache.length = 0
     dataVersion = 0
     lastVersion = 0
+    lastConfiguration = configurationIdentity()
     requestInFlight = false
     pendingAnalyze = false
     modelErrorShown = false
@@ -325,8 +356,8 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   // write, with which guards) is left to the caller.
   async function requestTitleResult(): Promise<TitleQueryResult> {
     const settings = deps.getSettings()
-    if (!settings.terminalAnalyzer.model) {
-      return { status: TitleRefreshStatus.Failure, error: 'Terminal analyzer model not configured' }
+    if (!settings.terminalAnalyzer.titleModel) {
+      return { status: TitleRefreshStatus.Failure, error: 'Title model not configured' }
     }
 
     const buffer = extractBuffer()
@@ -339,14 +370,14 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       const result = await deps.llm.generateTitle(buffer, {
         baseUrl: settings.llm.baseUrl,
         apiKey: settings.llm.apiKey,
-        model: settings.terminalAnalyzer.model,
+        model: settings.terminalAnalyzer.titleModel,
         titleSystemPrompt: settings.terminalAnalyzer.titleSystemPrompt,
         reasoningEffort: settings.terminalAnalyzer.reasoningEffort,
       })
       const durationMs = Date.now() - startTime
       const systemPrompt = 'systemPrompt' in result ? result.systemPrompt : undefined
       const error = 'error' in result ? result.error : undefined
-      history.push({ timestamp: Date.now(), kind: 'title', model: settings.terminalAnalyzer.model, bufferText: buffer, response: JSON.stringify(result), error, systemPrompt, durationMs })
+      history.push({ timestamp: Date.now(), kind: 'title', model: settings.terminalAnalyzer.titleModel, bufferText: buffer, response: JSON.stringify(result), error, systemPrompt, durationMs })
       if (history.length > MAX_HISTORY) history.shift()
       if ('title' in result && result.title) {
         return { status: TitleRefreshStatus.Success, title: result.title, description: result.description, branchName: result.branchName }
@@ -355,7 +386,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err)
       console.error('[analyzer] title generation failed:', err)
-      history.push({ timestamp: Date.now(), kind: 'title', model: settings.terminalAnalyzer.model, bufferText: buffer, response: '', error })
+      history.push({ timestamp: Date.now(), kind: 'title', model: settings.terminalAnalyzer.titleModel, bufferText: buffer, response: '', error })
       if (history.length > MAX_HISTORY) history.shift()
       return { status: TitleRefreshStatus.Failure, error }
     }

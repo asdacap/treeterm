@@ -1,3 +1,6 @@
+import type { Classification, ClassifierSettings } from './classification'
+export type { Classification, ClassificationInput, ClassificationProvider, ClassifierSettings } from './classification'
+export { ClassifierProvider } from '../../shared/types'
 import type { ReactNode } from 'react'
 import type { WorkspaceStore, TerminalAppRef, CachedTerminal } from '../store/createWorkspaceStore'
 export type { WorkspaceStore, TerminalAppRef, CachedTerminal }
@@ -588,7 +591,7 @@ export interface DaemonApi {
 
 export interface LlmApi {
   send: (requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string; reasoning: ReasoningEffort }) => Promise<void>
-  analyzeTerminal: (buffer: string, cwd: string, settings: { baseUrl: string; apiKey: string; model: string; systemPrompt: string; reasoningEffort: ReasoningEffort; safePaths: string[] }) => Promise<{ state: string; reason: string; cached?: boolean; systemPrompt?: string } | { error: string; systemPrompt?: string }>
+  analyzeTerminal: (buffer: string, cwd: string, settings: ClassifierSettings & { systemPrompt: string; safePaths: string[] }) => Promise<(Classification & { cached?: boolean; systemPrompt?: string }) | { error: string; systemPrompt?: string }>
   clearAnalyzerCache: () => Promise<void>
   generateTitle: (buffer: string, settings: { baseUrl: string; apiKey: string; model: string; titleSystemPrompt: string; reasoningEffort: ReasoningEffort }) => Promise<{ title: string; description: string; branchName: string; systemPrompt?: string } | { error: string; systemPrompt?: string }>
   cancel: (requestId: string) => void

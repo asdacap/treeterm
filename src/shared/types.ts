@@ -186,6 +186,11 @@ export enum ReasoningEffort {
   High = 'high',
 }
 
+export enum ClassifierProvider {
+  ChatCompletions = 'chat_completions',
+  Classifier = 'classifier',
+}
+
 export interface Settings {
   terminal: {
     fontSize: number
@@ -238,6 +243,8 @@ export interface Settings {
   }
   // Terminal analyzer LLM configuration
   terminalAnalyzer: {
+    provider: ClassifierProvider
+    titleModel: string      // Chat-completion model for titles, descriptions and branch names
     model: string           // Model name for terminal analysis
     systemPrompt: string    // System prompt (supports {{cwd}} and {{safe_paths}} templates)
     titleSystemPrompt: string // System prompt for generating workspace titles from terminal output

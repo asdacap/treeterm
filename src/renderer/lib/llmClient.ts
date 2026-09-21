@@ -9,6 +9,8 @@
 import OpenAI, { APIError } from 'openai'
 import { ReasoningEffort } from '../../shared/types'
 import type { LlmApi } from '../types'
+import type { Classification } from '../types/classification'
+import { classificationIdentity, createClassificationProvider, prepareClassificationInput, type ClassifierTransports } from './classificationProvider'
 
 interface LlmSettings {
   baseUrl: string
@@ -80,10 +82,10 @@ export const ANALYZER_CACHE_SIZE = 1024
 
 // Global analyzer cache — shared across all LLM client instances.
 // Must outlive individual sessions so that disconnect/reconnect or opening
-// debug clients does not re-query terminal buffers we have already analyzed.
-const globalAnalyzerCache: { buffer: string; result: { state: string; reason: string } }[] = []
+// debug clients does not re-query buffers already analyzed with the same context.
+const globalAnalyzerCache: { identity: string; result: Classification }[] = []
 
-export function createLlmClient(): LlmApi {
+export function createLlmClient(transports: ClassifierTransports = { completeChat: completeChatCall, parseChatJson: parseLlmJson, fetch: (...args) => fetch(...args) }): LlmApi {
   // Active streams for cancellation
   const activeStreams = new Map<string, AbortController>()
 
@@ -134,29 +136,14 @@ export function createLlmClient(): LlmApi {
     },
 
     analyzeTerminal: async (buffer, cwd, settings) => {
-      const cached = globalAnalyzerCache.find((entry) => entry.buffer === buffer)
-      if (cached) {
-        return { ...cached.result, cached: true }
-      }
-
-      const allSafePaths = Array.from(new Set([...settings.safePaths, cwd]))
-      const systemPrompt = settings.systemPrompt
-        .replace(/\{\{cwd\}\}/g, cwd)
-        .replace(/\{\{safe_paths\}\}/g, allSafePaths.join(', '))
-      const messages: ChatMessage[] = [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: buffer }
-      ]
+      const input = { buffer, cwd, safePaths: settings.safePaths, systemPrompt: settings.systemPrompt }
+      const { systemPrompt } = prepareClassificationInput(input)
       try {
-        const response = await completeChatCall(messages, {
-          baseUrl: settings.baseUrl,
-          apiKey: settings.apiKey,
-          model: settings.model,
-          reasoning: settings.reasoningEffort
-        })
-        const parsed = parseLlmJson(response)
-        const result = { state: parsed.state as string, reason: parsed.reason as string }
-        globalAnalyzerCache.push({ buffer, result })
+        const identity = classificationIdentity(input, settings)
+        const cached = globalAnalyzerCache.find((entry) => entry.identity === identity)
+        if (cached) return { ...cached.result, cached: true, systemPrompt }
+        const result = await createClassificationProvider(settings, transports).classify(input)
+        globalAnalyzerCache.push({ identity, result })
         if (globalAnalyzerCache.length > ANALYZER_CACHE_SIZE) {
           globalAnalyzerCache.shift()
         }

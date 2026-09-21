@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createAnalyzerStore, TitleRefreshStatus } from './createAnalyzerStore'
 import type { AnalyzerDeps } from './createAnalyzerStore'
 import { ActivityState } from '../types'
+import { ClassifierProvider } from '../../shared/types'
+import { createLlmClient, parseLlmJson } from '../lib/llmClient'
 import type { LlmApi, Settings } from '../types'
 import type { Tty, TtyState } from './createTtyStore'
 import { createStore } from 'zustand/vanilla'
@@ -57,7 +59,7 @@ function makeDeps(overrides?: Partial<AnalyzerDeps>): AnalyzerDeps {
   return {
     getSettings: vi.fn().mockReturnValue({
       llm: { apiKey: 'test-key', baseUrl: 'http://localhost' },
-      terminalAnalyzer: {
+      terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, titleModel: 'test-model',
         model: 'test-model',
         systemPrompt: 'test prompt',
         titleSystemPrompt: 'title prompt',
@@ -196,7 +198,7 @@ describe('createAnalyzerStore', () => {
     deps = makeDeps({
       getSettings: vi.fn().mockReturnValue({
         llm: { apiKey: '', baseUrl: '' },
-        terminalAnalyzer: { model: '', systemPrompt: '', titleSystemPrompt: '', reasoningEffort: 'off', safePaths: [], bufferLines: 10 },
+        terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, titleModel: 'test-model', model: '', systemPrompt: '', titleSystemPrompt: '', reasoningEffort: 'off', safePaths: [], bufferLines: 10 },
       } as unknown as Settings),
       openTtyStream: makeTtyStreamMock(mock, []),
     })
@@ -230,7 +232,7 @@ describe('createAnalyzerStore', () => {
     deps = makeDeps({
       getSettings: vi.fn().mockReturnValue({
         llm: { apiKey: '', baseUrl: 'http://localhost:11434/v1' },
-        terminalAnalyzer: { model: 'llama3', systemPrompt: 'test prompt', titleSystemPrompt: 'title prompt', reasoningEffort: 'off', safePaths: [], bufferLines: 10 },
+        terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, titleModel: 'test-model', model: 'llama3', systemPrompt: 'test prompt', titleSystemPrompt: 'title prompt', reasoningEffort: 'off', safePaths: [], bufferLines: 10 },
       } as unknown as Settings),
       openTtyStream: makeTtyStreamMock(mock, []),
     })
@@ -767,14 +769,14 @@ describe('createAnalyzerStore', () => {
       deps = makeDeps({
         getSettings: vi.fn().mockReturnValue({
           llm: { apiKey: 'test-key', baseUrl: 'http://localhost' },
-          terminalAnalyzer: { model: '', titleSystemPrompt: 'title prompt', reasoningEffort: 'low' },
+          terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, titleModel: '', model: '', titleSystemPrompt: 'title prompt', reasoningEffort: 'low' },
         } as unknown as Settings),
       })
       const store = createAnalyzerStore('tab-1', deps)
 
       const result = await store.getState().refreshTitleAndDescription()
 
-      expect(result).toEqual({ status: TitleRefreshStatus.Failure, error: 'Terminal analyzer model not configured' })
+      expect(result).toEqual({ status: TitleRefreshStatus.Failure, error: 'Title model not configured' })
       expect(deps.llm.generateTitle).not.toHaveBeenCalled()
     })
 
@@ -1231,4 +1233,89 @@ describe('createAnalyzerStore', () => {
 
     vi.useRealTimers()
   })
+  it('reclassifies an unchanged buffer when provider or safe paths change, without changing the title model', async () => {
+    vi.useFakeTimers()
+    const mock = makeMockTty()
+    const settings = makeDeps().getSettings()
+    const deps = makeDeps({ getSettings: () => settings, openTtyStream: makeTtyStreamMock(mock) })
+    const store = createAnalyzerStore('tab-1', deps)
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0)
+    mock.emitData('$ ')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(deps.llm.analyzeTerminal).toHaveBeenLastCalledWith(expect.any(String), '/test', expect.objectContaining({ provider: ClassifierProvider.ChatCompletions, model: 'test-model' }))
+
+    settings.terminalAnalyzer.provider = ClassifierProvider.Classifier
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(2)
+    expect(deps.llm.analyzeTerminal).toHaveBeenLastCalledWith(expect.any(String), '/test', expect.objectContaining({ provider: ClassifierProvider.Classifier, model: 'test-model' }))
+    const call = vi.mocked(deps.llm.analyzeTerminal).mock.calls[1]!
+    expect(call[2]).not.toHaveProperty('reasoningEffort')
+
+    settings.terminalAnalyzer.safePaths = ['/different']
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(3)
+    await store.getState().refreshTitleAndDescription()
+    expect(deps.llm.generateTitle).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ model: 'test-model' }))
+    expect(store.getState().getHistory().at(-1)).toMatchObject({ kind: 'title', model: 'test-model' })
+    store.getState().stop()
+    vi.useRealTimers()
+  })
+
+  it('discards a safe-permission response after a provider switch before the next poll', async () => {
+    vi.useFakeTimers()
+    const mock = makeMockTty()
+    const settings = makeDeps().getSettings()
+    let resolve: (value: { state: ActivityState; reason: string }) => void = () => { throw new Error('request not started') }
+    const analyzeTerminal = vi.fn().mockImplementationOnce(() => new Promise(r => { resolve = r }))
+      .mockResolvedValue({ state: ActivityState.PermissionRequest, reason: 'Classifier decision: permission_request' })
+    const deps = makeDeps({ getSettings: () => settings, openTtyStream: makeTtyStreamMock(mock), llm: { ...makeDeps().llm, analyzeTerminal } })
+    const store = createAnalyzerStore('tab-1', deps)
+    store.getState().setAutoApprove(true)
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0)
+    mock.emitData('Allow mutation?')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(store.getState().analyzing).toBe(true)
+    settings.terminalAnalyzer.provider = ClassifierProvider.Classifier
+    resolve({ state: ActivityState.SafePermissionRequested, reason: 'stale' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(analyzeTerminal).toHaveBeenCalledTimes(2)
+    expect(store.getState().aiState).toBe(ActivityState.PermissionRequest)
+    expect(store.getState().reason).toBe('Classifier decision: permission_request')
+    expect(store.getState().analyzing).toBe(false)
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- mocked TTY method
+    expect(mock.ttyState.write).not.toHaveBeenCalled()
+    expect(deps.setActivityTabState).not.toHaveBeenCalledWith('tab-1', ActivityState.SafePermissionRequested)
+    expect(store.getState().getHistory()[0]).toMatchObject({ error: '[discarded]' })
+    store.getState().stop()
+    vi.useRealTimers()
+  })
+
+  it.each(['malformed', 'safe_permission_requested_typo', 'permission_request'])('real Jev adapter handles %s without auto-approval', async (choice) => {
+    vi.useFakeTimers()
+    const mock = makeMockTty()
+    const settings = makeDeps().getSettings()
+    settings.terminalAnalyzer.provider = ClassifierProvider.Classifier
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ answers: { activity_state: { type: 'choice', choice } } }), { status: 200 }))
+    const llm = createLlmClient({ fetch: fetchMock, completeChat: vi.fn(), parseChatJson: parseLlmJson })
+    await llm.clearAnalyzerCache()
+    const deps = makeDeps({ getSettings: () => settings, openTtyStream: makeTtyStreamMock(mock), llm })
+    const store = createAnalyzerStore('tab-1', deps)
+    store.getState().setAutoApprove(true)
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0)
+    mock.emitData('Allow action?')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(store.getState().aiState).toBe(choice === 'permission_request' ? ActivityState.PermissionRequest : ActivityState.Error)
+    if (choice === 'permission_request') expect(store.getState().reason).toBe('Classifier decision: permission_request')
+    expect(store.getState().reason).not.toBe('')
+    expect(store.getState().analyzing).toBe(false)
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- mocked TTY method
+    expect(mock.ttyState.write).not.toHaveBeenCalled()
+    store.getState().stop()
+    vi.useRealTimers()
+  })
+
 })

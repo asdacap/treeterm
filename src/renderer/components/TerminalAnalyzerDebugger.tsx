@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSettingsStore } from '../store/settings'
 import type { ApplicationRenderProps, ReasoningEffort } from '../types'
+import { ClassifierProvider } from '../../shared/types'
 import { createLlmClient } from '../lib/llmClient'
 
 const llm = createLlmClient()
@@ -28,13 +29,14 @@ export default function TerminalAnalyzerDebugger({ tab }: ApplicationRenderProps
     }
   }, [debuggerState?.bufferText])
 
-  const handleTest = async () => {
+  const provider = settings.terminalAnalyzer.provider
+
+  const handleTest = async (): Promise<void> => {
     if (!model) {
       setError('Model must be configured.')
       return
     }
 
-    await llm.clearAnalyzerCache()
     const buffer = bufferText
     setLoading(true)
     setError(null)
@@ -43,12 +45,15 @@ export default function TerminalAnalyzerDebugger({ tab }: ApplicationRenderProps
 
     const start = Date.now()
     try {
+      await llm.clearAnalyzerCache()
       const response = await llm.analyzeTerminal(buffer, '', {
         baseUrl: settings.llm.baseUrl,
         apiKey: settings.llm.apiKey,
         model,
         systemPrompt,
-        reasoningEffort,
+        ...(provider === ClassifierProvider.Classifier
+          ? { provider }
+          : { provider, reasoningEffort }),
         safePaths: settings.terminalAnalyzer.safePaths
       })
       setDuration(Date.now() - start)
@@ -69,12 +74,20 @@ export default function TerminalAnalyzerDebugger({ tab }: ApplicationRenderProps
   return (
     <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, height: '100%', overflow: 'auto' }}>
       <h3 style={{ margin: 0, color: '#ccc' }}>Terminal Analyzer Debugger</h3>
+      <div style={{ color: '#aaa', fontSize: 12 }}>
+        Provider: {provider === ClassifierProvider.Classifier ? 'Classifier' : 'Chat Completions'}
+        {provider === ClassifierProvider.Classifier && (
+          <p>Classifier uses OpenRouter Decisions with the shared API Key and configured Base URL origin at /api/alpha/decisions.
+            Results include the decision and summary. Reasoning is not sent to Classifier.</p>
+        )}
+      </div>
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
         <div style={{ flex: 1 }}>
           <label style={{ color: '#aaa', fontSize: 12 }}>Model</label>
           <input
             type="text"
+            aria-label="Model"
             value={model}
             onChange={(e) => { setModel(e.target.value); }}
             style={{
@@ -93,6 +106,7 @@ export default function TerminalAnalyzerDebugger({ tab }: ApplicationRenderProps
         <label style={{ color: '#aaa', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', whiteSpace: 'nowrap' }}>
           Reasoning
           <select
+            disabled={provider === ClassifierProvider.Classifier}
             value={reasoningEffort}
             onChange={(e) => { setReasoningEffort(e.target.value as ReasoningEffort); }}
             style={{

@@ -1,3 +1,4 @@
+import { ClassifierProvider } from '../shared/types'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import * as fs from 'fs'
 
@@ -18,6 +19,11 @@ describe('settings', () => {
     it('returns default settings structure', () => {
       const defaults = getDefaultSettings()
 
+      expect(defaults.terminalAnalyzer).toMatchObject({
+        provider: ClassifierProvider.ChatCompletions,
+        model: 'openai/gpt-oss-safeguard-20b',
+        titleModel: 'openai/gpt-oss-safeguard-20b',
+      })
       expect(defaults.terminal.fontSize).toBe(14)
       expect(defaults.terminal.fontFamily).toBe('Menlo, Monaco, Consolas, monospace')
       expect(defaults.terminal.cursorStyle).toBe('block')
@@ -52,6 +58,71 @@ describe('settings', () => {
       expect(settings.terminal.fontSize).toBe(18) // Overridden
       expect(settings.terminal.cursorStyle).toBe('block') // Default preserved
       expect(settings.appearance.theme).toBe('dark') // Default preserved
+    })
+  })
+
+  describe('classifier settings compatibility', () => {
+
+    it.each([
+      [{}, 'openai/gpt-oss-safeguard-20b'],
+      [{ terminalAnalyzer: { model: 'custom/chat' } }, 'custom/chat'],
+      [{ terminalAnalyzer: { model: '' } }, ''],
+      [{ terminalAnalyzer: { model: 'custom/chat', titleModel: '' } }, ''],
+      [{ terminalAnalyzer: { model: 'custom/chat', titleModel: 'titles/chat' } }, 'titles/chat'],
+    ])('migrates legacy title models without replacing explicit settings: %j', (loaded, titleModel) => {
+      vi.mocked(fs.existsSync).mockReturnValue(true)
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(loaded))
+      const settings = loadSettings()
+      expect(settings.terminalAnalyzer.provider).toBe(ClassifierProvider.ChatCompletions)
+      expect(settings.terminalAnalyzer.titleModel).toBe(titleModel)
+    })
+
+    it.each([
+      ['jev', 'typesafe/jev-1.13', 'typesafe/jev-1.13', ClassifierProvider.Classifier],
+      ['jev', '', '', ClassifierProvider.Classifier],
+      ['jev', undefined, 'previous/chat', ClassifierProvider.Classifier],
+      [ClassifierProvider.ChatCompletions, 'typesafe/jev-1.13', 'previous/chat', ClassifierProvider.ChatCompletions],
+      [ClassifierProvider.Classifier, 'obsolete/model', 'previous/chat', ClassifierProvider.Classifier],
+    ])('migrates old provider %s and model %s without retaining jevModel', (provider, jevModel, model, expectedProvider) => {
+      vi.mocked(fs.existsSync).mockReturnValue(true)
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ terminalAnalyzer: {
+        provider, model: 'previous/chat', jevModel, titleModel: 'titles/chat',
+      } }))
+      const settings = loadSettings()
+      expect(settings.terminalAnalyzer).toMatchObject({
+        provider: expectedProvider,
+        model, titleModel: 'titles/chat',
+      })
+      expect(settings.terminalAnalyzer).not.toHaveProperty('jevModel')
+    })
+
+    it('round-trips explicit provider, classifier and title models', () => {
+      const settings = getDefaultSettings()
+      settings.terminalAnalyzer = {
+        ...settings.terminalAnalyzer,
+        provider: ClassifierProvider.Classifier,
+        model: 'typesafe/jev-1.13',
+        titleModel: 'chat/titles',
+      }
+      vi.mocked(fs.existsSync).mockReturnValue(true)
+      saveSettings(settings)
+      const serialized = vi.mocked(fs.writeFileSync).mock.calls[0]![1] as string
+      vi.mocked(fs.readFileSync).mockReturnValue(serialized)
+      expect(loadSettings().terminalAnalyzer).toEqual(settings.terminalAnalyzer)
+    })
+
+    it('rejects invalid settings before persisting', () => {
+      const settings = getDefaultSettings()
+      settings.terminalAnalyzer = { ...settings.terminalAnalyzer, provider: 'unknown' as ClassifierProvider }
+      expect(() => { saveSettings(settings) }).toThrow()
+      expect(fs.writeFileSync).not.toHaveBeenCalled()
+    })
+
+    it('surfaces invalid providers without overwriting saved settings', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true)
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ terminalAnalyzer: { provider: 'unknown' } }))
+      expect(() => loadSettings()).toThrow()
+      expect(fs.writeFileSync).not.toHaveBeenCalled()
     })
   })
 
