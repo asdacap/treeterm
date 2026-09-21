@@ -24,9 +24,8 @@ beforeEach(() => {
     ...defaultSettings,
     terminalAnalyzer: {
       ...defaultSettings.terminalAnalyzer,
-      provider: ClassifierProvider.Jev,
-      model: 'chat-model',
-      jevModel: 'jev-model',
+      provider: ClassifierProvider.Classifier,
+      model: 'typesafe/jev-1.13',
       titleModel: 'title-model',
       reasoningEffort: ReasoningEffort.Low,
     },
@@ -40,12 +39,12 @@ for (const Component of [TerminalAnalyzerDebugger, SystemPromptDebugger]) {
   describe(Component.name, () => {
     it('uses the Jev model without reasoning and displays the summary', async () => {
       render(<Component {...props} />)
-      expect((screen.getByLabelText<HTMLInputElement>('Model')).value).toBe('jev-model')
+      expect((screen.getByLabelText<HTMLInputElement>('Model')).value).toBe('typesafe/jev-1.13')
       expect((screen.getByLabelText<HTMLSelectElement>('Reasoning')).disabled).toBe(true)
       fireEvent.click(screen.getByRole('button', { name: 'Test' }))
       await waitFor(() => { expect(llm.analyzeTerminal).toHaveBeenCalled(); })
       const request = llm.analyzeTerminal.mock.calls[0]![2] as Record<string, unknown>
-      expect(request).toMatchObject({ provider: ClassifierProvider.Jev, model: 'jev-model' })
+      expect(request).toMatchObject({ provider: ClassifierProvider.Classifier, model: 'typesafe/jev-1.13' })
       expect(request).not.toHaveProperty('reasoningEffort')
       await screen.findByText(/Jev summary/)
     })
@@ -61,7 +60,7 @@ for (const Component of [TerminalAnalyzerDebugger, SystemPromptDebugger]) {
       expect(llm.analyzeTerminal).not.toHaveBeenCalled()
     })
 
-    it('uses the chat model and reasoning when chat is selected', async () => {
+    it('uses the same analyzer model and reasoning when chat is selected', async () => {
       useSettingsStore.setState((state) => ({ settings: {
         ...state.settings,
         terminalAnalyzer: { ...state.settings.terminalAnalyzer, provider: ClassifierProvider.ChatCompletions },
@@ -69,7 +68,7 @@ for (const Component of [TerminalAnalyzerDebugger, SystemPromptDebugger]) {
       render(<Component {...props} />)
       fireEvent.click(screen.getByRole('button', { name: 'Test' }))
       await waitFor(() => { expect(llm.analyzeTerminal).toHaveBeenCalledWith('terminal output', '', expect.objectContaining({
-        provider: ClassifierProvider.ChatCompletions, model: 'chat-model', reasoningEffort: ReasoningEffort.Low,
+        provider: ClassifierProvider.ChatCompletions, model: 'typesafe/jev-1.13', reasoningEffort: ReasoningEffort.Low,
       })); })
     })
   })
@@ -91,7 +90,7 @@ it('keeps title generation on its separate chat model and retains analyzer edits
   expect((screen.getByLabelText<HTMLInputElement>('Model')).value).toBe('edited-jev')
 })
 
-it('retains separate provider models and the title model in settings', async () => {
+it('retains a single analyzer model across provider switches and an independent title model', async () => {
   const saveSettings = vi.fn<(settings: Settings) => Promise<void>>().mockResolvedValue(undefined)
   useSettingsStore.setState({ saveSettings })
   const sandbox = { isAvailable: vi.fn().mockResolvedValue(true) } as unknown as SandboxApi
@@ -100,14 +99,14 @@ it('retains separate provider models and the title model in settings', async () 
   fireEvent.change(screen.getByLabelText('Classifier Model'), { target: { value: 'new-jev' } })
   fireEvent.change(screen.getByLabelText('Title Model'), { target: { value: 'new-title' } })
   fireEvent.change(screen.getByLabelText('Classifier Provider'), { target: { value: ClassifierProvider.ChatCompletions } })
-  expect(screen.getByLabelText<HTMLInputElement>('Classifier Model').value).toBe('chat-model')
-  fireEvent.change(screen.getByLabelText('Classifier Model'), { target: { value: 'new-chat' } })
-  fireEvent.change(screen.getByLabelText('Classifier Provider'), { target: { value: ClassifierProvider.Jev } })
   expect(screen.getByLabelText<HTMLInputElement>('Classifier Model').value).toBe('new-jev')
+  fireEvent.change(screen.getByLabelText('Classifier Model'), { target: { value: 'new-chat' } })
+  fireEvent.change(screen.getByLabelText('Classifier Provider'), { target: { value: ClassifierProvider.Classifier } })
+  expect(screen.getByLabelText<HTMLInputElement>('Classifier Model').value).toBe('new-chat')
   expect(screen.getByLabelText<HTMLInputElement>('Title Model').value).toBe('new-title')
   fireEvent.click(screen.getByRole('button', { name: 'Save' }))
   await waitFor(() => { expect(saveSettings).toHaveBeenCalled() })
   expect(saveSettings.mock.calls[0]![0].terminalAnalyzer).toMatchObject({
-    provider: ClassifierProvider.Jev, model: 'new-chat', jevModel: 'new-jev', titleModel: 'new-title',
+    provider: ClassifierProvider.Classifier, model: 'new-chat', titleModel: 'new-title',
   })
 })

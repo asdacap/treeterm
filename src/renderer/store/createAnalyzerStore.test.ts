@@ -59,7 +59,7 @@ function makeDeps(overrides?: Partial<AnalyzerDeps>): AnalyzerDeps {
   return {
     getSettings: vi.fn().mockReturnValue({
       llm: { apiKey: 'test-key', baseUrl: 'http://localhost' },
-      terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, jevModel: 'typesafe/jev-1.13', titleModel: 'test-model',
+      terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, titleModel: 'test-model',
         model: 'test-model',
         systemPrompt: 'test prompt',
         titleSystemPrompt: 'title prompt',
@@ -198,7 +198,7 @@ describe('createAnalyzerStore', () => {
     deps = makeDeps({
       getSettings: vi.fn().mockReturnValue({
         llm: { apiKey: '', baseUrl: '' },
-        terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, jevModel: 'typesafe/jev-1.13', titleModel: 'test-model', model: '', systemPrompt: '', titleSystemPrompt: '', reasoningEffort: 'off', safePaths: [], bufferLines: 10 },
+        terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, titleModel: 'test-model', model: '', systemPrompt: '', titleSystemPrompt: '', reasoningEffort: 'off', safePaths: [], bufferLines: 10 },
       } as unknown as Settings),
       openTtyStream: makeTtyStreamMock(mock, []),
     })
@@ -232,7 +232,7 @@ describe('createAnalyzerStore', () => {
     deps = makeDeps({
       getSettings: vi.fn().mockReturnValue({
         llm: { apiKey: '', baseUrl: 'http://localhost:11434/v1' },
-        terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, jevModel: 'typesafe/jev-1.13', titleModel: 'test-model', model: 'llama3', systemPrompt: 'test prompt', titleSystemPrompt: 'title prompt', reasoningEffort: 'off', safePaths: [], bufferLines: 10 },
+        terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, titleModel: 'test-model', model: 'llama3', systemPrompt: 'test prompt', titleSystemPrompt: 'title prompt', reasoningEffort: 'off', safePaths: [], bufferLines: 10 },
       } as unknown as Settings),
       openTtyStream: makeTtyStreamMock(mock, []),
     })
@@ -769,7 +769,7 @@ describe('createAnalyzerStore', () => {
       deps = makeDeps({
         getSettings: vi.fn().mockReturnValue({
           llm: { apiKey: 'test-key', baseUrl: 'http://localhost' },
-          terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, jevModel: 'typesafe/jev-1.13', titleModel: '', model: '', titleSystemPrompt: 'title prompt', reasoningEffort: 'low' },
+          terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, titleModel: '', model: '', titleSystemPrompt: 'title prompt', reasoningEffort: 'low' },
         } as unknown as Settings),
       })
       const store = createAnalyzerStore('tab-1', deps)
@@ -1245,10 +1245,10 @@ describe('createAnalyzerStore', () => {
     await vi.advanceTimersByTimeAsync(1000)
     expect(deps.llm.analyzeTerminal).toHaveBeenLastCalledWith(expect.any(String), '/test', expect.objectContaining({ provider: ClassifierProvider.ChatCompletions, model: 'test-model' }))
 
-    settings.terminalAnalyzer.provider = ClassifierProvider.Jev
+    settings.terminalAnalyzer.provider = ClassifierProvider.Classifier
     await vi.advanceTimersByTimeAsync(1000)
     expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(2)
-    expect(deps.llm.analyzeTerminal).toHaveBeenLastCalledWith(expect.any(String), '/test', expect.objectContaining({ provider: ClassifierProvider.Jev, model: 'typesafe/jev-1.13' }))
+    expect(deps.llm.analyzeTerminal).toHaveBeenLastCalledWith(expect.any(String), '/test', expect.objectContaining({ provider: ClassifierProvider.Classifier, model: 'test-model' }))
     const call = vi.mocked(deps.llm.analyzeTerminal).mock.calls[1]!
     expect(call[2]).not.toHaveProperty('reasoningEffort')
 
@@ -1268,7 +1268,7 @@ describe('createAnalyzerStore', () => {
     const settings = makeDeps().getSettings()
     let resolve: (value: { state: ActivityState; reason: string }) => void = () => { throw new Error('request not started') }
     const analyzeTerminal = vi.fn().mockImplementationOnce(() => new Promise(r => { resolve = r }))
-      .mockResolvedValue({ state: ActivityState.PermissionRequest, reason: 'Jev decision: permission_request' })
+      .mockResolvedValue({ state: ActivityState.PermissionRequest, reason: 'Classifier decision: permission_request' })
     const deps = makeDeps({ getSettings: () => settings, openTtyStream: makeTtyStreamMock(mock), llm: { ...makeDeps().llm, analyzeTerminal } })
     const store = createAnalyzerStore('tab-1', deps)
     store.getState().setAutoApprove(true)
@@ -1277,12 +1277,12 @@ describe('createAnalyzerStore', () => {
     mock.emitData('Allow mutation?')
     await vi.advanceTimersByTimeAsync(1000)
     expect(store.getState().analyzing).toBe(true)
-    settings.terminalAnalyzer.provider = ClassifierProvider.Jev
+    settings.terminalAnalyzer.provider = ClassifierProvider.Classifier
     resolve({ state: ActivityState.SafePermissionRequested, reason: 'stale' })
     await vi.advanceTimersByTimeAsync(0)
     expect(analyzeTerminal).toHaveBeenCalledTimes(2)
     expect(store.getState().aiState).toBe(ActivityState.PermissionRequest)
-    expect(store.getState().reason).toBe('Jev decision: permission_request')
+    expect(store.getState().reason).toBe('Classifier decision: permission_request')
     expect(store.getState().analyzing).toBe(false)
     // eslint-disable-next-line @typescript-eslint/unbound-method -- mocked TTY method
     expect(mock.ttyState.write).not.toHaveBeenCalled()
@@ -1296,7 +1296,7 @@ describe('createAnalyzerStore', () => {
     vi.useFakeTimers()
     const mock = makeMockTty()
     const settings = makeDeps().getSettings()
-    settings.terminalAnalyzer.provider = ClassifierProvider.Jev
+    settings.terminalAnalyzer.provider = ClassifierProvider.Classifier
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ answers: { activity_state: { type: 'choice', choice } } }), { status: 200 }))
     const llm = createLlmClient({ fetch: fetchMock, completeChat: vi.fn(), parseChatJson: parseLlmJson })
     await llm.clearAnalyzerCache()
@@ -1309,7 +1309,7 @@ describe('createAnalyzerStore', () => {
     await vi.advanceTimersByTimeAsync(1000)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(store.getState().aiState).toBe(choice === 'permission_request' ? ActivityState.PermissionRequest : ActivityState.Error)
-    if (choice === 'permission_request') expect(store.getState().reason).toBe('Jev decision: permission_request')
+    if (choice === 'permission_request') expect(store.getState().reason).toBe('Classifier decision: permission_request')
     expect(store.getState().reason).not.toBe('')
     expect(store.getState().analyzing).toBe(false)
     // eslint-disable-next-line @typescript-eslint/unbound-method -- mocked TTY method

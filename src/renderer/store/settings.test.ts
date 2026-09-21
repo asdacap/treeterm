@@ -26,7 +26,6 @@ describe('SettingsStore', () => {
     expect(defaultSettings.terminalAnalyzer).toMatchObject({
       provider: ClassifierProvider.ChatCompletions,
       model: 'openai/gpt-oss-safeguard-20b',
-      jevModel: 'typesafe/jev-1.13',
       titleModel: 'openai/gpt-oss-safeguard-20b',
     })
   })

@@ -15,8 +15,7 @@ export default function TerminalAnalyzerDebugger({ tab }: ApplicationRenderProps
   const debuggerState = tab.state as DebuggerState | undefined
   const [systemPrompt, setSystemPrompt] = useState(settings.terminalAnalyzer.systemPrompt)
   const [bufferText, setBufferText] = useState(debuggerState?.bufferText ?? '')
-  const [chatModel, setChatModel] = useState(settings.terminalAnalyzer.model)
-  const [jevModel, setJevModel] = useState(settings.terminalAnalyzer.jevModel)
+  const [model, setModel] = useState(settings.terminalAnalyzer.model)
   const [reasoningEffort, setReasoningEffort] = useState(settings.terminalAnalyzer.reasoningEffort)
   const [result, setResult] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -31,10 +30,6 @@ export default function TerminalAnalyzerDebugger({ tab }: ApplicationRenderProps
   }, [debuggerState?.bufferText])
 
   const provider = settings.terminalAnalyzer.provider
-  const classifierModel = provider === ClassifierProvider.Jev ? jevModel : chatModel
-  const setClassifierModel = provider === ClassifierProvider.Jev ? setJevModel : setChatModel
-  const model = classifierModel
-  const setModel = setClassifierModel
 
   const handleTest = async (): Promise<void> => {
     if (!model) {
@@ -56,7 +51,7 @@ export default function TerminalAnalyzerDebugger({ tab }: ApplicationRenderProps
         apiKey: settings.llm.apiKey,
         model,
         systemPrompt,
-        ...(provider === ClassifierProvider.Jev
+        ...(provider === ClassifierProvider.Classifier
           ? { provider }
           : { provider, reasoningEffort }),
         safePaths: settings.terminalAnalyzer.safePaths
@@ -80,10 +75,10 @@ export default function TerminalAnalyzerDebugger({ tab }: ApplicationRenderProps
     <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, height: '100%', overflow: 'auto' }}>
       <h3 style={{ margin: 0, color: '#ccc' }}>Terminal Analyzer Debugger</h3>
       <div style={{ color: '#aaa', fontSize: 12 }}>
-        Provider: {provider === ClassifierProvider.Jev ? 'Jev' : 'Chat Completions'}
-        {provider === ClassifierProvider.Jev && (
-          <p>Jev uses the shared API Key and configured Base URL origin at /api/alpha/decisions.
-            Results include the decision and summary. Reasoning is not sent to Jev.</p>
+        Provider: {provider === ClassifierProvider.Classifier ? 'Classifier' : 'Chat Completions'}
+        {provider === ClassifierProvider.Classifier && (
+          <p>Classifier uses OpenRouter Decisions with the shared API Key and configured Base URL origin at /api/alpha/decisions.
+            Results include the decision and summary. Reasoning is not sent to Classifier.</p>
         )}
       </div>
 
@@ -111,7 +106,7 @@ export default function TerminalAnalyzerDebugger({ tab }: ApplicationRenderProps
         <label style={{ color: '#aaa', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', whiteSpace: 'nowrap' }}>
           Reasoning
           <select
-            disabled={provider === ClassifierProvider.Jev}
+            disabled={provider === ClassifierProvider.Classifier}
             value={reasoningEffort}
             onChange={(e) => { setReasoningEffort(e.target.value as ReasoningEffort); }}
             style={{

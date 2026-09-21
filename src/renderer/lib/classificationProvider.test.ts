@@ -6,7 +6,7 @@ import { classificationIdentity, createClassificationProvider, decisionsUrl, typ
 import { createLlmClient, parseLlmJson } from './llmClient'
 
 const input = { buffer: 'Allow write? y/n', cwd: '/workspace', safePaths: ['/tmp'], systemPrompt: 'Custom policy at {{cwd}}; safe: {{safe_paths}}' }
-const jev: ClassifierSettings = { provider: ClassifierProvider.Jev, baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'test-secret', model: 'typesafe/jev-1.13' }
+const jev: ClassifierSettings = { provider: ClassifierProvider.Classifier, baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'test-secret', model: 'typesafe/jev-1.13' }
 const chat: ClassifierSettings = { ...jev, provider: ClassifierProvider.ChatCompletions, reasoningEffort: ReasoningEffort.Off }
 function transports(): ClassifierTransports {
   return { fetch: vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ answers: { activity_state: { type: 'choice', choice: 'idle' } } }))), completeChat: vi.fn().mockResolvedValue('{"state":"idle","reason":"Waiting"}'), parseChatJson: parseLlmJson }
@@ -14,7 +14,7 @@ function transports(): ClassifierTransports {
 
 beforeEach(async () => { await createLlmClient().clearAnalyzerCache() })
 
-describe('Jev Decisions contract', () => {
+describe('OpenRouter Decisions contract', () => {
   it('uses the configured origin and exact Decisions request, preserving custom guidance/context', async () => {
     const deps = transports()
     await createClassificationProvider(jev, deps).classify(input)
@@ -39,7 +39,15 @@ describe('Jev Decisions contract', () => {
   it.each([ActivityState.Idle, ActivityState.Completed, ActivityState.UserInputRequired, ActivityState.PermissionRequest, ActivityState.SafePermissionRequested])('normalizes %s without requiring confidence', async (state) => {
     const deps = transports()
     vi.mocked(deps.fetch).mockResolvedValue(new Response(JSON.stringify({ answers: { activity_state: { type: 'choice', choice: state } } })))
-    await expect(createClassificationProvider(jev, deps).classify(input)).resolves.toEqual({ state, reason: `Jev decision: ${state}` })
+    await expect(createClassificationProvider(jev, deps).classify(input)).resolves.toEqual({ state, reason: `Classifier decision: ${state}` })
+  })
+
+  it('sends any configured classifier model rather than hardcoding Jev', async () => {
+    const deps = transports()
+    await createClassificationProvider({ ...jev, model: 'other/classifier' }, deps).classify(input)
+    const request = vi.mocked(deps.fetch).mock.calls[0]![1]!
+    expect(JSON.parse(request.body as string)).toHaveProperty('model', 'other/classifier')
+    expect(deps.completeChat).not.toHaveBeenCalled()
   })
 
   it('allows optional response metadata', async () => {
@@ -61,7 +69,7 @@ describe('Jev Decisions contract', () => {
   ])('surfaces HTTP %s without falling back', async (status, body, message) => {
     const deps = transports()
     vi.mocked(deps.fetch).mockResolvedValue(new Response(body, { status, statusText: message }))
-    await expect(createClassificationProvider(jev, deps).classify(input)).rejects.toThrow(`Jev Decisions HTTP ${String(status)}: ${message}`)
+    await expect(createClassificationProvider(jev, deps).classify(input)).rejects.toThrow(`OpenRouter Decisions HTTP ${String(status)}: ${message}`)
     expect(deps.completeChat).not.toHaveBeenCalled()
   })
 

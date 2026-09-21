@@ -18,7 +18,7 @@ interface ClassifierConnection {
 /** Only the chat adapter supports reasoning effort. */
 export type ClassifierSettings = ClassifierConnection & (
   | { provider: ClassifierProvider.ChatCompletions; reasoningEffort: ReasoningEffort }
-  | { provider: ClassifierProvider.Jev }
+  | { provider: ClassifierProvider.Classifier }
 )
 
 export interface ClassificationInput {

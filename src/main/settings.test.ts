@@ -22,7 +22,6 @@ describe('settings', () => {
       expect(defaults.terminalAnalyzer).toMatchObject({
         provider: ClassifierProvider.ChatCompletions,
         model: 'openai/gpt-oss-safeguard-20b',
-        jevModel: 'typesafe/jev-1.13',
         titleModel: 'openai/gpt-oss-safeguard-20b',
       })
       expect(defaults.terminal.fontSize).toBe(14)
@@ -75,17 +74,34 @@ describe('settings', () => {
       vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(loaded))
       const settings = loadSettings()
       expect(settings.terminalAnalyzer.provider).toBe(ClassifierProvider.ChatCompletions)
-      expect(settings.terminalAnalyzer.jevModel).toBe('typesafe/jev-1.13')
       expect(settings.terminalAnalyzer.titleModel).toBe(titleModel)
+    })
+
+    it.each([
+      ['jev', 'typesafe/jev-1.13', 'typesafe/jev-1.13', ClassifierProvider.Classifier],
+      ['jev', '', '', ClassifierProvider.Classifier],
+      ['jev', undefined, 'previous/chat', ClassifierProvider.Classifier],
+      [ClassifierProvider.ChatCompletions, 'typesafe/jev-1.13', 'previous/chat', ClassifierProvider.ChatCompletions],
+      [ClassifierProvider.Classifier, 'obsolete/model', 'previous/chat', ClassifierProvider.Classifier],
+    ])('migrates old provider %s and model %s without retaining jevModel', (provider, jevModel, model, expectedProvider) => {
+      vi.mocked(fs.existsSync).mockReturnValue(true)
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ terminalAnalyzer: {
+        provider, model: 'previous/chat', jevModel, titleModel: 'titles/chat',
+      } }))
+      const settings = loadSettings()
+      expect(settings.terminalAnalyzer).toMatchObject({
+        provider: expectedProvider,
+        model, titleModel: 'titles/chat',
+      })
+      expect(settings.terminalAnalyzer).not.toHaveProperty('jevModel')
     })
 
     it('round-trips explicit provider, classifier and title models', () => {
       const settings = getDefaultSettings()
       settings.terminalAnalyzer = {
         ...settings.terminalAnalyzer,
-        provider: ClassifierProvider.Jev,
-        model: 'chat/classifier',
-        jevModel: 'typesafe/jev-1.13',
+        provider: ClassifierProvider.Classifier,
+        model: 'typesafe/jev-1.13',
         titleModel: 'chat/titles',
       }
       vi.mocked(fs.existsSync).mockReturnValue(true)

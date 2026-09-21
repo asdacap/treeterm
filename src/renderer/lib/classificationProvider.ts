@@ -57,7 +57,7 @@ export function classificationIdentity(input: ClassificationInput, settings: Cla
   return JSON.stringify({
     ...prepared,
     provider: settings.provider,
-    endpoint: settings.provider === ClassifierProvider.Jev ? decisionsUrl(settings.baseUrl) : settings.baseUrl,
+    endpoint: settings.provider === ClassifierProvider.Classifier ? decisionsUrl(settings.baseUrl) : settings.baseUrl,
     model: settings.model,
     ...(settings.provider === ClassifierProvider.ChatCompletions ? { reasoning: settings.reasoningEffort } : {}),
   })
@@ -75,7 +75,7 @@ export function createClassificationProvider(settings: ClassifierSettings, trans
           ], { baseUrl: settings.baseUrl, apiKey: settings.apiKey, model: settings.model, reasoning: settings.reasoningEffort })
           return classificationSchema.parse(transports.parseChatJson(raw))
         }
-        case ClassifierProvider.Jev: {
+        case ClassifierProvider.Classifier: {
           const response = await transports.fetch(decisionsUrl(settings.baseUrl), {
             method: 'POST',
             headers: { Authorization: `Bearer ${settings.apiKey}`, 'Content-Type': 'application/json' },
@@ -98,10 +98,10 @@ export function createClassificationProvider(settings: ClassifierSettings, trans
             } catch {
               // Non-JSON HTTP errors still surface their status; do not expose arbitrary response bodies.
             }
-            throw new Error(`Jev Decisions HTTP ${String(response.status)}: ${message}`)
+            throw new Error(`OpenRouter Decisions HTTP ${String(response.status)}: ${message}`)
           }
           const answer = decisionsResponseSchema.parse(JSON.parse(text)).answers.activity_state
-          return { state: answer.choice, reason: `Jev decision: ${answer.choice}` }
+          return { state: answer.choice, reason: `Classifier decision: ${answer.choice}` }
         }
       }
     },

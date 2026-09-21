@@ -127,8 +127,8 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
   function classifierSettings(settings: Settings): ClassifierSettings {
     const connection = { baseUrl: settings.llm.baseUrl, apiKey: settings.llm.apiKey }
-    return settings.terminalAnalyzer.provider === ClassifierProvider.Jev
-      ? { ...connection, provider: ClassifierProvider.Jev, model: settings.terminalAnalyzer.jevModel }
+    return settings.terminalAnalyzer.provider === ClassifierProvider.Classifier
+      ? { ...connection, provider: ClassifierProvider.Classifier, model: settings.terminalAnalyzer.model }
       : { ...connection, provider: ClassifierProvider.ChatCompletions, model: settings.terminalAnalyzer.model, reasoningEffort: settings.terminalAnalyzer.reasoningEffort }
   }
 

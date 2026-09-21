@@ -775,10 +775,10 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     })); }}
                   >
                     <option value={ClassifierProvider.ChatCompletions}>Chat Completions</option>
-                    <option value={ClassifierProvider.Jev}>Jev</option>
+                    <option value={ClassifierProvider.Classifier}>Classifier</option>
                   </select>
                   <p className="settings-hint">
-                    Jev uses the shared API Key and the configured Base URL origin at /api/alpha/decisions.
+                    Classifier uses OpenRouter Decisions with the shared API Key and the configured Base URL origin at /api/alpha/decisions.
                     Reasoning applies only to Chat Completions; title generation always uses Chat Completions.
                   </p>
                 </div>
@@ -789,17 +789,17 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     type="text"
                     className="settings-input"
                     aria-label="Classifier Model"
-                    value={localSettings.terminalAnalyzer.provider === ClassifierProvider.Jev ? localSettings.terminalAnalyzer.jevModel : localSettings.terminalAnalyzer.model}
+                    value={localSettings.terminalAnalyzer.model}
                     onChange={(e) =>
                       { setLocalSettings((prev) => ({
                         ...prev,
-                        terminalAnalyzer: { ...prev.terminalAnalyzer, [prev.terminalAnalyzer.provider === ClassifierProvider.Jev ? 'jevModel' : 'model']: e.target.value }
+                        terminalAnalyzer: { ...prev.terminalAnalyzer, model: e.target.value }
                       })); }
                     }
                     placeholder="openai/gpt-oss-safeguard-20b"
                   />
                   <p className="settings-hint">
-                    Model name for the selected classifier. Chat Completions and Jev model settings are retained separately.
+                    Model name for terminal analysis with the selected provider (e.g. typesafe/jev-1.13).
                   </p>
                 </div>
 
@@ -939,7 +939,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     </select>
                   </label>
                   <p className="settings-hint">
-                    Reasoning effort for Chat Completions analysis and title generation. Not sent to Jev; still applies to titles when Jev is selected.
+                    Reasoning effort for Chat Completions analysis and title generation. Not sent to Classifier; still applies to titles when Classifier is selected.
                   </p>
                 </div>
               </div>

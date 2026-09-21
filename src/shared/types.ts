@@ -188,7 +188,7 @@ export enum ReasoningEffort {
 
 export enum ClassifierProvider {
   ChatCompletions = 'chat_completions',
-  Jev = 'jev',
+  Classifier = 'classifier',
 }
 
 export interface Settings {
@@ -241,7 +241,6 @@ export interface Settings {
   // Terminal analyzer LLM configuration
   terminalAnalyzer: {
     provider: ClassifierProvider
-    jevModel: string        // OpenRouter Decisions model
     titleModel: string      // Chat-completion model for titles, descriptions and branch names
     model: string           // Model name for terminal analysis
     systemPrompt: string    // System prompt (supports {{cwd}} and {{safe_paths}} templates)
