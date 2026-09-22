@@ -1194,6 +1194,34 @@ describe('createAnalyzerStore', () => {
     vi.useRealTimers()
   })
 
+  it('publishes Working when the process was already producing output at start', async () => {
+    vi.useFakeTimers()
+    const mock = makeMockTty()
+    deps = makeDeps({
+      openTtyStream: makeTtyStreamMock(mock, ['$ npm test\r\n']),
+    })
+    const store = createAnalyzerStore('tab-1', deps)
+
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0)
+    // A spinner keeps the viewport changing; the replay would have gone quiet by now.
+    for (let t = 0; t < 500; t += 100) {
+      await vi.advanceTimersByTimeAsync(100)
+      mock.emitData(`spinner ${String(t)}\r\n`)
+    }
+    await vi.advanceTimersByTimeAsync(0)
+    expect(deps.setActivityTabState).toHaveBeenCalledExactlyOnceWith('tab-1', ActivityState.Working, expect.objectContaining({ kind: ActivityTransitionKind.Classification }))
+    expect(deps.llm.analyzeTerminal).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(500)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
+    expect(deps.setActivityTabState).toHaveBeenLastCalledWith('tab-1', ActivityState.Idle, expect.objectContaining({ kind: ActivityTransitionKind.Classification }))
+
+    store.getState().stop()
+    vi.useRealTimers()
+  })
+
   it('skips the Working edge but still classifies on idle while the idle detector is disabled', async () => {
     vi.useFakeTimers()
     const mock = makeMockTty()

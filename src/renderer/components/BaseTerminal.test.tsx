@@ -442,6 +442,21 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
     expect(processedData.at(-1)).toContain('more')
   })
 
+  it('reports Working when the attach replay keeps changing past the idle timeout', async () => {
+    const { emit } = await mount()
+    emit('build output')
+    act(() => { vi.advanceTimersByTime(999) })
+    emit('still building')
+    expect(setTabState).not.toHaveBeenCalled()
+    act(() => { vi.advanceTimersByTime(1) })
+    emit('and building')
+    expect(setTabState).toHaveBeenCalledExactlyOnceWith('tab1', ActivityState.Working, {
+      kind: ActivityTransitionKind.ViewportChanged, snapshot: processedData.at(-1),
+    })
+    act(() => { vi.advanceTimersByTime(1000) })
+    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle, expect.objectContaining({ kind: ActivityTransitionKind.ViewportIdle }))
+  })
+
   it('finishes pending Idle after unmount and stays idle on remount without new data', async () => {
     const { emit, unmount, view, settle } = await mount()
     settle()

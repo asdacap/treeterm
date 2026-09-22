@@ -37,6 +37,23 @@ describe('createIdleDetector', () => {
     expect(h.onActivity).toHaveBeenCalledTimes(1)
   })
 
+  it('reports a first burst that keeps changing past one idle timeout as activity', () => {
+    const h = setup()
+    h.detector.processSnapshot('spinner 1')
+    vi.advanceTimersByTime(499)
+    h.detector.processSnapshot('spinner 2')
+    expect(h.onActivity).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    h.detector.processSnapshot('spinner 3')
+    expect(h.onActivity).toHaveBeenCalledExactlyOnceWith('spinner 3')
+    h.detector.processSnapshot('spinner 4')
+    expect(h.onActivity).toHaveBeenCalledTimes(1)
+    vi.advanceTimersByTime(500)
+    expect(h.onIdle).toHaveBeenCalledExactlyOnceWith({ snapshot: 'spinner 4', idleTimeoutMs: 500 })
+    h.detector.processSnapshot('next job')
+    expect(h.onActivity).toHaveBeenCalledTimes(2)
+  })
+
   it('fires activity once per burst and idle after the timeout', () => {
     const h = setup()
     settle(h)
