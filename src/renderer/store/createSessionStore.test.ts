@@ -1576,6 +1576,16 @@ describe('createSessionStore', () => {
       expect(store.getState().isRestoring).toBe(false)
     })
 
+    it('refreshes git status for a workspace restored from its file', async () => {
+      const ws = makeWorkspace({ id: 'ws-restored', path: '/restored', isGitRepo: true, appStates: {} })
+      await store.getState().handleRestore(sessionWithRefs([ws], 1))
+      expect(deps.git.hasUncommittedChanges).not.toHaveBeenCalledWith('/restored')
+
+      emitFilePresent(ws)
+      await flushPromises()
+      expect(deps.git.hasUncommittedChanges).toHaveBeenCalledWith('/restored')
+    })
+
     it('handleExternalUpdate removes refs gone from the daemon and adds new ones', async () => {
       const updatesBefore = vi.mocked(deps.sessionApi.update).mock.calls.length
       store.getState().addWorkspace('/existing')
@@ -1616,7 +1626,7 @@ describe('createSessionStore', () => {
     })
 
     it('suppresses the watch echo of our own write that arrives before lastSeenSha advances', async () => {
-      const ws = makeWorkspace({ id: 'ws-echo', name: 'echo', path: '/echo', appStates: { 'tab-1': { applicationId: 'terminal', title: 'Terminal', state: {} } }, activeTabId: 'tab-1' })
+      const ws = makeWorkspace({ id: 'ws-echo', name: 'echo', path: '/echo', isGitRepo: true, gitBranch: 'main', gitRootPath: '/repo', appStates: { 'tab-1': { applicationId: 'terminal', title: 'Terminal', state: {} } }, activeTabId: 'tab-1' })
       await store.getState().handleRestore(sessionWithRefs([ws], 1))
       emitFilePresent(ws)
       const entry = store.getState().workspaces.get('ws-echo')!
@@ -2062,7 +2072,7 @@ describe('createSessionStore', () => {
     })
 
     it('does not flush clean workspaces on reconnect', async () => {
-      const ws = makeWorkspace({ id: 'ws-clean', name: 'clean', path: '/clean' })
+      const ws = makeWorkspace({ id: 'ws-clean', name: 'clean', path: '/clean', isGitRepo: true, gitBranch: 'main', gitRootPath: '/repo' })
       await store.getState().handleRestore(sessionWithRefs([ws], 1))
       emitFilePresent(ws, 'sha-initial')
 
@@ -2366,8 +2376,8 @@ describe('createSessionStore', () => {
     })
 
     it('flushDeferredWrites writes every dirty body and resolves once they have landed', async () => {
-      const a = makeWorkspace({ id: 'ws-a', name: 'a', path: '/a' })
-      const b = makeWorkspace({ id: 'ws-b', name: 'b', path: '/b' })
+      const a = makeWorkspace({ id: 'ws-a', name: 'a', path: '/a', isGitRepo: true, gitBranch: 'main', gitRootPath: '/repo' })
+      const b = makeWorkspace({ id: 'ws-b', name: 'b', path: '/b', isGitRepo: true, gitBranch: 'main', gitRootPath: '/repo' })
       await store.getState().handleRestore(sessionWithRefs([a, b], 1))
       emitFilePresent(a, 'sha-a')
       emitFilePresent(b, 'sha-b')
@@ -2393,16 +2403,16 @@ describe('createSessionStore', () => {
 
   describe('git info writes only on change', () => {
     it('skips the write when the refreshed git info is unchanged', async () => {
-      const ws = makeWorkspace({ id: 'ws-git', name: 'git', path: '/git', isGitRepo: true, gitBranch: 'main', gitRootPath: '/git' })
+      const ws = makeWorkspace({ id: 'ws-git', name: 'git', path: '/git', isGitRepo: true, gitBranch: 'main', gitRootPath: '/repo' })
       await store.getState().handleRestore(sessionWithRefs([ws], 1))
       emitFilePresent(ws, 'sha-initial')
       vi.mocked(deps.filesystem.writeFile).mockClear()
 
-      store.getState().updateGitInfo('ws-git', { isRepo: true, branch: 'main', rootPath: '/git' })
+      store.getState().updateGitInfo('ws-git', { isRepo: true, branch: 'main', rootPath: '/repo' })
       for (let i = 0; i < 6; i++) await flushPromises()
       expect(deps.filesystem.writeFile).not.toHaveBeenCalled()
 
-      store.getState().updateGitInfo('ws-git', { isRepo: true, branch: 'feature', rootPath: '/git' })
+      store.getState().updateGitInfo('ws-git', { isRepo: true, branch: 'feature', rootPath: '/repo' })
       for (let i = 0; i < 6; i++) await flushPromises()
       expect(deps.filesystem.writeFile).toHaveBeenCalledTimes(1)
       const body = JSON.parse(vi.mocked(deps.filesystem.writeFile).mock.calls[0]![2]) as Workspace

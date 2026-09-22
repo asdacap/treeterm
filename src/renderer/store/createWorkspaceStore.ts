@@ -145,6 +145,10 @@ export interface WorkspaceStoreState {
   getTabRef: (tabId: string) => AppRef | null
   /** Dispose a tab's runtime resources (tabRef + cached terminal) without modifying appStates or syncing to daemon. */
   disposeTabResources: (tabId: string) => void
+  /** The workspace has become Loaded in the session. Called once the entry is in the
+   *  session map (lookups by id resolve), after its tabs are initialised. Kicks off the
+   *  work a workspace owes itself on arrival, such as its first git status refresh. */
+  onLoaded: () => void
   /** Release workspace-scoped resources (cached TtyWriter subscriptions). Called when
    *  the workspace itself goes away, not on tab churn. */
   dispose: () => void
@@ -338,6 +342,12 @@ export function createWorkspaceStore(
         ref.dispose()
         tabRefs.delete(tabId)
       }
+    },
+
+    onLoaded: (): void => {
+      // Git status (uncommitted, behind origin, PR) otherwise refreshes only on demand:
+      // AI idle, workspace switch, review actions.
+      void gitController.getState().refreshGit()
     },
 
     dispose: (): void => {

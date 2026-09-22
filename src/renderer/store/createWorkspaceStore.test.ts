@@ -731,6 +731,17 @@ describe('createWorkspaceStore', () => {
     })
   })
 
+  describe('onLoaded', () => {
+    it('kicks off the first git status refresh', () => {
+      const store = createWorkspaceStore(makeWorkspace({ id: 'ws-1' }), makeHandleDeps())
+      const refreshGit = vi.spyOn(store.getState().gitController.getState(), 'refreshGit')
+
+      store.getState().onLoaded()
+
+      expect(refreshGit).toHaveBeenCalledOnce()
+    })
+  })
+
   describe('cross-cutting operations delegate to deps', () => {
     it('refreshGitInfo delegates to deps', async () => {
       const deps = makeHandleDeps()

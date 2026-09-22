@@ -63,7 +63,7 @@ function makeWorkspaceStore(
     mergeAndRemove: vi.fn(), mergeAndKeep: vi.fn(),
     closeAndClean: vi.fn(), lookupWorkspace: vi.fn(),
     remove: vi.fn(), removeKeepBranch: vi.fn(), removeKeepBoth: vi.fn(),
-    initTab: vi.fn(), getTabRef: vi.fn().mockReturnValue(null), disposeTabResources: vi.fn(),
+    initTab: vi.fn(), getTabRef: vi.fn().mockReturnValue(null), disposeTabResources: vi.fn(), onLoaded: vi.fn(),
     initAnalyzer: vi.fn(), createTty: vi.fn(), getTtyWriter: vi.fn(),
     connectionId: 'local', updateSettings: vi.fn(),
     settings: { defaultApplicationId: '' },

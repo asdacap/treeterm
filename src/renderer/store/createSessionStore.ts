@@ -1063,6 +1063,7 @@ export function createSessionStore(
         store.setState(s => ({
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: childWorkspace, store: handle })
         }))
+        handle.getState().onLoaded()
         await createWorkspaceFile(id, childWorkspace.path)
         await enqueueSync('addChildWorkspace')
         void handle.getState().saveRegistryEntry()
@@ -1135,6 +1136,7 @@ export function createSessionStore(
     for (const tabId of Object.keys(appStates)) {
       handle.getState().initTab(tabId)
     }
+    handle.getState().onLoaded()
 
     await createWorkspaceFile(id, childWorkspace.path)
     await enqueueSync('addChildWorkspaceFromResult')
@@ -1503,6 +1505,7 @@ export function createSessionStore(
         set(s => ({
           workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.Loaded, data: workspace, store: handle })
         }))
+        handle.getState().onLoaded()
         await createWorkspaceFile(id, workspace.path)
         void enqueueSync('addWorkspace')
       }).catch((err: unknown) => {
@@ -2185,6 +2188,8 @@ function reconstructWorkspace(
   for (const tabId of Object.keys(fileWorkspace.appStates)) {
     handle.getState().initTab(tabId)
   }
+
+  handle.getState().onLoaded()
 
   console.log('[Session] Reconstructed workspace:', fileWorkspace.name, 'parentId:', fileWorkspace.parentId)
   return id
