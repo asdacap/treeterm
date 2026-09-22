@@ -8,6 +8,7 @@ const indicators: Record<ActivityState, { icon: React.ReactNode; title: string }
   permission_request: { icon: '●', title: 'Permission request' },
   safe_permission_requested: { icon: '●', title: 'Safe permission' },
   completed: { icon: '✓', title: 'Completed' },
+  application_error: { icon: '✗', title: 'Application error' },
   error: { icon: '●', title: 'Error' }
 }
 

@@ -169,6 +169,20 @@ describe('ActivityStateStore', () => {
       expect(useActivityStateStore.getState().getWorkspaceState(['tab1', 'tab2'])).toBe(ActivityState.SafePermissionRequested)
     })
 
+    it('returns user_input_required over application_error', () => {
+      useActivityStateStore.getState().setTabState('tab1', ActivityState.ApplicationError, VIEWPORT)
+      useActivityStateStore.getState().setTabState('tab2', ActivityState.UserInputRequired, VIEWPORT)
+
+      expect(useActivityStateStore.getState().getWorkspaceState(['tab1', 'tab2'])).toBe(ActivityState.UserInputRequired)
+    })
+
+    it('returns application_error over error', () => {
+      useActivityStateStore.getState().setTabState('tab1', ActivityState.Error, VIEWPORT)
+      useActivityStateStore.getState().setTabState('tab2', ActivityState.ApplicationError, VIEWPORT)
+
+      expect(useActivityStateStore.getState().getWorkspaceState(['tab1', 'tab2'])).toBe(ActivityState.ApplicationError)
+    })
+
     it('returns error over completed and idle', () => {
       useActivityStateStore.getState().setTabState('tab1', ActivityState.Completed, VIEWPORT)
       useActivityStateStore.getState().setTabState('tab2', ActivityState.Error, VIEWPORT)

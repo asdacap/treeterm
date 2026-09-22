@@ -82,11 +82,12 @@ export const useActivityStateStore = create<ActivityStateStore>((set, get) => ({
 
   getWorkspaceState: (tabIds) => {
     const states = get().states
-    // Priority: working > permission_request > safe_permission_requested > user_input_required > error > completed > idle
+    // Priority: working > permission_request > safe_permission_requested > user_input_required > application_error > error > completed > idle
     if (tabIds.some((id) => states[id] === ActivityState.Working)) return ActivityState.Working
     if (tabIds.some((id) => states[id] === ActivityState.PermissionRequest)) return ActivityState.PermissionRequest
     if (tabIds.some((id) => states[id] === ActivityState.SafePermissionRequested)) return ActivityState.SafePermissionRequested
     if (tabIds.some((id) => states[id] === ActivityState.UserInputRequired)) return ActivityState.UserInputRequired
+    if (tabIds.some((id) => states[id] === ActivityState.ApplicationError)) return ActivityState.ApplicationError
     if (tabIds.some((id) => states[id] === ActivityState.Error)) return ActivityState.Error
     if (tabIds.some((id) => states[id] === ActivityState.Completed)) return ActivityState.Completed
     return ActivityState.Idle

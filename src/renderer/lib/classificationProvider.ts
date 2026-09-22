@@ -28,11 +28,12 @@ const criteria = {
   [ActivityState.UserInputRequired]: 'Program asks for text input, a design choice, or plan confirmation.',
   [ActivityState.PermissionRequest]: 'Program asks for y/n or similar permission, but the action does not meet the safe permission criteria.',
   [ActivityState.SafePermissionRequested]: 'Program asks permission for a safe action: git operations unless changing another worktree; build, test, or dependency installation; or mutations only within the safe paths. Reading outside safe paths is allowed, but wide-ranging searches using find or recursive grep outside safe paths are not allowed.',
+  [ActivityState.ApplicationError]: 'The program itself failed and stopped: service overloaded, rate limited, API or network error, crash, or an unhandled exception. The user must retry or intervene. Not a failing command the program ran and is still handling.',
 }
 
 const choiceSchema = z.enum([
   ActivityState.Working, ActivityState.Idle, ActivityState.Completed, ActivityState.UserInputRequired,
-  ActivityState.PermissionRequest, ActivityState.SafePermissionRequested,
+  ActivityState.PermissionRequest, ActivityState.SafePermissionRequested, ActivityState.ApplicationError,
 ])
 const decisionsResponseSchema = z.object({
   answers: z.object({ activity_state: z.object({ type: z.literal('choice'), choice: choiceSchema }) }),

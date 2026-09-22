@@ -73,6 +73,9 @@ export enum ActivityState {
   PermissionRequest = 'permission_request',
   SafePermissionRequested = 'safe_permission_requested',
   Completed = 'completed',
+  /** The program in the terminal reported a failure of its own: service overloaded, API error, crash. The user should retry. */
+  ApplicationError = 'application_error',
+  /** The classifier itself failed; the terminal's real state is unknown. */
   Error = 'error',
 }
 

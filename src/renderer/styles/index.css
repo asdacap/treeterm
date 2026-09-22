@@ -587,6 +587,10 @@ body,
   color: #23d18b;
 }
 
+.activity-application_error {
+  color: #d16969;
+}
+
 .activity-error {
   color: #f44747;
 }

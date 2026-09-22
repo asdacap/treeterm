@@ -29,6 +29,7 @@ describe('OpenRouter Decisions contract', () => {
           user_input_required: 'Program asks for text input, a design choice, or plan confirmation.',
           permission_request: 'Program asks for y/n or similar permission, but the action does not meet the safe permission criteria.',
           safe_permission_requested: 'Program asks permission for a safe action: git operations unless changing another worktree; build, test, or dependency installation; or mutations only within the safe paths. Reading outside safe paths is allowed, but wide-ranging searches using find or recursive grep outside safe paths are not allowed.',
+          application_error: 'The program itself failed and stopped: service overloaded, rate limited, API or network error, crash, or an unhandled exception. The user must retry or intervene. Not a failing command the program ran and is still handling.',
         },
       } } }),
     })
@@ -37,7 +38,7 @@ describe('OpenRouter Decisions contract', () => {
     expect(decisionsUrl('https://openrouter.ai/api/v1/')).toBe('https://openrouter.ai/api/alpha/decisions')
   })
 
-  it.each([ActivityState.Working, ActivityState.Idle, ActivityState.Completed, ActivityState.UserInputRequired, ActivityState.PermissionRequest, ActivityState.SafePermissionRequested])('normalizes %s without requiring confidence', async (state) => {
+  it.each([ActivityState.Working, ActivityState.Idle, ActivityState.Completed, ActivityState.UserInputRequired, ActivityState.PermissionRequest, ActivityState.SafePermissionRequested, ActivityState.ApplicationError])('normalizes %s without requiring confidence', async (state) => {
     const deps = transports()
     vi.mocked(deps.fetch).mockResolvedValue(new Response(JSON.stringify({ answers: { activity_state: { type: 'choice', choice: state } } })))
     await expect(createClassificationProvider(jev, deps).classify(input)).resolves.toEqual({ state, reason: `Classifier decision: ${state}` })

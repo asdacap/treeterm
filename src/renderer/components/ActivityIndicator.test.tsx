@@ -18,6 +18,7 @@ describe('ActivityIndicator', () => {
     { state: ActivityState.PermissionRequest, title: 'Permission request', icon: '●' },
     { state: ActivityState.SafePermissionRequested, title: 'Safe permission', icon: '●' },
     { state: ActivityState.Completed, title: 'Completed', icon: '✓' },
+    { state: ActivityState.ApplicationError, title: 'Application error', icon: '✗' },
     { state: ActivityState.Error, title: 'Error', icon: '●' },
   ]
 

@@ -57,6 +57,19 @@ describe('ActivityStateBadge', () => {
     expect(container.querySelector('.context-menu')).toBeNull()
   })
 
+  it('distinguishes an application error from a classifier error', () => {
+    const { container, rerender } = renderBadge(makeWorkspaceStore(), { state: ActivityState.ApplicationError, title: 'API overloaded' })
+    const badge = container.querySelector('.activity-state-badge')!
+    expect(badge.textContent).toBe('application error')
+    const applicationErrorColor = (badge as HTMLElement).style.background
+
+    rerender(
+      <ActivityStateBadge workspace={makeWorkspaceStore() as never} tabId="tab1" state={ActivityState.Error} getBufferText={() => ''} />
+    )
+    expect(badge.textContent).toBe('error')
+    expect((badge as HTMLElement).style.background).not.toBe(applicationErrorColor)
+  })
+
   it('opens the menu on right-click and seeds the debugger with the tab buffer', () => {
     const workspace = makeWorkspaceStore()
     const { container, getByText } = renderBadge(workspace)

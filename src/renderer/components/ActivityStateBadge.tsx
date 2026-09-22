@@ -9,6 +9,7 @@ const STATE_COLORS: Record<ActivityState, string> = {
   permission_request: '#cd6600',
   safe_permission_requested: '#0dbc79',
   completed: '#23d18b',
+  application_error: '#d16969',
   error: '#f44747'
 }
 
@@ -19,6 +20,7 @@ const STATE_LABELS: Record<ActivityState, string> = {
   permission_request: 'permission request',
   safe_permission_requested: 'safe permission',
   completed: 'completed',
+  application_error: 'application error',
   error: 'error'
 }
 
