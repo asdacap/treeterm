@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { defaultClassifierCriteria } from '../../shared/classifierSettings'
 import { ClassifierProvider, ReasoningEffort } from '../../shared/types'
 import { ActivityState } from '../types'
 import type { ClassifierSettings } from '../types/classification'
 import { classificationIdentity, createClassificationProvider, decisionsUrl, type ClassifierTransports } from './classificationProvider'
 import { createLlmClient, parseLlmJson } from './llmClient'
 
-const input = { buffer: 'Allow write? y/n', cwd: '/workspace', safePaths: ['/tmp'], systemPrompt: 'Custom policy at {{cwd}}; safe: {{safe_paths}}' }
+const criteria = { ...defaultClassifierCriteria, [ActivityState.Idle]: 'Prompt at {{cwd}}', [ActivityState.SafePermissionRequested]: 'Only mutates {{safe_paths}}' }
+const input = { buffer: 'Allow write? y/n', cwd: '/workspace', safePaths: ['/tmp'], systemPrompt: 'Custom policy at {{cwd}}; safe: {{safe_paths}}', criteria }
 const jev: ClassifierSettings = { provider: ClassifierProvider.Classifier, baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'test-secret', model: 'typesafe/jev-1.13' }
 const chat: ClassifierSettings = { ...jev, provider: ClassifierProvider.ChatCompletions, reasoningEffort: ReasoningEffort.Off }
 function transports(): ClassifierTransports {
@@ -22,15 +24,7 @@ describe('OpenRouter Decisions contract', () => {
       method: 'POST', headers: { Authorization: 'Bearer test-secret', 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: jev.model, state: { terminal: input.buffer, cwd: input.cwd, safe_paths: ['/tmp', '/workspace'] }, questions: { activity_state: {
         type: 'choice', instructions: { guidance: 'Custom policy at /workspace; safe: /tmp, /workspace', output: 'Choose the activity state using these criteria. Return the typed choice, not generated JSON or an explanation.' },
-        criteria: {
-          working: 'Program is still running and producing output; no prompt or question is waiting on the user.',
-          idle: 'Shell prompt visible, waiting for a command, or user input is incomplete.',
-          completed: 'The previous user request has been satisfied.',
-          user_input_required: 'Program asks for text input, a design choice, or plan confirmation.',
-          permission_request: 'Program asks for y/n or similar permission, but the action does not meet the safe permission criteria.',
-          safe_permission_requested: 'Program asks permission for a safe action: git operations unless changing another worktree; build, test, or dependency installation; or mutations only within the safe paths. Reading outside safe paths is allowed, but wide-ranging searches using find or recursive grep outside safe paths are not allowed.',
-          application_error: 'The program itself failed and stopped: service overloaded, rate limited, API or network error, crash, or an unhandled exception. The user must retry or intervene. Not a failing command the program ran and is still handling.',
-        },
+        criteria: { ...defaultClassifierCriteria, idle: 'Prompt at /workspace', safe_permission_requested: 'Only mutates /tmp, /workspace' },
       } } }),
     })
     expect(deps.completeChat).not.toHaveBeenCalled()
@@ -91,9 +85,32 @@ describe('unified chat adapter and identity', () => {
     const deps = transports()
     await expect(createClassificationProvider(chat, deps).classify(input)).resolves.toEqual({ state: 'idle', reason: 'Waiting' })
     expect(deps.completeChat).toHaveBeenCalledWith([
-      { role: 'system', content: 'Custom policy at /workspace; safe: /tmp, /workspace' }, { role: 'user', content: input.buffer },
+      { role: 'system', content: expect.any(String) as string }, { role: 'user', content: input.buffer },
     ], { baseUrl: chat.baseUrl, apiKey: chat.apiKey, model: chat.model, reasoning: ReasoningEffort.Off })
     expect(deps.fetch).not.toHaveBeenCalled()
+  })
+
+  it('generates the output format and state list from the configured criteria', async () => {
+    const deps = transports()
+    await createClassificationProvider(chat, deps).classify(input)
+    const system = vi.mocked(deps.completeChat).mock.calls[0]![0][0]!.content
+    expect(system.startsWith('Custom policy at /workspace; safe: /tmp, /workspace\n\nRespond with ONLY a JSON object: {"state": "<state>", "reason": "<reason>"}')).toBe(true)
+    expect(system).toContain(' - "idle": Prompt at /workspace')
+    expect(system).toContain(' - "safe_permission_requested": Only mutates /tmp, /workspace')
+    expect(system).toContain(`- "working": ${defaultClassifierCriteria.working}`)
+    const order = ['working', 'safe_permission_requested', 'permission_request', 'completed', 'user_input_required', 'application_error', 'idle'].map((state) => system.indexOf(`- "${state}": `))
+    expect(order).toEqual([...order].sort((x, y) => x - y))
+    expect(system).not.toContain('"error"')
+    expect(system.endsWith('The reason field should give the reason for the verdict, in no more than 10 words.')).toBe(true)
+  })
+
+  it('reports the prompt each provider actually receives', async () => {
+    const client = createLlmClient(transports())
+    const chatResult = await client.analyzeTerminal(input.buffer, input.cwd, { ...chat, ...input })
+    expect(chatResult.systemPrompt).toContain(' - "idle": Prompt at /workspace')
+    await client.clearAnalyzerCache()
+    const decisionsResult = await client.analyzeTerminal(input.buffer, input.cwd, { ...jev, ...input })
+    expect(decisionsResult.systemPrompt).toBe('Custom policy at /workspace; safe: /tmp, /workspace')
   })
 
   it.each(['{"state":"unknown","reason":"oops"}', '{"state":"idle"}', '{"state":"idle","reason":3}', 'null'])('rejects invalid chat classification %s', async (raw) => {
@@ -102,19 +119,20 @@ describe('unified chat adapter and identity', () => {
     await expect(createClassificationProvider(chat, deps).classify(input)).rejects.toThrow()
   })
 
-  it('isolates global cache by provider, endpoint, model, instructions, cwd, paths and reasoning', async () => {
+  it('isolates global cache by provider, endpoint, model, instructions, criteria, cwd, paths and reasoning', async () => {
     const deps = transports()
     const client = createLlmClient(deps)
-    const settings = { ...chat, systemPrompt: input.systemPrompt, safePaths: input.safePaths }
+    const settings = { ...chat, systemPrompt: input.systemPrompt, criteria: input.criteria, safePaths: input.safePaths }
     await client.analyzeTerminal(input.buffer, input.cwd, settings)
     await client.analyzeTerminal(input.buffer, input.cwd, { ...settings, model: 'other' })
     await client.analyzeTerminal(input.buffer, input.cwd, { ...settings, baseUrl: 'https://other.test/v1' })
     await client.analyzeTerminal(input.buffer, input.cwd, { ...settings, systemPrompt: 'other' })
+    await client.analyzeTerminal(input.buffer, input.cwd, { ...settings, criteria: { ...criteria, [ActivityState.Completed]: 'other' } })
     await client.analyzeTerminal(input.buffer, '/different', settings)
     await client.analyzeTerminal(input.buffer, input.cwd, { ...settings, safePaths: ['/different'] })
     await client.analyzeTerminal(input.buffer, input.cwd, { ...settings, reasoningEffort: ReasoningEffort.High })
     await client.analyzeTerminal(input.buffer, input.cwd, { ...settings, ...jev })
-    expect(deps.completeChat).toHaveBeenCalledTimes(7)
+    expect(deps.completeChat).toHaveBeenCalledTimes(8)
     expect(deps.fetch).toHaveBeenCalledTimes(1)
     await expect(client.analyzeTerminal(input.buffer, input.cwd, settings)).resolves.toHaveProperty('cached', true)
     expect(classificationIdentity(input, chat)).not.toContain(chat.apiKey)

@@ -2837,6 +2837,24 @@ body,
   color: var(--text-primary);
 }
 
+.settings-reset-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.settings-criterion {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin: 8px 0 4px;
+}
+
+.settings-criterion .settings-input {
+  width: 100%;
+}
+
 /* Tab Icon */
 .tab-icon {
   margin-right: 6px;

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { ClassifierProvider, type ReasoningEffort } from '../../shared/types'
+import { ClassifierProvider, type ClassifierCriteria, type ReasoningEffort } from '../../shared/types'
 import { ActivityState } from '../types'
 
 export const classificationSchema = z.object({
@@ -26,6 +26,7 @@ export interface ClassificationInput {
   cwd: string
   safePaths: string[]
   systemPrompt: string
+  criteria: ClassifierCriteria
 }
 
 /** Provider-specific transport and validation stay behind this renderer interface. */

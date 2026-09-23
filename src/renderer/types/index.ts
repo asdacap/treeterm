@@ -1,15 +1,17 @@
 import type { Classification, ClassifierSettings } from './classification'
 export type { Classification, ClassificationInput, ClassificationProvider, ClassifierSettings } from './classification'
-export { ClassifierProvider } from '../../shared/types'
+export { ActivityState, ClassifierProvider } from '../../shared/types'
 import type { ReactNode } from 'react'
 import type { WorkspaceStore, TerminalAppRef, CachedTerminal } from '../store/createWorkspaceStore'
 export type { WorkspaceStore, TerminalAppRef, CachedTerminal }
 
 // Import and re-export shared types
 import {
+  ActivityState,
   FileChangeStatus,
 } from '../../shared/types'
 import type {
+  ClassifierCriteria,
   SandboxConfig,
   AppState,
   Workspace,
@@ -65,19 +67,6 @@ export enum ScrollPosition {
   Middle = 'middle',
 }
 
-// Activity state for applications that can report their state
-export enum ActivityState {
-  Idle = 'idle',
-  Working = 'working',
-  UserInputRequired = 'user_input_required',
-  PermissionRequest = 'permission_request',
-  SafePermissionRequested = 'safe_permission_requested',
-  Completed = 'completed',
-  /** The program in the terminal reported a failure of its own: service overloaded, API error, crash. The user should retry. */
-  ApplicationError = 'application_error',
-  /** The classifier itself failed; the terminal's real state is unknown. */
-  Error = 'error',
-}
 
 /**
  * Non-serialized per-tab runtime state. Lives in the workspace store closure,
@@ -598,7 +587,7 @@ export interface DaemonApi {
 
 export interface LlmApi {
   send: (requestId: string, messages: { role: 'user' | 'assistant' | 'system'; content: string }[], settings: { baseUrl: string; apiKey: string; model: string; reasoning: ReasoningEffort }) => Promise<void>
-  analyzeTerminal: (buffer: string, cwd: string, settings: ClassifierSettings & { systemPrompt: string; safePaths: string[] }) => Promise<(Classification & { cached?: boolean; systemPrompt?: string }) | { error: string; systemPrompt?: string }>
+  analyzeTerminal: (buffer: string, cwd: string, settings: ClassifierSettings & { systemPrompt: string; criteria: ClassifierCriteria; safePaths: string[] }) => Promise<(Classification & { cached?: boolean; systemPrompt?: string }) | { error: string; systemPrompt?: string }>
   clearAnalyzerCache: () => Promise<void>
   generateTitle: (buffer: string, settings: { baseUrl: string; apiKey: string; model: string; titleSystemPrompt: string; reasoningEffort: ReasoningEffort }) => Promise<{ title: string; description: string; branchName: string; systemPrompt?: string } | { error: string; systemPrompt?: string }>
   cancel: (requestId: string) => void

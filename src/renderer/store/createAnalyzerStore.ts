@@ -141,7 +141,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   function configurationIdentity(): string {
     const settings = deps.getSettings()
     const configuration = classifierSettings(settings)
-    return JSON.stringify({ provider: configuration.provider, model: configuration.model, baseUrl: configuration.baseUrl, reasoning: configuration.provider === ClassifierProvider.ChatCompletions ? configuration.reasoningEffort : '', cwd: deps.cwd, systemPrompt: settings.terminalAnalyzer.systemPrompt, safePaths: settings.terminalAnalyzer.safePaths })
+    return JSON.stringify({ provider: configuration.provider, model: configuration.model, baseUrl: configuration.baseUrl, reasoning: configuration.provider === ClassifierProvider.ChatCompletions ? configuration.reasoningEffort : '', cwd: deps.cwd, systemPrompt: settings.terminalAnalyzer.systemPrompt, criteria: settings.terminalAnalyzer.criteria, safePaths: settings.terminalAnalyzer.safePaths })
   }
 
   function checkBuffer(buffer: string): BufferCheckResult {
@@ -224,7 +224,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
     try {
 
-      const identity = classificationIdentity({ buffer, cwd: deps.cwd, systemPrompt: settings.terminalAnalyzer.systemPrompt, safePaths: settings.terminalAnalyzer.safePaths }, providerSettings)
+      const identity = classificationIdentity({ buffer, cwd: deps.cwd, systemPrompt: settings.terminalAnalyzer.systemPrompt, criteria: settings.terminalAnalyzer.criteria, safePaths: settings.terminalAnalyzer.safePaths }, providerSettings)
       const checkResult = checkBuffer(identity)
       if (checkResult.action === 'skip') {
         console.debug('[terminal-analyzer] skipping, same buffer in-flight')
@@ -246,6 +246,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       const result = await deps.llm.analyzeTerminal(buffer, deps.cwd, {
         ...providerSettings,
         systemPrompt: settings.terminalAnalyzer.systemPrompt,
+        criteria: settings.terminalAnalyzer.criteria,
         safePaths: settings.terminalAnalyzer.safePaths,
       })
       const durationMs = Date.now() - startTime

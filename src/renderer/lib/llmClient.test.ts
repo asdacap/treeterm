@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ClassifierProvider, ReasoningEffort } from '../../shared/types'
+import { defaultClassifierCriteria } from '../../shared/classifierSettings'
 
 const { mockCreate } = vi.hoisted(() => ({
   mockCreate: vi.fn<(...args: unknown[]) => unknown>(),
@@ -184,6 +185,7 @@ const analyzerSettings = {
   apiKey: 'test-key',
   model: 'gpt-4',
   systemPrompt: 'You are analyzing a terminal at {{cwd}}. Safe paths: {{safe_paths}}',
+  criteria: defaultClassifierCriteria,
   reasoningEffort: ReasoningEffort.Off,
   safePaths: ['/usr/bin'],
 }

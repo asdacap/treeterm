@@ -75,6 +75,7 @@ export default function SystemPromptDebugger({ tab }: ApplicationRenderProps) {
           apiKey: settings.llm.apiKey,
           model,
           systemPrompt: analyzerPrompt,
+          criteria: settings.terminalAnalyzer.criteria,
           ...(provider === ClassifierProvider.Classifier
             ? { provider }
             : { provider, reasoningEffort }),

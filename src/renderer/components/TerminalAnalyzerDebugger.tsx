@@ -51,6 +51,7 @@ export default function TerminalAnalyzerDebugger({ tab }: ApplicationRenderProps
         apiKey: settings.llm.apiKey,
         model,
         systemPrompt,
+        criteria: settings.terminalAnalyzer.criteria,
         ...(provider === ClassifierProvider.Classifier
           ? { provider }
           : { provider, reasoningEffort }),

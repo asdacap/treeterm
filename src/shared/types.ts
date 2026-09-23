@@ -186,6 +186,26 @@ export enum ReasoningEffort {
   High = 'high',
 }
 
+// Activity state for applications that can report their state
+export enum ActivityState {
+  Idle = 'idle',
+  Working = 'working',
+  UserInputRequired = 'user_input_required',
+  PermissionRequest = 'permission_request',
+  SafePermissionRequested = 'safe_permission_requested',
+  Completed = 'completed',
+  /** The program in the terminal reported a failure of its own: service overloaded, API error, crash. The user should retry. */
+  ApplicationError = 'application_error',
+  /** The classifier itself failed; the terminal's real state is unknown. */
+  Error = 'error',
+}
+
+/** States a classifier can report; `Error` means the classifier itself failed. */
+export type ClassifiedState = Exclude<ActivityState, ActivityState.Error>
+
+/** One configurable definition per classified state (supports {{cwd}} and {{safe_paths}}). */
+export type ClassifierCriteria = Record<ClassifiedState, string>
+
 export enum ClassifierProvider {
   ChatCompletions = 'chat_completions',
   Classifier = 'classifier',
@@ -248,7 +268,8 @@ export interface Settings {
     provider: ClassifierProvider
     titleModel: string      // Chat-completion model for titles, descriptions and branch names
     model: string           // Model name for terminal analysis
-    systemPrompt: string    // System prompt (supports {{cwd}} and {{safe_paths}} templates)
+    systemPrompt: string    // Context and policy only (supports {{cwd}} and {{safe_paths}}); state list and output format are generated from criteria
+    criteria: ClassifierCriteria // Per-state definitions shared by both classifier providers
     titleSystemPrompt: string // System prompt for generating workspace titles from terminal output
     reasoningEffort: ReasoningEffort
     safePaths: string[]     // Paths considered safe for permission_request classification

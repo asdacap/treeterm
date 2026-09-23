@@ -1,4 +1,5 @@
-import { ClassifierProvider } from '../shared/types'
+import { ActivityState, ClassifierProvider } from '../shared/types'
+import { defaultAnalyzerSystemPrompt, defaultClassifierCriteria, legacyDefaultSystemPrompts } from '../shared/classifierSettings'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import * as fs from 'fs'
 
@@ -118,6 +119,40 @@ describe('settings', () => {
       const settings = getDefaultSettings()
       settings.terminalAnalyzer = { ...settings.terminalAnalyzer, provider: 'unknown' as ClassifierProvider }
       expect(() => { saveSettings(settings) }).toThrow()
+      expect(fs.writeFileSync).not.toHaveBeenCalled()
+    })
+
+    it.each(legacyDefaultSystemPrompts)('replaces a saved former default prompt with the criteria-free default %#', (systemPrompt) => {
+      vi.mocked(fs.existsSync).mockReturnValue(true)
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ terminalAnalyzer: { systemPrompt } }))
+      expect(loadSettings().terminalAnalyzer.systemPrompt).toBe(defaultAnalyzerSystemPrompt)
+    })
+
+    it('keeps a customized prompt and fills criteria missing from the saved file', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true)
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ terminalAnalyzer: {
+        systemPrompt: 'My own prompt at {{cwd}}',
+        criteria: { [ActivityState.Idle]: 'Custom idle' },
+      } }))
+      const { terminalAnalyzer } = loadSettings()
+      expect(terminalAnalyzer.systemPrompt).toBe('My own prompt at {{cwd}}')
+      expect(terminalAnalyzer.criteria).toEqual({ ...defaultClassifierCriteria, [ActivityState.Idle]: 'Custom idle' })
+    })
+
+    it('round-trips edited criteria', () => {
+      const settings = getDefaultSettings()
+      settings.terminalAnalyzer = { ...settings.terminalAnalyzer, criteria: { ...settings.terminalAnalyzer.criteria, [ActivityState.Completed]: 'Done at {{cwd}}' } }
+      vi.mocked(fs.existsSync).mockReturnValue(true)
+      saveSettings(settings)
+      const serialized = vi.mocked(fs.writeFileSync).mock.calls[0]![1] as string
+      vi.mocked(fs.readFileSync).mockReturnValue(serialized)
+      expect(loadSettings().terminalAnalyzer.criteria).toEqual(settings.terminalAnalyzer.criteria)
+    })
+
+    it('surfaces invalid saved criteria without overwriting saved settings', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true)
+      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ terminalAnalyzer: { criteria: { [ActivityState.Idle]: 42 } } }))
+      expect(() => loadSettings()).toThrow()
       expect(fs.writeFileSync).not.toHaveBeenCalled()
     })
 

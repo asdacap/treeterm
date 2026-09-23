@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { classificationSchema } from '../types/classification'
 import { ActivityState } from '../types'
 import { ClassifierProvider } from '../../shared/types'
-import { classifierSettingsSchema } from '../../shared/classifierSettings'
+import { classifierSettingsSchema, defaultClassifierCriteria } from '../../shared/classifierSettings'
 
 describe('classification contract', () => {
   it.each(Object.values(ActivityState))('accepts existing activity state %s', (state) => {
@@ -20,7 +20,7 @@ describe('classification contract', () => {
   })
 
   it.each(Object.values(ClassifierProvider))('accepts configured provider %s and preserves empty models', (provider) => {
-    expect(classifierSettingsSchema.parse({ provider, model: '', titleModel: '' })).toEqual({ provider, model: '', titleModel: '' })
+    expect(classifierSettingsSchema.parse({ provider, model: '', titleModel: '', criteria: defaultClassifierCriteria })).toEqual({ provider, model: '', titleModel: '', criteria: defaultClassifierCriteria })
   })
 
   it.each([
@@ -28,6 +28,9 @@ describe('classification contract', () => {
     { provider: null, model: '', titleModel: '' },
     { provider: ClassifierProvider.Classifier, model: 42, titleModel: '' },
     { provider: ClassifierProvider.Classifier, model: '', titleModel: null },
+    { provider: ClassifierProvider.Classifier, model: '', titleModel: '' },
+    { provider: ClassifierProvider.Classifier, model: '', titleModel: '', criteria: { ...defaultClassifierCriteria, idle: 3 } },
+    { provider: ClassifierProvider.Classifier, model: '', titleModel: '', criteria: { working: 'only one' } },
   ])('rejects invalid persisted classifier configuration %j', (value) => {
     expect(classifierSettingsSchema.safeParse(value).success).toBe(false)
   })

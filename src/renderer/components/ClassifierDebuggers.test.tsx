@@ -125,3 +125,31 @@ it('retains a single analyzer model across provider switches and an independent 
     provider: ClassifierProvider.Classifier, model: 'new-chat', titleModel: 'new-title',
   })
 })
+
+it('edits, resets and saves per-state criteria', async () => {
+  const saveSettings = vi.fn<(settings: Settings) => Promise<void>>().mockResolvedValue(undefined)
+  useSettingsStore.setState({ saveSettings })
+  const sandbox = { isAvailable: vi.fn().mockResolvedValue(true) } as unknown as SandboxApi
+  render(<SettingsDialog isOpen onClose={vi.fn()} sandbox={sandbox} platform={Platform.Darwin} />)
+  fireEvent.click(screen.getByRole('button', { name: 'LLM' }))
+  const defaults = useSettingsStore.getState().settings.terminalAnalyzer.criteria
+  fireEvent.change(screen.getByLabelText('idle criterion'), { target: { value: 'Custom idle' } })
+  fireEvent.change(screen.getByLabelText('completed criterion'), { target: { value: 'Custom completed' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Reset completed criterion' }))
+  expect(screen.getByLabelText<HTMLTextAreaElement>('completed criterion').value).toBe(defaults.completed)
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() => { expect(saveSettings).toHaveBeenCalled() })
+  expect(saveSettings.mock.calls[0]![0].terminalAnalyzer.criteria).toEqual({ ...defaults, idle: 'Custom idle' })
+})
+
+for (const Component of [TerminalAnalyzerDebugger, SystemPromptDebugger]) {
+  it(`${Component.name} sends the configured criteria`, async () => {
+    const { terminalAnalyzer } = useSettingsStore.getState().settings
+    const criteria = { ...terminalAnalyzer.criteria, idle: 'Edited idle' }
+    useSettingsStore.setState((state) => ({ settings: { ...state.settings, terminalAnalyzer: { ...terminalAnalyzer, criteria } } }))
+    render(<Component {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+    await waitFor(() => { expect(llm.analyzeTerminal).toHaveBeenCalled() })
+    expect(llm.analyzeTerminal).toHaveBeenCalledWith('terminal output', '', expect.objectContaining({ criteria }))
+  })
+}

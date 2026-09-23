@@ -1,6 +1,6 @@
 import { z } from 'zod'
-import { ClassifierProvider, type ReasoningEffort } from '../../shared/types'
-import { ActivityState } from '../types'
+import { classifiedStates } from '../../shared/classifierSettings'
+import { ClassifierProvider, type ClassifierCriteria, type ReasoningEffort } from '../../shared/types'
 import { classificationSchema, type ClassificationInput, type ClassificationProvider, type ClassifierSettings } from '../types/classification'
 
 export interface ChatMessage {
@@ -21,32 +21,38 @@ export interface ClassifierTransports {
   fetch: typeof fetch
 }
 
-const criteria = {
-  [ActivityState.Working]: 'Program is still running and producing output; no prompt or question is waiting on the user.',
-  [ActivityState.Idle]: 'Shell prompt visible, waiting for a command, or user input is incomplete.',
-  [ActivityState.Completed]: 'The previous user request has been satisfied.',
-  [ActivityState.UserInputRequired]: 'Program asks for text input, a design choice, or plan confirmation.',
-  [ActivityState.PermissionRequest]: 'Program asks for y/n or similar permission, but the action does not meet the safe permission criteria.',
-  [ActivityState.SafePermissionRequested]: 'Program asks permission for a safe action: git operations unless changing another worktree; build, test, or dependency installation; or mutations only within the safe paths. Reading outside safe paths is allowed, but wide-ranging searches using find or recursive grep outside safe paths are not allowed.',
-  [ActivityState.ApplicationError]: 'The program itself failed and stopped: service overloaded, rate limited, API or network error, crash, or an unhandled exception. The user must retry or intervene. Not a failing command the program ran and is still handling.',
-}
-
-const choiceSchema = z.enum([
-  ActivityState.Working, ActivityState.Idle, ActivityState.Completed, ActivityState.UserInputRequired,
-  ActivityState.PermissionRequest, ActivityState.SafePermissionRequested, ActivityState.ApplicationError,
-])
+const choiceSchema = z.enum(classifiedStates)
 const decisionsResponseSchema = z.object({
   answers: z.object({ activity_state: z.object({ type: z.literal('choice'), choice: choiceSchema }) }),
 })
 const errorSchema = z.object({ error: z.object({ message: z.string() }) })
 
+function fillTemplate(text: string, cwd: string, safePaths: string[]): string {
+  return text.replace(/\{\{cwd\}\}/g, cwd).replace(/\{\{safe_paths\}\}/g, safePaths.join(', '))
+}
+
 export function prepareClassificationInput(input: ClassificationInput): ClassificationInput {
   const safePaths = Array.from(new Set([...input.safePaths, input.cwd]))
+  const criteria = Object.fromEntries(
+    classifiedStates.map((state) => [state, fillTemplate(input.criteria[state], input.cwd, safePaths)]),
+  ) as ClassifierCriteria
   return {
     ...input,
     safePaths,
-    systemPrompt: input.systemPrompt.replace(/\{\{cwd\}\}/g, input.cwd).replace(/\{\{safe_paths\}\}/g, safePaths.join(', ')),
+    systemPrompt: fillTemplate(input.systemPrompt, input.cwd, safePaths),
+    criteria,
   }
+}
+
+/** The configured prompt followed by the output format and state list generated from the criteria. */
+export function chatSystemPrompt(prepared: ClassificationInput): string {
+  const states = classifiedStates.map((state) => ` - "${state}": ${prepared.criteria[state]}`).join('\n')
+  return `${prepared.systemPrompt}\n\nRespond with ONLY a JSON object: {"state": "<state>", "reason": "<reason>"} where state is the one of the following that best represents the terminal:\n${states}\nThe reason field should give the reason for the verdict, in no more than 10 words.`
+}
+
+/** The prompt text the selected provider actually receives, for history and debugging. */
+export function effectivePrompt(prepared: ClassificationInput, settings: ClassifierSettings): string {
+  return settings.provider === ClassifierProvider.ChatCompletions ? chatSystemPrompt(prepared) : prepared.systemPrompt
 }
 
 export function decisionsUrl(baseUrl: string): string {
@@ -72,7 +78,7 @@ export function createClassificationProvider(settings: ClassifierSettings, trans
       switch (settings.provider) {
         case ClassifierProvider.ChatCompletions: {
           const raw = await transports.completeChat([
-            { role: 'system', content: prepared.systemPrompt },
+            { role: 'system', content: chatSystemPrompt(prepared) },
             { role: 'user', content: prepared.buffer },
           ], { baseUrl: settings.baseUrl, apiKey: settings.apiKey, model: settings.model, reasoning: settings.reasoningEffort })
           return classificationSchema.parse(transports.parseChatJson(raw))
@@ -87,7 +93,7 @@ export function createClassificationProvider(settings: ClassifierSettings, trans
               questions: { activity_state: {
                 type: 'choice',
                 instructions: { guidance: prepared.systemPrompt, output: 'Choose the activity state using these criteria. Return the typed choice, not generated JSON or an explanation.' },
-                criteria,
+                criteria: prepared.criteria,
               } },
             }),
           })

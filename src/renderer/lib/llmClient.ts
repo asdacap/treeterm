@@ -10,7 +10,7 @@ import OpenAI, { APIError } from 'openai'
 import { ReasoningEffort } from '../../shared/types'
 import type { LlmApi } from '../types'
 import type { Classification } from '../types/classification'
-import { classificationIdentity, createClassificationProvider, prepareClassificationInput, type ClassifierTransports } from './classificationProvider'
+import { classificationIdentity, createClassificationProvider, effectivePrompt, prepareClassificationInput, type ClassifierTransports } from './classificationProvider'
 
 interface LlmSettings {
   baseUrl: string
@@ -136,8 +136,8 @@ export function createLlmClient(transports: ClassifierTransports = { completeCha
     },
 
     analyzeTerminal: async (buffer, cwd, settings) => {
-      const input = { buffer, cwd, safePaths: settings.safePaths, systemPrompt: settings.systemPrompt }
-      const { systemPrompt } = prepareClassificationInput(input)
+      const input = { buffer, cwd, safePaths: settings.safePaths, systemPrompt: settings.systemPrompt, criteria: settings.criteria }
+      const systemPrompt = effectivePrompt(prepareClassificationInput(input), settings)
       try {
         const identity = classificationIdentity(input, settings)
         const cached = globalAnalyzerCache.find((entry) => entry.identity === identity)

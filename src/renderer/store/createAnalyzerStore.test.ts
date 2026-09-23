@@ -12,6 +12,7 @@ import { createStore } from 'zustand/vanilla'
 import { Terminal } from '@xterm/xterm'
 import { PtyEventType } from '../../shared/ipc-types'
 import type { PtyEvent } from '../../shared/ipc-types'
+import { defaultClassifierCriteria } from '../../shared/classifierSettings'
 
 /** Creates a mock Tty with controllable event emission via openTtyStream callback */
 function makeMockTty() {
@@ -71,6 +72,7 @@ function makeDeps(overrides?: Partial<AnalyzerDeps>): AnalyzerDeps {
         bufferLines: 10,
         idleDebounceMs: 500,
         idleDebounceUnreadMs: 15000,
+        criteria: { ...defaultClassifierCriteria },
       },
     } as unknown as Settings),
     hasUnreadAttention: vi.fn().mockReturnValue(false),
@@ -218,7 +220,7 @@ describe('createAnalyzerStore', () => {
     deps = makeDeps({
       getSettings: vi.fn().mockReturnValue({
         llm: { apiKey: '', baseUrl: '' },
-        terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, titleModel: 'test-model', model: '', systemPrompt: '', titleSystemPrompt: '', reasoningEffort: 'off', safePaths: [], bufferLines: 10, idleDebounceMs: 500, idleDebounceUnreadMs: 15000 },
+        terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, titleModel: 'test-model', model: '', systemPrompt: '', titleSystemPrompt: '', reasoningEffort: 'off', safePaths: [], bufferLines: 10, idleDebounceMs: 500, idleDebounceUnreadMs: 15000, criteria: defaultClassifierCriteria },
       } as unknown as Settings),
       openTtyStream: makeTtyStreamMock(mock, []),
     })
@@ -253,7 +255,7 @@ describe('createAnalyzerStore', () => {
     deps = makeDeps({
       getSettings: vi.fn().mockReturnValue({
         llm: { apiKey: '', baseUrl: 'http://localhost:11434/v1' },
-        terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, titleModel: 'test-model', model: 'llama3', systemPrompt: 'test prompt', titleSystemPrompt: 'title prompt', reasoningEffort: 'off', safePaths: [], bufferLines: 10, idleDebounceMs: 500, idleDebounceUnreadMs: 15000 },
+        terminalAnalyzer: { provider: ClassifierProvider.ChatCompletions, titleModel: 'test-model', model: 'llama3', systemPrompt: 'test prompt', titleSystemPrompt: 'title prompt', reasoningEffort: 'off', safePaths: [], bufferLines: 10, idleDebounceMs: 500, idleDebounceUnreadMs: 15000, criteria: defaultClassifierCriteria },
       } as unknown as Settings),
       openTtyStream: makeTtyStreamMock(mock, []),
     })
@@ -1511,7 +1513,7 @@ describe('createAnalyzerStore', () => {
 
     vi.useRealTimers()
   })
-  it('reclassifies an unchanged buffer when provider or safe paths change, without changing the title model', async () => {
+  it('reclassifies an unchanged buffer when provider, safe paths or criteria change, without changing the title model', async () => {
     vi.useFakeTimers()
     const mock = makeMockTty()
     const settings = makeDeps().getSettings()
@@ -1533,6 +1535,11 @@ describe('createAnalyzerStore', () => {
     settings.terminalAnalyzer.safePaths = ['/different']
     await vi.advanceTimersByTimeAsync(1000)
     expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(3)
+
+    settings.terminalAnalyzer.criteria = { ...settings.terminalAnalyzer.criteria, idle: 'Edited idle' }
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(4)
+    expect(deps.llm.analyzeTerminal).toHaveBeenLastCalledWith(expect.any(String), '/test', expect.objectContaining({ criteria: expect.objectContaining({ idle: 'Edited idle' }) as unknown }))
     await store.getState().refreshTitleAndDescription()
     expect(deps.llm.generateTitle).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ model: 'test-model' }))
     expect(store.getState().getHistory().at(-1)).toMatchObject({ kind: 'title', model: 'test-model' })

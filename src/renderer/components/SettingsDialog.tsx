@@ -4,7 +4,8 @@ import type { Settings, ReasoningEffort } from '../types'
 import { useSettingsStore, defaultSettings } from '../store/settings'
 import { useAppStore } from '../store/app'
 import { Platform } from '../types'
-import { ClassifierProvider } from '../../shared/types'
+import { ClassifierProvider, type ClassifiedState } from '../../shared/types'
+import { classifiedStates } from '../../shared/classifierSettings'
 import type { SandboxApi } from '../types'
 
 interface SettingsDialogProps {
@@ -54,6 +55,13 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
   const allApplications = Array.from(applications.values())
   const [localSettings, setLocalSettings] = useState(savedSettings)
   const [activeTab, setActiveTab] = useState(TabId.Terminal)
+
+  const setCriterion = (state: ClassifiedState, value: string): void => {
+    setLocalSettings((prev) => ({
+      ...prev,
+      terminalAnalyzer: { ...prev.terminalAnalyzer, criteria: { ...prev.terminalAnalyzer.criteria, [state]: value } }
+    }))
+  }
   const [recording, setRecording] = useState<RecordingState>(null)
   const [sandboxAvailable, setSandboxAvailable] = useState<boolean | null>(null)
 
@@ -838,7 +846,7 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     style={{ resize: 'vertical', fontFamily: 'inherit' }}
                   />
                   <p className="settings-hint">
-                    {'System prompt for the analyzer. Supports {{cwd}} and {{safe_paths}} template variables.'}
+                    {'Context and policy for the analyzer. Supports {{cwd}} and {{safe_paths}} template variables. Do not list the states here: Chat Completions appends the output format and the state criteria below, and Classifier sends this text as guidance next to the criteria.'}
                   </p>
                   <button
                     className="settings-reset-btn"
@@ -850,6 +858,46 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                     }
                   >
                     Reset to default
+                  </button>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label">State Criteria</label>
+                  <p className="settings-hint">
+                    {'When the classifier should report each state. Used by both providers. Supports {{cwd}} and {{safe_paths}} template variables.'}
+                  </p>
+                  {classifiedStates.map((state) => (
+                    <div key={state} className="settings-criterion">
+                      <label className="settings-label" htmlFor={`criterion-${state}`}><code>{state}</code></label>
+                      <textarea
+                        id={`criterion-${state}`}
+                        className="settings-input"
+                        aria-label={`${state} criterion`}
+                        rows={2}
+                        value={localSettings.terminalAnalyzer.criteria[state]}
+                        onChange={(e) => { setCriterion(state, e.target.value); }}
+                        style={{ resize: 'vertical', fontFamily: 'inherit' }}
+                      />
+                      <button
+                        className="settings-reset-btn"
+                        aria-label={`Reset ${state} criterion`}
+                        disabled={localSettings.terminalAnalyzer.criteria[state] === defaultSettings.terminalAnalyzer.criteria[state]}
+                        onClick={() => { setCriterion(state, defaultSettings.terminalAnalyzer.criteria[state]); }}
+                      >
+                        Reset to default
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    className="settings-reset-btn"
+                    onClick={() =>
+                      { setLocalSettings((prev) => ({
+                        ...prev,
+                        terminalAnalyzer: { ...prev.terminalAnalyzer, criteria: defaultSettings.terminalAnalyzer.criteria }
+                      })); }
+                    }
+                  >
+                    Reset all criteria
                   </button>
                 </div>
 
