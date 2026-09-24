@@ -13,12 +13,14 @@ export interface IdleDetectorDeps {
   /** Read every time the idle timer is (re)armed so settings and unread state apply live. */
   idleTimeoutMs: () => number
   /**
-   * Quiet -> active transition; fires once per burst of viewport changes with the first changed
-   * frame. The first burst after creation is assumed to be the attach replay and is not
-   * reported unless it outlives one idle timeout, which a replay never does.
+   * Quiet -> active transition; fires at most once per burst of viewport changes, with the frame
+   * that confirmed the burst. A burst is confirmed when it is still changing one idle timeout
+   * after it began, or when it goes quiet on a screen other than the one it started from. The
+   * first burst after creation is assumed to be the attach replay and is only reported by the
+   * first rule, which a replay never meets.
    */
   onActivity: (snapshot: string) => void
-  /** No viewport change for the armed timeout. */
+  /** No viewport change for the armed timeout, after a burst that changed the screen. */
   onIdle: (edge: IdleEdge) => void
 }
 
@@ -35,38 +37,46 @@ export function idleTimeoutMs(settings: Settings, unread: boolean): number {
 /**
  * Shared quiet/active state machine behind terminal activity. Consumers feed rendered viewport
  * snapshots; a frame identical to the last one repainted nothing visible and is not activity.
+ * A short burst that goes quiet on the screen it started from (a blip) reports nothing, so it
+ * neither rings nor triggers a reclassification.
  */
 export function createIdleDetector(deps: IdleDetectorDeps): IdleDetector {
   let idleTimerId: ReturnType<typeof setTimeout> | null = null
   let lastSnapshot = deps.initialSnapshot
   // No resting state is known until the first burst resolves. That burst is usually the
-  // attach replay or initial paint, not work starting, so it is not reported as activity up
-  // front; otherwise every tab of a freshly opened session would go Working -> Idle and ring.
-  // A replay lands well within one idle timeout, though, so a first burst still changing
-  // the viewport that long after it began is a process that was already working when we
-  // attached, and it is reported as Working at that change.
+  // attach replay or initial paint, not work starting, so a short one is not reported as
+  // activity; otherwise every tab of a freshly opened session would go Working -> Idle and ring.
   let settled = false
-  let firstBurstStartedAt = 0
+  let burstBaseline = deps.initialSnapshot
+  let burstStartedAt = 0
+  let reported = false
+
+  const report = (snapshot: string): void => {
+    reported = true
+    deps.onActivity(snapshot)
+  }
 
   const processSnapshot = (snapshot: string): void => {
     if (snapshot === lastSnapshot) return
-    lastSnapshot = snapshot
     if (idleTimerId) {
       clearTimeout(idleTimerId)
-      if (!settled && Date.now() - firstBurstStartedAt >= deps.idleTimeoutMs()) {
-        settled = true
-        deps.onActivity(snapshot)
-      }
-    } else if (settled) {
-      deps.onActivity(snapshot)
+      if (!reported && Date.now() - burstStartedAt >= deps.idleTimeoutMs()) report(snapshot)
     } else {
-      firstBurstStartedAt = Date.now()
+      burstBaseline = lastSnapshot
+      burstStartedAt = Date.now()
+      reported = false
     }
+    lastSnapshot = snapshot
     // Captured at arming so the edge reports the timeout that actually elapsed.
     const timeout = deps.idleTimeoutMs()
     idleTimerId = setTimeout(() => {
       idleTimerId = null
+      const wasSettled = settled
       settled = true
+      if (!reported) {
+        if (lastSnapshot === burstBaseline) return
+        if (wasSettled) report(lastSnapshot)
+      }
       deps.onIdle({ snapshot: lastSnapshot, idleTimeoutMs: timeout })
     }, timeout)
   }

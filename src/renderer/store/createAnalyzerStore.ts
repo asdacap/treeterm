@@ -108,7 +108,6 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   // Internal closure state — not part of Zustand state
   let terminal: Terminal | null = null
   let ownTty: Tty | null = null
-  let dataVersion = 0
   let lastConfiguration = configurationIdentity()
   let pollInterval: ReturnType<typeof setInterval> | null = null
   let titleTimer: ReturnType<typeof setTimeout> | null = null
@@ -204,7 +203,6 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       return
     }
 
-    const requestVersion = dataVersion
     const settings = deps.getSettings()
     const providerSettings = classifierSettings(settings)
     const requestConfiguration = configurationIdentity()
@@ -257,7 +255,9 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (!running) return
 
-      if (dataVersion !== requestVersion || configurationIdentity() !== requestConfiguration) {
+      // Compare the screen itself, not a change counter: a blip that ends back on the requested
+      // buffer fires no idle edge to re-analyze, so its response must still apply.
+      if (extractBuffer() !== buffer || configurationIdentity() !== requestConfiguration) {
         pendingAnalyze = pendingAnalyze || configurationIdentity() !== requestConfiguration
         console.debug('[terminal-analyzer] discarding stale response')
         history.push({ timestamp: Date.now(), kind: 'analyzer', model: providerSettings.model, bufferText: buffer, response: JSON.stringify(result), error: '[discarded]', systemPrompt, durationMs })
@@ -338,7 +338,6 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
     // Reset dedup state
     inFlightBuffer = null
     cache.length = 0
-    dataVersion = 0
     lastConfiguration = configurationIdentity()
     requestInFlight = false
     pendingAnalyze = false
@@ -467,9 +466,8 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       // late attach from a previous cycle sees the *new* owner (not disposed) and
       // clobbers the current TTY with its own already-disposed handle.
       const owner = streamOwner = new DisposableStore()
-      let viewportText = extractBuffer()
       const detector = createIdleDetector({
-        initialSnapshot: `${configurationIdentity()}\0${viewportText ?? ''}`,
+        initialSnapshot: `${configurationIdentity()}\0${extractBuffer() ?? ''}`,
         idleTimeoutMs: () => idleTimeoutMs(deps.getSettings(), deps.hasUnreadAttention()),
         onActivity: () => {
           if (deps.isIdleDetectorDisabled()) return
@@ -480,12 +478,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       owner.add(toDisposable(detector.destroy))
       const updateViewport = (): void => {
         if (owner.isDisposed) return
-        const nextText = extractBuffer()
-        if (nextText !== viewportText) {
-          viewportText = nextText
-          dataVersion++
-        }
-        detector.processSnapshot(`${configurationIdentity()}\0${nextText ?? ''}`)
+        detector.processSnapshot(`${configurationIdentity()}\0${extractBuffer() ?? ''}`)
       }
 
       running = true

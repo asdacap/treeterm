@@ -424,18 +424,20 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
       kind: ActivityTransitionKind.ViewportIdle, snapshot: processedData.at(-1), idleTimeoutMs: 1000,
     })
     emit('real work')
-    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working, expect.objectContaining({ kind: ActivityTransitionKind.ViewportChanged }))
+    act(() => { vi.advanceTimersByTime(1000) })
+    expect(setTabState).toHaveBeenCalledWith('tab1', ActivityState.Working, expect.objectContaining({ kind: ActivityTransitionKind.ViewportChanged }))
   })
 
-  it('records both edges with the screen that caused them and the armed timeout', async () => {
+  it('records both edges with the screen that confirmed them and the armed timeout', async () => {
     const { emit, settle } = await mount()
     settle()
     emit('working')
-    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working, {
+    emit(' more')
+    expect(setTabState).not.toHaveBeenCalled()
+    act(() => { vi.advanceTimersByTime(1000) })
+    expect(setTabState).toHaveBeenNthCalledWith(1, 'tab1', ActivityState.Working, {
       kind: ActivityTransitionKind.ViewportChanged, snapshot: processedData.at(-1),
     })
-    emit(' more')
-    act(() => { vi.advanceTimersByTime(1000) })
     expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle, {
       kind: ActivityTransitionKind.ViewportIdle, snapshot: processedData.at(-1), idleTimeoutMs: 1000,
     })
@@ -461,11 +463,11 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
     const { emit, unmount, view, settle } = await mount()
     settle()
     emit('working')
-    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working, expect.objectContaining({ kind: ActivityTransitionKind.ViewportChanged }))
     // Unmount just before the idle timeout elapses.
     act(() => { vi.advanceTimersByTime(999) })
     unmount()
     act(() => { vi.advanceTimersByTime(1) })
+    expect(setTabState).toHaveBeenNthCalledWith(1, 'tab1', ActivityState.Working, expect.objectContaining({ kind: ActivityTransitionKind.ViewportChanged }))
     expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle, expect.objectContaining({ kind: ActivityTransitionKind.ViewportIdle }))
 
     render(view())
@@ -481,8 +483,8 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
     unmount()
     act(() => { vi.advanceTimersByTime(1100) })
     emit('background change')
-    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working, expect.objectContaining({ kind: ActivityTransitionKind.ViewportChanged }))
-    expect(processedData.at(-1)).toContain('background change')
+    const changed = processedData.at(-1)
+    expect(changed).toContain('background change')
 
     // Simulate a TUI repaint that leaves the parsed viewport unchanged.
     vi.spyOn(engine, 'write').mockImplementation((_data, afterWrite) => { afterWrite?.() })
@@ -492,6 +494,7 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
     await flush()
     emit('same screen')
     act(() => { vi.advanceTimersByTime(600) })
+    expect(setTabState).toHaveBeenNthCalledWith(3, 'tab1', ActivityState.Working, { kind: ActivityTransitionKind.ViewportChanged, snapshot: changed })
     expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle, expect.objectContaining({ kind: ActivityTransitionKind.ViewportIdle }))
     expect(setTabState).toHaveBeenCalledTimes(4)
   })
@@ -511,7 +514,7 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
     expect(session.dispose).toHaveBeenCalledTimes(1)
     finishWrite()
     act(() => { vi.advanceTimersByTime(2000) })
-    expect(setTabState).toHaveBeenCalledTimes(1)
+    expect(setTabState).not.toHaveBeenCalled()
     expect(processedData).toHaveLength(1)
   })
 
@@ -537,18 +540,24 @@ describe('BaseTerminal — cached activity detector lifecycle', () => {
   it('still settles to Idle when the detector is disabled mid-burst, and resumes when re-enabled', async () => {
     const { emit, setIdleDetectorDisabled, settle } = await mount()
     settle()
+    // Keep changing past one timeout so the burst is confirmed as Working mid-burst.
     emit('working')
+    act(() => { vi.advanceTimersByTime(600) })
+    emit(' still')
+    act(() => { vi.advanceTimersByTime(600) })
+    emit(' working')
     expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working, expect.objectContaining({ kind: ActivityTransitionKind.ViewportChanged }))
     setIdleDetectorDisabled(true)
     act(() => { vi.advanceTimersByTime(2000) })
     expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Idle, expect.objectContaining({ kind: ActivityTransitionKind.ViewportIdle }))
     emit('more spam')
-    expect(setTabState).toHaveBeenCalledTimes(2)
-
     act(() => { vi.advanceTimersByTime(2000) })
+    expect(setTabState).not.toHaveBeenCalledWith('tab1', ActivityState.Working, expect.objectContaining({ snapshot: processedData.at(-1) }))
+
     setIdleDetectorDisabled(false)
     emit('real work')
-    expect(setTabState).toHaveBeenLastCalledWith('tab1', ActivityState.Working, expect.objectContaining({ kind: ActivityTransitionKind.ViewportChanged }))
+    act(() => { vi.advanceTimersByTime(1000) })
+    expect(setTabState).toHaveBeenCalledWith('tab1', ActivityState.Working, { kind: ActivityTransitionKind.ViewportChanged, snapshot: processedData.at(-1) })
   })
 
   it('does not detect activity for terminals configured to use an external analyzer', async () => {
