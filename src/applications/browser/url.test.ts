@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveAddress } from './url'
+import { isMarkdownPage, resolveAddress } from './url'
 
 const PAGE = 'http://localhost:3000/app/page?x=1'
 
@@ -25,5 +25,18 @@ describe('resolveAddress', () => {
     ['   ', 'Enter a URL or path'],
   ])('refuses %s', (input, message) => {
     expect(() => resolveAddress(input, PAGE)).toThrow(message)
+  })
+})
+
+describe('isMarkdownPage', () => {
+  it.each([
+    ['text/markdown', 'http://localhost:3000/notes', true],
+    ['text/x-markdown', 'http://localhost:3000/notes', true],
+    ['text/plain', 'http://localhost:3000/README.md', true],
+    ['text/plain', 'http://localhost:3000/docs/Guide.MARKDOWN?x=1', true],
+    ['text/plain', 'http://localhost:3000/notes.txt', false],
+    ['text/html', 'http://localhost:3000/README.md', false],
+  ])('%s at %s is %s', (contentType, url, expected) => {
+    expect(isMarkdownPage(contentType, url)).toBe(expected)
   })
 })

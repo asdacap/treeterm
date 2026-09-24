@@ -45,3 +45,16 @@ export function resolveAddress(input: string, pageUrl: string): URL {
   next.hostname = page.hostname
   return next
 }
+
+const MARKDOWN_TYPES = new Set(['text/markdown', 'text/x-markdown'])
+const MARKDOWN_PATH = /\.(md|markdown)$/i
+
+/**
+ * Whether a loaded page is markdown source to render rather than show as text.
+ * Servers often send .md files as text/plain; HTML is never treated as markdown.
+ */
+export function isMarkdownPage(contentType: string, url: string): boolean {
+  if (MARKDOWN_TYPES.has(contentType)) return true
+  // eslint-disable-next-line custom/no-string-literal-comparison -- MIME type is a fixed external constant
+  return contentType === 'text/plain' && MARKDOWN_PATH.test(new URL(url).pathname)
+}

@@ -49,7 +49,7 @@ describe('BrowserView', () => {
     expect(onRetry).toHaveBeenCalled()
   })
 
-  type MockWebview = HTMLElement & Record<'goBack' | 'goForward' | 'reloadIgnoringCache' | 'stop' | 'canGoBack' | 'canGoForward' | 'loadURL', ReturnType<typeof vi.fn>>
+  type MockWebview = HTMLElement & Record<'goBack' | 'goForward' | 'reloadIgnoringCache' | 'stop' | 'canGoBack' | 'canGoForward' | 'loadURL' | 'executeJavaScript', ReturnType<typeof vi.fn>>
 
   function renderReady(openExternal = vi.fn()) {
     const { container } = render(
@@ -60,6 +60,7 @@ describe('BrowserView', () => {
       goBack: vi.fn(), goForward: vi.fn(), reloadIgnoringCache: vi.fn(), stop: vi.fn(),
       canGoBack: vi.fn(() => true), canGoForward: vi.fn(() => false),
       loadURL: vi.fn(() => Promise.resolve()),
+      executeJavaScript: vi.fn(() => Promise.resolve({ contentType: 'text/html', url: 'http://localhost:3000/', text: '' })),
     })
     const address = screen.getByLabelText<HTMLInputElement>('Address')
     const navigate = (url: string): void => {
@@ -96,6 +97,40 @@ describe('BrowserView', () => {
     expect(webview.stop).toHaveBeenCalled()
     act(() => { webview.dispatchEvent(new Event('did-stop-loading')) })
     expect(screen.getByTitle('Reload')).toBeTruthy()
+  })
+
+  it('renders markdown pages over the webview and routes their links', async () => {
+    const { webview, openExternal } = renderReady()
+    webview.executeJavaScript.mockResolvedValueOnce({
+      contentType: 'text/plain',
+      url: 'http://localhost:3000/docs/README.md',
+      text: '# Title\n\n[Guide](guide.md) [Site](https://example.com/) [Plain](#)',
+    })
+    act(() => { webview.dispatchEvent(Object.assign(new Event('did-navigate'), { url: 'http://localhost:3000/docs/README.md' })) })
+    act(() => { webview.dispatchEvent(new Event('did-stop-loading')) })
+    await waitFor(() => { expect(screen.getByRole('heading', { name: 'Title' })).toBeTruthy() })
+
+    fireEvent.click(screen.getByText('Guide'))
+    expect(webview.loadURL).toHaveBeenCalledWith('http://localhost:3000/docs/guide.md')
+    fireEvent.click(screen.getByText('Site'))
+    expect(openExternal).toHaveBeenCalledWith('https://example.com/')
+    // Clicks outside links are left alone.
+    fireEvent.click(screen.getByRole('heading', { name: 'Title' }))
+    expect(webview.loadURL).toHaveBeenCalledTimes(1)
+
+    // Navigating to an HTML page removes the overlay.
+    act(() => { webview.dispatchEvent(new Event('did-stop-loading')) })
+    await waitFor(() => { expect(screen.queryByRole('heading', { name: 'Title' })).toBeNull() })
+  })
+
+  it('logs a failed page probe and keeps showing the page', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { webview } = renderReady()
+    webview.executeJavaScript.mockRejectedValueOnce(new Error('guest gone'))
+    act(() => { webview.dispatchEvent(new Event('did-stop-loading')) })
+    await waitFor(() => { expect(error).toHaveBeenCalled() })
+    expect(document.querySelector('.webapp-markdown')).toBeNull()
+    error.mockRestore()
   })
 
   it('navigates to a typed path on Enter', () => {

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import type { KeyboardEvent, ReactNode, RefObject } from 'react'
+import type { KeyboardEvent, MouseEvent, ReactNode, RefObject } from 'react'
 import type { WebviewTag } from 'electron'
 import type { PortForwardInfo, SSHApi } from '../types'
 import { PortForwardStatus } from '../../shared/types'
 import { WebAppPhase } from '../../applications/webApp/runtime'
 import type { WebAppRuntime } from '../../applications/webApp/runtime'
-import { resolveAddress } from '../../applications/browser/url'
+import { isMarkdownPage, resolveAddress } from '../../applications/browser/url'
+import { MarkdownPreview } from './MarkdownPreview'
 
 // Views shared by the WebApp and Browser panes: the embedded page and the ssh forward.
 
@@ -56,11 +57,29 @@ export function BrowserView({ runtime, onRetry, detailsLinks, openExternal }: Br
   return <>{view(runtime)}</>
 }
 
+enum PageKind {
+  Web = 'web',
+  Markdown = 'markdown',
+}
+
+type PageContent = { kind: PageKind.Web } | { kind: PageKind.Markdown; text: string }
+
+interface PageProbe {
+  contentType: string
+  url: string
+  text: string
+}
+
+// Runs in the guest once a load finishes. Text pages are shown inline, so innerText is the source.
+const PROBE_SCRIPT = '({ contentType: document.contentType, url: location.href, text: document.body ? document.body.innerText : "" })'
+
 function WebView({ url, openExternal }: { url: string; openExternal: (url: string) => void }) {
   const [view, setView] = useState<WebviewTag | null>(null)
   const [currentUrl, setCurrentUrl] = useState(url)
   const [nav, setNav] = useState({ canGoBack: false, canGoForward: false })
   const [loading, setLoading] = useState(false)
+  // The previous page's content stays up until the next load finishes, like a normal browser.
+  const [content, setContent] = useState<PageContent>({ kind: PageKind.Web })
   const addressRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -70,7 +89,14 @@ function WebView({ url, openExternal }: { url: string; openExternal: (url: strin
       setNav({ canGoBack: view.canGoBack(), canGoForward: view.canGoForward() })
     }
     const onStart = (): void => { setLoading(true) }
-    const onStop = (): void => { setLoading(false) }
+    const onStop = (): void => {
+      setLoading(false)
+      view.executeJavaScript(PROBE_SCRIPT).then((probe: PageProbe) => {
+        setContent(isMarkdownPage(probe.contentType, probe.url)
+          ? { kind: PageKind.Markdown, text: probe.text }
+          : { kind: PageKind.Web })
+      }).catch((err: unknown) => { console.error(err) })
+    }
     view.addEventListener('did-navigate', onNavigate)
     view.addEventListener('did-navigate-in-page', onNavigate)
     view.addEventListener('did-start-loading', onStart)
@@ -87,6 +113,30 @@ function WebView({ url, openExternal }: { url: string; openExternal: (url: strin
     // The page itself shows load failures; the rejection is only worth a log line.
     view?.loadURL(target).catch((err: unknown) => { console.error(err) })
   }
+
+  // Links in rendered markdown would otherwise navigate the host window.
+  const onMarkdownClick = (e: MouseEvent<HTMLDivElement>): void => {
+    const href = (e.target as HTMLElement).closest('a')?.getAttribute('href')
+    if (href === null || href === undefined) return
+    e.preventDefault()
+    const target = new URL(href, currentUrl)
+    if (target.origin === new URL(currentUrl).origin) load(target.href)
+    else openExternal(target.href)
+  }
+
+  // Render callbacks are invoked directly, not mounted as component types.
+  /* eslint-disable react/no-unstable-nested-components */
+  const overlays: { [K in PageKind]: (c: Extract<PageContent, { kind: K }>) => ReactNode } = {
+    [PageKind.Web]: () => null,
+    [PageKind.Markdown]: (c) => (
+      <div className="webapp-markdown" onClick={onMarkdownClick}>
+        <MarkdownPreview content={c.text} />
+      </div>
+    ),
+  }
+  /* eslint-enable react/no-unstable-nested-components */
+  // TS cannot correlate the mapped key with the union member; the record above is exhaustive.
+  const overlay = overlays[content.kind] as (c: PageContent) => ReactNode
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
     // eslint-disable-next-line custom/no-string-literal-comparison -- KeyboardEvent.key values are DOM constants, not domain enums
@@ -108,12 +158,15 @@ function WebView({ url, openExternal }: { url: string; openExternal: (url: strin
         <AddressBar inputRef={addressRef} currentUrl={currentUrl} onNavigate={load} />
         <button title="Open in external browser" onClick={() => { openExternal(currentUrl) }}>↗</button>
       </div>
-      <webview
-        ref={(el: HTMLElement | null) => { setView(el as WebviewTag | null) }}
-        src={url}
-        partition="persist:webapp"
-        className="webapp-webview"
-      />
+      <div className="webapp-page">
+        <webview
+          ref={(el: HTMLElement | null) => { setView(el as WebviewTag | null) }}
+          src={url}
+          partition="persist:webapp"
+          className="webapp-webview"
+        />
+        {overlay(content)}
+      </div>
     </div>
   )
 }

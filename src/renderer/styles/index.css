@@ -7966,6 +7966,21 @@ body,
   font-family: monospace;
 }
 
+.webapp-page {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* Rendered markdown sits over the webview, which stays mounted to keep its history. */
+.webapp-markdown {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  background: var(--bg-primary);
+}
+
 .webapp-webview {
   flex: 1;
   min-height: 0;
