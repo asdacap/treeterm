@@ -39,6 +39,9 @@ export const defaultSettings: Settings = {
   webApp: {
     instances: []
   },
+  browser: {
+    instances: []
+  },
   notifications: { soundEnabled: true },
   appearance: {
     theme: 'dark'
@@ -162,6 +165,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       useAppStore.getState().registerCustomRunnerVariants(settings.customRunner.instances)
       // Register dynamic web app variants
       useAppStore.getState().registerWebAppVariants(settings.webApp.instances)
+      // Register dynamic browser variants
+      useAppStore.getState().registerBrowserVariants(settings.browser.instances)
     } catch (error) {
       console.warn('[settings] Failed to load settings, using defaults:', error)
       set({ isLoaded: true })
@@ -182,6 +187,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       useAppStore.getState().registerCustomRunnerVariants(settings.customRunner.instances)
       // Register dynamic web app variants
       useAppStore.getState().registerWebAppVariants(settings.webApp.instances)
+      // Register dynamic browser variants
+      useAppStore.getState().registerBrowserVariants(settings.browser.instances)
     } catch (error) {
       console.error('Failed to save settings:', error)
       throw error

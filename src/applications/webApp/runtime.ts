@@ -1,5 +1,5 @@
 import type { StoreApi } from 'zustand/vanilla'
-import type { TerminalAppRef } from '../../renderer/types'
+import type { AppRef, TerminalAppRef } from '../../renderer/types'
 
 export enum WebAppPhase {
   AllocatingPort = 'allocating-port',
@@ -16,13 +16,16 @@ export type WebAppRuntime =
   | { phase: WebAppPhase.Ready; url: string }
   | { phase: WebAppPhase.Error; message: string }
 
-export interface WebAppRef extends TerminalAppRef {
+/** Ref of a tab that shows a (possibly forwarded) localhost page: WebApp and Browser. */
+export interface PageRef extends AppRef {
   runtime: StoreApi<WebAppRuntime>
   /** Re-run the startup flow; reuses whatever port, PTY and forward still exist. */
   retry: () => void
   /** Tear down the ssh forward and set it up again (remote only). */
   restartForward: () => Promise<void>
 }
+
+export interface WebAppRef extends PageRef, TerminalAppRef {}
 
 export function forwardIdForTab(tabId: string): string {
   return `webapp-${tabId}`

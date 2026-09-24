@@ -168,6 +168,14 @@ export interface WebAppInstance {
   keepOnExit: boolean
 }
 
+export interface BrowserInstance {
+  id: string
+  name: string
+  icon: string
+  url: string  // must be http(s)://localhost or 127.0.0.1; forwarded over ssh on remote sessions
+  isDefault: boolean
+}
+
 export interface PrefixModeConfig {
   enabled: boolean
   prefixKey: string // e.g., 'Control+B'
@@ -247,6 +255,9 @@ export interface Settings {
   }
   webApp: {
     instances: WebAppInstance[]
+  }
+  browser: {
+    instances: BrowserInstance[]
   }
   notifications: {
     soundEnabled: boolean

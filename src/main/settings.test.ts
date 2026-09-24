@@ -308,6 +308,16 @@ describe('settings', () => {
       expect(loadSettings().webApp.instances).toEqual([])
     })
 
+    it('preserves browser.instances and defaults them to empty', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true)
+      const graf = { id: 'graf', name: 'Grafana', icon: '📈', url: 'http://localhost:3000/', isDefault: false }
+      vi.mocked(fs.readFileSync).mockReturnValueOnce(JSON.stringify({ browser: { instances: [graf] } }))
+      expect(loadSettings().browser.instances).toEqual([graf])
+
+      vi.mocked(fs.readFileSync).mockReturnValueOnce(JSON.stringify({}))
+      expect(loadSettings().browser.instances).toEqual([])
+    })
+
     it('preserves string keybindings as-is', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true)
       vi.mocked(fs.readFileSync).mockReturnValue(

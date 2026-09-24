@@ -208,55 +208,6 @@ describe('createWebAppVariant', () => {
       expect(tabState(store).localPort).toEqual({ status: WebAppPortStatus.Assigned, port: 20000 })
     })
 
-    it('reuses an active forward', async () => {
-      probe.mockResolvedValue(0)
-      const { ssh, forwards } = makeSsh(() => PortForwardStatus.Active)
-      forwards.set(forwardIdForTab(TAB_ID), {
-        id: forwardIdForTab(TAB_ID), connectionId: 'conn-1', localPort: 25000, remoteHost: 'localhost', remotePort: 31000, persist: false, status: PortForwardStatus.Active,
-      })
-      const ref = load(makeDeps(ssh), makeWorkspaceStore(readyState(), true))
-      await waitForPhase(ref, WebAppPhase.Ready)
-      expect(ssh.addPortForward).not.toHaveBeenCalled()
-      expect(ref.runtime.getState()).toEqual({ phase: WebAppPhase.Ready, url: 'http://localhost:25000/' })
-    })
-
-    it('waits for a connecting forward, and replaces a dead one keeping the persisted local port', async () => {
-      probe.mockResolvedValue(0)
-      const { ssh, forwards } = makeSsh(() => PortForwardStatus.Active)
-      const id = forwardIdForTab(TAB_ID)
-      forwards.set(id, { id, connectionId: 'conn-1', localPort: 26000, remoteHost: 'localhost', remotePort: 31000, persist: false, status: PortForwardStatus.Connecting })
-      const deps = makeDeps(ssh)
-      vi.mocked(deps.sleep).mockImplementation(() => {
-        forwards.set(id, { id, connectionId: 'conn-1', localPort: 26000, remoteHost: 'localhost', remotePort: 31000, persist: false, status: PortForwardStatus.Stopped })
-        return Promise.resolve()
-      })
-      const store = makeWorkspaceStore({ ...readyState(), localPort: { status: WebAppPortStatus.Assigned, port: 26000 } }, true)
-      const ref = load(deps, store)
-      await waitForPhase(ref, WebAppPhase.Ready)
-      expect(ssh.removePortForward).toHaveBeenCalledWith(id)
-      expect(ssh.addPortForward).toHaveBeenCalledWith(expect.objectContaining({ localPort: 26000 }))
-    })
-
-    it('retries on a new local port when the forward fails', async () => {
-      probe.mockResolvedValue(0)
-      const { ssh } = makeSsh((config) => config.localPort === 26000 ? PortForwardStatus.Error : PortForwardStatus.Active)
-      const store = makeWorkspaceStore({ ...readyState(), localPort: { status: WebAppPortStatus.Assigned, port: 26000 } }, true)
-      const ref = load(makeDeps(ssh), store)
-      await waitForPhase(ref, WebAppPhase.Ready)
-      expect(ssh.addPortForward).toHaveBeenCalledTimes(2)
-      expect(ref.runtime.getState()).toEqual({ phase: WebAppPhase.Ready, url: 'http://localhost:20000/' })
-      expect(tabState(store).localPort).toEqual({ status: WebAppPortStatus.Assigned, port: 20000 })
-    })
-
-    it('gives up after repeated forward failures', async () => {
-      probe.mockResolvedValue(0)
-      const { ssh } = makeSsh(() => PortForwardStatus.Error)
-      const ref = load(makeDeps(ssh), makeWorkspaceStore(readyState(), true))
-      await waitForPhase(ref, WebAppPhase.Error)
-      expect(ref.runtime.getState()).toEqual({ phase: WebAppPhase.Error, message: 'Port forward failed after 5 attempts' })
-      expect(ssh.addPortForward).toHaveBeenCalledTimes(5)
-    })
-
     it('restartForward removes the forward and runs again', async () => {
       probe.mockResolvedValue(0)
       const { ssh } = makeSsh(() => PortForwardStatus.Active)

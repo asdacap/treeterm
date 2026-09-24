@@ -17,6 +17,7 @@ import { filesystemApplication } from '../../applications/filesystem/renderer'
 import { createAiHarnessVariant } from '../../applications/aiHarness/renderer'
 import { createCustomRunnerVariant } from '../../applications/customRunner/renderer'
 import { createWebAppVariant } from '../../applications/webApp/renderer'
+import { createBrowserVariant } from '../../applications/browser/renderer'
 import { reviewApplication } from '../../applications/review/renderer'
 import { editorApplication } from '../../applications/editor/renderer'
 import { commentsApplication } from '../../applications/comments/renderer'
@@ -31,7 +32,7 @@ import type {
   Workspace, Session, Application,
   Platform, TerminalApi, SessionApi, AppApi, DaemonApi,
   RawFilesystemApi, ExecApi, SandboxApi, SettingsApi,
-  TerminalInstance, AiHarnessInstance, CustomRunnerInstance, WebAppInstance,
+  TerminalInstance, AiHarnessInstance, CustomRunnerInstance, WebAppInstance, BrowserInstance,
   ConnectionInfo, SSHConnectionConfig, SSHApi, ClipboardApi
 } from '../types'
 import { createBoundFilesystem } from '../types'
@@ -90,6 +91,7 @@ interface AppState extends AppDeps {
   registerAiHarnessVariants: (instances: AiHarnessInstance[]) => void
   registerCustomRunnerVariants: (instances: CustomRunnerInstance[]) => void
   registerWebAppVariants: (instances: WebAppInstance[]) => void
+  registerBrowserVariants: (instances: BrowserInstance[]) => void
 
   // Session management
   sessionStores: Map<string, SessionEntry>
@@ -101,6 +103,8 @@ interface AppState extends AppDeps {
   startRemoteConnect: (config: SSHConnectionConfig) => void
   setSessionError: (connectionId: string, error: string, errorKind?: ConnectionErrorKind) => void
 }
+
+const sleep = (ms: number): Promise<void> => new Promise<void>((resolve) => { setTimeout(resolve, ms) })
 
 // Placeholder used before initialize() injects real deps.
 // Safe because initialize() is called before any component renders.
@@ -259,7 +263,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       terminal: { kill: terminal.kill.bind(terminal) },
       ssh,
       openExternal,
-      sleep: (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms) }),
+      sleep,
       random: Math.random,
     }
 
@@ -274,6 +278,24 @@ export const useAppStore = create<AppState>()((set, get) => ({
     // Register new variants
     for (const instance of instances) {
       get().registerApplication(createWebAppVariant(instance, deps))
+    }
+  },
+
+  registerBrowserVariants: (instances: BrowserInstance[]) => {
+    const { ssh, openExternal } = get()
+    const deps = { ssh, openExternal, sleep, random: Math.random }
+
+    // Unregister existing dynamic browser apps
+    const allApps = Array.from(get().applications.values())
+    for (const app of allApps) {
+      if (app.id.startsWith('browser-')) {
+        get().unregisterApplication(app.id)
+      }
+    }
+
+    // Register new variants
+    for (const instance of instances) {
+      get().registerApplication(createBrowserVariant(instance, deps))
     }
   },
 

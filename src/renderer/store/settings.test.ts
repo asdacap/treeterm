@@ -8,7 +8,8 @@ vi.mock('./app', () => ({
       registerTerminalVariants: vi.fn(),
       registerAiHarnessVariants: vi.fn(),
       registerCustomRunnerVariants: vi.fn(),
-      registerWebAppVariants: vi.fn()
+      registerWebAppVariants: vi.fn(),
+      registerBrowserVariants: vi.fn()
     })
   }
 }))
@@ -70,6 +71,9 @@ describe('SettingsStore', () => {
         webApp: {
           instances: []
         },
+        browser: {
+          instances: []
+        },
         appearance: {
           theme: 'dark'
         },
@@ -127,6 +131,7 @@ describe('SettingsStore', () => {
         aiHarness: { instances: [] },
         customRunner: { instances: [] },
         webApp: { instances: [] },
+        browser: { instances: [] },
         sandbox: { enabledByDefault: false, allowNetworkByDefault: true },
         prefixMode: { enabled: true, prefixKey: 'Control+B', timeout: 1500 },
         keybindings: {

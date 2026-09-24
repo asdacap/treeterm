@@ -1,11 +1,11 @@
 import { createElement } from 'react'
 import { createStore } from 'zustand/vanilla'
-import type { Application, Tab, WebAppInstance, WebAppState, WorkspaceStore, SSHApi, PortForwardInfo } from '../../renderer/types'
+import type { Application, Tab, WebAppInstance, WebAppState, WorkspaceStore, SSHApi } from '../../renderer/types'
 import { isWebAppState, WebAppPortStatus } from '../../renderer/types'
-import { PortForwardStatus } from '../../shared/types'
 import WebAppPane from '../../renderer/components/WebAppPane'
 import { useActivityStateStore } from '../../renderer/store/activityState'
-import { createHttpProbe, findFreePort, randomPort, waitForHttp, WaitOutcome } from './ports'
+import { createHttpProbe, findFreePort, waitForHttp, WaitOutcome } from './ports'
+import { ensureForward } from './forward'
 import { WebAppPhase, forwardIdForTab } from './runtime'
 import type { WebAppRef, WebAppRuntime } from './runtime'
 
@@ -16,9 +16,6 @@ export type WebAppDeps = {
   sleep: (ms: number) => Promise<void>
   random: () => number
 }
-
-const FORWARD_ATTEMPTS = 5
-const FORWARD_POLL_MS = 500
 
 export function resolveCommand(command: string, port: number): string {
   return command.replaceAll('$PORT', String(port))
@@ -72,42 +69,18 @@ export function createWebAppVariant(instance: WebAppInstance, deps: WebAppDeps):
         update((s) => ({ ...s, ptyId, ptyHandle: handle, connectionId: ws.connectionId }))
       }
 
-      /** Polls until the forward leaves Connecting. Undefined when it does not exist. */
-      async function settledForward(): Promise<PortForwardInfo | undefined> {
-        for (;;) {
-          const pf = (await deps.ssh.listPortForwards(ws.connectionId)).find((p) => p.id === forwardId)
-          if (pf?.status !== PortForwardStatus.Connecting) return pf
-          await deps.sleep(FORWARD_POLL_MS)
-        }
-      }
-
-      async function ensureForward(state: WebAppState, remotePort: number): Promise<number> {
-        const existing = await settledForward()
-        if (existing?.status === PortForwardStatus.Active) return existing.localPort
-        if (existing) await deps.ssh.removePortForward(forwardId)
-
-        for (let attempt = 0; attempt < FORWARD_ATTEMPTS; attempt++) {
-          // Keep the persisted local port on the first try so the browser origin is stable.
-          const localPort = attempt === 0 && state.localPort.status === WebAppPortStatus.Assigned
-            ? state.localPort.port
-            : randomPort(deps.random)
-          await deps.ssh.addPortForward({
-            id: forwardId,
-            connectionId: ws.connectionId,
-            localPort,
-            remoteHost: 'localhost',
-            remotePort,
-            persist: false,
-          })
-          const pf = await settledForward()
-          if (pf?.status === PortForwardStatus.Active) {
-            update((s) => ({ ...s, localPort: { status: WebAppPortStatus.Assigned, port: localPort } }))
-            return localPort
-          }
-          // ExitOnForwardFailure: most likely the local port is taken — try another.
-          await deps.ssh.removePortForward(forwardId)
-        }
-        throw new Error(`Port forward failed after ${String(FORWARD_ATTEMPTS)} attempts`)
+      async function ensureLocalForward(state: WebAppState, remotePort: number): Promise<number> {
+        const localPort = await ensureForward({
+          ssh: deps.ssh,
+          sleep: deps.sleep,
+          random: deps.random,
+          connectionId: ws.connectionId,
+          forwardId,
+          remotePort,
+          preferredLocalPort: state.localPort,
+        })
+        update((s) => ({ ...s, localPort: { status: WebAppPortStatus.Assigned, port: localPort } }))
+        return localPort
       }
 
       async function start(): Promise<void> {
@@ -127,7 +100,7 @@ export function createWebAppVariant(instance: WebAppInstance, deps: WebAppDeps):
         runtime.setState({ phase: WebAppPhase.Forwarding, port }, true)
         const afterServer = readState()
         if (!afterServer || isCancelled()) return
-        const localPort = await ensureForward(afterServer, port)
+        const localPort = await ensureLocalForward(afterServer, port)
         if (isCancelled()) return
         runtime.setState({ phase: WebAppPhase.Ready, url: `http://localhost:${String(localPort)}/` }, true)
       }

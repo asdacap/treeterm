@@ -1,22 +1,17 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, act } from '@testing-library/react'
 import { createStore } from 'zustand/vanilla'
-import WebAppPane, { BrowserView, PortForwardView } from './WebAppPane'
-import type { WebAppPaneSsh } from './WebAppPane'
+import WebAppPane from './WebAppPane'
+import type { PageSsh } from './PageViews'
 import { WebAppPhase } from '../../applications/webApp/runtime'
 import type { WebAppRef, WebAppRuntime } from '../../applications/webApp/runtime'
 import type { PortForwardInfo, WorkspaceStore } from '../types'
 import type { WorkspaceStoreState } from '../store/createWorkspaceStore'
-import { PortForwardStatus } from '../../shared/types'
 
 vi.mock('./Terminal', () => ({
   default: ({ isVisible }: { isVisible: boolean }) => <div data-testid="terminal">{isVisible ? 'visible' : 'hidden'}</div>,
 }))
-
-const forward = (status: PortForwardStatus): PortForwardInfo => (status === PortForwardStatus.Error
-  ? { id: 'webapp-tab-1', connectionId: 'c', localPort: 20001, remoteHost: 'localhost', remotePort: 31000, persist: false, status, error: 'bind failed' }
-  : { id: 'webapp-tab-1', connectionId: 'c', localPort: 20001, remoteHost: 'localhost', remotePort: 31000, persist: false, status })
 
 function makeSsh(initial: PortForwardInfo[] = []) {
   let statusCb: (info: PortForwardInfo) => void = () => {}
@@ -29,7 +24,7 @@ function makeSsh(initial: PortForwardInfo[] = []) {
       outputCb = cb
       return Promise.resolve({ scrollback: ['[portfwd] started'], unsubscribe: unsubscribeOutput })
     }),
-  } as unknown as WebAppPaneSsh
+  } as unknown as PageSsh
   return { ssh, emitStatus: (i: PortForwardInfo) => { statusCb(i) }, emitOutput: (l: string) => { outputCb(l) }, unsubscribeOutput }
 }
 
@@ -82,96 +77,5 @@ describe('WebAppPane', () => {
     render(<WebAppPane workspace={makeWorkspace(ref, false)} tabId="tab-1" isVisible ssh={makeSsh().ssh} openExternal={vi.fn()} />)
     act(() => { ref.runtime.setState({ phase: WebAppPhase.WaitingForServer, port: 1234 }, true) })
     expect(screen.getByText('Waiting for server on port 1234…')).toBeTruthy()
-  })
-})
-
-describe('BrowserView', () => {
-  const noop = (): void => {}
-
-  it.each([
-    [{ phase: WebAppPhase.AllocatingPort } as WebAppRuntime, 'Finding a free port…'],
-    [{ phase: WebAppPhase.WaitingForServer, port: 3000 } as WebAppRuntime, 'Waiting for server on port 3000…'],
-    [{ phase: WebAppPhase.Forwarding, port: 3000 } as WebAppRuntime, 'Starting port forward for port 3000…'],
-  ])('shows a waiting message for %o', (runtime, text) => {
-    render(<BrowserView runtime={runtime} onRetry={noop} onViewShell={noop} openExternal={noop} />)
-    expect(screen.getByText(text)).toBeTruthy()
-  })
-
-  it('shows the error with a retry', () => {
-    const onRetry = vi.fn()
-    render(<BrowserView runtime={{ phase: WebAppPhase.Error, message: 'boom' }} onRetry={onRetry} onViewShell={noop} openExternal={noop} />)
-    expect(screen.getByText('boom')).toBeTruthy()
-    fireEvent.click(screen.getByText('Retry'))
-    expect(onRetry).toHaveBeenCalled()
-  })
-
-  it('embeds the page when ready, tracks navigation and drives the webview', () => {
-    const openExternal = vi.fn()
-    const { container } = render(
-      <BrowserView runtime={{ phase: WebAppPhase.Ready, url: 'http://localhost:3000/' }} onRetry={noop} onViewShell={noop} openExternal={openExternal} />,
-    )
-    const webview = container.querySelector('webview') as HTMLElement & { goBack: () => void; goForward: () => void; reload: () => void }
-    expect(webview.getAttribute('src')).toBe('http://localhost:3000/')
-    webview.goBack = vi.fn()
-    webview.goForward = vi.fn()
-    webview.reload = vi.fn()
-    fireEvent.click(screen.getByTitle('Back'))
-    fireEvent.click(screen.getByTitle('Forward'))
-    fireEvent.click(screen.getByTitle('Reload'))
-    expect(webview.goBack).toHaveBeenCalled()
-    expect(webview.goForward).toHaveBeenCalled()
-    expect(webview.reload).toHaveBeenCalled()
-
-    act(() => { webview.dispatchEvent(Object.assign(new Event('did-navigate'), { url: 'http://localhost:3000/about' })) })
-    expect(screen.getByText('http://localhost:3000/about')).toBeTruthy()
-    fireEvent.click(screen.getByTitle('Open in external browser'))
-    expect(openExternal).toHaveBeenCalledWith('http://localhost:3000/about')
-  })
-})
-
-describe('PortForwardView', () => {
-  it('shows status, streams output and offers restart on error', async () => {
-    const { ssh, emitStatus, emitOutput } = makeSsh([forward(PortForwardStatus.Active)])
-    const onRestart = vi.fn()
-    render(<PortForwardView ssh={ssh} connectionId="c" forwardId="webapp-tab-1" onRestart={onRestart} />)
-    expect(await screen.findByText(/localhost:20001 → localhost:31000 \(active\)/)).toBeTruthy()
-    expect(await screen.findByText('[portfwd] started')).toBeTruthy()
-    act(() => { emitOutput('[portfwd] line 2') })
-    expect(screen.getByText('[portfwd] line 2')).toBeTruthy()
-    expect(screen.queryByText('Restart')).toBeNull()
-
-    act(() => { emitStatus({ ...forward(PortForwardStatus.Active), id: 'someone-else' }) })
-    act(() => { emitStatus(forward(PortForwardStatus.Error)) })
-    expect(screen.getByText('bind failed')).toBeTruthy()
-    fireEvent.click(screen.getByText('Restart'))
-    expect(onRestart).toHaveBeenCalled()
-  })
-
-  it('re-watches output when a new forward process starts', async () => {
-    const { ssh, emitStatus } = makeSsh([forward(PortForwardStatus.Active)])
-    render(<PortForwardView ssh={ssh} connectionId="c" forwardId="webapp-tab-1" onRestart={vi.fn()} />)
-    await waitFor(() => { expect(ssh.watchPortForwardOutput).toHaveBeenCalledTimes(1) })
-    act(() => { emitStatus(forward(PortForwardStatus.Connecting)) })
-    await waitFor(() => { expect(ssh.watchPortForwardOutput).toHaveBeenCalledTimes(2) })
-  })
-
-  it('unsubscribes a watch that resolves after unmount', async () => {
-    const { ssh, unsubscribeOutput } = makeSsh([forward(PortForwardStatus.Active)])
-    const { unmount } = render(<PortForwardView ssh={ssh} connectionId="c" forwardId="webapp-tab-1" onRestart={vi.fn()} />)
-    await waitFor(() => { expect(ssh.watchPortForwardOutput).toHaveBeenCalled() })
-    unmount()
-    await waitFor(() => { expect(unsubscribeOutput).toHaveBeenCalled() })
-  })
-
-  it('shows list and watch failures', async () => {
-    const { ssh } = makeSsh([forward(PortForwardStatus.Active)])
-    vi.mocked(ssh.watchPortForwardOutput).mockRejectedValue(new Error('gone'))
-    const view = render(<PortForwardView ssh={ssh} connectionId="c" forwardId="webapp-tab-1" onRestart={vi.fn()} />)
-    expect(await screen.findByText('Failed to watch output: gone')).toBeTruthy()
-    view.unmount()
-
-    vi.mocked(ssh.listPortForwards).mockRejectedValue('offline')
-    render(<PortForwardView ssh={ssh} connectionId="c" forwardId="webapp-tab-1" onRestart={vi.fn()} />)
-    expect(await screen.findByText('offline')).toBeTruthy()
   })
 })

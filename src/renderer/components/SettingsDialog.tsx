@@ -8,6 +8,7 @@ import { ClassifierProvider, type ClassifiedState } from '../../shared/types'
 import { classifiedStates } from '../../shared/classifierSettings'
 import type { SandboxApi } from '../types'
 import WebAppSettingsSection from './WebAppSettingsSection'
+import BrowserSettingsSection from './BrowserSettingsSection'
 
 interface SettingsDialogProps {
   isOpen: boolean
@@ -29,6 +30,7 @@ enum TabId {
   Debug = 'debug',
   CustomRunners = 'custom-runners',
   WebApps = 'web-apps',
+  Browsers = 'browsers',
 }
 
 const tabs: { id: TabId; label: string }[] = [
@@ -38,6 +40,7 @@ const tabs: { id: TabId; label: string }[] = [
   { id: TabId.AiHarness, label: 'AI Harness' },
   { id: TabId.CustomRunners, label: 'Custom Runners' },
   { id: TabId.WebApps, label: 'Web Apps' },
+  { id: TabId.Browsers, label: 'Browsers' },
   { id: TabId.Llm, label: 'LLM' },
   { id: TabId.Sandbox, label: 'Sandbox' },
   { id: TabId.Appearance, label: 'Appearance' },
@@ -607,6 +610,13 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
               <WebAppSettingsSection
                 instances={localSettings.webApp.instances}
                 onChange={(instances) => { setLocalSettings((prev) => ({ ...prev, webApp: { ...prev.webApp, instances } })) }}
+              />
+            )}
+
+            {activeTab === TabId.Browsers && (
+              <BrowserSettingsSection
+                instances={localSettings.browser.instances}
+                onChange={(instances) => { setLocalSettings((prev) => ({ ...prev, browser: { ...prev.browser, instances } })) }}
               />
             )}
 

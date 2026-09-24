@@ -22,6 +22,7 @@ import type {
   AiHarnessInstance,
   CustomRunnerInstance,
   WebAppInstance,
+  BrowserInstance,
   PrefixModeConfig,
   Settings,
   WorktreeSettings,
@@ -48,6 +49,7 @@ export type {
   AiHarnessInstance,
   CustomRunnerInstance,
   WebAppInstance,
+  BrowserInstance,
   PrefixModeConfig,
   Settings,
   WorktreeSettings,
@@ -160,6 +162,11 @@ export type WebAppState = TerminalState & {
   port: WebAppPort
   // Remote sessions only: the local end of the ssh forward. Persisted so the browser
   // origin (and with it cookies/localStorage) stays stable across restarts.
+  localPort: WebAppPort
+}
+
+export interface BrowserState {
+  // Remote sessions only: the local end of the ssh forward (see WebAppState.localPort).
   localPort: WebAppPort
 }
 
@@ -728,6 +735,10 @@ export function isWebAppState(state: unknown): state is WebAppState {
     typeof (state as Partial<WebAppState>).port === 'object' &&
     typeof (state as Partial<WebAppState>).localPort === 'object'
   )
+}
+
+export function isBrowserState(state: unknown): state is BrowserState {
+  return state !== null && typeof state === 'object' && typeof (state as Partial<BrowserState>).localPort === 'object'
 }
 
 export function isReviewState(state: unknown): state is ReviewState {
