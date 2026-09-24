@@ -43,7 +43,7 @@ const mockWorkspaceStore = createStore<WorkspaceStoreState>()(() => ({
   remove: vi.fn(), removeKeepBranch: vi.fn(), removeKeepBoth: vi.fn(),
   initTab: vi.fn(), getTabRef: vi.fn().mockReturnValue(null), disposeTabResources: vi.fn(), onLoaded: vi.fn(), dispose: vi.fn(),
   initAnalyzer: vi.fn(), createTty: vi.fn().mockResolvedValue('pty-1'), ensureTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
-  connectionId: 'local', updateSettings: vi.fn(),
+  connectionId: 'local', isRemote: false, updateSettings: vi.fn(),
   metadata: {},
   appStates: {},
   attentionPending: false,

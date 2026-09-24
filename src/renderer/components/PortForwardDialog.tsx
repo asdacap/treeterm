@@ -39,6 +39,7 @@ export default function PortForwardDialog({ connectionId, onClose, onCreated, ad
       localPort: localPortNum,
       remoteHost: remoteHost.trim(),
       remotePort: remotePortNum,
+      persist: true,
     }
 
     setLoading(true)

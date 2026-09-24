@@ -4,10 +4,10 @@ import { ClassifierProvider } from '../shared/types'
 import { app } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
-import type { Settings, TerminalInstance, AiHarnessInstance, CustomRunnerInstance, PrefixModeConfig, SSHConnectionConfig, ReasoningEffort } from '../shared/types'
+import type { Settings, TerminalInstance, AiHarnessInstance, CustomRunnerInstance, WebAppInstance, PrefixModeConfig, SSHConnectionConfig, ReasoningEffort } from '../shared/types'
 
 // Re-export for backward compatibility
-export type { Settings, TerminalInstance, AiHarnessInstance, CustomRunnerInstance, PrefixModeConfig, SSHConnectionConfig }
+export type { Settings, TerminalInstance, AiHarnessInstance, CustomRunnerInstance, WebAppInstance, PrefixModeConfig, SSHConnectionConfig }
 
 const defaultSettings: Settings = {
   terminal: {
@@ -39,6 +39,9 @@ const defaultSettings: Settings = {
     }]
   },
   customRunner: {
+    instances: []
+  },
+  webApp: {
     instances: []
   },
   notifications: { soundEnabled: true },
@@ -254,6 +257,9 @@ function mergeSettings(defaults: Settings, loaded: Partial<Settings>): Settings 
     },
     customRunner: {
       instances: loaded.customRunner?.instances || []
+    },
+    webApp: {
+      instances: loaded.webApp?.instances || []
     },
     notifications: {
       ...defaults.notifications,

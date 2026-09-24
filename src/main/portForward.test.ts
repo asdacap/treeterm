@@ -39,6 +39,7 @@ const pfConfig: PortForwardConfig = {
   localPort: 8080,
   remoteHost: 'localhost',
   remotePort: 3000,
+  persist: true,
 }
 
 describe('PortForwardProcess', () => {
@@ -57,6 +58,7 @@ describe('PortForwardProcess', () => {
         localPort: 8080,
         remoteHost: 'localhost',
         remotePort: 3000,
+        persist: true,
         status: 'connecting',
       })
     })

@@ -7,7 +7,8 @@ vi.mock('./app', () => ({
     getState: vi.fn().mockReturnValue({
       registerTerminalVariants: vi.fn(),
       registerAiHarnessVariants: vi.fn(),
-      registerCustomRunnerVariants: vi.fn()
+      registerCustomRunnerVariants: vi.fn(),
+      registerWebAppVariants: vi.fn()
     })
   }
 }))
@@ -66,6 +67,9 @@ describe('SettingsStore', () => {
         customRunner: {
           instances: []
         },
+        webApp: {
+          instances: []
+        },
         appearance: {
           theme: 'dark'
         },
@@ -122,6 +126,7 @@ describe('SettingsStore', () => {
         appearance: { theme: 'light' },
         aiHarness: { instances: [] },
         customRunner: { instances: [] },
+        webApp: { instances: [] },
         sandbox: { enabledByDefault: false, allowNetworkByDefault: true },
         prefixMode: { enabled: true, prefixKey: 'Control+B', timeout: 1500 },
         keybindings: {

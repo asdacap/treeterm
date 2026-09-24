@@ -16,6 +16,7 @@ import { createGhosttyTerminalApplication } from '../../applications/ghosttyTerm
 import { filesystemApplication } from '../../applications/filesystem/renderer'
 import { createAiHarnessVariant } from '../../applications/aiHarness/renderer'
 import { createCustomRunnerVariant } from '../../applications/customRunner/renderer'
+import { createWebAppVariant } from '../../applications/webApp/renderer'
 import { reviewApplication } from '../../applications/review/renderer'
 import { editorApplication } from '../../applications/editor/renderer'
 import { commentsApplication } from '../../applications/comments/renderer'
@@ -30,7 +31,7 @@ import type {
   Workspace, Session, Application,
   Platform, TerminalApi, SessionApi, AppApi, DaemonApi,
   RawFilesystemApi, ExecApi, SandboxApi, SettingsApi,
-  TerminalInstance, AiHarnessInstance, CustomRunnerInstance,
+  TerminalInstance, AiHarnessInstance, CustomRunnerInstance, WebAppInstance,
   ConnectionInfo, SSHConnectionConfig, SSHApi, ClipboardApi
 } from '../types'
 import { createBoundFilesystem } from '../types'
@@ -88,6 +89,7 @@ interface AppState extends AppDeps {
   registerTerminalVariants: (instances: TerminalInstance[]) => void
   registerAiHarnessVariants: (instances: AiHarnessInstance[]) => void
   registerCustomRunnerVariants: (instances: CustomRunnerInstance[]) => void
+  registerWebAppVariants: (instances: WebAppInstance[]) => void
 
   // Session management
   sessionStores: Map<string, SessionEntry>
@@ -248,6 +250,30 @@ export const useAppStore = create<AppState>()((set, get) => ({
     // Register new variants
     for (const instance of instances) {
       get().registerApplication(createCustomRunnerVariant(instance, deps))
+    }
+  },
+
+  registerWebAppVariants: (instances: WebAppInstance[]) => {
+    const { terminal, ssh, openExternal } = get()
+    const deps = {
+      terminal: { kill: terminal.kill.bind(terminal) },
+      ssh,
+      openExternal,
+      sleep: (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms) }),
+      random: Math.random,
+    }
+
+    // Unregister existing dynamic web app apps
+    const allApps = Array.from(get().applications.values())
+    for (const app of allApps) {
+      if (app.id.startsWith('webapp-')) {
+        get().unregisterApplication(app.id)
+      }
+    }
+
+    // Register new variants
+    for (const instance of instances) {
+      get().registerApplication(createWebAppVariant(instance, deps))
     }
   },
 

@@ -24,6 +24,7 @@ function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStore
     openTtyStream: vi.fn<(...args: any[]) => any>().mockImplementation(() => Promise.resolve(null)),
     createTty: vi.fn<(...args: any[]) => Promise<string>>().mockResolvedValue('pty-1'),
     connectionId: 'local',
+    isRemote: false,
     git: {} as unknown as WorkspaceStoreDeps['git'],
     filesystem: {} as unknown as WorkspaceStoreDeps['filesystem'],
     runActions: { detect: vi.fn<(...args: any[]) => Promise<any[]>>().mockResolvedValue([]), run: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue(null) },

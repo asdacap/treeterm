@@ -8,7 +8,7 @@ import type { WorkspaceStore, WorkspaceStoreDeps } from './createWorkspaceStore'
 import { createTtyStore } from './createTtyStore'
 import type { Tty, TtyTerminalDeps } from './createTtyStore'
 import { FileWatchEventType, type PtyEvent, type FileWatchEvent } from '../../shared/ipc-types'
-import { ConnectionStatus, WorkspaceStatus } from '../../shared/types'
+import { ConnectionStatus, ConnectionTargetType, WorkspaceStatus } from '../../shared/types'
 import type {
   Workspace, Session, AppState, GitInfo, WorkspaceRef,
   ConnectionInfo, IpcResult,
@@ -910,6 +910,7 @@ export function createSessionStore(
       openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => store.getState().openTtyStream(ptyId, onEvent),
       createTty: (cwd, sandbox?, startupCommand?, ptyHandle?) => store.getState().createTty(cwd, sandbox, startupCommand, ptyHandle),
       connectionId: config.connection.id,
+      isRemote: config.connection.target.type === ConnectionTargetType.Remote,
       git: deps.git,
       filesystem: deps.filesystem,
       exec: deps.exec,

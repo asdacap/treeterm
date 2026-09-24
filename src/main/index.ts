@@ -11,6 +11,7 @@ import { ConnectionStatus, ConnectionTargetType, ConnectionErrorKind } from '../
 import type { SSHConnectionConfig, PortForwardConfig } from '../shared/types'
 import { PtyEventType, ExecEventType, type ExecEvent } from '../shared/ipc-types'
 import { createExecStreamRegistry } from './execStreamRegistry'
+import { attachWebviewGuard } from './webviewGuard'
 
 // Parse initial workspace and SSH target from command line
 let initialWorkspacePath: string | null = null
@@ -115,7 +116,9 @@ function createWindow(): BrowserWindow {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      // WebApp tabs embed their dev server; see webviewGuard.ts
+      webviewTag: true
     },
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 15, y: 15 }
@@ -165,6 +168,8 @@ function createWindow(): BrowserWindow {
     event.preventDefault()
     void shell.openExternal(url)
   })
+
+  attachWebviewGuard(window.webContents, (url) => { void shell.openExternal(url) })
 
   window.webContents.setWindowOpenHandler(({ url }) => {
     // eslint-disable-next-line custom/no-string-literal-comparison -- URL scheme is external
@@ -692,7 +697,8 @@ function syncSavedPortForwards(connectionId: string): void {
   const settings = loadSettings()
   const saved = settings.ssh.savedConnections.find(c => c.id === connectionId)
   if (!saved) return
-  const activeForwards = connectionManager.listPortForwards(connectionId)
+  // Forwards owned by an application tab (persist: false) die with the tab.
+  const activeForwards = connectionManager.listPortForwards(connectionId).filter(pf => pf.persist)
   saved.portForwards = activeForwards.map(pf => ({
     localPort: pf.localPort,
     remoteHost: pf.remoteHost,
@@ -714,6 +720,7 @@ function autoStartPortForwards(
       localPort: spec.localPort,
       remoteHost: spec.remoteHost,
       remotePort: spec.remotePort,
+      persist: true,
     }
 
     try {

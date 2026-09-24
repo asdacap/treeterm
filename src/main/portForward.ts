@@ -116,6 +116,7 @@ export class PortForwardProcess {
       localPort: this.config.localPort,
       remoteHost: this.config.remoteHost,
       remotePort: this.config.remotePort,
+      persist: this.config.persist,
     }
     if (this._status === PortForwardStatus.Error) {
       return { ...base, status: PortForwardStatus.Error, error: this._error ?? 'Unknown error' }

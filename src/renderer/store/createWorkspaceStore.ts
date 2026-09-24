@@ -77,6 +77,8 @@ export interface WorkspaceStoreDeps {
   openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<Tty>
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string, ptyHandle?: string) => Promise<string>
   connectionId: string
+  // Whether connectionId is an SSH connection. A connection's target never changes.
+  isRemote: boolean
   git: GitApi
   filesystem: FilesystemApi
   exec: ExecApi
@@ -170,6 +172,7 @@ export interface WorkspaceStoreState {
   // Write-only PTY access (cached per workspace, separate stream from terminal events)
   getTtyWriter: (ptyId: string) => Promise<TtyWriter>
   connectionId: string
+  isRemote: boolean
 
   // Git controller (polling, diff status, PR status)
   gitController: GitController
@@ -426,6 +429,7 @@ export function createWorkspaceStore(
     },
 
     connectionId: deps.connectionId,
+    isRemote: deps.isRemote,
 
     addTab: <T,>(applicationId: string, initialState?: Partial<T>): string => {
       const tabId = generateTabId()

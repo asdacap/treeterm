@@ -298,6 +298,16 @@ describe('settings', () => {
       expect(settings.customRunner.instances).toEqual([])
     })
 
+    it('preserves webApp.instances and defaults them to empty', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true)
+      const next = { id: 'next', name: 'Next', icon: '🌐', command: 'npm run dev -- -p $PORT', isDefault: false, keepOnExit: true }
+      vi.mocked(fs.readFileSync).mockReturnValueOnce(JSON.stringify({ webApp: { instances: [next] } }))
+      expect(loadSettings().webApp.instances).toEqual([next])
+
+      vi.mocked(fs.readFileSync).mockReturnValueOnce(JSON.stringify({}))
+      expect(loadSettings().webApp.instances).toEqual([])
+    })
+
     it('preserves string keybindings as-is', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true)
       vi.mocked(fs.readFileSync).mockReturnValue(

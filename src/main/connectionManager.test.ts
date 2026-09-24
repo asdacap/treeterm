@@ -105,6 +105,7 @@ vi.mock('./portForward', () => ({
       localPort: config.localPort,
       remoteHost: config.remoteHost,
       remotePort: config.remotePort,
+      persist: config.persist,
       status: 'connecting' as const,
     })
     const instance = { ...mockPortForwardInstance }
@@ -413,6 +414,7 @@ describe('ConnectionManager', () => {
         localPort: 8080,
         remoteHost: 'localhost',
         remotePort: 3000,
+        persist: true,
       })
       expect(manager.listPortForwards('remote-1')).toHaveLength(1)
 
@@ -437,6 +439,7 @@ describe('ConnectionManager', () => {
       localPort: 8080,
       remoteHost: 'localhost',
       remotePort: 3000,
+      persist: true,
     }
 
     it('addPortForward creates and starts a port forward', async () => {
@@ -517,6 +520,7 @@ describe('ConnectionManager', () => {
       localPort: 8080,
       remoteHost: 'localhost',
       remotePort: 3000,
+      persist: true,
     }
 
     it('restarts every port forward once the connection reconnects', async () => {
@@ -1030,6 +1034,7 @@ describe('ConnectionManager', () => {
         localPort: 9090,
         remoteHost: 'localhost',
         remotePort: 5000,
+        persist: true,
       })
 
       const outputCb = vi.fn()
@@ -1051,6 +1056,7 @@ describe('ConnectionManager', () => {
         localPort: 9091,
         remoteHost: 'localhost',
         remotePort: 5001,
+        persist: true,
       })
 
       const statusCb = vi.fn()

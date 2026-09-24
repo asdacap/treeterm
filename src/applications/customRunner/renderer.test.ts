@@ -73,6 +73,7 @@ const mockWorkspaceStoreStateData = {
   initAnalyzer: vi.fn(),
   createTty: vi.fn().mockResolvedValue('pty-1'), ensureTty: vi.fn().mockResolvedValue('pty-1'), getTtyWriter: vi.fn().mockResolvedValue({ write: vi.fn<(data: string) => void>(), kill: vi.fn<() => void>() }),
   connectionId: 'local',
+  isRemote: false,
   updateSettings: vi.fn(),
   settings: { defaultApplicationId: '' },
   metadata: {},

@@ -453,6 +453,7 @@ export default function SessionInfoPane({ sessionStore }: SessionInfoPaneProps) 
                                   localPort: pf.localPort,
                                   remoteHost: pf.remoteHost,
                                   remotePort: pf.remotePort,
+                                  persist: pf.persist,
                                 }
                                 try {
                                   const info = await ssh.addPortForward(config)

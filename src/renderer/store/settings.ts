@@ -36,6 +36,9 @@ export const defaultSettings: Settings = {
   customRunner: {
     instances: []
   },
+  webApp: {
+    instances: []
+  },
   notifications: { soundEnabled: true },
   appearance: {
     theme: 'dark'
@@ -157,6 +160,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       useAppStore.getState().registerAiHarnessVariants(settings.aiHarness.instances)
       // Register dynamic custom runner variants
       useAppStore.getState().registerCustomRunnerVariants(settings.customRunner.instances)
+      // Register dynamic web app variants
+      useAppStore.getState().registerWebAppVariants(settings.webApp.instances)
     } catch (error) {
       console.warn('[settings] Failed to load settings, using defaults:', error)
       set({ isLoaded: true })
@@ -175,6 +180,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       useAppStore.getState().registerAiHarnessVariants(settings.aiHarness.instances)
       // Re-register custom runner variants when settings change
       useAppStore.getState().registerCustomRunnerVariants(settings.customRunner.instances)
+      // Register dynamic web app variants
+      useAppStore.getState().registerWebAppVariants(settings.webApp.instances)
     } catch (error) {
       console.error('Failed to save settings:', error)
       throw error

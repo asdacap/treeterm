@@ -7,6 +7,7 @@ import { Platform } from '../types'
 import { ClassifierProvider, type ClassifiedState } from '../../shared/types'
 import { classifiedStates } from '../../shared/classifierSettings'
 import type { SandboxApi } from '../types'
+import WebAppSettingsSection from './WebAppSettingsSection'
 
 interface SettingsDialogProps {
   isOpen: boolean
@@ -27,6 +28,7 @@ enum TabId {
   Github = 'github',
   Debug = 'debug',
   CustomRunners = 'custom-runners',
+  WebApps = 'web-apps',
 }
 
 const tabs: { id: TabId; label: string }[] = [
@@ -35,6 +37,7 @@ const tabs: { id: TabId; label: string }[] = [
   { id: TabId.TerminalProfiles, label: 'Terminal Profiles' },
   { id: TabId.AiHarness, label: 'AI Harness' },
   { id: TabId.CustomRunners, label: 'Custom Runners' },
+  { id: TabId.WebApps, label: 'Web Apps' },
   { id: TabId.Llm, label: 'LLM' },
   { id: TabId.Sandbox, label: 'Sandbox' },
   { id: TabId.Appearance, label: 'Appearance' },
@@ -598,6 +601,13 @@ export default function SettingsDialog({ isOpen, onClose, sandbox, platform }: S
                   Sandbox settings restrict file and network access.
                 </p>
               </div>
+            )}
+
+            {activeTab === TabId.WebApps && (
+              <WebAppSettingsSection
+                instances={localSettings.webApp.instances}
+                onChange={(instances) => { setLocalSettings((prev) => ({ ...prev, webApp: { ...prev.webApp, instances } })) }}
+              />
             )}
 
             {activeTab === TabId.CustomRunners && (

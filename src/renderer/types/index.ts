@@ -21,6 +21,7 @@ import type {
   TerminalInstance,
   AiHarnessInstance,
   CustomRunnerInstance,
+  WebAppInstance,
   PrefixModeConfig,
   Settings,
   WorktreeSettings,
@@ -46,6 +47,7 @@ export type {
   TerminalInstance,
   AiHarnessInstance,
   CustomRunnerInstance,
+  WebAppInstance,
   PrefixModeConfig,
   Settings,
   WorktreeSettings,
@@ -142,6 +144,23 @@ export interface TerminalState {
 export type AiHarnessState = TerminalState & {
   sandbox: SandboxConfig
   autoApprove: boolean
+}
+
+export enum WebAppPortStatus {
+  Unassigned = 'unassigned',
+  Assigned = 'assigned',
+}
+
+export type WebAppPort =
+  | { status: WebAppPortStatus.Unassigned }
+  | { status: WebAppPortStatus.Assigned; port: number }
+
+export type WebAppState = TerminalState & {
+  // Port the server listens on, on the daemon's host. Substituted for $PORT in the command.
+  port: WebAppPort
+  // Remote sessions only: the local end of the ssh forward. Persisted so the browser
+  // origin (and with it cookies/localStorage) stays stable across restarts.
+  localPort: WebAppPort
 }
 
 export interface FilesystemState {
@@ -700,6 +719,14 @@ export function isAiHarnessState(state: unknown): state is AiHarnessState {
     isTerminalState(state) &&
     'sandbox' in (state as unknown as Record<string, unknown>) &&
     typeof (state as AiHarnessState).sandbox === 'object'
+  )
+}
+
+export function isWebAppState(state: unknown): state is WebAppState {
+  return (
+    isTerminalState(state) &&
+    typeof (state as Partial<WebAppState>).port === 'object' &&
+    typeof (state as Partial<WebAppState>).localPort === 'object'
   )
 }
 

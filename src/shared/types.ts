@@ -69,6 +69,9 @@ export interface PortForwardConfig {
   localPort: number
   remoteHost: string
   remotePort: number
+  // False for forwards owned by an application tab (e.g. WebApp); those are
+  // ephemeral and must not be written back into the saved SSH connection.
+  persist: boolean
 }
 
 export enum PortForwardStatus {
@@ -79,8 +82,8 @@ export enum PortForwardStatus {
 }
 
 export type PortForwardInfo =
-  | { id: string; connectionId: string; localPort: number; remoteHost: string; remotePort: number; status: PortForwardStatus.Connecting | PortForwardStatus.Active | PortForwardStatus.Stopped }
-  | { id: string; connectionId: string; localPort: number; remoteHost: string; remotePort: number; status: PortForwardStatus.Error; error: string }
+  | { id: string; connectionId: string; localPort: number; remoteHost: string; remotePort: number; persist: boolean; status: PortForwardStatus.Connecting | PortForwardStatus.Active | PortForwardStatus.Stopped }
+  | { id: string; connectionId: string; localPort: number; remoteHost: string; remotePort: number; persist: boolean; status: PortForwardStatus.Error; error: string }
 
 // === Sandbox Types ===
 
@@ -154,6 +157,15 @@ export interface CustomRunnerInstance {
   icon: string
   commandTemplate: string  // e.g., "rider {{workspace_path}}"
   isDefault: boolean
+}
+
+export interface WebAppInstance {
+  id: string
+  name: string
+  icon: string
+  command: string  // e.g., "npm run dev -- -p $PORT"; $PORT is replaced with a free port
+  isDefault: boolean
+  keepOnExit: boolean
 }
 
 export interface PrefixModeConfig {
@@ -232,6 +244,9 @@ export interface Settings {
   }
   customRunner: {
     instances: CustomRunnerInstance[]
+  }
+  webApp: {
+    instances: WebAppInstance[]
   }
   notifications: {
     soundEnabled: boolean
