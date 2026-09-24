@@ -103,7 +103,7 @@ function WebView({ url, openExternal }: { url: string; openExternal: (url: strin
         <button title="Forward" disabled={!nav.canGoForward} onClick={() => { view?.goForward() }}>→</button>
         {loading
           ? <button title="Stop" onClick={() => { view?.stop() }}>✕</button>
-          : <button title="Reload" onClick={() => { view?.reload() }}>⟳</button>}
+          : <button title="Reload" onClick={() => { view?.reloadIgnoringCache() }}>⟳</button>}
         <button title="Home" onClick={() => { load(url) }}>⌂</button>
         <AddressBar inputRef={addressRef} currentUrl={currentUrl} onNavigate={load} />
         <button title="Open in external browser" onClick={() => { openExternal(currentUrl) }}>↗</button>

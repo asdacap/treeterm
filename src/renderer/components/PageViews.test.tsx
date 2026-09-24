@@ -49,7 +49,7 @@ describe('BrowserView', () => {
     expect(onRetry).toHaveBeenCalled()
   })
 
-  type MockWebview = HTMLElement & Record<'goBack' | 'goForward' | 'reload' | 'stop' | 'canGoBack' | 'canGoForward' | 'loadURL', ReturnType<typeof vi.fn>>
+  type MockWebview = HTMLElement & Record<'goBack' | 'goForward' | 'reloadIgnoringCache' | 'stop' | 'canGoBack' | 'canGoForward' | 'loadURL', ReturnType<typeof vi.fn>>
 
   function renderReady(openExternal = vi.fn()) {
     const { container } = render(
@@ -57,7 +57,7 @@ describe('BrowserView', () => {
     )
     const webview = container.querySelector('webview') as MockWebview
     Object.assign(webview, {
-      goBack: vi.fn(), goForward: vi.fn(), reload: vi.fn(), stop: vi.fn(),
+      goBack: vi.fn(), goForward: vi.fn(), reloadIgnoringCache: vi.fn(), stop: vi.fn(),
       canGoBack: vi.fn(() => true), canGoForward: vi.fn(() => false),
       loadURL: vi.fn(() => Promise.resolve()),
     })
@@ -83,7 +83,7 @@ describe('BrowserView', () => {
     fireEvent.click(screen.getByTitle('Reload'))
     fireEvent.click(screen.getByTitle('Home'))
     expect(webview.goBack).toHaveBeenCalled()
-    expect(webview.reload).toHaveBeenCalled()
+    expect(webview.reloadIgnoringCache).toHaveBeenCalled()
     expect(webview.loadURL).toHaveBeenCalledWith('http://localhost:3000/')
     fireEvent.click(screen.getByTitle('Open in external browser'))
     expect(openExternal).toHaveBeenCalledWith('http://localhost:3000/about')
