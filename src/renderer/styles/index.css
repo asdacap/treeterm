@@ -7889,21 +7889,72 @@ body,
 }
 
 .webapp-toolbar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 4px 8px;
   border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
   font-size: 12px;
+}
+
+/* Indeterminate progress line under the toolbar while the page loads. */
+.webapp-toolbar.loading::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  height: 2px;
+  width: 30%;
+  background: var(--accent);
+  animation: webapp-progress 1s ease-in-out infinite;
+}
+
+@keyframes webapp-progress {
+  from { left: -30%; }
+  to { left: 100%; }
 }
 
 .webapp-toolbar button {
   background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: 3px;
+  border: 1px solid transparent;
+  border-radius: 4px;
   color: var(--text-primary);
   cursor: pointer;
   padding: 2px 8px;
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.webapp-toolbar button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.webapp-toolbar button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.webapp-address {
+  flex: 1;
+  min-width: 0;
+  margin: 0 4px;
+  padding: 4px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: none;
+}
+
+.webapp-address:focus {
+  border-color: var(--accent);
+}
+
+.webapp-address.invalid {
+  border-color: #f44336;
 }
 
 .webapp-url {
@@ -7917,6 +7968,9 @@ body,
 
 .webapp-webview {
   flex: 1;
+  min-height: 0;
   width: 100%;
   border: none;
+  /* Guests are transparent: without this, pages with no background show the app theme. */
+  background: #fff;
 }

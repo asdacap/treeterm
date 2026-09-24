@@ -49,27 +49,80 @@ describe('BrowserView', () => {
     expect(onRetry).toHaveBeenCalled()
   })
 
-  it('embeds the page when ready, tracks navigation and drives the webview', () => {
-    const openExternal = vi.fn()
+  type MockWebview = HTMLElement & Record<'goBack' | 'goForward' | 'reload' | 'stop' | 'canGoBack' | 'canGoForward' | 'loadURL', ReturnType<typeof vi.fn>>
+
+  function renderReady(openExternal = vi.fn()) {
     const { container } = render(
       <BrowserView runtime={{ phase: WebAppPhase.Ready, url: 'http://localhost:3000/' }} onRetry={noop} detailsLinks={[{ label: 'View shell', onClick: noop }]} openExternal={openExternal} />,
     )
-    const webview = container.querySelector('webview') as HTMLElement & { goBack: () => void; goForward: () => void; reload: () => void }
-    expect(webview.getAttribute('src')).toBe('http://localhost:3000/')
-    webview.goBack = vi.fn()
-    webview.goForward = vi.fn()
-    webview.reload = vi.fn()
-    fireEvent.click(screen.getByTitle('Back'))
-    fireEvent.click(screen.getByTitle('Forward'))
-    fireEvent.click(screen.getByTitle('Reload'))
-    expect(webview.goBack).toHaveBeenCalled()
-    expect(webview.goForward).toHaveBeenCalled()
-    expect(webview.reload).toHaveBeenCalled()
+    const webview = container.querySelector('webview') as MockWebview
+    Object.assign(webview, {
+      goBack: vi.fn(), goForward: vi.fn(), reload: vi.fn(), stop: vi.fn(),
+      canGoBack: vi.fn(() => true), canGoForward: vi.fn(() => false),
+      loadURL: vi.fn(() => Promise.resolve()),
+    })
+    const address = screen.getByLabelText<HTMLInputElement>('Address')
+    const navigate = (url: string): void => {
+      act(() => { webview.dispatchEvent(Object.assign(new Event('did-navigate'), { url })) })
+    }
+    return { webview, address, navigate, openExternal }
+  }
 
-    act(() => { webview.dispatchEvent(Object.assign(new Event('did-navigate'), { url: 'http://localhost:3000/about' })) })
-    expect(screen.getByText('http://localhost:3000/about')).toBeTruthy()
+  it('embeds the page when ready, tracks navigation and drives the webview', () => {
+    const { webview, address, navigate, openExternal } = renderReady()
+    expect(webview.getAttribute('src')).toBe('http://localhost:3000/')
+    expect(address.value).toBe('http://localhost:3000/')
+    expect(screen.getByTitle<HTMLButtonElement>('Back').disabled).toBe(true)
+
+    navigate('http://localhost:3000/about')
+    expect(address.value).toBe('http://localhost:3000/about')
+    expect(screen.getByTitle<HTMLButtonElement>('Back').disabled).toBe(false)
+    expect(screen.getByTitle<HTMLButtonElement>('Forward').disabled).toBe(true)
+
+    fireEvent.click(screen.getByTitle('Back'))
+    fireEvent.click(screen.getByTitle('Reload'))
+    fireEvent.click(screen.getByTitle('Home'))
+    expect(webview.goBack).toHaveBeenCalled()
+    expect(webview.reload).toHaveBeenCalled()
+    expect(webview.loadURL).toHaveBeenCalledWith('http://localhost:3000/')
     fireEvent.click(screen.getByTitle('Open in external browser'))
     expect(openExternal).toHaveBeenCalledWith('http://localhost:3000/about')
+  })
+
+  it('swaps reload for stop while loading', () => {
+    const { webview } = renderReady()
+    act(() => { webview.dispatchEvent(new Event('did-start-loading')) })
+    fireEvent.click(screen.getByTitle('Stop'))
+    expect(webview.stop).toHaveBeenCalled()
+    act(() => { webview.dispatchEvent(new Event('did-stop-loading')) })
+    expect(screen.getByTitle('Reload')).toBeTruthy()
+  })
+
+  it('navigates to a typed path on Enter', () => {
+    const { webview, address } = renderReady()
+    fireEvent.change(address, { target: { value: '/docs?x=1' } })
+    fireEvent.keyDown(address, { key: 'Enter' })
+    expect(webview.loadURL).toHaveBeenCalledWith('http://localhost:3000/docs?x=1')
+  })
+
+  it('keeps the typed text while the page navigates, and Escape reverts it', () => {
+    const { address, navigate } = renderReady()
+    fireEvent.change(address, { target: { value: '/draft' } })
+    navigate('http://localhost:3000/elsewhere')
+    expect(address.value).toBe('/draft')
+    fireEvent.keyDown(address, { key: 'Escape' })
+    expect(address.value).toBe('http://localhost:3000/elsewhere')
+  })
+
+  it('refuses another port and flags the input', () => {
+    const { webview, address } = renderReady()
+    fireEvent.change(address, { target: { value: 'localhost:4000/' } })
+    fireEvent.keyDown(address, { key: 'Enter' })
+    expect(webview.loadURL).not.toHaveBeenCalled()
+    expect(address.classList.contains('invalid')).toBe(true)
+    expect(address.title).toContain('Only pages on http://localhost:3000')
+    fireEvent.change(address, { target: { value: '/ok' } })
+    expect(address.classList.contains('invalid')).toBe(false)
   })
 })
 

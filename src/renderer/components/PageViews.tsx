@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { KeyboardEvent, ReactNode, RefObject } from 'react'
 import type { WebviewTag } from 'electron'
 import type { PortForwardInfo, SSHApi } from '../types'
 import { PortForwardStatus } from '../../shared/types'
 import { WebAppPhase } from '../../applications/webApp/runtime'
 import type { WebAppRuntime } from '../../applications/webApp/runtime'
+import { resolveAddress } from '../../applications/browser/url'
 
 // Views shared by the WebApp and Browser panes: the embedded page and the ssh forward.
 
@@ -58,25 +59,53 @@ export function BrowserView({ runtime, onRetry, detailsLinks, openExternal }: Br
 function WebView({ url, openExternal }: { url: string; openExternal: (url: string) => void }) {
   const [view, setView] = useState<WebviewTag | null>(null)
   const [currentUrl, setCurrentUrl] = useState(url)
+  const [nav, setNav] = useState({ canGoBack: false, canGoForward: false })
+  const [loading, setLoading] = useState(false)
+  const addressRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!view) return
-    const onNavigate = (e: Event): void => { setCurrentUrl((e as Event & { url: string }).url) }
+    const onNavigate = (e: Event): void => {
+      setCurrentUrl((e as Event & { url: string }).url)
+      setNav({ canGoBack: view.canGoBack(), canGoForward: view.canGoForward() })
+    }
+    const onStart = (): void => { setLoading(true) }
+    const onStop = (): void => { setLoading(false) }
     view.addEventListener('did-navigate', onNavigate)
     view.addEventListener('did-navigate-in-page', onNavigate)
+    view.addEventListener('did-start-loading', onStart)
+    view.addEventListener('did-stop-loading', onStop)
     return () => {
       view.removeEventListener('did-navigate', onNavigate)
       view.removeEventListener('did-navigate-in-page', onNavigate)
+      view.removeEventListener('did-start-loading', onStart)
+      view.removeEventListener('did-stop-loading', onStop)
     }
   }, [view])
 
+  const load = (target: string): void => {
+    // The page itself shows load failures; the rejection is only worth a log line.
+    view?.loadURL(target).catch((err: unknown) => { console.error(err) })
+  }
+
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
+    // eslint-disable-next-line custom/no-string-literal-comparison -- KeyboardEvent.key values are DOM constants, not domain enums
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'l') {
+      e.preventDefault()
+      addressRef.current?.focus()
+    }
+  }
+
   return (
-    <div className="webapp-browser">
-      <div className="webapp-toolbar">
-        <button title="Back" onClick={() => { view?.goBack() }}>←</button>
-        <button title="Forward" onClick={() => { view?.goForward() }}>→</button>
-        <button title="Reload" onClick={() => { view?.reload() }}>⟳</button>
-        <span className="webapp-url">{currentUrl}</span>
+    <div className="webapp-browser" onKeyDown={onKeyDown}>
+      <div className={`webapp-toolbar ${loading ? 'loading' : ''}`}>
+        <button title="Back" disabled={!nav.canGoBack} onClick={() => { view?.goBack() }}>←</button>
+        <button title="Forward" disabled={!nav.canGoForward} onClick={() => { view?.goForward() }}>→</button>
+        {loading
+          ? <button title="Stop" onClick={() => { view?.stop() }}>✕</button>
+          : <button title="Reload" onClick={() => { view?.reload() }}>⟳</button>}
+        <button title="Home" onClick={() => { load(url) }}>⌂</button>
+        <AddressBar inputRef={addressRef} currentUrl={currentUrl} onNavigate={load} />
         <button title="Open in external browser" onClick={() => { openExternal(currentUrl) }}>↗</button>
       </div>
       <webview
@@ -86,6 +115,54 @@ function WebView({ url, openExternal }: { url: string; openExternal: (url: strin
         className="webapp-webview"
       />
     </div>
+  )
+}
+
+interface AddressBarProps {
+  inputRef: RefObject<HTMLInputElement>
+  currentUrl: string
+  onNavigate: (url: string) => void
+}
+
+type Draft = { editing: false } | { editing: true; text: string; error: string }
+
+function AddressBar({ inputRef, currentUrl, onNavigate }: AddressBarProps) {
+  // While editing, navigation events must not clobber what is being typed.
+  const [draft, setDraft] = useState<Draft>({ editing: false })
+  const text = draft.editing ? draft.text : currentUrl
+  const error = draft.editing ? draft.error : ''
+
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
+    // eslint-disable-next-line custom/no-string-literal-comparison -- KeyboardEvent.key values are DOM constants, not domain enums
+    if (e.key === 'Enter') {
+      try {
+        const target = resolveAddress(text, currentUrl).href
+        setDraft({ editing: false })
+        e.currentTarget.blur()
+        onNavigate(target)
+      } catch (err) {
+        setDraft({ editing: true, text, error: err instanceof Error ? err.message : String(err) })
+      }
+    // eslint-disable-next-line custom/no-string-literal-comparison -- KeyboardEvent.key values are DOM constants, not domain enums
+    } else if (e.key === 'Escape') {
+      setDraft({ editing: false })
+      e.currentTarget.blur()
+    }
+  }
+
+  return (
+    <input
+      ref={inputRef}
+      className={`webapp-address ${error ? 'invalid' : ''}`}
+      aria-label="Address"
+      title={error || text}
+      spellCheck={false}
+      value={text}
+      onFocus={(e) => { e.currentTarget.select() }}
+      onBlur={() => { if (!error) setDraft({ editing: false }) }}
+      onChange={(e) => { setDraft({ editing: true, text: e.target.value, error: '' }) }}
+      onKeyDown={onKeyDown}
+    />
   )
 }
 

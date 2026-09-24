@@ -23,3 +23,25 @@ export function forwardedUrl(url: URL, localPort: number): string {
   next.port = String(localPort)
   return next.href
 }
+
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i
+
+/**
+ * Resolves what was typed into the address bar against the page the tab shows.
+ * Only the path, query and hash may change: the port is fixed (on remote sessions it
+ * is the local end of the tab's forward), so another origin is refused.
+ */
+export function resolveAddress(input: string, pageUrl: string): URL {
+  const trimmed = input.trim()
+  if (!trimmed) throw new Error('Enter a URL or path')
+  const page = new URL(pageUrl)
+  const relative = trimmed.startsWith('/') || trimmed.startsWith('?') || trimmed.startsWith('#')
+  const absolute = HAS_SCHEME.test(trimmed) ? trimmed : `http://${trimmed}`
+  const typed = relative ? new URL(trimmed, page) : parseLocalUrl(absolute)
+  if (typed.protocol !== page.protocol || targetPort(typed) !== targetPort(page)) {
+    throw new Error(`Only pages on ${page.origin} can be opened in this tab`)
+  }
+  const next = new URL(typed.href)
+  next.hostname = page.hostname
+  return next
+}
