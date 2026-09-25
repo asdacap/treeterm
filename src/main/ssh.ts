@@ -34,6 +34,17 @@ export type BootstrapResult =
   | { type: BootstrapResultType.Connected; socketPath: string }
   | { type: BootstrapResultType.HashMismatch; localHash: string; remoteHash: string }
 
+/**
+ * Map `uname -m` output to the arch suffix used by the cross-compiled daemon binaries
+ * (treeterm-daemon-<arch>-linux). Some systems report `arm64`/`amd64` instead of the
+ * kernel-canonical `aarch64`/`x86_64`.
+ */
+const ARCH_ALIASES: Record<string, string> = { arm64: 'aarch64', amd64: 'x86_64' }
+
+export function normalizeArch(arch: string | undefined): string | undefined {
+  return arch ? (ARCH_ALIASES[arch] ?? arch) : arch
+}
+
 export class SSHTunnel {
   private sshProcess: ChildProcess | null = null
   private bootstrapBuffer: string[] = []
@@ -383,7 +394,7 @@ export class SSHTunnel {
         void (async () => {
           try {
             const archMatch = stdout.match(/TREETERM_ARCH:(\S+)/)
-            const remoteArch = archMatch?.[1]?.trim()
+            const remoteArch = normalizeArch(archMatch?.[1]?.trim())
             if (!remoteArch) {
               reject(new Error('Could not detect remote architecture (TREETERM_ARCH not reported)'))
               return

@@ -22,7 +22,7 @@ vi.mock('./socketPath', () => ({
 
 import { spawn } from 'child_process'
 import * as fs from 'fs'
-import { SSHTunnel, BootstrapResultType } from './ssh'
+import { SSHTunnel, BootstrapResultType, normalizeArch } from './ssh'
 import type { SSHConnectionConfig } from '../shared/types'
 
 type MockProcess = EventEmitter & {
@@ -219,6 +219,16 @@ describe('SSHTunnel', () => {
       const tunnel = new SSHTunnel(makeConfig({ port: 2222 }))
       const args = priv(tunnel).buildBaseSSHArgs()
       expect(args).toContain('2222')
+    })
+  })
+
+  describe('normalizeArch', () => {
+    it('maps uname aliases to the daemon binary arch names', () => {
+      expect(normalizeArch('arm64')).toBe('aarch64')
+      expect(normalizeArch('amd64')).toBe('x86_64')
+      expect(normalizeArch('aarch64')).toBe('aarch64')
+      expect(normalizeArch('x86_64')).toBe('x86_64')
+      expect(normalizeArch(undefined)).toBeUndefined()
     })
   })
 
