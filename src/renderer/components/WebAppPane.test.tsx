@@ -33,6 +33,8 @@ function makeRef(runtime: WebAppRuntime): WebAppRef {
     runtime: createStore<WebAppRuntime>(() => runtime),
     retry: vi.fn(),
     restartForward: vi.fn(() => Promise.resolve()),
+    pageUrl: vi.fn((home: string) => home),
+    rememberPage: vi.fn(),
     cachedTerminal: null,
     disposeCachedTerminal: vi.fn(),
     close: vi.fn(),

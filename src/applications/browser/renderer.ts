@@ -4,7 +4,7 @@ import type { Application, Tab, BrowserInstance, BrowserState, WorkspaceStore, S
 import { isBrowserState, WebAppPortStatus } from '../../renderer/types'
 import BrowserPane from '../../renderer/components/BrowserPane'
 import { ensureForward } from '../webApp/forward'
-import { WebAppPhase, forwardIdForTab } from '../webApp/runtime'
+import { WebAppPhase, createPageMemory, forwardIdForTab } from '../webApp/runtime'
 import type { PageRef, WebAppRuntime } from '../webApp/runtime'
 import { forwardedUrl, parseLocalUrl, targetPort } from './url'
 
@@ -23,6 +23,7 @@ export function createBrowserVariant(instance: BrowserInstance, deps: BrowserDep
 
     createInitialState: () => ({
       localPort: { status: WebAppPortStatus.Unassigned },
+      path: '',
     }),
 
     onWorkspaceLoad: (tab: Tab, workspaceStore: WorkspaceStore): PageRef => {
@@ -71,6 +72,7 @@ export function createBrowserVariant(instance: BrowserInstance, deps: BrowserDep
 
       return {
         runtime,
+        ...createPageMemory(workspaceStore, tab.id),
         retry: run,
         restartForward: async () => {
           await deps.ssh.removePortForward(forwardId)

@@ -6,7 +6,7 @@ import WebAppPane from '../../renderer/components/WebAppPane'
 import { useActivityStateStore } from '../../renderer/store/activityState'
 import { createHttpProbe, findFreePort, waitForHttp, WaitOutcome } from './ports'
 import { ensureForward } from './forward'
-import { WebAppPhase, forwardIdForTab } from './runtime'
+import { WebAppPhase, createPageMemory, forwardIdForTab } from './runtime'
 import type { WebAppRef, WebAppRuntime } from './runtime'
 
 export type WebAppDeps = {
@@ -35,6 +35,7 @@ export function createWebAppVariant(instance: WebAppInstance, deps: WebAppDeps):
       widthLimitDisabled: false,
       port: { status: WebAppPortStatus.Unassigned },
       localPort: { status: WebAppPortStatus.Unassigned },
+      path: '',
     }),
 
     onWorkspaceLoad: (tab: Tab, workspaceStore: WorkspaceStore): WebAppRef => {
@@ -116,6 +117,7 @@ export function createWebAppVariant(instance: WebAppInstance, deps: WebAppDeps):
 
       const ref: WebAppRef = {
         runtime,
+        ...createPageMemory(workspaceStore, tab.id),
         retry: run,
         restartForward: async () => {
           await deps.ssh.removePortForward(forwardId)

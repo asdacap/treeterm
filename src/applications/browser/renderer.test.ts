@@ -34,7 +34,7 @@ function makeDeps(): BrowserDeps {
   }
 }
 
-function makeStore(isRemote: boolean, state: BrowserState = { localPort: { status: WebAppPortStatus.Unassigned } }): WorkspaceStore {
+function makeStore(isRemote: boolean, state: BrowserState = { localPort: { status: WebAppPortStatus.Unassigned }, path: '' }): WorkspaceStore {
   return createStore<WorkspaceStoreState>()((set, get) => ({
     workspace: { id: 'ws', path: '/p', appStates: { [TAB_ID]: { applicationId: 'browser-graf', title: 'Grafana', state } } } as unknown as Workspace,
     connectionId: 'conn-1',
@@ -79,13 +79,16 @@ describe('createBrowserVariant', () => {
     expect(app.id).toBe('browser-graf')
     expect(app.name).toBe('Grafana')
     expect(app.isDefault).toBe(true)
-    expect(app.createInitialState()).toEqual({ localPort: { status: WebAppPortStatus.Unassigned } })
+    expect(app.createInitialState()).toEqual({ localPort: { status: WebAppPortStatus.Unassigned }, path: '' })
   })
 
   it('local: opens the URL directly', () => {
     const ref = load(makeStore(false))
     expect(ref.runtime.getState()).toEqual({ phase: WebAppPhase.Ready, url: 'http://localhost:3000/d/x?from=now' })
     expect(mockEnsureForward).not.toHaveBeenCalled()
+    // The ref remembers the tab's page.
+    ref.rememberPage('http://localhost:3000/', 'http://localhost:3000/d/y')
+    expect(ref.pageUrl('http://localhost:3000/d/x?from=now')).toBe('http://localhost:3000/d/y')
   })
 
   it('reports an invalid URL', async () => {
@@ -95,7 +98,7 @@ describe('createBrowserVariant', () => {
 
   it('remote: forwards the port, persists the local end and opens the rewritten URL', async () => {
     mockEnsureForward.mockResolvedValue(21000)
-    const store = makeStore(true, { localPort: { status: WebAppPortStatus.Assigned, port: 21000 } })
+    const store = makeStore(true, { localPort: { status: WebAppPortStatus.Assigned, port: 21000 }, path: '' })
     const ref = load(store)
     expect(ref.runtime.getState()).toEqual({ phase: WebAppPhase.Forwarding, port: 3000 })
     await vi.waitFor(() => { expect(ref.runtime.getState().phase).toBe(WebAppPhase.Ready) })
@@ -103,7 +106,7 @@ describe('createBrowserVariant', () => {
     expect(mockEnsureForward).toHaveBeenCalledWith(expect.objectContaining({
       remotePort: 3000, forwardId: forwardIdForTab(TAB_ID), preferredLocalPort: { status: WebAppPortStatus.Assigned, port: 21000 },
     }))
-    expect(store.getState().workspace.appStates[TAB_ID]!.state).toEqual({ localPort: { status: WebAppPortStatus.Assigned, port: 21000 } })
+    expect(store.getState().workspace.appStates[TAB_ID]!.state).toEqual({ localPort: { status: WebAppPortStatus.Assigned, port: 21000 }, path: '' })
   })
 
   it('remote: shows forward failures and retries', async () => {
@@ -135,7 +138,7 @@ describe('createBrowserVariant', () => {
     await new Promise((r) => { setTimeout(r, 0) })
     expect(ref.runtime.getState().phase).toBe(WebAppPhase.Forwarding)
     expect(ref2.runtime.getState().phase).toBe(WebAppPhase.Forwarding)
-    expect(store.getState().workspace.appStates[TAB_ID]!.state).toEqual({ localPort: { status: WebAppPortStatus.Unassigned } })
+    expect(store.getState().workspace.appStates[TAB_ID]!.state).toEqual({ localPort: { status: WebAppPortStatus.Unassigned }, path: '' })
   })
 
   it('remote: does nothing when the tab is gone', () => {

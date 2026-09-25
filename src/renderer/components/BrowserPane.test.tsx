@@ -14,6 +14,8 @@ function makeWorkspace(runtime: WebAppRuntime, isRemote: boolean): WorkspaceStor
     runtime: createStore<WebAppRuntime>(() => runtime),
     retry: vi.fn(),
     restartForward: vi.fn(() => Promise.resolve()),
+    pageUrl: vi.fn((home: string) => home),
+    rememberPage: vi.fn(),
     close: vi.fn(),
     dispose: vi.fn(),
   }

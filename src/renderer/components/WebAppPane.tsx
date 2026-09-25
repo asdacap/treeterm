@@ -59,6 +59,7 @@ export default function WebAppPane({ workspace, tabId, isVisible, ssh, openExter
           onRetry={ref.retry}
           detailsLinks={[{ label: 'View shell', onClick: () => { setSubTab(WebAppSubTab.Shell) } }]}
           openExternal={openExternal}
+          memory={ref}
         />
       </div>
       <div className="webapp-pane-body" style={show(WebAppSubTab.Shell)}>

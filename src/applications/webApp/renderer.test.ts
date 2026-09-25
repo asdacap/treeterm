@@ -117,6 +117,16 @@ describe('createWebAppVariant', () => {
     expect(state.keepOnExit).toBe(true)
     expect(state.port).toEqual({ status: WebAppPortStatus.Unassigned })
     expect(state.localPort).toEqual({ status: WebAppPortStatus.Unassigned })
+    expect(state.path).toBe('')
+  })
+
+  it('remembers the page the tab was on', () => {
+    const store = makeWorkspaceStore(freshState(), false)
+    const ref = load(makeDeps({}), store)
+    ref.rememberPage('http://localhost:3000/', 'http://localhost:3000/about')
+    expect(tabState(store).path).toBe('/about')
+    expect(ref.pageUrl('http://localhost:3000/')).toBe('http://localhost:3000/about')
+    ref.dispose()
   })
 
   it('local: allocates a port, starts the command with it, and becomes ready', async () => {

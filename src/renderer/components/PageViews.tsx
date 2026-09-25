@@ -4,7 +4,7 @@ import type { WebviewTag } from 'electron'
 import type { PortForwardInfo, SSHApi } from '../types'
 import { PortForwardStatus } from '../../shared/types'
 import { WebAppPhase } from '../../applications/webApp/runtime'
-import type { WebAppRuntime } from '../../applications/webApp/runtime'
+import type { PageMemory, WebAppRuntime } from '../../applications/webApp/runtime'
 import { isMarkdownPage, resolveAddress } from '../../applications/browser/url'
 import { MarkdownPreview } from './MarkdownPreview'
 
@@ -23,9 +23,10 @@ interface BrowserViewProps {
   // Where to look while waiting or after a failure (the shell, the port forward log).
   detailsLinks: DetailsLink[]
   openExternal: (url: string) => void
+  memory: PageMemory
 }
 
-export function BrowserView({ runtime, onRetry, detailsLinks, openExternal }: BrowserViewProps) {
+export function BrowserView({ runtime, onRetry, detailsLinks, openExternal, memory }: BrowserViewProps) {
   const links = detailsLinks.map(link => (
     <button key={link.label} className="webapp-link" onClick={link.onClick}>{link.label}</button>
   ))
@@ -42,7 +43,7 @@ export function BrowserView({ runtime, onRetry, detailsLinks, openExternal }: Br
     [WebAppPhase.AllocatingPort]: () => waiting('Finding a free port…'),
     [WebAppPhase.WaitingForServer]: (r) => waiting(`Waiting for server on port ${String(r.port)}…`),
     [WebAppPhase.Forwarding]: (r) => waiting(`Starting port forward for port ${String(r.port)}…`),
-    [WebAppPhase.Ready]: (r) => <WebView url={r.url} openExternal={openExternal} />,
+    [WebAppPhase.Ready]: (r) => <WebView url={r.url} openExternal={openExternal} memory={memory} />,
     [WebAppPhase.Error]: (r) => (
       <div className="webapp-waiting">
         <div className="webapp-error">{r.message}</div>
@@ -73,9 +74,18 @@ interface PageProbe {
 // Runs in the guest once a load finishes. Text pages are shown inline, so innerText is the source.
 const PROBE_SCRIPT = '({ contentType: document.contentType, url: location.href, text: document.body ? document.body.innerText : "" })'
 
-function WebView({ url, openExternal }: { url: string; openExternal: (url: string) => void }) {
+interface WebViewProps {
+  // The start page (Home). The webview opens on the remembered page instead.
+  url: string
+  openExternal: (url: string) => void
+  memory: PageMemory
+}
+
+function WebView({ url, openExternal, memory }: WebViewProps) {
   const [view, setView] = useState<WebviewTag | null>(null)
-  const [currentUrl, setCurrentUrl] = useState(url)
+  // Read once per mount: changing a webview's src navigates it, so it must not follow the saved page.
+  const [src] = useState(() => memory.pageUrl(url))
+  const [currentUrl, setCurrentUrl] = useState(src)
   const [nav, setNav] = useState({ canGoBack: false, canGoForward: false })
   const [loading, setLoading] = useState(false)
   // The previous page's content stays up until the next load finishes, like a normal browser.
@@ -85,7 +95,9 @@ function WebView({ url, openExternal }: { url: string; openExternal: (url: strin
   useEffect(() => {
     if (!view) return
     const onNavigate = (e: Event): void => {
-      setCurrentUrl((e as Event & { url: string }).url)
+      const navigated = (e as Event & { url: string }).url
+      setCurrentUrl(navigated)
+      memory.rememberPage(url, navigated)
       setNav({ canGoBack: view.canGoBack(), canGoForward: view.canGoForward() })
     }
     const onStart = (): void => { setLoading(true) }
@@ -107,7 +119,7 @@ function WebView({ url, openExternal }: { url: string; openExternal: (url: strin
       view.removeEventListener('did-start-loading', onStart)
       view.removeEventListener('did-stop-loading', onStop)
     }
-  }, [view])
+  }, [view, memory, url])
 
   const load = (target: string): void => {
     // The page itself shows load failures; the rejection is only worth a log line.
@@ -161,7 +173,7 @@ function WebView({ url, openExternal }: { url: string; openExternal: (url: strin
       <div className="webapp-page">
         <webview
           ref={(el: HTMLElement | null) => { setView(el as WebviewTag | null) }}
-          src={url}
+          src={src}
           partition="persist:webapp"
           className="webapp-webview"
         />

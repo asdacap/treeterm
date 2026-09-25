@@ -163,11 +163,15 @@ export type WebAppState = TerminalState & {
   // Remote sessions only: the local end of the ssh forward. Persisted so the browser
   // origin (and with it cookies/localStorage) stays stable across restarts.
   localPort: WebAppPort
+  // Path, query and hash of the last page shown, within the page's origin ('' = the start page).
+  path: string
 }
 
 export interface BrowserState {
   // Remote sessions only: the local end of the ssh forward (see WebAppState.localPort).
   localPort: WebAppPort
+  // See WebAppState.path.
+  path: string
 }
 
 export interface FilesystemState {

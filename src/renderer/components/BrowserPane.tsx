@@ -33,6 +33,7 @@ export default function BrowserPane({ workspace, tabId, ssh, openExternal }: Bro
       onRetry={ref.retry}
       detailsLinks={isRemote ? [{ label: 'View port forward', onClick: () => { setSubTab(BrowserSubTab.PortForward) } }] : []}
       openExternal={openExternal}
+      memory={ref}
     />
   )
   // Local sessions open the page directly: nothing else to show.

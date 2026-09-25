@@ -4,7 +4,7 @@ import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import { BrowserView, PortForwardView } from './PageViews'
 import type { PageSsh } from './PageViews'
 import { WebAppPhase } from '../../applications/webApp/runtime'
-import type { WebAppRuntime } from '../../applications/webApp/runtime'
+import type { PageMemory, WebAppRuntime } from '../../applications/webApp/runtime'
 import type { PortForwardInfo } from '../types'
 import { PortForwardStatus } from '../../shared/types'
 
@@ -31,19 +31,24 @@ beforeEach(() => { vi.clearAllMocks() })
 
 describe('BrowserView', () => {
   const noop = (): void => {}
+  const makeMemory = (saved = ''): PageMemory => ({
+    pageUrl: vi.fn((home: string) => new URL(saved, home).href),
+    rememberPage: vi.fn(),
+  })
+  const memory = makeMemory()
 
   it.each([
     [{ phase: WebAppPhase.AllocatingPort } as WebAppRuntime, 'Finding a free port…'],
     [{ phase: WebAppPhase.WaitingForServer, port: 3000 } as WebAppRuntime, 'Waiting for server on port 3000…'],
     [{ phase: WebAppPhase.Forwarding, port: 3000 } as WebAppRuntime, 'Starting port forward for port 3000…'],
   ])('shows a waiting message for %o', (runtime, text) => {
-    render(<BrowserView runtime={runtime} onRetry={noop} detailsLinks={[{ label: 'View shell', onClick: noop }]} openExternal={noop} />)
+    render(<BrowserView runtime={runtime} onRetry={noop} detailsLinks={[{ label: 'View shell', onClick: noop }]} openExternal={noop} memory={memory} />)
     expect(screen.getByText(text)).toBeTruthy()
   })
 
   it('shows the error with a retry', () => {
     const onRetry = vi.fn()
-    render(<BrowserView runtime={{ phase: WebAppPhase.Error, message: 'boom' }} onRetry={onRetry} detailsLinks={[{ label: 'View shell', onClick: noop }]} openExternal={noop} />)
+    render(<BrowserView runtime={{ phase: WebAppPhase.Error, message: 'boom' }} onRetry={onRetry} detailsLinks={[{ label: 'View shell', onClick: noop }]} openExternal={noop} memory={memory} />)
     expect(screen.getByText('boom')).toBeTruthy()
     fireEvent.click(screen.getByText('Retry'))
     expect(onRetry).toHaveBeenCalled()
@@ -51,9 +56,9 @@ describe('BrowserView', () => {
 
   type MockWebview = HTMLElement & Record<'goBack' | 'goForward' | 'reloadIgnoringCache' | 'stop' | 'canGoBack' | 'canGoForward' | 'loadURL' | 'executeJavaScript', ReturnType<typeof vi.fn>>
 
-  function renderReady(openExternal = vi.fn()) {
+  function renderReady(openExternal = vi.fn(), pageMemory = memory) {
     const { container } = render(
-      <BrowserView runtime={{ phase: WebAppPhase.Ready, url: 'http://localhost:3000/' }} onRetry={noop} detailsLinks={[{ label: 'View shell', onClick: noop }]} openExternal={openExternal} />,
+      <BrowserView runtime={{ phase: WebAppPhase.Ready, url: 'http://localhost:3000/' }} onRetry={noop} detailsLinks={[{ label: 'View shell', onClick: noop }]} openExternal={openExternal} memory={pageMemory} />,
     )
     const webview = container.querySelector('webview') as MockWebview
     Object.assign(webview, {
@@ -88,6 +93,24 @@ describe('BrowserView', () => {
     expect(webview.loadURL).toHaveBeenCalledWith('http://localhost:3000/')
     fireEvent.click(screen.getByTitle('Open in external browser'))
     expect(openExternal).toHaveBeenCalledWith('http://localhost:3000/about')
+  })
+
+  it('opens on the remembered page and records navigation, keeping Home as the start page', () => {
+    const pageMemory = makeMemory('/docs?x=1#top')
+    const { webview, address, navigate } = renderReady(vi.fn(), pageMemory)
+    expect(pageMemory.pageUrl).toHaveBeenCalledWith('http://localhost:3000/')
+    expect(webview.getAttribute('src')).toBe('http://localhost:3000/docs?x=1#top')
+    expect(address.value).toBe('http://localhost:3000/docs?x=1#top')
+
+    navigate('http://localhost:3000/about')
+    expect(pageMemory.rememberPage).toHaveBeenCalledWith('http://localhost:3000/', 'http://localhost:3000/about')
+    act(() => { webview.dispatchEvent(Object.assign(new Event('did-navigate-in-page'), { url: 'http://localhost:3000/about#b' })) })
+    expect(pageMemory.rememberPage).toHaveBeenLastCalledWith('http://localhost:3000/', 'http://localhost:3000/about#b')
+    // Navigating does not feed back into src, which would reload the page.
+    expect(webview.getAttribute('src')).toBe('http://localhost:3000/docs?x=1#top')
+
+    fireEvent.click(screen.getByTitle('Home'))
+    expect(webview.loadURL).toHaveBeenCalledWith('http://localhost:3000/')
   })
 
   it('swaps reload for stop while loading', () => {
