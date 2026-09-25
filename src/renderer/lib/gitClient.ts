@@ -20,15 +20,19 @@ import type {
   FilesystemApi,
 } from '../types'
 /* eslint-disable custom/no-string-literal-comparison -- parses git porcelain output; status chars/tokens are git CLI conventions, not our domain */
-import { ExecEventType, type IpcResult } from '../../shared/ipc-types'
+import { DEFAULT_EXEC_TIMEOUT_MS, ExecEventType, type IpcResult } from '../../shared/ipc-types'
 import { FileChangeStatus } from '../../shared/types'
 import { resolveHomedir } from './homedir'
 import { withTimeout } from './withTimeout'
 import { MAX_READ_FILE_BYTES } from './fileLimits'
 
-// Backstop only — the daemon enforces a 30s exec timeout, so this fires only if the result event
+// Backstop only — the daemon enforces the exec timeout, so this fires only if the result event
 // is never delivered to the renderer.
-const GIT_EXEC_TIMEOUT_MS = 35000
+const GIT_EXEC_BACKSTOP_MARGIN_MS = 5000
+
+// `git worktree add` checks out the whole tree (plus LFS smudge and post-checkout hooks), which
+// takes over 30s on large repos.
+const WORKTREE_ADD_TIMEOUT_MS = 10 * 60_000
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -93,7 +97,8 @@ async function execGit(
   args: string[],
   options?: { timeoutMs?: number; onProgress?: (data: string) => void },
 ): Promise<ExecResult> {
-  const startResult = await exec.start(connectionId, cwd, 'git', args)
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS
+  const startResult = await exec.start(connectionId, cwd, 'git', args, timeoutMs)
   if (!startResult.success) throw new Error(startResult.error)
   const { execId } = startResult
 
@@ -117,7 +122,7 @@ async function execGit(
         reject(new Error(event.message))
       }
     })
-  }), GIT_EXEC_TIMEOUT_MS, `git ${args.join(' ')}`, () => { unsub(); })
+  }), timeoutMs + GIT_EXEC_BACKSTOP_MARGIN_MS, `git ${args.join(' ')}`, () => { unsub(); })
 }
 
 export function parseStatus(output: string): GitStatusEntry[] {
@@ -344,7 +349,7 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
         const args = ['worktree', 'add', '-b', branchName, worktreePath]
         if (baseBranch) args.push(baseBranch)
 
-        const result = await git(repoPath, args, { onProgress })
+        const result = await git(repoPath, args, { onProgress, timeoutMs: WORKTREE_ADD_TIMEOUT_MS })
         if (result.exitCode !== 0) {
           return { success: false, error: interpretError(result).message }
         }
@@ -460,7 +465,7 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
 
         const worktreePath = await resolveWorktreePath(rootPath, worktreeName)
 
-        const result = await git(repoPath, ['worktree', 'add', worktreePath, branch], { onProgress })
+        const result = await git(repoPath, ['worktree', 'add', worktreePath, branch], { onProgress, timeoutMs: WORKTREE_ADD_TIMEOUT_MS })
         if (result.exitCode !== 0) {
           return { success: false, error: interpretError(result).message }
         }
@@ -490,7 +495,7 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
 
         const worktreePath = await resolveWorktreePath(rootPath, worktreeName)
 
-        const result = await git(repoPath, ['worktree', 'add', '-b', branchName, worktreePath, remoteBranch], { onProgress })
+        const result = await git(repoPath, ['worktree', 'add', '-b', branchName, worktreePath, remoteBranch], { onProgress, timeoutMs: WORKTREE_ADD_TIMEOUT_MS })
         if (result.exitCode !== 0) {
           return { success: false, error: interpretError(result).message }
         }

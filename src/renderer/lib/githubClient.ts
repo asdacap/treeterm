@@ -7,7 +7,7 @@
  */
 
 import type { ExecApi, GitHubApi, GitHubPostCommentsResult, GitHubPrInfoResult, GitHubPrListResult, ReviewComment, SettingsApi } from '../types'
-import { ExecEventType } from '../../shared/ipc-types'
+import { DEFAULT_EXEC_TIMEOUT_MS, ExecEventType } from '../../shared/ipc-types'
 
 // --- Helpers ---
 
@@ -20,7 +20,7 @@ async function execCommand(
   command: string,
   args: string[],
 ): Promise<ExecResult> {
-  const startResult = await exec.start(connectionId, cwd, command, args)
+  const startResult = await exec.start(connectionId, cwd, command, args, DEFAULT_EXEC_TIMEOUT_MS)
   if (!startResult.success) throw new Error(startResult.error)
   const { execId } = startResult
 

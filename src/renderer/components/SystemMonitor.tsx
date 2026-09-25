@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Loader2, RefreshCw, Square, X } from 'lucide-react'
 import type { ExecApi } from '../types'
-import { ExecEventType, type ExecEvent } from '../../shared/ipc-types'
+import { DEFAULT_EXEC_TIMEOUT_MS, ExecEventType, type ExecEvent } from '../../shared/ipc-types'
 
 // --- Types ---
 
@@ -291,7 +291,7 @@ interface SystemMetricsProps {
 }
 
 function sendSignal(exec: ExecApi, connectionId: string, pid: number, signal: string, onRefresh: () => void): void {
-  void exec.start(connectionId, '/', 'kill', [signal, String(pid)]).then(() => {
+  void exec.start(connectionId, '/', 'kill', [signal, String(pid)], DEFAULT_EXEC_TIMEOUT_MS).then(() => {
     onRefresh()
   })
 }
@@ -509,7 +509,7 @@ export default function SystemMonitor({ connectionId, exec }: SystemMonitorProps
     let currentUnsub: (() => void) | null = null
 
     function poll(): void {
-      exec.start(connectionId, '/', 'sh', ['-c', MONITOR_SCRIPT]).then((result) => {
+      exec.start(connectionId, '/', 'sh', ['-c', MONITOR_SCRIPT], DEFAULT_EXEC_TIMEOUT_MS).then((result) => {
         if (cancelled) return
         if (!result.success) {
           setState({ status: MonitorStatus.Error, error: result.error })

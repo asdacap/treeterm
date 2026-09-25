@@ -261,8 +261,8 @@ const preloadApi: PreloadApi = {
     }
   },
   exec: {
-    start: (connectionId: string, cwd: string, command: string, args: string[]) => {
-      return client.execStart(connectionId, cwd, command, args)
+    start: (connectionId: string, cwd: string, command: string, args: string[], timeoutMs: number) => {
+      return client.execStart(connectionId, cwd, command, args, timeoutMs)
     },
     kill: (execId: string): void => {
       client.execKill(execId)

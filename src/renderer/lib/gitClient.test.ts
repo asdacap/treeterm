@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createGitApi, parseStatus } from './gitClient'
 import type { ExecApi, FilesystemApi } from '../types'
-import { ExecEventType, type ExecEvent } from '../../shared/ipc-types'
+import { DEFAULT_EXEC_TIMEOUT_MS, ExecEventType, type ExecEvent } from '../../shared/ipc-types'
 import { FileChangeStatus } from '../../shared/types'
 
 // ---------------------------------------------------------------------------
@@ -781,7 +781,7 @@ describe('createGitApi', () => {
       const result = await git.getUncommittedChanges('/repo')
 
       expect(exec.start).toHaveBeenNthCalledWith(
-        1, 'conn-1', '/repo', 'git', ['status', '--porcelain', '--untracked-files=all']
+        1, 'conn-1', '/repo', 'git', ['status', '--porcelain', '--untracked-files=all'], DEFAULT_EXEC_TIMEOUT_MS
       )
       expect(result.success).toBe(true)
       if (result.success) {
@@ -810,7 +810,7 @@ describe('createGitApi', () => {
 
       expect(exec.start).toHaveBeenNthCalledWith(
         4, 'conn-1', '/repo', 'git',
-        ['diff', '--numstat', '--no-index', '--', '/dev/null', 'new.ts']
+        ['diff', '--numstat', '--no-index', '--', '/dev/null', 'new.ts'], DEFAULT_EXEC_TIMEOUT_MS
       )
       expect(result.success).toBe(true)
       if (result.success) {
@@ -1300,6 +1300,24 @@ describe('createGitApi', () => {
         expect(result.path).toContain('.worktrees/feature')
         expect(result.branch).toBe('feature')
       }
+    })
+
+    // Checking out a large LFS repo takes over the default 30s exec timeout, which
+    // would SIGTERM git midway through the fork.
+    it('gives worktree add a longer exec timeout than the default', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: 'worktree /repo\n' },
+        { stdout: '' },
+        { stdout: '' },
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      await git.createWorktree('/repo', 'feature')
+
+      const addCall = vi.mocked(exec.start).mock.calls.find(([, , , args]) => args[0] === 'worktree' && args[1] === 'add')
+      expect(addCall?.[4]).toBeGreaterThan(DEFAULT_EXEC_TIMEOUT_MS)
     })
 
     it('creates worktree in home dir when not gitignored', async () => {

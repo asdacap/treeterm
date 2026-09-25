@@ -1,5 +1,5 @@
 import type { ExecApi } from '../../renderer/types'
-import { ExecEventType } from '../../shared/ipc-types'
+import { DEFAULT_EXEC_TIMEOUT_MS, ExecEventType } from '../../shared/ipc-types'
 
 /** Runs curl against a port on the daemon's host and returns curl's exit code. */
 export type HttpProbe = (port: number) => Promise<number>
@@ -30,7 +30,7 @@ export function createHttpProbe(exec: ExecApi, connectionId: string): HttpProbe 
   return async (port: number): Promise<number> => {
     const startResult = await exec.start(connectionId, '/', 'curl', [
       '-s', '-o', '/dev/null', '--connect-timeout', '1', '--max-time', '2', `http://localhost:${String(port)}/`,
-    ])
+    ], DEFAULT_EXEC_TIMEOUT_MS)
     if (!startResult.success) throw new Error(startResult.error)
     const { execId } = startResult
     return new Promise((resolve, reject) => {

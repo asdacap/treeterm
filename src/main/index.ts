@@ -609,7 +609,7 @@ function sendExecEvent(sender: Electron.WebContents, execId: string, event: Exec
   }
 }
 
-server.onExecStart((event, connectionId, cwd, command, args) => {
+server.onExecStart((event, connectionId, cwd, command, args, timeoutMs) => {
   try {
     const client = getClientForConnection(connectionId)
     const execId = randomUUID()
@@ -618,7 +618,7 @@ server.onExecStart((event, connectionId, cwd, command, args) => {
     execStreams.add(execId, { stream, sender, connectionId })
 
     const startInput: ExecInput = {
-      start: { cwd, command, args, env: {}, timeoutMs: 30000 }
+      start: { cwd, command, args, env: {}, timeoutMs }
     }
     stream.write(startInput)
     stream.end()

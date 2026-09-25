@@ -58,6 +58,10 @@ export type PtyEvent =
   | { type: PtyEventType.Error; message: string }
   | { type: PtyEventType.End }
 
+// The daemon SIGTERMs an exec after this long. Callers pass it explicitly; long-running
+// commands (e.g. `git worktree add` on a large LFS repo) pass a larger value.
+export const DEFAULT_EXEC_TIMEOUT_MS = 30_000
+
 export enum ExecEventType {
   Stdout = 'stdout',
   Stderr = 'stderr',
@@ -307,7 +311,7 @@ export interface IpcRequests {
 
   // Exec operations (streaming command execution)
   execStart: {
-    params: [connectionId: string, cwd: string, command: string, args: string[]]
+    params: [connectionId: string, cwd: string, command: string, args: string[], timeoutMs: number]
     result: IpcResult<{ execId: string }>
   }
 

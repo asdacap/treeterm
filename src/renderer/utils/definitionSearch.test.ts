@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { searchDefinition } from './definitionSearch'
 import type { ExecApi } from '../types'
-import { ExecEventType, type ExecEvent } from '../../shared/ipc-types'
+import { DEFAULT_EXEC_TIMEOUT_MS, ExecEventType, type ExecEvent } from '../../shared/ipc-types'
 
 function createMockExecApi(opts: {
   startResult?: { success: boolean; execId?: string; error?: string }
@@ -55,7 +55,8 @@ describe('definitionSearch', () => {
         'conn-1',
         '/workspace',
         'grep',
-        expect.arrayContaining(['-rnE', expectedPattern])
+        expect.arrayContaining(['-rnE', expectedPattern]),
+        DEFAULT_EXEC_TIMEOUT_MS
       )
     })
   })

@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { createHttpProbe, findFreePort, randomPort, waitForHttp, WaitOutcome } from './ports'
 import type { HttpProbe } from './ports'
 import type { ExecApi, ExecEvent } from '../../renderer/types'
-import { ExecEventType } from '../../shared/ipc-types'
+import { DEFAULT_EXEC_TIMEOUT_MS, ExecEventType } from '../../shared/ipc-types'
 
 function makeExec(events: ExecEvent[]): ExecApi {
   return {
@@ -36,7 +36,7 @@ describe('createHttpProbe', () => {
     ])
     const code = await createHttpProbe(exec, 'conn-1')(3000)
     expect(code).toBe(7)
-    expect(exec.start).toHaveBeenCalledWith('conn-1', '/', 'curl', expect.arrayContaining(['http://localhost:3000/']))
+    expect(exec.start).toHaveBeenCalledWith('conn-1', '/', 'curl', expect.arrayContaining(['http://localhost:3000/']), DEFAULT_EXEC_TIMEOUT_MS)
   })
 
   it('rejects when the exec fails to start', async () => {

@@ -1,6 +1,6 @@
 /* eslint-disable custom/no-string-literal-comparison -- switches on Monaco language IDs which are external string constants */
 import type { ExecApi, ExecEvent } from '../types'
-import { ExecEventType } from '../../shared/ipc-types'
+import { DEFAULT_EXEC_TIMEOUT_MS, ExecEventType } from '../../shared/ipc-types'
 
 export interface DefinitionLocation {
   filePath: string
@@ -111,7 +111,7 @@ export function searchDefinition(
   return new Promise((resolve) => {
     let stdout = ''
 
-    execApi.start(connectionId, workspacePath, 'grep', args).then((result) => {
+    execApi.start(connectionId, workspacePath, 'grep', args, DEFAULT_EXEC_TIMEOUT_MS).then((result) => {
       if (!result.success) {
         resolve([])
         return

@@ -287,7 +287,7 @@ export interface WorkspaceFilesystemApi {
 }
 
 export interface ExecApi {
-  start: (connectionId: string, cwd: string, command: string, args: string[]) => Promise<IpcResult<{ execId: string }>>
+  start: (connectionId: string, cwd: string, command: string, args: string[], timeoutMs: number) => Promise<IpcResult<{ execId: string }>>
   kill: (execId: string) => void
   onEvent: (execId: string, callback: (event: ExecEvent) => void) => () => void
 }
