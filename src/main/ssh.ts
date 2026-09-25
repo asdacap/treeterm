@@ -35,14 +35,47 @@ export type BootstrapResult =
   | { type: BootstrapResultType.HashMismatch; localHash: string; remoteHash: string }
 
 /**
- * Map `uname -m` output to the arch suffix used by the cross-compiled daemon binaries
- * (treeterm-daemon-<arch>-linux). Some systems report `arm64`/`amd64` instead of the
- * kernel-canonical `aarch64`/`x86_64`.
+ * Map `uname -m` output to the arch suffix used by the daemon binaries
+ * (treeterm-daemon-<arch>-<os>). macOS and some Linux distros report `arm64`/`amd64`
+ * instead of `aarch64`/`x86_64`. Also accepts Node's `process.arch` (`arm64`, `x64`).
  */
-const ARCH_ALIASES: Record<string, string> = { arm64: 'aarch64', amd64: 'x86_64' }
+const ARCH_ALIASES: Record<string, string> = { arm64: 'aarch64', amd64: 'x86_64', x64: 'x86_64' }
 
 export function normalizeArch(arch: string | undefined): string | undefined {
   return arch ? (ARCH_ALIASES[arch] ?? arch) : arch
+}
+
+/** Remote OS (lowercased `uname -s`) and normalized arch, used to pick the daemon binary. */
+export interface RemotePlatform {
+  os: string
+  arch: string
+}
+
+const BUILD_HINTS: Record<string, string> = {
+  linux: 'Run `npm run build:daemon-rs:remote` to cross-compile for Linux.',
+}
+
+/**
+ * Find the daemon binary in `baseDir` for the given remote OS/arch.
+ * Looks for a platform-specific binary (e.g., treeterm-daemon-x86_64-linux). A remote
+ * with the same OS/arch as this machine may also use the local daemon binary; any other
+ * mismatch throws rather than silently uploading a binary that cannot run there.
+ */
+export function findDaemonBinary(baseDir: string, remote: RemotePlatform): string {
+  const target = `${remote.arch}-${remote.os}`
+  const platformBinary = path.join(baseDir, `treeterm-daemon-${target}`)
+  if (fs.existsSync(platformBinary)) {
+    return platformBinary
+  }
+
+  const localTarget = `${normalizeArch(process.arch) ?? process.arch}-${process.platform}`
+  const localBinary = path.join(baseDir, 'treeterm-daemon')
+  if (target === localTarget && fs.existsSync(localBinary)) {
+    return localBinary
+  }
+
+  const hint = BUILD_HINTS[remote.os] ?? `Build the daemon for ${target} and place it at that path.`
+  throw new Error(`No daemon binary found for remote platform "${target}" (looked for ${platformBinary}). ${hint}`)
 }
 
 export class SSHTunnel {
@@ -157,31 +190,20 @@ export class SSHTunnel {
   }
 
   /**
-   * Get the local path to the daemon binary for the given remote architecture.
-   * Requires an arch-specific binary (e.g., treeterm-daemon-x86_64-linux) to exist —
-   * never falls back to the local (macOS) binary, which would silently upload the wrong arch.
+   * Get the local path to the daemon binary for the given remote OS/arch.
    */
-  private getDaemonBinaryPath(remoteArch: string): string {
+  private getDaemonBinaryPath(remote: RemotePlatform): string {
     const baseDir = app.isPackaged
       ? path.join(process.resourcesPath, 'daemon-rs')
       : path.join(__dirname, '../daemon-rs')
-
-    const archBinary = path.join(baseDir, `treeterm-daemon-${remoteArch}-linux`)
-    if (fs.existsSync(archBinary)) {
-      return archBinary
-    }
-
-    throw new Error(
-      `No daemon binary found for remote arch "${remoteArch}" (looked for ${archBinary}). ` +
-        `Run \`npm run build:daemon-rs:remote\` to cross-compile for Linux.`,
-    )
+    return findDaemonBinary(baseDir, remote)
   }
 
   /**
-   * Compute SHA256 checksum of the local daemon binary for the given architecture.
+   * Compute SHA256 checksum of the local daemon binary for the given remote platform.
    */
-  private getLocalDaemonChecksum(remoteArch: string): string {
-    const localPath = this.getDaemonBinaryPath(remoteArch)
+  private getLocalDaemonChecksum(remote: RemotePlatform): string {
+    const localPath = this.getDaemonBinaryPath(remote)
     const fileBuffer = fs.readFileSync(localPath)
     return crypto.createHash('sha256').update(fileBuffer).digest('hex')
   }
@@ -189,8 +211,8 @@ export class SSHTunnel {
   /**
    * Upload the daemon binary to the remote host via scp.
    */
-  private async uploadDaemon(remotePath: string, remoteArch: string): Promise<void> {
-    const localPath = this.getDaemonBinaryPath(remoteArch)
+  private async uploadDaemon(remotePath: string, remote: RemotePlatform): Promise<void> {
+    const localPath = this.getDaemonBinaryPath(remote)
     this.appendBootstrapOutput(`Uploading daemon binary to ${remotePath}...`)
     await this.uploadFile(localPath, remotePath)
     this.appendBootstrapOutput(`Upload complete`)
@@ -235,13 +257,13 @@ export class SSHTunnel {
    * We avoid `~/` in the scp destination because scp uses SFTP by default
    * (OpenSSH 9.0+), and the SFTP protocol does not reliably expand `~`.
    */
-  private async uploadAndStartDaemon(remoteArch: string, remoteHome: string): Promise<string> {
+  private async uploadAndStartDaemon(remote: RemotePlatform, remoteHome: string): Promise<string> {
     const daemonDir = `${remoteHome}/.treeterm`
     const daemonBin = `${daemonDir}/treeterm-daemon`
     const daemonLog = `${daemonDir}/daemon.log`
 
-    this.appendBootstrapOutput(`Uploading daemon binary (remote arch: ${remoteArch})...`)
-    await this.uploadDaemon(daemonBin, remoteArch)
+    this.appendBootstrapOutput(`Uploading daemon binary (remote platform: ${remote.arch}-${remote.os})...`)
+    await this.uploadDaemon(daemonBin, remote)
 
     const startArgs = this.buildBaseSSHArgs()
     const startScript = [
@@ -291,7 +313,8 @@ export class SSHTunnel {
         'DAEMON_SOCKET="/tmp/treeterm-$(id -u)/daemon.sock"',
         `REFRESH_DAEMON=${refreshDaemon}`,
         '',
-        '# Report system architecture for binary selection',
+        '# Report system OS and architecture for binary selection',
+        'echo "TREETERM_OS:$(uname -s)"',
         'echo "TREETERM_ARCH:$(uname -m)"',
         '',
         '# Report absolute home directory — scp over SFTP does not reliably expand ~',
@@ -305,7 +328,7 @@ export class SSHTunnel {
         '',
         '# Report checksum of remote binary for version verification',
         'if [ "$NEEDS_UPLOAD" = "0" ]; then',
-        '  REMOTE_HASH=$(sha256sum "$DAEMON_BIN" 2>/dev/null | cut -c1-64)',
+        '  REMOTE_HASH=$( (sha256sum "$DAEMON_BIN" 2>/dev/null || shasum -a 256 "$DAEMON_BIN" 2>/dev/null) | cut -c1-64)',
         '  echo "TREETERM_REMOTE_HASH:${REMOTE_HASH:-NONE}"',
         'else',
         '  echo "TREETERM_REMOTE_HASH:NONE"',
@@ -399,6 +422,13 @@ export class SSHTunnel {
               reject(new Error('Could not detect remote architecture (TREETERM_ARCH not reported)'))
               return
             }
+            const osMatch = stdout.match(/TREETERM_OS:(\S+)/)
+            const remoteOs = osMatch?.[1]?.trim().toLowerCase()
+            if (!remoteOs) {
+              reject(new Error('Could not detect remote OS (TREETERM_OS not reported)'))
+              return
+            }
+            const remote: RemotePlatform = { os: remoteOs, arch: remoteArch }
 
             const hashMatch = stdout.match(/TREETERM_REMOTE_HASH:(\S+)/)
             const remoteHash = hashMatch?.[1]?.trim()
@@ -410,7 +440,7 @@ export class SSHTunnel {
             if (socketPath && socketPath !== 'NEEDS_UPLOAD') {
               // eslint-disable-next-line custom/no-string-literal-comparison -- sentinel value from remote shell script
               if (remoteHash && remoteHash !== 'NONE') {
-                const localHash = this.getLocalDaemonChecksum(remoteArch)
+                const localHash = this.getLocalDaemonChecksum(remote)
                 if (remoteHash === localHash) {
                   resolve({ type: BootstrapResultType.Connected, socketPath })
                   return
@@ -442,7 +472,7 @@ export class SSHTunnel {
                   return
                 }
               } else {
-                // No hash available (sha256sum missing) — trust the running daemon
+                // No hash available (sha256sum/shasum missing) — trust the running daemon
                 resolve({ type: BootstrapResultType.Connected, socketPath })
                 return
               }
@@ -458,7 +488,7 @@ export class SSHTunnel {
             }
 
             // Upload and start daemon (binary missing, wrong arch, or hash mismatch)
-            resolve({ type: BootstrapResultType.Connected, socketPath: await this.uploadAndStartDaemon(remoteArch, remoteHome) })
+            resolve({ type: BootstrapResultType.Connected, socketPath: await this.uploadAndStartDaemon(remote, remoteHome) })
           } catch (err) {
             reject(
               new Error(

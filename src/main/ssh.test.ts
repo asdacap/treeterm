@@ -22,7 +22,8 @@ vi.mock('./socketPath', () => ({
 
 import { spawn } from 'child_process'
 import * as fs from 'fs'
-import { SSHTunnel, BootstrapResultType, normalizeArch } from './ssh'
+import { SSHTunnel, BootstrapResultType, normalizeArch, findDaemonBinary } from './ssh'
+import type { RemotePlatform } from './ssh'
 import type { SSHConnectionConfig } from '../shared/types'
 
 type MockProcess = EventEmitter & {
@@ -43,8 +44,8 @@ type SSHTunnelPrivate = {
   bootstrapRemoteDaemon: () => Promise<string>
   startTunnel: (remoteSocketPath: string) => void
   waitForSocket: () => Promise<void>
-  getLocalDaemonChecksum: (arch: string) => string
-  getDaemonBinaryPath: (arch: string) => string
+  getLocalDaemonChecksum: (remote: RemotePlatform) => string
+  getDaemonBinaryPath: (remote: RemotePlatform) => string
 }
 
 /** Get typed access to private members of SSHTunnel */
@@ -232,6 +233,30 @@ describe('SSHTunnel', () => {
     })
   })
 
+  describe('findDaemonBinary', () => {
+    const local: RemotePlatform = { os: process.platform, arch: normalizeArch(process.arch) ?? process.arch }
+    const OTHER_OS: Record<string, string> = { darwin: 'linux', linux: 'darwin' }
+    const OTHER_ARCH: Record<string, string> = { aarch64: 'x86_64', x86_64: 'aarch64' }
+
+    it('uses the platform-specific binary when present', () => {
+      vi.mocked(fs.existsSync).mockImplementation((p) => String(p).endsWith('treeterm-daemon-aarch64-linux'))
+      expect(findDaemonBinary('/base', { os: 'linux', arch: 'aarch64' })).toBe('/base/treeterm-daemon-aarch64-linux')
+    })
+
+    it('falls back to the local binary when the remote matches this machine', () => {
+      vi.mocked(fs.existsSync).mockImplementation((p) => String(p).endsWith('/treeterm-daemon'))
+      expect(findDaemonBinary('/base', local)).toBe('/base/treeterm-daemon')
+    })
+
+    it('never uses the local binary for a different OS or arch', () => {
+      vi.mocked(fs.existsSync).mockImplementation((p) => String(p).endsWith('/treeterm-daemon'))
+      expect(() => findDaemonBinary('/base', { ...local, os: OTHER_OS[local.os] ?? 'linux' }))
+        .toThrow('No daemon binary found')
+      expect(() => findDaemonBinary('/base', { ...local, arch: OTHER_ARCH[local.arch] ?? 'aarch64' }))
+        .toThrow('No daemon binary found')
+    })
+  })
+
   describe('bootstrapRemoteDaemon', () => {
     it('resolves with socket path on success', async () => {
       const proc = makeMockProcess()
@@ -240,7 +265,7 @@ describe('SSHTunnel', () => {
       const tunnel = new SSHTunnel(makeConfig())
       const promise = priv(tunnel).bootstrapRemoteDaemon()
 
-      proc.stdout.emit('data', Buffer.from('TREETERM_ARCH:x86_64\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n'))
+      proc.stdout.emit('data', Buffer.from('TREETERM_OS:Linux\nTREETERM_ARCH:x86_64\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n'))
       proc.emit('close', 0)
 
       const result = await promise
@@ -285,6 +310,19 @@ describe('SSHTunnel', () => {
       await expect(promise).rejects.toThrow('Could not detect remote architecture')
     })
 
+    it('rejects when TREETERM_OS marker is missing', async () => {
+      const proc = makeMockProcess()
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
+
+      const tunnel = new SSHTunnel(makeConfig())
+      const promise = priv(tunnel).bootstrapRemoteDaemon()
+
+      proc.stdout.emit('data', Buffer.from('TREETERM_ARCH:x86_64\n'))
+      proc.emit('close', 0)
+
+      await expect(promise).rejects.toThrow('Could not detect remote OS')
+    })
+
     it('includes REFRESH_DAEMON=1 when refreshDaemon option set', async () => {
       const proc = makeMockProcess()
       vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
@@ -297,7 +335,7 @@ describe('SSHTunnel', () => {
       const scriptArg = spawnCall[1][spawnCall[1].length - 1]
       expect(scriptArg).toContain('REFRESH_DAEMON=1')
 
-      proc.stdout.emit('data', Buffer.from('TREETERM_ARCH:x86_64\nTREETERM_SOCKET:/tmp/daemon.sock\n'))
+      proc.stdout.emit('data', Buffer.from('TREETERM_OS:Linux\nTREETERM_ARCH:x86_64\nTREETERM_SOCKET:/tmp/daemon.sock\n'))
       proc.emit('close', 0)
 
       await promise
@@ -316,7 +354,7 @@ describe('SSHTunnel', () => {
       expect(scriptArg).toContain('TREETERM_REMOTE_HASH')
       expect(scriptArg).toContain('TREETERM_HOME:$HOME')
 
-      proc.stdout.emit('data', Buffer.from('TREETERM_ARCH:x86_64\nTREETERM_SOCKET:/tmp/daemon.sock\n'))
+      proc.stdout.emit('data', Buffer.from('TREETERM_OS:Linux\nTREETERM_ARCH:x86_64\nTREETERM_SOCKET:/tmp/daemon.sock\n'))
       proc.emit('close', 0)
     })
 
@@ -332,7 +370,7 @@ describe('SSHTunnel', () => {
       proc.stdout.emit(
         'data',
         Buffer.from(
-          'TREETERM_ARCH:x86_64\nTREETERM_REMOTE_HASH:aabbccdd11223344\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n',
+          'TREETERM_OS:Linux\nTREETERM_ARCH:x86_64\nTREETERM_REMOTE_HASH:aabbccdd11223344\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n',
         ),
       )
       proc.emit('close', 0)
@@ -366,7 +404,7 @@ describe('SSHTunnel', () => {
       bootstrapProc.stdout.emit(
         'data',
         Buffer.from(
-          'TREETERM_ARCH:x86_64\nTREETERM_HOME:/home/testuser\nTREETERM_REMOTE_HASH:remotehash999\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n',
+          'TREETERM_OS:Linux\nTREETERM_ARCH:x86_64\nTREETERM_HOME:/home/testuser\nTREETERM_REMOTE_HASH:remotehash999\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n',
         ),
       )
       bootstrapProc.emit('close', 0)
@@ -409,7 +447,7 @@ describe('SSHTunnel', () => {
       proc.stdout.emit(
         'data',
         Buffer.from(
-          'TREETERM_ARCH:x86_64\nTREETERM_REMOTE_HASH:NONE\nTREETERM_SOCKET:NEEDS_UPLOAD\n',
+          'TREETERM_OS:Linux\nTREETERM_ARCH:x86_64\nTREETERM_REMOTE_HASH:NONE\nTREETERM_SOCKET:NEEDS_UPLOAD\n',
         ),
       )
       proc.emit('close', 0)
@@ -429,7 +467,7 @@ describe('SSHTunnel', () => {
       proc.stdout.emit(
         'data',
         Buffer.from(
-          'TREETERM_ARCH:x86_64\nTREETERM_REMOTE_HASH:remotehash999\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n',
+          'TREETERM_OS:Linux\nTREETERM_ARCH:x86_64\nTREETERM_REMOTE_HASH:remotehash999\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n',
         ),
       )
       proc.emit('close', 0)
@@ -456,7 +494,7 @@ describe('SSHTunnel', () => {
       proc.stdout.emit(
         'data',
         Buffer.from(
-          'TREETERM_ARCH:x86_64\nTREETERM_REMOTE_HASH:remotehash999\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n',
+          'TREETERM_OS:Linux\nTREETERM_ARCH:x86_64\nTREETERM_REMOTE_HASH:remotehash999\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n',
         ),
       )
       proc.emit('close', 0)
@@ -477,7 +515,7 @@ describe('SSHTunnel', () => {
       proc.stdout.emit(
         'data',
         Buffer.from(
-          'TREETERM_ARCH:x86_64\nTREETERM_REMOTE_HASH:NONE\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n',
+          'TREETERM_OS:Linux\nTREETERM_ARCH:x86_64\nTREETERM_REMOTE_HASH:NONE\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n',
         ),
       )
       proc.emit('close', 0)
