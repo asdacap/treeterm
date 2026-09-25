@@ -34,6 +34,16 @@ export function WorkspaceIcon({ tabIds, loadStatus, isWorktree }: {
   return isWorktree ? <GitBranch size={16} /> : <Folder size={16} />
 }
 
+// Remounts (via key) on every attention-state change so the CSS flash replays.
+export function WorkspaceAttentionFlash({ tabIds }: { tabIds: string[] }) {
+  const activityState = useActivityStateStore((state) =>
+    state.getWorkspaceState(tabIds)
+  )
+
+  if (activityState === ActivityState.Idle || activityState === ActivityState.Working) return null
+  return <span key={activityState} className={`tree-item-flash activity-${activityState}`} aria-hidden="true" />
+}
+
 export function FavouriteWorkspaceItem({
   sessionId,
   sessionStore,
@@ -89,6 +99,7 @@ export function FavouriteWorkspaceItem({
         onContextMenu={handleContextMenu}
         title={data.path}
       >
+        <WorkspaceAttentionFlash tabIds={Object.keys(appStates)} />
         <span className="tree-item-icon">
           <WorkspaceIcon tabIds={Object.keys(appStates)} isWorktree={data.isWorktree} />
         </span>
